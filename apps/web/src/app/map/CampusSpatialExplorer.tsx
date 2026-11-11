@@ -203,6 +203,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintDate, setFootprintDate] = useState<string | null>(null);
   const [footprintBaseDate, setFootprintBaseDate] = useState<string | null>(null);
   const [footprintStale, setFootprintStale] = useState(false);
+  // Respect a 503 Retry-After from our server instead of inviting users to
+  // repeatedly retry while the public Overpass origin is in cooldown.
+  const [footprintRetryAfterUntil, setFootprintRetryAfterUntil] = useState<number | null>(null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
   const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
@@ -232,6 +235,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
 
   useEffect(() => {
+    if (footprintRetryAfterUntil === null) return;
+    const timer = window.setTimeout(() => setFootprintRetryAfterUntil(null),
+      Math.max(0, footprintRetryAfterUntil - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [footprintRetryAfterUntil]);
+
+  useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) return;
     let active = true;
     let timedOut = false;
@@ -248,7 +258,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }, 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) throw new Error('footprint source unavailable');
+        if (!response.ok) {
+          // Only our 503 responses use this contract. Ignore malformed or
+          // unreasonably large intermediary values rather than freezing the UI.
+          const raw = response.status === 503 ? response.headers?.get('retry-after')?.trim() : null;
+          if (active && !timedOut && raw && /^[1-9]\d{0,5}$/.test(raw)) {
+            setFootprintRetryAfterUntil(Date.now() + Math.min(86_400, Number(raw)) * 1000);
+          }
+          throw new Error('footprint source unavailable');
+        }
         return response.json() as Promise<unknown>;
       })
       .then((response) => {
@@ -259,6 +277,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintDate(snapshot.fetchedAt.slice(0, 10));
         setFootprintBaseDate(snapshot.osmBaseAt?.slice(0, 10) ?? null);
         setFootprintStale(snapshot.stale);
+        setFootprintRetryAfterUntil(null);
         setFootprintStatus('ready');
       })
       .catch(() => {
@@ -327,7 +346,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
                 {footprintStatus === 'unavailable' && <>
                   <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
-                  <button className={styles.retryFootprints} type="button" onClick={() => setFootprintAttempt((value) => value + 1)}>
+                  {footprintRetryAfterUntil !== null && <span>
+                    來源暫停重新讀取，約 {Math.max(1, Math.ceil((footprintRetryAfterUntil - Date.now()) / 60_000))} 分鐘後可再試。
+                  </span>}
+                  <button className={styles.retryFootprints} type="button"
+                    disabled={footprintRetryAfterUntil !== null}
+                    onClick={() => setFootprintAttempt((value) => value + 1)}>
                     重新讀取建築輪廓
                   </button>
                 </>}
