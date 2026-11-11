@@ -63,6 +63,12 @@
 
 - **非地面 OSM 圖徵不擠出為地面校舍**：即使 way ID 已在校園白名單內，後續編輯仍可能帶入 `location=underground/underwater/roof/overhead`、非零 `layer`、`bridge=yes` 或 `tunnel=yes`。目前立體化只支援從地面開始的整棟外框；沒有可靠的基底高程、上下層幾何時，這些圖徵必須被排除，而不是把地下空間或懸空建物繪成從地面延伸的牆。沒有定位標籤、明示 `location=surface`／`layer=0` 與 `bridge=no` 等否定旗標時，仍須通過原有 way 白名單、座標、外框及樓高檢查。新增加 OSM parser 的正反例及 API 503／`no-store`／冷卻回歸，使用**合成標註**，不代表已發現靜宜真有地下或橋上校舍，也未完成實際 Overpass 抽樣。參考 [OSM location 語意](https://wiki.openstreetmap.org/wiki/Key:location) 和 [建築局部／基底高度](https://wiki.openstreetmap.org/wiki/Key:building:part)。
 
+## Overpass HTTP 200 主體長度完整性
+
+本版額外核對 **identity（未壓縮）** 的 HTTP 回應 `Content-Length` 與實際讀取的 UTF-8 位元組數。如果雖為 HTTP 200、JSON 格式也正確，但完成串流後位元組數少於／多於標頭宣告，一律視為不可信的 Overpass 快照；不建立 24 小時新鮮快取，改用既有 503／冷卻／有日期舊快照備援。對沒有 `Content-Length` 的 chunked 回應，仍採既有 500 KB 解碼位元組上限與 12 秒 deadline。
+
+對 `Content-Encoding: gzip`／`br` 等壓縮回應不直接比較兩者：Node Fetch 可能將 body 解壓後提供給程式，但保留壓縮前網路回應的 **編碼後長度** 標頭，兩個位元組數本來就不同。所有編碼仍受解碼後 500 KB 上限保護。新增 HTTP 200 合成有效 JSON／錯誤長度、匹配長度及模擬已解壓 Fetch 回應之回歸，**不是對真實 Overpass 發生部分回應的證據**；對無長度標頭且回傳有效但不完整 JSON 的情況，仍須另外以線上來源核查。
+
 ## 需驗收，不可直接說已超越競品
 
 - [ ] 真實線上 Overpass 回傳：確認已核對的靜宜建築輪廓數量，逐棟對照 OSM 原始 way 與校方位置，保留失敗樣本。
