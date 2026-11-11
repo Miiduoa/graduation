@@ -492,7 +492,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     const dialog = await open();
     const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-    expect(within(dialog).getByText(/約 10 分鐘後可再試/)).toBeTruthy();
+    expect(within(dialog).getByText(/約 10 分鐘冷卻，到期後可再試/)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     fireEvent.click(retry);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -507,7 +507,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     fireEvent.click(retry);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(within(dialog).queryByText(/約 10 分鐘後可再試/)).toBeNull();
+    expect(within(dialog).queryByText(/約 10 分鐘冷卻，到期後可再試/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
   }
