@@ -144,3 +144,38 @@ it('keeps fenced code hidden when an apparent closing fence has trailing text', 
   expect(tables).toHaveLength(1);
   expect(tables[0].rows).toEqual([['程式設計', '3']]);
 });
+
+it('keeps a fenced code example hidden when a tab-indented marker resembles its closing fence', () => {
+  const tick = String.fromCharCode(96);
+  const text = [
+    tick.repeat(3) + 'markdown',
+    '\t' + tick.repeat(3),
+    '| 虛構資料 | 學分 |',
+    '| --- | --- |',
+    '| 測試科目 | 999 |',
+    tick.repeat(3),
+    '| 真正教材 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(text)).toEqual([{
+    startLine: 7,
+    headers: ['真正教材', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('does not treat a tab-indented code marker as a new fenced block', () => {
+  const text = [
+    '\t~~~',
+    '',
+    '| 科目 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(text)).toEqual([{
+    startLine: 3,
+    headers: ['科目', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});

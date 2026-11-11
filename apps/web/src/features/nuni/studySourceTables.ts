@@ -28,7 +28,11 @@ function parseSimplePipeRow(line: string): string[] | null {
 
 function fenceMarker(line: string): { character: string; length: number; suffix: string } | null {
   const trimmed = line.trimStart();
-  if (line.length - trimmed.length > 3) return null;
+  // Markdown fences may be indented by at most three ASCII spaces.
+  // A leading tab reaches the fourth column and is an indented code line,
+  // not an opening/closing fence. Never let it expose fake table rows.
+  const indent = line.slice(0, line.length - trimmed.length);
+  if (!/^ {0,3}$/u.test(indent)) return null;
   const marker = trimmed[0];
   if (marker !== '~' && marker !== String.fromCharCode(96)) return null;
   let length = 0;
