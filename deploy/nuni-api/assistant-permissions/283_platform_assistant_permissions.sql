@@ -2,8 +2,8 @@
 CREATE TABLE platform_assistant_permissions (
   platform_account_id text PRIMARY KEY REFERENCES platform_accounts(id) ON DELETE CASCADE,
   revision integer NOT NULL CHECK (revision > 0),
-  create_personal_event boolean NOT NULL DEFAULT false,
-  prepare_food_order boolean NOT NULL DEFAULT false,
+  create_personal_event boolean NOT NULL DEFAULT true,
+  prepare_food_order boolean NOT NULL DEFAULT true,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 REVOKE ALL ON TABLE platform_assistant_permissions FROM PUBLIC;

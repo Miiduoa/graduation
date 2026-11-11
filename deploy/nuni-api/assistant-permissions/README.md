@@ -2,7 +2,7 @@
 
 `/settings?section=assistant` 的 Google 平台帳號權限透過 BFF 的 `GET/POST /api/nuni/assistant-permissions` 儲存到 nuni PostgreSQL。每個平台帳號一份，跨瀏覽器、分頁與重新登入共用。公開社群及雲端 AI 服務仍維持啟用；這份設定只控制可由助理提出與執行的動作。
 
-目前兩項權限為 `createPersonalEvent`（新增個人行程）及 `prepareFoodOrder`（整理訂餐草稿）。沒有設定時兩項均為 false；讀取失敗回 503，不以本機狀態、cookie 或記憶體冒充儲存成功。校內請假、圖書、點名等既有學校帳號權限不會與 Google 帳號合併。
+目前兩項權限為 `createPersonalEvent`（新增個人行程）及 `prepareFoodOrder`（整理訂餐草稿）。沒有設定紀錄時兩項均視為開啟，與既有可用行為相容；設定寫入失敗仍回 503，不以本機狀態、cookie 或記憶體冒充儲存成功。校內請假、圖書、點名等既有學校帳號權限不會與 Google 帳號合併。
 
 ## API 與儲存
 
@@ -35,7 +35,7 @@ python3 deploy/nuni-api/build.py --assistant-permissions-candidate \
 
 發布前先核對實際執行中的 API immutable image、來源 tree 與已套用的 migration 清單。上述 input 是程式庫內固定的 lost-found 候選，**不代表此刻正式站必定是同一來源**。若正式站含有此候選未納入的程式變更或不同的 migration checksum，先以該真實來源重新整合及核驗，不可用這份候選覆蓋。固定來源、完整 typecheck/build、既有 API 回歸與隔離 migration 驗收須對同一個將發布的映像完成。
 
-依既有安全發布環境，用已核驗映像中的 `node apps/api/dist/migrate.js` 套用完整 manifest，再核對 283 checksum 與下表 ACL；API 啟動驗證完成後再發布 Web 與 App。若 282 尚未套用，必須先把它及前置 migration 的範圍納入同一發布審查，不能假設只會跑 283。不能讓 BFF 在 request 中建立資料表，也不能直接裸跑 SQL 規避 migration 紀錄。沒有表或 ACL 時，BFF 回 `ASSISTANT_PERMISSION_STORE_UNAVAILABLE`，不會顯示儲存成功。
+依既有安全發布環境，用已核驗映像中的 `node apps/api/dist/migrate.js` 套用完整 manifest，再核對 283 checksum 與下表 ACL；API 啟動驗證完成後再發布 Web 與 App。若 282 尚未套用，必須先把它及前置 migration 的範圍納入同一發布審查，不能假設只會跑 283。不能讓 BFF 在 request 中建立資料表，也不能直接裸跑 SQL 規避 migration 紀錄。沒有表、ACL 或資料庫設定時，既有助理動作仍依預設開啟可用；設定寫入回 `ASSISTANT_PERMISSION_STORE_UNAVAILABLE`，不會顯示儲存成功。
 
 連線依序使用 `PLATFORM_ASSISTANT_DATABASE_URL`、既有 `ASSIGNMENT_FILE_DATABASE_URL`、`DATABASE_URL`，必須指向含 `platform_accounts` 的 nuni PostgreSQL。這是既有平台資料庫，不建立另一套 Storage 或 Firebase 權限。程式不讀取瀏覽器提供的連線設定、不輸出連線字串；測試也不使用正式環境連線。
 

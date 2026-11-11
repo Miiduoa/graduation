@@ -22,7 +22,7 @@ const row = (revision: number | null, calendar: unknown, food: unknown) => ({
 
 afterEach(() => resetAssignmentFileStores());
 
-it('returns closed defaults only for an existing account without a preference row', async () => {
+it('returns open defaults only for an existing account without a preference row', async () => {
   const query = vi.fn().mockResolvedValue([row(null, null, null)]);
   const store = createSqlPlatformAssistantPermissionStore(query);
   expect(await store.read(accountId)).toEqual({
@@ -102,10 +102,15 @@ it('does not send invalid identity or permission values to PostgreSQL', async ()
 });
 
 it.each(['production', 'development', 'test'])(
-  'never substitutes memory when persistence is missing in %s',
+  'keeps existing actions available and never fakes a save when persistence is missing in %s',
   async (NODE_ENV) => {
     const store = resolvePlatformAssistantPermissionStore({ NODE_ENV });
-    await expect(store.read(accountId)).rejects.toMatchObject({ status: 503 });
+    expect(await store.read(accountId)).toEqual({
+      scope: 'platform-account',
+      accountId,
+      revision: 0,
+      permissions: createDefaultPlatformAssistantPermissions(),
+    });
     await expect(store.save(accountId, 0, enabled)).rejects.toMatchObject({ status: 503 });
   },
 );
@@ -146,9 +151,9 @@ it('does not expose database details when a query fails', async () => {
   });
 });
 
-it('rejects a fabricated unsaved grant or unknown response field', () => {
+it('accepts the unsaved default grant and rejects an unknown response field', () => {
   const state = { scope: 'platform-account', accountId, revision: 0, permissions: enabled };
-  expect(() => parsePlatformAssistantPermissionState(state)).toThrow();
+  expect(parsePlatformAssistantPermissionState(state)).toEqual(state);
   expect(() =>
     parsePlatformAssistantPermissionState({ ...state, revision: 1, uid: 'other' }),
   ).toThrow();

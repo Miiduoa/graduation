@@ -95,11 +95,11 @@ describe.skipIf(!modulePath && !port)('isolated PostgreSQL permission storage', 
     } finally { await db.close(); }
   });
 
-  it('persists one account and keeps another account at closed defaults', async () => {
-    expect((await store.read(a)).permissions).toEqual(disabled);
+  it('persists one account and keeps another account at open defaults', async () => {
+    expect((await store.read(a)).permissions).toEqual(enabled);
     expect(await store.save(a, 0, enabled)).toEqual({ scope: 'platform-account', accountId: a, revision: 1, permissions: enabled });
     expect((await store.read(a)).permissions).toEqual(enabled);
-    expect((await store.read(b)).permissions).toEqual(disabled);
+    expect((await store.read(b)).permissions).toEqual(enabled);
     await expect(store.read(closed)).rejects.toMatchObject({ status: 401 });
     await expect(store.save(closed, 0, enabled)).rejects.toMatchObject({ status: 401 });
   });
@@ -117,7 +117,7 @@ describe.skipIf(!modulePath && !port)('isolated PostgreSQL permission storage', 
 
   it('does not create a missing row using an invented nonzero revision', async () => {
     await expect(store.save(a, 3, enabled)).rejects.toMatchObject({ status: 409 });
-    expect(await store.read(a)).toMatchObject({ revision: 0, permissions: disabled });
+    expect(await store.read(a)).toMatchObject({ revision: 0, permissions: enabled });
   });
 
   it('denies a suspended account and removes settings when the account is closed', async () => {
@@ -129,7 +129,7 @@ describe.skipIf(!modulePath && !port)('isolated PostgreSQL permission storage', 
     await db.query("UPDATE platform_accounts SET state='closed' WHERE id=$1", [a]);
     expect((await db.query('SELECT revision FROM platform_assistant_permissions WHERE platform_account_id=$1', [a])).rows).toHaveLength(0);
     await db.query("UPDATE platform_accounts SET state='active' WHERE id=$1", [a]);
-    expect(await store.read(a)).toMatchObject({ revision: 0, permissions: disabled });
+    expect(await store.read(a)).toMatchObject({ revision: 0, permissions: enabled });
   });
 
   it('cascades hard account deletion without affecting another account', async () => {

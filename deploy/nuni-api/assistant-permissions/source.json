@@ -7,7 +7,7 @@
   "sourceFiles": {
     "apps/api/src/migrations/283_platform_assistant_permissions.sql": {
       "source": "deploy/nuni-api/assistant-permissions/283_platform_assistant_permissions.sql",
-      "sha256": "691d78dcad84f2446f0758c89a0b8915a2a0f18fac753445dc7ed6f5a9c1da2a"
+      "sha256": "86a8b1df2018a8686de602d978a29998946af12f0cbce34fd56aad3ed45a3996"
     }
   },
   "migration": "283_platform_assistant_permissions",

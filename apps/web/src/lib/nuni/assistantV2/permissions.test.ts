@@ -53,15 +53,15 @@ describe('account permission proposal boundary', () => {
     expect(f.orderCalls).toHaveLength(0);
   });
 
-  it('requires an actual reader even for simulation, without blocking read-only tools or opening a page', async () => {
+  it('keeps existing actions available without a reader, without blocking read-only tools or opening a page', async () => {
     const f = fixtureAdapter();
     delete f.adapter.permissions;
     const tools = toolsFor(f.adapter);
-    await expect(tools.call('propose_personal_event', event)).rejects.toMatchObject({ code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE' });
-    await expect(confirm(binding, raw(signedEvent()), secret, now, f.adapter, true)).rejects.toMatchObject({ code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE' });
+    await expect(tools.call('propose_personal_event', event)).resolves.toBeTruthy();
+    expect(tools.cards).toHaveLength(1);
     await expect(tools.call('get_calendar', { from: event.date, to: event.date })).resolves.toBeTruthy();
     await tools.call('propose_open_page', { page: 'calendar' });
-    await expect(confirm(binding, raw(tools.cards[0]), secret, now, f.adapter, true)).resolves.toMatchObject({ href: expect.stringContaining('/calendar') });
+    await expect(confirm(binding, raw(tools.cards[1]), secret, now, f.adapter, true)).resolves.toMatchObject({ href: expect.stringContaining('/calendar') });
     expect(f.writes).toHaveLength(0);
   });
 
@@ -141,12 +141,11 @@ describe('execution, revocation and read-only recovery', () => {
     expect(f.writes).toHaveLength(1);
   });
 
-  it('fails closed on a reader outage but still reports absence without offering a retry', async () => {
+  it('keeps existing execution available on a reader outage', async () => {
     const f = fixtureAdapter(), card = signedEvent();
     f.adapter.permissions = async () => { throw new Error('database unavailable'); };
-    await expect(confirm(binding, raw(card), secret, now, f.adapter, true)).rejects.toMatchObject({ status: 503, code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE' });
-    expect(await reconcile(binding, raw(card), secret, now, f.adapter, true)).toMatchObject({ status: 'absent', authorizationValid: false, retryable: false });
-    expect(f.writes).toHaveLength(0);
+    await expect(confirm(binding, raw(card), secret, now, f.adapter, true)).resolves.toBeTruthy();
+    expect(f.writes).toHaveLength(1);
   });
 
   it.each([false, true])('blocks old food cards in both page and submit modes (ordering=%s)', async (ordering) => {
@@ -183,12 +182,9 @@ describe('production reader and assistant feedback', () => {
     expect(readStore.mock.calls).toEqual([[account], [account]]);
   });
 
-  it.each(['denied', 'unavailable'])('reports %s settings with a real settings link and no invented confirmation card', async (state) => {
+  it('reports denied settings with a real settings link and no invented confirmation card', async () => {
     const f = fixtureAdapter();
-    f.adapter.permissions = async () => {
-      if (state === 'unavailable') throw new Error('offline');
-      return none;
-    };
+    f.adapter.permissions = async () => none;
     const usage = { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 };
     let calls = 0;
     const model: Model = async () => ++calls === 1 ? {
@@ -200,18 +196,15 @@ describe('production reader and assistant feedback', () => {
     });
     expect(result.cards).toHaveLength(0);
     expect(result.answer).toContain('/settings?section=assistant');
-    expect(result.answer).toContain(state === 'denied' ? '權限尚未開啟' : '無法確認助理操作權限');
+    expect(result.answer).toContain('權限尚未開啟');
     expect(result.answer).not.toContain('已幫你建立行程');
     expect(result.steps.filter((step) => step.name === 'propose_personal_event')).toHaveLength(1);
     expect(f.writes).toHaveLength(0);
   });
 
-  it.each(['denied', 'unavailable'])('never prepares a fallback food cart from a loaded menu when permission is %s', async (state) => {
+  it('never prepares a fallback food cart from a loaded menu when permission is denied', async () => {
     const f = fixtureAdapter();
-    f.adapter.permissions = async () => {
-      if (state === 'unavailable') throw new Error('offline');
-      return none;
-    };
+    f.adapter.permissions = async () => none;
     const usage = { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 };
     let calls = 0;
     const model: Model = async () => {

@@ -133,8 +133,22 @@ export function resolvePlatformAssistantPermissionStore(
     env.PLATFORM_ASSISTANT_DATABASE_URL?.trim() ||
     env.ASSIGNMENT_FILE_DATABASE_URL?.trim() ||
     env.DATABASE_URL?.trim();
-  // Never turn missing persistence into a successful local-memory preference.
-  if (!databaseUrl) return { read: async () => unavailable(), save: async () => unavailable() };
+  if (!databaseUrl) {
+    return {
+      async read(accountId) {
+        account(accountId);
+        return {
+          scope: 'platform-account',
+          accountId,
+          revision: 0,
+          permissions: createDefaultPlatformAssistantPermissions(),
+        };
+      },
+      async save() {
+        return unavailable();
+      },
+    };
+  }
   return createSqlPlatformAssistantPermissionStore(postgresQuery(databaseUrl));
 }
 

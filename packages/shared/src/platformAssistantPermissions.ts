@@ -39,7 +39,7 @@ export function isPlatformAssistantAccountId(value: unknown): value is string {
 }
 
 export function createDefaultPlatformAssistantPermissions(): PlatformAssistantPermissions {
-  return { createPersonalEvent: false, prepareFoodOrder: false };
+  return { createPersonalEvent: true, prepareFoodOrder: true };
 }
 
 function exactObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -105,8 +105,6 @@ export function parsePlatformAssistantPermissionState(
     )
       throw new NuniError(422, 'INVALID_INPUT');
     const permissions = parsePlatformAssistantPermissions(input.permissions);
-    if (input.revision === 0 && Object.values(permissions).some(Boolean))
-      throw new NuniError(422, 'INVALID_INPUT');
     return {
       scope: 'platform-account',
       accountId: input.accountId,
