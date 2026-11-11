@@ -191,10 +191,8 @@ test('rechecks both students at publication and issuance, including block and sc
     await original(...args);
     f.docs.set('users/bob', { schoolId: 'other' });
   });
-  await expect(f.send(path)).rejects.toMatchObject({ code: 'permission-denied' });
-  expect(f.docs.has('conversations/thread/messages/' + messageId)).toBe(false);
-  f.docs.set('users/bob', { schoolId: 'pu' });
-  await f.send(path); // Firestore failure after the copy can recover using the same file.
+  await f.send(path);
+  expect(f.docs.get('conversations/thread/messages/' + messageId)).toMatchObject({ type: 'image' });
   for (const key of [
     'users/alice/blockedUsers/bob',
     'users/bob/blockedUsers/alice',
@@ -206,7 +204,8 @@ test('rechecks both students at publication and issuance, including block and sc
     f.docs.delete(key);
   }
   f.docs.set('schools/pu/members/alice', { status: 'inactive' });
-  await expect(f.read(mediaId)).rejects.toMatchObject({ code: 'permission-denied' });
+  f.docs.set('users/alice', { primarySchoolId: 'pu' });
+  expect(await f.read(mediaId)).toHaveProperty('url');
 });
 
 test('a first photo creates the canonical thread only when it is sent with the validated peer', async () => {

@@ -96,14 +96,10 @@ test.each(
 });
 
 test.each([
-  ['users/alice', { schoolId: 'elsewhere' }],
-  ['users/bob', { schoolId: 'elsewhere' }],
   ['users/alice', { status: 'disabled' }],
   ['users/bob', { status: 'suspended', schoolId: '' }],
   ['users/alice', { accountDeletionInProgress: true }],
   ['users/bob', { status: 'deleted' }],
-  ['schools/pu/members/alice', { status: 'inactive' }],
-  ['schools/pu/members/bob', { status: 'inactive' }],
   ['users/alice/blockedUsers/bob', {}],
   ['users/bob/blockedUsers/alice', {}],
   ['friendBlocks/alice_bob', {}],
@@ -128,6 +124,21 @@ test.each([
   await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
   expect(store.docs.get(thread)).toEqual(before);
   expect(store.docs.has(`${thread}/messages/next-text-message-000002`)).toBe(false);
+});
+
+test.each([
+  ['users/alice', { schoolId: 'elsewhere' }],
+  ['users/bob', { schoolId: 'elsewhere' }],
+  ['schools/pu/members/alice', { status: 'inactive' }],
+  ['schools/pu/members/bob', { status: 'inactive' }],
+])('existing conversation still sends after school change at %s', async (path, value) => {
+  store.docs.set('users/alice', {});
+  store.docs.set('users/bob', { schoolId: '' });
+  expect(await send()).toEqual({ conversationId, messageId });
+  store.docs.set(path, value);
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: true });
+  const nextId = 'next-text-message-000002';
+  expect(await send({ messageId: nextId })).toEqual({ conversationId, messageId: nextId });
 });
 
 test('trims before applying the 4000 character limit and limits the inbox preview', async () => {
@@ -161,8 +172,6 @@ test('a receipt replay preserves a later message and existing read state', async
 });
 
 test.each([
-  ['users/alice', { schoolId: 'elsewhere' }],
-  ['users/bob', { schoolId: 'elsewhere' }],
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
   ['users/bob', { schoolId: 'pu', status: 'deleted' }],
   ['users/alice', { schoolId: 'pu', status: 'disabled' }],
@@ -170,8 +179,6 @@ test.each([
   ['users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['users/bob', { schoolId: 'pu', accountDeletionInProgress: true }],
-  ['schools/pu/members/alice', { status: 'inactive' }],
-  ['schools/pu/members/bob', { status: 'inactive' }],
   ['users/alice/blockedUsers/bob', {}],
   ['users/bob/blockedUsers/alice', {}],
   ['friendBlocks/alice_bob', {}],
@@ -193,6 +200,27 @@ test.each([
     expect(store.docs.get(thread)).toEqual(before);
   },
 );
+
+test.each([
+  ['users/alice', { schoolId: 'elsewhere' }],
+  ['users/bob', { schoolId: 'elsewhere' }],
+  ['schools/pu/members/alice', { status: 'inactive' }],
+  ['schools/pu/members/bob', { status: 'inactive' }],
+])('new chats still require school access at %s, existing chats do not', async (path, value) => {
+  const original = store.docs.get(path);
+  store.docs.set(path, value);
+  await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(store.docs.has(thread)).toBe(false);
+  store.docs.set(path, original);
+  await send();
+  store.docs.set(path, value);
+  expect(await send()).toEqual({ conversationId, messageId });
+  expect(await send({ messageId: 'next-text-message-000002' })).toEqual({
+    conversationId,
+    messageId: 'next-text-message-000002',
+  });
+});
 
 test.each(['users/alice', 'users/bob', 'schools/pu/members/alice', 'schools/pu/members/bob'])(
   'refuses preparation and creation when %s is missing',

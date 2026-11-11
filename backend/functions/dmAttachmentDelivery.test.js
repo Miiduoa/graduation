@@ -57,14 +57,15 @@ function fixture() {
   return { docs, reads, file, bucket, call };
 }
 
-test('server authorization checks conversation, current school profile, and active membership on each read', async () => {
+test('server authorization checks conversation members, live accounts, and blocks on each read', async () => {
   const { call, reads, file, bucket } = fixture();
   const result = await call();
   expect(result).toEqual({ url: expect.stringContaining('X-Goog-Expires'), expiresAt: new Date(1234567000000 + MINUTE_MS).toISOString() });
   expect(reads).toEqual([
     'conversations/private',
-    'users/alice', 'schools/pu/members/alice',
-    'users/bob', 'schools/pu/members/bob',
+    'users/alice', 'users/bob',
+    'users/alice/blockedUsers/bob', 'users/bob/blockedUsers/alice',
+    'friendBlocks/alice_bob', 'friendBlocks/bob_alice',
   ]);
   expect(bucket.file).toHaveBeenCalledWith('conversations/private/media/one/file.pdf');
   expect(file.setMetadata).not.toHaveBeenCalled();
@@ -79,7 +80,6 @@ test('server authorization checks conversation, current school profile, and acti
 });
 
 test.each([
-  ['transferred despite active old-school membership', 'users/alice', { schoolId: 'other' }],
   ['deleted profile', 'users/alice', { schoolId: 'pu', status: 'deleted' }],
   ['disabled profile', 'users/alice', { schoolId: 'pu', status: 'disabled' }],
   ['suspended profile', 'users/alice', { schoolId: 'pu', status: 'suspended' }],
@@ -90,12 +90,12 @@ test.each([
   ['peer inactive profile', 'users/bob', { schoolId: 'pu', status: 'inactive' }],
   ['peer account deletion', 'users/bob', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['account deletion', 'users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
-  ['inactive membership', 'schools/pu/members/alice', { status: 'inactive' }],
-  ['missing membership', 'schools/pu/members/alice', null],
   ['removed from conversation', 'conversations/private', { type: 'dm', schoolId: 'pu', memberIds: ['bob', 'carol'] }],
-  ['conversation moved school', 'conversations/private', { type: 'dm', schoolId: 'other', memberIds: ['alice', 'bob'] }],
-  ['wrong conversation type', 'conversations/private', { type: 'group', schoolId: 'pu', memberIds: ['alice', 'bob'] }],
   ['duplicate members', 'conversations/private', { type: 'dm', schoolId: 'pu', memberIds: ['alice', 'alice'] }],
+  ['viewer blocked peer', 'users/alice/blockedUsers/bob', {}],
+  ['peer blocked viewer', 'users/bob/blockedUsers/alice', {}],
+  ['friend block', 'friendBlocks/alice_bob', {}],
+  ['reverse friend block', 'friendBlocks/bob_alice', {}],
 ])('refuses %s before generating a capability', async (_name, key, value) => {
   const { call, docs, file } = fixture();
   if (value == null) docs.delete(key);
@@ -184,11 +184,62 @@ test.each([
   expect(file.generateSignedPostPolicyV4).not.toHaveBeenCalled();
 });
 
-test('upload is refused after transfer, even before creating any policy', async () => {
+test('transferred members can still read and upload attachments on an existing conversation', async () => {
   const { call, docs, file } = fixture();
   docs.set('users/alice', { schoolId: 'other' });
+  docs.set('users/bob', { primarySchoolId: 'pu' });
+  docs.delete('schools/pu/members/alice');
+  docs.set('schools/pu/members/bob', { status: 'inactive' });
+  await expect(call()).resolves.toHaveProperty('url');
+  await expect(call({}, 'bob')).resolves.toHaveProperty('url');
+  await expect(call({ action: 'upload', contentType: 'application/pdf', size: 300 }))
+    .resolves.toMatchObject({ method: 'POST' });
+  expect(file.getSignedUrl).toHaveBeenCalled();
+  expect(file.generateSignedPostPolicyV4).toHaveBeenCalled();
+});
+
+test('group conversation members can upload and read attachments without matching schools', async () => {
+  const { call, docs, file } = fixture();
+  docs.set('conversations/group-chat', {
+    type: 'group',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob', 'carol'],
+  });
+  docs.set('users/carol', { primarySchoolId: 'other' });
+  docs.set('users/bob', { schoolId: 'elsewhere' });
+  await expect(call({ conversationId: 'group-chat' }, 'carol')).resolves.toHaveProperty('url');
+  await expect(call({
+    action: 'upload', conversationId: 'group-chat', contentType: 'image/png', size: 1024,
+  }, 'bob')).resolves.toMatchObject({
+    method: 'POST',
+    path: 'conversations/group-chat/media/generated-on-server/file.pdf',
+  });
+  expect(file.getSignedUrl).toHaveBeenCalled();
+  expect(file.generateSignedPostPolicyV4).toHaveBeenCalled();
+});
+
+test('group outsider cannot read attachments even with an active school profile', async () => {
+  const { call, docs, file } = fixture();
+  docs.set('conversations/group-chat', {
+    type: 'group',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob', 'carol'],
+  });
+  docs.set('users/mallory', { schoolId: 'pu' });
+  docs.set('schools/pu/members/mallory', { status: 'active' });
+  await expect(call({ conversationId: 'group-chat' }, 'mallory')).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  expect(file.getSignedUrl).not.toHaveBeenCalled();
+});
+
+test('blocked members still cannot read or upload attachments', async () => {
+  const { call, docs, file } = fixture();
+  docs.set('users/alice/blockedUsers/bob', {});
+  await expect(call()).rejects.toMatchObject({ code: 'permission-denied' });
   await expect(call({ action: 'upload', contentType: 'application/pdf', size: 300 }))
     .rejects.toMatchObject({ code: 'permission-denied' });
+  expect(file.getSignedUrl).not.toHaveBeenCalled();
   expect(file.generateSignedPostPolicyV4).not.toHaveBeenCalled();
 });
 

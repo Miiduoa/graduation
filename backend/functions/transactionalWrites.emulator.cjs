@@ -115,10 +115,10 @@ test('simultaneous story replies with the same id create one DM message and one 
   assert.equal((await thread.get()).data().lastMessage.id, receipts[0].messageId);
 });
 
-test('neither side can use an old-school story to send or replay a private reply after transfer', async () => {
-  const profiles = ['alice', 'bob'].map((uid) => db.doc(`users/${uid}`));
+test('existing members can still send and replay a private story reply after transfer', async () => {
   const seed = db.batch();
-  for (const profile of profiles) seed.set(profile, { schoolId: 'pu' });
+  seed.set(db.doc('users/alice'), { schoolId: 'pu' });
+  seed.set(db.doc('users/bob'), { schoolId: 'pu' });
   seed.set(db.doc('campusStories/transfer'), {
     authorUid: 'bob', schoolId: 'pu', allowReplies: true, expiresAt: Date.now() + 60_000,
   });
@@ -133,18 +133,14 @@ test('neither side can use an old-school story to send or replay a private reply
   const secondId = 'story-transfer-reply-second';
   const first = await reply(firstId);
   const thread = db.doc(`conversations/${first.conversationId}`);
-  for (const profile of profiles) {
-    // The old school member document remains active throughout this transfer.
-    await profile.update({ schoolId: 'other' });
-    await assert.rejects(reply(firstId), { code: 'permission-denied' });
-    await assert.rejects(reply(secondId), { code: 'permission-denied' });
-    assert.equal((await thread.collection('messages').get()).size, 1);
-    assert.equal((await thread.get()).data().lastMessage.id, first.messageId);
-    await profile.update({ schoolId: 'pu' });
-    assert.deepEqual(await reply(firstId), first);
-  }
+  await db.doc('users/alice').update({ schoolId: 'other' });
+  await db.doc('users/bob').set({ primarySchoolId: 'pu' });
+  assert.deepEqual(await reply(firstId), first);
   const second = await reply(secondId);
   assert.notEqual(second.messageId, first.messageId);
+  assert.equal((await thread.collection('messages').get()).size, 2);
+  await db.doc('users/alice/blockedUsers/bob').set({});
+  await assert.rejects(reply('story-transfer-reply-third'), { code: 'permission-denied' });
   assert.equal((await thread.collection('messages').get()).size, 2);
 });
 

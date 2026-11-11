@@ -65,31 +65,44 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       memberIds = [uid, peerUid].sort();
     }
     const [first, second] = memberIds.map((id) => db.collection('users').doc(id));
-    const members = db.collection('schools').doc(schoolId).collection('members');
     const blocks = db.collection('friendBlocks');
-    const [a, b, ma, mb, ...blocked] = await tx.getAll(
-      first,
-      second,
-      members.doc(memberIds[0]),
-      members.doc(memberIds[1]),
+    const blockRefs = [
       first.collection('blockedUsers').doc(memberIds[1]),
       second.collection('blockedUsers').doc(memberIds[0]),
       blocks.doc(`${memberIds[0]}_${memberIds[1]}`),
       blocks.doc(`${memberIds[1]}_${memberIds[0]}`),
-    );
-    if (
-      ![a, b].every((snap) => {
-        const profile = snap.data();
-        // Legacy profiles rely on active school membership; an explicit transfer still denies access.
-        return (
-          !isAccountUnavailable(profile) &&
-          (profile.schoolId == null || profile.schoolId === '' || profile.schoolId === schoolId)
-        );
-      }) ||
-      ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
-      blocked.some((snap) => snap.exists)
-    )
-      throw denied();
+    ];
+    if (threadSnap.exists) {
+      const [a, b, ...blocked] = await tx.getAll(first, second, ...blockRefs);
+      // Existing members keep photos after transfer or missing school fields.
+      if (
+        ![a, b].every((snap) => !isAccountUnavailable(snap.data())) ||
+        blocked.some((snap) => snap.exists)
+      )
+        throw denied();
+    } else {
+      const members = db.collection('schools').doc(schoolId).collection('members');
+      const [a, b, ma, mb, ...blocked] = await tx.getAll(
+        first,
+        second,
+        members.doc(memberIds[0]),
+        members.doc(memberIds[1]),
+        ...blockRefs,
+      );
+      if (
+        ![a, b].every((snap) => {
+          const profile = snap.data();
+          // New chats still need a usable account. Missing schoolId is legacy-compatible.
+          return (
+            !isAccountUnavailable(profile) &&
+            (profile.schoolId == null || profile.schoolId === '' || profile.schoolId === schoolId)
+          );
+        }) ||
+        ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
+        blocked.some((snap) => snap.exists)
+      )
+        throw denied();
+    }
     return action({
       tx,
       thread,

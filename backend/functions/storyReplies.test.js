@@ -82,16 +82,11 @@ test('reuses the DM without resetting read state and never bumps the preview on 
 });
 
 test.each([
-  ['users/alice', { schoolId: 'other' }],
-  // A legacy active school membership must not override the author's current school.
-  ['users/bob', { schoolId: 'other' }],
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
   ['users/alice', { schoolId: 'pu', status: 'disabled' }],
   ['users/bob', { schoolId: 'pu', status: 'suspended' }],
   ['users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['users/bob', { accountDeletionInProgress: true }],
-  ['schools/pu/members/alice', {}],
-  ['schools/pu/members/bob', { status: 'inactive' }],
   ['users/alice/blockedUsers/bob', {}],
   ['users/bob/blockedUsers/alice', {}],
   ['friendBlocks/alice_bob', {}],
@@ -112,17 +107,40 @@ test.each([
   expect([...store.docs.keys()].some((key) => key.includes('/messages/'))).toBe(false);
 });
 
-test('does not send or replay a receipt after the author transfers schools', async () => {
+test.each([
+  [{ primarySchoolId: 'pu' }, { schoolId: 'pu' }],
+  [{}, { schoolId: 'pu' }],
+  [{ schoolId: 'other' }, { schoolId: 'pu' }],
+  [{ schoolId: 'pu' }, { primarySchoolId: 'pu' }],
+  [{ schoolId: 'pu' }, { schoolId: 'other' }],
+  [{ primarySchoolId: 'other' }, { schoolId: '' }],
+])('legacy or transferred profiles still reply %j / %j', async (alice, bob) => {
+  store.docs.set('users/alice', alice);
+  store.docs.set('users/bob', bob);
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  store.docs.delete('schools/pu/members/bob');
+  const receipt = await send();
+  expect(receipt.conversationId).toBe('dm_pu_alice_bob');
+  expect(store.docs.get(`${thread}/messages/${receipt.messageId}`).content).toBe('明天還有嗎？');
+});
+
+test('still sends and replays a receipt after the author transfers schools', async () => {
   const original = await send();
   store.docs.set('users/bob', { schoolId: 'other' });
-  // Old school membership can lag behind the profile during a transfer.
   expect(store.docs.get('schools/pu/members/bob')).toMatchObject({ status: 'active' });
-  await expect(send({ replyId: 'test-reply-0000000002' })).rejects.toMatchObject({
-    code: 'permission-denied',
-  });
+  const next = await send({ replyId: 'test-reply-0000000002' });
+  expect(next.conversationId).toBe(original.conversationId);
+  expect(await send()).toEqual(original);
+  expect(store.docs.get(thread).lastMessage.id).toBe(next.messageId);
+  expect([...store.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(2);
+});
+
+test('blocked accounts still cannot reply after a transfer or missing schoolId', async () => {
+  store.docs.set('users/alice', { primarySchoolId: 'pu' });
+  store.docs.set('users/bob', { schoolId: 'other' });
+  store.docs.set('users/alice/blockedUsers/bob', {});
   await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
-  expect(store.docs.get(thread).lastMessage.id).toBe(original.messageId);
-  expect([...store.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(1);
+  expect([...store.docs.keys()].some((key) => key.includes('/messages/'))).toBe(false);
 });
 
 test('rejects an expired or deleted story, a self reply, and an account switch', async () => {

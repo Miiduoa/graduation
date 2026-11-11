@@ -23,6 +23,12 @@ function availableProfile(snapshot) {
   return Boolean(profile) && !isAccountUnavailable(profile);
 }
 
+function profileAllowsStoryReply(snapshot) {
+  // Keep block + account-validity only. primarySchoolId-only profiles, missing
+  // schoolId, and school transfers must not lose the ability to reply.
+  return availableProfile(snapshot);
+}
+
 function createReplyToCampusStory({ db }) {
   return async (request) => {
     const uid = request.auth?.uid;
@@ -50,7 +56,6 @@ function createReplyToCampusStory({ db }) {
         .digest('hex');
     const conversation = db.collection('conversations').doc(conversationId);
     const message = conversation.collection('messages').doc(messageId);
-    const members = db.collection('schools').doc(schoolId).collection('members');
     const sender = db.collection('users').doc(uid);
     const author = db.collection('users').doc(authorUid);
     const friendBlocks = db.collection('friendBlocks');
@@ -59,8 +64,6 @@ function createReplyToCampusStory({ db }) {
       const [
         senderProfile,
         authorProfile,
-        senderMember,
-        authorMember,
         story,
         thread,
         existing,
@@ -68,8 +71,6 @@ function createReplyToCampusStory({ db }) {
       ] = await tx.getAll(
         sender,
         author,
-        members.doc(uid),
-        members.doc(authorUid),
         db.collection('campusStories').doc(storyId),
         conversation,
         message,
@@ -79,12 +80,8 @@ function createReplyToCampusStory({ db }) {
         friendBlocks.doc(`${authorUid}_${uid}`),
       );
       if (
-        !availableProfile(senderProfile) ||
-        !availableProfile(authorProfile) ||
-        senderProfile.data().schoolId !== schoolId ||
-        authorProfile.data().schoolId !== schoolId ||
-        senderMember.data()?.status !== 'active' ||
-        authorMember.data()?.status !== 'active' ||
+        !profileAllowsStoryReply(senderProfile) ||
+        !profileAllowsStoryReply(authorProfile) ||
         blocks.some((block) => block.exists)
       ) {
         throw unavailable();

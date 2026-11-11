@@ -32,34 +32,45 @@ function forbidden() {
   return new HttpsError('permission-denied', '無法存取這份私訊附件。');
 }
 
+function conversationMembers(thread) {
+  const memberIds = thread?.memberIds;
+  return Array.isArray(memberIds) && memberIds.length > 0 && memberIds.every(segment)
+    ? memberIds
+    : null;
+}
+
+function availableAccount(snapshot) {
+  return snapshot.exists && !isAccountUnavailable(snapshot.data());
+}
+
 async function authorize(db, uid, conversationId) {
   const conversation = await db.collection('conversations').doc(conversationId).get();
   const thread = conversation.data();
-  if (!conversation.exists || thread?.type !== 'dm' || !segment(thread?.schoolId) ||
-      !Array.isArray(thread.memberIds) || thread.memberIds.length !== 2 ||
-      new Set(thread.memberIds).size !== 2 || !thread.memberIds.includes(uid)) {
+  const memberIds = conversationMembers(thread);
+  // Existing members of any conversation type, including groups, keep media
+  // access. School matching and active school membership must not revoke it.
+  if (!conversation.exists || !memberIds || !memberIds.includes(uid)) {
     throw forbidden();
   }
-  const schoolId = thread.schoolId;
-  const peerUid = thread.memberIds.find((id) => id !== uid);
-  // These reads are deliberately in Admin SDK, NOT Storage Rules. Caller and
-  // peer profile plus membership must be authoritative on EACH request,
-  // including after school transfers or the other account being disabled.
-  const [profileSnapshot, memberSnapshot, peerProfile, peerMember] = await Promise.all([
-    db.collection('users').doc(uid).get(),
-    db.collection('schools').doc(schoolId).collection('members').doc(uid).get(),
-    db.collection('users').doc(peerUid).get(),
-    db.collection('schools').doc(schoolId).collection('members').doc(peerUid).get(),
-  ]);
-  for (const [profileSnap, memberSnap] of [[profileSnapshot, memberSnapshot], [peerProfile, peerMember]]) {
-    const profile = profileSnap.data();
-    if (!profileSnap.exists || !memberSnap.exists ||
-        profile?.schoolId !== schoolId || isAccountUnavailable(profile) ||
-        memberSnap.data()?.status !== 'active') {
-      throw forbidden();
-    }
+  const uniqueMembers = [...new Set(memberIds)];
+  const isDirect = thread.type === 'dm' && uniqueMembers.length === 2 && memberIds.length === 2;
+  if (thread.type === 'dm' && !isDirect) throw forbidden();
+  const peerUid = isDirect ? uniqueMembers.find((id) => id !== uid) : null;
+  const reads = [db.collection('users').doc(uid).get()];
+  if (peerUid) {
+    reads.push(
+      db.collection('users').doc(peerUid).get(),
+      db.collection('users').doc(uid).collection('blockedUsers').doc(peerUid).get(),
+      db.collection('users').doc(peerUid).collection('blockedUsers').doc(uid).get(),
+      db.collection('friendBlocks').doc(`${uid}_${peerUid}`).get(),
+      db.collection('friendBlocks').doc(`${peerUid}_${uid}`).get(),
+    );
   }
-  return schoolId;
+  const [profileSnapshot, peerProfile, ...blocks] = await Promise.all(reads);
+  if (!availableAccount(profileSnapshot)) throw forbidden();
+  if (peerUid && (!availableAccount(peerProfile) || blocks.some((block) => block.exists))) {
+    throw forbidden();
+  }
 }
 
 function attachmentPath(conversationId, folder, mediaId, fileName) {
