@@ -173,7 +173,7 @@ describe('durable public navigation gate', () => {
       fireEvent.click(screen.getByRole('button', { name: '結案並開始新任務' }));
       fireEvent.click(screen.getByRole('button', { name: '確認結案' }));
       const field = await screen.findByLabelText('起點與終點');
-      expect(document.activeElement).toBe(field);
+      await waitFor(() => expect(document.activeElement).toBe(field));
     },
   );
   it('keeps failed or uncertain acknowledgement locked and retries the original id even when lookup returns null', async () => {

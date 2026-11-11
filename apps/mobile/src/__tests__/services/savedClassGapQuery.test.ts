@@ -74,6 +74,48 @@ describe('class gap questions', () => {
     }
   });
 
+  test('carries colloquial elliptical follow-ups without swallowing a different student task', () => {
+    const initial = { ...tomorrow, part: 'morning' as const };
+    const cases: Array<[string, SavedClassGapQuery, SavedClassGapQuery]> = [
+      ['那明天的呢？', { ...today, minMinutes: 30 }, tomorrow],
+      ['那下午的呢？', initial, { ...initial, part: 'afternoon' }],
+      ['那至少一小時的呢？', tomorrow, { ...tomorrow, minMinutes: 60 }],
+    ];
+    for (const [question, previous, expected] of cases) {
+      expect(isSavedClassGapRefinement(question)).toBe(true);
+      expect(savedClassGapFollowUp(question, previous)).toEqual(expected);
+    }
+    for (const question of ['那明天的作業呢', '那下午的公告呢', '那至少一小時的提醒呢']) {
+      expect(isSavedClassGapRefinement(question)).toBe(false);
+      expect(savedClassGapFollowUp(question, tomorrow)).toBeNull();
+    }
+    // Bare ellipses cannot start a new lookup without an earlier verified gap turn.
+    expect(savedClassGapQuery('那明天的呢？')).toBeNull();
+  });
+
+  test('does not reuse corrupt restored filters in a follow-up', () => {
+    const invalidPrevious: unknown[] = [
+      null, undefined,
+      { ...today, day: 'last-week' },
+      { ...today, part: '__proto__' },
+      { ...today, minMinutes: Number.NaN },
+      { ...today, minMinutes: -1 },
+      { ...today, minMinutes: Number.POSITIVE_INFINITY },
+      { ...today, fromMinute: Number.NaN },
+      { ...today, fromMinute: 1440 },
+      { ...today, untilMinute: 1441 },
+      { ...today, fromMinute: 960, untilMinute: 930 },
+      { ...today, part: 'afternoon', fromMinute: 1140 },
+      { ...today, part: 'morning', untilMinute: 780, fromMinute: 750 },
+    ];
+    for (const restored of invalidPrevious) {
+      expect(savedClassGapFollowUp('那至少一小時呢', restored as SavedClassGapQuery)).toBeNull();
+      expect(savedClassGapFollowUp('改成三點半之後', restored as SavedClassGapQuery)).toBeNull();
+    }
+    // A normal saved turn still carries forward day and duration as intended.
+    expect(savedClassGapFollowUp('那至少一小時呢', today)).toEqual({ ...today, minMinutes: 60 });
+  });
+
   test('keeps the other conditions while a student changes the date, length and clock window', () => {
     const initial = savedClassGapQuery('今天下午有45分鐘的空堂嗎')!;
     expect(initial).toEqual({ ...today, part: 'afternoon', minMinutes: 45 });
@@ -165,6 +207,36 @@ const context: OnDeviceSchoolContext = {
 };
 
 describe('saved class gap answer', () => {
+  test('never answers from a missing snapshot or an unrecognized timetable source', () => {
+    const invalidTimetables: unknown[] = [
+      null, undefined, [], 'invalid',
+      { ...context.timetable, source: 'unknown' },
+      { ...context.timetable, source: null },
+      { ...context.timetable, source: undefined },
+    ];
+    for (const timetable of invalidTimetables) {
+      const result = answerSavedClassGapQuery(today, {
+        ...context, timetable: timetable as OnDeviceSchoolContext['timetable'],
+      });
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toMatch(/資料不足|來源無法核對/);
+      expect(result.content).not.toContain('有 2 段');
+      expect(result.content).not.toContain('沒有課間空堂');
+    }
+    for (const invalidContext of [null, undefined]) {
+      const result = answerSavedClassGapQuery(today, invalidContext as unknown as OnDeviceSchoolContext);
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('資料不足');
+    }
+    expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, source: 'unreadable' },
+    }).content).toContain('讀不到');
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, source: 'not-available' },
+    }).content).toContain('還沒有');
+  });
+
   test('lists upcoming available minutes in local time, in chronological order, with provenance', () => {
     const reply = answerSavedClassGapQuery(today, context);
     expect(reply).toMatchObject({ tool: 'saved-timetable', route: '/timetable' });
@@ -247,6 +319,107 @@ describe('saved class gap answer', () => {
     }).content).toContain('沒有課間空堂');
   });
 
+  test('rejects calendar rollover in zoned collection and save timestamps', () => {
+    // Date.parse accepts nonexistent days such as February 30 and 24:00 by
+    // shifting them into the next day. Neither can prove a timetable's date.
+    for (const checkedAt of [
+      '2026-02-30T10:00:01Z',
+      '2026-11-31T10:00:01+08:00',
+      '2026-11-06T24:00:00+08:00',
+    ]) {
+      const answer = answerSavedClassGapQuery(today, { ...context, checkedAt }).content;
+      expect(answer).toContain('資料不足');
+      expect(answer).not.toContain('沒有課間空堂');
+      expect(answer).not.toContain('有 2 段');
+    }
+    for (const updatedAt of [
+      '2026-02-30T00:00:00Z',
+      '2026-11-05T24:00:00+08:00',
+    ]) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, updatedAt },
+      }).content;
+      expect(answer).toContain('儲存時間不詳');
+      expect(answer).toContain('有 2 段');
+    }
+    // Real leap days and a zoned timestamp still work.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: '2024-02-29T10:00:01Z' },
+    }).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery(today, {
+      ...context, checkedAt: '2026-11-06T02:00:01Z',
+    }).content).toContain('有 2 段');
+  });
+
+  test('does not treat an ambiguous or malformed collection clock as evidence of free time', () => {
+    // A restored snapshot must not change calendar day when the OS timezone changes.
+    const ambiguousOrInvalid: unknown[] = [
+      '2026-11-06T10:00:01', '2026-11-06 10:00:01',
+      'Fri, 06 Nov 2026 02:00:01 GMT', 'not-a-date', 12345,
+    ];
+    for (const checkedAt of ambiguousOrInvalid) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, checkedAt: checkedAt as string,
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('資料不足');
+      expect(answer.content).not.toContain('有 2 段');
+      expect(answer.content).not.toContain('沒有課間空堂');
+    }
+    // ISO instants with explicit offsets remain equivalent across devices.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, checkedAt: '2026-11-06T02:00:01Z',
+    }).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
+  });
+
+  test('answers valid gaps with unknown or future-dated save provenance', () => {
+    const invalidSavedAt: unknown[] = [
+      '', 'unparseable', '2099-01-01T00:00:00+08:00', 12345,
+      // Without a timezone, the same snapshot can mean different instants on iOS and Android.
+      '2026-11-05T15:12:00', '2026-11-05 15:12:00', 'Thu, 05 Nov 2026 15:12:00 GMT',
+    ];
+    for (const updatedAt of invalidSavedAt) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context,
+        timetable: { ...context.timetable, updatedAt: updatedAt as string },
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toMatch(/儲存時間不詳|晚於查詢時間，需核對/);
+      expect(answer.content).toContain('有 2 段');
+      expect(answer.content).toContain('14:00–15:00（60 分鐘）');
+      expect(answer.content).not.toContain('無法核對空堂');
+      expect(answer.content).not.toContain('沒有課間空堂');
+    }
+    // Explicit UTC or offset timestamps are portable evidence, not device-local guesses.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: '2026-11-05T23:12:00+08:00' },
+    }).content).toContain('有 2 段');
+    // Small clock skew remains answerable, with provenance marked for review.
+    const nearFuture = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: '2026-11-06T10:04:00+08:00' },
+    });
+    expect(nearFuture.content).toContain('有 2 段');
+    expect(nearFuture.content).toContain('晚於查詢時間，需核對');
+    // Null remains a known limitation, not a forged timestamp.
+    const unknownSaveTime = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: null },
+    }).content;
+    expect(unknownSaveTime).toContain('儲存時間不詳');
+    expect(unknownSaveTime).toContain('有 2 段');
+  });
+
+  test('keeps legacy saves and saves preceding a device-clock rollback queryable', () => {
+    for (const updatedAt of ['2026-11-05T15:12:00', '2026-11-06T10:30:00+08:00']) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, updatedAt },
+      }).content;
+      expect(answer).toContain('有 2 段');
+      expect(answer).toContain('14:00–15:00（60 分鐘）');
+      expect(answer).toMatch(/儲存時間不詳|晚於查詢時間，需核對/);
+    }
+  });
+
   test('malformed saved gap containers and entries fail closed instead of crashing or claiming no free time', () => {
     const malformed: unknown[] = [
       null, undefined, 12, 'invalid', [], {},
@@ -270,6 +443,152 @@ describe('saved class gap answer', () => {
     });
     expect(invalidContainer.content).toContain('資料不足');
     expect(invalidContainer.content).not.toContain('沒有課間空堂');
+  });
+
+  test('rejects duplicate and overlapping free intervals without treating another day as an overlap', () => {
+    const invalid = [
+      [gap('14:00', '15:00'), gap('14:30', '16:00')],
+      [gap('14:00', '15:00'), gap('14:00', '15:00')],
+      [gap('14:00', '15:00'), gap('13:30', '14:01')],
+    ];
+    for (const classGaps of invalid) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, classGaps },
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('無法核對');
+      expect(answer.content).not.toContain('有 2 段');
+      expect(answer.content).not.toContain('沒有課間空堂');
+    }
+    const unrelatedDay = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [
+        gap('14:00', '15:00'), gap('14:30', '16:00', '2026-11-07'),
+      ] },
+    }).content;
+    expect(unrelatedDay).toContain('有 1 段');
+    expect(unrelatedDay).toContain('14:00–15:00（60 分鐘）');
+  });
+
+  test('does not confuse another day\'s restored gaps with a verified empty date', () => {
+    // A stale cache saved for tomorrow must not answer "today has no gaps".
+    const wrongDay = answerSavedClassGapQuery(today, {
+      ...context, timetable: {
+        ...context.timetable, classGaps: [gap('14:00', '15:00', '2026-11-07')],
+      },
+    });
+    expect(wrongDay.route).toBe('/timetable');
+    expect(wrongDay.content).toContain('無法核對');
+    expect(wrongDay.content).toContain('查詢日期');
+    expect(wrongDay.content).not.toContain('沒有課間空堂');
+    expect(wrongDay.content).not.toContain('有 1 段');
+
+    // The identical saved interval is valid when the student asks for tomorrow.
+    expect(answerSavedClassGapQuery(tomorrow, {
+      ...context, timetable: {
+        ...context.timetable, classGaps: [gap('14:00', '15:00', '2026-11-07')],
+      },
+    }).content).toContain('14:00–15:00（60 分鐘）');
+
+    // The source calculation can legitimately return an empty set.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [] },
+    }).content).toContain('沒有課間空堂');
+  });
+
+  test('combines touching free intervals before enforcing the minimum without bridging a real class', () => {
+    const timetable = { ...context.timetable, classGaps: [
+      gap('15:00', '16:00'), gap('14:00', '15:00'), gap('16:10', '17:10'),
+    ] };
+    const answer = (query: Partial<SavedClassGapQuery>) =>
+      answerSavedClassGapQuery({ ...today, ...query }, { ...context, timetable }).content;
+    const ninetyMinutes = answer({ minMinutes: 90 });
+    expect(ninetyMinutes).toContain('有 1 段至少 90 分鐘');
+    expect(ninetyMinutes).toContain('14:00–16:00（120 分鐘）');
+    expect(ninetyMinutes).not.toContain('16:10–17:10');
+    expect(answer({ fromMinute: 870, minMinutes: 90 })).toContain('14:30–16:00（90 分鐘）');
+    expect(answer({ minMinutes: 121 })).toContain('沒有至少 121 分鐘');
+  });
+
+  test('rejects shorter cross-midnight gaps instead of clipping them into false free time', () => {
+    // These intervals are shorter than a day, but savedClassGaps only returns
+    // periods between classes within the requested Taiwan calendar date.
+    const crossing = [
+      { startAt: instant('23:45', '2026-11-05'), endAt: instant('00:30') },
+      { startAt: instant('23:00'), endAt: instant('00:20', '2026-11-07') },
+    ];
+    for (const bad of crossing) {
+      const result = answerSavedClassGapQuery(today, {
+        ...context, checkedAt: '2026-11-06T00:05:01+08:00',
+        timetable: { ...context.timetable, classGaps: [bad] },
+      });
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('跨越查詢日期');
+      expect(result.content).toContain('無法核對');
+      expect(result.content).not.toContain('有 1 段');
+      expect(result.content).not.toContain('沒有課間空堂');
+    }
+    // Midnight exactly at the endpoint is not a crossing, and unrelated
+    // next-day openings must not contaminate today's result.
+    const correct = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [
+        { startAt: instant('23:00'), endAt: instant('00:00', '2026-11-07') },
+        gap('01:00', '02:00', '2026-11-07'),
+      ] },
+    }).content;
+    expect(correct).toContain('23:00–24:00（60 分鐘）');
+    expect(correct).not.toContain('01:00–02:00');
+  });
+
+  test('rejects fabricated day-long gaps instead of turning them into an all-day free period', () => {
+    // Two classes on the requested day cannot create a whole-day or multi-day class gap.
+    // Corrupt persisted data must not become a plausible 10:01–24:00 opening when clipped.
+    const impossible = [
+      { startAt: instant('08:00'), endAt: instant('08:00', '2026-11-07') },
+      { startAt: instant('09:00', '2026-11-05'), endAt: instant('15:00', '2026-11-07') },
+    ];
+    for (const bad of impossible) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, classGaps: [bad] },
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('資料不足');
+      expect(answer.content).not.toContain('沒有課間空堂');
+      expect(answer.content).not.toContain('有 1 段');
+      expect(answer.content).not.toContain('24:00');
+    }
+    const valid = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [gap('14:00', '15:00')] },
+    });
+    expect(valid.content).toContain('14:00–15:00（60 分鐘）');
+  });
+
+  test('rejects corrupted restored clock filters without crashing or inventing free time', () => {
+    const malformed = [
+      { ...today, day: 'yesterday' },
+      { ...today, part: '__proto__' },
+      { ...today, minMinutes: Number.NaN },
+      { ...today, minMinutes: -30 },
+      { ...today, minMinutes: 1441 },
+      { ...today, fromMinute: Number.NaN },
+      { ...today, fromMinute: -1 },
+      { ...today, fromMinute: 1440 },
+      { ...today, untilMinute: Number.POSITIVE_INFINITY },
+      { ...today, untilMinute: 0 },
+      { ...today, untilMinute: 1441 },
+      { ...today, fromMinute: 960, untilMinute: 930 },
+      { ...today, part: 'afternoon', fromMinute: 1140 },
+    ];
+    for (const restored of malformed) {
+      const result = answerSavedClassGapQuery(restored as SavedClassGapQuery, context);
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('查詢條件');
+      expect(result.content).not.toContain('沒有課間空堂');
+      expect(result.content).not.toContain('有 2 段');
+    }
+    // Valid parser output and exact-day bounds remain usable.
+    expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery({ ...today, fromMinute: 0, untilMinute: 1440 }, context).content)
+      .toContain('14:00–15:00（60 分鐘）');
   });
 
   test('distinguishes a known empty result from missing, unreadable or incomplete evidence', () => {
