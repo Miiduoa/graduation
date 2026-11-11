@@ -204,6 +204,27 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to POI-only when an audited OSM way becomes underground', async () => {
+    const underground = JSON.stringify({
+      elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', height: '18 m', location: 'underground' } }],
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(underground, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const initial = await GET();
+    expect(initial.status).toBe(503);
+    expect(initial.headers.get('Cache-Control')).toBe('no-store');
+    expect((await initial.json()).error).toMatch(/temporarily unavailable/);
+    // The unverified 3D volume never enters the fresh cache. Preserve the
+    // upstream cooldown rather than requesting a bad way on every map visit.
+    const again = await GET();
+    expect(again.status).toBe(503);
+    expect(again.headers.get('Cache-Control')).toBe('no-store');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('does not cache a building=yes way with a present but empty ruin marker', async () => {
     const ambiguous = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
