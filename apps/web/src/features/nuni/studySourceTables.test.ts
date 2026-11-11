@@ -144,3 +144,39 @@ describe('collapsible HTML lesson answers are not public source Markdown tables'
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+it('does not turn hidden inline HTML cells into visible study-source data', () => {
+  const source = [
+    '| 課程 | 備註 |',
+    '| --- | --- |',
+    '| 資料庫 | <span hidden>尚未公告的成績</span> |',
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(4));
+});
+
+it('does not treat HTML-like text inside Markdown inline code as a hidden wrapper close', () => {
+  const source = [
+    '<details>',
+    '使用 `</details>` 示範如何關閉答案。',
+    '| 未公開結果 | 分數 |',
+    '| --- | --- |',
+    '| 仍在收合區 | 999 |',
+    '</details>',
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(7));
+});
+
+it('keeps a simple comparison expression in a genuine Markdown table', () => {
+  const source = [
+    '| 概念 | 公式 |',
+    '| --- | --- |',
+    '| 比較 | x < y |',
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual([{
+    startLine: 1,
+    headers: ['概念', '公式'],
+    rows: [['比較', 'x < y']],
+  }]);
+});

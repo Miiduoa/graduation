@@ -30,8 +30,11 @@ function parseSimplePipeRow(line: string): string[] | null {
   // Markdown renders four-space / tab-indented rows as code, not a table.
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
-  // Raw HTML blocks and graphics cannot be treated as Markdown table cells.
-  if (/<\/?(?:pre|code|script|style|textarea|template|noscript|svg|math|table|details|dialog)\b/iu.test(trimmed)) return null;
+  // HTML inside an otherwise plausible Markdown cell can contain hidden
+  // answers or formatting. Without a Markdown/HTML renderer we cannot tell
+  // what is visible, so omit the entire table instead of exposing it as text.
+  // Plain comparisons such as "x < y" are not HTML tags.
+  if (/<\/?[A-Za-z][\w:-]*(?=[\s/>])[^>]*>/u.test(trimmed)) return null;
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
   if (!trimmed.includes('|') || trimmed.includes('\\|') ||
@@ -110,7 +113,13 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
     for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table|details|dialog|div|section|aside)\b[^>]*>/giu)) {
       const token = match[0];
-      if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
+      // In a disclosure or hidden container, a paired inline-code example
+      // such as `</details>` is not an actual closing tag. Otherwise it
+      // prematurely exposes the still-hidden answer beneath the example.
+      // Raw <pre>/<code> blocks are HTML, not Markdown inline-code contexts.
+      if (!inHtmlComment &&
+          (htmlCodeBlocks.length === 0 ||
+            NESTABLE_HTML_BLOCKS.has(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
       if (inHtmlComment) {
         if (token === '-->' || token === '--!>') inHtmlComment = false;
