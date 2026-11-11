@@ -151,6 +151,27 @@ it.each([GROUP_ANSWER, ANSWER])('rejects malformed submitted-receipt attachment 
   }
 });
 
+it.each([GROUP_ANSWER, ANSWER])('requires a meaningful submittedAt timestamp for teacher GET on %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const receipt = 'groups/course/assignments/work/submissions/alice';
+  for (const submittedAt of [false, 0, -1, '', 'not-a-date', {}, { seconds: 123 }, Number.NaN]) {
+    store.docs.set(receipt, { userId: 'alice', submittedAt, attachments: [path] });
+    await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, path, 'alice', false)).resolves.toBeUndefined();
+  }
+
+  const submitted = new Date('2026-11-11T00:00:00.000Z');
+  for (const submittedAt of [
+    submitted, submitted.getTime(), submitted.toISOString(), { toMillis: () => submitted.getTime() },
+  ]) {
+    store.docs.set(receipt, { userId: 'alice', submittedAt, attachments: [path] });
+    await expect(authorize(store, path, 'teacher', false)).resolves.toBeUndefined();
+    store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
+    await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    store.docs.set('schools/pu/members/teacher', { status: 'active' });
+  }
+});
+
 it('legacy uploads require a live open assignment and an unsubmitted receipt', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();

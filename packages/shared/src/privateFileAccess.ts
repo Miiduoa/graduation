@@ -142,6 +142,29 @@ function allowsListedOrLegacyPrivateFile(record: Record<string, unknown>, path: 
   return referencesPrivateFile(record.attachments, path);
 }
 
+/** Only a real, nonempty submission time grants a teacher access to private files.
+ * Firestore Timestamp, legacy ISO strings and millisecond numbers are supported.
+ * Booleans, empty values and arbitrary maps cannot act as a submitted receipt. */
+function hasSubmittedReceiptTime(value: unknown): boolean {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) && value.getTime() > 0;
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0;
+  if (typeof value === 'string') {
+    if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) return false;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) && ms > 0;
+  }
+  if (value && typeof value === 'object') {
+    const toMillis = (value as { toMillis?: unknown }).toMillis;
+    if (typeof toMillis === 'function') {
+      try {
+        const ms = toMillis.call(value);
+        return typeof ms === 'number' && Number.isFinite(ms) && ms > 0;
+      } catch { return false; }
+    }
+  }
+  return false;
+}
+
 function accountBlocked(data: Record<string, unknown>): boolean {
   return (
     data.accountDeletionInProgress === true ||
@@ -461,7 +484,7 @@ export async function authorizePrivateFile(
             // Legacy receipts may omit attachments, but a missing/unsubmitted
             // receipt is never proof that a teacher may read an uploaded draft.
             !submission.exists || owner !== scope.userId ||
-            previous.submittedAt == null ||
+            !hasSubmittedReceiptTime(previous.submittedAt) ||
             !allowsListedOrLegacyPrivateFile(previous, scope.path)
           )) deny();
         }
@@ -513,7 +536,7 @@ export async function authorizePrivateFile(
             : 'studentId' in previous ? previous.studentId : scope.userId;
         if (
           !submission.exists || owner !== scope.userId ||
-          previous.submittedAt == null ||
+          !hasSubmittedReceiptTime(previous.submittedAt) ||
           // Preserve access to genuinely submitted historical receipts with
           // no file list. A present list remains an exact allow-list.
           !allowsListedOrLegacyPrivateFile(previous, scope.path)
