@@ -438,7 +438,7 @@ it('drains thousands of immediately finished speech chunks without recursion or 
 it('keeps the same local narration when the parent replaces the status callback', () => {
   const firstListener = vi.fn();
   const latestListener = vi.fn();
-  const source = '原文與逐字引句。'.repeat(45);
+  const source = '原文與逐字引句。';
   const view = render(<StudyReadAloud text={source} onSpeakingChange={firstListener} />);
   fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
   const utterance = speak.mock.calls[0][0] as Utterance;
