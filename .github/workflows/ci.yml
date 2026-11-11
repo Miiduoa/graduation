@@ -424,7 +424,7 @@ jobs:
 
       - name: Run Expo Doctor
         working-directory: apps/mobile
-        run: npx expo-doctor
+        run: npx expo-doctor@1.21.5
 
       - name: Bundle mobile JavaScript
         working-directory: apps/mobile
