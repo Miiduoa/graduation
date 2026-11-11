@@ -6,7 +6,7 @@ import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
-import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
+import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
@@ -214,6 +214,9 @@ export function AssistantThread({
         {error ? (
           <p className={styles.alert} role="alert">
             {error}
+            {assistantPermissionSettingsHref(error) && <>
+              {' '}<Link href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</Link>
+            </>}
           </p>
         ) : null}
         {recoverableQuestion ? (

@@ -4,6 +4,7 @@ import { Alert, Linking, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { AIDetailScreen, AISection, AIRow, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { useAuth } from '../state/auth';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { useThemeMode } from '../state/theme';
 import { getLegalUrl } from '../services/release';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
@@ -12,6 +13,7 @@ type Navigation = { goBack?: () => void; navigate?: (screen: string) => void };
 
 export default function SettingsAiFirstScreen({ navigation }: { navigation?: Navigation }) {
   const auth = useAuth();
+  const platform = useOptionalNuniSession();
   const { mode, setMode } = useThemeMode();
   const uid = auth.user?.uid;
   const profile = auth.profile?.uid === uid ? auth.profile : null;
@@ -139,6 +141,16 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         />
       </AISection>
 
+      {uid || platform?.session ? (
+        <AISection title="AI 助理">
+          <AIRow
+            title="助理權限"
+            subtitle="逐項開關助理可執行的代辦動作（預設關閉）"
+            onPress={go('AssistantPermissions')}
+          />
+        </AISection>
+      ) : null}
+
       {uid ? (
         <>
           <AISection title="通知與個人資料">
@@ -146,11 +158,6 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
               title="通知設定"
               subtitle="管理通知類型與免打擾時段"
               onPress={go('NotificationSettings')}
-            />
-            <AIRow
-              title="助理權限"
-              subtitle="逐項開關助理可執行的寫入動作（預設關閉）"
-              onPress={go('AssistantPermissions')}
             />
             <AIRow
               title="個人資料"

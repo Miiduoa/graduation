@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AssistantThread } from './AssistantThread';
+import { assistantPermissionMessage } from './copy';
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -61,6 +62,12 @@ it('reports confirmation, reconciliation and cancellation as distinct pending ac
 it('surfaces a friendly error region', () => {
   render(<AssistantThread {...base} error="查詢未完成，請稍後再試。" />);
   expect(screen.getByRole('alert').textContent).toBe('查詢未完成，請稍後再試。');
+});
+
+it('offers the working assistant settings route when an action permission is denied', () => {
+  render(<AssistantThread {...base} error={assistantPermissionMessage('ASSISTANT_PERMISSION_DENIED')!} />);
+  expect(screen.getByRole('alert').textContent).toContain('這次沒有執行');
+  expect(screen.getByRole('link', { name: '設定 AI 代辦權限' }).getAttribute('href')).toBe('/settings?section=assistant');
 });
 
 it('measures the composer dock height onto the thread shell', () => {

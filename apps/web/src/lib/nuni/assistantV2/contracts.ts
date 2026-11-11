@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { parseAssistantCalendarEvent } from '@campus/shared/src/assistantExecution';
+import type { PlatformAssistantPermissions } from '@campus/shared/src/platformAssistantPermissions';
 if (typeof window !== 'undefined') throw new Error('Server only');
 export class V2Error extends Error {
   constructor(
@@ -179,6 +180,7 @@ export type Task = {
 };
 export type Adapter = {
   simulation: boolean;
+  permissions?(): Promise<PlatformAssistantPermissions>;
   remainingApiCalls?(): number;
   food?: {
     enabled(): boolean;
@@ -224,6 +226,36 @@ export type Adapter = {
     mutationId: string;
   }): Promise<Ledger>;
 };
+export type AssistantPermissionKey = keyof PlatformAssistantPermissions;
+export const ASSISTANT_PERMISSION_SETTINGS_HREF = '/settings?section=assistant';
+
+export function proposalPermission(name: string): AssistantPermissionKey | undefined {
+  if (name === 'propose_personal_event' || name === 'propose_study_plan') return 'createPersonalEvent';
+  if (name === 'propose_food_order' || name === 'reorder_last_food_order') return 'prepareFoodOrder';
+}
+
+/** Read again for each proposal and execution; a missing reader never grants access. */
+export async function requireAssistantPermission(adapter: Adapter, key: AssistantPermissionKey) {
+  if (!adapter.permissions) return fail('ASSISTANT_PERMISSION_STORE_UNAVAILABLE', 503);
+  let permissions: PlatformAssistantPermissions;
+  try {
+    permissions = await adapter.permissions();
+  } catch (error) {
+    if ((error as { status?: number }).status === 401) throw error;
+    return fail('ASSISTANT_PERMISSION_STORE_UNAVAILABLE', 503);
+  }
+  if (!permissions || permissions[key] !== true) return fail('ASSISTANT_PERMISSION_DENIED', 403);
+}
+
+export function assistantPermissionRecovery(code: string) {
+  if (code !== 'ASSISTANT_PERMISSION_DENIED' && code !== 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE') return;
+  return {
+    href: ASSISTANT_PERMISSION_SETTINGS_HREF,
+    nextStep: code === 'ASSISTANT_PERMISSION_DENIED'
+      ? '這項助理操作權限尚未開啟。請到設定的助理權限調整；不要自動重試或宣稱已產生確認卡。'
+      : '目前無法確認助理操作權限。請到設定重新讀取；不要自動重試或宣稱已產生確認卡。',
+  };
+}
 export async function bounded<T>(
   work: (signal: AbortSignal) => Promise<T>,
   signal: AbortSignal,
