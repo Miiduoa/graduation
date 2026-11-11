@@ -180,3 +180,35 @@ it('keeps a simple comparison expression in a genuine Markdown table', () => {
     rows: [['比較', 'x < y']],
   }]);
 });
+
+it('does not let an escaped backtick hide a real HTML comment and expose fake rows', () => {
+  const tick = String.fromCharCode(96);
+  const source = [
+    '教師備註：\\' + tick + '<!-- 尚未公布 ' + tick,
+    '| 未發布科目 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    '-->',
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(6));
+});
+
+it('does not let an escaped backtick hide the real end of a disclosure', () => {
+  const tick = String.fromCharCode(96);
+  const source = [
+    '<details>',
+    '示範：\\' + tick + '</details>' + tick,
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(3));
+});
+
+it('keeps a real inline-code span after a pair of literal backslashes', () => {
+  const tick = String.fromCharCode(96);
+  const source = [
+    '示範：\\\\' + tick + '<!--' + tick + ' 只是程式碼文字。',
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(2));
+});

@@ -64,6 +64,13 @@ function isInsideInlineCode(line: string, target: number): boolean {
   const tick = String.fromCharCode(96);
   for (let offset = 0; offset < line.length;) {
     if (line[offset] !== tick) { offset += 1; continue; }
+    // In Markdown text, an escaped backtick cannot open inline code.
+    // Ignore only the escaped character: additional backticks in the same
+    // run may still form a delimiter. Inside code, closing ticks remain raw.
+    let backslashes = 0;
+    for (let previous = offset - 1; previous >= 0 && line[previous] === '\\'; previous -= 1)
+      backslashes += 1;
+    if (backslashes % 2 === 1) { offset += 1; continue; }
     const start = offset;
     while (line[offset] === tick) offset += 1;
     const width = offset - start;
