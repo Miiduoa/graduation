@@ -140,12 +140,15 @@ export function createCampusSpatialScene(
     .filter((footprint) => pointsById.has(footprint.poiId));
   const buildingHeightById = new Map(visibleFootprints
     .map((footprint) => [footprint.poiId, footprint.heightMeters]));
-  // Building heights always count for camera framing. Rooftop POI markers,
-  // however, are only justified where the POI actually lies inside the ring.
+  // Building heights always count for camera framing, even when illustrative.
+  // An illustrative 12m volume has no sourced roof elevation: keep the POI
+  // anchored to its real map point at ground level instead of visually asserting
+  // that its marker is on a measured roof. Sourced-height roof markers still
+  // require the actual POI to lie within the accepted OSM outline.
   const rooftopMarkerHeightById = new Map<string, number>();
   for (const footprint of visibleFootprints) {
     const point = pointsById.get(footprint.poiId);
-    if (point && poiWithinOutline(point, footprint)) {
+    if (point && footprint.heightBasis === 'osm-tag' && poiWithinOutline(point, footprint)) {
       rooftopMarkerHeightById.set(point.id, footprint.heightMeters);
     }
   }
