@@ -12,6 +12,7 @@ const REQUEST_PATH = `/privateGroupFile?path=${encodeURIComponent(FILE_PATH)}`;
 async function startTransport({ verifyIdToken } = {}) {
   const store = transactionStore([
     ['users/alice', {}], ['groups/course', { schoolId: 'pu' }],
+    ['groups/course/posts/post', { authorId: 'alice' }],
     ['groups/course/members/alice', { status: 'active', role: 'member' }],
     ['schools/pu/members/alice', { status: 'active' }],
   ]);

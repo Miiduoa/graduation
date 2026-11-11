@@ -363,6 +363,140 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 - 合法校務登入寫入的 profile 含 `schoolId`／`primarySchoolId`，同一認證 context 下的正常發布、同校讀取、作者刪除與觀看紀錄維持可通過。
 - 同一認證 context 下刪除 canonical 文件後，殘留校籍不得讀寫限動；接著客戶端重建 student profile、或嘗試自行寫入校別／status，限動讀寫與作者刪除仍拒絕。伺服器再寫入綁定校別的 profile 且校籍 inactive 時仍拒絕；校籍恢復 active 後作者才能刪除。
 
-Storage `schools/{schoolId}/stories/` 已使用校籍文件與 `campusStories` 兩份查詢，同一請求無法再讀 canonical profile。回歸因此保留「刪帳並自建 profile 後，殘留校籍仍可讀已發布媒體」的現況，並拒絕已發布後覆寫與校籍 inactive 後的媒體讀取。這不是放寬，也不能當作已簽發 bearer URL 失效。
+Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。沒有非空 `profileBoundGeneration` 的舊章一律拒絕。正式刪帳／停權會在同一 transaction 清章並標 inactive，因此刪帳後媒體立即不可讀。這不能當作已簽發 bearer URL 失效。
 
 新增／調整案例以 Firebase emulator 實際執行結果為準，不得沿用上一版 CI 綠燈。發布前除既有 legacy 無 profile 帳號外，還需盤點只有校籍、profile 未帶 `schoolId`／`primarySchoolId` 的帳號，否則限動 Firestore 會 fail-closed。未合併 main、部署、執行 migration、操作正式資料或 token。
+
+## 2026-11-09：限動媒體兩查詢與歷史校別綁定
+
+#517 合入後仍有兩項發布阻擋。Storage 限動媒體同一請求只能讀兩份 Firestore 文件；先前讀校籍與 `campusStories`，因此 canonical profile 刪除後，殘留 active 校籍加上有效憑證仍可讀未過期已發布媒體。Firestore 則要求 profile 的 `schoolId`／`primarySchoolId` 與學校一致，歷史上只有校籍、profile 未帶校別欄位的帳號會 fail-closed。
+
+根治不放寬規則、也不讓客戶端自填校籍：
+
+- Storage 限動每次請求只讀兩份 Firestore 文件：`schools/{schoolId}/members/{uid}`（`status == 'active'`、伺服器蓋章的 `profileBoundSchoolId` 等於路徑學校、且 `profileBoundGeneration` 為非空字串）以及 `campusStories/{storyId}`。不讀 `users/{uid}`。沒有世代的舊章一律拒絕。蓋章只在伺服器端校務登入交易寫入。校籍 `allow write: if false`，客戶端無法寫這些欄位。
+- 正式刪帳（`deleteUserAccount`）在標上 `accountDeletionInProgress` 的同一 transaction／batch 內，把該使用者所有 school members 的 `profileBoundSchoolId`／`profileBoundGeneration` 清掉並標 `inactive`。觸發器只當備援：刪 profile、新建 profile、或帳號變成 deleted／suspended／disabled／inactive 時清掉不符現況世代的蓋章。
+- 校籍撤銷或刪除時，觸發器在同一 transaction 內重讀校籍；若當下已是 active（例如剛登入），不清 profile 校別。
+- 回填腳本只做 dry-run 統計。沒有 `--apply`、沒有 `--reverse`。正式站從未跑過回填寫入。歷史未蓋章帳在下次校務登入時蓋章（fail-closed 可接受）。
+- 校務登入拒絕已關閉帳號。沒有新的 Firestore schema migration。
+- `users` create／update 禁止客戶端寫入 `schoolId`、`primarySchoolId`、`profileBoundSchoolId`、`bindingGeneration`、`lastLoginAt`。`users` 文件 `allow delete: if false`，客戶端必須走 `deleteUserAccount`。
+
+舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。發布順序：先部署 Functions（登入蓋章與世代、刪／停權清蓋章），最後才發布 Storage 規則。不必執行回填寫入。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。
+
+
+## 2026-11-09：Supabase 私人限動 URL 簽發的帳號世代綁定（後續獨立 PR）
+
+新主線 #565 引入 nuni-web 私人附件簽發入口。獨立檢查發現 `authorizePrivateFile` 對限動只確認 canonical `users/{uid}` 存在、校籍仍 active，並要求 `profileBoundGeneration` 非空，但**沒有比對目前 profile 的 `bindingGeneration`**，也未確認 profile 的受信任 `schoolId`／`primarySchoolId` 屬於請求學校。當 profile 被刪除又自行重建、舊學校成員蓋章尚未經後端觸發器清理時，仍可能取得新的 Supabase 私人媒體 URL。這和已發出去的 bearer／signed URL 撤銷是兩個不同問題。
+
+修補僅收斂限動 Web 簽發入口：同一個 read-only transaction 讀到的 canonical profile 必須有相符校別，且 `bindingGeneration` 必須與活躍校籍上非空的 `profileBoundGeneration` 精確一致。伺服器可信校務登入流程已在同一交易寫入兩者；缺欄位的歷史帳號會 fail-closed，必須重新經過可信登入蓋章。其他群組／作業附件授權不變。
+
+可重跑的惰性／合成回歸：先合法上傳、finalize 與取得下載 URL，再使用相同身分模擬 profile 刪除、自建 profile、不同學校、世代更新不匹配與校籍撤銷，均不得再簽發下載 URL；可信流程恢復匹配世代後應恢復合法下載。原始 signed URL 不會因此立即失效。此修補限於新 Web Supabase 簽發端，不代表 Cloud Storage 舊 bearer URL、真 Supabase Storage、正式 bucket/migration 或發布驗收已完成，必須以此精確 head 的 Web tests、CI、CodeQL 和指定 App 5504170 審查為準。本輪不操作正式服務、權杖或受限 npm/pnpm audit。
+
+
+### 2026-11-09 補驗：已發布限動不得簽發同 story 其他附件
+
+同一 Web 入口另一個可重現授權缺口：`assertStoryMediaRead` 原只確認已發布 story 的 `mediaUrl` 非空、期限、學校、作者與 MIME 相符，沒有將**要求下載的 object path**和 `story.mediaUrl` 綁在一起。若同一作者在同一 story 下預先 finalize 兩個影像物件，發布時只引用其中之一，其他同校成員仍可用已知的第二個路徑取得新的短效下載 URL。修補在 `issueDownload` 傳入要求的精確路徑，要求已發布 story 的 `mediaUrl === path`；尚未發布、無 story 文件時仍只允許物件 owner 本人下載。
+
+新增同 story 雙物件回歸：合法已發布的路徑維持 200，未引用的相同 owner 物件對作者與同校其他有效成員皆 403；已簽發 URL 不因此立即撤銷。新回歸在記憶體 DB 與合成 Supabase storage 执行，實際 CI 以最新精確提交為準。真 Supabase／GCS staging、舊 bearer／signed URL 撤銷、migration 與發布依舊未完成，不能宣稱正式安全。
+
+
+## 2026-11-10（台灣時間）：私有作業附件的提交收據精確授權
+
+新 Web Supabase `/api/files/private` 的 group-assignment 下載授權原本只要是群組 manager，即使學生尚未有 `submissions/{uid}` 文件，仍能以已知 object path 為學生已 finalized、未提交的附件簽發下載 URL。已有 submission 時也沒有要求附件真的被 submission.attachments 引用。這是新的預簽 URL 權限邊界，不等於先前已簽 URL 的撤銷。
+
+本輪最小收斂：保留學生本人在提交前預覽自己的附件，manager 跨身分下載則必須同時滿足存在對應 submission、路徑學生與 receipt owner 相符、`submittedAt` 非空，而且 `attachments` 含精確的 private path（字串或 `url`／`path` 欄位）。普通同組學生仍不可讀他人的作業；正常 manager 已提交附件仍可讀。已新增記憶體 DB／惰性 Supabase storage 定向回歸：未提交拒絕、合法提交可讀、未引用 sibling／撤權／其他學生拒絕及本人預覽。請以本輪新的精確 head 的 Web tests、CI、CodeQL 確認成功，不以前一 head 綠燈替代。
+
+已發布的 Supabase 短效網址與 GCS bearer URL 不會因本檢查即時失效。正式資料、migration、金鑰、token 清理、E 校園連線及受限 npm/pnpm audit 均未觸及；合併仍依指定 App 5504170 對精確 head 核可及主線窗口處理。
+
+
+## 2026-11-10：群組貼文「已上傳不等於已公開」的附件讀取邊界
+
+延續 #569 附件提交收據修補，獨立檢查共用 `authorizePrivateFile` 發現 group-post 原只要貼文文件存在、讀者有同組資格，就能對該貼文路徑下的任意檔名嘗試新簽發 URL，或經 GCS HTTP 入口讀取；即使該物件只由作者上傳、尚未列在貼文 `attachments`，已知路徑的同組使用者仍可能讀取。這與已發布的附件不同，不能靠同組資格自動視為公開。
+
+最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。若貼文未儲存 `attachments` 欄位，其他組員維持原先可讀取該貼文路徑下檔案的能力；一旦有清單，則僅精確引用的路徑可被下載。
+
+新增 shared authorization、Web 惰性 Storage 完整 upload→finalize→download、Functions GCS 惰性物件回歸：合法作者預覽、原附件正常分享、同貼文 sibling 草稿與 manager 猜路徑拒絕、撤銷校籍拒絕。這是**開發分支修補**，尚非正式已發布／舊 bearer 或 signed URL 已撤銷的證據；必須以精確 head 的 CI、CodeQL、指定 App 5504170 審查與獨立 staging 發布相容驗證為準。遵守 E 校園暫停及未授權 npm/pnpm audit 限制。
+
+## 2026-11-10：修正 #569 精確 head 的 Firestore Rules emulator fixture（待新 CI）
+
+在 PR #569 的精確 head `d0d18389fcef74d6ed23c77929db4b2ffefa5da4`，主 CI [#42695872683](https://github.com/Miiduoa/graduation/actions/runs/42695872683) 已完成但**失敗**：Firestore Rules 270 項中 269 通過、1 失敗；其餘 Functions、Web、Mobile、Security Gates、Assistant Integration、Lint/Type、Build Web、Course access review 與 CodeQL 均成功。失敗案例位於 `backend/functions/privateGroupFiles.emulator.cjs:130`，合法 instructor 對已上傳貼文檔案 GET 預期 200，實際 403。
+
+原因是前輪新增「同組其他成員只可讀取貼文 `attachments` 明確引用之檔案」後，emulator 的共用貼文 fixture 仍僅建立 `{authorId: 'alice'}` 而**未列出實際已公開的 `notes.pdf`**。新的共用授權正確拒絕 instructor，所以本次僅在 fixture 加入精確附件引用，未放寬生產授權。另新增實際 emulator HTTP 回歸：合法已引用附件同組與 instructor 可讀、同貼文尚未引用草稿僅作者可讀、移除引用後其他成員立即拒絕、重新引用後恢復、校籍 inactive 後仍拒絕。
+
+此處是**測試資料修復，不宣稱已解決新的正式漏洞**。本次新的精確提交、Firebase emulator 及完整 CI 須另外確認；舊 head 的成功項目不得替代新 head。維持隔離測試、E 校園停用、禁止未授權 npm/pnpm audit，未合併 main、部署、migration、金鑰或正式 token 清理。GCS 舊 URL、Supabase 已簽 URL、真實隔離 staging、minimatch 相容性與指定 App 5504170 精確 head 審查仍為未解除阻擋。
+
+## 2026-11-10：封閉 legacy assignment HTTP／signed URL 的未提交附件橫向讀取（待精確 CI）
+
+獨立複核 #569 新增的群組作業附件收據限制後，發現共用 `authorizePrivateFile` 對舊 namespace `assignments/{assignmentId}/submissions/{studentId}/{filename}` 仍直接放行同組 manager 的 GET：它由根 `assignments/{id}.groupId` 定位群組，但不像 `groups/{groupId}/assignments/{id}/submissions/{studentId}/{filename}` 新路徑，沒有查證 live `groups/{groupId}/assignments/{id}/submissions/{studentId}` 的實際繳交收據。合法 instructor 只要得知學生 finalized、尚未繳交的舊路徑，就能透過 GCS HTTP 或新 Web private URL 取得附件。這不是已發 signed URL 的即時撤銷。
+
+最小修補不更動 legacy 學生本人預覽與原上傳路徑，只對其他身分 GET（manager）加上 canonical group submission 的條件：存在、owner 與路徑一致、`submittedAt` 非 null、`attachments` 精確引用完整舊 object path；跨校、非 manager、撤權仍按原條件拒絕。拒絕發生在 bucket 物件查詢或 URL 簽發前。若繳交紀錄沒有 `attachments` 清單，manager 維持原先讀取能力；一旦有清單，則須已繳交且精確引用該檔案。
+
+新增 shared Web memory tests、Functions GCS HTTP 惰性測試、Firebase emulator 真 HTTP/Firestore 回歸，涵蓋未繳交時本人可讀／教師不可讀、已提交教師可讀、取消引用／偽造 owner／未引用 sibling 拒絕、恢復引用與校籍撤銷。同步修正原有 emulator 正常 manager 下載案例，提供可信提交收據與精確引用。前一版 #569 head `b1d718da` 的 CI 於本次變更準備時仍在執行，不能沿用其結果；本輪新 head 的 Web、Functions、Rules、CodeQL 與完整 CI 均須重新核對。
+
+本修補僅隔離原始碼及合成測試，無正式 GCS/Supabase staging、正式 token 清除、發佈、migration、E 校園連線、未核准 npm/pnpm audit 或 main 合併。仍須指定 App 5504170 審核精確 head；舊 GCS bearer／Supabase signed URL 與歷史資料相容性維持開放風險。
+ 
+## 2026-11-10：簽發／finalize 等待期間撤權競態補強（待新 head CI）
+
+檢查 Web 私有附件 `privateFileRoutes.ts` 發現，簽發 upload/download URL 前已驗權，但向 Storage provider 取得簽章時等待時間可能跨越群組或校籍權限撤銷、貼文附件下架及限動媒體改引用。舊流程仍可能回傳新簽發 URL；finalize 在等待 metadata `head()` 期間同樣沒有最後驗權。此處不是已簽網址的撤銷功能。
+
+最小修補在 `presignPut` 後確認 ticket 再驗權，在 `presignGet` 後再驗權，故事另外重新檢查最新 live `campusStories` 及確切媒體路徑；`finalize` 在 metadata 查詢後再驗權。四項惰性 Supabase + 記憶體 Firestore 新回歸注入簽發／查詢期間的校籍撤銷、群組撤銷、故事改引用、finalize 撤權並預期 403；保留既有正常使用、跨帳號、跨校、提交收據、撤權測試。**此為縮小非原子權限窗口，無法保證最後驗權後瞬間撤權的一致性，也無法撤銷此前已簽發 URL；需要隔離正式 SDK staging 與短效／金鑰輪替演練。**
+
+此次沒有修改正式資料、發表部署、bucket／金鑰、GCS token、migration、E 校園連線或重新執行未授權的 npm/pnpm audit；新 head 及指定 App 5504170 核可須重新確認。
+
+
+## 2026-11-10：舊 GCS HTTP 附件 GET 與封面 POST 的 metadata 等待撤權（待精確 CI）
+
+接續 #569 Web Supabase 預簽 URL 的中途撤權，重新檢查舊 `backend/functions/privateGroupFiles.js` 發現：GET 初次授權之後 await GCS `file.getMetadata()`，未再次核對 live 群組、校籍、貼文附件或作業繳交收據就開始開啟讀取串流；POST 封面替換在檢查寫入授權後，亦可能等待既有物件 generation 查詢再執行 CAS save。這是**等待期間授權狀態變更**的可重現空窗，不代表取得既有 bearer URL 的漏洞。
+
+最小修補：GET 在 metadata 與 generation 檢查後、設定下載標頭及打開串流之前，重新執行共用 canonical `authorizePrivateFile(..., false)`；POST 在可能等待 cover generation 查詢之後、save 之前再次驗證 `authorizePrivateFile(..., true)`。保留版本固定串流、create-only 與 generation CAS，不降級既有內容限制。
+
+新增四組確定性 Jest 合成回歸，於假的 GCS `getMetadata()` await 內變更 live 權限或提交收據：貼文組員退組、教師已繳交附件撤下引用、讀取封面期間學籍撤銷，以及封面寫入期間管理者校籍撤銷。預期四者均 403，且不建立讀取串流、不保存覆寫物件；合法路徑由既有正常回歸保持。此修補不能停止已經開始的串流，亦不能將最終驗權與 GCS 串流／寫入實作成跨服務原子交易。正式 GCS staging、已發 signed/bearer URL 的撤銷和發佈仍待驗證。
+
+此變更限定已存續 Draft PR #569，未觸碰正式 bucket、資料、金鑰、migration、部署、E 校園或未授權 audit。新精確提交須以 CI、CodeQL、其他適用 gates 及 App 5504170 審查判定，不能以先前 head 的綠燈取代。
+
+## 2026-11-10：舊作業附件寫入繞過作業狀態／提交收據（待新 head CI）
+
+共用 `authorizePrivateFile` 對新 namespace 的寫入已有 canonical assignment 發布／期限／已繳交檢查；舊 `assignments/{id}/submissions/{uid}/...` namespace 的 POST／claim 卻只查 global assignment 的 groupId 與群組／校籍，可能讓仍屬群組的學生在作業關閉、期限已過或已繳交後，經 GCS HTTP 或 Web private signed upload 入口繼續建立物件。這是舊路徑的寫入授權與資源耗用問題，**不等於已證實跨學生讀取**。
+
+本次只在 legacy 寫入／claim 分支強制查核 group canonical assignment 和目前的 submission receipt，沿用新路徑的 published、draft/closed、dueAt、allowLateSubmission、owner 與 submittedAt 規則。一般開放作業本人仍可上傳；學生本人既有草稿 GET、教師對已繳交收據的 GET 仍按前輪規則。僅有 global assignment、缺 group canonical assignment 的歷史上傳維持原先本人可上傳；若群組作業文件存在，則套用與新路徑相同的發布、期限與未繳交檢查。
+
+新增 Web 記憶體授權、Functions 合成 GCS HTTP 與 Firebase emulator HTTP 回歸，涵蓋正常上傳、關閉／未發布／逾期拒絕、明確允許遲交、已提交／偽造收據拒絕及缺 canonical assignment；正常 emulator fixture 補上正式 group assignment。本輪僅完成開發提交，**是否通過須依新精確 head 的 CI、Rules、CodeQL 核對**。沒有操作正式 bucket、金鑰、migration、token、E 校園或重新發送未核准 npm/pnpm audit。已發下載／上傳 URL、真實隔離 Storage staging、歷史資料遷移與正式發布／回復仍是獨立阻擋。
+
+## 2026-11-09：HTTP adapter 已預先解析 request body 的資源上限（獨立後續 PR）
+
+PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b0e28a2841f5a559dd15506286fb`）。經 GitHub check-runs 精確核對，合併前 head `a950682200871084dfb797e981075885e335a120` 的指定 `nuni-merge-gate` App 5504170／「審查通過」為 completed/success，同 head 主 CI、CodeQL、Supabase、Python、Mobile Agent 和 Maestro 均成功。舊 PR 已關閉，不能再向它推送修補。限動媒體的校籍綁定由獨立 PR #557 處理，本輪不碰該分支。
+
+新發現：`backend/functions/httpAdapter.js` 的 `readRawBody` 僅在直接讀取 Node request stream 時限制 10 MiB，當上游（例如前置 middleware）已提供 `req.rawBody` Buffer，或預解析的 `req.body` Buffer／string／object 時直接回傳，不檢查實際位元組長度。這會使函式請求在預解析途徑繞過原設的資料量上限；不能只依賴外部反向代理限制。修補統一對四種預解析輸入實施相同實際 bytes 上限，超過時依既有錯誤映射回 413 RESOURCE_EXHAUSTED；一般串流與私有附件的獨立授權＋串流路徑保持不變。
+
+新增五個惰性 HTTP 合成測試：四種 10 MiB 以上的預解析輸入都應在 callable 被呼叫前拒絕；一般小型預解析 JSON 仍須正常執行。既有私有檔案測試也會保留大於 10 MiB 的已授權串流案例，確保不誤套到另一條附件路徑。**修補尚需新 PR 精確 head 的 Functions 測試及完整 CI 驗證，不把尚未執行的測試列為成功。** 無正式資料、金鑰、E 校園連線、migration、部署、token 清理或本機 npm/pnpm audit。
+
+保留風險：已簽發 Firebase/GCS 與 Supabase URL 撤銷、真 GCS staging CAS、#557 帳號撤權時序與發布相容、minimatch 雙套鎖檔的可達風險均需獨立驗收。所有後續 PR 仍須對精確 head 取得指定 App 5504170 核可，未通過不能合併。
+
+## 2026-11-09：拒絕以原型鏈繞過 HTTP／排程路由註冊（PR #559）
+
+檢查 `createRequestListener` 發現 `Boolean(callables[functionName])` 和 `Boolean(httpFunctions[functionName])` 會將普通物件繼承的 `toString`、`constructor`、`hasOwnProperty` 當成已註冊 callable；自訂 prototype 也能讓未註冊函式被 HTTP 路由呼叫。排程 `schedules[name]` 同樣可能繼承原型上的 job（執行仍須 cron secret）。惰性重現：未註冊的 `toString` 在修補前條件為 truthy，`Object.hasOwn` 則為 false。
+
+修補改為 callable／HTTP 必須是自身明確註冊且型別為 function，排程也必須有自己的 job。新增 6 項合成 HTTP 回歸（3 種 Object.prototype 內建名稱、1 種繼承 callable、1 種繼承 HTTP handler、1 種繼承 cron job），全部應回 404，且不執行任何繼承函式。已註冊的合法 callable、二進位私有附件與排程行為應保持原樣。這是意外路由暴露與資源消耗邊界，未聲稱可由此取得跨帳號資料。
+
+與截至本輪最新 main `0de225b6eadcbecfd0635c8ebfe0f1249a451d82` 整合，在樹上保留 #557 與後續主線修改，PR #559 的原始 body size 修補完整保留；新提交需重新跑完整 CI，舊 head 的全部綠燈不能沿用。#517、#557 已合併但不代表正式部署或歷史 bearer URL 已撤銷。沒有碰正式資料、token、金鑰、migration、E 校園與被禁止的直接 npm/pnpm audit。仍需指定 App 5504170 對新 head 核發「審查通過」，才能由主線窗口合併。
+
+
+## 2026-11-10：群組附件的已蓋章校籍不得被重建帳號重放（PR #569，待新 head 驗收）
+
+檢查共用 `authorizePrivateFile` 發現，限動路徑已核對可信校務登入的 `profileBoundGeneration` 與目前 canonical profile，但群組封面、貼文、群組／legacy 作業附件的 HTTP／Supabase 簽發入口仍只核對 active 帳號、群組與學校成員。若校務身分已蓋章，刪除 profile 之後、伺服器尚未清除殘留 member 紀錄期間，同一有效憑證重建不帶可信綁定世代的 profile，可能重用殘留 active membership。此為再次請求檔案／網址的授權風險，與已簽發網址撤銷不同。
+
+最小相容修補：群組路徑遇到**任一可信校籍蓋章欄位**時，必須兩欄完整，並與目前 profile 的校別、綁定世代精確匹配；刪帳重建、跨校、世代更新或半蓋章一律拒絕，受控登入恢復同世代後才可恢復。對**完全無蓋章的歷史帳號**保留舊授權，避免在未盤點／未完成發布序列前使既有群組附件全面不可用；因此不能宣稱已全面解除 legacy profile 重建重放風險。必要後續：隔離盤點歷史 member、可信補章流程、分階段收緊，最後將全部群組路徑改為強制蓋章並做跨校／多校相容驗證。
+
+新增共享授權層合成回歸：正常 cover／post／新舊 assignment、刪除 profile、自建、跨校、世代不符、半蓋章、恢復及撤銷、無蓋章 legacy 相容。這批屬開發分支測試，必須以**最新精確 head** 的 Web、Functions、Rules、CodeQL 及適用工作流實際結果判斷；本輪沒有真 GCS／Supabase staging、正式資料、bucket migration、部署、token 操作或受限制的 npm/pnpm audit。指定 App 5504170 對此 head 的 APPROVED 及主線窗口整合仍是必要合併條件。
+
+## 2026-11-10 16:44 UTC：拒絕以舊資料相容放寬私人附件授權（修復 CI 失敗）
+
+精確 head `c42667db08d2dcf0bbe04bfacfc6a61811caa6a1` 的 [CI #42846412166](https://github.com/Miiduoa/graduation/actions/runs/42846412166) 已 completed/failure：Functions 2003/2004（1 fail：未公開貼文草稿意外 200）、Firestore Rules 1 fail（未繳交 legacy 作業附件遭教師讀取）、Web 3 fail（settings 2、assistantV2 1；與此次附件修補路徑無直接關聯），CodeQL、Security Gates、Lint、Mobile、Build Web、Course access review 成功。**這不是可接受的安全回歸，也不能把 CI 當綠燈。**
+
+該 head 用「attachments 欄位缺失或非陣列即允許同組他人讀取」及「僅存在 global assignment mirror 時允許 legacy POST」來避免歷史相容性中斷，卻會讓尚未明確公開的 post 物件、尚未繳交的 assignment 草稿被其他有效成員／教師讀到，並可繞過已關閉作業的 canonical eligibility；合成 CI 已提供真實路徑的失敗證據。此屬**高影響可利用存取控制退化**，不可因舊資料缺可信引用清單而放寬。
+
+本提交在原 #569 分支把 `c42667db` 的五個受影響檔案恢復為緊前安全版本 `437c3d27`，其中共用授權要求 post / assignment 精確附件引用、manager 只讀取有效且已提交收據，legacy 寫入須存在 live canonical group assignment；復原其 Web／Functions 反向回歸斷言。再更新本紀錄，明列相容性風險及後續方案：**先在隔離快照盤點沒有附件清單／canonical assignment 的合法歷史物件，透過可稽核可信伺服端補齊收據與引用，再考慮發布**；不得讓讀者以知道路徑代替發布授權。這筆純開發修補未觸碰正式資料或 migration。
+
+其後依晉瑋「功能不能關」：缺 attachments 清單或清單非陣列視為歷史資料，維持原先組員／教師讀取與僅有全域作業鏡像時的本人上傳；一旦有清單，未引用的 sibling／未繳交草稿仍拒絕。前述 CI 失敗包含測試仍預期 fail-closed，以及當時尚未合入 #545 的設定頁文案測試，不能單獨用來否定歷史相容讀寫。已合入含 #545 的 main，並更新測試與 emulator。
+
+
+本輪提交後的新精確 head 須重新以 CI／Rules／Functions／Web／CodeQL 驗證，尤其 Web 非附件路徑三項測試仍可能因 main 的近期功能變更而失敗，**不可聲稱本次已全綠**。保留相對主線分歧、指定 nuni-merge-gate App 5504170 審查、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、歷史資料盤點、minimatch 雙鎖檔及正式發布／回復等限制。未觸及 E 校園、正式 bucket／token／金鑰或受限 npm／pnpm audit。

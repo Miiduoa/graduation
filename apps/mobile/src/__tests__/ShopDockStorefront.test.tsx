@@ -1,20 +1,26 @@
 import React from 'react';
 import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { saveShopStorefront } from '../services/shopCatalog';
+import { useMerchantOrders } from '../hooks/useMerchantOrders';
+
+const mockRefreshProfile = jest.fn(async () => undefined);
+let mockAuth: {
+  user: { uid: string };
+  profile: {
+    uid: string;
+    role: string;
+    merchantAssignments: Array<{ status: string; schoolId: string; cafeteriaId: string; cafeteriaName: string }>;
+    merchantAssignmentsError?: string | null;
+  };
+  profileLoading?: boolean;
+  refreshProfile: typeof mockRefreshProfile;
+};
 
 jest.mock('../state/auth', () => ({
-  useAuth: () => ({
-    user: { uid: 'shop-a' },
-    profile: {
-      role: 'vendor',
-      merchantAssignments: [
-        { status: 'active', schoolId: 'pu', cafeteriaId: 'cafe', cafeteriaName: '校園餐廳' },
-      ],
-    },
-  }),
+  useAuth: () => mockAuth,
 }));
 jest.mock('../hooks/useMerchantOrders', () => ({
-  useMerchantOrders: () => ({ loading: false, error: null, orders: [] }),
+  useMerchantOrders: jest.fn(() => ({ loading: false, error: null, orders: [] })),
 }));
 jest.mock('../screens/MerchantHubScreen', () => ({
   MerchantHubScreen: () => null,
@@ -46,9 +52,53 @@ jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 import ShopDockScreen from '../screens/ShopDockScreen';
 
 beforeEach(() => {
-  jest.mocked(saveShopStorefront).mockClear();
+  jest.clearAllMocks();
+  mockAuth = {
+    user: { uid: 'shop-a' },
+    profile: {
+      uid: 'shop-a',
+      role: 'vendor',
+      merchantAssignments: [
+        { status: 'active', schoolId: 'pu', cafeteriaId: 'cafe', cafeteriaName: '校園餐廳' },
+      ],
+    },
+    refreshProfile: mockRefreshProfile,
+  };
   jest.mocked(saveShopStorefront).mockResolvedValue({ stored: 'cloud' });
 });
+
+test('a failed assignment read offers retry without showing an unassigned state or stale shop', () => {
+  mockAuth.profile.merchantAssignmentsError = '目前無法確認門市指派，請重新載入。';
+  const view = render(<ShopDockScreen />);
+  expect(view.getByText('目前無法確認門市指派，請重新載入。')).toBeTruthy();
+  expect(view.queryByText('這個帳號尚未獲指派門市')).toBeNull();
+  expect(view.queryByText('營業')).toBeNull();
+  expect(useMerchantOrders).toHaveBeenLastCalledWith({ assignment: null, isDemo: false });
+  fireEvent.press(view.getByText('重新載入門市指派'));
+  expect(mockRefreshProfile).toHaveBeenCalledTimes(1);
+});
+
+test('a verified unassigned account explains school-admin provisioning', () => {
+  mockAuth.profile.merchantAssignments = [];
+  const view = render(<ShopDockScreen />);
+  expect(view.getByText('這個帳號尚未獲指派門市')).toBeTruthy();
+  expect(view.getByText('店員請向所屬單位確認已核發的工作帳號，並由校方管理員指派門市。進駐申請人請使用原申請的 Google 帳號。')).toBeTruthy();
+  expect(view.queryByText('重新載入門市指派')).toBeNull();
+  expect(useMerchantOrders).toHaveBeenLastCalledWith({ assignment: null, isDemo: false });
+});
+
+test.each(['loading', 'changed-account'])(
+  '%s hides previously loaded merchant assignments while authority is checked',
+  (state) => {
+    if (state === 'loading') mockAuth.profileLoading = true;
+    else mockAuth.user = { uid: 'shop-b' };
+    const view = render(<ShopDockScreen />);
+    expect(view.getByText('正在確認門市指派…')).toBeTruthy();
+    expect(view.queryByText('這個帳號尚未獲指派門市')).toBeNull();
+    expect(view.queryByText('營業')).toBeNull();
+    expect(useMerchantOrders).toHaveBeenLastCalledWith({ assignment: null, isDemo: false });
+  },
+);
 
 async function openHours() {
   const view = render(<ShopDockScreen />);

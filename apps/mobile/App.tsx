@@ -75,6 +75,8 @@ import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScr
 import { PreAuthStack } from './src/screens/PreAuthStack';
 import { SchoolSessionBoundary, hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
 import { preAuthLinking } from './src/app/preAuthLinking';
+import { StudentCardLinkHandler } from './src/app/StudentCardLinkHandler';
+import { parseStudentCardDeepLink } from './src/app/studentCardDeepLink';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
@@ -153,6 +155,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           PostCompose: 'post/new',
           StoryCompose: 'story/new',
           PostDetail: 'post/:postId',
+          CreatorProfile: 'community/member/:memberUid',
           SmartCalendarScreen: 'calendar',
           CampusGame: 'home/campus-game',
         },
@@ -206,6 +209,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           Health: 'health',
           PrintService: 'print',
           LostFound: 'lost-found',
+          PlatformLostFound: 'platform-lost-found/:id?',
           LostFoundDetail: 'lost-found/:id',
           LostFoundPost: 'lost-found/post',
           Payment: 'payment',
@@ -236,6 +240,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           NotificationSettings: 'notification-settings',
           ProfileEdit: 'profile/edit',
           QRCode: 'qrcode',
+          StudentCard: 'student-card',
           GlobalSearch: 'search',
           Achievements: 'achievements',
           CampusGarden: 'campus-garden',
@@ -855,6 +860,7 @@ function SchoolNavigation() {
       ...linkingBase,
       async getInitialURL() {
         const url = await Linking.getInitialURL();
+        if (parseStudentCardDeepLink(url)) return null;
         if (url && isInterceptedMessagingDeepLink(url)) {
           pendingMessagingDeepLinkRef.current = url;
           return null;
@@ -863,6 +869,7 @@ function SchoolNavigation() {
       },
       subscribe(listener: (url: string) => void) {
         const subscription = Linking.addEventListener('url', ({ url }) => {
+          if (parseStudentCardDeepLink(url)) return;
           const parsedAssignment = parseGroupAssignmentDeepLink(url);
           if (parsedAssignment) {
             if (rootNavigationRef.isReady()) {
@@ -1098,6 +1105,7 @@ function AppInner() {
         <AuthProvider>
           <PersonalImportSyncBridge />
           <PersonalEventReminderBridge />
+          <StudentCardLinkHandler />
           <NotificationsProvider>
             <ToastProvider>
               <AuthAwareStateProviders>

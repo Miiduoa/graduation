@@ -105,7 +105,8 @@ it('preserves the tag node and children when its server status changes', () => {
 });
 
 it('retains the legacy-record label', () => {
-  render(<LostFoundItemTag item={{ ...item, canonical: false, userId: undefined }}><p>{item.description}</p></LostFoundItemTag>);
+  const legacyItem: LostFoundItem = { ...item, canonical: false, userId: undefined };
+  render(<LostFoundItemTag item={legacyItem}><p>{item.description}</p></LostFoundItemTag>);
 
   expect(screen.getByText('舊版紀錄')).toBeTruthy();
 });

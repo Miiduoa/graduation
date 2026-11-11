@@ -303,7 +303,7 @@ it('sends a current 401 back to account login without using legacy transport', a
   );
   await waitFor(() =>
     expect(replace).toHaveBeenCalledWith(
-      `/auth/account?returnUrl=${encodeURIComponent(`/classroom/course/${workspaceId}`)}`,
+      `/classroom/login?returnUrl=${encodeURIComponent(`/classroom/course/${workspaceId}`)}`,
     ),
   );
   expect(fetcher.mock.calls[0][0]).toBe(base);

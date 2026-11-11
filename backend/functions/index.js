@@ -143,6 +143,16 @@ const {
   createGradePublishedNotificationHandler,
 } = require('./firestoreTriggerHandlers');
 const {
+  clearProfileSchoolBindingForRevokedMembership,
+  inactivateLeftoverSchoolMemberships,
+  isClosedAccount,
+  nextBindingGeneration,
+  campusStoryStampFields,
+  createEnsureCampusStoryBindingHandler,
+  clearHaltFields,
+  clearCampusStoryBindingHalt,
+} = require('./campusStoryAccessBinding');
+const {
   createAssignmentPublishedNotifyHandler,
   createSubmissionNotifyHandler,
   createSchoolAnnouncementNotifyHandler,
@@ -637,36 +647,50 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
 
   const uid = userRecord.uid;
   const userRef = db.collection('users').doc(uid);
-  const userDoc = await userRef.get();
   const memberRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-  const memberDoc = await memberRef.get();
+  let profileExisted = false;
 
-  await userRef.set(
-    {
-      email: account.email,
-      displayName: account.displayName,
-      role: account.role,
-      schoolId,
-      primarySchoolId: schoolId,
-      lastLoginAt: FieldValue.serverTimestamp(),
-      devUniversalAccount: true,
-      devUniversalScope: 'all-schools',
-      schoolIds: FieldValue.arrayUnion(schoolId),
-      ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
-
-  await memberRef.set(
-    {
-      status: 'active',
-      role: toSchoolMemberRole(account.role),
-      devUniversalAccount: true,
-      updatedAt: FieldValue.serverTimestamp(),
-      ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
+  await db.runTransaction(async (tx) => {
+    const [userDoc, memberDoc] = await tx.getAll(userRef, memberRef);
+    profileExisted = userDoc.exists;
+    const accountData = userDoc.exists ? userDoc.data() || {} : {};
+    if (isClosedAccount(accountData)) {
+      throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+        reason: 'account-deletion',
+      });
+    }
+    const bindingGeneration = nextBindingGeneration(accountData, () => nodeCrypto.randomUUID());
+    tx.set(
+      userRef,
+      {
+        email: account.email,
+        displayName: account.displayName,
+        role: account.role,
+        schoolId,
+        primarySchoolId: schoolId,
+        lastLoginAt: FieldValue.serverTimestamp(),
+        bindingGeneration,
+        devUniversalAccount: true,
+        devUniversalScope: 'all-schools',
+        schoolIds: FieldValue.arrayUnion(schoolId),
+        ...clearHaltFields(FieldValue),
+        ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+    tx.set(
+      memberRef,
+      {
+        status: 'active',
+        role: toSchoolMemberRole(account.role),
+        devUniversalAccount: true,
+        updatedAt: FieldValue.serverTimestamp(),
+        ...campusStoryStampFields(schoolId, bindingGeneration),
+        ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+  });
 
   await syncAuthClaims(uid, {
     role: account.role,
@@ -682,7 +706,7 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
   return {
     uid,
     customToken,
-    isNewUser: createdAuthUser || !userDoc.exists,
+    isNewUser: createdAuthUser || !profileExisted,
     role: account.role,
     displayName: account.displayName,
     email: account.email,
@@ -1937,9 +1961,11 @@ exports.signInPuStudentId = onRequest(
           schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
         });
 
+        const verifiedStudentId = canonicalizePuStudentId(profile.studentId);
         customToken = await auth.createCustomToken(uid, {
           schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
           role: schoolRole.role,
+          ...(schoolRole.role === 'student' && verifiedStudentId ? { campusCardStudentId: verifiedStudentId } : {}),
         });
       }
 
@@ -2304,6 +2330,9 @@ exports.verifySSOCallback = onRequest(
         schoolId,
         ssoSub: userInfo.sub,
         role: resolvedRole,
+        ...(availability.isProductionReady && resolvedRole === 'student' && userInfo.campusCardStudentId
+          ? { campusCardStudentId: userInfo.campusCardStudentId }
+          : {}),
       });
 
       await syncAuthClaims(uid, {
@@ -2540,6 +2569,16 @@ exports.finalizePostLogin = onCall(
   async (request) => runFinalizePostLogin(request),
 );
 
+exports.ensureCampusStoryBinding = onCall(
+  { region: REGION },
+  createEnsureCampusStoryBindingHandler({
+    db,
+    FieldValue,
+    randomUUID: () => nodeCrypto.randomUUID(),
+    HttpsError,
+  }),
+);
+
 exports.onUserProfileChanged = onDocumentWritten(
   {
     region: REGION,
@@ -2548,6 +2587,13 @@ exports.onUserProfileChanged = onDocumentWritten(
   createUserProfileChangedHandler({
     syncAuthClaims,
     syncDirectoryEntriesForUser,
+    inactivateLeftoverSchoolMemberships: (uid) =>
+      inactivateLeftoverSchoolMemberships({
+        db,
+        uid,
+        FieldValue,
+        loadMemberships: (memberUid) => directorySync.loadSchoolMembershipDocs(db, memberUid),
+      }),
   }),
 );
 
@@ -2558,6 +2604,16 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
   },
   createSchoolMembershipChangedHandler({
     syncSchoolDirectoryEntry,
+    syncProfileSchoolBinding: async ({ schoolId, uid, membership }) => {
+      await clearCampusStoryBindingHalt({ db, FieldValue, uid });
+      return clearProfileSchoolBindingForRevokedMembership({
+        db,
+        FieldValue,
+        schoolId,
+        uid,
+        membership,
+      });
+    },
   }),
 );
 

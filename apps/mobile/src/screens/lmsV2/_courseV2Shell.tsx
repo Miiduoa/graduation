@@ -4,7 +4,7 @@
  * 提供 13 個 Course*V2Screen 共用的 header / loading / empty / error state,
  * 以及 useCourseRouteParams() 抓 courseId,讓每個 V2 Screen 只專注 fetch + render。
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, ActivityIndicator, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
@@ -103,27 +103,71 @@ export type Loadable<T> = {
   refresh: () => Promise<void>;
 };
 
-export function useLoadable<T>(fn: () => Promise<T>): Loadable<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function useResolvedLoadableScope(extraScope?: string): string {
+  const params = useCourseV2Params();
+  return JSON.stringify([
+    params.courseId ?? '',
+    params.assignmentId ?? '',
+    params.quizId ?? '',
+    params.attemptId ?? '',
+    params.topicId ?? '',
+    params.sessionId ?? '',
+    extraScope ?? '',
+  ]);
+}
+
+/** extraScope must include every non-route value that changes which records the query can read. */
+export function useLoadable<T>(fn: () => Promise<T>, extraScope?: string): Loadable<T> {
+  const scopeKey = useResolvedLoadableScope(extraScope);
+  const [state, setState] = useState<{
+    scopeKey: string;
+    data: T | null;
+    loading: boolean;
+    error: string | null;
+  }>({ scopeKey, data: null, loading: true, error: null });
+  const latest = useRef({ fn, scopeKey });
+  const mounted = useRef(false);
+  const sequence = useRef(0);
+
+  // Publish only committed queries; refresh also works when its caller kept an older reference.
+  useLayoutEffect(() => {
+    latest.current = { fn, scopeKey };
+  });
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sequence.current += 1;
+    };
+  }, [scopeKey]);
+
   const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    if (!mounted.current) return;
+    const query = latest.current;
+    const request = ++sequence.current;
+    const isCurrent = () => mounted.current && sequence.current === request;
+    setState(previous => ({
+      scopeKey: query.scopeKey,
+      data: previous.scopeKey === query.scopeKey ? previous.data : null,
+      loading: true,
+      error: null,
+    }));
     try {
-      const r = await fn();
-      setData(r);
+      const data = await query.fn();
+      if (isCurrent()) setState({ scopeKey: query.scopeKey, data, loading: false, error: null });
     } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setState(previous => ({ ...previous, loading: false, error: e?.message ?? String(e) }));
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-  return { data, loading, error, refresh };
+    void refresh();
+  }, [refresh, scopeKey]);
+
+  // Mask the previous scope during render, before effects start the next request.
+  if (state.scopeKey !== scopeKey) return { data: null, loading: true, error: null, refresh };
+  return { data: state.data, loading: state.loading, error: state.error, refresh };
 }
 
 export function CourseV2List<T>({

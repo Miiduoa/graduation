@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
-import type { AssistantCalendarBatchView } from '../services/assistantCalendarBatchExecution';
+import type { AssistantCalendarBatchView, AssistantCalendarBatchSourceChecks } from '../services/assistantCalendarBatchExecution';
 import type { AssistantCalendarContext } from '../services/assistantCalendarExecution';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { AssistantCalendarBatchAction } from './AssistantCalendarBatchAction';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 
-export function AssistantCalendarBatchRecovery({ batches, error, context, navigation, disabled, onRetry, onChange }: {
+export function AssistantCalendarBatchRecovery({ batches, error, context, navigation, disabled, onRetry, onChange, sourceChecks }: {
   batches: AssistantCalendarBatchView[];
   error: string;
   context: AssistantCalendarContext;
@@ -14,6 +14,7 @@ export function AssistantCalendarBatchRecovery({ batches, error, context, naviga
   disabled: boolean;
   onRetry: () => void;
   onChange: (batch: AssistantCalendarBatchView, originalId: string) => void;
+  sourceChecks?: AssistantCalendarBatchSourceChecks;
 }) {
   const [visible, setVisible] = useState(8);
   if (!error && !batches.length) return null;
@@ -29,7 +30,7 @@ export function AssistantCalendarBatchRecovery({ batches, error, context, naviga
       {ordered.slice(0, visible).map((batch) => <View key={batch.plan.id}
         style={{ marginTop: 16, paddingTop: 8, borderTopWidth: 1, borderTopColor: aiTokens.border }}>
         <AssistantCalendarBatchAction batch={batch} context={context} navigation={navigation}
-          disabled={disabled} onChange={(next) => onChange(next, batch.plan.id)} />
+          disabled={disabled} sourceChecks={sourceChecks} onChange={(next) => onChange(next, batch.plan.id)} />
       </View>)}
       {ordered.length > visible ? <AIButton label={`顯示更多行程安排（${ordered.length - visible}）`}
         variant="ghost" disabled={disabled} onPress={() => setVisible((count) => count + 8)} /> : null}

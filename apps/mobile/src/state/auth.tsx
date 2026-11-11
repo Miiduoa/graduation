@@ -11,13 +11,10 @@ import React, {
 } from 'react';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import {
-  collectionGroup,
+  collection,
   doc,
-  documentId,
   getDoc,
   getDocs,
-  query,
-  where,
 } from 'firebase/firestore';
 import {
   getAuthInstance,
@@ -38,6 +35,7 @@ import { puCacheClearAll } from '../data/puDataCache';
 import { clearPUCache } from '../services/puDataCache';
 import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
 import { bindVerifiedSchoolAiScope, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
+import { ensureCampusStoryBinding } from '../services/campusStoryBinding';
 import { captureSchoolSessionAssertion, clearPUSession } from '../services/studentIdAuth';
 import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 import {
@@ -73,6 +71,7 @@ export type UserProfile = {
   roleGroup?: RoleGroup;
   serviceRoles?: string[];
   merchantAssignments?: MerchantAssignment[];
+  merchantAssignmentsError?: string | null;
 };
 
 type AuthContextValue = {
@@ -134,61 +133,55 @@ async function loadMerchantAssignments(uid: string): Promise<MerchantAssignment[
     return [];
   }
   const db = getDb();
-  const snap = await getDocs(
-    query(collectionGroup(db, 'operators'), where(documentId(), '==', uid)),
-  ).catch(() => null);
+  // School and cafeteria directories are public. Operator rules allow an exact
+  // self read, and existing assignments identify the user only by document ID.
+  const schools = await getDocs(collection(db, 'schools'));
+  const rowsBySchool = await Promise.all(
+    schools.docs.map(async (school) => {
+      const cafeterias = await getDocs(collection(db, 'schools', school.id, 'cafeterias'));
+      return Promise.all(cafeterias.docs.map(async (cafeteria): Promise<MerchantAssignment | null> => {
+        const operator = await getDoc(
+          doc(db, 'schools', school.id, 'cafeterias', cafeteria.id, 'operators', uid),
+        );
+        if (!operator.exists()) return null;
+        const operatorData = operator.data() as Record<string, unknown>;
+        const cafeteriaData = cafeteria.data() as Record<string, unknown>;
+        const pilotStatusRaw = String(cafeteriaData.pilotStatus ?? 'inactive');
 
-  if (!snap || snap.empty) {
-    return [];
-  }
-
-  const rows = await Promise.all(
-    snap.docs.map(async (operatorSnap) => {
-      const cafeteriaRef = operatorSnap.ref.parent.parent;
-      const schoolRef = cafeteriaRef?.parent.parent;
-      if (!cafeteriaRef || !schoolRef) {
-        return null;
-      }
-
-      const cafeteriaSnap = await getDoc(cafeteriaRef).catch(() => null);
-      const operatorData = operatorSnap.data() as Record<string, unknown>;
-      const cafeteriaData = cafeteriaSnap?.exists()
-        ? (cafeteriaSnap.data() as Record<string, unknown>)
-        : {};
-      const pilotStatusRaw = String(cafeteriaData.pilotStatus ?? 'inactive');
-
-      return {
-        schoolId: schoolRef.id,
-        schoolName: findSchoolById(schoolRef.id)?.name ?? schoolRef.id,
-        cafeteriaId: cafeteriaRef.id,
-        cafeteriaName:
-          typeof cafeteriaData.name === 'string' && cafeteriaData.name.trim()
-            ? cafeteriaData.name
-            : cafeteriaRef.id,
-        merchantId:
-          typeof cafeteriaData.merchantId === 'string' && cafeteriaData.merchantId.trim()
-            ? cafeteriaData.merchantId
-            : cafeteriaRef.id,
-        brandKey:
-          typeof cafeteriaData.brandKey === 'string' && cafeteriaData.brandKey.trim()
-            ? cafeteriaData.brandKey
-            : null,
-        operatorRole:
-          operatorData.role === 'owner' || operatorData.role === 'manager'
-            ? operatorData.role
-            : 'staff',
-        status: operatorData.status === 'inactive' ? 'inactive' : 'active',
-        orderingEnabled: cafeteriaData.orderingEnabled === true,
-        pilotStatus:
-          pilotStatusRaw === 'pilot' || pilotStatusRaw === 'live' ? pilotStatusRaw : 'inactive',
-        displayName: typeof operatorData.displayName === 'string' ? operatorData.displayName : null,
-        email: typeof operatorData.email === 'string' ? operatorData.email : null,
-        lastActiveAt: toIsoStringOrNull(operatorData.lastActiveAt),
-      } satisfies MerchantAssignment;
+        return {
+          schoolId: school.id,
+          schoolName: findSchoolById(school.id)?.name ?? school.id,
+          cafeteriaId: cafeteria.id,
+          cafeteriaName:
+            typeof cafeteriaData.name === 'string' && cafeteriaData.name.trim()
+              ? cafeteriaData.name
+              : cafeteria.id,
+          merchantId:
+            typeof cafeteriaData.merchantId === 'string' && cafeteriaData.merchantId.trim()
+              ? cafeteriaData.merchantId
+              : cafeteria.id,
+          brandKey:
+            typeof cafeteriaData.brandKey === 'string' && cafeteriaData.brandKey.trim()
+              ? cafeteriaData.brandKey
+              : null,
+          operatorRole:
+            operatorData.role === 'owner' || operatorData.role === 'manager'
+              ? operatorData.role
+              : 'staff',
+          status: operatorData.status === 'inactive' ? 'inactive' : 'active',
+          orderingEnabled: cafeteriaData.orderingEnabled === true,
+          pilotStatus:
+            pilotStatusRaw === 'pilot' || pilotStatusRaw === 'live' ? pilotStatusRaw : 'inactive',
+          displayName: typeof operatorData.displayName === 'string' ? operatorData.displayName : null,
+          email: typeof operatorData.email === 'string' ? operatorData.email : null,
+          lastActiveAt: toIsoStringOrNull(operatorData.lastActiveAt),
+        } satisfies MerchantAssignment;
+      }));
     }),
   );
 
-  return rows
+  return rowsBySchool
+    .flat()
     .filter((row): row is MerchantAssignment => row !== null)
     .sort((a, b) => {
       const aActive = a.status === 'active' ? 1 : 0;
@@ -212,7 +205,13 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
     const ref = doc(db, 'users', u.uid);
     const snap = await getDoc(ref);
     const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
-    const merchantAssignments = await loadMerchantAssignments(u.uid).catch(() => []);
+    let merchantAssignments: MerchantAssignment[] = [];
+    let merchantAssignmentsError: string | null = null;
+    try {
+      merchantAssignments = await loadMerchantAssignments(u.uid);
+    } catch {
+      merchantAssignmentsError = '目前無法確認門市指派，請重新載入。';
+    }
     const assignmentSchoolId =
       merchantAssignments.find((assignment) => assignment.status === 'active')?.schoolId ??
       merchantAssignments[0]?.schoolId ??
@@ -265,6 +264,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       }
     }
 
+    void ensureCampusStoryBinding(); // Firebase Auth profile only; nuni Google has no uid.
     const userRole = (data.role as UserRole) ?? 'student';
     const roleGroup = getRoleGroup(userRole);
     const postLoginRolesRaw = data.postLoginRoles as unknown;
@@ -299,6 +299,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       roleGroup,
       serviceRoles,
       merchantAssignments,
+      merchantAssignmentsError,
     };
   } catch (error) {
     console.error('[auth] Failed to load profile:', error);
@@ -614,6 +615,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
                 schoolMembershipRole: null,
                 schoolMembershipSchoolId: null,
                 serviceRoles: [],
+                merchantAssignments: [],
+                merchantAssignmentsError: '目前無法確認門市指派，請重新載入。',
               }
             : null,
         );

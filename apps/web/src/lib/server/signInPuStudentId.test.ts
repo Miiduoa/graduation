@@ -53,6 +53,7 @@ function campus(overrides: Partial<PuCampusGateway> = {}): PuCampusGateway {
     loginStudent: async () => ({
       cookies: { PHPSESSID: 'stu-cookie' },
       studentName: '陳同學',
+      studentId: '412345678',
     }),
     fetchStudentInfo: async () => ({
       studentId: STUDENT,
@@ -513,7 +514,9 @@ it('keeps romanized faculty accounts on the teacher route', async () => {
       ],
     }),
   });
+  const mint = vi.spyOn(runtime, 'signCustomToken');
   const result = await handleSignInPuStudentId({ studentId: 'changyi', password: SECRET }, '1.1.1.1', runtime);
+  expect(mint.mock.calls[0]?.[1]).not.toHaveProperty('campusCardStudentId');
   expect(result).toMatchObject({ uid: 'pu-t-changyi', role: 'teacher' });
   expect(loginStudent).not.toHaveBeenCalled();
   expect(loginTronClass).toHaveBeenCalled();
@@ -735,7 +738,21 @@ it('signs real custom token claims when a service account is provided', async ()
   );
   const payload = decodeFirebaseCustomTokenPayload(String(result.customToken));
   expect(payload.uid).toBe('pu-1110700321');
-  expect(payload.claims).toEqual({ schoolId: 'pu', role: 'student' });
+  expect(payload.claims).toEqual({ schoolId: 'pu', role: 'student', campusCardStudentId: '412345678' });
+});
+
+it('does not certify an account number when the school login page omits the student number', async () => {
+  const { runtime } = deps({ campus: campus({ loginStudent: async () => ({ cookies: { PHPSESSID: 'stu' } }) }) });
+  const mint = vi.spyOn(runtime, 'signCustomToken');
+  await handleSignInPuStudentId({ studentId: STUDENT, password: SECRET, campusCardStudentId: STUDENT }, '6.6.6.7', runtime);
+  expect(mint.mock.calls[0]?.[1]).toEqual({ schoolId: 'pu', role: 'student' });
+});
+
+it('keeps mock-mode login responses free of card claims', async () => {
+  const { runtime } = deps();
+  const mint = vi.spyOn(runtime, 'signCustomToken');
+  await handleSignInPuStudentId({ studentId: STUDENT, password: SECRET, skipFirebase: true }, '6.6.6.8', runtime);
+  expect(mint.mock.calls[0]?.[1]).not.toHaveProperty('campusCardStudentId');
 });
 
 it('rate-limits repeated student attempts before calling the campus', async () => {
