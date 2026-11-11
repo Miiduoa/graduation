@@ -40,7 +40,8 @@ def sync_collection(collection_name: str, db=None) -> int:
     delete_by_source(f"firestore:{collection_name}")
 
     page_size = 500
-    query = db.collection(collection_name).where(filter=firestore.FieldFilter("visibility", "==", "public")).limit(page_size)
+    # Do not filter visibility in Firestore: older public docs omit the field.
+    query = db.collection(collection_name).limit(page_size)
     count = 0
     while True:
         page = list(query.stream())

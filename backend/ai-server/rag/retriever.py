@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from rag.indexer import get_or_create_collection
 from config import RAG_TOP_K
-from rag.public_documents import retrieval_filter
+from rag.public_documents import is_public_visibility, retrieval_filter
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,9 @@ def retrieve(
     dists = results.get("distances", [[]])[0]
 
     for text, meta, dist in zip(docs, metas, dists):
+        meta = meta or {}
+        if not is_public_visibility(meta.get("visibility")):
+            continue
         chunks.append(RetrievedChunk(
             text=text,
             source=meta.get("source", "unknown"),

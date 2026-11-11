@@ -18,9 +18,11 @@ class PublicRecordTests(unittest.TestCase):
     def test_requires_public_collection_visibility_and_school(self):
         for school in (None, "", "all", "unknown", "unavailable-campus", {}, "pu/path"):
             self.assertIsNone(public_document("events", announcement(school), "1"))
-        for visibility in (None, "private", "school", True):
+        for visibility in ("private", "school", True):
             row = {**announcement("pu"), "visibility": visibility}
             self.assertIsNone(public_document("events", row, "1"))
+        legacy = {"title": "午餐時段", "schoolId": "pu", "body": "舊公告"}
+        self.assertEqual(public_document("announcements", legacy, "1")["metadata"]["visibility"], "public")
         self.assertIsNone(public_document("enrollments", announcement("pu"), "1"))
         self.assertIsNone(public_document("users/1/courses", announcement("pu"), "1"))
 
@@ -55,6 +57,7 @@ class RetrievalTests(unittest.TestCase):
             public_document("announcements", announcement("pu", "靜宜限定"), "2"),
             {"source": "app:navigation", "text": "課表操作", "metadata": {}},
             {"source": "firestore:announcements", "text": "舊索引", "metadata": {}},
+            {"source": "firestore:announcements", "text": "缺標記舊公告", "metadata": {"schoolId": "nchu"}},
             {"source": "firestore:announcements", "text": "內部公告", "metadata": {"visibility": "school", "schoolId": "nchu"}},
             {"source": "firestore:enrollments", "text": "私有課籍", "metadata": {"visibility": "public", "schoolId": "nchu"}},
         ]
@@ -65,8 +68,8 @@ class RetrievalTests(unittest.TestCase):
             self.assertEqual({c.source for c in chunks}, {"app:navigation", "firestore:announcements"})
             campus = [c for c in chunks if c.source.startswith("firestore:")]
             self.assertEqual({c.metadata["schoolId"] for c in campus}, {expected})
-            self.assertTrue(all(c.metadata["visibility"] == "public" for c in campus))
-            self.assertEqual(len(campus), 2 if expected == "pu" else 1)
+            self.assertTrue(all(c.metadata.get("visibility") in (None, "public") for c in campus))
+            self.assertEqual(len(campus), 2)
         # The strongest semantic match belongs to another school. Scoped top-1 still finds this campus.
         first = retriever.retrieve(
             "靜宜限定", top_k=1, school_id="nchu", where={"source": "firestore:announcements"}, embedding_fn=embed,
@@ -83,26 +86,31 @@ class SyncTests(unittest.TestCase):
     def test_firestore_and_json_apply_the_same_policy(self):
         from rag import sync_firestore as sync
 
-        rows = [announcement("nchu"), {**announcement("nthu"), "visibility": "private"}, announcement(None)]
+        rows = [
+            announcement("nchu"),
+            {**announcement("nthu"), "visibility": "private"},
+            announcement(None),
+            {"title": "舊公告", "schoolId": "nchu", "body": "沒有公開標記"},
+        ]
         db = Mock()
-        db.collection.return_value.where.return_value.limit.return_value.stream.return_value = [
+        db.collection.return_value.limit.return_value.stream.return_value = [
             Mock(id=str(i), to_dict=Mock(return_value=row)) for i, row in enumerate(rows)
         ]
         with tempfile.TemporaryDirectory() as folder, patch.object(sync, "delete_by_source"), patch.object(sync, "index_documents", side_effect=len) as index:
             self.assertEqual(sync.sync_collection("users", db), 0)
             db.collection.assert_not_called()
-            self.assertEqual(sync.sync_collection("announcements", db), 1)
+            self.assertEqual(sync.sync_collection("announcements", db), 2)
             (Path(folder) / "announcements.json").write_text(json.dumps(rows))
             (Path(folder) / "users.json").write_text(json.dumps(rows))
-            self.assertEqual(sync.sync_from_json_dump(folder), {"announcements": 1})
+            self.assertEqual(sync.sync_from_json_dump(folder), {"announcements": 2})
             self.assertEqual(index.call_args_list[0], index.call_args_list[1])
-            self.assertEqual(index.call_args.args[0][0]["metadata"]["schoolId"], "nchu")
+            self.assertEqual({item["metadata"]["schoolId"] for item in index.call_args.args[0]}, {"nchu"})
 
     def test_a_full_first_page_does_not_hide_another_campus(self):
         from rag import sync_firestore as sync
 
         db = Mock()
-        query = db.collection.return_value.where.return_value.limit.return_value
+        query = db.collection.return_value.limit.return_value
         first = [Mock(id=str(i), to_dict=Mock(return_value=announcement("pu"))) for i in range(500)]
         query.stream.return_value = first
         query.start_after.return_value.stream.return_value = [Mock(id="next", to_dict=Mock(return_value=announcement("nchu")))]

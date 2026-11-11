@@ -108,8 +108,15 @@ async def _fetch_weather(query: str, client: httpx.AsyncClient, school_id: str |
         return None
 
     place = re.sub(
-        r"今天|現在|目前|請問|幫我|查詢|一下|會不會|要不要|天氣|氣溫|下雨|帶傘|雨具|天候|"
-        r"如何|怎麼樣|怎樣|需要|的|會|嗎|[？?！!。，、\s]", "", query,
+        r"今天|明天|昨天|現在|目前|今晚|早上|中午|下午|晚上|近期|"
+        r"請問|幫我|麻煩|搜尋|查詢|查查|一下|會不會|要不要|"
+        r"天氣|氣溫|下雨|帶傘|雨具|天候|weather|temperature|rain|umbrella|"
+        r"如何|怎麼樣|怎樣|怎麼|即時|需要|應該|大概|可能|好像|"
+        r"的|會|嗎|呢|啊|喔|呀|唄|啦|吧|嘛|了|在|裡|内|內|查|雨|傘|要|"
+        r"[？?！!。，、\s]",
+        "",
+        query,
+        flags=re.IGNORECASE,
     )
     if place in ("靜宜", "静宜", "靜宜大學", "静宜大學", "沙鹿", "沙鹿區") or (
         not place and school_id in ("pu", "tw-pu")
