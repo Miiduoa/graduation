@@ -92,7 +92,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     // "<!--" or "<pre>" in that line must not hide the next real table.
     // Keep processing indented closing tags while inside an actual HTML block.
     if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
-        /^(?: {4}| {0,3}\\t)/u.test(line)) continue;
+        /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
     for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {

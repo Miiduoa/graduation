@@ -472,8 +472,11 @@ it('does not treat indented code examples as live HTML that hides later source t
   ];
   for (const example of [
     '    <!-- 這是縮排程式碼裡的字面註解，未關閉',
+    '    <pre>這是四格空白縮排的原始碼範例',
+    '\t<!-- 這是 Tab 縮排的字面註解，未關閉',
     '\t<pre>這是 Tab 縮排的原始碼範例',
     '   \t<!-- 三格空白加 Tab 也是程式碼',
+    '   \t<pre>三格空白加 Tab 也是原始碼範例',
   ]) {
     const tables = extractStudySourceTables([example, ...suffix].join('\n'));
     expect(tables).toEqual([{
@@ -485,18 +488,20 @@ it('does not treat indented code examples as live HTML that hides later source t
 });
 
 it('still recognizes indented closing HTML tags inside real HTML blocks', () => {
-  const content = [
-    '<pre>',
-    '    </pre>',
-    '<!-- 教師備註',
-    '    -->',
-    '| 課程 | 學分 |',
-    '| --- | --- |',
-    '| 資管 | 3 |',
-  ].join('\n');
-  expect(extractStudySourceTables(content)).toEqual([{
-    startLine: 5,
-    headers: ['課程', '學分'],
-    rows: [['資管', '3']],
-  }]);
+  for (const indent of ['    ', '\t', '   \t']) {
+    const content = [
+      '<pre>',
+      indent + '</pre>',
+      '<!-- 教師備註',
+      indent + '-->',
+      '| 課程 | 學分 |',
+      '| --- | --- |',
+      '| 資管 | 3 |',
+    ].join('\n');
+    expect(extractStudySourceTables(content)).toEqual([{
+      startLine: 5,
+      headers: ['課程', '學分'],
+      rows: [['資管', '3']],
+    }]);
+  }
 });
