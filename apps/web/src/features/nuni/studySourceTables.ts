@@ -17,8 +17,8 @@ function parseSimplePipeRow(line: string): string[] | null {
   // Markdown renders four-space / tab-indented rows as code, not a table.
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
-  // Raw HTML code elements are not Markdown table cell content.
-  if (/<\/?(?:pre|code|script|style|textarea|template|noscript)\b/iu.test(trimmed)) return null;
+  // Raw HTML blocks and graphics cannot be treated as Markdown table cells.
+  if (/<\/?(?:pre|code|script|style|textarea|template|noscript|svg|math|table)\b/iu.test(trimmed)) return null;
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
   if (!trimmed.includes('|') || trimmed.includes('\\|') ||
@@ -95,7 +95,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript)\b[^>]*>/giu)) {
+    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table)\b[^>]*>/giu)) {
       const token = match[0];
       if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
@@ -115,7 +115,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       }
       const tag = match[1]?.toLowerCase();
       if (!tag) continue;
-      // Once inside a raw HTML element, tag-looking text in teaching
+      // Once inside a raw HTML element or graphic, tag-looking text in teaching
       // examples does not open another block. Wait for that element's
       // own closing tag so a later published table is not swallowed.
       if (htmlCodeBlocks.length > 0) {
