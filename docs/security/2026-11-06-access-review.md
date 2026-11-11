@@ -544,3 +544,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補：先將 ISO 字串的 YYYY-MM-DD 當成 UTC 日曆日期往返比對，無效月份／閏年／日數一律拒絕；通過後仍沿用原有 `Date.parse` 驗證時間及正值。保留有效 ISO 日期與完整時區、Firestore Timestamp、Date 與整數毫秒，以及學生本人草稿預覽。Web 共用授權測試對群組及 legacy 兩種路徑增加無效 2/29、2/30、4/31 禁止教師 GET、有效閏年日期保留讀取，既有撤權／跨帳號測試不變。新提交的 CI／CodeQL／適用工作流及 App 5504170 核可須重新對精確 head 查核。
 
 尚未解除：真正缺少 attachments 的歷史收據欠缺檔案級證據、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、minimatch 雙鎖檔相容與正式發布／回復。沒有執行正式 migration、金鑰或 token 操作、E 校園連線及未授權 npm/pnpm audit。
+
+
+## 2026-11-12：legacy 上傳路徑必須同時尊重 global 與 canonical 繳交收據（PR #577）
+
+在前一精確 head `36048052ee8f9e8df8b56d72a5f5921687bca3e9` 讀取共用 `authorizePrivateFile`，發現 `assignments/{id}/submissions/{uid}/...` 的新上傳授權只在群組 canonical assignment **不存在**時檢查 global submission。當兩份作業文件同時存在、global submission 已正式繳交但 canonical submission 尚未同步時，程式會跳過既有 global 收據，重新簽發 legacy 路徑的上傳權限。此前補上的「global-only 作業已繳交拒絕」不足以涵蓋此組合。
+
+最小修補在同一 read-only Firestore transaction 中**不論 canonical assignment 是否存在**都核對 global submission 擁有者及 `submittedAt`，非本人或非 null 時一律拒絕上傳；後續仍核對 canonical 或 global 作業發布狀態、截止與群組／校籍資格。移除 global-only 路徑的重複讀取，未放寬任何 GET。可重跑 `apps/web/src/lib/server/privateFileAccess.test.ts` 新案例：雙份作業正常草稿可上傳、global 已提交拒絕、global owner 不符拒絕、未提交收據仍可上傳、canonical 關閉拒絕、校籍撤銷拒絕。此變更不改已簽 URL 的生命週期；已簽 URL、實際 Storage 競態與正式部署須另行驗收。
+
+**提交前查核：** `36048052ee8f9e8df8b56d72a5f5921687bca3e9` 的 CI [#43023595275](https://github.com/Miiduoa/graduation/actions/runs/43023595275)、CodeQL [#43023595149](https://github.com/Miiduoa/graduation/actions/runs/43023595149)、Course access [#43023595244](https://github.com/Miiduoa/graduation/actions/runs/43023595244) 已 completed/success；其 15 個 check runs 中無 App 5504170 的「審查通過」。`main` 查核為 `1d76ad50c8caedda74862ba4ad1ad4d212207f8b`，分支相對主線 ahead 6／behind 8。新提交的完整 CI／CodeQL 必須重新讀取結果，**不能挪用父 head 綠燈**。Supabase permissions、Python Security、Mobile Agent、Maestro 依 workflow 路徑條件在本次差異中不應觸發，不代表通過；正式資料、E 校園、遷移、金鑰、token 與未授權本機 npm/pnpm audit 均不觸碰。

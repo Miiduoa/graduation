@@ -500,21 +500,26 @@ export async function authorizePrivateFile(
       if (scope.kind === 'assignment' && !scope.groupId && writing) {
         if (scope.userId !== uid) deny();
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
-        const [assignment, submission] = await tx.getAll(
-          assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
+        // A legacy URL must honor its global submission receipt even when a
+        // canonical group assignment has since been created or restored.
+        // Otherwise the mere presence of the group copy reopens uploads.
+        const [assignment, submission, legacySubmission] = await tx.getAll(
+          assignmentRef,
+          assignmentRef.collection('submissions').doc(scope.userId || ''),
+          db.collection('assignments').doc(scope.assignmentId || '')
+            .collection('submissions').doc(scope.userId || ''),
         );
+        const previousLegacy = asRecord(legacySubmission.data());
+        const legacyOwner = 'userId' in previousLegacy ? previousLegacy.userId
+          : 'uid' in previousLegacy ? previousLegacy.uid
+            : 'studentId' in previousLegacy ? previousLegacy.studentId : scope.userId;
+        if (legacySubmission.exists && (legacyOwner !== uid || previousLegacy.submittedAt != null)) deny();
         if (!assignment.exists) {
           // A global-only legacy assignment must not bypass current submission
           // closure or an already recorded submission in the global namespace.
           const mirrorRef = db.collection('assignments').doc(scope.assignmentId || '');
-          const [mirror, legacySubmission] = await tx.getAll(
-            mirrorRef, mirrorRef.collection('submissions').doc(scope.userId || ''),
-          );
+          const mirror = await tx.get(mirrorRef);
           const legacy = asRecord(mirror.data());
-          const previousLegacy = asRecord(legacySubmission.data());
-          const legacyOwner = 'userId' in previousLegacy ? previousLegacy.userId
-            : 'uid' in previousLegacy ? previousLegacy.uid
-              : 'studentId' in previousLegacy ? previousLegacy.studentId : scope.userId;
           const dueValue = legacy.dueAt;
           const validDueString = typeof dueValue !== 'string' || (
             /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
@@ -527,8 +532,7 @@ export async function authorizePrivateFile(
             !mirror.exists || legacy.groupId !== groupId ||
             legacy.published === false || ['draft', 'closed'].includes(String(legacy.status || '')) ||
             (legacy.dueAt != null && legacy.allowLateSubmission !== true &&
-              (due === null || Date.now() > due)) ||
-            (legacySubmission.exists && (legacyOwner !== uid || previousLegacy.submittedAt != null))
+              (due === null || Date.now() > due))
           ) deny();
         } else {
         const data = asRecord(assignment.data());

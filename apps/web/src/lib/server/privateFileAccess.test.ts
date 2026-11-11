@@ -176,6 +176,26 @@ it.each([GROUP_ANSWER, ANSWER])('requires a meaningful submittedAt timestamp for
   }
 });
 
+it('legacy upload checks global submission receipts even when canonical group assignment exists', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const globalReceipt = 'assignments/work/submissions/alice';
+  // Same student can upload before submission, while both assignment copies exist.
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z' });
+  // Previously the canonical group copy skipped this already-submitted global receipt.
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(globalReceipt, { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  // A valid draft receipt never overrides a closed canonical assignment.
+  store.docs.set('groups/course/assignments/work', { published: false });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/assignments/work', { published: true });
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it('legacy uploads require a live open assignment and an unsubmitted receipt', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
