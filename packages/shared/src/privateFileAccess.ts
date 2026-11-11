@@ -150,6 +150,11 @@ function hasSubmittedReceiptTime(value: unknown): boolean {
   if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0;
   if (typeof value === 'string') {
     if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) return false;
+    // Date.parse normalizes impossible calendar dates (e.g. Feb 30) into
+    // another month. A malformed legacy receipt must never authorize GET.
+    const day = value.slice(0, 10);
+    const dayMs = Date.parse(`${day}T00:00:00.000Z`);
+    if (!Number.isFinite(dayMs) || new Date(dayMs).toISOString().slice(0, 10) !== day) return false;
     const ms = Date.parse(value);
     return Number.isFinite(ms) && ms > 0;
   }

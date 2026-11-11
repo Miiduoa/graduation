@@ -535,3 +535,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增合成回歸：全域-only 正常與明確遲交開放、跨群鏡像、關閉／草稿／未發布、已過期與格式錯誤截止日、已繳交、錯 owner。正式判定必須以**新精確 head** 的 Web/Functions/Rules/CI/CodeQL 為準；舊 head 的成功不可沿用。先前報告的真 PG CI 缺口已由現有 test-web 的 PostgreSQL 15 service 與 NUNI_TEST_POSTGRES_PORT=5432 接入，但仍須核對最新 job 實際執行。
 
 本補強不是歷史資料 migration，無法解決缺少 attachments 清單的真正舊收據檔案級授權、舊 GCS／Supabase URL 撤銷、真隔離 Storage、minimatch 雙鎖檔及正式發布／回復。沒有自行合併 main、部署、清理 token、修改正式資料或金鑰、連線 E 校園或直接重跑未授權 npm/pnpm audit。
+
+
+## 2026-11-11：拒絕錯誤日曆日期冒充已繳交收據（PR #577 隔離補強）
+
+精確父 head `1db2023dfeda3537fe41f8f51eeec3c4b27456e2` 的主 CI #42990047129、CodeQL #42990047257 與 Course access #42990047189 已完成 success；此次新變更需重新驗證，不得借用父版本結論。共享 `hasSubmittedReceiptTime` 原以格式正則加 `Date.parse` 判定歷史 ISO 收據，Node 可將 `2026-02-30`／`2025-02-29`／`2026-04-31` 默默正規化成其他日期，讓不可能存在的提交日被誤認為已繳交，尤其與缺 attachments 清單的歷史讀取相容邊界疊加時，會錯誤授權教師取得私人檔案。以隔離 Node22 合成值重現該日期正規化；沒有連真實資料。
+
+最小修補：先將 ISO 字串的 YYYY-MM-DD 當成 UTC 日曆日期往返比對，無效月份／閏年／日數一律拒絕；通過後仍沿用原有 `Date.parse` 驗證時間及正值。保留有效 ISO 日期與完整時區、Firestore Timestamp、Date 與整數毫秒，以及學生本人草稿預覽。Web 共用授權測試對群組及 legacy 兩種路徑增加無效 2/29、2/30、4/31 禁止教師 GET、有效閏年日期保留讀取，既有撤權／跨帳號測試不變。新提交的 CI／CodeQL／適用工作流及 App 5504170 核可須重新對精確 head 查核。
+
+尚未解除：真正缺少 attachments 的歷史收據欠缺檔案級證據、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、minimatch 雙鎖檔相容與正式發布／回復。沒有執行正式 migration、金鑰或 token 操作、E 校園連線及未授權 npm/pnpm audit。

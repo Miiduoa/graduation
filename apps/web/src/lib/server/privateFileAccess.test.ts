@@ -154,7 +154,10 @@ it.each([GROUP_ANSWER, ANSWER])('rejects malformed submitted-receipt attachment 
 it.each([GROUP_ANSWER, ANSWER])('requires a meaningful submittedAt timestamp for teacher GET on %s', async (path) => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const receipt = 'groups/course/assignments/work/submissions/alice';
-  for (const submittedAt of [false, 0, -1, '', 'not-a-date', {}, { seconds: 123 }, Number.NaN]) {
+  for (const submittedAt of [
+    false, 0, -1, '', 'not-a-date', {}, { seconds: 123 }, Number.NaN,
+    '2025-02-29', '2026-02-30', '2026-02-30T12:30:00Z', '2026-04-31',
+  ]) {
     store.docs.set(receipt, { userId: 'alice', submittedAt, attachments: [path] });
     await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
     await expect(authorize(store, path, 'alice', false)).resolves.toBeUndefined();
@@ -163,6 +166,7 @@ it.each([GROUP_ANSWER, ANSWER])('requires a meaningful submittedAt timestamp for
   const submitted = new Date('2026-11-11T00:00:00.000Z');
   for (const submittedAt of [
     submitted, submitted.getTime(), submitted.toISOString(), { toMillis: () => submitted.getTime() },
+    '2024-02-29', '2024-02-29T12:30:00+08:00',
   ]) {
     store.docs.set(receipt, { userId: 'alice', submittedAt, attachments: [path] });
     await expect(authorize(store, path, 'teacher', false)).resolves.toBeUndefined();
