@@ -268,7 +268,15 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
       if (!live.current || attempt !== version.current) return;
       if (!stillReadable) {
         setPosts((current) => current.filter((row) => row.id !== item.id));
-        setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
+        if (interrupted) {
+          // The card is gone, but the paused server page is still unread.
+          // Preserve that exact cursor so a student never silently skips it.
+          retry.current = interrupted;
+          setNotice('');
+          setError('這篇貼文已刪除或不再提供，已從搜尋結果移除。未完成的下一頁已保留，可原地重試。');
+        } else {
+          setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
+        }
         return;
       }
       navigated = true;
