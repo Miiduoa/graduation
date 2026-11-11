@@ -18,6 +18,7 @@ import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
+import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
 import styles from './CampusSpatialExplorer.module.css';
 
@@ -368,7 +369,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const staleAt = Math.min(fetchedMs + FOOTPRINT_DAY_MS, replicationMs + 2 * FOOTPRINT_DAY_MS);
         footprintExpiresAtRef.current = expiresAt;
         setFootprintClock({ staleAt, expiresAt });
-        setFootprints(snapshot.buildings);
+        // A fresh timestamp alone must not tear down and recreate the WebGL context.
+        // Keep geometry only when all source, revision and shape fields match.
+        setFootprints((current) => reuseUnchangedProvidenceFootprints(current, snapshot.buildings));
         setFootprintDate(snapshot.fetchedAt.slice(0, 10));
         setFootprintBaseDate(snapshot.osmBaseAt?.slice(0, 10) ?? null);
         setFootprintStale(snapshot.stale);
