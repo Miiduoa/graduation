@@ -330,7 +330,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
-    // A local age deadline must not discard a previously verified outline.
+    // Only an unexpired, dated stale snapshot may survive a refresh failure.
     const preserveStale = staleSnapshotRef.current &&
       footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
     footprintRequestActiveRef.current = true;
@@ -398,8 +398,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       })
       .catch(() => {
         if (!active || timedOut) return;
-        // Keep the previously verified snapshot even after its refresh deadline.
-        // Normal first-load failures remain marker-only.
+        // A dated stale snapshot may survive failures only inside the seven-day
+        // hard limit. Expired data and first-load failures stay marker-only.
         setFootprintRefreshing(false);
         const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
           Date.now() < footprintExpiresAtRef.current;
