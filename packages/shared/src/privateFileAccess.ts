@@ -135,10 +135,11 @@ function referencesPrivateFile(attachments: unknown, path: string): boolean {
     ));
 }
 
-/** Absent or non-array attachments are legacy records; keep the previous access path. */
-function allowsListedOrLegacyPrivateFile(attachments: unknown, path: string): boolean {
-  if (!Array.isArray(attachments)) return true;
-  return referencesPrivateFile(attachments, path);
+/** Only a genuinely absent attachments key is an eligible legacy record.
+ * Explicit null, malformed objects or strings must not grant group-wide access. */
+function allowsListedOrLegacyPrivateFile(record: Record<string, unknown>, path: string): boolean {
+  if (!Object.prototype.hasOwnProperty.call(record, 'attachments')) return true;
+  return referencesPrivateFile(record.attachments, path);
 }
 
 function accountBlocked(data: Record<string, unknown>): boolean {
@@ -421,7 +422,7 @@ export async function authorizePrivateFile(
         // The author can preview an uploaded draft. Other group members may
         // download only the precise object referenced by the live post.
         // Finalizing a private upload must not publish a sibling by guessable path.
-        if (!writing && data.authorId !== uid && !allowsListedOrLegacyPrivateFile(data.attachments, scope.path)) deny();
+        if (!writing && data.authorId !== uid && !allowsListedOrLegacyPrivateFile(data, scope.path)) deny();
       }
       if (scope.kind === 'assignment' && scope.groupId) {
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
@@ -461,7 +462,7 @@ export async function authorizePrivateFile(
             // receipt is never proof that a teacher may read an uploaded draft.
             !submission.exists || owner !== scope.userId ||
             previous.submittedAt == null ||
-            (Array.isArray(previous.attachments) && !referencesPrivateFile(previous.attachments, scope.path))
+            !allowsListedOrLegacyPrivateFile(previous, scope.path)
           )) deny();
         }
       }
@@ -515,7 +516,7 @@ export async function authorizePrivateFile(
           previous.submittedAt == null ||
           // Preserve access to genuinely submitted historical receipts with
           // no file list. A present list remains an exact allow-list.
-          (Array.isArray(previous.attachments) && !referencesPrivateFile(previous.attachments, scope.path))
+          !allowsListedOrLegacyPrivateFile(previous, scope.path)
         ) deny();
       }
       if (

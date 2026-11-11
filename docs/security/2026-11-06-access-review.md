@@ -509,3 +509,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小變更：兩種 assignment 路徑均要求第三方 manager 有既存 `submissions/{student}`、收據 owner 與路徑一致及 `submittedAt != null`；對真正已提交且沒有 `attachments` 欄位的 legacy 收據保留原閱讀相容性。有清單時仍須精確匹配路徑，未修改學生日常上傳資格。合成回歸改為驗證「無收據／空提交時間拒絕、真實 legacy 已提交收據通過」，並保留錯 owner、未引用 sibling、跨帳號／跨校及撤權案例。另同步調整 Functions Jest、Firebase emulator HTTP、Web 預簽 URL 的合成案例，確保舊測試不再把提前下載草稿當作應有功能。
 
 **驗證界線：** 原始碼及 Web 測試已修改；本輪此處不代表完整 CI 已成功。需以新 PR 精確 head 核對 Web、Functions、Firestore Rules、CodeQL、Supabase permissions、Python、Mobile Agent、適用 Maestro、review threads 及指定 nuni-merge-gate App 5504170「審查通過」。此補強不撤銷已簽發 GCS/Supabase 網址，也不證明所有歷史附件皆有可信提交收據；缺收據的管理者下載將 fail-closed，正式發布前應以隔離資料盤點並提供安全修復流程。真 GCS staging、minimatch 雙鎖檔、歷史 URL 清理、正式資料／金鑰／migration／部署需另行走既有審查與回復程序。E 校園連線繼續停用；未重跑未獲授權的 npm/pnpm audit。
+
+
+## 2026-11-11：顯式錯誤附件欄位不得當作無欄位 legacy 讀取（PR #577 後續修補）
+
+核對 #577 精確父提交 `fc214fa6ba010cb5a51734430d78f359d74fdf79` 的 Actions 主 CI #42899167145 與 CodeQL #42899167060 均已 completed/success（新提交不得沿用結果）。該版本共用 `allowsListedOrLegacyPrivateFile` 將「缺少 attachments 欄位」與「有 attachments 但值為 null／非陣列」視為一樣的歷史相容情況；作業收據中也以 `Array.isArray` 為開關。已公開貼文或已提交作業一旦含有顯式錯誤類型，就會允許同組非作者或老師透過猜得的路徑讀取未列出的 sibling 私人檔案，並非可信發布授權。
+
+最小修補只對明確**不存在**的 `attachments` 鍵保留舊相容行為；顯式 `null`、map、字串、布林等值一律不得讓第三方取得私人物件，即使 `submittedAt` 有值。有效陣列仍要求精確路徑，原作者草稿預覽及現有授權撤銷條件不變。新增 Web 共用授權測試：group-post 同組學生／manager 的 4 種畸形欄位需 403，兩種作業 namespace 的老師需 403，作者仍可合法預覽；既有真正缺欄位 legacy 相容測試保留。
+
+此修補防止畸形欄位觸發廣泛授權，但**尚未消除真正缺少附件欄位的歷史貼文／已提交收據的模糊檔案引用風險**。應使用合成隔離清單建立唯讀盤點與可信補齊，不可直接在正式資料上猜測檔案引用。新提交必須另核對 CI／CodeQL／適用 Supabase、Python、Mobile Agent、Maestro、指定 nuni-merge-gate App 5504170 的精確 head 核可。未合併、部署、執行 migration、改動金鑰、清理正式 bearer/signed URL、連線 E 校園，也未重新發出被拒絕授權的 npm/pnpm audit payload。

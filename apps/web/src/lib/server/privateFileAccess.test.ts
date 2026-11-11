@@ -141,6 +141,16 @@ it('legacy assignment URLs also require a submitted receipt with an exact file r
   await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
 });
 
+it.each([GROUP_ANSWER, ANSWER])('rejects malformed submitted-receipt attachment fields for %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const receipt = 'groups/course/assignments/work/submissions/alice';
+  for (const attachments of [null, {}, 'invalid', false]) {
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments });
+    await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, path, 'alice', false)).resolves.toBeUndefined();
+  }
+});
+
 it('legacy uploads require a live open assignment and an unsubmitted receipt', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
@@ -191,6 +201,17 @@ it('does not turn a finalized but unreferenced post attachment into a group-wide
   await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('schools/pu/members/bob', { status: 'active' });
   await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
+it('rejects malformed attachment fields instead of treating them as legacy shared posts', async () => {
+  const postPath = 'groups/course/posts/one';
+  const store = fileStore([[postPath, { authorId: 'alice' }]]);
+  for (const attachments of [null, {}, 'invalid', false]) {
+    store.docs.set(postPath, { authorId: 'alice', attachments });
+    await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, POST, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  }
 });
 
 it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {
