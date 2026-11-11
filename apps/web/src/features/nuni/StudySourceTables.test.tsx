@@ -358,7 +358,7 @@ it('recognizes --!> as an HTML comment end without showing hidden sample tables'
     '| 正式課程 | 學分 |',
     '| --- | --- |',
     '| 資料庫 | 3 |',
-  ].join('\\n');
+  ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([{
     startLine: 14,
     headers: ['正式課程', '學分'],
@@ -384,7 +384,7 @@ it('does not let a literal --!> inside fenced code alter HTML comment tracking',
     '| 真正教材 | 學分 |',
     '| --- | --- |',
     '| 資管 | 3 |',
-  ].join('\\n');
+  ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([{
     startLine: 13,
     headers: ['真正教材', '學分'],
