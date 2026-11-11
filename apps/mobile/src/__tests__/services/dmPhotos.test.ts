@@ -92,6 +92,29 @@ test('rejects oversized, remote, unsupported or changed local files before reque
   expect(mockCall).not.toHaveBeenCalled();
 });
 
+test('existing conversation IDs longer than 120 characters still bind a photo upload', async () => {
+  const conversationId = `dm_pu_${'a'.repeat(64)}_${'b'.repeat(64)}`;
+  expect(conversationId).toHaveLength(135);
+  const longScope = { ...scope, conversationId };
+  const longPath = path.replace('/private/', `/${conversationId}/`);
+  jest.spyOn(FormData.prototype, 'append').mockImplementation(() => undefined);
+  mockCall.mockResolvedValueOnce({
+    data: {
+      method: 'POST',
+      url: 'https://bucket.storage.googleapis.com/',
+      fields: { key: longPath, 'Content-Type': local.contentType },
+      path: longPath,
+      mediaId: 'media',
+      expiresAt: expiresAt(),
+    },
+  });
+  (fetch as jest.Mock).mockResolvedValueOnce({ ok: true });
+  await expect(uploadDmPhoto(longScope, local, signal())).resolves.toBe(longPath);
+  expect(mockCall).toHaveBeenCalledWith(
+    expect.objectContaining({ conversationId, action: 'uploadPhoto' }),
+  );
+});
+
 test('binds a first photo upload and confirmation to the prepared canonical peer', async () => {
   const first = { ...scope, conversationId: 'dm_pu_alice_bob', peerUid: 'bob' };
   const firstPath = path.replace('/private/', '/dm_pu_alice_bob/');

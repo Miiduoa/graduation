@@ -8,7 +8,7 @@ export type DmPeer = { viewerUid: string; schoolId: string; peerUid: string };
 export type DmPeerThread = DmPeer & { conversationId: string };
 type PreparedDm = { conversationId: string; peerUid: string; exists: boolean };
 type DmText = DmPeerThread & { messageId: string; content: string };
-const segment = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
+const segment = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,1500}$/;
 
 function checkPeer(input: DmPeer, signal?: AbortSignal) {
   if (signal?.aborted) throw Object.assign(new Error('對話已切換。'), { code: 'cancelled' });

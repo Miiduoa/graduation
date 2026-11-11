@@ -201,22 +201,35 @@ test.each([
   },
 );
 
-test.each([
-  ['schools/pu/members/alice', { status: 'inactive' }],
-  ['schools/pu/members/bob', { status: 'inactive' }],
-])('new chats still require active school membership at %s, existing chats do not', async (path, value) => {
+test('new chats still require the caller to have active school membership, existing chats do not', async () => {
+  const path = 'schools/pu/members/alice';
   const original = store.docs.get(path);
-  store.docs.set(path, value);
+  store.docs.set(path, { status: 'inactive' });
   await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
   await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
   expect(store.docs.has(thread)).toBe(false);
   store.docs.set(path, original);
   await send();
-  store.docs.set(path, value);
+  store.docs.set(path, { status: 'inactive' });
   expect(await send()).toEqual({ conversationId, messageId });
   expect(await send({ messageId: 'next-text-message-000002' })).toEqual({
     conversationId,
     messageId: 'next-text-message-000002',
+  });
+});
+
+test.each([
+  ['schools/pu/members/bob', { status: 'inactive' }],
+  ['schools/pu/members/bob', null],
+])('first DM does not require recipient school membership at %s', async (path, value) => {
+  if (value == null) store.docs.delete(path);
+  else store.docs.set(path, value);
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: false });
+  expect(await send()).toEqual({ conversationId, messageId });
+  expect(store.docs.get(thread)).toMatchObject({
+    type: 'dm',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
   });
 });
 
@@ -236,7 +249,7 @@ test.each([
   });
 });
 
-test.each(['users/alice', 'users/bob', 'schools/pu/members/alice', 'schools/pu/members/bob'])(
+test.each(['users/alice', 'users/bob', 'schools/pu/members/alice'])(
   'refuses preparation and creation when %s is missing',
   async (path) => {
     store.docs.delete(path);
@@ -328,6 +341,43 @@ test('a failed first commit leaves neither a message nor an empty conversation',
   expect(store.docs.has(thread)).toBe(false);
   expect(store.docs.has(`${thread}/messages/${messageId}`)).toBe(false);
   expect(await send()).toEqual({ conversationId, messageId });
+});
+
+test('canonical conversation IDs longer than 120 characters still create and reopen', async () => {
+  const alice = 'a'.repeat(64);
+  const bob = 'b'.repeat(64);
+  const longId = `dm_pu_${[alice, bob].sort().join('_')}`;
+  expect(longId).toHaveLength(135);
+  const local = transactionStore([
+    [`users/${alice}`, { schoolId: 'pu' }],
+    [`users/${bob}`, { schoolId: 'pu' }],
+    [`schools/pu/members/${alice}`, { status: 'active' }],
+  ]);
+  const svc = createDmConversations({ db: local.db });
+  const data = { viewerUid: alice, schoolId: 'pu', peerUid: bob };
+  expect(await svc.prepare({ auth: { uid: alice }, data })).toEqual({
+    conversationId: longId,
+    peerUid: bob,
+    exists: false,
+  });
+  expect(
+    await svc.sendText({
+      auth: { uid: alice },
+      data: { ...data, conversationId: longId, messageId, content: '還在嗎' },
+    }),
+  ).toEqual({ conversationId: longId, messageId });
+  expect(await svc.prepare({ auth: { uid: alice }, data })).toEqual({
+    conversationId: longId,
+    peerUid: bob,
+    exists: true,
+  });
+  expect(
+    await svc.sendText({
+      auth: { uid: alice },
+      data: { ...data, conversationId: longId, messageId, content: '還在嗎' },
+    }),
+  ).toEqual({ conversationId: longId, messageId });
+  expect(local.docs.get(`conversations/${longId}/messages/${messageId}`).content).toBe('還在嗎');
 });
 
 test('the existing Fly registry exposes both v2 callable handlers', async () => {

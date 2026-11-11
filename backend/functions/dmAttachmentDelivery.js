@@ -15,8 +15,18 @@ const DOCUMENT_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ]);
 
+// Firestore document IDs accept up to 1500 bytes. Canonical DMs are
+// dm_{schoolId}_{uid}_{uid}; a 120-character cap rejects IDs that already exist.
+// Do not take a second argument: Array#every passes the index.
 function segment(value) {
-  return typeof value === 'string' && /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/.test(value);
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 1500 &&
+    value !== '.' &&
+    value !== '..' &&
+    /^[A-Za-z0-9._-]+$/.test(value)
+  );
 }
 
 function uploadLimit(contentType) {

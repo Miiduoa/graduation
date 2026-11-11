@@ -19,7 +19,7 @@ const filenames = new Map([
   ['image/webp', 'photo.webp'],
 ]);
 const limit = 10 * 1024 * 1024;
-const segment = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
+const segment = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,1500}$/;
 export const photoFormatHint = '請選擇小於 10 MiB 的 JPG、PNG 或 WebP 照片。';
 
 export function localPhoto(uri: string, mimeType?: string | null): LocalPhoto {

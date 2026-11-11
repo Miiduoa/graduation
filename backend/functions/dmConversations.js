@@ -81,20 +81,19 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       )
         throw denied();
     } else {
-      // New DMs follow main conversation create: active school membership,
-      // not profile.schoolId equality. Transfers with leftover active
-      // membership can still open a first chat.
-      const members = db.collection('schools').doc(schoolId).collection('members');
-      const [a, b, ma, mb, ...blocked] = await tx.getAll(
+      // New DMs are no stricter than main conversation create: both accounts
+      // usable and not blocked. Main only checks the caller's school membership,
+      // never the recipient's.
+      const senderMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
+      const [a, b, senderMembership, ...blocked] = await tx.getAll(
         first,
         second,
-        members.doc(memberIds[0]),
-        members.doc(memberIds[1]),
+        senderMember,
         ...blockRefs,
       );
       if (
         ![a, b].every((snap) => !isAccountUnavailable(snap.data())) ||
-        ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
+        senderMembership.data()?.status !== 'active' ||
         blocked.some((snap) => snap.exists)
       )
         throw denied();

@@ -37,6 +37,16 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+it('parses photo paths on existing conversation IDs longer than 120 characters', () => {
+  const conversationId = `dm_pu_${'a'.repeat(64)}_${'b'.repeat(64)}`;
+  expect(conversationId).toHaveLength(135);
+  const longPath = `conversations/${conversationId}/photos/abc/sent.jpg`;
+  expect(parseDmPhotoPath(longPath, conversationId)).toEqual({
+    mediaId: 'abc',
+    fileName: 'sent.jpg',
+  });
+});
+
 it('accepts only nonempty JPEG, PNG and WebP strictly below 10 MiB', () => {
   for (const type of ['image/jpeg', 'image/png', 'image/webp']) {
     expect(validDmPhoto({ type, size: 10 * 1024 * 1024 - 1 } as File)).toBe(true);

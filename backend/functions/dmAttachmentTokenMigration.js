@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 
 // The only legacy DM attachment layouts. Never mutate arbitrary bucket objects.
-const DM_ATTACHMENT_PATH = /^conversations\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,120}\/(?:media|messages)\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,120}\/(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
+const DM_ATTACHMENT_PATH = /^conversations\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,1500}\/(?:media|messages)\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,1500}\/(?!\.{1,2}$)[A-Za-z0-9._-]{1,1500}$/;
 
 function isDmAttachmentPath(name) {
   return typeof name === 'string' && DM_ATTACHMENT_PATH.test(name);

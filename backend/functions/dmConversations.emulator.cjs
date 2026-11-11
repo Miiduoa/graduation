@@ -354,7 +354,7 @@ test('membership revoked after prepare or on a transaction retry prevents all fi
     runTransaction: (callback) =>
       db.runTransaction(async (transaction) => {
         attempts++;
-        if (attempts === 2) await db.doc('schools/pu/members/bob').update({ status: 'inactive' });
+        if (attempts === 2) await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
         const result = await callback(transaction);
         if (attempts === 1) throw Object.assign(new Error('retry'), { code: 10 });
         return result;
@@ -367,6 +367,18 @@ test('membership revoked after prepare or on a transaction retry prevents all fi
   assert.equal((await thread.get()).exists, false);
   assert.equal((await messages.get()).empty, true);
   await assert.rejects(handlers.prepare(request()), { code: 'permission-denied' });
+});
+
+test('first DM still opens when the recipient has no school membership', async () => {
+  await db.doc('schools/pu/members/bob').delete();
+  assert.deepEqual(await handlers.prepare(request()), {
+    conversationId,
+    peerUid: 'bob',
+    exists: false,
+  });
+  assert.deepEqual(await handlers.sendText(request()), { conversationId, messageId: textId });
+  assert.equal((await thread.get()).data().type, 'dm');
+  assert.equal((await messages.get()).size, 1);
 });
 
 test('revocation during first-photo publication leaves no thread and a safe retry commits exactly once', async () => {

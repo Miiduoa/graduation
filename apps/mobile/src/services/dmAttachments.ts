@@ -25,7 +25,7 @@ type UploadGrant = {
 };
 type ReadGrant = { url: string; expiresAt: string };
 
-const objectPath = /^conversations\/([A-Za-z0-9._-]{1,120})\/(media|messages)\/([A-Za-z0-9._-]{1,120})\/([A-Za-z0-9._-]{1,120})$/;
+const objectPath = /^conversations\/([A-Za-z0-9._-]{1,1500})\/(media|messages)\/([A-Za-z0-9._-]{1,1500})\/([A-Za-z0-9._-]{1,1500})$/;
 
 function signedInUid() {
   const uid = getAuthInstance().currentUser?.uid;
@@ -82,7 +82,7 @@ export async function uploadDmAttachment(
   contentType: string,
 ): Promise<DmAttachment> {
   const uid = signedInUid();
-  if (!/^[A-Za-z0-9._-]{1,120}$/.test(conversationId) ||
+  if (!/^[A-Za-z0-9._-]{1,1500}$/.test(conversationId) ||
       conversationId === '.' || conversationId === '..') {
     throw new Error('無效的私訊對話。');
   }

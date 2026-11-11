@@ -54,6 +54,35 @@ test('current DM member uploads by short-lived POST and receives durable object 
   expect(JSON.stringify(receipt)).not.toContain('firebaseStorageDownloadTokens');
 });
 
+test('uploads to an existing conversation ID longer than 120 characters', async () => {
+  const conversationId = `dm_pu_${'a'.repeat(64)}_${'b'.repeat(64)}`;
+  expect(conversationId).toHaveLength(135);
+  global.fetch = jest.fn(async (url: string) => {
+    if (url === 'file:///photo.png') return { ok: true, blob: async () => new Blob(['picture'], { type: 'image/png' }) };
+    return { ok: true, status: 204 };
+  }) as unknown as typeof fetch;
+  mockSign.mockResolvedValueOnce({
+    data: {
+      method: 'POST',
+      url: 'https://storage.test/upload',
+      fields: { key: 'signed-key', 'Content-Type': 'image/png' },
+      path: `conversations/${conversationId}/media/server-id/photo.png`,
+      mediaId: 'server-id',
+      expiresAt: 'soon',
+    },
+  }).mockResolvedValueOnce({
+    data: { url: 'https://storage.test/read?X-Goog-Signature=x', expiresAt: 'soon' },
+  });
+  await expect(
+    uploadDmAttachment(conversationId, 'file:///photo.png', 'photo.png', 'image/png'),
+  ).resolves.toMatchObject({
+    path: `conversations/${conversationId}/media/server-id/photo.png`,
+  });
+  expect(mockSign).toHaveBeenCalledWith(
+    expect.objectContaining({ action: 'upload', conversationId }),
+  );
+});
+
 test('a legitimate second member can open a legacy message object through fresh callable authorization', async () => {
   mockUid = 'bob';
   mockSign.mockResolvedValueOnce({ data: { url: 'https://storage.test/read', expiresAt: 'soon' } });

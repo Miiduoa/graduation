@@ -43,6 +43,20 @@ beforeEach(() => {
   jest.mocked(query).mockClear();
 });
 
+test('prepares an existing canonical conversation ID longer than 120 characters', async () => {
+  const longPeer = { viewerUid: 'a'.repeat(64), schoolId: 'pu', peerUid: 'b'.repeat(64) };
+  const longId = `dm_pu_${[longPeer.viewerUid, longPeer.peerUid].sort().join('_')}`;
+  expect(longId).toHaveLength(135);
+  mockUid = longPeer.viewerUid;
+  mockCall.mockResolvedValue({ data: { conversationId: longId, peerUid: longPeer.peerUid, exists: true } });
+  await expect(prepareDmConversation(longPeer, signal())).resolves.toEqual({
+    conversationId: longId,
+    peerUid: longPeer.peerUid,
+    exists: true,
+  });
+  expect(mockCall).toHaveBeenCalledWith(longPeer);
+});
+
 test('prepares the canonical peer conversation without subscribing or writing a placeholder', async () => {
   mockCall.mockResolvedValue({ data: prepared });
   await expect(prepareDmConversation(peer, signal())).resolves.toEqual(prepared);

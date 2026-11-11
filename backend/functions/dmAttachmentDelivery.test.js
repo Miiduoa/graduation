@@ -119,6 +119,21 @@ test('legitimate second member can request a new signed link', async () => {
   expect(file.getSignedUrl).toHaveBeenCalledTimes(1);
 });
 
+test('existing conversation IDs longer than 120 characters still receive a signed read', async () => {
+  const conversationId = `dm_pu_${'a'.repeat(64)}_${'b'.repeat(64)}`;
+  expect(conversationId.length).toBeGreaterThan(120);
+  const { call, docs, bucket } = fixture();
+  docs.set(`conversations/${conversationId}`, {
+    type: 'dm',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
+  });
+  await expect(call({ conversationId })).resolves.toHaveProperty('url');
+  expect(bucket.file).toHaveBeenCalledWith(
+    `conversations/${conversationId}/media/one/file.pdf`,
+  );
+});
+
 test.each([
   [{ conversationId: '../pu' }],
   [{ mediaId: '../x' }],

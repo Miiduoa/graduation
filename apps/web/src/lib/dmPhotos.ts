@@ -18,7 +18,7 @@ export function validDmPhoto(file: File) {
   return extensions.has(file.type) && file.size > 0 && file.size < 10 * 1024 * 1024;
 }
 
-const segment = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
+const segment = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,1500}$/;
 export function parseDmPhotoPath(path: unknown, conversationId: string, published = true) {
   if (typeof path !== 'string' || !segment.test(conversationId)) return null;
   const [root, thread, folder, mediaId, fileName, ...rest] = path.split('/');
