@@ -14,6 +14,8 @@ const MAX_COLUMNS = 8;
 const MAX_ROWS = 20;
 
 function parseSimplePipeRow(line: string): string[] | null {
+  // Markdown renders four-space / tab-indented rows as code, not a table.
+  if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
@@ -24,14 +26,14 @@ function parseSimplePipeRow(line: string): string[] | null {
   return cells.length >= 2 && cells.length <= MAX_COLUMNS ? cells : null;
 }
 
-function fenceMarker(line: string): { character: string; length: number } | null {
+function fenceMarker(line: string): { character: string; length: number; suffix: string } | null {
   const trimmed = line.trimStart();
   if (line.length - trimmed.length > 3) return null;
   const marker = trimmed[0];
   if (marker !== '~' && marker !== String.fromCharCode(96)) return null;
   let length = 0;
   while (trimmed[length] === marker) length += 1;
-  return length >= 3 ? { character: marker, length } : null;
+  return length >= 3 ? { character: marker, length, suffix: trimmed.slice(length) } : null;
 }
 
 export function extractStudySourceTables(source: string): StudySourceTable[] {
@@ -44,7 +46,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     const marker = fenceMarker(lines[index]);
     if (marker) {
       if (fence === null) fence = marker;
-      else if (fence.character === marker.character && marker.length >= fence.length) fence = null;
+      else if (fence.character === marker.character && marker.length >= fence.length && !marker.suffix.trim()) fence = null;
       continue;
     }
     if (fence) continue;
@@ -56,15 +58,26 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
 
     const rows: string[][] = [];
     let cursor = index + 2;
+    let malformed = false;
     while (cursor < lines.length) {
-      const row = parseSimplePipeRow(lines[cursor]);
-      if (!row || row.length !== headers.length) break;
+      const line = lines[cursor];
+      const row = parseSimplePipeRow(line);
+      if (!row) {
+        // An escaped pipe, inline code or indented row can make a table
+        // ambiguous. Do not show only the earlier rows as if complete.
+        if (line.includes('|')) malformed = true;
+        break;
+      }
+      if (row.length !== headers.length) {
+        malformed = true;
+        break;
+      }
       rows.push(row);
       cursor += 1;
       if (rows.length > MAX_ROWS) break;
     }
-    // Do not quietly truncate a source table and suggest it is complete.
-    if (rows.length > 0 && rows.length <= MAX_ROWS)
+    // Never quietly truncate an oversized or malformed source table.
+    if (!malformed && rows.length > 0 && rows.length <= MAX_ROWS)
       tables.push({ startLine: index + 1, headers, rows });
     index = cursor - 1;
   }

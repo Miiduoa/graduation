@@ -91,3 +91,56 @@ it('does not mistake a shorter code fence for the end of a longer one', () => {
   expect(tables[0].headers).toEqual(['已授權教材', '學分']);
   expect(tables[0].rows).toEqual([['資料庫', '3']]);
 });
+
+it('omits the entire table if a later source row is malformed, rather than showing a partial table', () => {
+  for (const broken of [
+    '| 資工 | 3 | 加選 |',
+    '| 資工 |',
+    '| SQL \\| NoSQL | 4 |',
+  ]) {
+    const text = [
+      '| 科目 | 學分 |',
+      '| --- | --- |',
+      '| 資料庫 | 3 |',
+      broken,
+      '| 網路概論 | 2 |',
+    ].join('\n');
+    expect(extractStudySourceTables(text)).toEqual([]);
+  }
+});
+
+it('ignores code-indented pipe tables instead of presenting code text as data', () => {
+  const text = [
+    '    | 暫存標題 | 金額 |',
+    '    | --- | --- |',
+    '    | 測試資料 | 999 |',
+    '\t| 其他欄 | 數值 |',
+    '\t| --- | --- |',
+    '\t| 測試 | 111 |',
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  const tables = extractStudySourceTables(text);
+  expect(tables).toHaveLength(1);
+  expect(tables[0].headers).toEqual(['課程', '學分']);
+  expect(tables[0].rows).toEqual([['資料庫', '3']]);
+});
+
+it('keeps fenced code hidden when an apparent closing fence has trailing text', () => {
+  const tick = String.fromCharCode(96);
+  const text = [
+    tick.repeat(3) + 'markdown',
+    tick.repeat(3) + 'not-a-closing-fence',
+    '| 虛構 | 金額 |',
+    '| --- | --- |',
+    '| 範例 | 999 |',
+    tick.repeat(3),
+    '| 科目 | 學分 |',
+    '| --- | --- |',
+    '| 程式設計 | 3 |',
+  ].join('\n');
+  const tables = extractStudySourceTables(text);
+  expect(tables).toHaveLength(1);
+  expect(tables[0].rows).toEqual([['程式設計', '3']]);
+});
