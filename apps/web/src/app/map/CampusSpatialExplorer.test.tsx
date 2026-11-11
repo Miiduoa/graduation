@@ -93,9 +93,15 @@ it('connects scene markers, the progress control, directions and the original ma
   const callbacks = scene.create.mock.calls[0][2];
   act(() => callbacks.onSelect('dorm'));
   expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
-  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const directionLink = within(dialog).getByRole('link', { name: '開啟步行導航' });
+  const directions = new URL(directionLink.getAttribute('href')!);
   expect(directions.searchParams.get('destination')).toBe('24.228,120.582');
   expect(directions.searchParams.get('travelmode')).toBe('walking');
+  // A point location is not a surveyed entrance or an accessible walking path.
+  // The on-screen warning must also be linked to the outgoing route for assistive tech.
+  const warning = within(dialog).getByText(/導航僅以目前地點標記為目的地.*並非已核實的校舍入口/);
+  expect(directionLink.getAttribute('aria-describedby')).toBe(warning.id);
+  expect(warning.textContent).toContain('無障礙動線');
   expect(within(dialog).getByRole('button', { name: '下一個地點' }).hasAttribute('disabled')).toBe(true);
   fireEvent.change(within(dialog).getByRole('slider'), { target: { value: '0' } });
   expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain('本校圖書館');
