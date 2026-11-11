@@ -1,11 +1,15 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   rows: [] as Array<{ id: string; data: Record<string, unknown> }>,
-  emitters: [] as Array<{ path: string; emit: () => void; stop: () => void }>,
+  emitters: [] as Array<{ path: string; emit: () => void; fail: () => void; stop: () => void }>,
+  fromCache: false,
+  linkedFromCache: false,
+  delayLinked: false,
+  linkedRow: null as null | { id: string; data: Record<string, unknown> },
   paths: [] as string[],
   stopped: [] as string[],
   search: '',
@@ -54,22 +58,30 @@ vi.mock('@/components/SiteShell', () => ({
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}), isFirebaseConfigured: () => true }));
 vi.mock('firebase/firestore', () => ({
   collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
+  doc: (ref: { path: string }, id: string) => ({ path: ref.path + '/' + id, id }),
   query: (ref: { path: string }) => ref,
   orderBy: () => null,
   limit: () => null,
-  onSnapshot: (ref: { path: string }, next: (snapshot: unknown) => void) => {
+  onSnapshot: (ref: { path: string; id?: string }, options: { includeMetadataChanges: boolean }, next: (snapshot: unknown) => void, fail: () => void) => {
+    expect(options.includeMetadataChanges).toBe(true);
     state.paths.push(ref.path);
-    const emit = () =>
-      next({ docs: state.rows.map((row) => ({ id: row.id, data: () => row.data })) });
+    const emit = () => {
+      if (ref.id) {
+        next({ metadata: { fromCache: state.linkedFromCache }, id: ref.id, exists: () => state.linkedRow?.id === ref.id, data: () => state.linkedRow?.data });
+      } else {
+        next({ metadata: { fromCache: state.fromCache }, docs: state.rows.map((row) => ({ id: row.id, data: () => row.data })) });
+      }
+    };
     const entry = {
       path: ref.path,
       emit,
+      fail,
       stop: () => {
         state.stopped.push(ref.path);
       },
     };
     state.emitters.push(entry);
-    emit();
+    if (!ref.id || !state.delayLinked) emit();
     return entry.stop;
   },
 }));
@@ -80,6 +92,10 @@ const placed = { toDate: () => new Date('2026-10-13T04:05:00.000Z') };
 beforeEach(() => {
   vi.unstubAllEnvs();
   state.uid = 'alice';
+  state.delayLinked = false;
+  state.fromCache = false;
+  state.linkedFromCache = false;
+  state.linkedRow = null;
   state.paths = [];
   state.stopped = [];
   state.emitters = [];
@@ -340,9 +356,7 @@ it.each(['未登入', '空列表', '找不到訂單', '已有該筆訂單', '未
     expect(screen.getByRole('link', { name: '查看餐廳資訊' }).getAttribute('href')).toBe(
       scenario === '未選校' ? '/cafeteria' : '/cafeteria?schoolId=pu',
     );
-    expect(state.paths).toEqual(
-      scenario === '未登入' || scenario === '未選校' ? [] : ['users/alice/schools/pu/orders'],
-    );
+    expect(state.paths).toEqual([]);
   },
 );
 
@@ -354,4 +368,89 @@ it('點餐開啟、空列表深連仍提示找不到該筆訂單', () => {
   expect(screen.getByText(/找不到這筆訂單/)).toBeTruthy();
   expect(screen.getByRole('heading', { name: '還沒有訂單' })).toBeTruthy();
   expect(screen.queryByText(/無法查看這筆訂單/)).toBeNull();
+});
+
+it('通知指向近期清單之外的訂單時，只讀本人的當校訂單，並持續更新取餐號碼', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.search = 'orderId=co_archived';
+  state.linkedRow = { id: 'co_archived', data: { status: 'ready', queueNumber: 42 } };
+  const view = render(<OrdersPage />);
+  const target = screen.getByRole('article', { current: true });
+  expect(target.textContent).toContain('取餐號碼 42');
+  const archive = state.emitters[1];
+  expect(archive.path).toBe('users/alice/schools/pu/orders/co_archived');
+  await waitFor(() => expect(document.activeElement).toBe(target));
+  const link = screen.getByRole('link', { name: '餐廳資訊' });
+  link.focus();
+  state.linkedRow.data.queueNumber = 43;
+  await act(async () => archive.emit());
+  expect(target.textContent).toContain('取餐號碼 43');
+  await act(async () => { await new Promise(requestAnimationFrame); });
+  expect(document.activeElement).toBe(link);
+
+  state.rows = [state.linkedRow, ...state.rows];
+  await act(async () => state.emitters[0].emit());
+  expect(screen.getAllByText('取餐號碼 43')).toHaveLength(1);
+
+  state.uid = 'bob';
+  state.rows = [];
+  state.linkedRow = null;
+  view.rerender(<OrdersPage />);
+  expect(state.stopped).toContain(archive.path);
+  expect(state.paths.at(-1)).toBe('users/bob/schools/pu/orders/co_archived');
+  state.linkedRow = { id: 'co_archived', data: { status: 'ready', queueNumber: 44 } };
+  await act(async () => archive.emit());
+  expect(screen.queryByText('取餐號碼 44')).toBeNull();
+});
+
+it('訂單讀取失敗可在原頁重試，只接收新訂閱的更新', async () => {
+  render(<OrdersPage />);
+  const first = state.emitters[0];
+  act(() => first.fail());
+  expect(screen.queryByText('取餐號碼 7')).toBeNull();
+  expect(screen.getByRole('alert').textContent).toContain('目前讀不到訂單');
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取訂單' }));
+  expect(state.paths).toEqual([first.path, first.path]);
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+  state.rows = [];
+  await act(async () => { first.emit(); first.fail(); });
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('快取的空清單或通知訂單須等伺服器確認，避免誤報沒有下單', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.search = 'orderId=co_archived';
+  state.rows = [];
+  state.linkedFromCache = true;
+  render(<OrdersPage />);
+  expect(screen.getByRole('status').textContent).toContain('等候連線');
+  expect(screen.queryByText(/找不到這筆訂單|還沒有訂單/)).toBeNull();
+  state.fromCache = true;
+  state.rows = [{ id: 'co_other', data: { status: 'ready', queueNumber: 9 } }];
+  act(() => state.emitters[0].emit());
+  expect(screen.getByRole('status').textContent).toContain('上次同步');
+  state.fromCache = state.linkedFromCache = false;
+  act(() => state.emitters.forEach((entry) => entry.emit()));
+  expect(screen.getByRole('status').textContent).toContain('找不到這筆訂單');
+});
+
+it('慢速或失敗的通知查詢不遮住近期訂單，單獨重試不重讀清單', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.search = 'orderId=co_archived';
+  state.delayLinked = true;
+  render(<OrdersPage />);
+  const firstLookup = state.emitters[1];
+  expect(screen.getByRole('status').textContent).toContain('通知中的訂單');
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+  act(() => firstLookup.fail());
+  expect(screen.getByRole('alert').textContent).toContain('通知中的訂單');
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取這筆訂單' }));
+  expect(state.paths).toEqual([state.emitters[0].path, firstLookup.path, firstLookup.path]);
+  state.linkedRow = { id: 'co_archived', data: { status: 'ready', queueNumber: 42 } };
+  act(() => firstLookup.emit());
+  expect(screen.queryByText('取餐號碼 42')).toBeNull();
+  act(() => state.emitters[2].emit());
+  expect(screen.getByText('取餐號碼 42')).toBeTruthy();
 });

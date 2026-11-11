@@ -1,0 +1,191 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  align-items: start;
+  gap: 28px;
+  max-width: 1280px;
+  margin-inline: auto;
+}
+
+.visual, .details { min-width: 0; }
+.scene {
+  position: relative;
+  height: clamp(280px, 42vw, 480px);
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel, var(--surface));
+}
+.sceneHost { position: absolute; inset: 0; touch-action: pan-y pinch-zoom; }
+.sceneHost:focus-visible { outline: 3px solid var(--brand); outline-offset: -4px; }
+.sceneHost canvas { display: block; width: 100%; height: 100%; }
+.compass {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--brand);
+  background: var(--surface, var(--bg));
+  font-size: 0.75rem;
+}
+.compass svg { flex-shrink: 0; }
+.cameraTools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.cameraTools > button { min-width: 44px; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.cameraTools > button[aria-disabled='true'] { opacity: 0.55; cursor: default; }
+.cameraTools > span { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.sceneCaption {
+  position: absolute;
+  bottom: 12px;
+  left: 14px;
+  padding: 4px 7px;
+  color: var(--text);
+  background: var(--surface, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.sceneMessage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 12px;
+  color: var(--muted);
+  text-align: center;
+  background: var(--surface, var(--bg));
+}
+.sceneMessage p { max-width: 30ch; margin: 0; line-height: 1.7; }
+.viewTools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.viewTools > span { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
+.viewTools button[aria-pressed='true'] { color: var(--brand); border-color: currentColor; }
+.note { margin: 12px 0 0; color: var(--muted); font-size: 0.8125rem; line-height: 1.8; }
+.footprintInfo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--bg));
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.footprintInfo strong { color: var(--text); font-weight: 650; }
+.footprintInfo span { flex: 1 1 100%; }
+.footprintInfo small { color: var(--muted); font-size: 0.75rem; }
+.footprintInfo .retryFootprints {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface, var(--bg));
+  font: inherit;
+  cursor: pointer;
+}
+.footprintInfo .retryFootprints:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.footprintInfo a, .officialFloors a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  color: var(--brand);
+  text-underline-offset: 3px;
+}
+.officialFloors {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--bg));
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+.officialFloors strong { font-weight: 650; }
+.officialFloors p { margin: 0; }
+.officialFloors small { color: var(--muted); }
+
+.details { display: grid; gap: 24px; }
+.selectField { display: grid; gap: 8px; }
+.selectField label, .progress label { font-size: 0.8125rem; color: var(--muted); }
+.selectField select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface, var(--bg));
+}
+.progress label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.progress label span { font-variant-numeric: tabular-nums; }
+.progress input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 4px 0;
+  padding: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+.steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.steps > button { flex: 1 1 100px; }
+.place { padding-top: 20px; border-top: 1px solid var(--border); }
+.place h3 { margin: 5px 0 12px; font-size: 1.5rem; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.place > p { margin: 8px 0; font-size: 0.875rem; line-height: 1.8; overflow-wrap: anywhere; }
+.place > .category { margin: 0; color: var(--muted); font-size: 0.75rem; }
+.place > .pending { padding-left: 12px; border-left: 2px solid currentColor; }
+.actions { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.actions > a, .actions > button, .steps > button, .viewTools > button {
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.source { display: inline-flex; align-items: center; justify-content: center; font-size: 0.8125rem; }
+.unavailable { max-width: 48ch; margin: 12px auto; line-height: 1.8; }
+.layout :is(button, select, input, a):focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
+
+@media (max-width: 760px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .scene { height: clamp(250px, 48dvh, 360px); }
+  .viewTools > span { flex: 1 1 100%; margin: 4px 0 0; }
+  .details { gap: 20px; }
+}
+
+@media (forced-colors: active) {
+  .scene { border-color: CanvasText; }
+  .sceneCaption, .compass { color: CanvasText; background: Canvas; }
+  .layout :is(button, select, input, a):focus-visible { outline-color: Highlight; }
+}

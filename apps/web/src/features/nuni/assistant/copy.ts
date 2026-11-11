@@ -1,4 +1,5 @@
 import { formatTaipeiDateTime, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 
 export const SUGGESTIONS = [
   '這禮拜有什麼要交的',
@@ -8,6 +9,7 @@ export const SUGGESTIONS = [
 ];
 
 export const PAGE_LABELS: Record<string, string> = {
+  ...Object.fromEntries(ASSISTANT_SERVICES.map((service) => [service.href.split('?')[0].slice(1), service.label])),
   today: '今日',
   timetable: '課表',
   calendar: '行事曆',
@@ -20,6 +22,7 @@ export const PAGE_LABELS: Record<string, string> = {
   announcements: '公告',
   events: '活動',
   food: '點餐',
+  settings: '設定',
 };
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -30,6 +33,11 @@ export function pageKey(href: string): string {
 }
 
 export function pageLabel(href: string): string {
+  if (pageKey(href) === 'settings' && href.includes('?')) {
+    const params = new URLSearchParams(href.split('?')[1]?.split('#')[0]);
+    if (params.getAll('section').length === 1 && params.get('section') === 'assistant')
+      return '助理權限';
+  }
   return PAGE_LABELS[pageKey(href)] || '頁面';
 }
 
@@ -98,6 +106,8 @@ export function formatDueInstant(value: string): string {
 }
 
 export function stepFamily(name: string): string {
+  if (name === 'get_imported_academics') return '個人成績與學分紀錄';
+  if (name === 'list_campus_services') return '服務入口';
   if (/food/.test(name)) return '餐點與訂單';
   if (/transit/.test(name)) return '交通資訊';
   if (/campus/.test(name)) return '校園資訊';

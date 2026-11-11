@@ -28,7 +28,7 @@ const records = [
     tab: '設備問題',
     start: '＋ 記錄問題',
     field: '問題名稱 *',
-    save: '儲存紀錄',
+    save: '存成我的報修備忘',
     form: '設備問題表單',
     title: '冷氣異音',
   },

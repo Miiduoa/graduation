@@ -8,6 +8,7 @@ import logging
 from typing import Sequence
 
 import chromadb
+from chromadb.config import Settings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import CHROMA_DIR, RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP
@@ -25,16 +26,63 @@ _splitter = RecursiveCharacterTextSplitter(
 def get_chroma_client() -> chromadb.ClientAPI:
     global _client
     if _client is None:
-        _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        _client = chromadb.PersistentClient(
+            path=str(CHROMA_DIR),
+            settings=Settings(chroma_api_impl="chromadb.api.rust.RustBindingsAPI"),
+        )
     return _client
+
+
+def _validate_embedding_configs(value: object) -> None:
+    """Check raw JSON before Chroma reconstructs collection/schema functions."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "embedding_function" and item not in (
+                None,
+                {"type": "legacy"},
+                {"type": "unknown"},
+                {"type": "known", "name": "default", "config": {}},
+            ):
+                raise ValueError("Unsupported local RAG embedding configuration")
+            _validate_embedding_configs(item)
+    elif isinstance(value, list):
+        for item in value:
+            _validate_embedding_configs(item)
 
 
 def get_or_create_collection(name: str = "campus") -> chromadb.Collection:
     client = get_chroma_client()
-    return client.get_or_create_collection(
+    collection = client.get_or_create_collection(
         name=name,
         metadata={"hnsw:space": "cosine"},
     )
+    # configuration/schema properties instantiate stored embedding functions.
+    # The raw model keeps legacy/default stores readable without trusting a
+    # restored collection to choose a model repository or executable loader.
+    model = collection.get_model()
+    schema = model.serialized_schema
+    if not isinstance(model.configuration_json, dict) or (
+        schema is not None and not isinstance(schema, dict)
+    ):
+        raise ValueError("Unsupported local RAG configuration")
+    _validate_embedding_configs(model.configuration_json)
+    if schema is not None:
+        defaults = schema.get("defaults", {})
+        keys = schema.get("keys", {})
+        if (
+            set(schema) - {"defaults", "keys", "cmek"}
+            or schema.get("cmek") is not None
+            or not isinstance(defaults, dict)
+            or not isinstance(keys, dict)
+        ):
+            raise ValueError("Unsupported local RAG configuration")
+        _validate_embedding_configs(defaults)
+        # Names inside schema.keys are document metadata names, not config keys.
+        for value_types in keys.values():
+            if not isinstance(value_types, dict):
+                raise ValueError("Unsupported local RAG configuration")
+            _validate_embedding_configs(value_types)
+    return collection
 
 
 def index_documents(

@@ -187,6 +187,31 @@ test('inspection refunds block closure until settled and retain both owners refu
   assert.deepEqual(deletedAuthUsers, ['alice']);
 });
 
+test('school membership stamps are cleared before membership documents are deleted', async () => {
+  await seed([
+    ['users/alice', { email: 'private@example.test' }],
+    [
+      'schools/pu/members/alice',
+      { status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1' },
+    ],
+  ]);
+  const database = {
+    collection: db.collection.bind(db),
+    collectionGroup: db.collectionGroup.bind(db),
+    runTransaction: db.runTransaction.bind(db),
+    async recursiveDelete(reference) {
+      if (reference.path === 'schools/pu/members/alice') {
+        throw new Error('injected membership delete unavailable');
+      }
+      return db.recursiveDelete(reference);
+    },
+  };
+  await assert.rejects(handler(database)(request()), /injected membership delete unavailable/);
+  assert.deepEqual(deletedAuthUsers, []);
+  assert.equal((await db.doc('users/alice').get()).data().accountDeletionInProgress, true);
+  assert.deepEqual((await db.doc('schools/pu/members/alice').get()).data(), { status: 'inactive' });
+});
+
 test('failed cleanup leaves Auth untouched and a retry does not decrement committed membership or event counts twice', async () => {
   const event = 'schools/pu/clubEvents/event';
   await seed([

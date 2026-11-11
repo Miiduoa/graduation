@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseAssistantCalendarEvent } from '@campus/shared/src/assistantExecution';
 if (typeof window !== 'undefined') throw new Error('Server only');
 export class V2Error extends Error {
   constructor(
@@ -116,6 +117,9 @@ export function eventArgs(raw: unknown): EventArgs {
     if ((out.endDate || out.date) === out.date && out.startTime >= out.endTime) return fail();
   } else if (v.startTime !== undefined || v.endTime !== undefined) return fail();
   if (out.endDate && Date.parse(out.endDate) - Date.parse(out.date) > 31 * 86400000) return fail();
+  // Every proposed event must also be representable by the shared verified
+  // receipt; do not discover an invalid date or control character after writing.
+  try { parseAssistantCalendarEvent(out); } catch { return fail(); }
   return out;
 }
 export type Binding = {

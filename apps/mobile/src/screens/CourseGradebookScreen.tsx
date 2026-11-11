@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { GroupSubmissionAttachments } from './GroupSubmissionAttachments';
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
@@ -353,6 +354,7 @@ export function CourseGradebookScreen(props: any) {
                       {assignment.title}
                     </Text>
                     <Pill text={`${assignment.weight}%`} kind="accent" />
+                    {isTeacher && routeGroupId && <GroupSubmissionAttachments key={JSON.stringify([auth.user?.uid, routeGroupId, assignment.id])} groupId={routeGroupId} assignmentId={assignment.id} />}
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                     <Pill

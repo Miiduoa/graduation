@@ -378,13 +378,13 @@
   }
 }
 
-.voiceTrigger {
+.account > .voiceTrigger {
   gap: 7px;
-  border-color: var(--brand) !important;
-  background: var(--accent-soft) !important;
-  color: var(--brand) !important;
-  font-weight: 650 !important;
-  border-radius: 11px !important;
+  border-color: var(--brand);
+  background: var(--accent-soft);
+  color: var(--brand);
+  font-weight: 650;
+  border-radius: 11px;
 }
 .voicePanel {
   position: fixed;
@@ -434,4 +434,46 @@
 }
 @media (max-width: 360px) {
   .account > .voiceTrigger { min-width: 40px; padding-inline: 7px; }
+}
+
+.today .account > a,
+.today .account > button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.today .account > .voiceTrigger,
+.today .account > .quickSearch {
+  min-width: 44px;
+  padding-inline: 10px;
+}
+
+.today .account > .login {
+  color: var(--brand);
+}
+
+.today .nav > a[aria-current='page'] {
+  background: transparent;
+}
+
+.today .nav > a[aria-current='page']::after {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .today .account > a:hover,
+  .today .account > button:not(:disabled):hover {
+    color: var(--text);
+    background: var(--panel);
+    border-color: transparent;
+  }
+}
+
+@media (max-width: 760px) {
+  .today .account {
+    gap: 0;
+  }
 }

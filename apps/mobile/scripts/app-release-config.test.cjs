@@ -70,7 +70,11 @@ test('production resolves with public service configuration and no school accoun
     entitlements: { 'com.apple.security.application-groups': ['group.com.nuni.app'] },
   }]);
   assert.ok(app.ios.config && typeof app.ios.config === 'object');
-  assert.equal(app.runtimeVersion, 'campus-one-native-photo-pdf-widget-live-2');
+  assert.ok(app.ios.infoPlist.NFCReaderUsageDescription.trim().length > 0);
+  assert.deepEqual(app.ios.infoPlist['com.apple.developer.nfc.readersession.iso7816.select-identifiers'], ['F04E554E490101']);
+  assert.deepEqual(app.ios.entitlements['com.apple.developer.nfc.readersession.formats'], ['TAG']);
+  assert.ok(app.android.permissions.some((permission) => /^(android\.permission\.)?NFC$/.test(permission)));
+  assert.equal(app.runtimeVersion, 'campus-one-native-photo-pdf-widget-live-nfc-3');
   assert.equal(app.runtimeVersion, require('./prepare-native-release.cjs').production.runtimeVersion);
   assert.equal(app.updates.url, `https://u.expo.dev/${app.extra.eas.projectId}`);
   assert.equal(app.extra.firebase.projectId, 'campus-one-tw');
@@ -159,9 +163,9 @@ test('optional native Maps configuration and Google bundle validation still work
   assert.match(result.stderr, /registered production Google iOS client requires com.nuni.app/);
 });
 
-test('預覽與正式版使用獨立且包含影像模組的新執行版本', () => {
+test('預覽與正式版使用獨立且包含學生證 NFC 的執行版本', () => {
   const preview = config({ APP_ENV: 'preview' });
-  assert.equal(preview.runtimeVersion, 'campus-preview-native-photo-pdf-widget-live-2');
+  assert.equal(preview.runtimeVersion, 'campus-preview-native-photo-pdf-widget-live-nfc-3');
   assert.notEqual(preview.runtimeVersion, config().runtimeVersion);
   const updates = readFileSync(resolve(appRoot, 'ios/mobile/Supporting/Expo.plist'), 'utf8');
   assert.ok(updates.includes(preview.runtimeVersion));

@@ -265,7 +265,7 @@ function PersonalCalendarWorkspace({
     setBaseline(record);
     setDraft(draftFromPersonalEvent(record));
     setFormError('');
-    setNotice('已開啟通知對應的個人行程（此裝置）。');
+    setNotice('已開啟指定的個人行程（此裝置）。');
   }, [focusEventId, load, scope]);
 
   const openCreate = () => {

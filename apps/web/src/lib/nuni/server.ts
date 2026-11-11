@@ -10,6 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
+export { boundedBytes } from '../server/boundedBytes';
+
 export const SESSION_COOKIE =
   process.env.NODE_ENV === 'production'
     ? '__Host-campus-platform-session'
@@ -17,7 +19,32 @@ export const SESSION_COOKIE =
 export const LOGIN_COOKIE =
   process.env.NODE_ENV === 'production' ? '__Host-campus-one-login' : 'campus-one-login';
 export const HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
-export type PlatformSession = { sessionHandle: string; expiresAt: number; pendingLogout?: true };
+export type PlatformServiceAccess = { social: boolean; cloudAi: boolean };
+export type PlatformSession = {
+  sessionHandle: string;
+  expiresAt: number;
+  pendingLogout?: true;
+  /** Legacy cookie field; ignored on read and removed on update. */
+  restrictedServices?: { social?: true; cloudAi?: true };
+};
+
+// Existing platform services are always enabled. Legacy preferences are ignored.
+export function platformServiceAccess(_session: PlatformSession): PlatformServiceAccess {
+  return { social: true, cloudAi: true };
+}
+
+export function requirePlatformService(_session: PlatformSession, _service: keyof PlatformServiceAccess): void {
+  // Compatibility helper: service preferences cannot revoke existing capabilities.
+}
+
+export function withPlatformServiceAccess(
+  session: PlatformSession,
+  _requested: PlatformServiceAccess,
+): PlatformSession {
+  const enabled = { ...session };
+  delete enabled.restrictedServices;
+  return enabled;
+}
 
 export function nuniEnabled() {
   // The legacy flag remains an API compatibility gate; it never selects the application shell.
@@ -130,6 +157,7 @@ export function readSession(request: NextRequest): PlatformSession | null {
     (value.pendingLogout !== undefined && value.pendingLogout !== true)
   )
     return null;
+  // Obsolete service restrictions must never invalidate a session or disable a service.
   return {
     sessionHandle: value.sessionHandle,
     expiresAt: value.expiresAt,
@@ -156,36 +184,6 @@ export function requireSession(request: NextRequest): PlatformSession {
   if (!equalSecret(request.headers.get('x-campus-session'), sessionContext(session)))
     throw new NuniError(409, 'SESSION_CHANGED');
   return session;
-}
-
-export async function boundedBytes(source: Request | Response, limit: number): Promise<Uint8Array> {
-  const declared = source.headers.get('content-length');
-  if (declared && Number(declared) > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
-  if (!source.body) throw new NuniError(400, 'INVALID_INPUT');
-  const reader = source.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new NuniError(503, 'READ_TIMEOUT')), WAKE_REQUEST_TIMEOUT_MS);
-  });
-  try {
-    while (true) {
-      const result = await Promise.race([reader.read(), deadline]);
-      if (result.done) break;
-      size += result.value.byteLength;
-      if (size > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
-      chunks.push(result.value);
-    }
-    return Buffer.concat(chunks);
-  } catch (error) {
-    void reader.cancel().catch(() => {});
-    if (error instanceof NuniError) throw error;
-    throw new NuniError(400, 'INVALID_INPUT');
-  } finally {
-    clearTimeout(timer);
-    reader.releaseLock();
-  }
 }
 
 export function binaryResponse(

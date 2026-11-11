@@ -43,6 +43,14 @@ test('computes only gaps between known lessons, not arbitrary free time', () => 
   expect(result?.content).not.toContain('第 8 節');
 });
 
+test.each(['後天下午有空堂嗎？', '今天四點以後有空堂嗎？', '今天有不到 20 分鐘的空檔嗎？'])(
+  'does not substitute weekly periods for a time or duration filter: %s', (question) => {
+    const reply = runOfflineCampusTool(question, snapshot);
+    expect(reply?.route).toBe('/timetable');
+    expect(reply?.content).toContain('實際上課時間');
+    expect(reply?.content).not.toContain('第 4–5 節');
+  });
+
 test('shows an evidence-based weekly overview and does not invent clock times', () => {
   const result = runOfflineCampusTool('這週課表有幾堂？', snapshot);
   expect(result?.content).toContain('星期一：2 堂');

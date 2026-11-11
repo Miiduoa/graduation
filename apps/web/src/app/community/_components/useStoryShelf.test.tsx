@@ -67,3 +67,18 @@ it('removes expired stories while open and excludes other schools and invalid de
   expect(result.current.viewer).toBeNull();
   expect(result.current.groups).toEqual([]);
 });
+
+it('records no self-view and retries a failed receipt only on an explicit revisit', async () => {
+  const rows = [group('me', [{}]), group('peer', [{}])];
+  const { result } = renderHook(() => useStoryShelf(rows, 'pu', 'me'));
+  act(() => result.current.open(rows[0]));
+  expect(result.current.viewer?.isOwner).toBe(true);
+  expect(markStoryViewed).not.toHaveBeenCalled();
+  vi.mocked(markStoryViewed).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => result.current.open(rows[1]));
+  expect(result.current.viewer?.isOwner).toBe(false);
+  expect(markStoryViewed).toHaveBeenCalledTimes(1);
+  await act(async () => result.current.open(rows[1]));
+  await act(async () => result.current.open(rows[1]));
+  expect(markStoryViewed).toHaveBeenCalledTimes(2);
+});

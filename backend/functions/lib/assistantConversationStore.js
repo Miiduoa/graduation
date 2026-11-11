@@ -5,13 +5,17 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const MAX_STORED_MESSAGES = 30;
 const MAX_MESSAGE_CHARS = 8000;
 
-function db() {
-  return getFirestore();
+// Older conversations could include client-supplied assistant turns. Only replay
+// transcripts written by the server after client history was removed from model input.
+function transcriptRef(uid, sessionId) {
+  if (!uid || !sessionId || sessionId.includes('/')) return null;
+  return getFirestore().collection('users').doc(uid).collection('assistantTranscripts').doc(sessionId);
 }
 
 function sanitizeMessageForStore(msg) {
   if (!msg || typeof msg !== 'object') return null;
-  if (msg.role === 'system') return null;
+  // Evidence is rebuilt for each request and must never become a stored user turn.
+  if (msg.role === 'system' || msg.name === 'campus_reference_data') return null;
   const role = msg.role;
   if (!['user', 'assistant', 'tool'].includes(role)) return null;
   const out = { role };
@@ -30,39 +34,33 @@ function sanitizeMessageForStore(msg) {
 /**
  * @param {string} uid
  * @param {string} sessionId
+ * @param {string} schoolId
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-async function loadConversationMessages(uid, sessionId) {
-  if (!uid || !sessionId) return [];
-  const snap = await db()
-    .collection('sessions')
-    .doc(uid)
-    .collection('conversations')
-    .doc(sessionId)
-    .get()
-    .catch(() => null);
-  if (!snap?.exists) return [];
-  const data = snap.data() || {};
-  const list = Array.isArray(data.messages) ? data.messages : [];
-  return list.filter((m) => m && typeof m === 'object');
+async function loadConversationMessages(uid, sessionId, schoolId) {
+  const ref = transcriptRef(uid, sessionId);
+  if (!ref || !schoolId) return [];
+  const snap = await ref.get().catch(() => null);
+  const data = snap?.data();
+  if (data?.schoolId !== schoolId || !Array.isArray(data.messages)) return [];
+  return data.messages.slice(-MAX_STORED_MESSAGES).map(sanitizeMessageForStore).filter(Boolean);
 }
 
 /**
  * @param {string} uid
  * @param {string} sessionId
+ * @param {string} schoolId
  * @param {Array<Record<string, unknown>>} messages 含 system 亦可，會剔除
  */
-async function saveConversationMessages(uid, sessionId, messages) {
-  if (!uid || !sessionId || !Array.isArray(messages)) return;
+async function saveConversationMessages(uid, sessionId, schoolId, messages) {
+  const ref = transcriptRef(uid, sessionId);
+  if (!ref || !schoolId || !Array.isArray(messages)) return;
   const cleaned = messages.map(sanitizeMessageForStore).filter(Boolean);
   const trimmed = cleaned.slice(-MAX_STORED_MESSAGES);
-  await db()
-    .collection('sessions')
-    .doc(uid)
-    .collection('conversations')
-    .doc(sessionId)
+  await ref
     .set(
       {
+        schoolId,
         messages: trimmed,
         updatedAt: FieldValue.serverTimestamp(),
       },

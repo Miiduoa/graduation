@@ -1,5 +1,6 @@
 .entry {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding: clamp(20px, 4vw, 32px);
   margin-bottom: 26px;
@@ -202,4 +203,19 @@
   color: var(--text);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.compactEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.compactEntry .heading {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.compactEntry .compactHeading {
+  margin: 0;
+  font-size: 16px;
 }

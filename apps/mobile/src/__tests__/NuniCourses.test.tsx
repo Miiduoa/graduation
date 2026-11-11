@@ -48,6 +48,8 @@ jest.mock('../state/nuniSession', () => ({
     pendingLogout: false,
   }),
 }));
+// Course UI tests have no resolved local import scope; conflict coverage lives in StudyAgenda tests.
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => null }));
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').theme }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => `intent-${++mockUuid}-unique-key` }));
 
@@ -614,6 +616,8 @@ it('locks a double tap and preserves the payload and idempotency key after an un
   await view.findByRole('button', { name: '重試確認這次送出' });
   const first = writes()[0][2];
   expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(false);
+  act(() => view.getByLabelText('作業內容：校園訪談').props.onChangeText('晚到的原生輸入事件'));
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留這次內容');
   mockRequest.mockImplementation(response);
   fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
   await view.findByText('已收到伺服器繳交紀錄。');
@@ -2432,6 +2436,380 @@ it.each(['superseded'])(
     clock.mockRestore();
   },
 );
+
+it.each([
+  { choice: 'keep-draft', latest: 'submitted' },
+  { choice: 'use-current', latest: 'submitted' },
+  { choice: 'keep-draft', latest: 'withdrawn' },
+] as const)(
+  'resolves a verified superseded retry before the deadline and waits for a new explicit submission: $choice / $latest',
+  async ({ choice, latest }) => {
+    fileSubmitFlag.on = true;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-09T11:59:00Z'));
+    try {
+      assignment = {
+        ...assignment,
+        dueAt: '2026-10-09T12:00:00Z',
+        mySubmission: receipt('先前繳交'),
+        submissionCount: 1,
+      };
+      const submissions: Record<string, unknown>[] = [];
+      mockRequest.mockImplementation((path, context, input) => {
+        if (path.endsWith('/submit-files')) {
+          submissions.push(input);
+          if (submissions.length === 1) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+          if (submissions.length === 2) {
+            assignment = {
+              ...assignment,
+              mySubmission: latest === 'submitted'
+                ? { ...receipt('另一裝置的新內容'), submittedAt: '2026-10-09T11:58:00Z' }
+                : null,
+              submissionCount: latest === 'submitted' ? 1 : 0,
+            };
+            throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+          }
+          assignment = {
+            ...assignment,
+            mySubmission: { ...receipt(input.body), submittedAt: '2026-10-09T11:59:00Z' },
+            submissionCount: 1,
+          };
+          return assignment;
+        }
+        return response(path, context, input);
+      });
+      const cache = new Map<string, unknown>();
+      const ui = () => <NuniDraftProvider cache={cache}><NuniCourses /></NuniDraftProvider>;
+      const view = render(ui());
+      fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+      await view.findByLabelText('作業內容：校園訪談');
+      fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '保留我的手機草稿');
+      fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+      await view.findByRole('button', { name: '重試確認這次送出' });
+      if (latest === 'withdrawn') {
+        assignment = { ...assignment, mySubmission: null, submissionCount: 0 };
+        fireEvent.press(view.getByRole('button', { name: '更新內容' }));
+        await view.findByText('待繳作業 1 · 待答測驗 1');
+        fireEvent.press(view.getByRole('button', { name: '待完成 1' }));
+      }
+      fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+      await view.findByText(latest === 'submitted'
+        ? '這次繳交已被較新的提交取代，請以目前回執為準。'
+        : '這次送出已被取代，目前沒有你的繳交紀錄。草稿已保留，請確認後再送出。');
+      if (latest === 'submitted') expect(view.getByText('另一裝置的新內容')).toBeTruthy();
+      else {
+        expect(view.queryByText('先前繳交')).toBeNull();
+        expect(view.getByText('待繳作業 1 · 待答測驗 1')).toBeTruthy();
+        expect(view.getByRole('button', { name: '待完成 1' })).toHaveAccessibilityState({ selected: true });
+      }
+      await view.findByRole('button', { name: '保留草稿，儲存時覆寫' });
+      expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留我的手機草稿');
+      expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(true);
+      expect(view.queryByRole('button', { name: '重試確認這次送出' })).toBeNull();
+      expect(view.queryByText('已收到伺服器繳交紀錄。')).toBeNull();
+      expect(submissions).toHaveLength(2);
+      expect(submissions[1]).toEqual(submissions[0]);
+
+      // The resolved old key must not return when the same account is revalidated.
+      mockSession = { ...mockSession, context: 'context-revalidated' };
+      view.rerender(ui());
+      await view.findByRole('button', { name: '保留草稿，儲存時覆寫' });
+      expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留我的手機草稿');
+      expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(true);
+      expect(view.queryByRole('button', { name: '重試確認這次送出' })).toBeNull();
+      const submitLabel = latest === 'submitted' ? '更新作業繳交' : '繳交作業';
+      fireEvent.press(view.getByRole('button', { name: submitLabel }));
+      expect(submissions).toHaveLength(2);
+      expect(view.getByText('請先選擇使用最新內容，或保留草稿後再儲存。')).toBeTruthy();
+      fireEvent.press(view.getByRole('button', {
+        name: choice === 'keep-draft' ? '保留草稿，儲存時覆寫' : '改用目前內容',
+      }));
+      expect(submissions).toHaveLength(2);
+      const expectedBody = choice === 'keep-draft' ? '保留我的手機草稿' : '另一裝置的新內容';
+      expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe(expectedBody);
+      fireEvent.press(view.getByRole('button', { name: submitLabel }));
+      await view.findByText('已收到伺服器繳交紀錄。');
+      expect(submissions).toHaveLength(3);
+      expect(submissions[2]).toMatchObject({ body: expectedBody, fileIds: [] });
+      expect(submissions[2].idempotencyKey).not.toBe(submissions[0].idempotencyKey);
+      expect(view.queryByText(/這份內容已有更新/)).toBeNull();
+      expect(view.queryByText('這次繳交已被較新的提交取代，請以目前回執為準。')).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  },
+);
+
+it.each([
+  'generic-conflict', 'wrong-status', 'read-failed', 'missing-activity',
+  'other-activity', 'other-course', 'other-account', 'missing-on-first-attempt',
+] as const)(
+  'retains the exact uncertain submission until superseded recovery is verified: %s',
+  async (failure) => {
+    fileSubmitFlag.on = true;
+    const submissions: Record<string, unknown>[] = [];
+    const failedAttempt = failure === 'missing-on-first-attempt' ? 1 : 2;
+    let recoveryReads = 0;
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/submit-files')) {
+        submissions.push(input);
+        if (submissions.length < failedAttempt) throw new NuniError(503, 'UNAVAILABLE');
+        if (submissions.length === failedAttempt)
+          throw new NuniError(failure === 'wrong-status' ? 503 : 409,
+            failure === 'generic-conflict' ? 'IDEMPOTENCY_CONFLICT' : 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+        assignment = { ...assignment, mySubmission: receipt(input.body), submissionCount: 1 };
+        return assignment;
+      }
+      if (path.endsWith('/assignments') && submissions.length === failedAttempt) {
+        recoveryReads += 1;
+        if (failure === 'read-failed') throw new NuniError(503, 'UNAVAILABLE');
+        if (failure === 'missing-activity' || failure === 'missing-on-first-attempt') return { assignments: [] };
+        const fresh = { ...assignment, mySubmission: receipt('不可採用的紀錄') };
+        if (failure === 'other-activity') {
+          const otherId = 'cwa_99999999-9999-4999-8999-999999999999';
+          return { assignments: [{ ...fresh, id: otherId, mySubmission: { ...fresh.mySubmission, assignmentId: otherId } }] };
+        }
+        if (failure === 'other-course')
+          return { assignments: [{ ...fresh, workspaceId: 'cw_99999999-9999-4999-8999-999999999999' }] };
+        if (failure === 'other-account')
+          return { assignments: [{ ...fresh, mySubmission: { ...fresh.mySubmission, platformAccountId: 'pa_99999999-9999-4999-8999-999999999999' } }] };
+        return { assignments: [fresh] };
+      }
+      return response(path, context, input);
+    });
+    const view = await openCourse();
+    fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '仍須核對的原始內容');
+    fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+    if (failedAttempt === 2)
+      fireEvent.press(await view.findByRole('button', { name: '重試確認這次送出' }));
+    await view.findByRole('button', { name: '重試確認這次送出' });
+    expect(submissions).toHaveLength(failedAttempt);
+    expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(false);
+    expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('仍須核對的原始內容');
+    expect(view.queryByRole('button', { name: '保留草稿，儲存時覆寫' })).toBeNull();
+    expect(view.queryByText('不可採用的紀錄')).toBeNull();
+    expect(view.queryByText('已收到伺服器繳交紀錄。')).toBeNull();
+    expect(recoveryReads).toBe(failure === 'generic-conflict' || failure === 'wrong-status' ? 0 : 1);
+    fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+    await view.findByText('已收到伺服器繳交紀錄。');
+    expect(submissions).toHaveLength(failedAttempt + 1);
+    expect(submissions.every((payload) => JSON.stringify(payload) === JSON.stringify(submissions[0]))).toBe(true);
+  },
+);
+
+it('does not let a superseded read from a replaced session resolve the current retry intent', async () => {
+  fileSubmitFlag.on = true;
+  const cache = new Map<string, unknown>();
+  const ui = () => <NuniDraftProvider cache={cache}><NuniCourses /></NuniDraftProvider>;
+  const fresh = deferred<unknown>();
+  const submissions: Record<string, unknown>[] = [];
+  let readingOldScope = false;
+  mockRequest.mockImplementation((path, context, input) => {
+    if (path.endsWith('/submit-files')) {
+      submissions.push(input);
+      if (submissions.length === 1) throw new NuniError(503, 'UNAVAILABLE');
+      if (submissions.length === 2) throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+      return { ...assignment, mySubmission: receipt(input.body), submissionCount: 1 };
+    }
+    if (path.endsWith('/assignments') && submissions.length === 2 && context === 'context-first') {
+      readingOldScope = true;
+      return fresh.promise;
+    }
+    return response(path, context, input);
+  });
+  const view = render(ui());
+  fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+  fireEvent.changeText(await view.findByLabelText('作業內容：校園訪談'), '保留原本的待確認內容');
+  fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+  fireEvent.press(await view.findByRole('button', { name: '重試確認這次送出' }));
+  await waitFor(() => expect(readingOldScope).toBe(true));
+  mockSession = { ...mockSession, context: 'context-revalidated' };
+  view.rerender(ui());
+  await view.findByRole('button', { name: '重試確認這次送出' });
+  await act(async () => fresh.resolve({ assignments: [{ ...assignment, mySubmission: receipt('舊畫面晚到的回執') }] }));
+  expect(view.getByLabelText('作業內容：校園訪談').props.editable).toBe(false);
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('保留原本的待確認內容');
+  expect(view.queryByText('舊畫面晚到的回執')).toBeNull();
+  expect(view.queryByRole('button', { name: '保留草稿，儲存時覆寫' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '重試確認這次送出' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  expect(submissions).toHaveLength(3);
+  expect(submissions[2]).toEqual(submissions[0]);
+});
+
+it.each([
+  { draft: 'text-and-file', choice: 'keep-draft' },
+  { draft: 'file-only', choice: 'keep-draft' },
+  { draft: 'text-and-file', choice: 'use-current' },
+] as const)(
+  'keeps superseded attachment input until the user explicitly chooses: $draft / $choice',
+  async ({ draft, choice }) => {
+    fileSubmitFlag.on = true;
+    const picker = require('expo-document-picker');
+    picker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///retained.pdf', name: 'retained.pdf', mimeType: 'application/pdf' }],
+    });
+    const metadata = (id: string) => ({
+      id, originalName: 'retained.pdf', contentType: 'application/pdf', byteSize: 12, kind: 'file',
+      downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${id}/content`,
+      downloadExp: '1', downloadSig: 'sig',
+    });
+    const originalFile = metadata('cwf_77777777-7777-4777-8777-777777777777');
+    const freshFile = metadata('cwf_88888888-8888-4888-8888-888888888888');
+    mockUpload.mockReset().mockResolvedValueOnce(originalFile).mockResolvedValue(freshFile);
+    let intentRequests = 0;
+    const submissions: Record<string, unknown>[] = [];
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/files/intents')) {
+        const file = ++intentRequests === 1 ? originalFile : freshFile;
+        return { intents: [{ ...file, uploadPath: file.downloadPath }] };
+      }
+      if (path.endsWith('/submit-files')) {
+        submissions.push(input);
+        if (submissions.length === 1) throw new NuniError(503, 'ASSIGNMENT_FILE_STORE_UNAVAILABLE');
+        if (submissions.length === 2) {
+          assignment = { ...assignment, mySubmission: receipt('另一裝置的新內容'), submissionCount: 1 };
+          throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_SUPERSEDED');
+        }
+        assignment = {
+          ...assignment,
+          mySubmission: { ...receipt(input.body ?? '附件作業'), files: input.fileIds.length ? [freshFile] : [] },
+          submissionCount: 1,
+        };
+        return assignment;
+      }
+      return response(path, context, input);
+    });
+    const view = await openCourse();
+    const body = draft === 'file-only' ? '' : '這是我原本選擇的作業內容';
+    if (body) fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), body);
+    fireEvent.press(view.getByRole('button', { name: '檔案' }));
+    await view.findByText('retained.pdf · 12 B');
+    fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+    fireEvent.press(await view.findByRole('button', { name: '重試確認這次送出' }));
+    await view.findByRole('button', { name: '保留草稿，儲存時覆寫' });
+    expect(view.getByText('retained.pdf · 12 B')).toBeTruthy();
+    expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe(body);
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1]).toEqual(submissions[0]);
+    expect(intentRequests).toBe(1);
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    expect(submissions).toHaveLength(2);
+    fireEvent.press(view.getByRole('button', { name: choice === 'keep-draft' ? '保留草稿，儲存時覆寫' : '改用目前內容' }));
+    expect(submissions).toHaveLength(2);
+    if (choice === 'use-current') expect(view.queryByText('retained.pdf · 12 B')).toBeNull();
+    else expect(view.getByText('retained.pdf · 12 B')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    await view.findByText('已收到伺服器繳交紀錄。');
+    expect(submissions).toHaveLength(3);
+    expect(submissions[2].idempotencyKey).not.toBe(submissions[0].idempotencyKey);
+    expect(submissions[2]).toMatchObject({
+      fileIds: choice === 'keep-draft' ? [freshFile.id] : [],
+      ...(choice === 'use-current' ? { body: '另一裝置的新內容' } : body ? { body } : {}),
+    });
+    if (choice === 'keep-draft' && !body) expect(submissions[2]).not.toHaveProperty('body');
+    expect(intentRequests).toBe(choice === 'keep-draft' ? 2 : 1);
+    expect(mockUpload).toHaveBeenCalledTimes(choice === 'keep-draft' ? 2 : 1);
+    expect(view.queryByText('retained.pdf · 12 B')).toBeNull();
+  },
+);
+
+it.each(['keep-draft', 'use-current'] as const)(
+  'compares an unsent attachment draft with the new receipt after reopening: %s',
+  async (choice) => {
+    fileSubmitFlag.on = true;
+    assignment = { ...assignment, mySubmission: receipt('選檔時的原始內容'), submissionCount: 1 };
+    const cache = new Map<string, unknown>();
+    const ui = () => <NuniDraftProvider cache={cache}><NuniCourses /></NuniDraftProvider>;
+    const picker = require('expo-document-picker');
+    picker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///unsent.pdf', name: 'unsent.pdf', mimeType: 'application/pdf' }],
+    });
+    const fileId = 'cwf_77777777-7777-4777-8777-777777777777';
+    const metadata = {
+      id: fileId, originalName: 'unsent.pdf', contentType: 'application/pdf', byteSize: 12, kind: 'file',
+      downloadPath: `class-workspaces/${courseId}/assignments/${assignmentId}/files/${fileId}/content`,
+      downloadExp: '1', downloadSig: 'sig',
+    };
+    mockUpload.mockReset().mockResolvedValue(metadata);
+    const submissions: Record<string, unknown>[] = [];
+    mockRequest.mockImplementation((path, context, input) => {
+      if (path.endsWith('/files/intents')) return { intents: [{ ...metadata, uploadPath: metadata.downloadPath }] };
+      if (path.endsWith('/submit-files')) {
+        submissions.push(input);
+        assignment = { ...assignment, mySubmission: { ...receipt(input.body), files: input.fileIds.length ? [metadata] : [] } };
+        return assignment;
+      }
+      return response(path, context, input);
+    });
+    let view = render(ui());
+    fireEvent.press(await view.findByRole('button', { name: '服務設計課程' }));
+    fireEvent.press(await view.findByRole('button', { name: '檔案' }));
+    await view.findByText('unsent.pdf · 12 B');
+    view.unmount();
+    assignment = {
+      ...assignment,
+      mySubmission: { ...receipt('另一裝置在離開期間更新'), submittedAt: '2026-10-09T04:00:00Z' },
+    };
+    view = render(ui());
+    await view.findByText('另一裝置在離開期間更新');
+    expect(view.getByText('unsent.pdf · 12 B')).toBeTruthy();
+    expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('選檔時的原始內容');
+    await view.findByRole('button', { name: '保留草稿，儲存時覆寫' });
+    fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '另一裝置在離開期間更新');
+    expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('另一裝置在離開期間更新');
+    fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '選檔時的原始內容');
+    expect(mockUpload).not.toHaveBeenCalled();
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    expect(submissions).toHaveLength(0);
+    const lateSelection = deferred<unknown>();
+    if (choice === 'use-current') {
+      picker.getDocumentAsync.mockReturnValueOnce(lateSelection.promise);
+      fireEvent.press(view.getByRole('button', { name: '檔案' }));
+    }
+    fireEvent.press(view.getByRole('button', { name: choice === 'keep-draft' ? '保留草稿，儲存時覆寫' : '改用目前內容' }));
+    if (choice === 'use-current') {
+      await act(async () => lateSelection.resolve({
+        canceled: false,
+        assets: [{ uri: 'file:///late.pdf', name: 'late.pdf', mimeType: 'application/pdf' }],
+      }));
+      expect(view.queryByText('unsent.pdf · 12 B')).toBeNull();
+      expect(view.queryByText('late.pdf · 12 B')).toBeNull();
+    }
+    const body = choice === 'keep-draft' ? '選檔時的原始內容' : '另一裝置在離開期間更新';
+    expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe(body);
+    expect(submissions).toHaveLength(0);
+    fireEvent.press(view.getByRole('button', { name: '更新作業繳交' }));
+    await view.findByText('已收到伺服器繳交紀錄。');
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({ body, fileIds: choice === 'keep-draft' ? [fileId] : [] });
+    expect(mockUpload).toHaveBeenCalledTimes(choice === 'keep-draft' ? 1 : 0);
+  },
+);
+
+it('ignores a late file selection after the original text submission has been confirmed', async () => {
+  fileSubmitFlag.on = true;
+  const picker = require('expo-document-picker');
+  const selection = deferred<unknown>();
+  picker.getDocumentAsync.mockReturnValueOnce(selection.promise);
+  mockRequest.mockImplementation((path, context, input) => path.endsWith('/submit-files')
+    ? { ...assignment, mySubmission: receipt(input.body), submissionCount: 1 }
+    : response(path, context, input));
+  const view = await openCourse();
+  fireEvent.changeText(view.getByLabelText('作業內容：校園訪談'), '先送出的文字');
+  fireEvent.press(view.getByRole('button', { name: '檔案' }));
+  fireEvent.press(view.getByRole('button', { name: '繳交作業' }));
+  await view.findByText('已收到伺服器繳交紀錄。');
+  await act(async () => selection.resolve({
+    canceled: false,
+    assets: [{ uri: 'file:///late.pdf', name: 'late.pdf', mimeType: 'application/pdf' }],
+  }));
+  expect(view.queryByText('late.pdf · 12 B')).toBeNull();
+  expect(view.getByLabelText('作業內容：校園訪談').props.value).toBe('先送出的文字');
+  expect(mockRequest.mock.calls.filter(([path]) => path.endsWith('/submit-files'))).toHaveLength(1);
+});
 
 it('舊版本缺少影像模組時保留既有附件操作並隱藏轉檔入口', async () => {
   const availability = jest.spyOn(photoPdf, 'photoPdfAvailable').mockReturnValue(false);

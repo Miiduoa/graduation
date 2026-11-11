@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { bytes, type Message, type ModelInput, type Obj } from './contracts';
 import { formatProviderMessages, groqModel, providerError } from './groq';
-import { run } from './runner';
+import { run, toolSummary } from './runner';
 import { searchTaichungCatalog } from '../../transit-catalog';
 import type { TransitArrival, TransitResult, TransitStop } from '../../transit';
 import {
@@ -314,6 +314,98 @@ it('compacts oversized get_transit payloads before the next model call', async (
   });
   expect(bytes(requests[1]!.messages)).toBeLessThan(4000);
   expect(JSON.stringify(requests[1]!.messages)).not.toMatch(/taichung-open-data|24\.226/);
+});
+
+it('keeps compact Providence stops and arrival seconds in the model follow-up', async () => {
+  const campus = providenceStops();
+  expect(campus).toHaveLength(16);
+  const compactStops = compactTransitResult(campusStopsResult()) as CompactTransitResult;
+  expect(bytes(compactStops)).toBeGreaterThan(400);
+  expect(bytes(compactStops)).toBeGreaterThanOrEqual(1600);
+  expect(bytes(compactStops)).toBeLessThanOrEqual(TRANSIT_COMPACT_MAX_BYTES);
+
+  const tightSummary = toolSummary(compactStops, 400);
+  expect(() => JSON.parse(tightSummary)).not.toThrow();
+  expect(Buffer.byteLength(tightSummary)).toBeLessThanOrEqual(TRANSIT_COMPACT_MAX_BYTES);
+  expect(JSON.parse(tightSummary)).toEqual(compactStops);
+  expect((JSON.parse(tightSummary) as CompactTransitResult).stops?.map((stop) => stop.id)).toEqual(
+    campus.map((stop) => stop.id),
+  );
+  for (const stop of campus) expect(tightSummary).toContain(stop.id);
+
+  const other = toolSummary(
+    { items: Array.from({ length: 40 }, (_, i) => ({ n: i, text: '摘要資料'.repeat(6) })) },
+    400,
+  );
+  expect(() => JSON.parse(other)).not.toThrow();
+  expect(Buffer.byteLength(other)).toBeLessThanOrEqual(600);
+
+  const arrivals: TransitArrival[] = [
+    sampleArrival({ seconds: 480 }),
+    sampleArrival({
+      id: campus[0]!.id + ':368',
+      route: '368',
+      seconds: 90,
+      destination: '沙鹿火車站',
+      scheduledAt: null,
+    }),
+  ];
+  const rawArrivals: TransitResult = {
+    status: 'ready',
+    kind: 'arrivals',
+    fetchedAt: '2026-11-06T00:00:00+08:00',
+    arrivals,
+  };
+  const f = fixtureAdapter();
+  f.adapter.transit = async (args) => (args.action === 'arrivals' ? rawArrivals : campusStopsResult());
+
+  const requests: ModelInput[] = [];
+  let calls = 0;
+  await run({
+    question: '公車交通',
+    history: [],
+    binding,
+    adapter: f.adapter,
+    secret,
+    now,
+    writes: true,
+    signal: new AbortController().signal,
+    log: () => {},
+    model: async (input) => {
+      requests.push(input);
+      if (++calls === 1) return transitCall;
+      const follow = input.messages.at(-1)?.content ?? '';
+      const packed = follow.match(/<results trust="untrusted">([\s\S]*)<\/results>/)?.[1];
+      expect(packed).toBeTruthy();
+      expect(() => JSON.parse(packed!)).not.toThrow();
+      for (const stop of campus) expect(follow).toContain(stop.id);
+      if (calls === 2)
+        return {
+          message: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 't2',
+                type: 'function',
+                function: {
+                  name: 'get_transit',
+                  arguments: JSON.stringify({
+                    action: 'arrivals',
+                    city: campus[0]!.city,
+                    stopId: campus[0]!.id,
+                  }),
+                },
+              },
+            ],
+          },
+          usage,
+        };
+      expect(follow).toContain('"seconds":480');
+      expect(follow).toContain('"seconds":90');
+      return { message: { role: 'assistant', content: '請至 /bus 確認。' }, usage };
+    },
+  });
+  expect(requests).toHaveLength(3);
 });
 
 it('keeps a partial transit answer when the follow-up model call is rejected', async () => {

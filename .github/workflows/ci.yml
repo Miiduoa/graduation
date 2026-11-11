@@ -92,7 +92,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
-          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
           python3 deploy/nuni-api/food-ordering/build_test.py
           node --test deploy/nuni-web-legacy/source.test.mjs deploy/nuni-web-legacy/build.test.mjs deploy/nuni-api/security/source.test.mjs
 
@@ -159,6 +159,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: nuni UI design checks
+        run: |
+          node --test scripts/ui-design-gate.test.mjs
+          node scripts/ui-design-gate.mjs --base HEAD^1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -180,6 +187,9 @@ jobs:
 
       - name: Type check
         run: pnpm typecheck
+
+      - name: Test platform public Agent admission contracts
+        run: node scripts/test-platform-public-agent.mjs
 
   test-mobile:
     name: Mobile Tests
@@ -250,6 +260,21 @@ jobs:
   test-web:
     name: Web Tests
     runs-on: ubuntu-latest
+    # Test-only PostgreSQL. No production credentials or databases are used.
+    services:
+      attachment-postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: box
+          POSTGRES_PASSWORD: attachment_test_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U box -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -278,12 +303,25 @@ jobs:
       - name: Test shared school catalogs and personal imports
         run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
 
+      - name: Test assistant services, academic data and verified execution contracts
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
+
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
+
+      - name: Run PostgreSQL attachment race and submission regressions
+        # The two suites otherwise silently skip 13 PostgreSQL-backed cases.
+        env:
+          NUNI_TEST_POSTGRES_PORT: '5432'
+          PGPASSWORD: attachment_test_only
+        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts --reporter=verbose
 
       - name: Run web tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
         # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
+        env:
+          NUNI_TEST_POSTGRES_PORT: '5432'
+          PGPASSWORD: attachment_test_only
         run: pnpm --filter web exec vitest run --coverage
 
   test-nuni-assistant:
@@ -396,7 +434,7 @@ jobs:
 
       - name: Run Expo Doctor
         working-directory: apps/mobile
-        run: npx expo-doctor
+        run: npx expo-doctor@1.21.5
 
       - name: Bundle mobile JavaScript
         working-directory: apps/mobile

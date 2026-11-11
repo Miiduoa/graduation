@@ -1,4 +1,6 @@
 import React from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import LoginLandingScreen from './LoginLandingScreen';
@@ -16,11 +18,15 @@ import PersonalCalendarScreen from './PersonalCalendarScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { HealthScreen } from './HealthScreen';
 import { DormitoryScreen } from './DormitoryScreen';
+import { PlatformLostFoundScreen } from './PlatformLostFoundScreen';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { AIButton } from '../ui/aiFirst';
 import { useNuniSession } from '../state/nuniSession';
+import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { useSchool } from '../state/school';
+import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
@@ -38,6 +44,24 @@ function PublicCareerScreen(props: ServiceScreenProps) {
   );
 }
 
+function PublicSchoolRoute({ children, onHome }: { children: React.ReactNode; onHome: () => void }) {
+  const { school, selectionReady } = useSchool();
+  if (selectionReady === false) return <ActivityIndicator accessibilityLabel="正在讀取選校設定" />;
+  if (school.id) return <>{children}</>;
+  return (
+    <SafeAreaView style={{ flex: 1, padding: 20, backgroundColor: theme.colors.bg }}>
+      <View style={{ gap: 14 }}>
+        <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
+          先選擇要瀏覽的學校
+        </Text>
+        <Text style={{ color: theme.colors.muted }}>選校後會開啟你剛才要看的頁面。</Text>
+        <SchoolBrowsingControl />
+        <AIButton label="返回首頁" variant="ghost" onPress={onHome} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
 /**
  * 平台帳號與學校帳號各自驗證，與 MeStack 共用同一入口。
  */
@@ -49,6 +73,11 @@ export function PreAuthStack() {
   return (
     <Stack.Navigator
       initialRouteName="LoginLanding"
+      screenLayout={({ children, route, navigation }) =>
+        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
+          <PublicSchoolRoute onHome={() => navigation.navigate('LoginLanding')}>{children}</PublicSchoolRoute>
+        )
+      }
       screenOptions={createStackScreenOptions()}
       id={undefined}
     >
@@ -60,6 +89,7 @@ export function PreAuthStack() {
       <Stack.Screen name="Map" component={GoogleMapsLikeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Library" component={LibraryAiFirstScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LibraryCatalog" component={LibraryCatalogScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentCard" getComponent={() => require('./StudentCardScreen').default} options={{ title: '數位學生證' }} />
       <Stack.Screen name="SchoolInfo" component={SchoolInfoScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="BusSchedule"
@@ -96,7 +126,13 @@ export function PreAuthStack() {
         component={PublicCareerScreen}
         options={{ headerShown: false, title: '職涯' }}
       />
+      <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '失物招領' }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen
+        name="OralExamDemo"
+        getComponent={() => require('./OralExamDemoScreen').default}
+        options={{ title: '口試示範工作區' }}
+      />
       <Stack.Screen
         name="NuniTimetableAssistant"
         getComponent={() => require('./NuniTimetableAssistantScreen').NuniTimetableAssistantScreen}

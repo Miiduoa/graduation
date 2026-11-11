@@ -449,12 +449,13 @@ function AnnouncementReader({
           )}
         </section>
       ) : (
-        <div className={styles.list} aria-label="公告列表">
+        <div className={styles.list} role="region" aria-label="公告列表">
           {visibleAnnouncements.map((announcement) => (
             <article
               key={announcement.id}
               id={`announcement-${encodeURIComponent(announcement.id)}`}
               className={styles.announcement}
+              data-pinned={announcement.pinned ? 'true' : undefined}
             >
               <Link
                 className={styles.rowLink}

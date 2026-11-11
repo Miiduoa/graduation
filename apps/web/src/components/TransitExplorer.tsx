@@ -4,25 +4,27 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { revealStopResult } from '@/lib/revealStopResult';
 import {
   CAMPUS_TRANSIT, TRANSIT_CITIES, TRANSIT_MESSAGES, arrivalKind, arrivalLabel, arrivalMatchesCampusGroup,
-  directionLabel, formatDistance, hasCampusNext, isCity, isPosition, isStaticTransitStop,
-  listedCampusStops, nextLiveArrival, preferredTransitCity, publicPlaceName, queryTransit,
+  directionLabel, formatDistance, hasCampusNext, isCity, isLegacyCatalogGroup, isPosition, isStaticTransitStop,
+  listedCampusStops, nextLiveArrival, preferredTransitCity, queryTransit,
   readSavedStops, stopMapUrl, TAICHUNG_BUS_URL, TAICHUNG_CATALOG_URL,
   type TransitArrival, type TransitCity, type TransitFailure, type TransitQuery, type TransitResult, type TransitRoute, type TransitStop,
 } from '@/lib/transit';
 import { CampusBusBoard } from './CampusBusBoard';
 import { DirectBusSearch } from './DirectBusSearch';
+import { CatalogRouteList, catalogDirection } from './CatalogRouteList';
 import css from './transit.module.css';
 
 const SAVED_KEY = 'campus-one:transit-stops:v1';
 const stopKey = (stop: TransitStop) => `${stop.city}:${stop.id}`;
 const isAborted = (error: unknown) => error instanceof Error && error.name === 'AbortError';
 type Mode = 'campus' | 'nearby' | 'search' | 'saved';
-const catalogDirection = (direction: string) => direction === '去' ? '去程' : direction === '返' ? '返程' : direction || '方向未提供';
 function catalogSummary(routes: TransitRoute[] = []): string {
   if (!routes.length) return '靜態站牌資料';
   const names = [...new Set(routes.map((route) => route.name))];
   const directions = [...new Set(routes.map((route) => catalogDirection(route.direction)))];
-  return `${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等路線' : ' 路線'} · ${directions.join('／')} · 靜態站牌資料`;
+  const destinations = [...new Set(routes.map((route) => route.destination).filter(Boolean))];
+  const towards = destinations.length ? ` · 往 ${destinations.slice(0, 2).join('、')}${destinations.length > 2 ? ' 等' : ''}` : '';
+  return `${names.slice(0, 3).join('、')}${names.length > 3 ? ' 等路線' : ' 路線'} · ${directions.join('／')}${towards} · 靜態站牌資料`;
 }
 function stopSubtitle(stop: TransitStop): string {
   if (isStaticTransitStop(stop)) return catalogSummary(stop.routes);
@@ -174,7 +176,7 @@ function StopArrivals({ stop, groupLabel }: { stop: TransitStop; groupLabel?: st
 }
 
 
-function StaticStopDetails({ stop }: { stop: TransitStop }) {
+function StaticStopDetails({ stop, onFindStops }: { stop: TransitStop; onFindStops: () => void }) {
   const pane = useRef<HTMLElement>(null);
   useEffect(() => {
     revealStopResult(pane.current);
@@ -187,34 +189,44 @@ function StaticStopDetails({ stop }: { stop: TransitStop }) {
       tabIndex={-1}
       aria-labelledby="transit-static-title"
     >
-    <div className={css.sectionHeading}>
-      <div><p className={css.eyebrow}>候車站牌 · 臺中市</p><h3 id="transit-static-title">{stop.name}</h3></div>
-      <span className={css.source}>靜態站牌資料</span>
-    </div>
-    <p className={css.note}>同名站牌可能位於道路兩側。上車前請核對車頭方向，勿只看站名。</p>
-    <a className={css.mapLink} href={stopMapUrl(stop)} target="_blank" rel="noopener noreferrer">開啟步行導航 ↗</a>
-    <div className={css.message} role="status">
-      <strong>班次時間請至官方網站確認</strong>
-      <p>以下是站牌與行經路線資料，沒有班次時間或到站倒數。出發前請到官方網站確認目前營運與到站情況。</p>
-      <a href={TAICHUNG_BUS_URL} target="_blank" rel="noopener noreferrer">前往臺中公車查即時到站 ↗</a>
-    </div>
-    <h4 className={css.routeHeading}>行經路線與方向</h4>
-    {stop.routes?.length ? <ul className={css.catalogRoutes}>{stop.routes.map((route, index) => <li key={`${route.name}:${route.direction}:${route.destination}:${index}`}>
-      <strong>{route.name}</strong>
-      <span>{[catalogDirection(route.direction), route.destination ? `往 ${publicPlaceName(route.destination) || route.destination}` : '目的地未提供'].filter(Boolean).join(' · ')}</span>
-    </li>)}</ul> : <p className={css.empty}>來源未提供行經路線，請至官方網站查詢。</p>}
-    <p className={css.note}><a href={TAICHUNG_CATALOG_URL} target="_blank" rel="noopener noreferrer">臺中市政府公車路線站牌資料 ↗</a><br />
-      {stop.catalogDate && <>資料快照：{new Date(stop.catalogDate).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })}。</>}
-      來源不定期更新，路線可能調整；收藏會保留當時的資料。
-    </p>
+      <div className={css.sectionHeading}>
+        <div>
+          <p className={css.eyebrow}>候車站牌 · 臺中市</p>
+          <h3 id="transit-static-title">{stop.name}</h3>
+        </div>
+        <span className={css.source}>靜態站牌資料</span>
+      </div>
+      {isLegacyCatalogGroup(stop) ? (
+        <div className={css.message}>
+          <p>這筆舊收藏合併了多個站牌。請重新選擇要搭車的那一站，核對方向並開啟導航。</p>
+          <button type="button" className={css.secondary} onClick={onFindStops}>重新查找靜宜大學站牌</button>
+        </div>
+      ) : (
+        <>
+          <p className={css.note}>同名站牌可能位於道路兩側。上車前請核對車頭方向。</p>
+          <a className={css.mapLink} href={stopMapUrl(stop)} target="_blank" rel="noopener noreferrer">開啟步行導航 ↗</a>
+          <div className={css.message} role="status">
+            <strong>班次時間請至官方網站確認</strong>
+            <p><a href={TAICHUNG_BUS_URL} target="_blank" rel="noopener noreferrer">前往臺中公車查即時到站 ↗</a></p>
+          </div>
+          <h4 className={css.routeHeading}>行經路線與方向</h4>
+          <CatalogRouteList stopName={stop.name} routes={stop.routes ?? []} />
+        </>
+      )}
+      <p className={css.note}>
+        <a href={TAICHUNG_CATALOG_URL} target="_blank" rel="noopener noreferrer">臺中市政府公車路線站牌資料 ↗</a><br />
+        {stop.catalogDate && <>資料快照：{new Date(stop.catalogDate).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' })}。</>}
+        來源不定期更新，路線可能調整；收藏會保留當時的資料。
+      </p>
     </section>
   );
 }
 
-function StopResults({ query, saved, toggleSaved }: {
+function StopResults({ query, saved, toggleSaved, onFindStops }: {
   query: TransitQuery | null;
   saved: TransitStop[];
   toggleSaved: (stop: TransitStop) => void;
+  onFindStops: () => void;
 }) {
   const [result, setResult] = useState<TransitResult | null>(null);
   const [selected, setSelected] = useState<TransitStop | null>(null);
@@ -235,7 +247,8 @@ function StopResults({ query, saved, toggleSaved }: {
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, [query, retry]);
   const stops = query ? (result?.status === 'ready' && result.kind === 'stops' ? result.stops : []) : saved;
-  const grouped = Boolean(query?.action === 'campus' && stops.length);
+  // A catalog stop has its own boarding coordinates. Keep opposite sides of a road separate.
+  const grouped = Boolean(query?.action === 'campus' && stops.length && !stops.some(isStaticTransitStop));
   const campusList = grouped ? listedCampusStops(stops) : null;
   const shownStops = campusList ? campusList.listed : stops;
   const current = selected ? shownStops.find((stop) => listedKey(stop) === listedKey(selected)) ??
@@ -256,7 +269,7 @@ function StopResults({ query, saved, toggleSaved }: {
         {failed && <div className={css.message} role="status"><p>{result?.status === 'unavailable' && result.reason === 'rate-limited' ? '查詢的人較多，服務忙碌中。請等約 1 分鐘再試一次，或先看下方官方公車網站。' : '暫時讀不到資料，請稍後再試'}</p><button type="button" className={css.secondary} disabled={busy} onClick={() => { setBusy(true); setResult(null); setSelected(null); setRetry((value) => value + 1); }}>再試一次</button></div>}
         {!waiting && !failed && !stops.length && <p className={css.empty}>{emptyCopy}</p>}
         {!waiting && !failed && shownStops.length > 0 && <ul className={`${css.stopList}${grouped ? ` ${css.groupedStops}` : ''}`}>{shownStops.map((stop, index) => {
-          const isSaved = saved.some((entry) => stopKey(entry) === stopKey(stop));
+          const isSaved = saved.some((entry) => stopKey(entry) === stopKey(stop) && isLegacyCatalogGroup(entry) === isLegacyCatalogGroup(stop));
           const accessibleName = `${stop.name} ${stopSubtitle(stop)} 第 ${index + 1} 站牌`;
           const repeatsCity = stop.distance === null && stopSubtitle(stop) === TRANSIT_CITIES[stop.city];
           return <li key={listedKey(stop)} data-selected={current && listedKey(current) === listedKey(stop) ? 'true' : undefined}>
@@ -278,7 +291,7 @@ function StopResults({ query, saved, toggleSaved }: {
         </details>}
         {result?.status === 'ready' && result.kind === 'stops' && result.limited && !waiting && !failed && !grouped && <p className={css.note}>{query?.action === 'campus' ? '學校附近站牌較多，目前先列出前 16 站；找不到要搭的站牌時，改用「搜尋站名」輸入完整站名。' : '此範圍資料較多，僅列出部分站牌；請縮小範圍確認。'}</p>}
       </section>
-      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={listedKey(current)} stop={current} /> : <StopArrivals key={listedKey(current)} stop={current} groupLabel={grouped ? current.name : undefined} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
+      {current ? isStaticTransitStop(current) ? <StaticStopDetails key={listedKey(current)} stop={current} onFindStops={onFindStops} /> : <StopArrivals key={listedKey(current)} stop={current} groupLabel={grouped ? current.name : undefined} /> : !waiting && !failed && (stops.length > 0 || !query) ? <div className={css.placeholder}><span aria-hidden="true">→</span><h3>選好站牌，再確認方向</h3><p>點選站牌，查看路線資料與步行導航；有接通動態資料的站牌會顯示到站預估。</p></div> : null}
     </div>
   );
 }
@@ -344,11 +357,13 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
     }, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 });
   }
   function toggleSaved(stop: TransitStop) {
-    const existing = saved.some((item) => stopKey(item) === stopKey(stop));
+    const existing = saved.find((item) => stopKey(item) === stopKey(stop));
+    const removing = existing && isLegacyCatalogGroup(existing) === isLegacyCatalogGroup(stop);
     if (!existing && saved.length >= 16) { setMessage('最多可收藏 16 個站牌，請先移除不常使用的站牌。'); return; }
-    const next = existing ? saved.filter((item) => stopKey(item) !== stopKey(stop)) : [...saved, { ...stop, distance: null }];
+    const others = saved.filter((item) => stopKey(item) !== stopKey(stop));
+    const next = removing ? others : [...others, { ...stop, distance: null }];
     setSaved(next);
-    try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); setMessage(existing ? '已取消收藏。' : '已收藏在這個瀏覽器；不會儲存你目前的位置。'); }
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); setMessage(removing ? '已取消收藏。' : '已收藏在這個瀏覽器；不會儲存你目前的位置。'); }
     catch { setMessage('瀏覽器不允許儲存，這次收藏僅在目前頁面有效。'); }
   }
   const board = hasCampusNext(schoolId) && mode === 'campus';
@@ -376,7 +391,12 @@ function TransitExplorerContent({ schoolId, schoolName, legacy }: { schoolId: st
       {(mode === 'nearby' || mode === 'search') && <p className={css.privacy}>縣市僅決定查詢範圍；同一大學若有跨縣市校區，請切換到實際搭車地點的縣市。</p>}
       {mode === 'nearby' && <p className={css.privacy}>只查詢所選縣市。定位僅在你按下按鈕後使用，不會寫入個人檔案；不會持續追蹤。跨縣市旅行時請切換查詢縣市。</p>}
       {message && <p className={css.message} role="status">{message}</p>}
-      {lookup.query || mode === 'saved' ? <StopResults key={`${mode}:${lookup.revision}`} query={lookup.query} saved={saved} toggleSaved={toggleSaved} /> : <p className={css.empty}>{locating ? '正在取得你的位置；也可以切回學校站牌，不需等待定位。' : mode === 'nearby' ? '選好縣市與範圍後，按「使用我的位置」查詢。' : '輸入站名後按搜尋，不會在每次打字時傳送查詢。'}</p>}
+      {lookup.query || mode === 'saved' ? <StopResults key={`${mode}:${lookup.revision}`} query={lookup.query} saved={saved} toggleSaved={toggleSaved} onFindStops={() => {
+        switchMode('search');
+        setCity('Taichung');
+        setTerm('靜宜大學');
+        search({ action: 'search', city: 'Taichung', text: '靜宜大學' });
+      }} /> : <p className={css.empty}>{locating ? '正在取得你的位置；也可以切回學校站牌，不需等待定位。' : mode === 'nearby' ? '選好縣市與範圍後，按「使用我的位置」查詢。' : '輸入站名後按搜尋，不會在每次打字時傳送查詢。'}</p>}
     </>}
     <footer className={css.footer}><a href={city === 'Taichung' ? TAICHUNG_BUS_URL : 'https://www.taiwanbus.tw/'} target="_blank" rel="noopener noreferrer">官方公車網站 ↗</a></footer>
     {legacy && <details className={css.legacy}><summary>已登錄校園路線 · 備用查詢</summary>{legacy}</details>}
