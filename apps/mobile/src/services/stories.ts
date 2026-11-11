@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   deleteDoc,
@@ -5,14 +6,19 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   limit,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
+  startAfter,
   where,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { buildStoryViewerPage, STORY_VIEWER_QUERY_LIMIT, storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '../firebase';
+import { fetchSchoolDirectoryProfiles } from './memberDirectory';
 
 export function storiesCollection(db = getDb()) {
   return collection(db, 'campusStories');
@@ -50,6 +56,7 @@ export async function publishStory(storyId: string, payload: {
   poiName?: string | null;
   expiresAtMs: number;
 }): Promise<string> {
+  if (payload.mediaUrl) assertPrivateFileNamespace(payload.mediaUrl, `schools/${payload.schoolId}/stories/${storyId}`);
   const ref = doc(storiesCollection(), storyId);
   const content = {
     schoolId: payload.schoolId,
@@ -81,44 +88,60 @@ export async function listActiveStoriesForSchool(
   options: { throwOnError?: boolean } = {},
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
   try {
-    const snap = await getDocs(
+    // Preserve near-expiry stories with only a small request-latency buffer.
+    const read = (expiresAfter: number) => getDocs(
       query(
         storiesCollection(db),
         where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
+        where('expiresAt', '>', expiresAfter),
+        orderBy('expiresAt', 'desc'),
         limit(lim),
       ),
     );
+    const snap = await read(Date.now() + 3_000).catch((error: unknown) => {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+      return read(Date.now() + 15_000);
+    });
     return snap.docs
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    // 缺索引 fallback：不排序
-    try {
-      const snap = await getDocs(
-        query(storiesCollection(db), where('schoolId', '==', schoolId), limit(lim)),
-      );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-        .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch (error) {
-      if (options.throwOnError) throw error;
-      return [];
-    }
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
+  } catch (error) {
+    // Never fall back to a school-only query: it exposes expired metadata.
+    if (options.throwOnError) throw error;
+    return [];
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
+type StoryScope = Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>;
+
+export async function markStoryViewed(story: StoryScope, viewerUid: string) {
+  if (story.authorUid === viewerUid) return;
   const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+  const viewRef = doc(db, ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, {
     viewerUid,
     viewedAt: serverTimestamp(),
   });
+}
+
+export async function listStoryViewers(
+  story: StoryScope,
+  cursor: QueryDocumentSnapshot | null,
+) {
+  const db = getDb();
+  const receipts = collection(db, ...storyViewerCollectionPath(story));
+  const snapshot = await getDocsFromServer(query(
+    receipts,
+    orderBy('viewedAt', 'desc'),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(STORY_VIEWER_QUERY_LIMIT),
+  ));
+  return buildStoryViewerPage(snapshot.docs, story.authorUid, (uids) =>
+    fetchSchoolDirectoryProfiles(story.schoolId, uids, db),
+  );
 }
 
 export async function deleteMyStory(storyId: string) {

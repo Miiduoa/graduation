@@ -41,6 +41,7 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
@@ -527,32 +528,48 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
+  // Keep near-expiry stories visible while allowing a small request-latency buffer.
+  let expiresAfter = Date.now() + 3_000;
+  let permissionRetried = false;
+  const readStories = async (sorted: boolean) => {
+    const read = () => getDocs(query(
+      storiesCol(db),
+      where('schoolId', '==', schoolId),
+      where('expiresAt', '>', expiresAfter),
+      ...(sorted ? [orderBy('expiresAt', 'desc')] : []),
+      limit(lim),
+    ));
+    try {
+      return await read();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied' || permissionRetried) {
+        throw error;
+      }
+      permissionRetried = true;
+      expiresAfter = Date.now() + 15_000;
+      return read();
+    }
+  };
+  const toActiveStories = (docs: Array<{ id: string; data: () => unknown }>) =>
+    docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
   try {
-    const snap = await getDocs(
-      query(
-        storiesCol(db),
-        where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
-        limit(lim),
-      ),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    const snap = await getDocs(
-      query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
+    const snap = await readStories(true);
+    return toActiveStories(snap.docs);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'permission-denied') throw error;
+    const snap = await readStories(false);
+    return toActiveStories(snap.docs);
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
-  const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+export async function markStoryViewed(
+  story: Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>,
+  viewerUid: string,
+) {
+  if (story.authorUid === viewerUid) return;
+  const viewRef = doc(getDb(), ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, { viewerUid, viewedAt: serverTimestamp() });

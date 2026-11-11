@@ -60,8 +60,8 @@ export function workspacePath(id: string): string {
   return `/classroom/course/${encodeURIComponent(id)}`;
 }
 
-export function accountReturnHref(path: string): string {
-  return `/auth/account?returnUrl=${encodeURIComponent(path)}`;
+export function classroomLoginHref(path: string): string {
+  return `/classroom/login?returnUrl=${encodeURIComponent(path)}`;
 }
 
 export function adminLoginHref(path: string): string {

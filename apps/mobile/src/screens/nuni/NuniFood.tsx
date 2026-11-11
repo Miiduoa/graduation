@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState, ScrollView, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import QRCode from 'react-native-qrcode-svg';
+import {
+  FOOD_POLL_MS,
+  canShowPickupCredential,
+  foodCustomerNextStep,
+  isFoodOrderInProgress,
+} from '@campus/shared/src/foodOrderGuidance';
 import { canStartFoodOrder, foodQuoteProblem } from '@campus/shared/src/nuniFood';
 import type {
   NuniFoodCancelInput,
@@ -16,8 +22,6 @@ import type {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import {
-  FOOD_POLL_MS,
-  FOOD_TERMINAL_STATES,
   FoodButton,
   FoodCard,
   FoodField,
@@ -31,11 +35,11 @@ import {
   useFoodClient,
   useFoodLoad,
   useFoodMutation,
+  type FoodClient,
 } from './NuniFoodUi';
 import { foodPageIntro } from '@campus/shared/src/foodPageCopy';
 import { isMobileOnlineOrderingEnabled } from '../../utils/onlineOrdering';
 
-import { foodCustomerNextStep } from './foodOrderGuidance';
 import { PickupTimePicker } from './PickupTimePicker';
 import { FoodQuickAdd } from './FoodQuickAdd';
 import { formatPickupTime, pickupTimeFromMinutes } from './foodPickupTime';
@@ -57,11 +61,6 @@ export function NuniFood() {
 function FoodAccount({ context }: { context: string }) {
   const client = useFoodClient(context);
   const [selected, select] = useNuniDraftState<Selection | null>('food:selected-realm', null);
-  const loader = useCallback(
-    async () => ({ public: await client.listRealms(), orders: await client.listOrderRealms() }),
-    [client],
-  );
-  const resource = useFoodLoad(loader);
   const orderingOn = isMobileOnlineOrderingEnabled();
   const active = selected && (orderingOn || selected.mode === 'orders') ? selected : null;
   if (active)
@@ -76,40 +75,49 @@ function FoodAccount({ context }: { context: string }) {
   return (
     <ScrollView contentContainerStyle={page}>
       <FoodText title>點餐與取餐</FoodText>
-      <FoodText>{foodPageIntro(isMobileOnlineOrderingEnabled())}</FoodText>
-      <FoodReadState resource={resource} />
-      {resource.data ? (
-        <>
-          {orderingOn ? (
-            <>
-              <FoodText title>選擇用餐校區</FoodText>
-              {resource.data.public
-                .filter((realm) => realm.services.includes('food'))
-                .map((realm) => (
-                  <FoodButton
-                    key={realm.tenantId}
-                    onPress={() => select({ ...realm, mode: 'menu' })}
-                  >{`查看餐點：${realm.name}`}</FoodButton>
-                ))}
-              {!resource.data.public.some((realm) => realm.services.includes('food')) ? (
-                <FoodText>目前沒有開放接單的門市。</FoodText>
-              ) : null}
-            </>
-          ) : null}
-          <FoodText title>我的訂單</FoodText>
-          <FoodText>店家暫停接新單時，仍可從這裡查看原有訂單。</FoodText>
-          {resource.data.orders.map((realm) => (
-            <FoodButton
-              key={realm.tenantId}
-              onPress={() => select({ ...realm, mode: 'orders' })}
-            >{`訂單紀錄：${realm.name}`}</FoodButton>
-          ))}
-          {!resource.data.orders.length ? <FoodText>目前沒有訂單紀錄。</FoodText> : null}
-        </>
-      ) : null}
+      <FoodText>{foodPageIntro(orderingOn)}</FoodText>
+      {orderingOn ? <DiningRealms client={client} onSelect={select} /> : null}
+      <OrderRealms client={client} onSelect={select} />
     </ScrollView>
   );
 }
+
+type RealmChoicesProps = { client: FoodClient; onSelect(selection: Selection): void };
+
+function DiningRealms({ client, onSelect }: RealmChoicesProps) {
+  const resource = useFoodLoad(client.listRealms);
+  const realms = resource.data?.filter((realm) => realm.services.includes('food'));
+  return (
+    <>
+      <FoodText title>選擇用餐校區</FoodText>
+      <FoodReadState resource={resource} reloadLabel="重新讀取用餐校區" />
+      {realms?.map((realm) => (
+        <FoodButton key={realm.tenantId} onPress={() => onSelect({ ...realm, mode: 'menu' })}>
+          {`查看餐點：${realm.name}`}
+        </FoodButton>
+      ))}
+      {realms?.length === 0 ? <FoodText>目前沒有開放接單的門市。</FoodText> : null}
+    </>
+  );
+}
+
+function OrderRealms({ client, onSelect }: RealmChoicesProps) {
+  const resource = useFoodLoad(client.listOrderRealms);
+  return (
+    <>
+      <FoodText title>我的訂單</FoodText>
+      <FoodText>店家暫停接新單時，仍可從這裡查看原有訂單。</FoodText>
+      <FoodReadState resource={resource} reloadLabel="重新讀取訂單校區" />
+      {resource.data?.map((realm) => (
+        <FoodButton key={realm.tenantId} onPress={() => onSelect({ ...realm, mode: 'orders' })}>
+          {`訂單紀錄：${realm.name}`}
+        </FoodButton>
+      ))}
+      {resource.data?.length === 0 ? <FoodText>目前沒有訂單紀錄。</FoodText> : null}
+    </>
+  );
+}
+
 function FoodRealm({
   context,
   selection,
@@ -129,9 +137,20 @@ function FoodRealm({
     null,
   );
   const orderingOn = isMobileOnlineOrderingEnabled();
-  const [storedMode, setMode] = useState(selection.mode);
-  const mode = orderingOn ? storedMode : 'orders';
-  const [cursor, setCursor] = useState<string | undefined>();
+  const [list, setList] = useState<{ mode: Selection['mode']; cursors: string[] }>({
+    mode: selection.mode,
+    cursors: [],
+  });
+  const mode = orderingOn ? list.mode : 'orders';
+  const cursors = mode === list.mode ? list.cursors : [];
+  const cursor = cursors.at(-1);
+  const scroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  }, [mode, cursor]);
+  const changeMode = (next: Selection['mode']) => {
+    if (next !== list.mode) setList({ mode: next, cursors: [] });
+  };
   const loader = useCallback(
     async () =>
       mode === 'menu'
@@ -163,8 +182,11 @@ function FoodRealm({
         orderId={orderId}
         onBack={() => {
           selectOrder(null);
-          setMode('orders');
-          void resource.load();
+          if (mode === 'orders') void resource.load();
+          else {
+            selectLocation(null);
+            changeMode('orders');
+          }
         }}
       />
     );
@@ -179,32 +201,28 @@ function FoodRealm({
         onOrder={selectOrder}
       />
     );
+  const nextCursor = resource.data?.value.nextCursor;
   return (
-    <ScrollView contentContainerStyle={page}>
+    <ScrollView ref={scroll} contentContainerStyle={page}>
       <FoodButton onPress={onBack}>返回用餐校區</FoodButton>
       <FoodText title>{selection.name}</FoodText>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         {orderingOn ? (
           <FoodButton
             selected={mode === 'menu'}
-            onPress={() => {
-              setCursor(undefined);
-              setMode('menu');
-            }}
+            onPress={() => changeMode('menu')}
           >
             餐點門市
           </FoodButton>
         ) : null}
         <FoodButton
           selected={mode === 'orders'}
-          onPress={() => {
-            setCursor(undefined);
-            setMode('orders');
-          }}
+          onPress={() => changeMode('orders')}
         >
           我的訂單
         </FoodButton>
       </View>
+      {cursor || nextCursor ? <FoodText status>{`第 ${cursors.length + 1} 頁`}</FoodText> : null}
       <FoodReadState resource={resource} />
       {resource.data?.kind === 'menu' ? (
         <>
@@ -228,7 +246,9 @@ function FoodRealm({
             </FoodCard>
           ))}
           {!resource.data.value.locations.length ? (
-            <FoodText>目前沒有開放的門市；已有訂單可至「我的訂單」查詢。</FoodText>
+            <FoodText>
+              {cursor ? '這一頁沒有門市，可以返回上一頁。' : '目前沒有開放的門市，已有訂單可至「我的訂單」查詢。'}
+            </FoodText>
           ) : null}
         </>
       ) : null}
@@ -248,14 +268,19 @@ function FoodRealm({
             </FoodCard>
           ))}
           {!resource.data.value.orders.length ? (
-            <FoodText>這個校區目前沒有你的訂單。</FoodText>
+            <FoodText>{cursor ? '這一頁沒有訂單，可以返回上一頁。' : '這個校區目前沒有你的訂單。'}</FoodText>
           ) : null}
         </>
       ) : null}
-      {resource.data?.value.nextCursor ? (
-        <FoodButton onPress={() => setCursor(resource.data!.value.nextCursor)}>下一頁</FoodButton>
+      {cursor ? (
+        <FoodButton onPress={() => setList({ mode, cursors: cursors.slice(0, -1) })}>上一頁</FoodButton>
       ) : null}
-      {cursor ? <FoodButton onPress={() => setCursor(undefined)}>回到第一頁</FoodButton> : null}
+      {nextCursor && !cursors.includes(nextCursor) ? (
+        <FoodButton onPress={() => setList({ mode, cursors: [...cursors, nextCursor] })}>下一頁</FoodButton>
+      ) : null}
+      {cursors.length > 1 ? (
+        <FoodButton onPress={() => setList({ mode, cursors: [] })}>回到第一頁</FoodButton>
+      ) : null}
     </ScrollView>
   );
 }
@@ -358,6 +383,7 @@ function FoodMenu({
   const preparingQuote = useRef(false);
   const [stage, setStage] = useState<MenuStage>('menu');
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [customizeDraft, setCustomizeDraft] = useState<CartLine | null>(null);
   const [error, setError] = useState('');
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
@@ -379,6 +405,7 @@ function FoodMenu({
         setQuote(null);
         setStage('menu');
         setFocusId(null);
+        setCustomizeDraft(null);
         setLineErrors({});
         onOrder((receipt as NuniFoodOrderCommandResult).orderId);
       }
@@ -422,13 +449,18 @@ function FoodMenu({
     return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
   }, 0);
   const focusItem = focusId ? catalog.find((item) => item.id === focusId) : undefined;
-  const focusLine = focusId ? (cart[focusId] ?? emptyLine()) : emptyLine();
+  const focusLine = customizeDraft ?? (focusId ? (cart[focusId] ?? emptyLine()) : emptyLine());
   const update = (id: string, patch: Partial<CartLine>) => {
     if (locked || !acceptingOrders) return;
     setCart((previous) => ({
       ...previous,
       [id]: { ...emptyLine(), ...previous[id], ...patch },
     }));
+  };
+  const updateCustomize = (patch: Partial<CartLine>) => {
+    if (!focusId || locked || !acceptingOrders) return;
+    if (customizeDraft) setCustomizeDraft({ ...customizeDraft, ...patch });
+    else update(focusId, patch);
   };
   const openCustomize = (item: NuniFoodMenuItem) => {
     if (
@@ -444,6 +476,10 @@ function FoodMenu({
       delete next[item.id];
       return next;
     });
+    const current = cart[item.id];
+    setCustomizeDraft(
+      current && current.inBasket !== false && Number(current.quantity) > 0 ? current : null,
+    );
     setCart((previous) => {
       const current = previous[item.id];
       if (current && current.quantity !== '' && Number(current.quantity) > 0) return previous;
@@ -457,7 +493,7 @@ function FoodMenu({
   };
   const saveCustomize = () => {
     if (!focusItem || locked || !acceptingOrders) return;
-    const line = cart[focusItem.id] ?? emptyLine();
+    const line = focusLine;
     const issue = validateLine(focusItem, line);
     if (issue) {
       setError('');
@@ -470,8 +506,9 @@ function FoodMenu({
       return next;
     });
     setError('');
-    update(focusItem.id, { inBasket: true });
+    update(focusItem.id, { ...line, inBasket: true });
     setFocusId(null);
+    setCustomizeDraft(null);
     setStage('menu');
   };
   const removeLine = (id: string) => {
@@ -489,6 +526,7 @@ function FoodMenu({
     });
     if (focusId === id) {
       setFocusId(null);
+      setCustomizeDraft(null);
       setStage('menu');
     }
   };
@@ -604,7 +642,7 @@ function FoodMenu({
           label={`${focusItem.name}數量`}
           value={focusLine.quantity === '0' ? '1' : focusLine.quantity}
           disabled={disabled}
-          onChange={(quantity) => update(focusItem.id, { quantity })}
+          onChange={(quantity) => updateCustomize({ quantity })}
         />
         {focusItem.optionGroups.map((group) => (
           <View key={group.id} style={{ gap: 8 }}>
@@ -622,7 +660,7 @@ function FoodMenu({
                       .length >= group.maximumSelections)
                 }
                 onPress={() =>
-                  update(focusItem.id, {
+                  updateCustomize({
                     selectedOptionIds: toggleOption(focusLine, group, option.id),
                   })
                 }
@@ -635,7 +673,7 @@ function FoodMenu({
           label={`${focusItem.name}備註`}
           value={focusLine.note}
           disabled={disabled}
-          onChange={(note) => update(focusItem.id, { note })}
+          onChange={(note) => updateCustomize({ note })}
         />
         <FoodButton variant="primary" disabled={disabled} onPress={saveCustomize}>
           放入購物籃
@@ -644,15 +682,22 @@ function FoodMenu({
           disabled={locked}
           onPress={() => {
             if (
-              focusLine.quantity === '0' ||
-              focusLine.quantity === '' ||
-              Number(focusLine.quantity) === 0
+              !customizeDraft &&
+              (focusLine.quantity === '0' ||
+                focusLine.quantity === '' ||
+                Number(focusLine.quantity) === 0)
             )
               removeLine(focusItem.id);
             else {
               setFocusId(null);
               setStage('menu');
             }
+            setCustomizeDraft(null);
+            setLineErrors((previous) => {
+              const next = { ...previous };
+              delete next[focusItem.id];
+              return next;
+            });
             setError('');
           }}
         >
@@ -963,7 +1008,7 @@ function FoodOrder({
   const loader = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
   const resource = useFoodLoad(loader, {
     pollMs: FOOD_POLL_MS,
-    shouldPoll: (data) => !data || !FOOD_TERMINAL_STATES.has(data.state),
+    shouldPoll: (data) => !data || isFoodOrderInProgress(data.state),
   });
   const [reason, setReason] = useNuniDraftState<NuniFoodCancelInput['reason']>(
     `food:${tenantId}:${orderId}:cancel-reason`,
@@ -996,14 +1041,10 @@ function FoodOrder({
   }, [resource.data, resource.errorKind]);
   const order = resource.errorKind === 'unavailable' ? null : (resource.data ?? lastOrder);
   const current = !!resource.data && !resource.error && !resource.loading;
-  const token = order?.pickup.credential;
-  const canShowToken =
-    current &&
-    order?.state === 'ready' &&
-    order.allowedActions.includes('show-pickup-credential') &&
-    order.pickup.allowedActions.includes('present-one-time-token') &&
-    token &&
-    Date.parse(token.expiresAt) > now;
+  const token =
+    current && order?.state === 'ready' && canShowPickupCredential(order, now)
+      ? order.pickup.credential
+      : null;
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={page}>
       <FoodButton onPress={onBack}>返回訂單紀錄</FoodButton>
@@ -1065,7 +1106,7 @@ function FoodOrder({
               {order.refund.state === 'completed' ? '退款已完成。' : '退款仍在處理，尚未完成。'}
             </FoodText>
           ) : null}
-          {canShowToken ? (
+          {token ? (
             <FoodCard>
               <FoodText title>出示給店家取餐</FoodText>
               <FoodText>這組憑證只能使用一次；請勿轉傳給他人。</FoodText>

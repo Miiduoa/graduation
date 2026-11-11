@@ -304,6 +304,8 @@ export default ({ config }: any) => {
         NSLocationWhenInUseUsageDescription: '需要位置權限以提供校園導航',
         NSLocationAlwaysAndWhenInUseUsageDescription: '需要位置權限以提供校園導航',
         NSFaceIDUsageDescription: '使用 Face ID 進行安全驗證',
+        NFCReaderUsageDescription: '讀取對方出示的學生證，核對學校與學號。',
+        'com.apple.developer.nfc.readersession.iso7816.select-identifiers': ['F04E554E490101'],
         UIBackgroundModes: ['fetch', 'remote-notification'],
       },
       associatedDomains: deepLinkHost ? [`applinks:${deepLinkHost}`] : undefined,
@@ -312,6 +314,7 @@ export default ({ config }: any) => {
         'com.apple.developer.applesignin': ['Default'],
         'aps-environment': isProduction ? 'production' : 'development',
         'com.apple.security.application-groups': [`group.${bundleIdentifier}`],
+        'com.apple.developer.nfc.readersession.formats': ['TAG'],
       },
     },
     android: {
@@ -331,6 +334,7 @@ export default ({ config }: any) => {
         'VIBRATE',
         'USE_FINGERPRINT',
         'USE_BIOMETRIC',
+        'NFC',
       ],
       config: mapsApiKey ? { googleMaps: { apiKey: mapsApiKey } } : undefined,
       intentFilters: androidIntentFilters,
@@ -374,8 +378,8 @@ export default ({ config }: any) => {
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
       allowLocalMockAuth,
-      /** `false` 時不對 TronClass 發網路請求；口試／離線 Demo：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false` */
-      tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, true),
+      /** 僅在 `EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=true` 時對 TronClass 發網路請求；未設定或非 true 則關閉，學校連線預設關閉。 */
+      tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, false),
       assignmentFileSubmit: parseBoolean(
         process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED,
         false,
@@ -406,9 +410,9 @@ export default ({ config }: any) => {
           url: `https://u.expo.dev/${easProjectId}`,
         }
       : undefined,
-    // 新增原生影像模組與課表小工具後，預覽與正式版都需使用新安裝檔及獨立執行版本。
+    // 原生學生證 NFC 需隨新安裝檔發佈，預覽與正式版使用獨立執行版本。
     runtimeVersion: isProduction
-      ? 'campus-one-native-photo-pdf-widget-live-2'
-      : 'campus-preview-native-photo-pdf-widget-live-2',
+      ? 'campus-one-native-photo-pdf-widget-live-nfc-3'
+      : 'campus-preview-native-photo-pdf-widget-live-nfc-3',
   };
 };

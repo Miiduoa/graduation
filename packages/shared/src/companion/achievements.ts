@@ -327,15 +327,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   // ── Dorm ──
   {
     id: 'dorm_repair_first',
-    label: '首次宿舍報修',
-    description: '在 APP 提交第一個宿舍報修。',
+    label: '首次宿舍報修備忘',
+    description: '在 APP 存下第一筆宿舍報修備忘。',
     signal: 'dormRepairCreatedLifetime',
     threshold: 1,
     unlock: {
       id: 'toolbox',
       kind: 'accessory',
       label: '小工具箱',
-      description: '精靈會幫你叫工人。',
+      description: '先把問題記下來，再依學校管道通報。',
       emoji: '🧰',
       domain: 'dorm',
     },

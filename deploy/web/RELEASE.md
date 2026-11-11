@@ -10,6 +10,8 @@
 
 工作流程先檢查新 Web 容器的公開路由，正式 rollout 後確認兩台映像與公開 readiness 的完整 SHA。公開 `/bus` 需回應目前公車頁的伺服器頁框並允許同源定位；校園與查詢按鈕在瀏覽器載入後呈現，因此不再把伺服器 HTML 中的按鈕字串當發布條件。`browserControlsVerified` 保持 false，直到另行完成 JavaScript 載入後的瀏覽器操作驗收。
 
+部署要啟用私人檔案儲存時，須先完成 bucket migration 與必要的 Fly secrets 設定，再將 production Actions 變數 `NEXT_PUBLIC_FILE_STORAGE_BACKEND` 設為 `supabase`，讓建置帶入 `NEXT_PUBLIC_FILE_STORAGE_BACKEND=supabase`；未設定時為空字串，功能維持關閉，service role 等伺服器密鑰僅放 Fly secrets，絕不可作為 build arg 或 `NEXT_PUBLIC_*`。
+
 `transit_profile` 預設為 `live-tdx`，維持真實 TDX 站牌、方向與新鮮到站資料的發布條件；需要 Web runtime 的 `TDX_CLIENT_ID`、`TDX_CLIENT_SECRET`。另一個選項 `official-links-only` 供尚未申請 TDX 的版本明確發布官方查詢入口：
 
 - 建置前、rollout 前與後，逐一檢查兩台既有機器：兩個 TDX 環境變數必須完全不存在；只設定一個、空字串或已設定兩個都停止，避免掩蓋已啟用服務的故障。

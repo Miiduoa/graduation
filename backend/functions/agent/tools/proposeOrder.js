@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
+const { isAuthorizationFailure } = require('../authorizationFailure');
 const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../../lib/onlineOrdering');
 const {
   assistantWritePermissionDeniedMessage,
@@ -121,6 +122,7 @@ async function execute(ctx, rawInput) {
       confirmHint: '請使用者按下「確認下單」按鈕後，系統才會真的建立訂單並扣款（或於取餐時付款）。',
     };
   } catch (e) {
+    if (isAuthorizationFailure(e)) throw e;
     return {
       success: false,
       errorCode: e?.name === 'ZodError' ? 'invalid_input' : 'propose_failed',

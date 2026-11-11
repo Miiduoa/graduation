@@ -195,15 +195,28 @@ async function verifyOidcIdToken({ idToken, ssoConfig, expectedNonce }) {
   }
 
   let payload;
+  let campusCardStudentId;
 
   if (ssoConfig.jwksUri) {
     const { createRemoteJWKSet, jwtVerify } = await import('jose');
-    const jwks = createRemoteJWKSet(new URL(ssoConfig.jwksUri));
+    const keySetUrl = new URL(ssoConfig.jwksUri);
+    const jwks = createRemoteJWKSet(keySetUrl);
     const verified = await jwtVerify(idToken, jwks, {
       audience: ssoConfig.clientId,
       ...(ssoConfig.issuer ? { issuer: ssoConfig.issuer } : {}),
     });
     payload = verified.payload;
+    // Only a signed, issuer-bound student_id identifies a cardholder. The general
+    // profile also accepts employee numbers and the local unsigned development flow.
+    if (
+      expectedNonce &&
+      ssoConfig.issuer?.startsWith('https://') &&
+      keySetUrl.protocol === 'https:' &&
+      typeof payload.student_id === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]{4,31}$/.test(payload.student_id)
+    ) {
+      campusCardStudentId = payload.student_id;
+    }
   } else {
     if (isReleaseRuntime()) {
       throw new Error('OIDC jwksUri is required for token verification');
@@ -230,7 +243,7 @@ async function verifyOidcIdToken({ idToken, ssoConfig, expectedNonce }) {
     throw new Error('OIDC nonce validation failed');
   }
 
-  return payload;
+  return { payload, campusCardStudentId };
 }
 
 async function verifyOIDC({
@@ -271,7 +284,7 @@ async function verifyOIDC({
   const tokens = await tokenResponse.json();
 
   if (tokens.id_token) {
-    const decoded = await verifyOidcIdToken({
+    const { payload: decoded, campusCardStudentId } = await verifyOidcIdToken({
       idToken: tokens.id_token,
       ssoConfig,
       expectedNonce,
@@ -282,6 +295,7 @@ async function verifyOIDC({
       name: decoded.name || decoded.preferred_username,
       displayName: decoded.name || decoded.preferred_username,
       studentId: decoded.student_id || decoded.employee_id,
+      campusCardStudentId,
       department: decoded.department || decoded.ou,
       accessToken: tokens.access_token,
     };

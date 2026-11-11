@@ -1,4 +1,18 @@
+const { FieldValue } = require('firebase-admin/firestore');
 const { createDeleteUserAccountHandler, RETAINED_CATEGORIES } = require('./accountDeletion');
+
+function isDeleteSentinel(value) {
+  return Boolean(value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete()));
+}
+
+function applyWrite(current, data, replace) {
+  const next = replace ? {} : { ...(current || {}) };
+  for (const [key, value] of Object.entries(data)) {
+    if (isDeleteSentinel(value)) delete next[key];
+    else next[key] = value;
+  }
+  return next;
+}
 
 const NOW = Date.parse('2030-01-01T12:00:00Z');
 const request = (data = {}, uid = 'alice', authTime = NOW / 1000) => ({
@@ -41,7 +55,7 @@ function store(seed = []) {
       },
       set: async (data, options) => {
         check('set', path);
-        docs.set(path, options?.merge ? { ...docs.get(path), ...data } : data);
+        docs.set(path, applyWrite(docs.get(path), data, !options?.merge));
       },
       delete: async () => {
         check('delete', path);
@@ -126,12 +140,14 @@ function store(seed = []) {
         get: async (q) => results(q, base),
         delete: (reference) => writes.push(['delete', reference]),
         update: (reference, data) => writes.push(['update', reference, data]),
+        set: (reference, data, options) => writes.push(['set', reference, data, options]),
       };
       const result = await callback(transaction);
       check('commit', writes[0]?.[1].path || 'empty');
-      for (const [kind, reference, data] of writes) {
+      for (const [kind, reference, data, options] of writes) {
         if (kind === 'delete') docs.delete(reference.path);
-        else docs.set(reference.path, { ...docs.get(reference.path), ...data });
+        else if (kind === 'set') docs.set(reference.path, applyWrite(docs.get(reference.path), data, !options?.merge));
+        else docs.set(reference.path, applyWrite(docs.get(reference.path), data, false));
       }
       return result;
     },
@@ -194,6 +210,8 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
     ['users/alice/postLoginRuns/run', { studentId: 'private' }],
     ['users/bob/private/one', { secret: 'keep' }],
     ['_puSessions/bob', { ownerUid: 'bob' }],
+    ['_studentCardPresentations/alice', { maskedId: '•••• 1234' }],
+    ['_studentCardPresentations/bob', { maskedId: '•••• 9876' }],
     ['_puTronClassLmsCache/alice', { ownerUid: 'alice', snapshot: { homework: [] } }],
     ['notifications/bob', { userId: 'bob' }],
   ];
@@ -210,6 +228,7 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
   });
   expect([...state.docs.keys()].sort()).toEqual([
     '_puSessions/bob',
+    '_studentCardPresentations/bob',
     'notifications/bob',
     'users/alice',
     'users/bob/private/one',
@@ -249,6 +268,76 @@ test('scans full-path membership pages, maintains counters and ignores noncanoni
   expect(state.docs.has('schools/pu/serviceRoles/alice')).toBe(false);
   expect(state.docs.has('schools/pu/cafeterias/c/operators/alice')).toBe(false);
   expect([...state.docs.keys()].filter((key) => key.endsWith('/members/bob'))).toHaveLength(221);
+});
+
+test('deletes creator profiles across schools while preserving other users and noncanonical paths', async () => {
+  const profile = { displayName: 'Alice', bio: 'Public biography' };
+  const otherProfile = { displayName: 'Bob', uid: 'alice' };
+  const preserved = [
+    ['schools/pu/creatorProfiles/bob', otherProfile],
+    ['archives/shared/creatorProfiles/alice', profile],
+    ['schools/pu/archives/shared/creatorProfiles/alice', profile],
+    ['schools/pu/otherProfiles/alice', profile],
+  ];
+  const state = store([
+    ['schools/pu/creatorProfiles/alice', profile],
+    ['schools/other/creatorProfiles/alice', profile],
+    ...preserved,
+  ]);
+
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has('schools/pu/creatorProfiles/alice')).toBe(false);
+  expect(state.docs.has('schools/other/creatorProfiles/alice')).toBe(false);
+  for (const [path, data] of preserved) expect(state.docs.get(path)).toEqual(data);
+  expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
+});
+
+test('deletes creator highlights across schools while preserving other users and noncanonical paths', async () => {
+  const highlight = { postId: 'post-1' };
+  const other = { postId: 'post-2', uid: 'alice' };
+  const preserved = [
+    ['schools/pu/creatorHighlights/bob', other],
+    ['archives/shared/creatorHighlights/alice', highlight],
+    ['schools/pu/archives/shared/creatorHighlights/alice', highlight],
+    ['schools/pu/otherHighlights/alice', highlight],
+  ];
+  const state = store([
+    ['schools/pu/creatorHighlights/alice', highlight],
+    ['schools/other/creatorHighlights/alice', highlight],
+    ...preserved,
+  ]);
+
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has('schools/pu/creatorHighlights/alice')).toBe(false);
+  expect(state.docs.has('schools/other/creatorHighlights/alice')).toBe(false);
+  for (const [path, data] of preserved) expect(state.docs.get(path)).toEqual(data);
+  expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
+});
+
+test('creator highlight deletion failures keep Auth available for retry', async () => {
+  const path = 'schools/pu/creatorHighlights/alice';
+  const state = store([[path, { postId: 'post-1' }]]);
+  state.fail('delete', path);
+
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.docs.has(path)).toBe(true);
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has(path)).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
+});
+
+test('creator profile deletion failures keep Auth available for retry', async () => {
+  const path = 'schools/pu/creatorProfiles/alice';
+  const state = store([[path, { bio: 'Public biography' }]]);
+  state.fail('delete', path);
+
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.docs.has(path)).toBe(true);
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has(path)).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
 });
 
 test.each([
@@ -432,6 +521,21 @@ test.each([
     expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
   },
 );
+
+test('school membership stamps are cleared in the same commit that marks deletion in progress', async () => {
+  const state = store([
+    ['users/alice', { email: 'private@example.com' }],
+    [
+      'schools/pu/members/alice',
+      { status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1' },
+    ],
+  ]);
+  state.fail('recursiveDelete', 'schools/pu/members/alice');
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect(state.docs.get('users/alice').accountDeletionInProgress).toBe(true);
+  expect(state.docs.get('schools/pu/members/alice')).toEqual({ status: 'inactive' });
+});
 
 test('Auth deletion errors stay failures and only missing Auth is idempotent success', async () => {
   const state = store([['users/alice', { email: 'private@example.com' }]]);

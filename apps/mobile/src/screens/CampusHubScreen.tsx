@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AIScreen } from '../ui/aiFirst';
-import { rootNavigateNested } from '../app/rootNavigation';
 import { AppActionIcon } from '../ui/AppActionIcon';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { theme } from '../ui/theme';
@@ -21,6 +20,7 @@ type ServiceItem = {
   label: string;
   description: string;
   screen: string;
+  params?: { tab: 'food' };
   keywords: string[];
 };
 const frequentServices: ServiceItem[] = [
@@ -129,7 +129,7 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         icon: 'ic_lost_found',
         label: '失物招領',
         description: '找回遺失物品',
-        screen: 'LostFound',
+        screen: 'PlatformLostFound',
         keywords: ['失物', '招領', '撿到', '遺失'],
       },
       {
@@ -138,6 +138,21 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         description: '準備列印文件',
         screen: 'PrintService',
         keywords: ['印表機', '影印', '掃描', '文件'],
+      },
+      {
+        icon: 'ic_restaurant',
+        label: '我的訂單',
+        description: '查看 App 校園餐廳的取餐號碼、進度與訂餐紀錄',
+        screen: 'StudentOrders',
+        keywords: ['取餐', '訂單狀態', '訂單紀錄', '訂單進度', '餐點訂單'],
+      },
+      {
+        icon: 'ic_store_merchant',
+        label: '站內點餐',
+        description: '查看 nuni 平台的門市與訂單紀錄',
+        screen: 'NuniWorkspace',
+        params: { tab: 'food' },
+        keywords: ['站內訂單', '站內取餐', '平台點餐', '平台訂單'],
       },
       {
         icon: 'ic_payment_card',
@@ -174,6 +189,18 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
       },
     ],
   },
+  {
+    title: '和同學一起',
+    items: [
+      {
+        icon: 'ic_people_community',
+        label: '找人',
+        description: '加好友後，分享課表與查看共同空堂。',
+        screen: 'FriendSearch',
+        keywords: ['找同學', '找朋友', '同校成員'],
+      },
+    ],
+  },
 ];
 
 type Navigation = Parameters<typeof safeNavigate>[0];
@@ -186,10 +213,11 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const s = useThemeStyleSheet(createStyles);
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const keyword = query.trim().toLowerCase();
+  const keyword = query.normalize('NFKC').trim().toLowerCase();
   const paymentsEnabled = isFeatureEnabled('payments');
   const filtered = useMemo(() => {
     const isProvidence = supportsLegacyTransportHub(schoolId);
+    const terms = keyword.split(/\s+/);
     return [{ title: '常用服務', items: frequentServices }, ...sections]
       .map((section) => ({
         ...section,
@@ -200,9 +228,8 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
             !isProvidence && item.screen === 'Library'
               ? item.keywords.filter((word) => word !== '蓋夏')
               : item.keywords;
-          return [item.label, item.description, ...keywords].some((value) =>
-            value.toLowerCase().includes(keyword),
-          );
+          const fields = [item.label, item.description, ...keywords];
+          return terms.every((term) => fields.some((value) => value.toLowerCase().includes(term)));
         }),
       }))
       .filter((section) => section.items.length > 0);
@@ -211,12 +238,12 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const quickActions = keyword
     ? getMobileQuickActions(query).filter(
         (action) => !filtered.some((section) =>
-          section.items.some((item) => item.screen === action.route)),
+          section.items.some((item) => item.screen === action.route && !item.params)),
       )
     : [];
   const openService = (item: ServiceItem) => {
     Keyboard.dismiss();
-    safeNavigate(navigation, item.screen, undefined, {
+    safeNavigate(navigation, item.screen, item.params, {
       fallbackMessage: `「${item.label}」目前無法開啟。`,
     });
   };
@@ -274,34 +301,6 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
       ) : (
         <OpenOrderCard navigation={navigation} />
       )}
-      {quickActions.length > 0 ? (
-        <View style={s.section}>
-          <Text accessibilityRole="header" style={s.sectionTitle}>可以直接做</Text>
-          <View style={s.serviceList}>
-            {quickActions.map((action) => (
-              <Pressable
-                key={action.destination}
-                accessibilityRole="button"
-                accessibilityLabel={'依需求前往' + action.label}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  safeNavigate(navigation, action.route, undefined, {
-                    fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
-                  });
-                }}
-                style={({ pressed }) => [s.serviceRow, pressed && s.pressed]}
-              >
-                <View style={s.serviceCopy}>
-                  <Text style={s.serviceTitle}>{action.label}</Text>
-                  <Text style={s.serviceDetail}>{action.description}</Text>
-                </View>
-                <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
-              </Pressable>
-            ))}
-          </View>
-          <Text style={s.subtitle}>這裡只會開啟功能，變更或提交仍需你確認。</Text>
-        </View>
-      ) : null}
       {filtered.map((section) => {
         const isFrequent = !keyword && section.title === '常用服務';
         return (
@@ -350,6 +349,34 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
           </View>
         );
       })}
+      {quickActions.length > 0 ? (
+        <View style={s.section}>
+          <Text accessibilityRole="header" style={s.sectionTitle}>可以直接做</Text>
+          <View style={s.serviceList}>
+            {quickActions.map((action) => (
+              <Pressable
+                key={action.destination}
+                accessibilityRole="button"
+                accessibilityLabel={'依需求前往' + action.label}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  safeNavigate(navigation, action.route, undefined, {
+                    fallbackMessage: '目前無法開啟對應服務，請稍後重試。',
+                  });
+                }}
+                style={({ pressed }) => [s.serviceRow, pressed && s.pressed]}
+              >
+                <View style={s.serviceCopy}>
+                  <Text style={s.serviceTitle}>{action.label}</Text>
+                  <Text style={s.serviceDetail}>{action.description}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
+              </Pressable>
+            ))}
+          </View>
+          <Text style={s.subtitle}>這裡只會開啟功能，變更或提交仍需你確認。</Text>
+        </View>
+      ) : null}
       {matchCount === 0 && quickActions.length === 0 ? (
         <View style={s.emptyState}>
           <Ionicons name="search-outline" size={28} color={theme.colors.muted} />
@@ -362,26 +389,6 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
           >
             <Text style={s.link}>查看所有服務</Text>
           </Pressable>
-        </View>
-      ) : null}
-      {!keyword ? (
-        <View style={s.section}>
-          <Text accessibilityRole="header" style={s.sectionTitle}>
-            和同學一起
-          </Text>
-          <View style={s.serviceList}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => rootNavigateNested('訊息', 'FriendSearch')}
-              style={({ pressed }) => [s.serviceRow, pressed && s.pressed]}
-            >
-              <View style={s.serviceCopy}>
-                <Text style={s.serviceTitle}>找人</Text>
-                <Text style={s.serviceDetail}>加好友後，分享課表與查看共同空堂。</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
-            </Pressable>
-          </View>
         </View>
       ) : null}
     </AIScreen>

@@ -1,6 +1,7 @@
 import { buildPersonalToday, classDate, validClassDate, type PersonalImportRecord, type PersonalTodayEntry } from '@campus/shared';
 import { courseScope } from '@campus/shared/src/courseAccess';
 import { currentSemesterStartUtc, rocSchoolYear } from '@campus/shared/src/campusAnnouncementQuality';
+import { assertClassExceptions, matchesClassException } from '@campus/shared/src/timetable/classExceptions';
 
 export type SavedClassOccurrence = {
   courseId: string;
@@ -55,7 +56,7 @@ function refreshSavedClasses(records: PersonalImportRecord[], schoolId: string, 
 
 type TimetableGroup = { term: string; rows: PersonalImportRecord[] };
 
-function timetableGroups(records: readonly PersonalImportRecord[]) {
+function timetableGroups(records: readonly PersonalImportRecord[], requirePlacedTerm?: string) {
   const groups = new Map<string, TimetableGroup>();
   for (const row of records) {
     const key = `${row.academicYear}|${row.semester}`;
@@ -70,8 +71,8 @@ function timetableGroups(records: readonly PersonalImportRecord[]) {
         return undefined;
       }
     }
-    // A course with no assigned weekday has no scheduled occurrence.
-    if (row.dayOfWeek) group.rows.push(row);
+    // Named class queries can skip unscheduled courses. Gaps need every row in the requested term.
+    if (row.dayOfWeek || group.term === requirePlacedTerm) group.rows.push(row);
   }
 
   return [...groups.values()];
@@ -92,6 +93,87 @@ function scheduledDay(groups: TimetableGroup[], schoolId: string, date: Date, in
       previousTerm === term || academicTerm(new Date(entry.startAt)) === group.term));
   }
   return entries;
+}
+
+/** Remaining time between saved meetings on one Taiwan date. An unknown timetable cannot establish a gap. */
+export function savedClassGaps(
+  records: readonly PersonalImportRecord[], schoolId: string, now: Date, day: 'today' | 'tomorrow' | 'day-after-tomorrow',
+): { startAt: number; endAt: number }[] | undefined {
+  const offset = day === 'today' ? 0 : day === 'tomorrow' ? 1 : 2;
+  const date = new Date(now.getTime() + offset * DAY);
+  const groups = timetableGroups(
+    records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId), academicTerm(date),
+  );
+  if (!groups) return undefined;
+  const entries = scheduledDay(groups, schoolId, date, true);
+  if (!entries) return undefined;
+  // Dated makeup meetings can occupy this day regardless of their course's term.
+  // Keep the term-limited schedule used by current/next class queries unchanged.
+  for (const group of groups.filter((group) => group.term !== academicTerm(date))) {
+    const plan = buildPersonalToday(group.rows, { schoolId, now: date });
+    entries.push(...plan.today.filter((entry) => entry.row.classExceptions?.some((change) =>
+      change.kind === 'move' && change.originalDate === entry.originalDate &&
+      change.date === classDate(new Date(entry.startAt)) && change.startTime === entry.startTime)));
+  }
+  const midnight = Date.parse(`${classDate(date)}T00:00:00+08:00`);
+  // buildPersonalToday also lists the previous weekday; gaps only use meetings that occupy this date.
+  const onDay = entries.filter((entry) => entry.endAt > midnight && entry.startAt < midnight + DAY);
+  if (onDay.length < 2) return [];
+
+  onDay.sort((a, b) => a.startAt - b.startAt);
+  const gaps: { startAt: number; endAt: number }[] = [];
+  let busyUntil = onDay[0].endAt;
+  for (let i = 1; i < onDay.length; i++) {
+    const entry = onDay[i];
+    const startAt = Math.max(busyUntil, now.getTime());
+    if (startAt < entry.startAt) gaps.push({ startAt, endAt: entry.startAt });
+    busyUntil = Math.max(busyUntil, entry.endAt);
+  }
+  return gaps;
+}
+
+/** Actual meetings intersecting this Taiwan date, including saved single-day changes. Incomplete relevant terms cannot establish an available gap. */
+export function scheduledSavedClasses(
+  records: readonly PersonalImportRecord[], schoolId: string, date: string,
+): PersonalTodayEntry[] | undefined {
+  if (!validClassDate(date) || !Array.isArray(records) ||
+      Array.from(records).some((row) => !row || typeof row !== 'object')) return undefined;
+  const scoped = records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId);
+  if (!scoped.length) return [];
+  const day = new Date(`${date}T12:00:00+08:00`);
+  const dayStart = Date.parse(`${date}T00:00:00+08:00`);
+  const relevantTerms = new Set([academicTerm(day), academicTerm(new Date(day.getTime() - DAY))]);
+  try {
+    for (const row of scoped) {
+      const scope = courseScope(row);
+      const rowTerm = `${scope.academicYear}|${scope.semester}`;
+      assertClassExceptions(row.classExceptions);
+      const changes = row.classExceptions ?? [];
+      if (new Set(changes.map((change) => change.originalDate)).size !== changes.length ||
+          new Set(changes.map((change) => change.id)).size !== changes.length ||
+          changes.some((change) => !matchesClassException(row, change.original))) return undefined;
+      // A dated makeup meeting cannot disappear because scheduledDay excludes
+      // its term or its start belongs to another term. Keep a valid prior-night
+      // carryover, whose start still belongs to the original course's term.
+      if (changes.some((change) => {
+        if (change.kind !== 'move') return false;
+        const start = Date.parse(`${change.date}T${change.startTime}:00+08:00`);
+        const end = Date.parse(`${change.endDate || change.date}T${change.endTime}:00+08:00`);
+        return !Number.isFinite(start) || !Number.isFinite(end) ||
+          (start < dayStart + DAY && end > dayStart &&
+            (!relevantTerms.has(rowTerm) || academicTerm(new Date(start)) !== rowTerm));
+      })) return undefined;
+      if (!relevantTerms.has(rowTerm)) continue;
+      // Named class lookups may omit an unplaced course; availability cannot.
+      if (!Number.isInteger(row.dayOfWeek) || row.dayOfWeek! < 1 || row.dayOfWeek! > 7) return undefined;
+    }
+    const groups = timetableGroups(scoped);
+    return groups ? scheduledDay(groups, schoolId, day, true) : undefined;
+  } catch {
+    // buildPersonalToday skips malformed exceptions for display. A preparation
+    // suggestion must instead preserve the distinction between unknown and free.
+    return undefined;
+  }
 }
 
 function addressableClasses(entries: PersonalTodayEntry[]) {

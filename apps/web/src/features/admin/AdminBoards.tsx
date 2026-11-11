@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import { adminError, parseBoard, parseBoards, parseSchools } from './api';
@@ -12,11 +12,13 @@ export function AdminBoards({
   suspended,
   creating,
   onCreating,
+  onDraftChange,
 }: {
   context: string;
   suspended: boolean;
   creating: boolean;
-  onCreating: (value: boolean) => void;
+  onCreating: (value: boolean) => boolean | void;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const boards = useAdminResource('boards', context, parseBoards, !suspended);
   const [query, setQuery] = useState('');
@@ -41,6 +43,11 @@ export function AdminBoards({
     context,
     !suspended && creating && !schools.loading && !schools.error,
   );
+  const dirty = creating && (Boolean(name.trim()) || Boolean(description.trim()) || mutation.busy);
+  useEffect(() => {
+    onDraftChange?.(dirty);
+    return () => onDraftChange?.(false);
+  }, [dirty, onDraftChange]);
   async function create() {
     if (!eligible.some((school) => school.tenantId === tenantId) || name.trim().length < 2) return;
     setNotice('');
@@ -139,7 +146,9 @@ export function AdminBoards({
               <Button
                 disabled={mutation.busy}
                 onClick={() => {
-                  onCreating(false);
+                  if (onCreating(false) === false) return;
+                  setName('');
+                  setDescription('');
                   setNotice('');
                   setResponseError('');
                 }}
