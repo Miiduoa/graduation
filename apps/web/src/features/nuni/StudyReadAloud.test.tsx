@@ -322,3 +322,73 @@ it('does not re-enter speaking state when an engine ends immediately inside spea
   expect(speak).toHaveBeenCalledTimes(2);
   expect(changed).toHaveBeenLastCalledWith(true);
 });
+
+it('reads long cited lessons in bounded local-only chunks without skipping original characters', () => {
+  const changed = vi.fn();
+  const text = '主鍵' + '甲'.repeat(180) + '。外鍵' + '乙'.repeat(220);
+  render(<StudyReadAloud text={text} onSpeakingChange={changed} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const voiceUpdate = addEventListener.mock.calls.find(([event]) => event === 'voiceschanged')?.[1] as (() => void) | undefined;
+  voices = [remote];
+  act(() => voiceUpdate?.());
+
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 10; index += 1) {
+    const part = speak.mock.calls[index][0] as Utterance;
+    chunks.push(part.text);
+    expect(Array.from(part.text).length).toBeLessThanOrEqual(160);
+    // A temporary voice-list refresh must not switch to a remote/default voice.
+    expect(part.voice).toBe(local);
+    act(() => part.onend?.());
+  }
+  expect(chunks.length).toBeGreaterThan(2);
+  expect(chunks.join('')).toBe(text);
+  expect(changed.mock.calls.filter(([value]) => value === true)).toHaveLength(1);
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
+
+it('does not start a second speech chunk when cancel synchronously triggers onend', () => {
+  render(<StudyReadAloud text={'這一段長教材'.repeat(80)} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const first = speak.mock.calls[0][0] as Utterance;
+  cancel.mockImplementationOnce(() => first.onend?.());
+  fireEvent.click(screen.getByRole('button', { name: '停止朗讀' }));
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect(first.onend).toBeNull();
+  expect(first.onerror).toBeNull();
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
+
+it('recovers from a speech-engine failure midway through a long lesson without leaking the error', () => {
+  const changed = vi.fn();
+  speak.mockImplementationOnce(() => {}).mockImplementationOnce(() => { throw new Error('private speech details'); });
+  render(<StudyReadAloud text={'教材逐字引句。'.repeat(75)} onSpeakingChange={changed} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const first = speak.mock.calls[0][0] as Utterance;
+  act(() => first.onend?.());
+
+  expect(speak).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('status').textContent).toContain('朗讀未能完成');
+  expect(screen.getByRole('status').textContent).not.toContain('private speech details');
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(3);
+  expect((speak.mock.calls[2][0] as Utterance).text).toBe(first.text);
+  expect(changed).toHaveBeenLastCalledWith(true);
+});
+
+it('abandons later chunks after Stop is rejected, even if the active chunk finishes naturally', () => {
+  render(<StudyReadAloud text={'學生要求停止朗讀。'.repeat(80)} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const first = speak.mock.calls[0][0] as Utterance;
+  cancel.mockImplementationOnce(() => { throw new Error('cannot stop yet'); });
+  fireEvent.click(screen.getByRole('button', { name: '停止朗讀' }));
+  expect(screen.getByRole('status').textContent).toContain('尚未確認停止朗讀');
+  expect(screen.getByRole('button', { name: '停止朗讀' })).toBeTruthy();
+  act(() => first.onend?.());
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});

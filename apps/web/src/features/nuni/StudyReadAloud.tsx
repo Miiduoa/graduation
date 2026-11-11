@@ -3,6 +3,28 @@
 import { useEffect, useRef, useState } from 'react';
 import styles from './CourseStudyPanel.module.css';
 
+// Mobile speech engines can stop unexpectedly on a long single utterance.
+// Split on natural punctuation where possible, preserving every source character.
+const STUDY_SPEECH_CHUNK_LENGTH = 160;
+function splitStudySpeech(text: string): string[] {
+  const chars = Array.from(text);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < chars.length;) {
+    let end = Math.min(offset + STUDY_SPEECH_CHUNK_LENGTH, chars.length);
+    if (end < chars.length) {
+      for (let index = end - 1; index >= offset + 80; index -= 1) {
+        if (/[。！？；，、\n.!?;:：]/u.test(chars[index])) {
+          end = index + 1;
+          break;
+        }
+      }
+    }
+    chunks.push(chars.slice(offset, end).join(''));
+    offset = end;
+  }
+  return chunks;
+}
+
 /** Use an installed voice so reading a private course does not require a speech service. */
 export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChange, rate: selectedRate, onRateChange }: {
   text: string;
@@ -22,6 +44,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   const [error, setError] = useState('');
   const voice = useRef<SpeechSynthesisVoice | null>(null);
   const active = useRef<SpeechSynthesisUtterance | null>(null);
+  const remainingChunks = useRef<string[]>([]);
 
   useEffect(() => {
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
@@ -46,6 +69,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     catch { /* Students can retry through the manual voice refresh button. */ }
     return () => {
       refreshVoices.current = null;
+      remainingChunks.current = [];
       // A failed listener teardown must never prevent cancelling private speech.
       try { synthesis.removeEventListener('voiceschanged', update); }
       catch { /* Continue cleaning up the current utterance. */ }
@@ -63,17 +87,26 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
 
   function stop(): boolean {
     if (active.current) {
-      // Do not claim that playback has stopped if a mobile browser rejects
-      // cancel(). Keep Stop enabled and voice dictation blocked for a retry.
       const utterance = active.current;
+      // cancel() may fire onend synchronously. Detach first so a cancelled
+      // chunk cannot start the next piece behind the student's back.
+      const oldEnd = utterance.onend;
+      const oldError = utterance.onerror;
+      utterance.onend = null;
+      utterance.onerror = null;
       try {
         window.speechSynthesis.cancel();
       } catch {
+        // Keep Stop and the active playback state for a genuine retry.
+        utterance.onend = oldEnd;
+        utterance.onerror = oldError;
+        // A rejected stop still means the student asked to end this sequence.
+        // Never auto-start the next chunk when the current one later ends.
+        remainingChunks.current = [];
         setError('瀏覽器尚未確認停止朗讀，請再按一次「停止朗讀」；若仍播放，請使用裝置的語音控制。');
         return false;
       }
-      utterance.onend = null;
-      utterance.onerror = null;
+      remainingChunks.current = [];
       active.current = null;
     }
     setSpeaking(false);
@@ -85,54 +118,70 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   function toggle() {
     if (active.current) { stop(); return; }
     if (!voice.current || !available) return;
-    // Mobile browsers can advertise a local voice but reject utterance
-    // construction (for example when speech access is restricted). Do not
-    // leave the reader stuck or leak the browser error into the lesson.
-    let utterance: SpeechSynthesisUtterance;
-    try {
-      utterance = new SpeechSynthesisUtterance(text);
-      utterance.voice = voice.current;
-      utterance.lang = voice.current.lang;
-      utterance.rate = rate;
-    } catch {
+    // Snapshot the approved on-device voice. voiceschanged can briefly report
+    // no voices between chunks; never silently fall back to a remote/default one.
+    const selectedVoice = voice.current;
+    remainingChunks.current = splitStudySpeech(text);
+    let announced = false;
+
+    const finishPlayback = (message = '') => {
+      remainingChunks.current = [];
       setSpeaking(false);
       onSpeakingChange?.(false);
-      setError('目前無法朗讀，可繼續閱讀文字。');
-      return;
-    }
-    active.current = utterance;
-    const finish = () => {
-      if (active.current !== utterance) return false;
-      active.current = null;
-      utterance.onend = null;
-      utterance.onerror = null;
-      setSpeaking(false);
-      onSpeakingChange?.(false);
-      return true;
+      if (message) setError(message);
     };
-    utterance.onend = finish;
-    utterance.onerror = () => {
-      if (finish()) setError('朗讀未能完成，可繼續閱讀文字。');
+    const speakNext = () => {
+      const part = remainingChunks.current.shift();
+      if (part === undefined) { finishPlayback(); return; }
+
+      let utterance: SpeechSynthesisUtterance;
+      try {
+        utterance = new SpeechSynthesisUtterance(part);
+        utterance.voice = selectedVoice;
+        utterance.lang = selectedVoice.lang;
+        utterance.rate = rate;
+      } catch {
+        finishPlayback('目前無法朗讀，可繼續閱讀文字。');
+        return;
+      }
+      active.current = utterance;
+      const finishPart = (failed: boolean) => {
+        if (active.current !== utterance) return;
+        active.current = null;
+        utterance.onend = null;
+        utterance.onerror = null;
+        if (failed) {
+          finishPlayback('朗讀未能完成，可重新朗讀或繼續閱讀文字。');
+        } else if (remainingChunks.current.length) {
+          speakNext();
+        } else {
+          finishPlayback();
+        }
+      };
+      utterance.onend = () => finishPart(false);
+      utterance.onerror = () => finishPart(true);
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        if (active.current === utterance) active.current = null;
+        utterance.onend = null;
+        utterance.onerror = null;
+        finishPlayback(announced
+          ? '朗讀未能完成，可重新朗讀或繼續閱讀文字。'
+          : '目前無法朗讀，可繼續閱讀文字。');
+        return;
+      }
+      // An engine may finish a very short chunk inside speak(). Do not
+      // resurrect a completed queue or announce speech more than once.
+      if (active.current === utterance && !announced) {
+        announced = true;
+        setSpeaking(true);
+        onSpeakingChange?.(true);
+      }
     };
+
     setError('');
-    try {
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      // A synchronous start failure must not depend on cancel(): browsers can
-      // reject both calls, leaving a false "停止朗讀" state that blocks retry.
-      if (active.current === utterance) active.current = null;
-      utterance.onend = null;
-      utterance.onerror = null;
-      setSpeaking(false);
-      onSpeakingChange?.(false);
-      setError('目前無法朗讀，可繼續閱讀文字。');
-      return;
-    }
-    // Some engines can call onend synchronously; do not resurrect ended speech.
-    if (active.current === utterance) {
-      setSpeaking(true);
-      onSpeakingChange?.(true);
-    }
+    speakNext();
   }
 
   return (
