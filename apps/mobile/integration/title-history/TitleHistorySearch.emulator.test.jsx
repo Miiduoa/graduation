@@ -304,6 +304,49 @@ test('a post deleted after search must not navigate from a stale result', async 
   }
 });
 
+test('deleting an earlier post while the real next page is held retains that server cursor for retry', async () => {
+  const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
+  const first = await search.mock.results[0].value;
+  let releasePage;
+  let pageReady;
+  const pageFetched = new Promise((resolve) => { pageReady = resolve; });
+  // Read the genuine server page, but delay delivery to the component.
+  search.mockImplementationOnce((...args) => realSearch(...args).then((page) =>
+    new Promise((resolve) => {
+      releasePage = () => resolve(page);
+      pageReady();
+    })));
+  fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+  await pageFetched;
+
+  const document = 'schools/pu/campusPosts/old-000';
+  let saved;
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const doc = context.firestore().doc(document);
+    saved = (await doc.get()).data();
+    await doc.delete();
+  });
+  try {
+    fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 00')[0]);
+    await view.findByText(/這篇貼文已刪除或不再提供/, {}, { timeout: 10000 });
+    expect(onOpenPost).not.toHaveBeenCalled();
+    expect(rows(view).some((post) => post.id === 'old-000')).toBe(false);
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+
+    await act(async () => { releasePage(); releasePage = null; });
+    expect(rows(view)).toHaveLength(19);
+    fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+    await count(view, 39);
+    expect(search.mock.calls[2][2]).toEqual(first.nextCursor);
+    expect(new Set(rows(view).map((post) => post.id)).size).toBe(39);
+    record({ deletedDocument: 'old-000', unreadPageRetriedAtOriginalCursor: true,
+      lateServerPageRejected: true, authorizedVisibleResults: 39, navigationCalls: 0 });
+  } finally {
+    await act(async () => { if (releasePage) releasePage(); });
+    await environment.withSecurityRulesDisabled((context) => context.firestore().doc(document).set(saved));
+  }
+});
+
 test('membership revoked after search prevents opening old cached results', async () => {
   const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
   await membership('inactive');
