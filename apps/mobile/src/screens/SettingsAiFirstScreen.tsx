@@ -145,7 +145,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         <AISection title="AI 助理">
           <AIRow
             title="助理權限"
-            subtitle="逐項開關助理可執行的代辦動作（預設關閉）"
+            subtitle="逐項開關助理可執行的代辦動作（預設開啟，每次執行仍需確認）"
             onPress={go('AssistantPermissions')}
           />
         </AISection>

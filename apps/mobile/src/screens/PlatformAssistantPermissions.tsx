@@ -154,7 +154,7 @@ function PlatformAssistantPermissionEditor({ scope }: { scope: PlatformAssistant
     <View>
       <AICard title="Google 帳號的代辦動作">
         <Text style={{ color: aiTokens.muted, lineHeight: 22, marginBottom: 12 }}>
-          預設關閉。開啟後，每次執行仍會先請你確認。網頁與手機共用這個 Google 帳號的設定。
+          預設開啟，每次執行仍需確認。網頁與手機共用這個 Google 帳號的設定。
         </Text>
         {PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS.map((row) => (
           <View

@@ -203,7 +203,7 @@ function PlatformAssistantPermissionsEditor({
     <section className={styles.stack} aria-label="Google 帳號 AI 代辦權限">
       <div className={styles.sectionHeading}>
         <h3 className={styles.groupHeading}>Google 帳號的代辦動作</h3>
-        <p>選擇允許助理代辦的項目。預設關閉；開啟後，每次執行仍會先請你確認。</p>
+        <p>選擇允許助理代辦的項目。預設開啟，每次執行仍需確認。</p>
       </div>
       <div className={styles.group}>
         {PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS.map((row) => (
