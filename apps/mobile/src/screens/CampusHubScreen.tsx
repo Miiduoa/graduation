@@ -129,7 +129,7 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
         icon: 'ic_lost_found',
         label: '失物招領',
         description: '找回遺失物品',
-        screen: 'LostFound',
+        screen: 'PlatformLostFound',
         keywords: ['失物', '招領', '撿到', '遺失'],
       },
       {

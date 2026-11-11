@@ -111,6 +111,9 @@ function createPrivateGroupFileHandler({
           || !Number.isSafeInteger(Number(metadata.generation))) {
           throw failure(500, 'Missing file generation');
         }
+        // GCS metadata lookup may outlive a membership or submission revocation.
+        // Reauthorize before opening any read stream or sending response headers.
+        await authorizePrivateFile(db, scope, user.uid, false);
         const filename = encodeURIComponent(scope.filename)
           .replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
         const contentType = String(metadata.contentType || 'application/octet-stream');
@@ -152,6 +155,8 @@ function createPrivateGroupFileHandler({
           if (Number(error.code) !== 404) throw error;
         }
       }
+      // Cover generation lookup can also wait across a manager or school revocation.
+      await authorizePrivateFile(db, scope, user.uid, true);
       await file.save(bytes, {
         resumable: false,
         preconditionOpts: { ifGenerationMatch: generation },

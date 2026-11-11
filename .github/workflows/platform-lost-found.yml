@@ -1,0 +1,67 @@
+name: Platform lost-found
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'deploy/nuni-api/**'
+      - 'packages/shared/src/nuni*.ts'
+      - 'packages/shared/src/lostFoundFields.ts'
+      - 'packages/shared/src/taipeiTime.ts'
+      - 'packages/shared/tests/nuniLostFound.test.cjs'
+      - 'scripts/test-platform-lost-found.mjs'
+      - 'scripts/test-platform-lost-found-runtime.mjs'
+      - 'scripts/platform-lost-found/**'
+      - '.github/workflows/platform-lost-found.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts-and-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: platform_lost_found_test
+          POSTGRES_USER: lost_found_test
+          POSTGRES_PASSWORD: isolated-test-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+      - name: Install isolated test tools
+        run: npm install --prefix "$RUNNER_TEMP/lost-found-tools" --ignore-scripts --no-audit --no-fund typescript@5.9.3 @types/node@22.20.5 pg@8.22.0 fastify@5.10.0 @fastify/rate-limit@11.1.0
+      - name: Verify source contract and packaging boundaries
+        run: |
+          python3 deploy/nuni-api/lost-found/prepare.py --verify-only
+          python3 -m unittest discover -s scripts/platform-lost-found -p '*_test.py' -v
+      - name: Run shared contracts and transactional PostgreSQL regressions
+        env:
+          LOST_FOUND_TEST_DATABASE_URL: postgresql://lost_found_test:isolated-test-only@127.0.0.1:5432/platform_lost_found_test
+          LOST_FOUND_TEST_TSC: ${{ runner.temp }}/lost-found-tools/node_modules/.bin/tsc
+          LOST_FOUND_TEST_TYPE_ROOTS: ${{ runner.temp }}/lost-found-tools/node_modules/@types
+          LOST_FOUND_TEST_DEPS: ${{ runner.temp }}/lost-found-tools/node_modules
+          NODE_OPTIONS: --max-old-space-size=768
+        run: |
+          set -o pipefail
+          node scripts/test-platform-lost-found.mjs | tee platform-lost-found-results.tap
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: platform-lost-found-results
+          path: platform-lost-found-results.tap
+          if-no-files-found: warn
+          retention-days: 14

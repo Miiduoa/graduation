@@ -28,8 +28,8 @@ describe('tronClassDataEnabled', () => {
     mockExpoConfig.extra = {};
   });
 
-  test('isTronClassDataFetchEnabled defaults to true when extra omits flag', () => {
-    expect(isTronClassDataFetchEnabled()).toBe(true);
+  test('isTronClassDataFetchEnabled defaults to false when extra omits flag', () => {
+    expect(isTronClassDataFetchEnabled()).toBe(false);
   });
 
   test('isTronClassDataFetchEnabled is false when extra.tronClassDataEnabled is false', () => {

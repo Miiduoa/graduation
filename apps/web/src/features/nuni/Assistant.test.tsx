@@ -759,6 +759,16 @@ it('v2 renders markdown, assignment rows and food cards without raw paths', asyn
   expect(screen.getByText('確認')).toBeTruthy();
 });
 
+it('handles an obsolete service error as a request failure without offering a disable control', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(
+    JSON.stringify({ error: 'PLATFORM_SERVICE_DISABLED' }),
+    { status: 403, headers: { 'Content-Type': 'application/json' } },
+  )));
+  render(<Assistant />);
+  await screen.findByText('目前無法查詢，請重新選擇或稍後再試。');
+  expect(screen.queryByRole('link', { name: '管理平台權限' })).toBeNull();
+});
+
 it('keeps the next draft typed while a cloud answer is pending', async () => {
   let resolveAnswer: (response: Response) => void = () => {};
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {

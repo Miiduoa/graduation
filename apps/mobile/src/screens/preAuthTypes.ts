@@ -5,18 +5,21 @@ export type PreAuthStackParamList = {
   Library: undefined;
   LibraryCatalog: { initialQuery?: string } | undefined;
   SchoolInfo: undefined;
+  StudentCard: undefined;
   BusSchedule: undefined;
   公告總覽: undefined;
   公告詳情: { id: string };
   CourseCatalog: undefined;
   Health: undefined;
   Dormitory: undefined;
+  PlatformLostFound: { id?: string; schoolId?: string } | undefined;
   Career: undefined;
   SSOLogin: undefined;
   NuniTimetableAssistant: undefined;
   PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;
   PersonalTimetable: { term?: string; courseId?: string; schoolId?: string; date?: string; startAt?: number; reminderScope?: string } | undefined;
   PersonalCalendar: { eventId?: string } | undefined;
+  OralExamDemo: undefined;
   NuniWorkspace: {
     tab?: 'courses' | 'food' | 'merchant' | 'account';
     assistantAccountId?: string;

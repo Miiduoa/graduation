@@ -11,10 +11,9 @@ const ASSOCIATION_PATHS = [
   '/apple-app-site-association',
 ];
 
-// Login-completion HTML that IdP redirects still hit. These are not browsable
-// entry screens; dropping them would break school/Google return after consent.
+// The school account callback runs in the current app. These two callback
+// pages still complete transactions started by the retained login flows.
 export const LEGACY_LOGIN_CALLBACK_PATHS = [
-  '/auth/account/callback',
   '/auth/callback',
   '/auth/platform/callback',
 ];

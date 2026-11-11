@@ -68,6 +68,8 @@ function sortValue(value: unknown): number {
 
 export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
   const docs = new Map<string, DocData>(seed.map(([path, data]) => [path, clone(data) as DocData]));
+  const versions = new WeakMap<DocData, number>();
+  let nextVersion = 0;
   let failCommit = false;
 
   function ref(path: string) {
@@ -146,10 +148,12 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
 
   function snap(reference: { path: string; id: string }, values = docs) {
     const data = values.get(reference.path);
+    if (data && !versions.has(data)) versions.set(data, ++nextVersion);
     return {
       id: reference.id,
       ref: ref(reference.path),
       exists: data !== undefined,
+      updateTime: data ? { seconds: versions.get(data)!, nanoseconds: 0 } : undefined,
       data: () => (data ? (clone(data) as DocData) : {}),
     };
   }
