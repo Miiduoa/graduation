@@ -473,7 +473,9 @@ it('preserves the intended new-message recipient through the login return URL', 
   await act(async () => {
     render(<Suspense fallback={<p>載入路由…</p>}><NewDmPage searchParams={params} /></Suspense>);
   });
-  const login = await screen.findByRole('link', { name: '前往登入' });
-  expect(login.getAttribute('href')).toBe('/login?returnUrl=%2Fdms%2Fnew%3Fpeer%3Dbob');
+  const login = await screen.findByRole('link', { name: '連結學校帳號' });
+  expect(login.getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fdms%2Fnew%3Fpeer%3Dbob',
+  );
   expect(preparePrivateConversation).not.toHaveBeenCalled();
 });
