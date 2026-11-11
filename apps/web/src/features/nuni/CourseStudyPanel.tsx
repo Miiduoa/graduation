@@ -785,7 +785,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           <button type="button" className={styles.button} onClick={() => {
             const trigger = pendingSource.clearPaste ? pasteStart.current : sourceInput.current;
             setPendingSource(null);
-            trigger?.focus();
+            // A selected file can finish loading while the import details are
+            // collapsed. Do not send keyboard focus into that hidden section.
+            if (trigger?.closest('details')?.hasAttribute('open')) trigger.focus();
+            else sourceSummary.current?.focus();
           }}>保留原本的學習內容</button>
         </div>
       </section>}

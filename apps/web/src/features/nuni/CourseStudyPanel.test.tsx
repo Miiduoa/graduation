@@ -947,11 +947,28 @@ it('cancels a successful local file replacement without losing the study draft o
   expect(inputValue(noteLabel)).toBe('保留這份資料庫筆記');
   expect(screen.queryByText('交易必須一致。')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
-  expect(document.activeElement).toBe(input);
+  // The imported lesson keeps its upload details collapsed; the file input
+  // is hidden and cannot be the keyboard/screen-reader return destination.
+  expect(document.activeElement).toBe(screen.getByText('換一份講義或貼上內容'));
   expect(screen.getByText(material.body)).toBeTruthy();
   expect(inputValue(noteLabel)).toBe('保留這份資料庫筆記');
   expect(inputValue(questionLabel)).toBe('未送出的問題也要保留');
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('returns focus to the visible file picker when cancelling a replacement from expanded import details', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '還沒備份的筆記' } });
+  const summary = screen.getByText('換一份講義或貼上內容');
+  fireEvent.click(summary);
+  expect(summary.closest('details')?.hasAttribute('open')).toBe(true);
+  const input = screen.getByLabelText('選擇講義') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['新的例題'], '例題.txt', { type: 'text/plain' })] } });
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(document.activeElement).toBe(input);
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('還沒備份的筆記');
 });
 
 it('requires explicit confirmation before pasted text replaces a practice, and cancels without losing the answer', async () => {
