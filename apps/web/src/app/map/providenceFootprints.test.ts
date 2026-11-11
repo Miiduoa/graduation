@@ -244,6 +244,39 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('does not raise a subsurface, rooftop or bridge feature into an invented ground-standing building', () => {
+    // A whitelisted way can later be retagged. A source height is not a
+    // surveyed base elevation; reject non-surface placement rather than
+    // constructing walls through soil or empty air.
+    for (const placement of [
+      { location: 'underground' }, { location: 'underwater' },
+      { location: 'roof' }, { location: 'overhead' },
+      { location: '' }, { location: null },
+      { layer: '-1' }, { layer: '1' }, { layer: '0.5' },
+      { layer: 'unknown' }, { layer: null },
+      { bridge: 'yes' }, { bridge: 'viaduct' }, { bridge: true },
+      { tunnel: 'yes' }, { tunnel: 'building_passage' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height: '18 m', ...placement })],
+      }), JSON.stringify(placement)).toEqual([]);
+    }
+    // Explicit ground placement and negative bridge/tunnel flags should not
+    // hide a normally verified, above-ground OSM outline.
+    for (const placement of [
+      {}, { location: 'surface' }, { location: 'ground' },
+      { layer: '0' }, { layer: '+0' },
+      { bridge: 'no', tunnel: 'no' },
+      { location: 'surface', layer: '0', bridge: 'no', tunnel: 'false' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height: '18 m', ...placement })],
+      }), JSON.stringify(placement)).toMatchObject([
+        { poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag' },
+      ]);
+    }
+  });
+
   it('rejects wrong campus, open ways, degenerate shapes and self-intersections', () => {
     const outside = library.map((p) => ({ lat: p.lat + 1, lon: p.lon }));
     const open = library.slice(0, -1);
