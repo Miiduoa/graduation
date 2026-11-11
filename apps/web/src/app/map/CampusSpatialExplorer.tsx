@@ -236,9 +236,32 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
 
   useEffect(() => {
     if (footprintRetryAfter === null) return;
+    // Mobile browsers can throttle a background tab's timers. On resume,
+    // check the absolute deadline instead of leaving the retry disabled until
+    // the delayed timeout finally runs. Never refetch automatically.
+    const synchronizeCooldown = () => {
+      const remaining = footprintRetryAfter.until - Date.now();
+      if (remaining <= 0) {
+        setFootprintRetryAfter((current) =>
+          current?.until === footprintRetryAfter.until ? null : current);
+        return;
+      }
+      const minutes = Math.ceil(remaining / 60_000);
+      setFootprintRetryAfter((current) =>
+        current?.until === footprintRetryAfter.until && current.minutes !== minutes
+          ? { ...current, minutes } : current);
+    };
     const timer = window.setTimeout(() => setFootprintRetryAfter(null),
       Math.max(0, footprintRetryAfter.until - Date.now()));
-    return () => window.clearTimeout(timer);
+    const interval = window.setInterval(synchronizeCooldown, 60_000);
+    document.addEventListener('visibilitychange', synchronizeCooldown);
+    window.addEventListener('pageshow', synchronizeCooldown);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', synchronizeCooldown);
+      window.removeEventListener('pageshow', synchronizeCooldown);
+    };
   }, [footprintRetryAfter]);
 
   useEffect(() => {
