@@ -1843,3 +1843,35 @@ it('rejects oversized pasted JSON before retaining it in state, without losing a
   expect(paste.value).toBe('已改用較小份的 JSON 草稿');
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it('shows only a current source Markdown table and never treats copied values as model output', () => {
+  const tableMaterial = {
+    id: 'syllabus-credits',
+    title: '學分原文表',
+    body: [
+      '下列為教材直接列出的欄位。',
+      '| 科目 | 學分 |',
+      '| --- | --- |',
+      '| 資料庫 | 3 |',
+    ].join('\n'),
+  };
+  const revised = { ...tableMaterial, body: '新版講義只有段落，不再提供表格。' };
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={tableMaterial} onClose={vi.fn()} />);
+  const table = screen.getByRole('table', { name: '原文第 2 行起的表格' });
+  expect(within(table).getByRole('columnheader', { name: '學分' })).toBeTruthy();
+  expect(within(table).getByText('3')).toBeTruthy();
+  expect(screen.getByText(/沒有補算、推論或辨識圖片/)).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '這個表格我還需要複習。' } });
+  view.rerender(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={revised} onClose={vi.fn()} />);
+  expect(screen.getByRole('table')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect(screen.queryByRole('table')).toBeNull();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  expect(mocks.run).not.toHaveBeenCalled();
+});

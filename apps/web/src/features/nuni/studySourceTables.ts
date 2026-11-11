@@ -24,26 +24,27 @@ function parseSimplePipeRow(line: string): string[] | null {
   return cells.length >= 2 && cells.length <= MAX_COLUMNS ? cells : null;
 }
 
-function fenceMarker(line: string): string | null {
+function fenceMarker(line: string): { character: string; length: number } | null {
   const trimmed = line.trimStart();
+  if (line.length - trimmed.length > 3) return null;
   const marker = trimmed[0];
   if (marker !== '~' && marker !== String.fromCharCode(96)) return null;
   let length = 0;
   while (trimmed[length] === marker) length += 1;
-  return length >= 3 ? marker : null;
+  return length >= 3 ? { character: marker, length } : null;
 }
 
 export function extractStudySourceTables(source: string): StudySourceTable[] {
   if (!source.includes('|')) return [];
   const lines = source.split(/\r?\n/u);
   const tables: StudySourceTable[] = [];
-  let fence: string | null = null;
+  let fence: { character: string; length: number } | null = null;
 
   for (let index = 0; index < lines.length - 2 && tables.length < MAX_TABLES; index += 1) {
     const marker = fenceMarker(lines[index]);
     if (marker) {
       if (fence === null) fence = marker;
-      else if (fence === marker) fence = null;
+      else if (fence.character === marker.character && marker.length >= fence.length) fence = null;
       continue;
     }
     if (fence) continue;
