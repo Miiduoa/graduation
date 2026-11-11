@@ -101,7 +101,11 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
   const router = useRouter();
   const fieldId = useId();
   const hintId = useId();
+  const limitId = useId();
   const [draft, setDraft] = useState('');
+  // The shared search parser counts Unicode code points after trimming.
+  // Keep maxLength=160 UTF-16 units so 80 emoji remain searchable.
+  const titleTooLong = Array.from(draft.trim()).length > 80;
   const [resumePosition, setResumePosition] = useState<ReadingPosition | null>(null);
   const [searched, setSearched] = useState('');
   const [page, setPage] = useState<TitleSearchPage | null>(null);
@@ -311,7 +315,8 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
           <label htmlFor={fieldId}>標題開頭</label>
           <input id={fieldId} ref={input} type="search" value={draft}
             onChange={(event) => edit(event.target.value)} maxLength={160}
-            aria-describedby={hintId} autoComplete="off" placeholder="例如：二手書、租屋"
+            aria-invalid={titleTooLong} aria-describedby={titleTooLong ? `${hintId} ${limitId}` : hintId}
+            autoComplete="off" placeholder="例如：二手書、租屋"
             onKeyDown={(event) => {
               if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault();
             }} />
@@ -328,6 +333,9 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
           )}
         </div>
       </form>
+      {titleTooLong && <p id={limitId} aria-live="polite" className={styles.error}>
+        標題開頭最多 80 字，請刪減後搜尋。
+      </p>}
       <p id={hintId} className={styles.hint}>
         直接搜尋本校可讀取的歷史貼文，不必先載入動態牆。只比對標題開頭，不搜尋內文；英文區分大小寫。結果依標題排列，每頁最多 20 則。
       </p>

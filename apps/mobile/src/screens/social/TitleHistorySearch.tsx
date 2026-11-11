@@ -96,6 +96,8 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const insets = useSafeAreaInsets();
   const input = useRef<TextInput>(null);
   const [text, setText] = useState(initialQuery);
+  // Match the shared parser: count Unicode code points after trimming, not UTF-16 units.
+  const titleTooLong = Array.from(text.trim()).length > 80;
   const [resumeHint, setResumeHint] = useState(Boolean(initialQuery));
   const [resumePostId, setResumePostId] = useState(initialPostId);
   const [posts, setPosts] = useState<TitleSearchPost[]>([]);
@@ -340,9 +342,14 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
             {resumeHint && <Text accessibilityLiveRegion="polite" style={styles.message}>已保留上次的搜尋文字；請重新搜尋以確認最新結果與校籍權限。</Text>}
             <Text style={styles.label}>記得的標題開頭</Text>
             <TextInput ref={input} value={text} onChangeText={change} style={styles.input}
-              accessibilityLabel="記得的標題開頭" placeholder="例如：二手書" placeholderTextColor={theme.colors.textSecondary}
+              accessibilityLabel="記得的標題開頭"
+              accessibilityHint={titleTooLong ? "標題開頭超過 80 字，請刪減後搜尋。" : "最多 80 字的標題開頭"}
+              placeholder="例如：二手書" placeholderTextColor={theme.colors.textSecondary}
               autoCapitalize="none" autoCorrect={false} returnKeyType="search"
               onSubmitEditing={() => { void request(null, false); }} />
+            {titleTooLong && <Text accessibilityLiveRegion="polite" style={styles.message}>
+              標題開頭最多 80 字，請刪減後搜尋。
+            </Text>}
             <View style={styles.actions}>
               <Pressable accessibilityRole="button" accessibilityLabel="搜尋歷史標題"
                 accessibilityState={{ disabled: busy || opening, busy: busy || opening }} disabled={busy || opening}
