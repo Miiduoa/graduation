@@ -392,3 +392,21 @@ it('abandons later chunks after Stop is rejected, even if the active chunk finis
   expect(speak).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
 });
+
+it('drains thousands of immediately finished speech chunks without recursion or missing source text', () => {
+  // A few mobile engines can fire onend synchronously inside speak().
+  // Previously each callback nested another speakNext and could overflow the stack.
+  const changed = vi.fn();
+  const text = '甲'.repeat(160 * 3500 + 7);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={text} onSpeakingChange={changed} />);
+
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }))).not.toThrow();
+  expect(speak).toHaveBeenCalledTimes(3501);
+  const utterances = speak.mock.calls.map(([utterance]) => utterance as Utterance);
+  expect(utterances.every((utterance) => utterance.voice === local && utterance.text.length <= 160)).toBe(true);
+  expect(utterances.map((utterance) => utterance.text).join('')).toBe(text);
+  expect(changed).not.toHaveBeenCalledWith(true);
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});

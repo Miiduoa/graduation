@@ -130,7 +130,23 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       onSpeakingChange?.(false);
       if (message) setError(message);
     };
+    // A browser may dispatch onend inside speak(). Drain that completion
+    // without recursively nesting one speakNext call per lesson chunk.
+    let launchingChunk = false;
+    let nextChunkQueued = false;
     const speakNext = () => {
+      if (launchingChunk) {
+        nextChunkQueued = true;
+        return;
+      }
+      do {
+        nextChunkQueued = false;
+        launchingChunk = true;
+        try { launchChunk(); }
+        finally { launchingChunk = false; }
+      } while (nextChunkQueued);
+    };
+    const launchChunk = () => {
       const part = remainingChunks.current.shift();
       if (part === undefined) { finishPlayback(); return; }
 
