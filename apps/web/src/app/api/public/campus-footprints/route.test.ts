@@ -1047,10 +1047,13 @@ describe('public Providence building geometry route', () => {
       const stale = await GET();
       expect(stale.status).toBe(200);
       expect(stale.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(stale.headers.get('Retry-After')).toBe('5400');
       expect((await stale.json()).fetchedAt).toBe(initial.fetchedAt);
 
       clock.mockReturnValue(refreshAt + 60 * 60 * 1000);
-      const stillStale = await (await GET()).json();
+      const coolingResponse = await GET();
+      expect(coolingResponse.headers.get('Retry-After')).toBe('1800');
+      const stillStale = await coolingResponse.json();
       expect(stillStale.stale).toBe(true);
       expect(stillStale.fetchedAt).toBe(initial.fetchedAt);
       expect(upstream).toHaveBeenCalledTimes(2);
