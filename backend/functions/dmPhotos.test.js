@@ -208,6 +208,22 @@ test('rechecks both students at publication and issuance, including block and sc
   expect(await f.read(mediaId)).toHaveProperty('url');
 });
 
+test('active transferred members can still send a first photo', async () => {
+  const conversationId = 'dm_pu_alice_bob';
+  const thread = 'conversations/' + conversationId;
+  const f = fixture({ conversationId, createThread: false });
+  f.docs.set('users/alice', { schoolId: 'elsewhere' });
+  f.docs.set('users/bob', { primarySchoolId: 'pu' });
+  const { path } = await f.upload({ peerUid: 'bob' });
+  f.stage(path);
+  expect(await f.send(path, { peerUid: 'bob' })).toEqual({ conversationId, messageId });
+  expect(f.docs.get(thread)).toMatchObject({
+    type: 'dm',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
+  });
+});
+
 test('a first photo creates the canonical thread only when it is sent with the validated peer', async () => {
   const conversationId = 'dm_pu_alice_bob';
   const thread = 'conversations/' + conversationId;

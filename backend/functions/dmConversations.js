@@ -81,6 +81,9 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       )
         throw denied();
     } else {
+      // New DMs follow main conversation create: active school membership,
+      // not profile.schoolId equality. Transfers with leftover active
+      // membership can still open a first chat.
       const members = db.collection('schools').doc(schoolId).collection('members');
       const [a, b, ma, mb, ...blocked] = await tx.getAll(
         first,
@@ -90,14 +93,7 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
         ...blockRefs,
       );
       if (
-        ![a, b].every((snap) => {
-          const profile = snap.data();
-          // New chats still need a usable account. Missing schoolId is legacy-compatible.
-          return (
-            !isAccountUnavailable(profile) &&
-            (profile.schoolId == null || profile.schoolId === '' || profile.schoolId === schoolId)
-          );
-        }) ||
+        ![a, b].every((snap) => !isAccountUnavailable(snap.data())) ||
         ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
         blocked.some((snap) => snap.exists)
       )

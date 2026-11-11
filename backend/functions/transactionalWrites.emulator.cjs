@@ -119,28 +119,34 @@ test('existing members can still send and replay a private story reply after tra
   const seed = db.batch();
   seed.set(db.doc('users/alice'), { schoolId: 'pu' });
   seed.set(db.doc('users/bob'), { schoolId: 'pu' });
+  seed.set(db.doc('users/charlie'), { schoolId: 'other' });
+  seed.set(db.doc('schools/other/members/charlie'), { status: 'active' });
+  seed.delete(db.doc('schools/pu/members/charlie'));
   seed.set(db.doc('campusStories/transfer'), {
     authorUid: 'bob', schoolId: 'pu', allowReplies: true, expiresAt: Date.now() + 60_000,
   });
   await seed.commit();
 
   const send = createReplyToCampusStory({ db });
-  const reply = (replyId) => send({
-    auth: { uid: 'alice' },
-    data: { schoolId: 'pu', storyId: 'transfer', viewerUid: 'alice', authorUid: 'bob', replyId, content: '明天見' },
+  const reply = (uid, replyId) => send({
+    auth: { uid },
+    data: { schoolId: 'pu', storyId: 'transfer', viewerUid: uid, authorUid: 'bob', replyId, content: '明天見' },
   });
   const firstId = 'story-transfer-reply-first';
   const secondId = 'story-transfer-reply-second';
-  const first = await reply(firstId);
+  const first = await reply('alice', firstId);
   const thread = db.doc(`conversations/${first.conversationId}`);
-  await db.doc('users/alice').update({ schoolId: 'other' });
   await db.doc('users/bob').set({ primarySchoolId: 'pu' });
-  assert.deepEqual(await reply(firstId), first);
-  const second = await reply(secondId);
+  assert.deepEqual(await reply('alice', firstId), first);
+  const second = await reply('alice', secondId);
   assert.notEqual(second.messageId, first.messageId);
   assert.equal((await thread.collection('messages').get()).size, 2);
+  await assert.rejects(reply('charlie', 'story-outsider-reply-0001'), { code: 'permission-denied' });
+  await db.doc('users/alice').update({ schoolId: 'other' });
+  assert.deepEqual(await reply('alice', firstId), first);
+  await assert.rejects(reply('alice', 'story-transfer-reply-third'), { code: 'permission-denied' });
   await db.doc('users/alice/blockedUsers/bob').set({});
-  await assert.rejects(reply('story-transfer-reply-third'), { code: 'permission-denied' });
+  await assert.rejects(reply('alice', firstId), { code: 'permission-denied' });
   assert.equal((await thread.collection('messages').get()).size, 2);
 });
 

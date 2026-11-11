@@ -23,10 +23,20 @@ function availableProfile(snapshot) {
   return Boolean(profile) && !isAccountUnavailable(profile);
 }
 
-function profileAllowsStoryReply(snapshot) {
-  // Keep block + account-validity only. primarySchoolId-only profiles, missing
-  // schoolId, and school transfers must not lose the ability to reply.
-  return availableProfile(snapshot);
+function affiliatedWithSchool(profile, schoolId) {
+  const school = typeof profile?.schoolId === 'string' ? profile.schoolId : '';
+  const primary = typeof profile?.primarySchoolId === 'string' ? profile.primarySchoolId : '';
+  return school === schoolId || primary === schoolId;
+}
+
+function canReadCampusStory(profileSnap, memberSnap, schoolId) {
+  // Matches campusStories get: live account, active school membership, and
+  // schoolId or primarySchoolId bound to that campus.
+  return (
+    availableProfile(profileSnap) &&
+    memberSnap.data()?.status === 'active' &&
+    affiliatedWithSchool(profileSnap.data(), schoolId)
+  );
 }
 
 function createReplyToCampusStory({ db }) {
@@ -58,12 +68,14 @@ function createReplyToCampusStory({ db }) {
     const message = conversation.collection('messages').doc(messageId);
     const sender = db.collection('users').doc(uid);
     const author = db.collection('users').doc(authorUid);
+    const senderMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
     const friendBlocks = db.collection('friendBlocks');
 
     return db.runTransaction(async (tx) => {
       const [
         senderProfile,
         authorProfile,
+        senderMembership,
         story,
         thread,
         existing,
@@ -71,6 +83,7 @@ function createReplyToCampusStory({ db }) {
       ] = await tx.getAll(
         sender,
         author,
+        senderMember,
         db.collection('campusStories').doc(storyId),
         conversation,
         message,
@@ -80,8 +93,8 @@ function createReplyToCampusStory({ db }) {
         friendBlocks.doc(`${authorUid}_${uid}`),
       );
       if (
-        !profileAllowsStoryReply(senderProfile) ||
-        !profileAllowsStoryReply(authorProfile) ||
+        !availableProfile(senderProfile) ||
+        !availableProfile(authorProfile) ||
         blocks.some((block) => block.exists)
       ) {
         throw unavailable();
@@ -111,6 +124,9 @@ function createReplyToCampusStory({ db }) {
         }
         // A response may have been lost just before expiry. A replay must never republish the preview.
         return { conversationId, messageId };
+      }
+      if (!canReadCampusStory(senderProfile, senderMembership, schoolId)) {
+        throw unavailable();
       }
       const source = story.data();
       if (

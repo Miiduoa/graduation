@@ -158,6 +158,23 @@ after(async () => {
   await deleteApp(app);
 });
 
+test('active transferred members can still open a first DM without matching profile schoolId', async () => {
+  await db.doc('users/alice').set({ schoolId: 'elsewhere' });
+  await db.doc('users/bob').set({ primarySchoolId: 'pu' });
+  assert.deepEqual(await handlers.prepare(request()), {
+    conversationId,
+    peerUid: 'bob',
+    exists: false,
+  });
+  assert.equal((await thread.get()).exists, false);
+  assert.deepEqual(await handlers.sendText(request()), { conversationId, messageId: textId });
+  const row = (await thread.get()).data();
+  assert.equal(row.type, 'dm');
+  assert.equal(row.schoolId, 'pu');
+  assert.deepEqual(row.memberIds, ['alice', 'bob']);
+  assert.equal((await messages.get()).size, 1);
+});
+
 test('a missing conversation is denied by client rules; prepare and an authorized empty inbox create nothing', async () => {
   const alice = environment.authenticatedContext('alice').firestore();
   await assertFails(alice.doc(thread.path).get({ source: 'server' }));

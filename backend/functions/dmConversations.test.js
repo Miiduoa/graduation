@@ -202,11 +202,9 @@ test.each([
 );
 
 test.each([
-  ['users/alice', { schoolId: 'elsewhere' }],
-  ['users/bob', { schoolId: 'elsewhere' }],
   ['schools/pu/members/alice', { status: 'inactive' }],
   ['schools/pu/members/bob', { status: 'inactive' }],
-])('new chats still require school access at %s, existing chats do not', async (path, value) => {
+])('new chats still require active school membership at %s, existing chats do not', async (path, value) => {
   const original = store.docs.get(path);
   store.docs.set(path, value);
   await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
@@ -219,6 +217,22 @@ test.each([
   expect(await send({ messageId: 'next-text-message-000002' })).toEqual({
     conversationId,
     messageId: 'next-text-message-000002',
+  });
+});
+
+test.each([
+  ['users/alice', { schoolId: 'elsewhere' }],
+  ['users/bob', { schoolId: 'elsewhere' }],
+  ['users/alice', { primarySchoolId: 'pu' }],
+  ['users/bob', {}],
+])('active members can still open a first DM after profile school change at %s', async (path, value) => {
+  store.docs.set(path, value);
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: false });
+  expect(await send()).toEqual({ conversationId, messageId });
+  expect(store.docs.get(thread)).toMatchObject({
+    type: 'dm',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
   });
 });
 

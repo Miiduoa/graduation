@@ -109,30 +109,63 @@ test.each([
 
 test.each([
   [{ primarySchoolId: 'pu' }, { schoolId: 'pu' }],
-  [{}, { schoolId: 'pu' }],
-  [{ schoolId: 'other' }, { schoolId: 'pu' }],
+  [{ schoolId: 'other', primarySchoolId: 'pu' }, { schoolId: 'pu' }],
   [{ schoolId: 'pu' }, { primarySchoolId: 'pu' }],
   [{ schoolId: 'pu' }, { schoolId: 'other' }],
-  [{ primarySchoolId: 'other' }, { schoolId: '' }],
-])('legacy or transferred profiles still reply %j / %j', async (alice, bob) => {
+  [{ schoolId: 'pu', primarySchoolId: 'other' }, {}],
+])('readers who can still see the story can reply %j / author %j', async (alice, bob) => {
   store.docs.set('users/alice', alice);
   store.docs.set('users/bob', bob);
-  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
   store.docs.delete('schools/pu/members/bob');
   const receipt = await send();
   expect(receipt.conversationId).toBe('dm_pu_alice_bob');
   expect(store.docs.get(`${thread}/messages/${receipt.messageId}`).content).toBe('明天還有嗎？');
 });
 
+test.each([
+  ['users/alice', { schoolId: 'other' }],
+  ['users/alice', {}],
+  ['users/alice', { primarySchoolId: 'other' }],
+  ['schools/pu/members/alice', { status: 'inactive' }],
+  ['schools/pu/members/alice', null],
+])('refuses a new reply when the viewer cannot read the story at %s', async (path, record) => {
+  if (record == null) store.docs.delete(path);
+  else store.docs.set(path, record);
+  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(store.docs.has(thread)).toBe(false);
+});
+
+test('another school with no membership cannot start a story reply', async () => {
+  store.docs.set('users/charlie', { schoolId: 'other' });
+  store.docs.set('schools/other/members/charlie', { status: 'active' });
+  await expect(send({ viewerUid: 'charlie' }, 'charlie')).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  expect(store.docs.has(thread)).toBe(false);
+  expect(store.docs.has('conversations/dm_pu_bob_charlie')).toBe(false);
+  expect([...store.docs.keys()].some((key) => key.includes('/messages/'))).toBe(false);
+});
+
 test('still sends and replays a receipt after the author transfers schools', async () => {
   const original = await send();
   store.docs.set('users/bob', { schoolId: 'other' });
-  expect(store.docs.get('schools/pu/members/bob')).toMatchObject({ status: 'active' });
+  store.docs.delete('schools/pu/members/bob');
   const next = await send({ replyId: 'test-reply-0000000002' });
   expect(next.conversationId).toBe(original.conversationId);
   expect(await send()).toEqual(original);
   expect(store.docs.get(thread).lastMessage.id).toBe(next.messageId);
   expect([...store.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(2);
+});
+
+test('replays an existing reply after the viewer loses story read access', async () => {
+  const original = await send();
+  store.docs.set('users/alice', { schoolId: 'other' });
+  store.docs.delete('schools/pu/members/alice');
+  expect(await send()).toEqual(original);
+  await expect(send({ replyId: 'test-reply-0000000002' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  expect([...store.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(1);
 });
 
 test('blocked accounts still cannot reply after a transfer or missing schoolId', async () => {
