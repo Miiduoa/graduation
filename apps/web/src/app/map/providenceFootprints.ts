@@ -148,8 +148,11 @@ function outlineNearPoi(outline: readonly [number, number][], place: { lat: numb
 /** Whitelisted IDs can be edited in OSM. A former building or roof-only way must
  * not be rendered as an occupied, full-height campus building. Unclear tags fail closed.
  */
+// Non-building/ambiguous values sometimes survive old OSM edits on an audited way.
+// A matching way ID alone must not turn explicit negative tags into a campus block.
 const NON_BUILDING_VOLUMES = new Set([
-  'no', 'maybe', 'proposed', 'planned', 'construction', 'demolished', 'destroyed',
+  'no', 'false', '0', 'none', 'unknown', 'maybe',
+  'proposed', 'planned', 'construction', 'demolished', 'destroyed',
   'ruins', 'ruined', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
 ]);
 // A way can retain building=yes while carrying a lifecycle tag for a removed,

@@ -99,6 +99,8 @@ describe('Providence OSM building outlines', () => {
     })).toEqual([]);
     for (const tags of [
       null, {}, { height: '18' }, { building: 'no' },
+      { building: 'false' }, { building: ' FALSE ' },
+      { building: '0' }, { building: 'none' }, { building: 'unknown' },
       { building: 'construction' }, { building: 'proposed' },
       { building: 'demolished' }, { building: 'roof' }, { building: 'ruins' },
       { building: 'maybe' }, { building: '   ' }, { building: 1 },
