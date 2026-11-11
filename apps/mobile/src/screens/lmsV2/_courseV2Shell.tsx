@@ -103,10 +103,24 @@ export type Loadable<T> = {
   refresh: () => Promise<void>;
 };
 
-/** scopeKey must include every value that changes which records the query can read. */
-export function useLoadable<T>(fn: () => Promise<T>, scopeKey?: string): Loadable<T> {
+function useResolvedLoadableScope(extraScope?: string): string {
+  const params = useCourseV2Params();
+  return JSON.stringify([
+    params.courseId ?? '',
+    params.assignmentId ?? '',
+    params.quizId ?? '',
+    params.attemptId ?? '',
+    params.topicId ?? '',
+    params.sessionId ?? '',
+    extraScope ?? '',
+  ]);
+}
+
+/** extraScope must include every non-route value that changes which records the query can read. */
+export function useLoadable<T>(fn: () => Promise<T>, extraScope?: string): Loadable<T> {
+  const scopeKey = useResolvedLoadableScope(extraScope);
   const [state, setState] = useState<{
-    scopeKey: string | undefined;
+    scopeKey: string;
     data: T | null;
     loading: boolean;
     error: string | null;

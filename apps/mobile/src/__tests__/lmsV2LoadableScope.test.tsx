@@ -7,6 +7,31 @@ import { useLoadable, type Loadable } from '../screens/lmsV2/_courseV2Shell';
 
 jest.mock('../ui/theme', () => ({ theme: {} }));
 jest.mock('../ui/useThemeStyleSheet', () => ({ useThemeStyleSheet: jest.fn() }));
+jest.mock('@react-navigation/native', () => {
+  const actual = jest.requireActual('@react-navigation/native');
+  return {
+    ...actual,
+    useNavigation: () => ({
+      navigate: jest.fn(),
+      goBack: jest.fn(),
+      setOptions: jest.fn(),
+      setParams: jest.fn(),
+    }),
+    useRoute: () => ({ params: globalThis.__lmsLoadableRouteParams }),
+    useFocusEffect: jest.fn(),
+  };
+});
+
+declare global {
+  var __lmsLoadableRouteParams: {
+    courseId?: string;
+    assignmentId?: string;
+    quizId?: string;
+    topicId?: string;
+    sessionId?: string;
+    attemptId?: string;
+  };
+}
 
 type Snapshot = { scope: string | undefined; data: string | null; loading: boolean; error: string | null };
 let current: Loadable<string>;
@@ -29,6 +54,7 @@ async function advance(ms: number) {
 }
 
 beforeEach(() => {
+  globalThis.__lmsLoadableRouteParams = {};
   jest.useFakeTimers();
   snapshots = [];
 });
@@ -152,4 +178,26 @@ it('keeps the one-argument signature usable and retries with the latest query', 
   act(() => { void current.refresh(); });
   await advance(5);
   expect(current.data).toBe('latest');
+});
+
+it('isolates one-argument callers when the course route changes', async () => {
+  function Legacy({ query }: { query: () => Promise<string> }) {
+    current = useLoadable(query);
+    snapshots.push({ scope: undefined, data: current.data, loading: current.loading, error: current.error });
+    return <Text>{current.loading ? 'loading' : current.error ?? current.data ?? 'empty'}</Text>;
+  }
+  globalThis.__lmsLoadableRouteParams = { courseId: 'course-a' };
+  const view = render(<Legacy query={delayed('old-course', 10)} />);
+  await advance(10);
+  expect(view.getByText('old-course')).toBeTruthy();
+  act(() => { void current.refresh(); });
+  globalThis.__lmsLoadableRouteParams = { courseId: 'course-b' };
+  view.rerender(<Legacy query={delayed('new-course', 5)} />);
+  expect(view.getByText('loading')).toBeTruthy();
+  expect(current.data).toBeNull();
+  await advance(5);
+  expect(view.getByText('new-course')).toBeTruthy();
+  await advance(5);
+  expect(current).toMatchObject({ data: 'new-course', loading: false, error: null });
+  expect(view.getByText('new-course')).toBeTruthy();
 });
