@@ -401,6 +401,32 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('does not publish a way edit later than the Overpass database timestamp', async () => {
+    const stamp = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const now = Date.now();
+    const baseTime = stamp(now - 10 * 60_000);
+    const impossibleWayEdit = stamp(now - 60_000);
+    const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      osm3s: { timestamp_osm_base: baseTime },
+      elements: [{ ...JSON.parse(osmPayload).elements[0], version: 99, timestamp: impossibleWayEdit }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.osmBaseAt).toBe(baseTime);
+    expect(data.buildings).toHaveLength(1);
+    expect(data.buildings[0]).toMatchObject({
+      poiId: 'pu-library', heightBasis: 'illustrative',
+    });
+    expect(data.buildings[0]).not.toHaveProperty('osmVersion');
+    expect(data.buildings[0]).not.toHaveProperty('osmEditedAt');
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('expires fresh cache when Overpass replication becomes 48 hours old, not 24 hours after fetch', async () => {
     const start = Math.floor(Date.now() / 1000) * 1000;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
@@ -1021,10 +1047,13 @@ describe('public Providence building geometry route', () => {
       const stale = await GET();
       expect(stale.status).toBe(200);
       expect(stale.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(stale.headers.get('Retry-After')).toBe('5400');
       expect((await stale.json()).fetchedAt).toBe(initial.fetchedAt);
 
       clock.mockReturnValue(refreshAt + 60 * 60 * 1000);
-      const stillStale = await (await GET()).json();
+      const coolingResponse = await GET();
+      expect(coolingResponse.headers.get('Retry-After')).toBe('1800');
+      const stillStale = await coolingResponse.json();
       expect(stillStale.stale).toBe(true);
       expect(stillStale.fetchedAt).toBe(initial.fetchedAt);
       expect(upstream).toHaveBeenCalledTimes(2);

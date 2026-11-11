@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   parseProvidenceOsmFootprints,
+  stripOsmRevisionsAfter,
   PROVIDENCE_OSM_BUILDING_WAY_IDS,
   type ProvidenceFootprint,
 } from '@/app/map/providenceFootprints';
@@ -220,9 +221,16 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
     throw new Error('Overpass returned an incomplete result');
   }
-  const buildings = parseProvidenceOsmFootprints(payload);
-  if (!buildings.length) throw new Error('No verified building outlines in response');
   const now = Date.now();
+  // A way's edit timestamp cannot be newer than the Overpass replication
+  // snapshot that contains it. Preserve checked geometry, but drop any
+  // contradictory revision label rather than advertising false provenance.
+  // Legacy replies without osm3s are bounded by their HTTP fetch time.
+  const buildings = stripOsmRevisionsAfter(
+    parseProvidenceOsmFootprints(payload),
+    osmBaseAt ? Date.parse(osmBaseAt) : now,
+  );
+  if (!buildings.length) throw new Error('No verified building outlines in response');
   // The 48-hour replication-age check must remain true for the *entire* time
   // this snapshot is presented as fresh, not only when Overpass was fetched.
   // Otherwise a 47-hour-old OSM database could be marked fresh for another
@@ -296,7 +304,13 @@ export async function GET() {
     stale: cache.validUntil <= Date.now(), buildings: cache.buildings,
   }, {
     // 有舊快照時保留舊輪廓並明示來源日期，不把快取說成最新。
-    headers: { 'Cache-Control': cache.validUntil <= Date.now()
-      ? 'private, no-store' : freshCacheControl(cache.validUntil) },
+    headers: {
+      'Cache-Control': cache.validUntil <= Date.now()
+        ? 'private, no-store' : freshCacheControl(cache.validUntil),
+      // A valid dated fallback is still served with HTTP 200. Advertise the
+      // current upstream cooldown so the client does not hammer a stale origin.
+      ...(cache.validUntil <= Date.now() && unavailableUntil > Date.now()
+        ? { 'Retry-After': retryAfterSeconds() } : {}),
+    },
   });
 }
