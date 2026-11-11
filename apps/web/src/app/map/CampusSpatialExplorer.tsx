@@ -298,7 +298,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintDate(null);
         setFootprintBaseDate(null);
         setFootprintStale(false);
-        setFootprintRefreshing(false);
+        // A refresh already in flight must keep the retry control disabled
+        // after the old 3D source is withdrawn. Otherwise repeated taps abort
+        // and restart the same public-source check while it is still pending.
+        setFootprintRefreshing(footprintRequestActiveRef.current);
         setFootprintRefreshFailed(false);
         setFootprintExpired(true);
         setFootprintStatus('unavailable');
@@ -476,11 +479,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {footprintStatus === 'unavailable' && <>
                   <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
                   {footprintExpired && <span>先前的建築輪廓已超過七天來源期限，為避免將過期資料當成現況，已停止顯示。</span>}
+                  {footprintRefreshing && <span>正在檢查更新；完成前不會顯示過期輪廓。</span>}
                   {footprintRetryAfter !== null && <span>
                     來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
                   <button className={styles.retryFootprints} type="button"
-                    disabled={footprintRetryAfter !== null}
+                    disabled={footprintRetryAfter !== null || footprintRefreshing}
                     onClick={() => setFootprintAttempt((value) => value + 1)}>
                     重新讀取建築輪廓
                   </button>
