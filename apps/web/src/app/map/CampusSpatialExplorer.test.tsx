@@ -626,6 +626,53 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
   }
 });
 
+it('keeps the existing WebGL scene when an OSM refresh only updates the fetch date', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), stale: true,
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap',
+        // Real JSON requests decode new objects, not the same in-memory array.
+        buildings: JSON.parse(JSON.stringify(buildings)),
+        fetchedAt: new Date().toISOString(), stale: false,
+      }),
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toHaveLength(1));
+  const createdScenes = scene.create.mock.calls.length;
+  const disposedScenes = scene.dispose.mock.calls.length;
+  fireEvent.click(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull());
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  // Data date is new, but geometry and source details did not change.
+  expect(scene.create).toHaveBeenCalledTimes(createdScenes);
+  expect(scene.dispose).toHaveBeenCalledTimes(disposedScenes);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('releases a server cooldown after a suspended mobile tab resumes, without auto retrying', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockResolvedValue({
