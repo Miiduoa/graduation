@@ -144,9 +144,18 @@ export function personalImportDeadlineSources(
 ): StudyDeadlineSource[] {
   return records.flatMap((row): StudyDeadlineSource[] => {
     if (row.schoolId !== schoolId || (row.kind !== 'timetable' && row.kind !== 'events')) return [];
+    const record: PersonalImportRecord = {
+      ...row,
+      source: {
+        type: row.source?.type ?? 'paste',
+        line: row.source?.line ?? 1,
+        rawText: '',
+      },
+    };
+    delete record.grade;
     const base = {
       kind: row.kind,
-      records: [row],
+      records: [record],
       schoolId,
       termKey: `${row.academicYear}|${row.semester}`,
       status: 'partial' as const,
