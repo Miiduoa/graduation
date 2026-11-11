@@ -957,7 +957,6 @@ service cloud.firestore {
         && isSchoolMember(request.resource.data.schoolId);
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.memberIds
-        && request.resource.data.get('type', '') == resource.data.get('type', '')
         && request.resource.data.schoolId == resource.data.schoolId
         && request.resource.data.memberIds == resource.data.memberIds;
       allow delete: if false;

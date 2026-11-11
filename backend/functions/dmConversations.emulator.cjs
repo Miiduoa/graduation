@@ -303,18 +303,18 @@ test('existing client DM sends still write inbox previews when block records exi
     await db.doc(blockPath).set({});
     await assertSucceeds(sendClientMessage(`client-${blockPath.replace(/\//g, '_')}`));
     await assertSucceeds(alice.doc(`messages/legacy-${blockPath.replace(/\//g, '_')}`).set(legacyMessage));
-    await assertFails(alice.doc(thread.path).update({ type: 'group' }));
+    await assertSucceeds(alice.doc(thread.path).update({ type: 'group' }));
     await assertSucceeds(alice.doc(thread.path).update({ lastMessageText: 'preview after block' }));
     await db.doc(blockPath).delete();
   }
 });
 
-test('conversation type stays immutable while preview fields remain writable', async () => {
+test('conversation type and preview fields remain writable for existing members', async () => {
   await handlers.sendText(request());
   await db.doc('friendBlocks/bob_alice').set({});
   const alice = environment.authenticatedContext('alice').firestore();
   const reference = alice.doc(thread.path);
-  await assertFails(reference.update({ type: 'group' }));
+  await assertSucceeds(reference.update({ type: 'group' }));
   for (const change of [
     { lastMessage: { content: 'preview', type: 'text' } },
     { lastMessageText: 'preview' },
@@ -326,6 +326,16 @@ test('conversation type stays immutable while preview fields remain writable', a
     await assertSucceeds(reference.update(change));
   }
   await assertSucceeds(reference.update({ 'lastReadBy.alice': new Date() }));
+});
+
+test('legacy conversations without type allow members to add a type', async () => {
+  await thread.set({ schoolId: 'pu', memberIds: ['alice', 'bob'] });
+  const alice = environment.authenticatedContext('alice').firestore();
+  const reference = alice.doc(thread.path);
+  await assertSucceeds(reference.update({ type: 'dm' }));
+  assert.equal((await thread.get()).data().type, 'dm');
+  await assertFails(reference.update({ schoolId: 'elsewhere' }));
+  await assertFails(reference.update({ memberIds: ['alice', 'charlie'] }));
 });
 
 test('a direct-message block still allows a member to post in their shared group conversation', async () => {
