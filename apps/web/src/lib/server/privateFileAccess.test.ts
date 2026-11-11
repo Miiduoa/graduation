@@ -67,6 +67,32 @@ it('uses the canonical group assignment without a global mirror', async () => {
   expect(privateGroupAssignmentPath('course', 'work', 'alice', 'answer.pdf')).toBe(GROUP_ANSWER);
   await expect(authorize(fileStore())).resolves.toBeUndefined();
 });
+it('group-path uploads honor same-group global receipts before canonical submission sync', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const globalReceipt = 'assignments/work/submissions/alice';
+  // Active student with no submitted receipt can upload in the new group namespace.
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z' });
+  // Previously the group-path branch only checked its own canonical receipt.
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  // An inconsistent owner cannot be treated as an unsubmitted draft.
+  store.docs.set(globalReceipt, { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+
+  // An unrelated assignment using the same ID in another group must not block this one.
+  store.docs.set('assignments/work', { groupId: 'another-group' });
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z' });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('assignments/work', { groupId: 'course' });
+  store.docs.set('groups/course/assignments/work', { status: 'closed' });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/assignments/work', { published: true });
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
 it.each(['left', 'inactive', 'missing'])('rejects group membership %s', async (status) => {
   const store = fileStore([['groups/course/members/alice', { status }]]);
   await expect(authorize(store)).rejects.toMatchObject({ statusCode: 403 });

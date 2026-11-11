@@ -553,3 +553,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補在同一 read-only Firestore transaction 中**不論 canonical assignment 是否存在**都核對 global submission 擁有者及 `submittedAt`，非本人或非 null 時一律拒絕上傳；後續仍核對 canonical 或 global 作業發布狀態、截止與群組／校籍資格。移除 global-only 路徑的重複讀取，未放寬任何 GET。可重跑 `apps/web/src/lib/server/privateFileAccess.test.ts` 新案例：雙份作業正常草稿可上傳、global 已提交拒絕、global owner 不符拒絕、未提交收據仍可上傳、canonical 關閉拒絕、校籍撤銷拒絕。此變更不改已簽 URL 的生命週期；已簽 URL、實際 Storage 競態與正式部署須另行驗收。
 
 **提交前查核：** `36048052ee8f9e8df8b56d72a5f5921687bca3e9` 的 CI [#43023595275](https://github.com/Miiduoa/graduation/actions/runs/43023595275)、CodeQL [#43023595149](https://github.com/Miiduoa/graduation/actions/runs/43023595149)、Course access [#43023595244](https://github.com/Miiduoa/graduation/actions/runs/43023595244) 已 completed/success；其 15 個 check runs 中無 App 5504170 的「審查通過」。`main` 查核為 `1d76ad50c8caedda74862ba4ad1ad4d212207f8b`，分支相對主線 ahead 6／behind 8。新提交的完整 CI／CodeQL 必須重新讀取結果，**不能挪用父 head 綠燈**。Supabase permissions、Python Security、Mobile Agent、Maestro 依 workflow 路徑條件在本次差異中不應觸發，不代表通過；正式資料、E 校園、遷移、金鑰、token 與未授權本機 npm/pnpm audit 均不觸碰。
+
+
+## 2026-11-12：group-path 上傳同步檢查同組 global 已繳交收據（PR #577）
+
+延續上一輪 legacy URL 的雙收據修補，讀取共用 `authorizePrivateFile` 確認對稱缺口：`groups/{groupId}/assignments/{assignmentId}/submissions/{uid}/{filename}` 上傳只檢查 canonical 群組收據；若同一份作業的 global 鏡像已標記繳交、canonical 群組收據尚未同步，仍能重新取得新群組路徑的上傳資格。此為授權重開問題，不代表跨學生讀取或已簽網址撤銷。
+
+最小修補在**同一次 Firestore read-only transaction**中，當 global assignment 明確指向同一 `groupId` 時額外核對其 `submissions/{uid}`；錯 owner 或 `submittedAt != null` 一律拒絕 group-path 新上傳及 claim。沒有 global 鏡像、或該 global ID 屬於不同群組時維持原 canonical 權限，避免用其他校群的同名作業封鎖合法草稿。原有 canonical published/status/期限、跨帳號及校籍撤銷仍生效。
+
+新增 Web 合成授權回歸覆蓋正常未提交、global 已提交、錯 owner、合法草稿、跨帳號、不同群組的鏡像碰撞、canonical 關閉、校籍撤銷。精確 head 必須重新核對 CI、CodeQL、Firestore Rules、真 PostgreSQL CI 及適用專用工作流；未見 nuni-merge-gate App 5504170 對新 head「審查通過」之前不能合併。這次沒有操作正式資料、GCS／Supabase、金鑰、migration、token、E 校園及未授權 npm/pnpm audit。已發 URL、缺附件清單的歷史資料、真實隔離 Storage、minimatch 雙鎖檔、正式發布與回復仍未驗收。

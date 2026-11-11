@@ -467,6 +467,24 @@ export async function authorizePrivateFile(
           // submissionId/userId/groupId/assignmentId. Payload shape, content, status
           // and request.time are enforced when the submission document is written.
           if (scope.userId !== uid) deny();
+          // When this group assignment has a legacy global mirror, its submission
+          // may have been finalized before the canonical group receipt synced.
+          // The group-path upload must not reopen an already submitted draft.
+          // A global assignment for another group is unrelated to this namespace.
+          const globalAssignmentRef = db.collection('assignments').doc(scope.assignmentId || '');
+          const globalAssignment = await tx.get(globalAssignmentRef);
+          if (globalAssignment.exists && asRecord(globalAssignment.data()).groupId === groupId) {
+            const globalSubmission = await tx.get(
+              globalAssignmentRef.collection('submissions').doc(scope.userId || ''),
+            );
+            const globalPrevious = asRecord(globalSubmission.data());
+            const globalOwner = 'userId' in globalPrevious ? globalPrevious.userId
+              : 'uid' in globalPrevious ? globalPrevious.uid
+                : 'studentId' in globalPrevious ? globalPrevious.studentId : scope.userId;
+            if (globalSubmission.exists && (
+              globalOwner !== uid || globalPrevious.submittedAt != null
+            )) deny();
+          }
           // acceptsStudentSubmission: publication, status, deadline and late policy.
           const dueValue = data.dueAt;
           const validDueString = typeof dueValue !== 'string' || (
