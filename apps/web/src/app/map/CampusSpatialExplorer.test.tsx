@@ -902,7 +902,11 @@ it.each(['failure', 'timeout'])('does not restore expired 3D geometry after refr
     fireEvent(window, new Event('pageshow'));
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
     expect(within(dialog).getByText(/超過七天來源期限/)).toBeTruthy();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    // React removes the expired UI immediately; replacing the lazy-loaded
+    // WebGL scene completes asynchronously. Assert the actual scene update,
+    // not merely the earlier status render, before checking failed refresh.
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    expect(scene.dispose).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     if (outcome === 'timeout') {
       const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
