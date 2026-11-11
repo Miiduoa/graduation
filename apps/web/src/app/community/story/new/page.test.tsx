@@ -138,9 +138,12 @@ it('keeps the selected photo when a replacement is unreadable and releases super
   await waitFor(() =>
     expect(screen.getByAltText('已選取的照片').getAttribute('src')).toBe('blob:second'),
   );
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first');
+  // React cleans up the previous preview in a passive effect, after the
+  // replacement image becomes visible. Wait for that cleanup rather than
+  // racing it in the full CI suite.
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first'));
   fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:second');
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:second'));
   expect(screen.getByRole('button', { name: '發布限時動態' })).toHaveProperty('disabled', true);
 });
 

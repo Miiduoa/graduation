@@ -204,6 +204,13 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     }
     throw new Error('OSM service unavailable');
   }
+  // A 200 OK with Content-Range still advertises a byte-range representation.
+  // A proxy must not promote a partial map export into a fresh campus snapshot,
+  // even when the returned fragment happens to be syntactically valid JSON.
+  if (response.headers.get('content-range') !== null) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('OSM response advertised partial content');
+  }
   const raw = await readBoundedResponse(response, signal);
   const payload = JSON.parse(raw) as unknown;
   const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());

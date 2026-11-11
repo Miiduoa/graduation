@@ -101,6 +101,27 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a 200 response advertising Content-Range instead of caching an incomplete map', async () => {
+    // Even with a valid JSON body, Content-Range denotes a byte-range
+    // representation, not proof of a complete OSM export.
+    const upstream = vi.fn().mockImplementation(async () =>
+      new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Range': 'bytes 0-99/200' },
+      }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect(first.headers.get('Retry-After')).toBeTruthy();
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    // Do not cache or immediately retry the invalid upstream representation.
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     { declared: 0, description: 'zero bytes' },
     { declared: new TextEncoder().encode(osmPayload).byteLength - 1, description: 'too few bytes' },
