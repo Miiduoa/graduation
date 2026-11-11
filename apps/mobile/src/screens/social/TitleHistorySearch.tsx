@@ -63,13 +63,17 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
             initialQuery={resumeQuery.current}
             initialPostId={resumePostId.current}
             onRememberQuery={(query, postId) => {
-              if (modalActive.current) { resumeQuery.current = query; resumePostId.current = postId; }
+              if (!modalActive.current) return;
+              // Commit the reading location and dismiss only AFTER navigation
+              // has accepted the target; a throwing navigator leaves the modal.
+              resumeQuery.current = query;
+              resumePostId.current = postId;
+              modalActive.current = false;
+              setOpen(false);
             }}
             onClose={dismiss}
             onOpenPost={(post) => {
               if (!live.current || !modalActive.current || post.schoolId !== schoolId) return;
-              modalActive.current = false;
-              setOpen(false);
               onOpenPost(post);
             }}
           />
@@ -250,6 +254,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     setOpening(true);
     setError('');
     let navigated = false;
+    let verified = false;
     // A stalled server verification must not lock every card indefinitely.
     // The SDK Promise may still settle later; the version fence rejects it.
     confirmTimer.current = setTimeout(() => {
@@ -279,12 +284,13 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
         }
         return;
       }
+      verified = true;
+      onOpenPost({ id: item.id, schoolId });
       navigated = true;
       onRememberQuery?.(text, item.id);
-      onOpenPost({ id: item.id, schoolId });
     } catch (cause) {
       if (!live.current || attempt !== version.current) return;
-      if (denied(cause)) {
+      if (denied(cause) && !verified) {
         setResumePostId(undefined);
         cursor.current = null;
         retry.current = { cursor: null, append: false };
@@ -293,12 +299,19 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
         setNotice('');
         setError('校籍或存取權限已變更，搜尋結果已清除。確認校籍後可重試搜尋。');
       } else {
-        // The canceled page retains its exact boundary, even when confirmation
-        // fails before navigation. Never skip it or leave the retry controls stuck.
+        // The canceled page retains its exact boundary, even if the navigator
+        // throws after successful server authorization. No false reading marker.
         if (interrupted) retry.current = interrupted;
-        setError(interrupted
-          ? '暫時無法向伺服器確認這篇貼文，已保留搜尋結果。可再點一次貼文，或原地重試未完成的搜尋。'
-          : '暫時無法向伺服器確認這篇貼文，已保留搜尋結果。確認連線後可再點一次。');
+        if (verified) {
+          setNotice('');
+          setError(interrupted
+            ? '貼文已通過伺服器確認，但頁面開啟失敗。未完成的下一頁已保留，可原地重試或再次點擊貼文。'
+            : '貼文已通過伺服器確認，但頁面開啟失敗。搜尋結果已保留，請再次點擊貼文。');
+        } else {
+          setError(interrupted
+            ? '暫時無法向伺服器確認這篇貼文，已保留搜尋結果。可再點一次貼文，或原地重試未完成的搜尋。'
+            : '暫時無法向伺服器確認這篇貼文，已保留搜尋結果。確認連線後可再點一次。');
+        }
       }
     } finally {
       if (live.current && attempt === version.current) {
