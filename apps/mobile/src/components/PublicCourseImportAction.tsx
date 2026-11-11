@@ -96,7 +96,11 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
           '相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。'
           ? 'teacher' : error instanceof Error && error.message ===
           '相同課號與班別的原有上課時段與官方資料不同；請先核對原有資料。'
-          ? 'time' : undefined,
+          ? 'time' : error instanceof Error && error.message ===
+          '相同課號、班別與時段已有不同教室的個人紀錄；請先核對原有資料。'
+          ? 'room' : error instanceof Error && error.message ===
+          '相同課號、班別與時段已有不同課名的個人紀錄；請先核對原有資料。'
+          ? 'title' : undefined,
       });
     } finally {
       if (active(run)) pending.current = false;
