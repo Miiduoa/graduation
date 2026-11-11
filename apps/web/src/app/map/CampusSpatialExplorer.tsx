@@ -214,6 +214,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintStale, setFootprintStale] = useState(false);
   const [footprintRefreshing, setFootprintRefreshing] = useState(false);
   const [footprintRefreshFailed, setFootprintRefreshFailed] = useState(false);
+  const [footprintExpired, setFootprintExpired] = useState(false);
   const staleSnapshotRef = useRef(false);
   // Refresh previously valid snapshots at their deadline, including in suspended tabs.
   const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
@@ -286,12 +287,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
       if (now >= footprintClock.expiresAt) {
-        // Refresh once at the deadline, retaining the verified geometry and dates.
-        // A pending refresh already serves this purpose; do not restart it on resume.
+        // The seven-day limit is a hard provenance boundary, even if a tab
+        // slept through its timer. An expired outline must not remain visible
+        // while the API is offline, cooling down, or still being refreshed.
+        // Keep the independent POI markers and walking links available.
         footprintExpiresAtRef.current = null;
-        staleSnapshotRef.current = true;
+        staleSnapshotRef.current = false;
         setFootprintClock(null);
-        setFootprintStale(true);
+        setFootprints([]);
+        setFootprintDate(null);
+        setFootprintBaseDate(null);
+        setFootprintStale(false);
+        setFootprintRefreshing(false);
+        setFootprintRefreshFailed(false);
+        setFootprintExpired(true);
+        setFootprintStatus('unavailable');
+        // Refresh at most once; an existing request may still complete with
+        // a NEW independently validated snapshot. Never restart it here.
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
@@ -319,7 +331,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     let active = true;
     let timedOut = false;
     // A local age deadline must not discard a previously verified outline.
-    const preserveStale = staleSnapshotRef.current;
+    const preserveStale = staleSnapshotRef.current &&
+      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
     footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
@@ -333,7 +346,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale;
+      const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
+        Date.now() < footprintExpiresAtRef.current;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
@@ -379,6 +393,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         });
         setFootprintRefreshing(false);
         setFootprintRefreshFailed(false);
+        setFootprintExpired(false);
         setFootprintStatus('ready');
       })
       .catch(() => {
@@ -386,7 +401,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Keep the previously verified snapshot even after its refresh deadline.
         // Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale;
+        const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
+          Date.now() < footprintExpiresAtRef.current;
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
@@ -459,6 +475,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
                 {footprintStatus === 'unavailable' && <>
                   <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
+                  {footprintExpired && <span>先前的建築輪廓已超過七天來源期限，為避免將過期資料當成現況，已停止顯示。</span>}
                   {footprintRetryAfter !== null && <span>
                     來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
