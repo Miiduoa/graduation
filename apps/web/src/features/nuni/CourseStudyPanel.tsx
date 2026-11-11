@@ -148,6 +148,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const closeButton = useRef<HTMLButtonElement>(null);
   const closeHeading = useRef<HTMLHeadingElement>(null);
   const replaceHeading = useRef<HTMLHeadingElement>(null);
+  const replacementReturnTarget = useRef<HTMLElement | null>(null);
   const practiceConfirmHeading = useRef<HTMLHeadingElement>(null);
   const startPracticeButton = useRef<HTMLButtonElement>(null);
   const endPausedPracticeButton = useRef<HTMLButtonElement>(null);
@@ -305,7 +306,16 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   }, [source, hasStudyChanges, progressPaste]);
 
   useEffect(() => {
-    if (pendingSource) replaceHeading.current?.focus();
+    if (pendingSource) {
+      replaceHeading.current?.focus();
+      return;
+    }
+    // Restore focus after React removes the confirmation and its active element.
+    const trigger = replacementReturnTarget.current;
+    if (!trigger) return;
+    replacementReturnTarget.current = null;
+    if (trigger.isConnected && trigger.closest('details')?.hasAttribute('open')) trigger.focus();
+    else sourceSummary.current?.focus();
   }, [pendingSource]);
 
   useEffect(() => {
@@ -783,12 +793,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
             if (next.clearPaste) setPaste('');
           }}>確認改讀新教材</button>
           <button type="button" className={styles.button} onClick={() => {
-            const trigger = pendingSource.clearPaste ? pasteStart.current : sourceInput.current;
+            replacementReturnTarget.current = pendingSource.clearPaste ? pasteStart.current : sourceInput.current;
             setPendingSource(null);
-            // A selected file can finish loading while the import details are
-            // collapsed. Do not send keyboard focus into that hidden section.
-            if (trigger?.closest('details')?.hasAttribute('open')) trigger.focus();
-            else sourceSummary.current?.focus();
           }}>保留原本的學習內容</button>
         </div>
       </section>}
