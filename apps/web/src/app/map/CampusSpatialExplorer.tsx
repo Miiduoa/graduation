@@ -215,9 +215,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintRefreshing, setFootprintRefreshing] = useState(false);
   const [footprintRefreshFailed, setFootprintRefreshFailed] = useState(false);
   const staleSnapshotRef = useRef(false);
-  // Previously valid snapshots have an absolute expiry even in suspended tabs.
+  // Refresh previously valid snapshots at their deadline, including in suspended tabs.
   const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
   const footprintExpiresAtRef = useRef<number | null>(null);
+  const footprintRequestActiveRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
@@ -285,18 +286,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
       if (now >= footprintClock.expiresAt) {
-        // A browser can sleep past the seven-day source limit without refetching.
-        // Withdraw geometry itself, not only the displayed freshness label.
+        // Refresh once at the deadline, retaining the verified geometry and dates.
+        // A pending refresh already serves this purpose; do not restart it on resume.
         footprintExpiresAtRef.current = null;
-        staleSnapshotRef.current = false;
+        staleSnapshotRef.current = true;
         setFootprintClock(null);
-        setFootprints([]);
-        setFootprintStatus('unavailable');
-        setFootprintDate(null);
-        setFootprintBaseDate(null);
-        setFootprintStale(false);
-        setFootprintRefreshing(false);
-        setFootprintRefreshFailed(false);
+        setFootprintStale(true);
+        if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
+          setFootprintAttempt((value) => value + 1);
+        }
       } else if (now >= footprintClock.staleAt) {
         staleSnapshotRef.current = true;
         setFootprintStale(true);
@@ -311,7 +309,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       document.removeEventListener('visibilitychange', checkSnapshotAge);
       window.removeEventListener('pageshow', checkSnapshotAge);
     };
-  }, [school, footprintClock, footprintStale]);
+  }, [school, footprintClock, footprintStale, footprintRetryAfter]);
 
   useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) {
@@ -320,10 +318,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
-    // Keep a previously verified, explicitly stale outline in view while
-    // checking for a newer snapshot. Do not blank the 3D canvas on retry.
-    const preserveStale = staleSnapshotRef.current &&
-      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
+    // A local age deadline must not discard a previously verified outline.
+    const preserveStale = staleSnapshotRef.current;
+    footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
     const controller = new AbortController();
@@ -333,10 +330,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     const timeout = window.setTimeout(() => {
       if (!active) return;
       timedOut = true;
+      footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
-        Date.now() < footprintExpiresAtRef.current;
+      const keepStale = preserveStale;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
@@ -386,16 +383,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       })
       .catch(() => {
         if (!active || timedOut) return;
-        // A failed refresh must not discard a still-valid, explicitly stale
-        // building snapshot. Normal first-load failures remain marker-only.
+        // Keep the previously verified snapshot even after its refresh deadline.
+        // Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
-          Date.now() < footprintExpiresAtRef.current;
+        const keepStale = preserveStale;
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
-      .finally(() => window.clearTimeout(timeout));
-    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+      .finally(() => {
+        if (active) footprintRequestActiveRef.current = false;
+        window.clearTimeout(timeout);
+      });
+    return () => {
+      active = false;
+      footprintRequestActiveRef.current = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [school, model.unavailableReason, footprintAttempt]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
