@@ -248,3 +248,94 @@ it('tracks a second HTML comment opened on the same line the first one closes', 
     rows: [['資料庫', '3']],
   }]);
 });
+
+
+it('ignores raw HTML code blocks rather than presenting sample data as course tables', () => {
+  const content = [
+    '<pre class="example">',
+    '| 測試科目 | 分數 |',
+    '| --- | --- |',
+    '| 未發布 | 999 |',
+    '</pre>',
+    '<code>',
+    '| 模擬題目 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 888 |',
+    '</code>',
+    '<script>',
+    '| 隱藏欄位 | 數值 |',
+    '| --- | --- |',
+    '| 測試 | 777 |',
+    '</script>',
+    '<style>',
+    '| 範例欄位 | 數值 |',
+    '| --- | --- |',
+    '| 測試 | 666 |',
+    '</style>',
+    '<textarea>',
+    '| 輸入欄位 | 數值 |',
+    '| --- | --- |',
+    '| 測試 | 555 |',
+    '</textarea>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 26,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('tracks HTML comments closing before a raw code block opens on the same line', () => {
+  const content = [
+    '<!-- 不展示 --> <pre class="notes">',
+    '| 假科目 | 假學分 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    '</pre> <!-- 再開啟註解',
+    '| 內部數值 | 學分 |',
+    '| --- | --- |',
+    '| 假資料 | 888 |',
+    '-->',
+    '| 真正教材 | 學分 |',
+    '| --- | --- |',
+    '| 資管 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 10,
+    headers: ['真正教材', '學分'],
+    rows: [['資管', '3']],
+  }]);
+});
+
+it('does not let raw HTML-looking examples inside fenced code hide subsequent real tables', () => {
+  const ticks = String.fromCharCode(96).repeat(3);
+  const content = [
+    ticks + 'html',
+    '<pre>',
+    '| 假欄 | 數值 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    ticks,
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 7,
+    headers: ['課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('omits an ambiguous table row containing raw HTML code tags', () => {
+  const content = [
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+    '| <code>測試</code> | 999 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([]);
+});

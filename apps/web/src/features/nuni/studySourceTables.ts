@@ -17,6 +17,8 @@ function parseSimplePipeRow(line: string): string[] | null {
   // Markdown renders four-space / tab-indented rows as code, not a table.
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
+  // Raw HTML code elements are not Markdown table cell content.
+  if (/<\/?(?:pre|code|script|style|textarea)\b/iu.test(trimmed)) return null;
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
   if (!trimmed.includes('|') || trimmed.includes('\\|') ||
@@ -47,33 +49,41 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
   const tables: StudySourceTable[] = [];
   let fence: { character: string; length: number } | null = null;
   let inHtmlComment = false;
+  const htmlCodeBlocks: string[] = [];
 
   for (let index = 0; index < lines.length - 2 && tables.length < MAX_TABLES; index += 1) {
     const line = lines[index];
-    // Markdown HTML comments can contain convincing example tables that
-    // students must not mistake for visible source data. Never interpret a
-    // comment marker inside a fenced code example as an actual comment.
+    // HTML comments and raw code blocks can span lines. Track boundaries in
+    // source order: a comment may close and open a <pre> on the same line.
+    // Literal HTML-looking text inside fenced Markdown code is not markup.
     if (!fence) {
-      // One physical line may close a comment and immediately open another.
-      // Scan markers in order rather than exposing subsequent hidden tables.
-      let commentLine = inHtmlComment;
-      let position = 0;
-      while (position < line.length) {
+      let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
+      for (const match of line.matchAll(/<!--|-->|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {
+        const token = match[0];
         if (inHtmlComment) {
-          const closing = line.indexOf('-->', position);
-          if (closing < 0) break;
-          inHtmlComment = false;
-          commentLine = true;
-          position = closing + 3;
-        } else {
-          const opening = line.indexOf('<!--', position);
-          if (opening < 0) break;
-          inHtmlComment = true;
-          commentLine = true;
-          position = opening + 4;
+          if (token === '-->') inHtmlComment = false;
+          hiddenLine = true;
+          continue;
         }
+        if (token === '<!--') {
+          if (htmlCodeBlocks.length === 0) inHtmlComment = true;
+          hiddenLine = true;
+          continue;
+        }
+        if (token === '-->') {
+          hiddenLine = true;
+          continue;
+        }
+        const tag = match[1]?.toLowerCase();
+        if (!tag) continue;
+        if (token.startsWith('</')) {
+          if (htmlCodeBlocks[htmlCodeBlocks.length - 1] === tag) htmlCodeBlocks.pop();
+        } else if (!/\/>$/u.test(token)) {
+          htmlCodeBlocks.push(tag);
+        }
+        hiddenLine = true;
       }
-      if (commentLine) continue;
+      if (hiddenLine) continue;
     }
     const marker = fenceMarker(line);
     if (marker) {
