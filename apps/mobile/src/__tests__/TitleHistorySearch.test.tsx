@@ -326,6 +326,31 @@ test('a revoked membership while a next page is pending must leave the first-pag
   expect(search).toHaveBeenLastCalledWith('pu', '二手書', null);
 });
 
+test('a deleted post during unfinished pagination preserves the exact next-page retry', async () => {
+  const first = result([row('one')], true);
+  const pending = deferred<TitleSearchPage>();
+  search.mockResolvedValueOnce(first).mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce(result([row('two')]));
+  confirmOpen.mockResolvedValueOnce(false);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+  expect(search).toHaveBeenCalledTimes(2);
+  try {
+    fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+    await view.findByText(/這篇貼文已刪除或不再提供/);
+    expect(view.open).not.toHaveBeenCalled();
+    expect(view.queryByText('二手書 one')).toBeNull();
+    // The deleted card is gone, but its interrupted next-page cursor must be retryable.
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+  } finally {
+    await act(async () => pending.resolve(result([row('late')])));
+  }
+  expect(view.queryByText('二手書 late')).toBeNull();
+  fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+  await view.findByText('二手書 two');
+  expect(search.mock.calls[2]).toEqual(search.mock.calls[1]);
+});
+
 test('offline post confirmation during a pending next page offers both post and page recovery', async () => {
   const pending = deferred<TitleSearchPage>();
   search.mockResolvedValueOnce(result([row('one')], true))
