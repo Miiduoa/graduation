@@ -974,10 +974,20 @@ it('keeps a nearby but off-outline POI on the ground instead of inventing a roof
 
   const onRoof = markerHeight(inside);
   const onGround = markerHeight(exterior);
+  const illustrative = markerHeight({
+    ...inside,
+    heightMeters: 12,
+    heightBasis: 'illustrative',
+  });
   expect(onRoof.y).toBeGreaterThan(inside.heightMeters);
   expect(onGround.y).toBeLessThan(inside.heightMeters);
-  // The accepted sourced outline is still rendered; only the misleading
-  // floating POI is corrected, without moving the POI to a guessed entrance.
+  // A POI inside an OSM polygon is not proof of a 12m roof elevation.
+  // Missing height tags may extrude an explicitly illustrative volume, but
+  // the POI must not be lifted onto that invented roof.
+  expect(illustrative.y).toBeCloseTo(onGround.y, 6);
+  // The accepted sourced/illustrative outline is still drawn; only the
+  // misleading floating POI is corrected, never moving it to a guessed entrance.
   expect(onRoof.buildingVolumes).toBe(1);
   expect(onGround.buildingVolumes).toBe(1);
+  expect(illustrative.buildingVolumes).toBe(1);
 });
