@@ -46,7 +46,9 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   // A parent may recreate this callback while narrating (for example on a UI state change).
   // Keep the latest listener without tearing down a playing utterance.
   const onSpeakingChangeRef = useRef(onSpeakingChange);
-  onSpeakingChangeRef.current = onSpeakingChange;
+  useEffect(() => {
+    onSpeakingChangeRef.current = onSpeakingChange;
+  }, [onSpeakingChange]);
   const active = useRef<SpeechSynthesisUtterance | null>(null);
   const remainingChunks = useRef<string[]>([]);
 

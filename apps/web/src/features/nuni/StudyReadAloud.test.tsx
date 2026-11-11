@@ -20,6 +20,9 @@ const addEventListener = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks preserves previous mock implementations. A synchronous
+  // speech-engine fake must not leak into the following student's test.
+  speak.mockReset();
   voices = [remote, local];
   vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
   vi.stubGlobal('speechSynthesis', { getVoices: () => voices, speak, cancel, addEventListener, removeEventListener: vi.fn() });

@@ -1,3 +1,9 @@
+## 2026-11-11：修復朗讀跨步驟回呼的 React lint 與模擬語音污染
+
+- 查核精確 `320fdfc` 的 [CI #42953172458](https://github.com/Miiduoa/graduation/actions/runs/42953172458)：Lint & Type Check 因 `StudyReadAloud.tsx:49` 在 render 直接寫 ref 被 React hooks lint 阻擋；改由 `useEffect([onSpeakingChange])` 更新最新 listener，來源文字未變時不因父層新回呼中斷正在播放的本機中文朗讀。
+- 同一 SHA 的 Web Tests 有 12,764 passed、1 failed；唯一失敗的模擬語音整合測試緊接在 3,501 段同步完成測試後，因 `vi.clearAllMocks()` 不會清掉 `speak.mockImplementation` 而繼承前一測試的同步結束行為。每個測試前另執行 `speak.mockReset()`，讓測試還原真實預期，並保留既有立即完成及長文容錯案例。這是測試隔離修正，不把失敗測試誤當實機朗讀可靠性。
+- 本次未變更個人進度格式、教材來源、語音來源與文字，沒有新增套件、付費服務或教材外傳。改動仍須精確新 head 的 Web／Mobile Tests、Lint／TypeCheck、Web／Mobile Build、Security Gates、CodeQL、指定 App 5504170 核准與 iOS／Android 真機另行查核；PR 繼續 Draft，不合併、不部署，也不宣稱超越 Ahaboard。
+
 ## 2026-11-11：修復手機朗讀啟動被拒後無法重試
 
 - 當瀏覽器已找到裝置本機中文語音、但 `speechSynthesis.speak()` 同步拒絕播放時，先前的 catch 呼叫 `cancel()` 才能清除朗讀狀態；若語音引擎連取消也拒絕，學生可能卡在「停止朗讀」且無法再次啟動。現在對「啟動被同步拒絕」獨立清除未成功交付的 utterance、事件回呼與播放狀態，不依賴全域取消；重新按朗讀即可再試，錯誤訊息不暴露瀏覽器內部細節。
