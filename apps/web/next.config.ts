@@ -135,7 +135,13 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      ...['/merchant', '/course/:courseId/attendance', '/teacher/course/:courseId/attendance'].map(
+      {
+        source: '/',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(self)' },
+        ],
+      },
+      ...['/merchant', '/merchant/workspace', '/course/:courseId/attendance', '/teacher/course/:courseId/attendance'].map(
         (source) => ({
           source,
           headers: [
@@ -166,6 +172,13 @@ const nextConfig: NextConfig = {
             },
           ]
         : []),
+      {
+        source: '/auth/account/callback',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
       {
         source: '/sso-callback',
         headers: [

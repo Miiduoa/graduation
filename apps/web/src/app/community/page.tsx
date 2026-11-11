@@ -26,7 +26,7 @@ function activeTabFor(value: string | null): TabKey {
 }
 
 export default function CommunityPage() {
-  const { schoolId, schoolName, schoolSearch, ready } = useBrowsingSchoolPageContext();
+  const { schoolId, schoolName, schoolSearch, ready, requiresSchoolSelection } = useBrowsingSchoolPageContext();
   return (
     <SiteShell
       title="校園交流"
@@ -38,7 +38,16 @@ export default function CommunityPage() {
           <CommunityPageInner key={schoolId} schoolId={schoolId} schoolSearch={schoolSearch} />
         </CommunityAccess>
       ) : (
-        <SchoolScopePlaceholder />
+        <>
+          {requiresSchoolSelection && (
+            <section className={styles.status}>
+              <h2>先逛跨校公開交流</h2>
+              <p>使用 Google 帳號閱讀公開貼文、參與開放看板，不需要先選學校。</p>
+              <Link className="btn primary" href="/social?campus=all">前往公開交流</Link>
+            </section>
+          )}
+          <SchoolScopePlaceholder />
+        </>
       )}
     </SiteShell>
   );
@@ -74,6 +83,9 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
           </Link>
           <Link href={boardsHref} className={styles.secondaryLink}>
             逛逛看板
+          </Link>
+          <Link href={`/community/me?schoolId=${encodeURIComponent(schoolId)}`} className={styles.secondaryLink}>
+            我的頁面
           </Link>
         </div>
       </section>

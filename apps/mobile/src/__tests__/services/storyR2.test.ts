@@ -12,7 +12,7 @@ jest.mock('firebase/storage', () => ({
   uploadBytes: (...args: unknown[]) => mockLegacy(...args),
   getDownloadURL: async () => 'https://legacy/image',
 }));
-import { uploadStoryImage } from '../../services/mediaUpload';
+import { uploadStoryImage, uploadStoryVideo } from '../../services/mediaUpload';
 beforeEach(() => {
   jest.clearAllMocks();
   mockEnabled = false;
@@ -47,5 +47,18 @@ test('does not publish a story path when finalization fails', async () => {
   mockEnabled = true;
   mockUpload.mockRejectedValueOnce(new Error('File finalization failed'));
   await expect(uploadStoryImage('pu', 's', 'alice', 'file:///image', 'image/png')).rejects.toThrow('File finalization failed');
+  expect(mockLegacy).not.toHaveBeenCalled();
+});
+
+test('uploads clips privately and enforces the private video size limit', async () => {
+  mockEnabled = true;
+  const blob = { type: 'video/mp4', size: 900 };
+  global.fetch = jest.fn(async () => ({ blob: async () => blob })) as unknown as typeof fetch;
+  const path = await uploadStoryVideo('pu', 's', 'alice', 'file:///clip', 3000);
+  expect(path).toMatch(/^schools\/pu\/stories\/s\/video-[a-z0-9-]+\.mp4$/);
+  expect(mockUpload).toHaveBeenCalledWith({ path, body: blob, contentType: 'video/mp4' });
+  blob.size = 45 * 1024 * 1024 + 1;
+  await expect(uploadStoryVideo('pu', 's', 'alice', 'file:///clip', 3000)).rejects.toThrow('45 MB');
+  expect(mockUpload).toHaveBeenCalledTimes(1);
   expect(mockLegacy).not.toHaveBeenCalled();
 });

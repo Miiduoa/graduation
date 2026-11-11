@@ -19,7 +19,32 @@ export const SESSION_COOKIE =
 export const LOGIN_COOKIE =
   process.env.NODE_ENV === 'production' ? '__Host-campus-one-login' : 'campus-one-login';
 export const HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
-export type PlatformSession = { sessionHandle: string; expiresAt: number; pendingLogout?: true };
+export type PlatformServiceAccess = { social: boolean; cloudAi: boolean };
+export type PlatformSession = {
+  sessionHandle: string;
+  expiresAt: number;
+  pendingLogout?: true;
+  /** Legacy cookie field; ignored on read and removed on update. */
+  restrictedServices?: { social?: true; cloudAi?: true };
+};
+
+// Existing platform services are always enabled. Legacy preferences are ignored.
+export function platformServiceAccess(_session: PlatformSession): PlatformServiceAccess {
+  return { social: true, cloudAi: true };
+}
+
+export function requirePlatformService(_session: PlatformSession, _service: keyof PlatformServiceAccess): void {
+  // Compatibility helper: service preferences cannot revoke existing capabilities.
+}
+
+export function withPlatformServiceAccess(
+  session: PlatformSession,
+  _requested: PlatformServiceAccess,
+): PlatformSession {
+  const enabled = { ...session };
+  delete enabled.restrictedServices;
+  return enabled;
+}
 
 export function nuniEnabled() {
   // The legacy flag remains an API compatibility gate; it never selects the application shell.
@@ -132,6 +157,7 @@ export function readSession(request: NextRequest): PlatformSession | null {
     (value.pendingLogout !== undefined && value.pendingLogout !== true)
   )
     return null;
+  // Obsolete service restrictions must never invalidate a session or disable a service.
   return {
     sessionHandle: value.sessionHandle,
     expiresAt: value.expiresAt,

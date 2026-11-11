@@ -4,6 +4,15 @@ import {
   readAnnouncementListState,
 } from '@/app/announcements/announcementListState';
 import { lostFoundListHref, readLostFoundListState } from './lostFoundListNavigation';
+
+it('preserves the explicit school source when returning from legacy lost-found pages', () => {
+  expect(lostFoundListHref('pu', { schoolId: 'pu', source: ['platform', 'school'] })).toBe(
+    '/lost-found?schoolId=pu&source=school',
+  );
+  expect(lostFoundListHref('pu', new URLSearchParams('source=school&mine=1'))).toBe(
+    '/lost-found?schoolId=pu&source=school&mine=1',
+  );
+});
 import { replaceServiceListQuery, serviceListSchoolQuery } from './serviceListNavigation';
 
 beforeEach(() => {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { asRecords, platformFetch, type PlatformResponse } from './platformFetch';
-import { accountReturnHref, workspacePath } from './constants';
+import { classroomLoginHref, workspacePath } from './constants';
 import { CLASSROOM_ACCESS_ERROR, classroomAccessDenied } from './classroomAccess';
 import { useActiveRequest } from './useActiveRequest';
 import styles from './Platform.module.css';
@@ -120,7 +120,7 @@ function ClassroomSessionScope({
       setError(CLASSROOM_ACCESS_ERROR);
       scope.onDenied?.();
       if (result.status === 401)
-        window.location.replace(accountReturnHref(workspacePath(workspaceId)));
+        window.location.replace(classroomLoginHref(workspacePath(workspaceId)));
       return false;
     }
     if (!result.ok) throw new Error(fallback);
