@@ -190,7 +190,7 @@ it('omits tables hidden inside Markdown HTML comments without losing visible mat
     '| 公開教材 | 學分 |',
     '| --- | --- |',
     '| 資料庫 | 3 |',
-  ].join('\\n');
+  ].join('\n');
   const tables = extractStudySourceTables(content);
   expect(tables).toEqual([{
     startLine: 6,
@@ -206,7 +206,7 @@ it('does not turn an inline HTML comment into a fabricated or incomplete source 
     '| 資料庫 | 3 |',
     '<!-- | 尚未公布 | 999 | -->',
     '| 網路概論 | 2 |',
-  ].join('\\n');
+  ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([]);
 });
 
@@ -222,7 +222,7 @@ it('does not let a comment marker in a fenced code sample hide later source tabl
     '| 正式課程 | 學分 |',
     '| --- | --- |',
     '| 資管 | 3 |',
-  ].join('\\n');
+  ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([{
     startLine: 7,
     headers: ['正式課程', '學分'],
