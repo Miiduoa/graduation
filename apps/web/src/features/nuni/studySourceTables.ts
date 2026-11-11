@@ -28,8 +28,20 @@ const TABLE_SUPPRESSED_HTML_TAGS = new Set([
 ]);
 
 function hasHiddenHtmlAttribute(token: string): boolean {
-  return /\shidden(?=[\s=/>])/iu.test(token) ||
-    /\saria-hidden\s*=\s*(?:"true"|'true'|true)(?=\s|\/?>)/iu.test(token);
+  // Only actual HTML attributes count. Searching the whole token for words
+  // such as "hidden" also matches a quoted title/description and can hide a
+  // legitimate course table that students need to read.
+  const opening = /^<[A-Za-z][\w:-]*/u.exec(token);
+  if (!opening) return false;
+  const attributes = token.slice(opening[0].length);
+  for (const match of attributes.matchAll(/\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\x60=<>]+)))?/gu)) {
+    const name = match[1].toLowerCase();
+    // HTML's boolean hidden attribute is active even when written hidden="false".
+    if (name === 'hidden') return true;
+    if (name === 'aria-hidden' &&
+        (match[2] ?? match[3] ?? match[4] ?? '').toLowerCase() === 'true') return true;
+  }
+  return false;
 }
 
 function parseSimplePipeRow(line: string): string[] | null {

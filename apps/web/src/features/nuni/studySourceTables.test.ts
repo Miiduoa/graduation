@@ -259,3 +259,44 @@ describe('quoted HTML attributes are not active table-boundary markup', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(6));
   });
 });
+
+describe('visibility attributes must be outside HTML quoted values', () => {
+  it.each([
+    ['<div title="教材 hidden 說明">', '</div>'],
+    ['<section data-caption="example aria-hidden=true flag">', '</section>'],
+    ['<aside title="example aria-hidden=\'true\' hidden">', '</aside>'],
+  ])('keeps the visible course table after %s', (opening, closing) => {
+    expect(extractStudySourceTables([opening, ...visibleTable, closing].join('\n')))
+      .toEqual(realTable(2));
+  });
+
+  it('still suppresses an actual hidden attribute after an unrelated quoted title', () => {
+    const source = [
+      '<div title="課堂示範 hidden 狀態" aria-hidden="true">',
+      '| 尚未公布 | 學分 |',
+      '| --- | --- |',
+      '| 測試 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('treats HTML hidden="false" as a present Boolean hidden attribute', () => {
+    const source = [
+      '<div title="sample" hidden="false">',
+      '| 尚未公布 | 學分 |',
+      '| --- | --- |',
+      '| 測試 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('keeps an explicitly aria-hidden="false" table visible', () => {
+    expect(extractStudySourceTables([
+      '<section aria-hidden="false">', ...visibleTable, '</section>',
+    ].join('\n'))).toEqual(realTable(2));
+  });
+});
