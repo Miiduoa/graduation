@@ -269,6 +269,23 @@ export default function LoginLandingScreen() {
             </Pressable>
           </>
         )}
+        <View style={s.panel}>
+          <Text accessibilityRole="header" style={s.title}>
+            口試示範工作區
+          </Text>
+          <Text style={s.body}>
+            本機示範資料，涵蓋學生、教師、校方、店家與平台營運。不會登入真實校園，也不會寫入正式資料庫。
+          </Text>
+          <Pressable
+            testID="oral-exam-demo-start"
+            accessibilityRole="button"
+            accessibilityLabel="開啟口試示範工作區"
+            style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+            onPress={() => safeNavigate(navigation, 'OralExamDemo')}
+          >
+            <Text style={s.schoolButtonText}>開啟口試示範 →</Text>
+          </Pressable>
+        </View>
         <Text style={s.footer}>nuni · 課程與校園生活</Text>
       </ScrollView>
     </SafeAreaView>
