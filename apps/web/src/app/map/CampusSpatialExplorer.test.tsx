@@ -902,6 +902,13 @@ it.each(['failure', 'timeout'])('does not restore expired 3D geometry after refr
     fireEvent(window, new Event('pageshow'));
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
     expect(within(dialog).getByText(/超過七天來源期限/)).toBeTruthy();
+    expect(within(dialog).getByText(/正在檢查更新；完成前不會顯示過期輪廓/)).toBeTruthy();
+    // While a request is in flight, the expired-volume fallback must not
+    // expose an enabled retry that cancels and restarts the public OSM fetch.
+    const retryWhilePending = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }) as HTMLButtonElement;
+    expect(retryWhilePending.disabled).toBe(true);
+    fireEvent.click(retryWhilePending);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     // React removes the expired UI immediately; replacing the lazy-loaded
     // WebGL scene completes asynchronously. Assert the actual scene update,
     // not merely the earlier status render, before checking failed refresh.
@@ -918,6 +925,11 @@ it.each(['failure', 'timeout'])('does not restore expired 3D geometry after refr
     expect(within(dialog).queryByText(/更新未成功，仍顯示先前/)).toBeNull();
     expect(within(dialog).getByText(/超過七天來源期限/)).toBeTruthy();
     await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    // A failed or timed-out request releases the manual retry while retaining
+    // the marker-only state and never reintroducing expired geometry.
+    await waitFor(() => expect((within(dialog).getByRole('button', {
+      name: '重新讀取建築輪廓',
+    }) as HTMLButtonElement).disabled).toBe(false));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
     timerSpy.mockRestore();
