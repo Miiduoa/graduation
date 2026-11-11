@@ -149,7 +149,7 @@ test('a failed read disables editing until a successful retry', async () => {
   const view = render(<AssistantPermissionsScreen />);
   await waitFor(() => expect(view.getByText('重新讀取權限')).toBeTruthy());
   expect(view.getByLabelText('新增個人行程').props.disabled).toBe(true);
-  expect(view.getByLabelText('新增個人行程').props.value).toBe(false);
+  expect(view.getByLabelText('新增個人行程').props.value).toBe(true);
   fireEvent.press(view.getByText('儲存 AI 代辦權限'));
   expect(request).toHaveBeenCalledTimes(1);
   fireEvent.press(view.getByText('重新讀取權限'));

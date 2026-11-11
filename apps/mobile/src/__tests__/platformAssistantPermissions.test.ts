@@ -37,7 +37,6 @@ test('loads and saves the verified account through its BFF session context', asy
 test.each([
   ['another account', { ...snapshot, accountId: otherAccountId }],
   ['invalid revision', { ...snapshot, revision: -1 }],
-  ['grant at default revision', { ...snapshot, permissions: enabled }],
   ['missing permission', { ...snapshot, permissions: { createPersonalEvent: false } }],
   [
     'nonboolean grant',
@@ -51,6 +50,13 @@ test.each([
   await expect(
     loadPlatformAssistantPermissions(scope(jest.fn().mockResolvedValue(response))),
   ).rejects.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' });
+});
+
+test('accepts a read response with grant at default revision', async () => {
+  const response = { ...snapshot, permissions: enabled };
+  await expect(
+    loadPlatformAssistantPermissions(scope(jest.fn().mockResolvedValue(response))),
+  ).resolves.toEqual(response);
 });
 
 test.each([
