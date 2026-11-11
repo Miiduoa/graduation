@@ -738,7 +738,7 @@ it('ages an already-open campus 3D snapshot to stale, then withdraws it after se
     fireEvent(window, new Event('pageshow'));
     expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   } finally {
@@ -826,7 +826,7 @@ it('does not resurrect an expired stale outline after a pending refresh fails', 
     await act(async () => { rejectRefresh(new Error('offline after snapshot expiry')); });
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
     expect(within(dialog).queryByText(/更新未成功，仍顯示先前/)).toBeNull();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
     clockSpy.mockRestore();
