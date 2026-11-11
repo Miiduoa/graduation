@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from config import DATA_DIR, FIREBASE_CRED_PATH
-from rag.indexer import index_documents, delete_by_source
+from rag.indexer import index_documents
 from rag.public_documents import PUBLIC_FIELDS, public_document
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,45 @@ def _get_firestore_db():
     return firestore.client()
 
 
+def source_document_ids(source: str, collection_name: str = "campus") -> list[str]:
+    from rag.indexer import get_or_create_collection
+
+    data = get_or_create_collection(collection_name).get(where={"source": source})
+    return list(data.get("ids") or [])
+
+
+def delete_ids(ids: list[str], collection_name: str = "campus") -> None:
+    if not ids:
+        return
+    from rag.indexer import get_or_create_collection
+
+    get_or_create_collection(collection_name).delete(ids=ids)
+
+
+def replace_source_documents(source: str, documents: list, collection_name: str = "campus") -> int:
+    """Write the new rows first; only then drop previous rows for this source."""
+    old_ids = source_document_ids(source, collection_name)
+    count = index_documents(documents, collection_name=collection_name) if documents else 0
+    if documents:
+        current = set(source_document_ids(source, collection_name))
+        stale = [doc_id for doc_id in old_ids if doc_id not in current]
+    else:
+        stale = old_ids
+    delete_ids(stale, collection_name)
+    return count
+
+
+def sync_ok(result: dict | None) -> bool:
+    return isinstance(result, dict) and bool(result) and all(value >= 0 for value in result.values())
+
+
+def failed_collections(result: dict | None) -> set[str]:
+    if not isinstance(result, dict):
+        return set(PUBLIC_FIELDS)
+    failed = {name for name, value in result.items() if value < 0}
+    return failed | (set(PUBLIC_FIELDS) - set(result))
+
+
 def sync_collection(collection_name: str, db=None) -> int:
     """Sync a single Firestore collection into ChromaDB."""
     if collection_name not in PUBLIC_FIELDS:
@@ -39,7 +78,7 @@ def sync_collection(collection_name: str, db=None) -> int:
     logger.info("Syncing collection: %s", collection_name)
     page_size = 500
     # Do not filter visibility in Firestore: older public docs omit the field.
-    # Read every page first; only replace the old index after the source read succeeds.
+    # Read every page first; only replace the old index after the write succeeds.
     query = db.collection(collection_name).limit(page_size)
     documents = []
     while True:
@@ -52,8 +91,7 @@ def sync_collection(collection_name: str, db=None) -> int:
             break
         query = query.start_after(page[-1])
 
-    delete_by_source(f"firestore:{collection_name}")
-    count = index_documents(documents) if documents else 0
+    count = replace_source_documents(f"firestore:{collection_name}", documents)
     logger.info("Synced %d public chunks from %s", count, collection_name)
     return count
 
@@ -70,17 +108,21 @@ def sync_all(db=None) -> dict[str, int]:
     return results
 
 
-def sync_from_json_dump(dump_dir: str | Path | None = None) -> dict[str, int]:
+def sync_from_json_dump(
+    dump_dir: str | Path | None = None,
+    collections: set[str] | None = None,
+) -> dict[str, int]:
     """Sync from local JSON dump files (for development without Firebase credentials)."""
     dump_path = Path(dump_dir) if dump_dir else DATA_DIR / "firestore_dump"
+    wanted = set(PUBLIC_FIELDS) if collections is None else set(collections) & set(PUBLIC_FIELDS)
     if not dump_path.exists():
         logger.warning("No dump directory at %s, skipping JSON sync", dump_path)
-        return {}
+        return {name: -1 for name in wanted}
 
     results: dict[str, int] = {}
     for json_file in dump_path.glob("*.json"):
         collection_name = json_file.stem
-        if collection_name not in PUBLIC_FIELDS:
+        if collection_name not in wanted:
             continue
         try:
             data = json.loads(json_file.read_text(encoding="utf-8"))
@@ -91,12 +133,14 @@ def sync_from_json_dump(dump_dir: str | Path | None = None) -> dict[str, int]:
                 record = public_document(collection_name, item, str(idx))
                 if record:
                     documents.append(record)
-            delete_by_source(f"firestore:{collection_name}")
-            results[collection_name] = index_documents(documents) if documents else 0
+            results[collection_name] = replace_source_documents(
+                f"firestore:{collection_name}", documents
+            )
         except Exception as e:
             logger.error("Failed to sync JSON dump %s: %s", json_file, e)
             results[collection_name] = -1
-
+    for name in wanted:
+        results.setdefault(name, -1)
     return results
 
 
@@ -121,9 +165,6 @@ def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, 
     Unscoped rows are never opened to every campus. If source data is unavailable,
     they stay unscoped and remain invisible to school-filtered retrieval.
     """
-    def source_ok(result: dict | None) -> bool:
-        return isinstance(result, dict) and all(value >= 0 for value in result.values())
-
     leftover = legacy_unscoped_firestore_ids(collection_name)
     if not leftover:
         return {"legacy": 0, "remaining": 0, "rebuilt": False, "retryable": False}
@@ -134,12 +175,13 @@ def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, 
         logger.warning("Legacy Firestore re-sync from live collections failed: %s", exc)
         results["firestore"] = None
     leftover = legacy_unscoped_firestore_ids(collection_name)
-    if leftover or not source_ok(results.get("firestore")):
-        results["json"] = sync_from_json_dump(dump_dir)
+    need = failed_collections(results.get("firestore"))
+    if leftover or need:
+        results["json"] = sync_from_json_dump(dump_dir, collections=need or None)
         leftover = legacy_unscoped_firestore_ids(collection_name)
     results["remaining"] = len(leftover)
-    results["rebuilt"] = results["remaining"] < results["legacy"] and (
-        source_ok(results.get("firestore")) or source_ok(results.get("json"))
+    results["rebuilt"] = results["remaining"] == 0 and (
+        sync_ok(results.get("firestore")) or sync_ok(results.get("json"))
     )
     results["retryable"] = not results["rebuilt"]
     if leftover or results["retryable"]:
