@@ -1,3 +1,4 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
 import { httpsCallable } from 'firebase/functions';
 import { ASSISTANT_SERVICES, resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
 import { parseImportedAcademicIntent, summarizeImportedAcademics,
@@ -39,7 +40,7 @@ type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; chec
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory' | 'saved-academics' | 'calendar-action';
   route?: string;
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
@@ -132,7 +133,7 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent' | 'saved-academics' | 'calendar-action';
+  tool?: CampusAssistantMessage['tool'];
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
   calendarTask?: AssistantCalendarTask;
@@ -307,6 +308,10 @@ export async function askCampusAssistant(input: {
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const contact = getSchoolContactAnswer(input.scope.schoolId, question, input.schoolName);
+    if (contact && !input.courseworkChoice) {
+      return { content: contact, source: 'device', hasActions: false, tool: 'school-directory' };
+    }
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;
