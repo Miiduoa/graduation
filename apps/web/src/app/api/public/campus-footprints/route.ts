@@ -192,10 +192,12 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // We only need status/Retry-After. Release the unused body immediately,
     // without awaiting cancellation from an uncooperative upstream.
     if (response.body) void response.body.cancel().catch(() => {});
-    // HTTP 406 may mean the public Overpass server has blocked this client.
-    // Repeating the same request every ten minutes can prolong that block.
-    // Pause for a full day rather than treating access denial as congestion.
-    if (response.status === 406) {
+    // The public Overpass operator may penalize clients that repeatedly send
+    // malformed queries (400) or retry while denied (403/406). A fixed query
+    // bug will not repair itself after ten minutes: back off for a full day,
+    // while leaving a dated stale snapshot / POI-only fallback available.
+    // Retain the separate Retry-After handling for congestion (429/503).
+    if (response.status === 400 || response.status === 403 || response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
     // 429 and 503 can contain a server-provided cooldown. Do not retry against
