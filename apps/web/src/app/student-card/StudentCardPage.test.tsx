@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import {
+  createAccountDemoPermissions,
+  createAccountDemoState,
+  type AccountDemoSnapshot,
+} from '@campus/shared/src/accountDemo';
 import { StudentCardPage } from './StudentCardPage';
 
 const state = vi.hoisted(() => ({
@@ -16,6 +21,17 @@ const state = vi.hoisted(() => ({
   },
   read: vi.fn(),
   qr: vi.fn(),
+  platform: {
+    session: null as { platformAccountId: string; context: string } | null,
+    loading: false,
+    pendingLogout: false,
+    error: '',
+  },
+  demoRequest: vi.fn(),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => state.platform,
+  browserRequest: state.demoRequest,
 }));
 vi.mock('next/link', () => ({
   default: ({ children, href, ...props }: { children: ReactNode; href: string }) => (
@@ -56,6 +72,11 @@ beforeEach(() => {
   state.user.uid = 'alice';
   state.profile.schoolId = 'pu';
   state.profile.role = 'student';
+  state.platform.session = null;
+  state.platform.loading = false;
+  state.platform.pendingLogout = false;
+  state.platform.error = '';
+  state.demoRequest.mockReset();
   state.user.getIdToken.mockResolvedValue('authenticated-token');
   state.read.mockResolvedValue({ exists: () => true, data: () => state.profile });
   state.qr.mockResolvedValue('data:image/png;base64,cXI=');
@@ -229,4 +250,170 @@ it('leaves school services available to visitors and other roles', async () => {
   rerender(<StudentCardPage />);
   expect(await screen.findByText('學生帳號專用')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '取得驗證碼' })).toBeNull();
+});
+
+const demoAccountId = 'pa_12345678-1234-1234-1234-123456789abc';
+function accountDemo(overrides: Partial<AccountDemoSnapshot> = {}): AccountDemoSnapshot {
+  return {
+    accountId: demoAccountId,
+    revision: 1,
+    profile: {
+      displayName: '展示同學',
+      schoolId: 'pu',
+      schoolName: '靜宜大學',
+      studentId: 'DEMO20261112',
+      department: '資訊管理學系',
+    },
+    permissions: createAccountDemoPermissions(true),
+    state: createAccountDemoState(),
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    ...overrides,
+  };
+}
+
+function signInPlatform() {
+  state.signedIn = false;
+  state.platform.session = { platformAccountId: demoAccountId, context: 'platform-session-a' };
+}
+
+it('shows an account-owned demonstration card for Google platform sign-in without Firebase', async () => {
+  signInPlatform();
+  state.demoRequest.mockResolvedValue({ demo: accountDemo() });
+  render(<StudentCardPage />);
+  const card = await screen.findByRole('article', { name: '展示學生證' });
+  expect(card.textContent).toContain('展示同學');
+  expect(card.textContent).toContain('DEMO');
+  expect(card.textContent).not.toContain('DEMO20261112');
+  expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
+  expect(state.read).not.toHaveBeenCalled();
+  expect(state.demoRequest).toHaveBeenCalledWith('account-demo', 'platform-session-a');
+  expect(screen.getByRole('link', { name: '展示資料與權限' }).getAttribute('href')).toBe(
+    '/demo/account',
+  );
+});
+
+it('uses a separate DEMO QR payload and never asks the real card service to issue a credential', async () => {
+  signInPlatform();
+  state.demoRequest.mockResolvedValue({ demo: accountDemo() });
+  render(<StudentCardPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '出示展示 QR Code' }));
+  await screen.findByAltText('DEMO 展示學生證 QR Code');
+  expect(state.qr).toHaveBeenCalledWith(
+    expect.stringMatching(/^nuni-demo-card:v1:pu:DEMO20261112:\d+$/),
+    expect.objectContaining({ margin: 4, width: 512 }),
+  );
+  expect(fetch).not.toHaveBeenCalled();
+  expect(within(screen.getByRole('dialog')).getByText('DEMO20261112')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '收起學生證' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByText('DEMO20261112')).toBeNull();
+});
+
+it.each(['disabled', 'expired', 'other-school', 'other-account'] as const)(
+  'does not show a demonstration card when its authorization is %s',
+  async (condition) => {
+    signInPlatform();
+    const demo = accountDemo();
+    if (condition === 'disabled') demo.permissions.studentCard = false;
+    if (condition === 'expired') demo.expiresAt = new Date(Date.now() - 1).toISOString();
+    if (condition === 'other-school') demo.profile.schoolId = 'thu';
+    if (condition === 'other-account') demo.accountId = 'pa_22345678-1234-1234-1234-123456789abc';
+    state.demoRequest.mockResolvedValue({ demo });
+    render(<StudentCardPage />);
+    await screen.findByRole('heading', {
+      name:
+        condition === 'disabled'
+          ? '學生證展示尚未開啟'
+          : condition === 'expired'
+            ? '展示資料已到期'
+            : condition === 'other-school'
+              ? '請切回展示帳號的學校'
+              : '暫時無法讀取展示學生證',
+    });
+    expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+    expect(screen.queryByText('展示同學')).toBeNull();
+    expect(state.qr).not.toHaveBeenCalled();
+  },
+);
+
+it('accepts a canonical school alias while keeping the same account boundary', async () => {
+  signInPlatform();
+  const demo = accountDemo();
+  demo.profile.schoolId = 'tw-pu';
+  state.demoRequest.mockResolvedValue({ demo });
+  render(<StudentCardPage />);
+  expect(await screen.findByRole('article', { name: '展示學生證' })).toBeTruthy();
+});
+
+it('cannot restore an old account response after the platform account changes', async () => {
+  signInPlatform();
+  let finish!: (value: unknown) => void;
+  state.demoRequest.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const { rerender } = render(<StudentCardPage />);
+  await waitFor(() => expect(state.demoRequest).toHaveBeenCalled());
+  state.platform.session = {
+    platformAccountId: 'pa_22345678-1234-1234-1234-123456789abc',
+    context: 'platform-session-b',
+  };
+  state.demoRequest.mockResolvedValueOnce({ demo: null });
+  rerender(<StudentCardPage />);
+  await screen.findByRole('link', { name: '登入學校帳號' });
+  await act(async () => finish({ demo: accountDemo() }));
+  expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+  expect(screen.queryByText('展示同學')).toBeNull();
+});
+
+it.each(['logout', 'context', 'school'] as const)(
+  'clears a visible demo QR immediately on %s changes',
+  async (change) => {
+    signInPlatform();
+    state.demoRequest.mockResolvedValue({ demo: accountDemo() });
+    const { rerender } = render(<StudentCardPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '出示展示 QR Code' }));
+    await screen.findByAltText('DEMO 展示學生證 QR Code');
+    if (change === 'logout') state.platform.pendingLogout = true;
+    if (change === 'context') {
+      state.platform.session = { ...state.platform.session!, context: 'platform-session-new' };
+      state.demoRequest.mockImplementationOnce(() => new Promise(() => {}));
+    }
+    if (change === 'school') state.schoolId = 'thu';
+    rerender(<StudentCardPage />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('DEMO20261112')).toBeNull();
+    await act(async () => {});
+  },
+);
+
+it('removes the demonstration card when the server authorization expires', async () => {
+  vi.useFakeTimers();
+  signInPlatform();
+  state.demoRequest.mockResolvedValue({
+    demo: accountDemo({ expiresAt: new Date(Date.now() + 2000).toISOString() }),
+  });
+  await act(async () => {
+    render(<StudentCardPage />);
+  });
+  expect(screen.getByRole('article', { name: '展示學生證' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '出示學號' }));
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByText('DEMO20261112')).toBeNull();
+  expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '展示資料已到期' })).toBeTruthy();
+});
+
+it('falls back to the existing Firebase card when the platform account has no demo grant', async () => {
+  state.platform.session = { platformAccountId: demoAccountId, context: 'platform-session-a' };
+  state.demoRequest.mockResolvedValue({ demo: null });
+  render(<StudentCardPage />);
+  await ready();
+  expect(screen.getByRole('article', { name: '學生證個人資料' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
 });

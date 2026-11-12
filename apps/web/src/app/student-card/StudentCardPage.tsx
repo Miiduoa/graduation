@@ -9,6 +9,8 @@ import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { SiteShell } from '@/components/SiteShell';
 import { getAuth, getDb } from '@/lib/firebase';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
+import { AccountDemoStudentCard } from './AccountDemoStudentCard';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import {
   getStudentCardService,
@@ -83,9 +85,33 @@ function OfficialService({ schoolId }: { schoolId: string | null }) {
 
 export function StudentCardPage() {
   const { user, loading } = useAuth();
+  const platform = useOptionalNuniSession();
   const school = useSelectedSchool();
   const schoolId = toPublicSchoolId(school.selectedSchoolId);
-  const ready = !loading && !school.loading && school.catalogStatus === 'ready';
+  const ready =
+    !loading && !platform?.loading && !school.loading && school.catalogStatus === 'ready';
+  const platformSession =
+    platform && !platform.pendingLogout && !platform.error ? platform.session : null;
+  const card =
+    !user || user.isAnonymous ? (
+      <section className={styles.message}>
+        <h2>把學號放進隨身卡片</h2>
+        <p>使用學校帳號登入後，可查看個人資料並取得學號驗證碼。</p>
+        <Link
+          className={styles.button}
+          href={'/login?returnUrl=' + encodeURIComponent('/student-card?campus=' + schoolId)}
+        >
+          登入學校帳號
+        </Link>
+      </section>
+    ) : schoolId ? (
+      <AccountCard
+        key={user.uid + ':' + schoolId}
+        user={user}
+        schoolId={schoolId}
+        schoolName={school.selectedSchool?.name || '我的學校'}
+      />
+    ) : null;
   return (
     <SiteShell title="數位學生證" subtitle="需要出示學號時，打開這張卡。" compactHeading>
       <div className={styles.page}>
@@ -96,24 +122,20 @@ export function StudentCardPage() {
             <h2>先選擇你的學校</h2>
             <p>從頁面上方選擇學校，查看你的卡片與校方服務。</p>
           </section>
-        ) : !user || user.isAnonymous ? (
-          <section className={styles.message}>
-            <h2>把學號放進隨身卡片</h2>
-            <p>使用學校帳號登入後，可查看個人資料並取得學號驗證碼。</p>
-            <Link
-              className={styles.button}
-              href={'/login?returnUrl=' + encodeURIComponent('/student-card?campus=' + schoolId)}
-            >
-              登入學校帳號
-            </Link>
-          </section>
-        ) : (
-          <AccountCard
-            key={user.uid + ':' + schoolId}
-            user={user}
+        ) : platformSession ? (
+          <AccountDemoStudentCard
+            key={JSON.stringify([
+              platformSession.platformAccountId,
+              platformSession.context,
+              schoolId,
+            ])}
+            accountId={platformSession.platformAccountId}
+            context={platformSession.context}
             schoolId={schoolId}
-            schoolName={school.selectedSchool?.name || '我的學校'}
+            fallback={card}
           />
+        ) : (
+          card
         )}
         {ready && <OfficialService schoolId={schoolId} />}
       </div>

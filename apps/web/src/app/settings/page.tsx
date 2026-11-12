@@ -34,6 +34,7 @@ import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
+import { AccountDemoEntry } from '@/components/AccountDemoEntry';
 import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
@@ -1351,6 +1352,7 @@ function SettingsContent({
             </section>
           )}
           {contentMap[activeSection]()}
+          <AccountDemoEntry />
         </div>
       </div>
     </SiteShell>
