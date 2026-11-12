@@ -1,9 +1,9 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
 import { informationKinds } from './information';
-import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
+import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -845,8 +845,9 @@ export function createTools(
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
+    const explicit = parseAssistantCalendarIntent(question, now);
     if (typeof raw.title === 'string' && /^寫/.test(raw.title) &&
-        parseAssistantCalendarIntent(question, now)?.kind !== 'draft')
+      !(explicit?.kind === 'draft' && raw.title === explicit.event.title))
       raw = { ...raw, title: studyTitle(raw.title) };
     const l = await getLedger(),
       e = eventArgs(raw),

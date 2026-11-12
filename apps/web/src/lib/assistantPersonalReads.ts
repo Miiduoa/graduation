@@ -183,6 +183,7 @@ export async function answerAssistantPersonalQuestion(
     } catch (error) {
       assertActive();
       if (sessionFailure(error)) throw new Error('登入狀態已變更，請重新登入後再查詢。');
+      if (options.fallbackOnMissing) return null;
       return result('這次無法讀取課程與作業資料，尚未確認有哪些未交項目。請稍後重試；不會把讀取失敗當成沒有作業。', ['classroom']);
     }
   }

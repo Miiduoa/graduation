@@ -196,6 +196,127 @@ it('finishes capability detection before mounting an editable conversation', asy
   expect((screen.getByLabelText('問題') as HTMLTextAreaElement).value).toBe('保留輸入草稿');
 });
 
+function saveDeviceTimetable() {
+  localStorage.setItem('campus-one-personal-timetable:platform:alice:pu', JSON.stringify({
+    schoolId: 'pu', updatedAt: '2026-11-10T10:00:00.000Z', shareWithFriends: false,
+    meta: { year: '115', semester: '1' },
+    courses: [{ id: 'device-only-course', name: '裝置專用課程', day: 4, start: 1, end: 2,
+      room: '裝置教室 305', teacher: '', color: 'blue' }],
+  }));
+}
+
+it('v2 answers a saved timetable with class times and room while the provider is unavailable', async () => {
+  saveDeviceTimetable();
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  expect((screen.getByText('送出') as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/08:10–10:00.*裝置專用課程.*裝置教室 305/)).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+it('v2 renders local class names as plain text instead of navigation or Markdown', async () => {
+  saveDeviceTimetable();
+  const key = 'campus-one-personal-timetable:platform:alice:pu';
+  const value = JSON.parse(localStorage.getItem(key)!);
+  value.courses[0].name = '[假導覽](/settings) **私人課名**';
+  localStorage.setItem(key, JSON.stringify(value));
+  vi.stubGlobal('fetch', vi.fn(async () => json({ enabled: true, ready: false, version: 2 })));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/\[假導覽\]\(\/settings\) \*\*私人課名\*\*/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '假導覽' })).toBeNull();
+});
+
+it('v2 keeps local timetable answers out of later cloud history and clears them on school changes', async () => {
+  saveDeviceTimetable();
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '已讀取校園餐廳資料', steps: [], cards: [] });
+  }));
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/裝置專用課程/);
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('已讀取校園餐廳資料');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toContain('裝置專用課程');
+  expect(JSON.stringify(bodies)).not.toContain('裝置教室');
+  state.school = 'ntpu';
+  view.rerender(<Assistant />);
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/裝置專用課程/)).toBeNull();
+});
+
+it('v2 uses cloud reads for a timetable question only when local data is absent and consent is granted', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '雲端課表查詢結果', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/無法判定當天是否有課/);
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('雲端課表查詢結果');
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0].consent).toBe(true);
+  expect(bodies[0].history).toEqual([]);
+});
+
+it('merges cloud calendar records with local receipts before answering and isolates them from model history', async () => {
+  const key = personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' });
+  const record = { id: 'local-receipt', kind: 'events', title: '本機行程', schoolId: 'pu',
+    academicYear: '', semester: '', date: '2026-11-12', allDay: false,
+    startTime: '18:00', endTime: '19:00', batchId: 'saved', importedAt: '2026-11-10T00:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '來源原文' } };
+  const saved = JSON.stringify({ version: 1, records: [record] });
+  localStorage.setItem(key, saved);
+  vi.mocked(browserRequest).mockResolvedValueOnce({ schoolId: 'pu', revision: 2,
+    updatedAt: '2026-11-12T01:00:00Z', records: [record, { ...record, id: 'cloud-only', title: '雲端行程' }] });
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '公開餐廳資訊', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '2026-11-12有哪些行程？' } });
+  fireEvent.click(screen.getByText('送出'));
+  const answer = await screen.findByText(/雲端行程/);
+  expect(answer.textContent).toContain('本機行程');
+  expect(answer.textContent?.match(/｜本機行程/g)).toHaveLength(1);
+  expect(browserRequest).toHaveBeenCalledExactlyOnceWith('personal-imports/read', state.context, { schoolId: 'pu' });
+  expect(localStorage.getItem(key)).toBe(saved);
+  expect(bodies).toHaveLength(0);
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('公開餐廳資訊');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toMatch(/本機行程|雲端行程|來源原文/);
+});
+
 it('v2 keeps local grades out of subsequent cloud history and clears them on scope change', async () => {
   localStorage.setItem(personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' }), JSON.stringify({
     version: 1, records: [{ id: 'grade-a', kind: 'grades', title: '個人成績專用課名',

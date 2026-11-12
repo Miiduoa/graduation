@@ -35,6 +35,8 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
     const results = await preview(['--model=fake', '--cases=all']);
     assert.equal(results.length, 10);
     assert.equal(output.trim().split('\n').length, 10);
+    const directReadQuestion = '下一堂課在哪，幾點';
+    assert.equal(results.filter((result) => result.question === directReadQuestion).length, 1);
     for (const result of results) {
       assert.equal(result.error, undefined);
       assert.equal(result.stopReason, '');
@@ -47,6 +49,8 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
         // These complete data queries deliberately bypass the model, while
         // still requiring a successful reader and the fixture's actual data.
         assert.equal(result.modelCalls, 0);
+        assert.deepEqual(result.usage, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+        assert.equal(result.orderCalls, 0);
         assert.deepEqual(result.tools, []);
         assert.deepEqual(result.actionCards, []);
         assert.equal(result.fixtureWrites, 0);
@@ -61,7 +65,8 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
           assert.doesNotMatch(result.finalAnswer, /已交報告/);
         } else {
           assert.match(result.finalAnswer, /13:00–15:00.*資料結構.*資訊202/);
-          assert.doesNotMatch(result.finalAnswer, /程式設計/);
+          assert.match(result.finalAnswer, /來源：已同步的個人課表/);
+          assert.doesNotMatch(result.finalAnswer, /程式設計|語文館|請開啟/);
         }
       } else {
         assert.ok(result.modelCalls >= 1 && result.modelCalls <= 4);
@@ -177,5 +182,5 @@ test('direct private reads mark plain text responses, including an interrupted r
   });
   assert.equal(interrupted.dataRead, true);
   assert.equal(interrupted.modelCalls, 0);
-  assert.match(interrupted.answer, /課表目前未能讀取/);
+  assert.match(interrupted.answer, /目前無法讀取已同步課表|課表目前未能讀取/);
 });

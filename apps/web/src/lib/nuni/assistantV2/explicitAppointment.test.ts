@@ -20,7 +20,7 @@ describe('explicit personal appointments use the existing confirmation flow', ()
     expect(result.cards[0]).toMatchObject({ tool: 'propose_personal_event', args: {
       title: '英文讀書', date: '2026-11-05', allDay: false, startTime: '19:00', endTime: '20:00',
     } });
-    expect(result.answer).toContain('按確認後才會儲存');
+    expect(result.answer).toContain('按下確認後');
     expect(f.writes).toHaveLength(0);
     const card = result.cards[0];
     const raw = { token: card.token, args: card.args };
@@ -48,7 +48,7 @@ describe('explicit personal appointments use the existing confirmation flow', ()
   it('keeps writes disabled without creating a false success receipt', async () => {
     const f = fixtureAdapter();
     const result = await ask('幫我明天 19:00 到 20:00 安排英文讀書', f, false);
-    expect(result.answer).toContain('尚未儲存');
+    expect(result.answer).toContain('尚未加入行事曆');
     expect(result.cards).toHaveLength(0);
     expect(f.writes).toHaveLength(0);
   });

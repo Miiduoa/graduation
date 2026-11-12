@@ -14,7 +14,7 @@ import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assist
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
-import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
+import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 type Step = {
@@ -349,7 +349,7 @@ function V2Conversation({
   async function ask() {
     const current = question.trim();
     if (!current || busy.current) return;
-    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId });
+    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
     if (local) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);

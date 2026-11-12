@@ -15,7 +15,7 @@ import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
   if (reply.local || reply.dataRead)
-    return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap' }}>{reply.answer}</p></div>;
+    return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
   return <AssistantMarkdown text={reply.answer} />;
 }
 
@@ -155,7 +155,7 @@ export function AssistantThread({
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
         <>
-          <p className={styles.intro}>直接查課程、時間、教室與未交作業。安排事情時會先列出內容，確認後再處理。</p>
+          <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -165,7 +165,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程與已接通的 nuni 作業。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (

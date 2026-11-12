@@ -108,6 +108,8 @@ function saveTodayLesson() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
   window.history.replaceState({}, '', '/?campus=pu');
   Element.prototype.scrollIntoView = vi.fn();
   state.context = 'session-a';
@@ -121,7 +123,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it('accepts a spoken question on Today, waits for consent and sends follow-ups in the same conversation', async () => {
+it.each([
+  ['explanation', '資料庫索引', '請解釋什麼是資料庫索引？', '索引能加快資料查找。', '可以舉個例子嗎？', '例如先依學號找到資料。'],
+  ['planning', '明天下午讀書', '幫我安排明天下午讀書', '可以先找明天下午的空檔。', '可以排一小時嗎？', '我會先核對一小時的空檔。'],
+])('accepts a spoken %s question on Today, waits for consent and sends follow-ups in the same conversation', async (_kind, spoken, question, firstReply, followup, secondReply) => {
   const synthesis = installSpeech();
   let dictate: (text: string) => void = () => {};
   vi.stubGlobal(
@@ -137,23 +142,24 @@ it('accepts a spoken question on Today, waits for consent and sends follow-ups i
   );
   const ask = vi
     .fn()
-    .mockReturnValueOnce(reply('索引能加快資料查找。'))
-    .mockReturnValueOnce(reply('例如先依學號找到資料。'));
+    .mockReturnValueOnce(reply(firstReply))
+    .mockReturnValueOnce(reply(secondReply));
   mockNuniAsk(ask);
   render(entry());
   const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
   fireEvent.click(await screen.findByRole('button', { name: '使用語音輸入' }));
-  act(() => dictate('資料庫索引'));
-  expect(field.value).toBe('資料庫索引');
-  fireEvent.change(field, { target: { value: '請解釋什麼是資料庫索引？' } });
+  act(() => dictate(spoken));
+  expect(field.value).toBe(spoken);
+  fireEvent.change(field, { target: { value: question } });
   fireEvent.keyDown(field, { key: 'Enter' });
   expect(ask).not.toHaveBeenCalled();
+  expect(field.value).toBe(question);
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
-  await screen.findByText('索引能加快資料查找。');
+  await screen.findByText(firstReply);
   expect(ask.mock.calls[0][0]).toMatchObject({
     schoolId: 'pu',
-    question: '請解釋什麼是資料庫索引？',
+    question: question,
     history: [],
     consent: true,
   });
@@ -161,25 +167,114 @@ it('accepts a spoken question on Today, waits for consent and sends follow-ups i
   fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
   expect(synthesis.speak).toHaveBeenCalledOnce();
   expect(synthesis.speak.mock.calls[0][0]).toMatchObject({
-    text: '索引能加快資料查找。',
+    text: firstReply,
     voice: deviceVoice,
   });
-  fireEvent.change(field, { target: { value: '可以舉個例子嗎？' } });
-  expect(field.value).toBe('可以舉個例子嗎？');
+  fireEvent.change(field, { target: { value: followup } });
+  expect(field.value).toBe(followup);
   fireEvent.click(screen.getByRole('button', { name: '停止朗讀', pressed: true }));
   expect(synthesis.cancel).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
-  await screen.findByText('例如先依學號找到資料。');
+  await screen.findByText(secondReply);
   expect(synthesis.speak).toHaveBeenCalledOnce();
   expect(ask.mock.calls[1][0]).toMatchObject({
     conversationId: ask.mock.calls[0][0].conversationId,
-    question: '可以舉個例子嗎？',
+    question: followup,
     history: [
-      { role: 'user', content: '請解釋什麼是資料庫索引？' },
-      { role: 'assistant', content: '索引能加快資料查找。' },
+      { role: 'user', content: question },
+      { role: 'assistant', content: firstReply },
     ],
   });
   expect(window.location.pathname + window.location.search).toBe('/?campus=pu');
+});
+
+function saveDeviceTimetable(owner = 'platform:session-a') {
+  localStorage.setItem(`campus-one-personal-timetable:${owner}:pu`, JSON.stringify({
+    schoolId: 'pu', updatedAt: '2026-11-10T10:00:00.000Z', shareWithFriends: false,
+    meta: { year: '115', semester: '1' },
+    courses: [{ id: 'device-only-course', name: '首頁裝置專用課程', day: 4, start: 1, end: 2,
+      room: '裝置教室 305', teacher: '', color: 'blue' }],
+  }));
+}
+
+it.each(['account', 'school'])('answers saved Today data before and after consent, then clears it on %s changes', async (scope) => {
+  saveDeviceTimetable();
+  const ask = vi.fn(() => reply('不應查詢雲端'));
+  mockNuniAsk(ask);
+  const view = render(entry());
+  const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.change(field, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.keyDown(field, { key: 'Enter' });
+  expect(await screen.findByText(/08:10–10:00.*首頁裝置專用課程.*裝置教室 305/)).toBeTruthy();
+  expect(ask).not.toHaveBeenCalled();
+  expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
+  expect(field.value).toBe('');
+
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  expect(await screen.findAllByText(/首頁裝置專用課程/)).toHaveLength(2);
+  expect(ask).not.toHaveBeenCalled();
+
+  if (scope === 'school') state.school = 'ncku';
+  else state.context = 'session-b';
+  view.rerender(entry());
+  const newField = await screen.findByRole('textbox', { name: '問題' });
+  expect(screen.queryByText(/首頁裝置專用課程/)).toBeNull();
+  expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
+  fireEvent.change(newField, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.keyDown(newField, { key: 'Enter' });
+  await screen.findByText(/無法判定當天是否有課/);
+  expect(screen.queryByText(/首頁裝置專用課程/)).toBeNull();
+  expect(ask).not.toHaveBeenCalled();
+});
+
+it('queries the cloud after a missing local Today source is resubmitted with consent, without forwarding private read history', async () => {
+  const ask = vi.fn()
+    .mockReturnValueOnce(Response.json({
+      answer: '下一堂是雲端資料庫，教室主顧 305。', dataRead: true,
+      steps: [{ name: 'get_schedule', status: 'ok', summary: '已核對同步課表' }], cards: [],
+    }))
+    .mockReturnValueOnce(reply('已讀取校園餐廳資料。'));
+  mockNuniAsk(ask);
+  render(entry());
+  const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.change(field, { target: { value: '下一堂課是什麼？' } });
+  fireEvent.keyDown(field, { key: 'Enter' });
+  await screen.findByText(/無法判定當天是否有課/);
+  expect(field.value).toBe('');
+  expect(ask).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '下一堂課是什麼？' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('下一堂是雲端資料庫，教室主顧 305。');
+  expect(ask).toHaveBeenCalledOnce();
+  expect(ask.mock.calls[0][0]).toMatchObject({
+    question: '下一堂課是什麼？', consent: true, history: [], schoolId: 'pu',
+  });
+  fireEvent.change(field, { target: { value: '附近餐廳有哪些？' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('已讀取校園餐廳資料。');
+  expect(ask).toHaveBeenCalledTimes(2);
+  expect(ask.mock.calls[1][0]).toMatchObject({ question: '附近餐廳有哪些？', history: [] });
+  expect(JSON.stringify(ask.mock.calls[1][0])).not.toContain('雲端資料庫');
+});
+
+it.each([false, true])('keeps Today school-account reads on their live school source (device source: %s)', async (hasDeviceSource) => {
+  state.context = null;
+  state.uid = 'alice';
+  if (hasDeviceSource) saveDeviceTimetable('school:alice');
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '校方課表：今天的課在主顧 402。' });
+  render(entry(false));
+  const field = await screen.findByRole('textbox', { name: '你的問題' });
+  fireEvent.change(field, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('校方課表：今天的課在主顧 402。');
+  expect(callCampusAssistant).toHaveBeenCalledOnce();
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0]).toMatchObject({ userId: 'alice', schoolId: 'pu' });
+  expect(screen.queryByText(/首頁裝置專用課程/)).toBeNull();
+  expect(screen.queryByText(/無法判定當天是否有課/)).toBeNull();
 });
 
 it.each(['account', 'school'])(

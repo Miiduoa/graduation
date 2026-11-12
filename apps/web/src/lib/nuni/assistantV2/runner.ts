@@ -1,4 +1,6 @@
 import { maskMessages } from './privacy';
+import { directReads, directReadAnswer } from './directRead';
+import { prepareExplicitEventRequest } from './explicitEventRequest';
 import {
   formatImportedAcademicSummary,
   type ImportedAcademicSummary,
@@ -35,7 +37,6 @@ import {
 } from './contracts';
 import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
 import { explicitPageRequest, informationAnswer, informationReads, type InformationResult } from './information';
-import { prepareExplicitAppointment } from './explicitAppointment';
 import {
   createTools,
   schemas,
@@ -184,8 +185,9 @@ export type RunInput = {
 export async function run(input: RunInput) {
   const started = Date.now(),
     now = input.now ?? started;
+  const reads = directReads(input.question, now);
   const selectedNames = selectTools(input.question, input.adapter.simulation);
-  const requiredReads = !writeIntent(input.question) && !personalSlotSelect(input.question)
+  const requiredReads = !reads.length && !writeIntent(input.question) && !personalSlotSelect(input.question)
     ? informationReads(input.question, now) : [];
   const informationResults: InformationResult[] = [];
   const campusPrelude = campusInfoPrelude(input.question);
@@ -257,17 +259,18 @@ export async function run(input: RunInput) {
       (extra.length ? '\n\n' + partialAnswer(extra, tools.cards, input.question, now) : '');
   };
   try {
-    const appointment = await prepareExplicitAppointment({ question: input.question, now, signal, tools });
-    if (appointment) {
-      steps.push(...appointment.steps);
+    const explicitEvent = await prepareExplicitEventRequest({ question: input.question, tools, signal, now });
+    if (explicitEvent) {
+      steps.push(...explicitEvent.steps);
+      stopReason = explicitEvent.stopReason;
       log('assistant.completed');
-      return { version: 2, ...appointment, modelCalls: 0, usage, simulation: input.adapter.simulation };
+      return { version: 2, ...explicitEvent, modelCalls: 0, usage, simulation: input.adapter.simulation };
     }
     const workOnly =
       /作業|要交|測驗|待繳/.test(input.question) &&
       !scheduleIntent(input.question) &&
       !/有空|行程|課表/.test(input.question);
-    const context = !requiredReads.length && !explicitPageRequest(input.question) && !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
+    const context = !reads.length && !requiredReads.length && !explicitPageRequest(input.question) && !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
       ? await bounded((child) => tools.withSignal(child, () => tools.context()), signal, 15000)
       : {
           now: new Date(now).toISOString(),
@@ -279,8 +282,25 @@ export async function run(input: RunInput) {
                 4000,
               )
             : [],
-          missing: ['未預讀私人資料'],
+          missing: reads.length ? [] : ['未預讀私人資料'],
         };
+    for (const read of reads) {
+      try {
+        const value = await bounded((child) => tools.withSignal(child, () => tools.call(read.tool, read.args)), signal, 4000);
+        evidence.push({ tool: read.tool, result: value.value });
+        steps.push({ name: read.tool, status: value.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+      } catch (error) {
+        if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+        steps.push({ name: read.tool, status: 'error', summary: safeCode(error) });
+      }
+    }
+    if (reads.length) {
+      signal.throwIfAborted();
+      stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
+      log('assistant.completed');
+      return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now),
+        steps, cards: [], modelCalls: 0, usage, stopReason, simulation: input.adapter.simulation };
+    }
     // Read required facts before generation. A page card, an empty answer, or
     // a provider outage cannot prevent a supported query from being completed.
     for (const read of requiredReads) {
@@ -317,6 +337,8 @@ export async function run(input: RunInput) {
       }
     }
     if (requiredReads.length) {
+      signal.throwIfAborted();
+      stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
       // These strictly scoped questions are fully handled by verified readers.
       // Do not wait for (or send private results to) an unnecessary model call.
       log('assistant.completed');
@@ -772,6 +794,9 @@ export async function run(input: RunInput) {
     };
   } catch (e) {
     log('assistant.failed', e);
+    if (reads.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
+      return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now), steps,
+        cards: [], modelCalls, usage, stopReason: safeCode(e), simulation: input.adapter.simulation };
     if ((evidence.length || informationResults.length) && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return {
         version: 2,
