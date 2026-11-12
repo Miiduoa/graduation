@@ -844,4 +844,30 @@ describe('new lesson self-check quality boundary', () => {
     lastWorker().emit({ type: 'result', raw: JSON.stringify({ ...lesson(), answer: 'x = 2' }) });
     await expect(retry).resolves.toMatchObject({ answer: 'x = 2' });
   });
+
+  it.each([
+    { label: 'exact repetition', question: '主鍵', answer: '主鍵' },
+    { label: 'punctuation and direction marks', question: '\u2066主鍵？', answer: '主鍵。' },
+    { label: 'case and whitespace', question: 'SQL ? ', answer: 'sql' },
+  ])('rejects a tautological self-check ($label) while preserving saved formats and retry', async ({ question, answer }) => {
+    const repeated = { ...lesson(), question, answer };
+    // Legacy v1/v2 lesson decoding is deliberately unchanged.
+    expect(parseTutorExplanation(JSON.stringify(repeated), passage())).toMatchObject({ question, answer });
+    const timing = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam',
+      signal: new AbortController().signal, onTiming: timing,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(repeated) });
+    await expect(pending).rejects.toThrow('複習題和參考回答內容相同');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(timing).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
 });

@@ -108,6 +108,15 @@ function hasSubstantiveGeneratedReview(explanation: TutorExplanation): boolean {
     .every((text) => /[\p{L}\p{N}]/u.test(comparableGeneratedTeaching(text)));
 }
 
+// If the model repeats its answer as the question, there is nothing for the
+// student to recall. Ignore only whitespace, punctuation and display-only
+// characters for this NEW-output comparison; retain mathematical operators.
+function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
+  const comparable = (value: string) => comparableGeneratedTeaching(value)
+    .replace(/[\p{P}\s]/gu, '').toLocaleLowerCase();
+  return comparable(explanation.question) !== comparable(explanation.answer);
+}
+
 // Distinct titles, source lines or whitespace cannot turn the SAME explanation
 // into two instructional steps. Keep citations and displayed text untouched.
 function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
@@ -260,6 +269,8 @@ export async function runStudyTutor({
               throw new Error('這次講解的說明只有標點或符號，無法作為教學內容。請重新講解。');
             if (!hasSubstantiveGeneratedReview(explanation))
               throw new Error('這次講解的複習題或參考回答只有標點或符號，無法用來練習。請重新講解。');
+            if (!hasDistinctGeneratedReview(explanation))
+              throw new Error('這次講解的複習題和參考回答內容相同，無法進行自我檢查。請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
