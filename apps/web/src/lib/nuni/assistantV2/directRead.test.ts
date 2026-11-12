@@ -188,6 +188,12 @@ it.each([
   '明天有哪些行程，然後幫我傳訊息', '今天有哪些課，順便幫我預約',
   '今天有什麼課，也幫我把課表分享給小明', '今天有哪些作業沒交？幫我交掉',
   '我有哪些已繳作業', '今天作業繳了嗎', '今天有什麼課，空檔有哪些', '今天有課嗎，空堂在哪裡',
+  '今天有哪些已繳和未繳作業', '我有哪些已提交的作業', '資料結構有哪些作業沒交', '微積分的作業沒交',
 ])('leaves navigation, negation, examples, ambiguous dates and writes to their existing handlers: %s', (question) => {
   expect(directReads(question, now)).toEqual([]);
+});
+
+it('still answers generic remaining-work questions with a due-work read', () => {
+  expect(directReads('今天還有什麼作業沒交', now).map((read) => read.kind)).toEqual(['due-work']);
+  expect(directReads('我有哪些作業沒交', now).map((read) => read.kind)).toEqual(['due-work']);
 });
