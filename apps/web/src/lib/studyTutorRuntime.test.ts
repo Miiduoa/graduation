@@ -1010,3 +1010,49 @@ describe('new lesson self-check quality boundary', () => {
     await expect(retry).resolves.toEqual(lesson());
   });
 });
+
+
+describe('new local self-check answer disclosure boundary', () => {
+  it.each([
+    { label: 'a short Chinese answer in parentheses', question: '哪個欄位？（參考回答：學號）', answer: '學號' },
+    { label: 'an English answer key', question: '哪個指令？ 標準答案: SQL。', answer: 'SQL' },
+    { label: 'a numeric answer after an answer label', question: '計算結果？答案：1.2', answer: '1.2' },
+    { label: 'a quoted answer with spaces', question: '哪種欄位？解答：「外鍵 連接」', answer: '外鍵連接' },
+  ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
+    const leaked = { ...lesson(), question, answer };
+    expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
+      .toMatchObject({ question, answer });
+
+    const timing = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam',
+      signal: new AbortController().signal, onTiming: timing,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(leaked) });
+    await expect(pending).rejects.toThrow('直接寫出參考答案');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(timing).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
+  it.each([
+    { question: '主鍵用來識別什麼？', answer: '每一筆紀錄。' },
+    { question: '題目出現「答案：」欄位時應如何核對？', answer: '先核對教材原文' },
+    { question: '(a+b)？', answer: 'a+b' },
+  ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
+    const valid = { ...lesson(), question, answer };
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'practice', signal: new AbortController().signal,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(valid) });
+    await expect(pending).resolves.toEqual(valid);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+});

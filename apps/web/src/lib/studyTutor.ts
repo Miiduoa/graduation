@@ -229,7 +229,7 @@ export function buildStudyTutorPrompt(
     modeGuidance[mode],
     '只輸出一個 JSON 物件，欄位必須恰好為 title、explanation、sourceQuote、question、answer、steps。前五欄都是非空純文字，不使用 HTML 或 Markdown。',
     'title 最多 20 字，explanation 用 60 至 120 字概述核心概念，question 最多 120 字，answer 最多 200 字。steps 是 2 至 4 個短步驟的陣列，逐步解釋教材而非重複摘要。',
-    'sourceQuote 必須逐字引用 SOURCE_DATA.text 中一段最多 60 字的短句，不能改寫、加省略號或拼接不同位置，也不能引用 HISTORY_DATA 的模型解說。answer 是課後自我對照用的說明，不是評分。',
+    'sourceQuote 必須逐字引用 SOURCE_DATA.text 中一段最多 60 字的短句，不能改寫、加省略號或拼接不同位置，也不能引用 HISTORY_DATA 的模型解說。answer 是課後自我對照用的說明，不是評分；question 必須讓學生先回想，不得包含「答案：」「參考回答：」或其他直接揭露 answer 的提示。',
     '每個步驟只有 title、explanation、sourceQuote 三個非空純文字欄位，可另加 formula。步驟 title 最多 20 字、explanation 最多 90 字；sourceQuote 只截取支持該步的短原句，最多 60 字。',
     'formula 僅在教材有公式時提供，必須是該步 sourceQuote 內原樣連續的文字，最多 200 字；不要新算、改寫或轉換符號，沒有公式就省略此欄。引句相符不代表推導或計算已驗證。',
     `HISTORY_DATA=${JSON.stringify(turns)}`,

@@ -122,6 +122,25 @@ function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
   return comparable(explanation.question) !== comparable(explanation.answer);
 }
 
+// A self-check cannot test recall if it prints its own reference answer in
+// an explicit answer key. Only reject a labelled disclosure that actually
+// matches the generated answer; ordinary questions may contain the same
+// technical terms or mathematical givens without revealing the answer.
+// Validate NEW local generation only; saved v1/v2 lessons remain readable.
+function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
+  const question = comparableGeneratedTeaching(explanation.question).toLowerCase();
+  const answer = comparableGeneratedTeaching(explanation.answer)
+    .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
+  const labels = /(?:正確答案|標準答案|參考答案|參考回答|解答|答案)\s*[:：]/gu;
+  let label: RegExpExecArray | null;
+  while ((label = labels.exec(question)) !== null) {
+    const disclosed = question.slice(label.index + label[0].length)
+      .replace(/^[\s"'“”‘’「『（(\[【]+/gu, '').replace(/\s+/gu, '');
+    if (disclosed.startsWith(answer)) return false;
+  }
+  return true;
+}
+
 // Distinct titles, source lines or whitespace cannot turn the SAME explanation
 // into two instructional steps. Keep citations and displayed text untouched.
 function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
@@ -297,6 +316,8 @@ export async function runStudyTutor({
               throw new Error('這次講解的複習題或參考回答只有標點或符號，無法用來練習。請重新講解。');
             if (!hasDistinctGeneratedReview(explanation))
               throw new Error('這次講解的複習題和參考回答內容相同，無法進行自我檢查。請重新講解。');
+            if (!hasUnrevealedGeneratedReview(explanation))
+              throw new Error('這次複習題直接寫出參考答案，無法練習回想。請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
