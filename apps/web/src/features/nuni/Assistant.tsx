@@ -342,7 +342,7 @@ function V2Conversation({
   async function ask() {
     const current = question.trim();
     if (!current || busy.current) return;
-    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId });
+    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent });
     if (local) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -366,7 +366,7 @@ function V2Conversation({
     // The sent content remains captured in `current` and can be recovered on failure.
     setQuestion('');
     try {
-      const history = turns.filter((turn) => !turn.reply.local &&
+      const history = turns.filter((turn) => !turn.reply.local && turn.reply.dataRead !== true &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },

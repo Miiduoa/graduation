@@ -16,6 +16,8 @@ export type V2Reply = {
   steps: V2Step[];
   cards: V2Card[];
   simulation?: boolean;
+  /** Source-backed deterministic data: render as text and keep out of later model history. */
+  dataRead?: boolean;
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
 };
 
