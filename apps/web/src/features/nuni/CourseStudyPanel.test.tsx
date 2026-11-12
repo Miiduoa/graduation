@@ -1540,6 +1540,41 @@ it('clears the earlier manual JSON fallback after a new explicit progress downlo
   }
 });
 
+it('keeps a selected TXT excerpt but still offers the NEW JSON when its mobile download is blocked', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const create = vi.fn(() => { throw new Error('download blocked'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '兩種格式都要保留的筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製本次筆記' }));
+    const selectedNotes = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    selectedNotes.setSelectionRange(4, 14);
+
+    fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+    expect(create).toHaveBeenCalledOnce();
+    expect(screen.getByRole('textbox', { name: '可選取的本次筆記文字' })).toBe(selectedNotes);
+    expect(selectedNotes.selectionStart).toBe(4);
+    expect(selectedNotes.selectionEnd).toBe(14);
+    expect(screen.getByRole('alert').textContent).toContain('這次的新備份');
+    expect(screen.getByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' }));
+    const progress = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(parseCourseStudyProgress(progress.value, scope).passages['0:0'].note).toBe('兩種格式都要保留的筆記');
+    expect(progress.value).toContain(material.body);
+    expect(document.activeElement).toBe(progress);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('preserves a selectable JSON backup after a blocked mobile download', () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });

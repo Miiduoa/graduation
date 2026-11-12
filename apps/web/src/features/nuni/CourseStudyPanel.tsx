@@ -477,22 +477,28 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       setDownloadStatus(`已交給瀏覽器下載${label}；若沒有出現檔案，可改用下方手動備份。`);
     } catch {
       if (url) URL.revokeObjectURL(url);
+      const hasNewExport = previousManualCopy !== null && preparedFallback !== null
+        && (preparedFallback.kind !== previousManualKind || preparedFallback.text !== previousManualCopy);
       if (previousManualCopy !== null) {
-        // A previously selected excerpt must remain mounted and retain the
-        // learner's selection when a second download attempt fails.
+        // Preserve the mounted textarea and its manually selected excerpt.
         setManualCopyKind(previousManualKind);
         setManualCopyText(previousManualCopy);
+        // The blocked NEW export must still be accessible: otherwise saving
+        // progress while TXT is selected offers only the OLD notes.
+        if (hasNewExport && preparedFallback) setDownloadBackup(preparedFallback);
       } else if (preparedFallback) {
         // A first-time blocked download still yields the exact TXT/JSON
         // export as selectable local text, without requiring another action.
         setManualCopyKind(preparedFallback.kind);
         setManualCopyText(preparedFallback.text);
       }
-      setDownloadError(previousManualCopy !== null
-        ? '目前無法下載；先前可手動選取的備份仍保留，可複製文字或重試下載。'
-        : preparedFallback
-          ? '目前無法下載；已在下方提供完整可選取的備份文字，請手動複製保存。'
-          : '目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
+      setDownloadError(hasNewExport
+        ? '目前無法下載；先前選取的文字仍保留。這次的新備份請按「沒有下載到檔案？顯示完整手動備份」。'
+        : previousManualCopy !== null
+          ? '目前無法下載；先前可手動選取的備份仍保留，可複製文字或重試下載。'
+          : preparedFallback
+            ? '目前無法下載；已在下方提供完整可選取的備份文字，請手動複製保存。'
+            : '目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
     } finally {
       link.remove();
     }
@@ -1002,6 +1008,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
           setManualCopyKind(downloadBackup.kind);
           setManualCopyText(downloadBackup.text);
+          setDownloadError('');
           setDownloadStatus('已顯示同一份下載內容的完整手動備份，可全選後自行儲存。');
         }}>沒有下載到檔案？顯示完整手動備份</button>}
         {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
