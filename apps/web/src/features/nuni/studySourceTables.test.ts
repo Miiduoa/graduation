@@ -366,3 +366,72 @@ describe('explicit inline display:none on HTML lesson wrappers', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(11));
   });
 });
+
+
+describe('explicit inline CSS visibility in course source wrappers', () => {
+  it.each([
+    '<div style="visibility:hidden">',
+    "<section style='CONTENT-VISIBILITY: hidden !important'>",
+    '<aside style="visibility:collapse">',
+    '<div style="visibility: hidden !important; visibility: visible">',
+  ])('does not reconstruct hidden source rows inside %s', (opening) => {
+    const tag = /^<([a-z]+)/i.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 未公開答案 | 學分 |',
+      '| --- | --- |',
+      '| 測試資料 | 99 |',
+      '</' + tag + '>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<div style="visibility:hidden; visibility:visible">',
+    '<section style="content-visibility:hidden; content-visibility:visible">',
+    '<aside style="visibility:hidden; visibility:visible !important">',
+    '<div style="display:none !important; display:block !important">',
+  ])('keeps source rows when later declarations restore visibility in %s', (opening) => {
+    const tag = /^<([a-z]+)/i.exec(opening)?.[1] ?? 'div';
+    expect(extractStudySourceTables([opening, ...visibleTable, '</' + tag + '>'].join('\n')))
+      .toEqual(realTable(2));
+  });
+
+  it('does not let visibility:visible override display:none from a different property', () => {
+    const source = [
+      '<div style="display:none; visibility:visible">',
+      '| 未發布內容 | 學分 |',
+      '| --- | --- |',
+      '| 測試 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('does not treat title text or custom CSS properties as actual visibility settings', () => {
+    expect(extractStudySourceTables([
+      '<div title="visibility:hidden" style="--example:visibility:hidden; visibility:visible">',
+      ...visibleTable,
+      '</div>',
+    ].join('\n'))).toEqual(realTable(2));
+  });
+
+  it('does not let nested containers expose a visibility-hidden parent', () => {
+    const source = [
+      '<section style="visibility:hidden">',
+      '<div style="visibility:visible">',
+      '| 未發布成績 | 學分 |',
+      '| --- | --- |',
+      '| 模擬資料 | 99 |',
+      '</div>',
+      '| 仍在隱藏區 | 學分 |',
+      '| --- | --- |',
+      '| 模擬資料 | 88 |',
+      '</section>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+});

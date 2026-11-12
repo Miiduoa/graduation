@@ -799,3 +799,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 ### 2026-11-12：明確 display:none 的課程答案不再被重建為公開表格
 
 教材 Markdown 可能夾帶 `<div style="display:none">` 等 HTML 容器。原本「原文表格」重建只辨識 hidden／aria-hidden=true，會把這些明確不顯示的練習答案當成可見的正式表格。現在保守辨識 div／section／aside 的行內、字面 display:none 宣告，並依先後順序及 !important 處理覆寫；不會把 title 裡的 display:none、CSS 自訂屬性或已被 display:block 覆蓋的設定誤當隱藏。巢狀容器仍須等最外層關閉才恢復原文表格辨識。新增七項 Vitest 測試情境。此修補不處理外部樣式表、任意 CSS、DOM 的實際排版或圖像理解，也未修改原教材、備份格式與私人筆記。新版 CI/CodeQL、指定 App 5504170、Maestro、手機真機、WebGPU 與 Ahaboard 同機比較仍需依新 SHA 驗證；PR 保持 Draft、不合併、不部署。
+
+### 2026-11-12：避免隱藏樣式的教材表格被誤當公開內容
+
+- 修復原文表格重建未辨識行內 `visibility:hidden`、`visibility:collapse`、`content-visibility:hidden` 的問題。若教師以這些字面 CSS 屬性隱藏答案，白板不再另行抽出為可見表格。
+- 只辨識 div／section／aside 的明確行內宣告，同一屬性依 `!important` 與宣告先後處理；不同屬性的可見值不得取消另一屬性的隱藏值。title 中的說明文字、自訂 CSS 屬性及已被合法覆寫的隱藏宣告不會誤判。新增多組解析器回歸測試，保留後續真正公開的 Markdown 表格。
+- 保守處理巢狀隱藏容器，不宣稱具備完整 CSS／DOM 可見性計算；尤其外部樣式表、`var()`、CSS 註解及手機瀏覽器實際渲染不在本輪驗證範圍。原教材、個人筆記、v1/v2 進度及練習 checkpoint 格式、端側 AI 資料界線均未修改。不代表 iOS／Android 真機、WebGPU 中文教學、App 5504170 正式核准或 Ahaboard 同機比較已完成；PR 保持 Draft，不合併、不部署。

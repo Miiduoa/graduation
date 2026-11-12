@@ -15,7 +15,7 @@ const MAX_ROWS = 20;
 
 // A Markdown-looking table in an explicitly hidden HTML wrapper is not
 // visible course material. Do not infer CSS visibility or parse arbitrary
-// HTML: recognize explicit hidden / aria-hidden=true and simple inline display:none;
+// HTML: recognize explicit hidden / aria-hidden=true and literal inline display:none,\n// visibility:hidden / visibility:collapse / content-visibility:hidden;
 // this does not infer computed CSS, external stylesheets or chart meaning.
 const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
@@ -28,20 +28,26 @@ const TABLE_SUPPRESSED_HTML_TAGS = new Set([
   'template', 'noscript', 'svg', 'math', 'table',
 ]);
 
-function hasExplicitHiddenDisplay(style: string): boolean {
-  // Handle literal inline display declarations, respecting overrides and !important.
-  // An attribute quoting "display:none" is not an active CSS declaration.
-  let effective: { hidden: boolean; important: boolean } | null = null;
+function hasExplicitHiddenInlineStyle(style: string): boolean {
+  // Only recognize literal inline visibility declarations. CSS properties
+  // cascade independently; a visible value for one property cannot override
+  // a hidden value for another. Same-property !important and order still apply.
+  // This is not a computed-style parser (external styles and var() are unknown).
+  const effective = new Map<string, { value: string; important: boolean }>();
   for (const part of style.split(';')) {
-    const property = /^\s*display\s*:\s*(.*?)\s*$/iu.exec(part);
+    const property = /^\s*(display|visibility|content-visibility)\s*:\s*(.*?)\s*$/iu.exec(part);
     if (!property) continue;
-    const important = /\s*!important\s*$/iu.test(property[1]);
-    const value = property[1].replace(/\s*!important\s*$/iu, '').trim().toLowerCase();
+    const name = property[1].toLowerCase();
+    const important = /\s*!important\s*$/iu.test(property[2]);
+    const value = property[2].replace(/\s*!important\s*$/iu, '').trim().toLowerCase();
     if (!value) continue;
-    if (!effective || important || !effective.important)
-      effective = { hidden: value === 'none', important };
+    const previous = effective.get(name);
+    if (!previous || important || !previous.important)
+      effective.set(name, { value, important });
   }
-  return effective?.hidden ?? false;
+  return effective.get('display')?.value === 'none' ||
+    ['hidden', 'collapse'].includes(effective.get('visibility')?.value ?? '') ||
+    effective.get('content-visibility')?.value === 'hidden';
 }
 
 function hasHiddenHtmlAttribute(token: string): boolean {
@@ -55,7 +61,7 @@ function hasHiddenHtmlAttribute(token: string): boolean {
     const name = match[1].toLowerCase();
     // HTML's boolean hidden attribute is active even when written hidden="false".
     if (name === 'hidden') return true;
-    if (name === 'style' && hasExplicitHiddenDisplay(match[2] ?? match[3] ?? match[4] ?? ''))
+    if (name === 'style' && hasExplicitHiddenInlineStyle(match[2] ?? match[3] ?? match[4] ?? ''))
       return true;
     if (name === 'aria-hidden' &&
         (match[2] ?? match[3] ?? match[4] ?? '').toLowerCase() === 'true') return true;
