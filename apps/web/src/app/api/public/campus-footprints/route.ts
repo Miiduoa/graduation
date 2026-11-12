@@ -287,7 +287,16 @@ export async function GET() {
   } else {
     try {
       if (!pending) pending = readOsmWithDeadline().finally(() => { pending = null; });
-      cache = await pending;
+      const candidate = await pending;
+      // A later HTTP fetch can reach an older Overpass replica. Do not replace
+      // a previously dated snapshot with older (or undated) OSM database state
+      // and falsely present the regression as the newest campus geometry.
+      // Preserve the last trusted snapshot as dated, no-store stale fallback.
+      if (cache?.osmBaseAt && (!candidate.osmBaseAt ||
+          Date.parse(candidate.osmBaseAt) < Date.parse(cache.osmBaseAt))) {
+        throw new Error('Overpass replication timestamp regressed');
+      }
+      cache = candidate;
       unavailableUntil = 0;
     } catch (error) {
       unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError

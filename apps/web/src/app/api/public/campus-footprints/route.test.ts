@@ -535,6 +535,81 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each(['older', 'missing'] as const)(
+    'keeps dated campus geometry when an Overpass refresh has %s replication metadata',
+    async (regression) => {
+      const start = Math.floor(Date.now() / 1000) * 1000;
+      const day = 24 * 60 * 60 * 1000;
+      const stamp = (ms: number) => new Date(ms).toISOString().replace('.000Z', 'Z');
+      const initialBase = stamp(start - 60_000);
+      // After 25h, the next database state is 40h old: still inside the
+      // existing 48h freshness window, but older than the *last* snapshot.
+      const regressedBase = stamp(start - 15 * 60 * 60 * 1000);
+      const withBase = (payload: string, base: string | null) => JSON.stringify({
+        ...JSON.parse(payload),
+        ...(base === null ? {} : { osm3s: { timestamp_osm_base: base } }),
+      });
+      const alteredPayload = JSON.stringify({
+        ...JSON.parse(osmPayload),
+        elements: [{
+          ...JSON.parse(osmPayload).elements[0],
+          tags: { building: 'yes', height: '90' },
+        }],
+      });
+      const recoveredPayload = JSON.stringify({
+        ...JSON.parse(osmPayload),
+        elements: [{
+          ...JSON.parse(osmPayload).elements[0],
+          tags: { building: 'yes', height: '20' },
+        }],
+      });
+      const upstream = vi.fn()
+        .mockImplementationOnce(async () => new Response(withBase(osmPayload, initialBase), { status: 200 }))
+        .mockImplementationOnce(async () => new Response(withBase(
+          alteredPayload, regression === 'older' ? regressedBase : null,
+        ), { status: 200 }))
+        .mockImplementationOnce(async () => new Response(withBase(
+          recoveredPayload, stamp(start + day + 60 * 60 * 1000),
+        ), { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const { GET } = await import('./route');
+        const first = await GET();
+        expect(first.status).toBe(200);
+        const original = await first.json();
+        expect(original.osmBaseAt).toBe(initialBase);
+        expect(original.buildings[0].heightBasis).toBe('illustrative');
+
+        clock.mockReturnValue(start + day + 60 * 60 * 1000);
+        const fallback = await GET();
+        expect(fallback.status).toBe(200);
+        expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+        expect(fallback.headers.get('Retry-After')).toBe('600');
+        expect(await fallback.json()).toMatchObject({
+          stale: true, fetchedAt: original.fetchedAt,
+          osmBaseAt: initialBase, buildings: original.buildings,
+        });
+        expect(upstream).toHaveBeenCalledTimes(2);
+
+        clock.mockReturnValue(start + day + 65 * 60 * 1000);
+        expect((await GET()).status).toBe(200);
+        expect(upstream).toHaveBeenCalledTimes(2); // No retry storm.
+
+        clock.mockReturnValue(start + day + 71 * 60 * 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        const next = await recovered.json();
+        expect(next.stale).toBe(false);
+        expect(next.osmBaseAt).toBe(stamp(start + day + 60 * 60 * 1000));
+        expect(next.buildings[0]).toMatchObject({ heightMeters: 20, heightBasis: 'osm-tag' });
+        expect(upstream).toHaveBeenCalledTimes(3);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it('stops stale fallback at seven days from OSM replication, not only the HTTP fetch', async () => {
     const day = 24 * 60 * 60 * 1000;
     const start = Math.floor(Date.now() / 1000) * 1000;
