@@ -215,7 +215,7 @@ suite('title search using the real SDK and repository authorization rules', () =
     const path = 'schools/pu/campusPosts/web-title-moved';
     await environment.withSecurityRulesDisabled(async (context) => {
       await context.firestore().doc(path).set({
-        schoolId: 'pu', boardId: 'public', title: '二手書 原標題',
+        schoolId: 'pu', boardId: 'public', title: '二手書 !原標題',
         content: '學生仍可用新標題找到', authorUid: 'alice',
       });
     });
