@@ -88,6 +88,12 @@
 - [ ] 同校同任務與 Google 地圖、Apple 地圖、校方環景、UniTable 做可重複的操作比較，記錄成功率、錯誤目的地、步數、中位耗時、裝置效能與證據。詳見 [campus-spatial-benchmark.md](./campus-spatial-benchmark.md)。
 - [ ] 以上完成且靜宜實際有明確優勢後，再逐校新增**各校自己的**地圖邊界、POI 校核與建築輪廓，不以靜宜資料冒充他校。其他學校的選校／一般地圖功能不受此功能阻擋。
 
+## OSM relation 支援邊界（2026-11-12）
+ 
+原本僅查詢已核對的 OSM `way`，因此靜宜地點清單中已核對、但 OSM 來源為 `relation/9246899` 的希嘉學苑不可能取得立體外框。本次固定白名單額外查詢該 relation（不開放任意 ID），**只接受 `type=multipolygon`、單一已閉合 `outer` way、沒有任何 inner 或第二組成員**的回應，並重新檢驗地理範圍、面積、自交、與官方地點對位和建築／樓高標註。其他複雜 relation 全部拒絕，不會把中庭或孔洞填成實體牆，也不假設目前上游一定符合此形狀。
+
+此支援是**保守的資料格式能力**：合成測試可證明簡單 relation 會保留 OSM 來源，不能據此宣稱希嘉學苑現有 OSM relation 的成員確實只有一條外環或已完成實地 3D 核對。關係的版本不代表其 member way 的幾何新鮮度，暫不呈現 relation 版本標籤。未新增入口、樓層、路線或校方照片；複雜 geometry 仍保持純 POI 與平面導航。參考 [OSM multipolygon 定義](https://wiki.openstreetmap.org/wiki/Multipolygon)。
+
 ## 測試
 
 ```sh
