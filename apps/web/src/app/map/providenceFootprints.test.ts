@@ -31,6 +31,21 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('does not render explicitly invisible or deleted OSM ways as current buildings', () => {
+    // Synthetic Overpass-like metadata: a geometry/tag match alone is not
+    // proof that an explicitly invisible element is still a visible building.
+    const building = way(255784049, library, { building: 'school', height: '18 m' });
+    expect(parseProvidenceOsmFootprints({ elements: [building] })).toHaveLength(1);
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...building, visible: true }],
+    })).toHaveLength(1);
+    for (const visible of [false, null, 'false', 0]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...building, visible }],
+      }), String(visible)).toEqual([]);
+    }
+  });
+
   it('does not extrude a coordinate-closed but OSM-node-open way', () => {
     // These IDs are synthetic. Real OSM way closure requires first/last
     // node IDs to match; two different nodes may share the same coordinates.
@@ -105,6 +120,29 @@ describe('Providence OSM building outlines', () => {
         ...parsed[0], osmVersion: 99, osmEditedAt: '2026-10-15T08:09:10Z',
       }],
     })).toEqual(parsed);
+
+    // An old/partial relation must not resurrect a deleted outer/inner way,
+    // even if its cached coordinates still form a valid polygon.
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...relation([outerMember, innerMember]), visible: false }],
+    })).toEqual([]);
+    for (const member of [
+      { ...outerMember, visible: false },
+      { ...innerMember, visible: false },
+      { ...outerMember, visible: null },
+    ]) {
+      const members = member.role === 'outer'
+        ? [member, innerMember] : [outerMember, member];
+      expect(parseProvidenceOsmFootprints({
+        elements: [relation(members)],
+      })).toEqual([]);
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [relation([
+        { ...outerMember, visible: true },
+        { ...innerMember, visible: true },
+      ])],
+    })).toHaveLength(1);
 
     const withNodes = (member: typeof outerMember, refs: unknown) => ({
       ...member, nodes: refs,
