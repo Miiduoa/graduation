@@ -87,12 +87,15 @@ async function readTitlePage(
 }
 
 /** Confirm an old result from the server before the ordinary Web open action. */
-export async function confirmCampusPostTitleOpen(schoolId: string, postId: string): Promise<boolean> {
+export async function confirmCampusPostTitleOpen(schoolId: string, postId: string, input: string): Promise<boolean> {
+  const prefix = parseTitlePrefix(input);
   if (!schoolId || schoolId.includes('/') || !postId || postId.includes('/')) throw invalidTitleSearch();
   const db = getDb();
   const snapshot = await getDocFromServer(doc(db, 'schools', schoolId, 'campusPosts', postId));
   if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
     throw Object.assign(new Error('貼文尚未取得伺服器確認。'), { code: 'unavailable' });
   }
-  return snapshot.exists() && snapshot.data().schoolId === schoolId;
+  // A title can change after a result was listed. Revalidate its current
+  // prefix with the same parser used for search and reading-position resume.
+  return snapshot.exists() && Boolean(titleSearchPost(snapshot.id, snapshot.data(), schoolId, prefix));
 }

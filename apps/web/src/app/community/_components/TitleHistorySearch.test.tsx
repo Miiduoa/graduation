@@ -98,7 +98,7 @@ it('opens an already visible post while its next page is pending', async () => {
   submit();
   fireEvent.click(await screen.findByRole('button', { name: '載入更多符合的標題' }));
   fireEvent.click(screen.getByRole('link', { name: '二手書 old-1001' }));
-  expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001');
+  expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001', '二手書');
   await act(async () => nextPage.resolve(page(['stale-delivery'])));
   expect(screen.queryByRole('link', { name: '二手書 stale-delivery' })).toBeNull();
   await act(async () => confirmation.resolve(true));
@@ -115,7 +115,7 @@ it('can retry the interrupted cursor after an offline post confirmation', async 
   submit();
   fireEvent.click(await screen.findByRole('button', { name: '載入更多符合的標題' }));
   fireEvent.click(screen.getByRole('link', { name: '二手書 old-1001' }));
-  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001'));
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001', '二手書'));
   fireEvent.click(screen.getByRole('button', { name: '載入更多符合的標題' }));
   await screen.findByRole('link', { name: '二手書 old-1002' });
   expect(mocks.search.mock.calls[2][2]).toBe(first.nextCursor);
@@ -221,10 +221,11 @@ it('prevents opening a deleted result and does not navigate to an invalid old po
   submit();
   const link = await screen.findByRole('link', { name: '二手書 old-1001' });
   fireEvent.click(link);
-  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001'));
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001', '二手書'));
   expect(mocks.navigate).not.toHaveBeenCalled();
   expect(screen.queryByRole('link', { name: '二手書 old-1001' })).toBeNull();
-  expect(screen.getByRole('status').textContent).toContain('已刪除');
+  expect(screen.getByRole('status').textContent).toContain('標題已變更');
+  expect(window.sessionStorage.getItem('nuni:community-history-reading-position:v1')).toBeNull();
 });
 it('verifies permission before navigation; revoked membership clears the old list', async () => {
   mocks.confirm.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
@@ -277,7 +278,7 @@ it('does not tell screen readers that an authorized post was unverified when onl
   fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('貼文已通過伺服器確認');
-  expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001');
+  expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001', '二手書');
   expect(screen.getByRole('status').textContent).toContain('伺服器已確認貼文可閱讀');
   expect(screen.getByRole('status').textContent).not.toContain('尚未通過伺服器確認');
 });

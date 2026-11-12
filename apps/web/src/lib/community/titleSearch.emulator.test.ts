@@ -186,27 +186,27 @@ suite('title search using the real SDK and repository authorization rules', () =
       await context.firestore().doc(path).set({ schoolId: 'pu', boardId: 'public',
         title: '二手書 伺服器確認', content: '仍在校內', authorUid: 'alice' });
     });
-    expect(await confirmCampusPostTitleOpen('pu', 'web-check')).toBe(true);
+    expect(await confirmCampusPostTitleOpen('pu', 'web-check', '二手書')).toBe(true);
     await disableNetwork(alice);
     try {
-      await expect(confirmCampusPostTitleOpen('pu', 'web-check')).rejects.toMatchObject({ code: 'unavailable' });
+      await expect(confirmCampusPostTitleOpen('pu', 'web-check', '二手書')).rejects.toMatchObject({ code: 'unavailable' });
     } finally { await enableNetwork(alice); }
     const membership = 'schools/pu/members/alice';
     await environment.withSecurityRulesDisabled(async (context) => {
       await context.firestore().doc(membership).update({ status: 'inactive' });
     });
     try {
-      await expect(confirmCampusPostTitleOpen('pu', 'web-check')).rejects.toMatchObject({ code: 'permission-denied' });
+      await expect(confirmCampusPostTitleOpen('pu', 'web-check', '二手書')).rejects.toMatchObject({ code: 'permission-denied' });
     } finally {
       await environment.withSecurityRulesDisabled(async (context) => {
         await context.firestore().doc(membership).update({ status: 'active' });
       });
     }
-    await expect(confirmCampusPostTitleOpen('other', 'private')).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(confirmCampusPostTitleOpen('other', 'private', '二手書')).rejects.toMatchObject({ code: 'permission-denied' });
     await environment.withSecurityRulesDisabled(async (context) => {
       await context.firestore().doc(path).delete();
     });
-    expect(await confirmCampusPostTitleOpen('pu', 'web-check')).toBe(false);
+    expect(await confirmCampusPostTitleOpen('pu', 'web-check', '二手書')).toBe(false);
   });
   it('does not open a server-confirmed old result after its title has moved to another prefix', async () => {
     // The list was already fetched for 二手書. The author now changes the title

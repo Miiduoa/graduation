@@ -51,11 +51,11 @@ function readReadingPosition(uid: string, schoolId: string): ReadingPosition | n
 
 
 /** Do not leave a student's result link permanently locked if a server read stalls. */
-async function confirmWithinDeadline(schoolId: string, postId: string): Promise<boolean> {
+async function confirmWithinDeadline(schoolId: string, postId: string, prefix: string): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      confirmCampusPostTitleOpen(schoolId, postId),
+      confirmCampusPostTitleOpen(schoolId, postId, prefix),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(
           Object.assign(new Error('貼文確認逾時。'), { code: 'deadline-exceeded' }),
@@ -269,14 +269,14 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
     let navigated = false;
     let confirmed = false;
     try {
-      const available = await confirmWithinDeadline(schoolId, id);
+      const available = await confirmWithinDeadline(schoolId, id, searched);
       if (request !== version.current) return;
       if (!available) {
         focusAfter.current = 'summary';
         setPage((current) => current ? {
           ...current, posts: current.posts.filter((post) => post.id !== id),
         } : null);
-        setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
+        setNotice('這篇貼文已刪除或標題已變更，已從搜尋結果移除。');
         return;
       }
       confirmed = true;
