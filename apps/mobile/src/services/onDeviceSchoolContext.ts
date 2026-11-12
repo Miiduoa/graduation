@@ -1,3 +1,4 @@
+import { MAX_PERIOD_SLOTS } from '@campus/shared';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
@@ -125,13 +126,24 @@ export function formatOnDeviceSchoolPrompt(
   const timetable = snapshot.timetable;
   const validTimetable = !!timetable &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
-    (timetable.updatedAt === null || typeof timetable.updatedAt === 'string') &&
+    (timetable.updatedAt === null ||
+      (typeof timetable.updatedAt === 'string' &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(timetable.updatedAt) &&
+        Number.isFinite(Date.parse(timetable.updatedAt)))) &&
     Array.isArray(timetable.courses) && timetable.courses.length <= 80 &&
+    // The live collector never attaches course rows to a missing/unreadable source.
+    // A restored contradiction must not authorize unrelated private summaries.
+    (timetable.source === 'saved-device-copy' ||
+      (timetable.updatedAt === null && timetable.courses.length === 0)) &&
     timetable.courses.every((course) => !!course &&
-      typeof course.name === 'string' &&
-      Number.isFinite(course.day) && Number.isFinite(course.start) &&
-      Number.isFinite(course.end) &&
-      (course.room === undefined || typeof course.room === 'string'));
+      typeof course.name === 'string' && !!course.name.trim() && course.name.length <= 48 &&
+      Number.isInteger(course.day) && course.day >= 0 && course.day <= 5 &&
+      Number.isInteger(course.start) && Number.isInteger(course.end) &&
+      (course.day === 0
+        ? course.start === 0 && course.end === 0
+        : course.start >= 1 && course.end >= course.start && course.end <= MAX_PERIOD_SLOTS) &&
+      (course.room === undefined ||
+        (typeof course.room === 'string' && course.room.length <= 40)));
   const owned = verifiedClock && validTimetable &&
     !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
   const sampleCourses = owned && timetable ? timetable.courses.slice(0, 8) : [];
