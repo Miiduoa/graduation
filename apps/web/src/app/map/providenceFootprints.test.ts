@@ -313,6 +313,52 @@ describe('Providence OSM building outlines', () => {
     })).toEqual([]);
   });
 
+  it('measures an audited POI against actual building surface, not empty courtyard', () => {
+    // Synthetic geometry centred on the existing audited Xijia POI. None of
+    // these square outlines is claimed to describe the real dormitory.
+    const center = { lon: 120.58067, lat: 24.228017 };
+    const ring = (lonRadius: number, latRadius: number) => [
+      { lon: center.lon - lonRadius, lat: center.lat - latRadius },
+      { lon: center.lon + lonRadius, lat: center.lat - latRadius },
+      { lon: center.lon + lonRadius, lat: center.lat + latRadius },
+      { lon: center.lon - lonRadius, lat: center.lat + latRadius },
+      { lon: center.lon - lonRadius, lat: center.lat - latRadius },
+    ];
+    const outer = ring(0.00065, 0.00065);
+    const relation = (inner: ReturnType<typeof ring>) => ({
+      type: 'relation', id: 9246899,
+      tags: { type: 'multipolygon', building: 'dormitory', name: '希嘉學苑' },
+      members: [
+        { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+        { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+      ],
+    });
+    // A POI only 12-13 m from the courtyard wall still belongs to the
+    // building's 30 m alignment allowance, even if it is in the open air.
+    const nearCourtyard = parseProvidenceOsmFootprints({
+      elements: [relation(ring(0.00012, 0.00012))],
+    });
+    expect(nearCourtyard).toMatchObject([{ poiId: 'pu-xijia' }]);
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: nearCourtyard,
+    })).toEqual(nearCourtyard);
+
+    // The POI is more than 40 m from the nearest *building wall* when
+    // the courtyard is wider. Outer-polygon containment alone used to
+    // incorrectly accept this unrelated volume on both API and client.
+    const wideCourtyard = ring(0.0004, 0.0004);
+    expect(parseProvidenceOsmFootprints({
+      elements: [relation(wideCourtyard)],
+    })).toEqual([]);
+    const forged = {
+      ...nearCourtyard[0],
+      holes: [wideCourtyard.slice(0, -1).map(({ lon, lat }) => [lon, lat] as [number, number])],
+    };
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [forged],
+    })).toEqual([]);
+  });
+
   it('parses the audited 2026-11-12 OSM snapshot of Xijia with its real inner courtyard', () => {
     // Source: https://api.openstreetmap.org/api/0.6/relation/9246899/full
     // These coordinates are from an OSM snapshot, NOT a survey of current
