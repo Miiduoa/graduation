@@ -550,6 +550,23 @@ it('times out reading-position lookup without replaying a cached article or losi
 });
 
 
+it('keeps Chinese IME candidate confirmation from submitting history search when Enter loses isComposing', () => {
+  render(<TitleHistorySearch schoolId="pu" />);
+  const field = screen.getByRole('searchbox');
+  fireEvent.change(field, { target: { value: '二手書' } });
+  fireEvent.compositionStart(field);
+  // On some WebKit/browser IME sequences, the Enter keydown reports
+  // isComposing=false even while the active composition has not ended.
+  const enter = new KeyboardEvent('keydown', {
+    key: 'Enter', bubbles: true, cancelable: true, isComposing: false,
+  });
+  expect(field.dispatchEvent(enter)).toBe(false);
+  expect(mocks.search).not.toHaveBeenCalled();
+  fireEvent.compositionEnd(field);
+  fireEvent.submit(field.closest('form')!);
+  expect(mocks.search).toHaveBeenCalledExactlyOnceWith('pu', '二手書', null);
+});
+
 it('warns immediately about an overlong Web title but accepts 80 Unicode code points', async () => {
   render(<TitleHistorySearch schoolId="pu" />);
   const field = screen.getByRole('searchbox');
