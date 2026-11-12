@@ -360,7 +360,19 @@ window.__fixtureToken=location.search;
   await begin(390, 844, 'light', 'open-verified');
   await type('二手書'); await click('搜尋歷史標題'); await count(20);
   await clickFirstResult();
-  await until(() => call(() => window.__history.routes.length === 1), 'authorized result navigation');
+  try {
+    await until(() => call(() => window.__history.routes.length === 1), 'authorized result navigation');
+  } catch (cause) {
+    const diagnostic = await call(() => ({
+      opens: window.__history.opens, routes: window.__history.routes,
+      calls: window.__history.calls,
+      alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent),
+      status: document.querySelector('[role="status"]')?.textContent,
+      firstCard: document.querySelector('article a')?.textContent,
+      activeElement: document.activeElement?.outerHTML?.slice(0, 300),
+    })).catch((error) => ({ captureError: String(error) }));
+    throw new Error(`${String(cause)}; browser opening state=${JSON.stringify(diagnostic)}`);
+  }
   await check('390: a normal result click performs fresh server confirmation before navigation', () =>
     window.__history.opens.length === 1 && window.__history.opens[0].available === true &&
     window.__history.routes[0].includes('/community/post/old-'));
