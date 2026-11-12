@@ -90,7 +90,7 @@ test.each(['nthu', 'ncnu'] as const)('duplicate %s periods stay visible but neve
   const sourceUrl = resolvePublicCourseOperation(schoolId)!.sourceUrl;
   const original = schoolId === 'nthu' ? nthu : ncnu;
   const invalid: PublicCatalogCourse = schoolId === 'nthu'
-    ? { ...original, title: '重複時段課程', meetings: [
+    ? { ...original, title: '重複時段課程', time: 'M3M4\nM4M5', room: '教室甲\n教室乙', meetings: [
         { time: 'M3M4', room: '教室甲' }, { time: 'M4M5', room: '教室乙' },
       ] }
     : { ...original, title: '重複時段課程', time: '4ef4fg' };
