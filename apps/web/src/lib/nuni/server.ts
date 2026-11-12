@@ -223,6 +223,7 @@ export function readPlatformAuthorization(request: NextRequest): PlatformSession
 export async function boundedJson(
   source: Request | Response,
   limit = 1024 * 1024,
+  retryableReadSignal?: AbortSignal,
 ): Promise<unknown> {
   if (!source.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
     throw new NuniError(502, 'INVALID_RESPONSE');
@@ -248,6 +249,13 @@ export async function boundedJson(
   } catch (error) {
     void reader.cancel().catch(() => {});
     if (error instanceof NuniError) throw error;
+    // A timed-out GET body is a transport failure; malformed JSON remains non-retryable.
+    if (
+      retryableReadSignal?.aborted &&
+      error instanceof Error &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')
+    )
+      throw new NuniError(503, 'READ_TIMEOUT');
     throw new NuniError(502, 'INVALID_RESPONSE');
   } finally {
     clearTimeout(timer);
@@ -300,7 +308,11 @@ export async function fetchJson(
           }
           throw new NuniError(response.status >= 500 ? 503 : response.status, code);
         }
-        return await boundedJson(response, responseLimit);
+        return await boundedJson(
+          response,
+          responseLimit,
+          (init.method ?? 'GET').toUpperCase() === 'GET' ? signal : undefined,
+        );
       } catch (error) {
         if (error instanceof NuniError) throw error;
         throw new NuniError(503, 'SERVICE_UNAVAILABLE');
