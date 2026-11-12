@@ -1,5 +1,5 @@
 import React from 'react';
-import { AccessibilityInfo, FlatList, Modal, Platform, StyleSheet } from 'react-native';
+import { AccessibilityInfo, FlatList, Modal, Platform, Pressable, StyleSheet } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { TitleHistoryLauncher, TitleHistorySearch } from '../screens/social/TitleHistorySearch';
 import { CommunityScreen } from '../screens/CommunityScreen';
@@ -96,18 +96,20 @@ test('a pending native post confirmation disables the actual card until safe ret
   confirmOpen.mockReturnValueOnce(pending.promise);
   const view = panel(); enter(view);
   await view.findByText('二手書 one');
+  const actualCard = () => view.UNSAFE_getAllByType(Pressable)
+    .find((node) => node.props.accessibilityLabel === '開啟貼文：二手書 one');
   const card = view.getByLabelText('開啟貼文：二手書 one');
-  expect(card.props.disabled).toBe(false);
+  // Testing Library's accessible host View does not expose Pressable.disabled.
+  // Inspect the composite, then verify the same accessible host semantics.
+  expect(actualCard()?.props.disabled).toBe(false);
   fireEvent.press(card);
   const waiting = view.getByLabelText('開啟貼文：二手書 one');
-  // Announcing disabled without disabling Pressable leaves VoiceOver,
-  // Switch Control and touch interactions with contradictory semantics.
   expect(waiting.props.accessibilityState).toMatchObject({ busy: true, disabled: true });
-  expect(waiting.props.disabled).toBe(true);
+  expect(actualCard()?.props.disabled).toBe(true);
   fireEvent.press(waiting);
   expect(confirmOpen).toHaveBeenCalledTimes(1);
   await act(async () => { pending.resolve(false); });
-  expect(view.getByLabelText('開啟貼文：二手書 one').props.disabled).toBe(false);
+  expect(actualCard()?.props.disabled).toBe(false);
   expect(view.open).not.toHaveBeenCalled();
 });
 
