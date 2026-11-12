@@ -144,6 +144,15 @@ async function invokeHostedCallable(
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
+  if (name === 'prepareDmConversation' || name === 'sendDmText') {
+    const { createDmConversations } = await import('./dmConversationsHandler');
+    const handlers = createDmConversations({ db });
+    return name === 'prepareDmConversation' ? handlers.prepare(request) : handlers.sendText(request);
+  }
+  if (name === 'replyToCampusStory') {
+    const { createReplyToCampusStory } = await import('./storyReplyHandler');
+    return createReplyToCampusStory({ db })(request);
+  }
   if (name === 'getMyTronClassCourses') {
     const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
     const fetchCourses = lmsCoursesFetcher ?? (await import('./tronClassSchoolSource')).tronClassSchoolSource;

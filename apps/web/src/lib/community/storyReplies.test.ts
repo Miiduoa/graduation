@@ -1,3 +1,5 @@
+const functionsConfig = vi.hoisted(() => ({ enabled: true }));
+vi.mock('../cloudFunctions', () => ({ areFunctionsConfigured: () => functionsConfig.enabled }));
 import { beforeEach, expect, it, vi } from 'vitest';
 import { httpsCallable } from 'firebase/functions';
 import { sendStoryReply } from './storyReplies';
@@ -6,7 +8,7 @@ const runtime = vi.hoisted(() => ({ uid: 'reader', configured: true, invoke: vi.
 vi.mock('firebase/functions', () => ({ httpsCallable: vi.fn(() => runtime.invoke) }));
 vi.mock('@/lib/firebase', () => ({
   isFirebaseConfigured: () => runtime.configured,
-  getAuth: () => ({ currentUser: { uid: runtime.uid } }),
+  getAuth: () => ({ currentUser: { uid: runtime.uid, getIdToken: async () => 'fake-token' } }),
   getFunctionsInstance: () => ({}),
 }));
 const input = {
@@ -17,6 +19,7 @@ const input = {
   content: '好啊',
 };
 beforeEach(() => {
+  functionsConfig.enabled = true;
   vi.clearAllMocks();
   runtime.configured = true;
   runtime.uid = 'reader';
@@ -49,4 +52,28 @@ it('prevents demo and stale-account requests, and hides a response after sign-ou
     return { data: { conversationId: 'private-thread', messageId: 'm1' } };
   });
   await expect(sendStoryReply('reader', input)).rejects.toThrow('reply-session');
+});
+
+it.each([false, true])('delivers through hosted when absent (configured=%s)', async (configured) => {
+  functionsConfig.enabled = configured;
+  if (configured) runtime.invoke.mockRejectedValueOnce({ code: 'functions/not-found' });
+  const fetcher = vi.fn().mockResolvedValue({
+    ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_reader', messageId: 'story-receipt' } }),
+  });
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await expect(sendStoryReply('reader', input)).resolves.toBe('dm_pu_alice_reader');
+    expect(fetcher).toHaveBeenCalledWith('/api/fn/replyToCampusStory', expect.anything());
+    if (!configured) expect(httpsCallable).not.toHaveBeenCalled();
+  } finally { vi.unstubAllGlobals(); }
+});
+it('does not downgrade a denied story reply', async () => {
+  const error = { code: 'functions/permission-denied' };
+  runtime.invoke.mockRejectedValueOnce(error);
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await expect(sendStoryReply('reader', input)).rejects.toBe(error);
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally { vi.unstubAllGlobals(); }
 });

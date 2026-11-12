@@ -1,5 +1,11 @@
 import { httpsCallable } from 'firebase/functions';
+import { areFunctionsConfigured } from './cloudFunctions';
+import { isCallableMissing } from './callableFallback';
 import { getAuth, getFunctionsInstance } from './firebase';
+
+export function isDmPhotoUnavailable(error: unknown) {
+  return (error instanceof Error && error.message === 'photo-unavailable') || isCallableMissing(error);
+}
 
 export type PhotoScope = {
   viewerUid: string;
@@ -38,6 +44,7 @@ export function parseDmPhotoPath(path: unknown, conversationId: string, publishe
 function checkSession(scope: PhotoScope, signal: AbortSignal) {
   if (signal.aborted || getAuth()?.currentUser?.uid !== scope.viewerUid)
     throw new Error('photo-session');
+  if (!areFunctionsConfigured()) throw new Error('photo-unavailable');
 }
 
 type Grant = { url: string; expiresAt: string };

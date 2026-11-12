@@ -1,3 +1,5 @@
+const functionsConfig = vi.hoisted(() => ({ enabled: true }));
+vi.mock('./cloudFunctions', () => ({ areFunctionsConfigured: () => functionsConfig.enabled }));
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   confirmDmPhoto,
@@ -31,6 +33,7 @@ const signed = (path: string) => ({
   expiresAt: expiry(),
 });
 beforeEach(() => {
+  functionsConfig.enabled = true;
   vi.clearAllMocks();
   api.uid = 'alice';
   api.callable.mockReturnValue(api.call);
@@ -167,4 +170,12 @@ it('requests a fresh, scoped GET each time and checks expiry, URL type and objec
     api.call.mockResolvedValueOnce({ data });
     await expect(readDmPhoto(scope, path, signal())).rejects.toThrow();
   }
+});
+
+it('reports photos unavailable without attempting callables on Spark', async () => {
+  functionsConfig.enabled = false;
+  await expect(uploadDmPhoto(scope, file(), signal())).rejects.toThrow('photo-unavailable');
+  await expect(confirmDmPhoto(scope, draft, signal())).rejects.toThrow('photo-unavailable');
+  await expect(readDmPhoto(scope, path, signal())).rejects.toThrow('photo-unavailable');
+  expect(api.callable).not.toHaveBeenCalled();
 });
