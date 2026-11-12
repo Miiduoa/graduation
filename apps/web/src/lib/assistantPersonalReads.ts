@@ -13,7 +13,7 @@ import { loadNuniStudyAgenda, sortStudyTasks, studyTaskStatus } from '@campus/sh
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { browserRequest } from '@/features/nuni/Session';
 import { readPersonalImports, type PersonalImportScope } from './personalImports';
-import { loadPersonalTimetable } from './timetable/store';
+import { readPersonalTimetableOnDevice } from './timetable/store';
 import type { LocalAssistantResult } from './assistantLocalActions';
 
 type ReadIntent = {
@@ -28,7 +28,7 @@ type ReadIntent = {
 };
 const DAY = 86400000;
 const addDays = (day: string, offset: number) => classDate(new Date(Date.parse(day + 'T12:00:00+08:00') + offset * DAY));
-const clean = (value: string) => value.replace(/[\r\n\t]+/g, ' ').replace(/[\\`*_{}\[\]<>#|]/g, '\\$&');
+const clean = (value: string) => value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ');
 
 /** Recognizes direct reads only. Mixed requests and mutations stay with the action engine. */
 export function personalAssistantReadIntent(question: string, now = new Date()): ReadIntent | null {
@@ -214,7 +214,7 @@ export async function answerAssistantPersonalQuestion(
     return result(lines.join('\n'), ['calendar']);
   }
   try {
-    const manual = await loadPersonalTimetable(null, scope.schoolId, scope.owner);
+    const { timetable: manual } = readPersonalTimetableOnDevice(scope.schoolId, scope.owner);
     assertActive();
     imported = withClassExceptions([...imported, ...manualClassRecords(manual)], manual.classExceptions);
   } catch {

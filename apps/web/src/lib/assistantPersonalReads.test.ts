@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { answerAssistantPersonalQuestion as answer, personalAssistantReadIntent as intent } from './assistantPersonalReads';
 import { personalImportsStorageKey } from './personalImports';
 import { browserRequest } from '@/features/nuni/Session';
-import { loadPersonalTimetable } from './timetable/store';
+import { readPersonalTimetableOnDevice } from './timetable/store';
 import { classMeetingKey } from '@campus/shared/src/timetable/classExceptions';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
 
 vi.mock('@/features/nuni/Session', () => ({ browserRequest: vi.fn() }));
-vi.mock('./timetable/store', () => ({ loadPersonalTimetable: vi.fn() }));
+vi.mock('./timetable/store', () => ({ readPersonalTimetableOnDevice: vi.fn() }));
 const accountId = 'pa_22222222-2222-4222-8222-222222222222';
 const workspaceId = 'cw_11111111-1111-4111-8111-111111111111';
 const scope = { owner: 'platform:' + accountId, schoolId: 'pu' };
@@ -26,10 +26,10 @@ const save = (records: PersonalImportRecord[], owner = scope) =>
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(browserRequest).mockReset();
-  vi.mocked(loadPersonalTimetable).mockReset().mockResolvedValue({
+  vi.mocked(readPersonalTimetableOnDevice).mockReset().mockReturnValue({ found: false, timetable: {
     schoolId: 'pu', courses: [], meta: { school: 'pu', year: '115', semester: '1', className: '', credits: 0, title: '' },
     updatedAt: '2026-11-10T01:00:00Z', shareWithFriends: false,
-  });
+  } });
 });
 
 describe('direct personal reads', () => {
@@ -61,12 +61,12 @@ describe('direct personal reads', () => {
 
   it('applies saved class cancellations and afternoon filtering', async () => {
     const original = lesson();
-    vi.mocked(loadPersonalTimetable).mockResolvedValueOnce({
+    vi.mocked(readPersonalTimetableOnDevice).mockReturnValueOnce({ found: true, timetable: {
       schoolId: 'pu', courses: [], meta: { school: 'pu', year: '115', semester: '1', className: '', credits: 0, title: '' },
       updatedAt: '2026-11-10T01:00:00Z', shareWithFriends: false,
       classExceptions: [{ id: 'cancel', kind: 'cancel', originalDate: '2026-11-12', original,
         courseKey: classMeetingKey(original), createdAt: '2026-11-11T00:00:00Z' }],
-    });
+    } });
     save([original, lesson({ id: 'afternoon', title: '程式設計', startTime: '14:10', endTime: '16:00' })]);
     const result = await answer('今天下午有哪些課？', scope, options());
     expect(result?.content).toContain('程式設計');
@@ -87,6 +87,13 @@ describe('direct personal reads', () => {
     const failed = await answer('今天有哪些課？', scope, options());
     expect(failed?.content).toContain('無法確認');
     expect(failed?.content).not.toContain('沒有排課');
+  });
+
+  it('reports an unreadable manual timetable instead of claiming no classes', async () => {
+    vi.mocked(readPersonalTimetableOnDevice).mockImplementationOnce(() => { throw new Error('damaged timetable'); });
+    const result = await answer('今天有哪些課？', scope, options());
+    expect(result?.content).toContain('無法確認');
+    expect(result?.content).not.toContain('沒有排課');
   });
 
   it('keeps all-day end dates exclusive and includes overnight personal events', async () => {

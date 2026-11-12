@@ -115,7 +115,7 @@ const unwrap = (value: unknown): Obj => {
 };
 const rows = (value: unknown) => Array.isArray(value) ? value.map(record) : [];
 const label = (value: unknown, fallback = '') => typeof value === 'string'
-  ? value.replace(/[\r\n\p{Cc}]/gu, ' ').replace(/[\\`*_<>\[\]]/g, '\\$&').slice(0, 160).trim() || fallback
+  ? value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').slice(0, 160).trim() || fallback
   : fallback;
 function time(value: unknown): string {
   const timestamp = typeof value === 'string' ? Date.parse(value) : NaN;

@@ -144,6 +144,30 @@ it('keeps direct personal answers out of later model requests and clears them af
   expect(screen.queryByText(/實際資料庫課程/)).toBeNull();
 });
 
+it('does not send server reader results or their question in a subsequent model history', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json(bodies.length === 1
+      ? { answer: '[同步私人課程](/settings) 09:10–10:00', dataRead: true,
+        steps: [{ name: 'get_schedule', status: 'ok', summary: '已查詢' }], cards: [] }
+      : { answer: '公開餐廳回覆', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '今天有哪些課？' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/同步私人課程/);
+  expect(screen.queryByRole('link', { name: '同步私人課程' })).toBeNull();
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('公開餐廳回覆');
+  expect(bodies[1].history).toEqual([]);
+  expect(JSON.stringify(bodies[1])).not.toMatch(/同步私人課程|今天有哪些課/);
+});
+
 it('discards an in-flight direct coursework result after the session changes', async () => {
   let resolve!: (value: unknown) => void;
   vi.mocked(browserRequest).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));

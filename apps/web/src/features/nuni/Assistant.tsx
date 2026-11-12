@@ -388,7 +388,7 @@ function V2Conversation({
         }
       }
       if (!ready || !consent) return;
-      const history = turns.filter((turn) => !turn.reply.local &&
+      const history = turns.filter((turn) => !turn.reply.local && !turn.reply.dataRead &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },

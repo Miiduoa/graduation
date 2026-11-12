@@ -13,6 +13,12 @@ import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
+function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
+  if (reply.local || reply.dataRead)
+    return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap' }}>{reply.answer}</p></div>;
+  return <AssistantMarkdown text={reply.answer} />;
+}
+
 export function AssistantThread({
   inline = false,
   schoolId,
@@ -194,9 +200,9 @@ export function AssistantThread({
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
                 {inline ? (
                   <SpokenReply text={turn.reply.answer} disabled={pending}>
-                    <AssistantMarkdown text={turn.reply.answer} />
+                    <ReplyBody reply={turn.reply} />
                   </SpokenReply>
-                ) : <AssistantMarkdown text={turn.reply.answer} />}
+                ) : <ReplyBody reply={turn.reply} />}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (

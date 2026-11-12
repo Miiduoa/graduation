@@ -321,7 +321,7 @@ export async function run(input: RunInput) {
       // Do not wait for (or send private results to) an unnecessary model call.
       log('assistant.completed');
       return {
-        version: 2, answer: withSelectionNotice(informationAnswer(informationResults, now)),
+        version: 2, dataRead: true, answer: withSelectionNotice(informationAnswer(informationResults, now)),
         steps, cards: [], modelCalls, usage, stopReason, simulation: input.adapter.simulation,
       };
     }
@@ -782,6 +782,7 @@ export async function run(input: RunInput) {
         usage,
         stopReason: safeCode(e),
         simulation: input.adapter.simulation,
+        ...(informationResults.length ? { dataRead: true } : {}),
       };
     if (e instanceof V2Error || (e as { status?: number }).status) throw e;
     throw new V2Error(
