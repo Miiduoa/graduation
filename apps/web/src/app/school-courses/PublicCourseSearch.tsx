@@ -58,16 +58,18 @@ function sameSearch(left: CourseSearch, right: CourseSearch): boolean {
 let latestClipboardCopy = 0;
 let clipboardQueue: Promise<void> = Promise.resolve();
 
-function queuePublicCourseClipboardWrite(write: () => Promise<void>): Promise<'copied' | 'manual' | 'superseded'> {
+function queuePublicCourseClipboardWrite(
+  write: () => Promise<void>, isCurrent: () => boolean,
+): Promise<'copied' | 'manual' | 'superseded'> {
   const request = ++latestClipboardCopy;
   const operation = clipboardQueue.then(async () => {
-    if (request !== latestClipboardCopy) return 'superseded' as const;
+    if (request !== latestClipboardCopy || !isCurrent()) return 'superseded' as const;
     try {
       await write();
     } catch {
-      return request === latestClipboardCopy ? 'manual' as const : 'superseded' as const;
+      return request === latestClipboardCopy && isCurrent() ? 'manual' as const : 'superseded' as const;
     }
-    return request === latestClipboardCopy ? 'copied' as const : 'superseded' as const;
+    return request === latestClipboardCopy && isCurrent() ? 'copied' as const : 'superseded' as const;
   });
   clipboardQueue = operation.then(() => undefined, () => undefined);
   return operation;
@@ -174,6 +176,8 @@ function PublicCourseSearchForm({
   const [result, setResult] = useState<SearchResult | null>(() => linked.search ? { status: 'loading', ...linked.search } : null);
   const [copyFeedback, setCopyFeedback] = useState<ClipboardFeedback | null>(null);
   const copyAttempt = useRef(0);
+  // A pending queued copy belongs to the visible search, never a departed page.
+  useEffect(() => () => { copyAttempt.current += 1; }, []);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
@@ -181,7 +185,9 @@ function PublicCourseSearchForm({
   const copyCourse = useCallback(async (csv: string) => {
     const attempt = ++copyAttempt.current;
     setCopyFeedback(null);
-    const status = await queuePublicCourseClipboardWrite(() => navigator.clipboard.writeText(csv));
+    const status = await queuePublicCourseClipboardWrite(
+      () => navigator.clipboard.writeText(csv), () => attempt === copyAttempt.current,
+    );
     // Search/school changes invalidate clipboard feedback even if the old
     // write completes while a fresh result containing the same CSV is shown.
     if (status !== 'superseded' && attempt === copyAttempt.current) {
