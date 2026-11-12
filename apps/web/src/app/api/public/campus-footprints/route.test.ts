@@ -57,7 +57,7 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('returns audited simple OSM relation geometry with attribution and no editor metadata', async () => {
+  it('rejects a truncated Xijia relation instead of rendering an invented solid roof', async () => {
     const dormOutline = [
       { lat: 24.22797, lon: 120.58062 },
       { lat: 24.22797, lon: 120.58072 },
@@ -76,14 +76,9 @@ describe('public Providence building geometry route', () => {
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const response = await GET();
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
     const body = await response.json();
-    expect(body.buildings).toHaveLength(1);
-    expect(body.buildings[0]).toMatchObject({
-      poiId: 'pu-xijia', sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
-      heightBasis: 'illustrative', heightMeters: 12,
-    });
-    expect(body.buildings[0]).not.toHaveProperty('osmVersion');
+    expect(body.error).toMatch(/temporarily unavailable/);
     expect(JSON.stringify(body)).not.toContain('private-editor-name');
   });
 
