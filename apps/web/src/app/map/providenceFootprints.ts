@@ -126,9 +126,15 @@ function hasConsistentOsmWayNodes(way: Record<string, unknown>): boolean {
   if (nodes === undefined) return true;
   if (!Array.isArray(nodes) || !Array.isArray(way.geometry) ||
       nodes.length !== way.geometry.length || nodes.length < 4) return false;
+  // Every intermediate OSM node must be distinct. Repeating an ID inside
+  // the ring (rather than only to close it) is not a simple building loop,
+  // even when an upstream geometry array assigns that ID two different
+  // coordinates. Those contradictory node/geometry pairs must fail closed.
+  const interior = nodes.slice(0, -1);
   return nodes.every((id) => typeof id === 'number' &&
     Number.isSafeInteger(id) && id > 0) &&
-    nodes[0] === nodes[nodes.length - 1];
+    nodes[0] === nodes[nodes.length - 1] &&
+    new Set(interior).size === interior.length;
 }
 
 function safeOutline(value: unknown): Array<[number, number]> | null {
