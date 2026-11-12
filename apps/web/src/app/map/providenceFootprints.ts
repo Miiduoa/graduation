@@ -12,6 +12,8 @@ export type ProvidenceFootprint = {
   name: string;
   sourceUrl: string;
   outline: Array<[number, number]>; // GeoJSON 順序：[經度、緯度]
+  /** Validated OSM relation courtyards; never extrude these as solid roof/floor. */
+  holes?: Array<Array<[number, number]>>;
   heightMeters: number;
   heightBasis: 'osm-tag' | 'illustrative';
   /** Optional OSM way revision; not a site-survey or geometry-freshness guarantee. */
@@ -134,19 +136,70 @@ function safeOutline(value: unknown): Array<[number, number]> | null {
   return area >= 20 && area <= 100_000 ? points : null;
 }
 
-/** A relation may contain holes, disconnected outers or fragmented ways. The
- * current renderer supports ONE closed, hole-free outer way only. Reject all
- * other multipolygons rather than silently filling a courtyard or inventing
- * missing walls. We validate the member ring plus the relation's own tags.
+/** A one-outer OSM multipolygon may enclose one courtyard. The source-verified
+ * inner ring must remain empty in both the API payload and Three.js scene.
+ * Reject fragmented, intersecting, nested or unknown members rather than
+ * manufacturing closed walls from disconnected ways.
  */
-function safeSimpleRelationOutline(element: Record<string, unknown>): Array<[number, number]> | null {
+function pointStrictlyInsideRing(point: [number, number], ring: readonly [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, prev = ring.length - 1; i < ring.length; prev = i, i += 1) {
+    const a = ring[prev];
+    const b = ring[i];
+    if ((a[1] > point[1]) !== (b[1] > point[1]) &&
+        point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function holeStrictlyInsideOuter(
+  hole: readonly [number, number][], outline: readonly [number, number][],
+): boolean {
+  // No hole point or edge may touch/cross the outer ring. Testing all hole
+  // vertices + all edge pairs also covers concave outer footprints.
+  if (!hole.every((point) => pointStrictlyInsideRing(point, outline))) return false;
+  for (let i = 0; i < hole.length; i += 1) {
+    for (let j = 0; j < outline.length; j += 1) {
+      if (intersects(hole[i], hole[(i + 1) % hole.length],
+        outline[j], outline[(j + 1) % outline.length])) return false;
+    }
+  }
+  return polygonAreaMeters(outline) - polygonAreaMeters(hole) >= 20;
+}
+
+function safeSimpleRelationGeometry(element: Record<string, unknown>):
+  { outline: Array<[number, number]>; holes: Array<Array<[number, number]>> } | null {
   if (object(element.tags)?.type !== 'multipolygon') return null;
   const members = element.members;
-  if (!Array.isArray(members) || members.length !== 1) return null;
-  const member = object(members[0]);
-  if (!member || member.type !== 'way' || member.role !== 'outer' ||
-      typeof member.ref !== 'number' || !Number.isSafeInteger(member.ref)) return null;
-  return safeOutline(member.geometry);
+  // Only one closed outer ring and at most one closed inner ring are currently
+  // supported. Real OSM relation 9246899 has outer 255783593 / inner 665651134.
+  if (!Array.isArray(members) || members.length < 1 || members.length > 2) return null;
+  const ways = members.map(object);
+  if (ways.some((way) => !way || way.type !== 'way' ||
+      typeof way.ref !== 'number' || !Number.isSafeInteger(way.ref))) return null;
+  const outerMembers = ways.filter((way) => way?.role === 'outer');
+  const innerMembers = ways.filter((way) => way?.role === 'inner');
+  if (outerMembers.length !== 1 || outerMembers.length + innerMembers.length !== ways.length ||
+      innerMembers.length > 1) return null;
+  if (innerMembers.length && innerMembers[0]?.ref === outerMembers[0]?.ref) return null;
+  const outline = safeOutline(outerMembers[0]?.geometry);
+  if (!outline) return null;
+  if (!innerMembers.length) return { outline, holes: [] };
+  const hole = safeOutline(innerMembers[0]?.geometry);
+  if (!hole || !holeStrictlyInsideOuter(hole, outline)) return null;
+  return { outline, holes: [hole] };
+}
+
+/** Safe client-side revalidation of already-open rings serialized by the API. */
+function safeClientRing(value: unknown): Array<[number, number]> | null {
+  if (!Array.isArray(value) || value.length < 3 || value.length > MAX_VERTICES) return null;
+  const points = value.map((pair: unknown) =>
+    Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number'
+      ? { lon: pair[0], lat: pair[1] } : null);
+  if (points.some((entry) => entry === null)) return null;
+  return safeOutline([...points, points[0]]);
 }
 
 /** Ensure a verified OSM way/relation still covers (or is very close to) its named POI.
@@ -318,9 +371,10 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const place = knownBuildingForElement(element);
     const identity = `${element.type}:${element.id}`;
     if (!place || seen.has(identity) || !isStandingBuilding(element.tags)) continue;
-    const outline = element.type === 'way'
-      ? safeOutline(element.geometry) : safeSimpleRelationOutline(element);
-    if (!outline || !outlineNearPoi(outline, place)) continue;
+    const geometry = element.type === 'way'
+      ? (() => { const outline = safeOutline(element.geometry); return outline ? { outline, holes: [] } : null; })()
+      : safeSimpleRelationGeometry(element);
+    if (!geometry || !outlineNearPoi(geometry.outline, place)) continue;
     const height = heightFromOsmTags(element.tags);
     if (!height) continue;
     seen.add(identity);
@@ -328,7 +382,8 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
       poiId: place.id,
       name: place.name,
       sourceUrl: place.sourceUrl,
-      outline,
+      outline: geometry.outline,
+      ...(geometry.holes.length ? { holes: geometry.holes } : {}),
       ...height,
       // Relation revisions describe the relation, not its member-way geometry.
       // The existing UI labels revisions as "OSM way", so never mislabel them.
@@ -367,17 +422,19 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
       item.heightMeters < 2.5 || item.heightMeters > 100 ||
       (item.heightBasis !== 'illustrative' && item.heightBasis !== 'osm-tag') ||
       (item.heightBasis === 'illustrative' && item.heightMeters !== ILLUSTRATIVE_HEIGHT)) continue;
-    if (!Array.isArray(item.outline) || item.outline.length < 3 || item.outline.length > MAX_VERTICES) continue;
-    const geometry = item.outline.map((pair: unknown) =>
-      Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number'
-        ? { lon: pair[0], lat: pair[1] } : null);
-    if (geometry.some((entry: unknown) => entry === null)) continue;
-    const closed = [...geometry, geometry[0]];
-    const outline = safeOutline(closed);
+    const outline = safeClientRing(item.outline);
     if (!outline || !outlineNearPoi(outline, place)) continue;
+    // The client must revalidate ring containment and reject forged holes on
+    // ordinary ways. Missing/invalid holes must never become a solid courtyard.
+    if (item.holes !== undefined && !place.sourceUrl.includes('/relation/')) continue;
+    if (item.holes !== undefined &&
+        (!Array.isArray(item.holes) || item.holes.length !== 1)) continue;
+    const hole = Array.isArray(item.holes) ? safeClientRing(item.holes[0]) : null;
+    if (item.holes !== undefined && (!hole || !holeStrictlyInsideOuter(hole, outline))) continue;
     seen.add(item.poiId);
     accepted.push({
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
+      ...(hole ? { holes: [hole] } : {}),
       heightMeters: item.heightMeters, heightBasis: item.heightBasis,
       // A relation's revision does not date the geometry of its member way.
       // Never trust relation metadata as the UI's "OSM way" revision.
