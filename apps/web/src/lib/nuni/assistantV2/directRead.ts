@@ -17,6 +17,13 @@ function mentionsSpecificCourseWork(text: string): boolean {
   return leftover.length >= 2;
 }
 
+function mentionsSpecificCourseSchedule(text: string): boolean {
+  if (!/課表|上課|有.{0,5}課|哪些課|什麼課|幾點.{0,4}課|課.{0,5}(?:時間|教室|在哪|哪裡|幾點|結束)|下(?:一)?(?:堂|節)(?:課)?/.test(text)) return false;
+  const generic = /我的?|我有|今[天日]|明[天日]|後[天日]|這[週周](?:一|二|三|四|五|六|日|天)?|本[週周]|接下來|最近|目前|現在|還有|有沒有|哪些|什麼|列出|告訴我|查詢?|所有|全部|課表|行程|行事曆|上課|下一堂|下堂|下節|一堂|一節|幾點|在哪|哪裡|哪裏|教室|時間|結束|地點|開始|作業|測驗|還沒|沒交|未交|未繳|沒繳|待繳|要交|\d{4}-\d{2}-\d{2}/g;
+  const leftover = text.replace(generic, '').replace(/[的了嗎呢啊吧，,。．、？?\s有和與及課堂節]/g, '');
+  return leftover.length >= 2;
+}
+
 /** Only unambiguous information requests get automatic, read-only retrieval. */
 export function directReads(question: string, now: number): DirectRead[] {
   if (question.length > 1000 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(question)) return [];
@@ -40,6 +47,8 @@ export function directReads(question: string, now: number): DirectRead[] {
   const today = taipeiDate(now);
   const day = dates[0] || addDays(today, relativeDays[0] || 0);
   if (/空檔|空堂|有空|沒課/.test(text)) return [];
+  if (/衝突|撞期|重疊|撞堂/.test(text)) return [];
+  if (mentionsSpecificCourseSchedule(text)) return [];
   if (/怎麼走|如何走|怎麼去|怎麼到|怎麼抵達|如何前往|如何抵達|帶我去|帶我到|導航|路線|交通指引|走路去|步行去|地圖/.test(text)) return [];
   if (/已繳|已交|繳了|交了|已提交|已經提交|提交的|交完/.test(text)) return [];
   if (mentionsSpecificCourseWork(text)) return [];

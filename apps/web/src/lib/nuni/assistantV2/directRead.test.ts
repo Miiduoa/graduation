@@ -194,6 +194,7 @@ it.each([
   '有哪些作業沒交，只看資料結構', '今天有哪些作業已經提交',
   '今天有什麼課，教室怎麼走', '下一堂課教室怎麼走',
   '今天有什麼課，走路去教室', '今天有什麼課，教室地圖在哪',
+  '今天的課表和行程有衝突嗎', '程式設計今天幾點上課',
 ])('leaves navigation, negation, examples, ambiguous dates and writes to their existing handlers: %s', (question) => {
   expect(directReads(question, now)).toEqual([]);
 });
