@@ -106,7 +106,9 @@ test('native historical results reject press responder while server is recheckin
   expect(waiting.props.onStartShouldSetResponder()).toBe(false);
   fireEvent.press(waiting);
   expect(confirmOpen).toHaveBeenCalledTimes(1);
-  await act(async () => { pending.resolve(false); });
+  // An offline verification preserves the card for a fresh user-initiated retry.
+  // A confirmed deletion would correctly remove it, not re-enable it.
+  await act(async () => { pending.reject({ code: 'unavailable' }); });
   expect(view.getByLabelText('開啟貼文：二手書 one').props.onStartShouldSetResponder()).toBe(true);
   expect(view.open).not.toHaveBeenCalled();
 });
