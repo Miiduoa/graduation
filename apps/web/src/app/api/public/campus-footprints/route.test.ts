@@ -1125,6 +1125,32 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it('counts a shared failed Overpass request once for concurrent map visitors', async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockRejectedValueOnce(new Error('shared upstream outage'))
+        .mockRejectedValueOnce(new Error('second upstream outage'));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const responses = await Promise.all([GET(), GET(), GET(), GET(), GET()]);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      for (const response of responses) {
+        expect(response.status).toBe(503);
+        expect(response.headers.get('Retry-After')).toBe('600');
+      }
+      clock.mockReturnValue(start + 10 * 60 * 1000 + 1000);
+      const secondAttempt = await GET();
+      expect(secondAttempt.status).toBe(503);
+      expect(secondAttempt.headers.get('Retry-After')).toBe('1200');
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([400, 403, 406])('backs off for 24 hours after an Overpass HTTP %i rejection', async (status) => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
