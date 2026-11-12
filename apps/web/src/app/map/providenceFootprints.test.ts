@@ -72,6 +72,18 @@ describe('Providence OSM building outlines', () => {
         elements: [withNodes(nodes)],
       }), JSON.stringify(nodes)).toEqual([]);
     }
+    // A repeated OSM node ID identifies exactly one coordinate. This fixture
+    // differs by only 5e-10 degrees: safeOutline's geometry-only tolerance
+    // would accept it, but its explicit OSM node identity is contradictory.
+    const conflictingClosure = library.map((point) => ({ ...point }));
+    conflictingClosure[conflictingClosure.length - 1].lon += 5e-10;
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...withNodes(closedIds), geometry: conflictingClosure }],
+    })).toEqual([]);
+    // Preserve existing geometry-only compatibility when no node IDs exist.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, conflictingClosure, { building: 'school' })],
+    })).toHaveLength(1);
     // Synthetic fixtures without node references preserve legacy parsing.
     expect(parseProvidenceOsmFootprints({
       elements: [way(255784049, library, { building: 'school' })],
@@ -153,6 +165,22 @@ describe('Providence OSM building outlines', () => {
         withNodes(innerMember, [401, 402, 403, 404, 401]),
       ])],
     })).toHaveLength(1);
+    // Both audited member ways must agree on the position of their closing
+    // OSM node, not merely close to within a rounding tolerance.
+    for (const member of [outerMember, innerMember]) {
+      const almostClosed = member.geometry.map((point) => ({ ...point }));
+      almostClosed[almostClosed.length - 1].lat += 5e-10;
+      const changed = {
+        ...member,
+        nodes: member.role === 'outer'
+          ? [301, 302, 303, 304, 301] : [401, 402, 403, 404, 401],
+        geometry: almostClosed,
+      };
+      expect(parseProvidenceOsmFootprints({ elements: [relation([
+        member.role === 'outer' ? changed : withNodes(outerMember, [301, 302, 303, 304, 301]),
+        member.role === 'inner' ? changed : withNodes(innerMember, [401, 402, 403, 404, 401]),
+      ])] })).toEqual([]);
+    }
     // An OSM node ID is global across way members. These otherwise valid,
     // disjoint-looking coordinate rings must not share the same node ID:
     // that would place node 303 at two different positions.
