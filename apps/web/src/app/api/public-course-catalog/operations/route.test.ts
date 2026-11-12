@@ -91,7 +91,18 @@ describe('public course operation discovery', () => {
     expect(fetchSource).not.toHaveBeenCalled();
   });
 
-  it.each(['version=', 'version=0', 'version=3', 'version=02', 'version=1&version=2', 'version=2&schoolId=ncnu', 'headers=Cookie'])(
+  it.each(['_=1730000000000', 'version=1&_=1730000000000', 'version=2&_=1730000000000'])(
+    'ignores React Native cache metadata %s', async (query) => {
+      const response = await GET(new Request('https://example.test/api/public-course-catalog/operations?' + query));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      const version = new URLSearchParams(query).get('version') ?? '1';
+      const expected = await GET(new Request('https://example.test/api/public-course-catalog/operations?version=' + version));
+      expect(await response.json()).toEqual(await expected.json());
+    },
+  );
+
+  it.each(['version=', 'version=0', 'version=3', 'version=02', 'version=1&version=2', 'version=2&schoolId=ncnu', 'headers=Cookie', '_=1730000000000&extra=1', 'version=2&_=1730000000000&schoolId=ncnu', 'version=1&version=2&_=1730000000000', 'version=3&_=1730000000000'])(
     'rejects invalid discovery parameters %s without a source read', async (query) => {
       const fetchSource = vi.fn();
       vi.stubGlobal('fetch', fetchSource);
