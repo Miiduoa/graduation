@@ -1076,6 +1076,55 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('backs off exponentially after repeated upstream errors and resets after recovery', async () => {
+    const start = Date.now();
+    const minute = 60 * 1000;
+    const day = 24 * 60 * minute;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockRejectedValueOnce(new Error('temporary connection failure'))
+        .mockRejectedValueOnce(new Error('temporary connection failure'))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockRejectedValueOnce(new Error('new outage after recovery'));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const first = await GET();
+      expect(first.status).toBe(503);
+      expect(first.headers.get('Retry-After')).toBe('600');
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      clock.mockReturnValue(start + 10 * minute + 1000);
+      const second = await GET();
+      expect(second.status).toBe(503);
+      expect(second.headers.get('Retry-After')).toBe('1200');
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      // Waiting less than twenty minutes must not send a third public query.
+      clock.mockReturnValue(start + 30 * minute);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(start + 30 * minute + 2000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).stale).toBe(false);
+      expect(upstream).toHaveBeenCalledTimes(3);
+
+      // An unrelated later outage starts at ten minutes again, while keeping
+      // the previous source date visible as a clearly stale fallback.
+      clock.mockReturnValue(start + day + 31 * minute);
+      const stale = await GET();
+      expect(stale.status).toBe(200);
+      expect(stale.headers.get('Retry-After')).toBe('600');
+      expect((await stale.json()).stale).toBe(true);
+      expect(upstream).toHaveBeenCalledTimes(4);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([400, 403, 406])('backs off for 24 hours after an Overpass HTTP %i rejection', async (status) => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
