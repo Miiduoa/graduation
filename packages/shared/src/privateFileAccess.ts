@@ -466,7 +466,13 @@ export async function authorizePrivateFile(
         // The author can preview an uploaded draft. Other group members may
         // download only the precise object referenced by the live post.
         // Finalizing a private upload must not publish a sibling by guessable path.
-        if (!writing && data.authorId !== uid && !allowsListedOrLegacyPrivateFile(data, scope.path)) deny();
+        if (!writing && data.authorId !== uid && (
+          // A draft/scheduled post is not published merely because an upload
+          // URL or an attachment path is present on the document.
+          data.published === false ||
+          ['draft', 'scheduled', 'pending', 'unpublished'].includes(String(data.status || '')) ||
+          !allowsListedOrLegacyPrivateFile(data, scope.path)
+        )) deny();
       }
       if (scope.kind === 'assignment' && scope.groupId) {
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');

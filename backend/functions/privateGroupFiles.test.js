@@ -103,6 +103,20 @@ describe('private group file HTTP handler', () => {
     expect(result.body).not.toMatch(/token=|https:\/\//);
   });
 
+  test.each([
+    { published: false },
+    { status: 'draft' },
+    { status: 'scheduled' },
+  ])('does not stream explicitly unpublished post attachments to another member %j', async (visibility) => {
+    store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST], ...visibility });
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);
+    expect((await invoke({ path: POST, uid: 'teacher' })).status).toBe(403);
+    expect(reads).toHaveLength(0);
+    expect((await invoke({ path: POST, uid: 'alice' })).status).toBe(200);
+    store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST], published: true, status: 'published' });
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(200);
+  });
+
   test.each([null, 'expired'])('rejects absent or revoked authentication %s before looking up files', async (uid) => {
     expect((await invoke({ uid })).status).toBe(401);
     expect(bucket.file).not.toHaveBeenCalled();

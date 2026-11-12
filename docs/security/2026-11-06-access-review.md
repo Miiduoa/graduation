@@ -571,3 +571,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補：新增只用於 global 鏡像的新上傳資格檢查，在相同的 read-only Firestore transaction 中同時核對 global published/status、dueAt/allowLateSubmission，並延續同群與已繳交收據／owner 比對。global 作業屬其他群組時 group-path 不受其關閉狀態影響；合法晚交仍准許，校籍撤銷與 canonical 關閉仍拒絕。合成 Web 回歸對 group-path 和 legacy-path 各驗證正常、未發布、關閉、過期、異常日期、明確晚交及撤權。
 
 **驗證分級：** 此文件記錄原始碼變更與可重跑合成案例；新精確 head 的 CI、CodeQL、Supabase／Python／Mobile Agent／適用 Maestro 與 App 5504170 審查狀態，必須以 GitHub 實際結果另核對，未完成不能說已通過。read-only 授權檢查不等於撤銷既有 GCS／Supabase 已簽 URL，後者及真隔離 GCS staging、歷史缺附件清單、minimatch 雙鎖檔、正式發布與回復仍待驗收。未觸碰正式資料、憑證、token、migration、部署、E 校園或未授權的 npm／pnpm audit。
+
+## 2026-11-12：明確未發布的群組貼文附件禁止第三方讀取（PR #577）
+
+於父 head `e18e6a98c4c594e0ca4bf09f7993997ec705abd2` 的共用 `authorizePrivateFile` 發現：讀取群組貼文時，非作者只需群組／校籍有效且貼文存在、未刪除、`attachments` 引用符合，即可通過；**忽略 `published:false` 與 `status:draft/scheduled/pending/unpublished`**。因此在貼文已有精確附件引用但尚未發布的情況下，同組成員及管理者仍可透過既知檔案路徑讀取。這是當次授權判定的程式邏輯缺口，並非證明正式環境已有此類物件或檔案外洩。
+
+最小修補只在**非作者 GET** 增加明確未發布狀態的拒絕；作者自己的上傳、草稿預覽保持不變；真正已發布的貼文仍須符合附件精確路徑比對，歷史**未明確標記未發布**且缺 `attachments` 的讀取維持原相容行為。無法據此宣稱所有歷史模糊附件引用已修復。
+
+新增 `privateFileAccess.test.ts` 合成回歸：五種未發布狀態、非作者一般成員／管理者拒絕、作者讀取、發布後恢復，以及無附件清單的明確草稿拒絕／已發布歷史相容。`backend/functions/privateGroupFiles.test.js` 加入三種 HTTP 403 與作者／發布後 200 案例。父 head `e18e6a98c4c594e0ca4bf09f7993997ec705abd2` 的 [CI](https://github.com/Miiduoa/graduation/actions/runs/43129558111)、[CodeQL](https://github.com/Miiduoa/graduation/actions/runs/43129558002)、[Course access](https://github.com/Miiduoa/graduation/actions/runs/43129557915) 已 completed/success；**新提交仍須以自身精確 head 的全部 CI 結果判定**。
+
+未觸碰正式資料、金鑰、token、migration、部署或 E 校園；未重跑受限的 npm/pnpm audit。仍待歷史附件可信清單、已發 GCS／Supabase URL 撤銷、真隔離 Storage 競態、minimatch 雙鎖檔相容性、主線整合、正式發布／回復與指定 nuni-merge-gate App 5504170 對精確 head 的「審查通過」。

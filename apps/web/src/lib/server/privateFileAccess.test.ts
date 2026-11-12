@@ -314,6 +314,33 @@ it('does not turn a finalized but unreferenced post attachment into a group-wide
   await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
 });
 
+it.each([
+  { published: false },
+  { status: 'draft' },
+  { status: 'scheduled' },
+  { status: 'pending' },
+  { status: 'unpublished' },
+])('keeps unpublished group post attachments private from other members %j', async (visibility) => {
+  const path = 'groups/course/posts/one';
+  const store = fileStore([[path, { authorId: 'alice', attachments: [POST], ...visibility }]]);
+  // A listed attachment alone cannot publish an explicitly unpublished post.
+  await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, POST, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(path, { authorId: 'alice', attachments: [POST], published: true, status: 'published' });
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
+it('does not mistake an unpublished legacy post with no attachment list for a live post', async () => {
+  const path = 'groups/course/posts/one';
+  const store = fileStore([[path, { authorId: 'alice', status: 'draft' }]]);
+  await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(path, { authorId: 'alice', status: 'published' });
+  // Preserve compatibility for a truly published old post missing attachments.
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
 it('rejects malformed attachment fields instead of treating them as legacy shared posts', async () => {
   const postPath = 'groups/course/posts/one';
   const store = fileStore([[postPath, { authorId: 'alice' }]]);
