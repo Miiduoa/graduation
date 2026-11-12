@@ -17,6 +17,7 @@ export type LocalAssistantResult = {
   kind: 'services' | 'academics' | 'personal' | 'schedule';
   content: string;
   serviceIds: AssistantServiceId[];
+  courseworkTargets?: import('./assistantCoursework').AssistantCourseworkTarget[];
 };
 
 /** The caller supplies its verified account scope; text never selects an owner or school. */

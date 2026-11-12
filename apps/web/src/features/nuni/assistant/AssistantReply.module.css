@@ -524,6 +524,47 @@
   gap: 8px;
 }
 
+.courseworkChoices {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.courseworkChoice {
+  display: grid;
+  gap: 5px;
+  min-height: 44px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.courseworkChoice > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.courseworkChoice .courseworkAction {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.courseworkChoice:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.courseworkChoice:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .chipsCompact {
   flex-wrap: nowrap;
   gap: 8px;

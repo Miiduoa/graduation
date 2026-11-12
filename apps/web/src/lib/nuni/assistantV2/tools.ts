@@ -1,6 +1,7 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
 import { informationKinds } from './information';
+import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
@@ -792,7 +793,7 @@ export function createTools(
     if (to < from || Date.parse(to) - Date.parse(from) > 30 * 86400000) return fail();
     const list = await getCourses();
     const unqueried: { id: string; title: string; reason: string }[] = [];
-    const found: Task[] = [];
+    const found: (Task & { courseTitle: string })[] = [];
     // Reserve whole assignment/quiz pairs before starting parallel work.
     let remaining = adapter.remainingApiCalls?.() ?? 12;
     const selected = list.filter((c) => {
@@ -812,7 +813,7 @@ export function createTools(
               (child) => withOperationSignal(child, () => work(c.id)),
               operationSignal() || new AbortController().signal,
               3000,
-            )),
+            )).map((task) => ({ ...task, courseTitle: c.title })),
           );
         } catch (e) {
           if ((e as { status?: number }).status === 401) throw e;
@@ -839,7 +840,7 @@ export function createTools(
       source: 'class-workspaces',
     };
   }
-  async function propose(raw: Obj) {
+  async function propose(raw: Obj, studyTask?: Task) {
     if (!writes)
       return {
         unavailable: 'WRITES_DISABLED',
@@ -879,6 +880,7 @@ export function createTools(
       now,
       sequence(),
       priorEvents.at(-1),
+      studyTask ? studyGuardForTask(studyTask, 'study') : undefined,
     );
     cards.push(card);
     return { proposed: true, ...raw, requiresConfirmation: true };
@@ -1232,7 +1234,7 @@ export function createTools(
               startTime: slot.startTime,
               endTime,
               allDay: false,
-            }),
+            }, task),
           );
           slot.startTime = endTime;
           slot.minutes -= minutes;

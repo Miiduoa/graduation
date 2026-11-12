@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import { V2Error, type Model } from './contracts';
-import { directReads } from './directRead';
+import { directReads, directReadCourseworkTargets } from './directRead';
 import { fixtureAdapter, fixtureBinding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
 import { run } from './runner';
 
@@ -63,6 +63,23 @@ it('lists remaining work with real deadlines, excluding submitted work and keepi
   expect(result.answer).toContain('2026-11-04 至 2026-11-10');
   expect(ledger).not.toHaveBeenCalled();
   expect(result.cards).toEqual([]);
+});
+
+it('retains exact task selectors from fresh evidence while excluding submitted, undated and mismatched kinds', () => {
+  const read = { kind: 'due-work' as const, tool: 'get_due_work' as const,
+    args: { from: '2026-11-04', to: '2026-11-10' }, taskKind: 'assignment' as const };
+  const task = { id: 'cwa-one', courseId: 'cw-one', kind: 'assignment', title: 'same title',
+    courseTitle: '資料庫', dueAt: '2026-11-05T15:59:00Z', submitted: false, state: 'open' };
+  const targets = directReadCourseworkTargets([read], [{ tool: 'get_due_work', result: { pending: [
+    task, { ...task, id: 'cwa-two', courseId: 'cw-two', courseTitle: '資訊安全' },
+    { ...task, id: 'submitted', submitted: true }, { ...task, id: 'closed', state: 'closed' },
+    { ...task, id: 'undated', dueAt: null }, { ...task, id: 'quiz', kind: 'quiz' },
+  ] } }], now);
+  expect(targets).toEqual([
+    { workspaceId: 'cw-one', taskId: 'cwa-one', kind: 'assignment', title: 'same title', courseTitle: '資料庫', dueAt: task.dueAt },
+    { workspaceId: 'cw-two', taskId: 'cwa-two', kind: 'assignment', title: 'same title', courseTitle: '資訊安全', dueAt: task.dueAt },
+  ]);
+  expect(directReadCourseworkTargets([read], [], now)).toEqual([]);
 });
 
 it('uses tomorrow in Taipei for a calendar query without loading class workspaces', async () => {

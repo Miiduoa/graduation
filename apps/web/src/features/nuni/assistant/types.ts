@@ -19,6 +19,8 @@ export type V2Reply = {
   /** Verified reader output stays literal and out of later model history. */
   dataRead?: boolean;
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
+  courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
+  courseworkDate?: string;
 };
 
 export type V2Turn = { question: string; reply: V2Reply };

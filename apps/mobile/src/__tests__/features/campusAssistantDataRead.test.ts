@@ -60,6 +60,7 @@ beforeEach(() => {
   read.mockResolvedValue(source());
   request.mockImplementation(async (path) => {
     if (path === 'class-workspaces') return { workspaces: [{ id: workspaceId, title: '資料庫管理', state: 'active', memberRole: 'student' }] };
+    if (path === `class-workspaces/${workspaceId}`) return { id: workspaceId, title: '資料庫管理', state: 'active', memberRole: 'student' };
     if (path.endsWith('/quizzes')) return { quizzes };
     return { workspaceId, status: 'reviewed', membershipActive: true, memberRole: 'student', course: {
       id: 'ccd_' + uuid(1), version: 1, workspaceId, verification: 'administrator-reviewed',
@@ -134,6 +135,84 @@ test('a deadline lookup filters the authorized data by the requested Taiwan date
   expect(result.content).toContain('明天截止');
   expect(result.content).not.toContain('今天截止');
   expect(result.content).toContain('另有 1 筆未提供截止時間');
+  expect(result.courseworkList).toEqual({ owner: `nuni:${accountId}`, schoolId: 'pu', checkedAt: new Date(checkedAt).toISOString(),
+    assignments: [{ id: assignment(1).id, title: '明天截止', courseName: '資料庫管理', dueAt: assignment(1).dueAt,
+      source: { accountId, schoolId: 'pu', academicYear: '115', semester: '1', workspaceId, assignmentId: assignment(1).id } }],
+  });
+  expect(JSON.stringify(result.courseworkList)).not.toMatch(/作業全文|匯入原文|繳交內容/);
+});
+
+test('a direct assignment result can continue into the exact freshly checked source without looking up a class first', async () => {
+  const first = await askCampusAssistant(input('明天有哪些作業要交？'));
+  const next = await askCampusAssistant({ ...input('幫這份作業，找今天的半小時空堂。'), messages: [
+    { role: 'assistant', ...first }, { role: 'user', content: '幫這份作業，找今天的半小時空堂。' },
+  ] });
+  expect(next.courseworkRead?.result).toMatchObject({ kind: 'assignments', workspace: { id: workspaceId } });
+  expect(next.courseworkStudy).toEqual({ assignmentIds: [assignment(1).id], suggestTime: true, suggestDate: '2026-11-12' });
+  expect(next.courseworkList).toBeUndefined();
+  expect(bffRequest).toHaveBeenCalledTimes(3);
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('same-name direct results require selection before a fresh read, retaining the displayed order and requested day', async () => {
+  bffRequest.mockResolvedValue({ assignments: [assignment(2, { title: '同名報告' }), assignment(1, { title: '同名報告' })] });
+  const first = await askCampusAssistant(input('明天有哪些作業要交？'));
+  const choose = await askCampusAssistant({ ...input('幫這份作業今天找半小時空堂'), messages: [
+    { role: 'assistant', ...first }, { role: 'user', content: '幫這份作業今天找半小時空堂' },
+  ] });
+  expect(choose.courseworkRead).toBeUndefined();
+  expect(choose.courseworkStudy?.assignmentIds).toHaveLength(2);
+  expect(choose.content).toContain('要替哪一份');
+  expect(bffRequest).toHaveBeenCalledTimes(1);
+  const selectedId = choose.courseworkStudy!.assignmentIds[1];
+  const second = await askCampusAssistant({ ...input('第二份'), messages: [
+    { role: 'assistant', ...choose }, { role: 'user', content: '第二份' },
+  ] });
+  expect(second.courseworkStudy).toEqual({ assignmentIds: [selectedId], suggestTime: true, suggestDate: '2026-11-12' });
+  expect(second.courseworkRead?.openedAssignmentId).toBe(selectedId);
+  expect(bffRequest).toHaveBeenCalledTimes(3);
+});
+
+test('a direct result that becomes submitted is reread and cannot become a preparation preview', async () => {
+  const first = await askCampusAssistant(input('明天有哪些作業要交？'));
+  const submitted = assignment(1);
+  submitted.mySubmission = { assignmentId: submitted.id, platformAccountId: accountId, displayName: '學生',
+    body: '私人繳交內容', state: 'submitted', submittedAt: checkedAt, teacherFeedback: null, reviewedAt: null };
+  bffRequest.mockResolvedValue({ assignments: [submitted] });
+  const next = await askCampusAssistant({ ...input('幫這份作業找半小時空堂'), messages: [
+    { role: 'assistant', ...first }, { role: 'user', content: '幫這份作業找半小時空堂' },
+  ] });
+  expect(next.courseworkRead).toBeUndefined();
+  expect(next.courseworkStudy).toBeUndefined();
+  expect(next.content).toMatch(/繳交|來源/);
+});
+
+test('a foreign account result cannot be selected or read through the current account', async () => {
+  const first = await askCampusAssistant(input('明天有哪些作業要交？'));
+  expect(first.courseworkList).toBeDefined();
+  const next = await askCampusAssistant({ ...input('幫這份作業找半小時空堂'), messages: [
+    { role: 'assistant', ...first, courseworkList: { ...first.courseworkList!, owner: 'nuni:another-account' } },
+    { role: 'user', content: '幫這份作業找半小時空堂' },
+  ] });
+  expect(next.courseworkStudy).toBeUndefined();
+  expect(next.courseworkList).toBeUndefined();
+  expect(bffRequest).toHaveBeenCalledTimes(1);
+});
+
+test('structured coursework sources remain private even if a later model message omits the original tool label', async () => {
+  const first = await askCampusAssistant(input('明天有哪些作業要交？'));
+  mockUid = 'campus-a';
+  mockCallable.mockResolvedValue({ data: { content: '一般回答', run: { status: 'completed' }, actions: [] } });
+  await askCampusAssistant({ scope: { uid: mockUid, schoolId: 'pu' }, isCurrent: () => true, mode: 'campus',
+    messages: [
+      { role: 'user', content: '明天有哪些作業要交？' },
+      { role: 'assistant', content: first.content, courseworkList: first.courseworkList },
+      { role: 'user', content: '請解釋二分搜尋' },
+    ],
+  });
+  expect(mockCallable).toHaveBeenCalledWith(expect.objectContaining({
+    messages: [{ role: 'user', content: '請解釋二分搜尋' }],
+  }));
 });
 
 test('denied student membership does not read assignment data or claim there are zero tasks', async () => {

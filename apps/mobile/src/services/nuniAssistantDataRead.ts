@@ -8,10 +8,19 @@ import { scheduledClassTimeLabel, taipeiDayNumber } from './campusStudyAgenda';
 import { scheduledSavedClasses } from './nextSavedClasses';
 import type { buildNuniCampusPlan } from './nuniCampusPlanner';
 import { isAssignmentDeadlineQuestion, queryAssignmentDeadlines } from './queryAssignmentDeadlines';
+import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
+
+/** Exact displayed results for a local follow-up; they are locators, never write authority. */
+export type CourseworkListRead = {
+  owner: string;
+  schoolId: string;
+  checkedAt: string;
+  assignments: { id: string; title: string; courseName: string; dueAt: string | null; source: NuniPlanAssignmentSource }[];
+};
 
 type ReadInput = Parameters<typeof buildNuniCampusPlan>[0];
 type DataIntent = 'timetable' | 'assignments' | 'quizzes';
-type DataReply = { content: string; tool: 'platform-data' };
+type DataReply = { content: string; tool: 'platform-data'; courseworkList?: CourseworkListRead };
 const DAY = 86_400_000;
 const TIMETABLE_PERIOD = /今天|今日|明天|明日|後天|昨天|昨日|(?:接下來|未來)[七7]天|[上下本這]?(?:週|周|星期|禮拜)[一二三四五六日天末]?/g;
 
@@ -117,6 +126,7 @@ async function readCoursework(input: ReadInput, now: number, intent: 'assignment
     return value;
   };
   let agenda: Exclude<Awaited<ReturnType<typeof loadNuniStudyAgenda>>, 'cancelled'>;
+  const sourceScopes = new Map<string, Pick<NuniPlanAssignmentSource, 'schoolId' | 'academicYear' | 'semester'>>();
   let unchecked = 0;
   try {
     const classes = createNuniClasses(request, input.platformTimetable.accountId);
@@ -134,6 +144,8 @@ async function readCoursework(input: ReadInput, now: number, intent: 'assignment
         assertCurrent();
         if (detail.status === 'reviewed' && detail.memberRole === 'student') {
           eligible.push({ ...workspace, title: detail.course.title });
+          sourceScopes.set(workspace.id, { schoolId: detail.course.schoolId,
+            academicYear: detail.course.academicYear, semester: detail.course.semester });
         } else unchecked++;
       } catch (error) {
         assertCurrent();
@@ -177,7 +189,16 @@ async function readCoursework(input: ReadInput, now: number, intent: 'assignment
   lines.push(incomplete
     ? `部分課程來源尚未確認，本次僅列出成功讀取的${pendingName}。`
     : `已核對目前帳號在所選校園的學生課程、開放${name}與${quiz ? '作答' : '繳交'}紀錄。`);
-  return reply([heading, ...lines].join('\n'));
+  const assignments = quiz ? [] : result.rows.slice(0, 30).flatMap(({ item }) => {
+    const scope = sourceScopes.get(item.courseId);
+    return scope ? [{ id: item.id, title: item.title, courseName: item.groupName, dueAt: item.dueAt,
+      source: { ...scope, accountId: input.platformTimetable.accountId,
+        workspaceId: item.courseId, assignmentId: item.id } }] : [];
+  });
+  return { ...reply([heading, ...lines].join('\n')), ...(assignments.length && { courseworkList: {
+    owner: `nuni:${input.platformTimetable.accountId}`, schoolId: input.schoolId,
+    checkedAt: new Date(now).toISOString(), assignments,
+  } }) };
 }
 
 export async function readNuniAssistantData(input: ReadInput, intent: DataIntent): Promise<DataReply | null> {

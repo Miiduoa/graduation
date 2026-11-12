@@ -1,5 +1,6 @@
 import { addDays, clip, eventArgs, taipeiDate, type Obj } from './contracts';
 import { eventInterval } from './actions';
+import { parseAssistantCourseworkTargets } from '../../assistantCoursework';
 
 export type DirectRead = {
   kind: 'schedule' | 'next-class' | 'calendar' | 'due-work';
@@ -109,6 +110,21 @@ function resultFor(read: DirectRead, evidence: Evidence[]): Obj | undefined {
   if (!found) return;
   const wrapped = row(found.result);
   return wrapped.data && typeof wrapped.data === 'object' ? row(wrapped.data) : wrapped;
+}
+
+/** Only this request's actual reader result may supply a selectable source. */
+export function directReadCourseworkTargets(reads: DirectRead[], evidence: Evidence[], now: number) {
+  const read = reads.find((item) => item.kind === 'due-work');
+  const result = read && resultFor(read, evidence);
+  if (!read || !result) return [];
+  const pending = rows(result.pending).filter((entry) => entry.submitted === false &&
+    entry.state === 'open' && (!read.taskKind || entry.kind === read.taskKind) &&
+    (entry.kind === 'assignment' || entry.kind === 'quiz') &&
+    typeof entry.dueAt === 'string' && Date.parse(entry.dueAt) > now);
+  return parseAssistantCourseworkTargets(pending.slice(0, 12).map((entry) => ({
+    workspaceId: entry.courseId, taskId: entry.id, kind: entry.kind,
+    title: label(entry.title), courseTitle: label(entry.courseTitle, '課程作業'), dueAt: entry.dueAt,
+  })));
 }
 
 /** Facts are rendered from this request's authenticated tool results, not model prose. */

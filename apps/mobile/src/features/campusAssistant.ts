@@ -32,7 +32,7 @@ import { assistantCalendarOwner, createAssistantCalendarTask, findPersistedAssis
   recheckAssistantCalendarTask, sameAssistantCalendarEvent,
   type AssistantCalendarTask } from '../services/assistantCalendarExecution';
 import { isNuniCampusPlanningQuestion } from '../services/nuniCampusPlanner';
-import { nuniAssistantDataIntent } from '../services/nuniAssistantDataRead';
+import { nuniAssistantDataIntent, type CourseworkListRead } from '../services/nuniAssistantDataRead';
 
 export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
 
@@ -52,6 +52,7 @@ export type CampusAssistantMessage = {
   savedClassRead?: SavedClassRead;
   classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
+  courseworkList?: CourseworkListRead;
   courseworkStudy?: CourseworkStudySelection;
   courseworkStudyCheckedAt?: string;
 };
@@ -145,6 +146,7 @@ export async function askCampusAssistant(input: {
   savedClassRead?: SavedClassRead;
   classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
+  courseworkList?: CourseworkListRead;
   courseworkStudy?: CourseworkStudySelection;
   announcementRead?: AnnouncementRead;
   route?: string;
@@ -164,7 +166,7 @@ export async function askCampusAssistant(input: {
     // forwarded, together with their preceding question, to a later model.
     .filter((message, index, history) => {
       const privateRead = (item?: CampusAssistantMessage) => !!item &&
-        (!!item.courseworkRead || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action', 'platform-data'].includes(item.tool ?? ''));
+        (!!item.courseworkRead || !!item.courseworkList || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action', 'platform-data'].includes(item.tool ?? ''));
       return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
     })
     .map((message) => ({
@@ -180,12 +182,37 @@ export async function askCampusAssistant(input: {
   const prior = input.messages[input.messages.length - 2];
   const sourceReply = prior?.role === 'assistant' ? prior : undefined;
   const study = answerCourseworkStudyIntent({
-    question, read: sourceReply?.courseworkRead, previous: sourceReply?.courseworkStudy,
+    question, read: sourceReply?.courseworkRead, list: sourceReply?.courseworkList, previous: sourceReply?.courseworkStudy,
     choice: input.courseworkStudyChoice, accountId: input.platformTimetable?.accountId,
     schoolId: input.scope.schoolId,
     isCurrent: () => input.isCurrent() && !!input.platformTimetable?.isCurrent() && !input.signal?.aborted,
   });
-  if (study) return { ...study, source: 'device', tool: 'calendar-action', hasActions: false };
+  if (study) {
+    const selection = study.courseworkStudy;
+    if (study.courseworkList && selection?.assignmentIds.length === 1 && !selection.chooseSource &&
+        input.platformTimetable && input.courseworkRequests) {
+      const selected = study.courseworkList.assignments.find((row) => row.id === selection.assignmentIds[0]);
+      if (selected) {
+        // A summary carries only displayed identifiers. Reuse the real source
+        // reader before opening the existing preview/confirm/save executor.
+        const { readNuniPlanCourseworkStudy } = require('./nuniPlanCourseworkStudy') as typeof import('./nuniPlanCourseworkStudy');
+        const result = await abortableCampusRead(() => readNuniPlanCourseworkStudy({
+          source: selected.source, context: { ...input.scope, platformTimetable: input.platformTimetable,
+            isCurrent: () => input.isCurrent() && !input.signal?.aborted },
+          transport: input.courseworkRequests!, signal: input.signal,
+        }), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+        scopeCheck(input, false);
+        assertNotCancelled();
+        if (result.kind === 'ready' && result.assignmentId === selected.id) return {
+          content: study.content, courseworkRead: { ...result.read, openedAssignmentId: selected.id },
+          courseworkStudy: selection, source: 'device', tool: 'calendar-action', hasActions: false,
+        };
+        return { content: result.kind === 'ready' ? '無法核對剛才選定的作業，請重新查詢。' : result.message,
+          courseworkList: study.courseworkList, source: 'device', tool: 'calendar-action', hasActions: false };
+      }
+    }
+    return { ...study, source: 'device', tool: 'calendar-action', hasActions: false };
+  }
   const batchIntent = parseAssistantCalendarBatchIntent(question);
   if (batchIntent) {
     if (batchIntent.kind === 'invalid') return { content: batchIntent.message,
