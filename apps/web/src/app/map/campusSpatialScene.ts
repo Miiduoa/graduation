@@ -646,8 +646,14 @@ export function createCampusSpatialScene(
         hole.closePath();
         shape.holes.push(hole);
       }
+      // OSM-tagged height and an arbitrary illustrative 12 m extrusion are
+      // not equivalent evidence. Translucency keeps this difference visible
+      // in both themes and when the building is selected.
+      const illustrative = footprint.heightBasis === 'illustrative';
       const material = ownMaterial(new MeshStandardMaterial({
         color: '#abbab2', roughness: 0.93, metalness: 0,
+        transparent: illustrative, opacity: illustrative ? 0.58 : 1,
+        depthWrite: !illustrative,
       }));
       const geometry = ownGeometry(new ExtrudeGeometry(shape, {
         depth: footprint.heightMeters, bevelEnabled: false, steps: 1, curveSegments: 1,

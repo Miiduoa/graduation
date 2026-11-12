@@ -839,6 +839,51 @@ it('keeps a POI on the ground when it falls on a courtyard or outer-ring boundar
   expect(onOuterEdge).toBeCloseTo(inCourtyard, 6);
 });
 
+
+it('keeps unsourced 12 m volumes translucent while OSM-tagged heights remain opaque', () => {
+  // Synthetic ring/height fixtures, not a survey of the real library.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const ring: Array<[number, number]> = [
+    [120.58131, 24.22624], [120.58143, 24.22624],
+    [120.58143, 24.22634], [120.58131, 24.22634],
+  ];
+  const base: ProvidenceFootprint = {
+    poiId: library.id, name: library.name, sourceUrl: library.sourceUrl,
+    outline: ring, heightMeters: 12, heightBasis: 'illustrative',
+  };
+  const materialFor = (footprint: ProvidenceFootprint) => {
+    const view = setup(campus, undefined, [footprint]);
+    drawFrame();
+    const graph = view.renderer.render.mock.calls.at(-1)![0] as Scene;
+    const volume = graph.children.find((node): node is Mesh =>
+      node instanceof Mesh && node.geometry instanceof ExtrudeGeometry)!;
+    return { ...view, material: volume.material as import('three').MeshStandardMaterial };
+  };
+  const illustrative = materialFor(base);
+  const tagged = materialFor({ ...base, heightMeters: 18, heightBasis: 'osm-tag' });
+  expect(illustrative.material.transparent).toBe(true);
+  expect(illustrative.material.opacity).toBeCloseTo(0.58);
+  expect(illustrative.material.depthWrite).toBe(false);
+  expect(tagged.material.transparent).toBe(false);
+  expect(tagged.material.opacity).toBe(1);
+  expect(tagged.material.depthWrite).toBe(true);
+
+  for (const view of [
+    { selectedId: library.id, overhead: false, motion: false, dark: false },
+    { selectedId: library.id, overhead: false, motion: false, dark: true },
+    { selectedId: null, overhead: true, motion: false, dark: true },
+  ]) {
+    illustrative.scene.setView(view);
+    tagged.scene.setView(view);
+    drawFrame();
+    expect(illustrative.material.transparent).toBe(true);
+    expect(illustrative.material.opacity).toBeCloseTo(0.58);
+    expect(tagged.material.transparent).toBe(false);
+    expect(tagged.material.opacity).toBe(1);
+  }
+});
+
 it('extrudes OSM footprints in geographically aligned meters only for known spatial points', () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const campus = buildCampusSpatialModel([library]);
