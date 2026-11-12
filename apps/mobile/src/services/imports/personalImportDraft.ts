@@ -12,6 +12,12 @@ export type PersonalImportDraft = {
   issues: ImportIssue[];
   retryBatches: PersonalImportAiTextBatch[];
 };
+/** For typed drafts or validated storage values; validate stored data before calling. */
+export function isEmptyPersonalImportDraft(draft: PersonalImportDraft): boolean {
+  return !(draft.text.trim() || draft.rows.length || draft.issues.length ||
+    draft.retryBatches.length || draft.selected?.length || draft.options.source?.name ||
+    (draft.options.source && draft.options.source.type !== 'paste'));
+}
 const keyFor = (scope: PersonalImportScope) =>
   `campus.personal-import-draft.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const writes = new Map<string, Promise<void>>();
@@ -21,7 +27,7 @@ export function savePersonalImportDraft(
   draft: PersonalImportDraft | null,
 ): Promise<void> {
   const key = keyFor(scope);
-  const serialized = draft ? JSON.stringify(draft) : null;
+  const serialized = draft && !isEmptyPersonalImportDraft(draft) ? JSON.stringify(draft) : null;
   const write = (writes.get(key) ?? Promise.resolve())
     .catch(() => {})
     .then(() =>
@@ -131,7 +137,5 @@ export async function hasPersonalImportDraft(scope: PersonalImportScope): Promis
   if (raw === null) return false;
   const draft = await loadPersonalImportDraft(scope);
   if (!draft) return true;
-  return !!(draft.text.trim() || draft.rows.length || draft.issues.length ||
-    draft.retryBatches.length || draft.options.source?.name ||
-    (draft.options.source && draft.options.source.type !== 'paste'));
+  return !isEmptyPersonalImportDraft(draft);
 }

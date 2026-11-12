@@ -1904,7 +1904,7 @@ test.each([
   },
 );
 
-test('late AsyncStorage draft recovery cannot replace freshly pasted input', async () => {
+test('draft recovery finishes before input becomes editable', async () => {
   let resolveDraft!: (value: string | null) => void;
   const getItem = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
   const spy = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key) =>
@@ -1914,14 +1914,15 @@ test('late AsyncStorage draft recovery cannot replace freshly pasted input', asy
   try {
     const view = render(<PersonalImportScreen />);
     await waitFor(() => expect(resolveDraft).toBeDefined());
-    await waitForImportReady(view);
-    fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '新貼上的資料');
+    expect(view.queryByLabelText('貼上或修正原始文字')).toBeNull();
     await act(async () => resolveDraft(JSON.stringify({
       text: '舊草稿', options: { kind: 'grades', schoolId: 'pu', academicYear: '114', semester: '2' },
       rows: [], issues: [], retryBatches: [],
     })));
+    await waitForImportReady(view);
+    expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('舊草稿');
+    fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '新貼上的資料');
     expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('新貼上的資料');
-    expect(view.queryByText('已恢復上次完成的待核對草稿；未完成段落可以重試。')).toBeNull();
   } finally {
     spy.mockRestore();
     jest.mocked(AsyncStorage.getItem).mockImplementation(getItem);
@@ -2183,10 +2184,15 @@ test.each(['cancel', 'complete', 'empty', 'zero', 'error', 'restore'] as const)(
 );
 
 
-test.each(['先前空白頁', '回訪已有空草稿'])('手機暨大查課在%s後可匯入，完成後可繼續帶入下一門課', async (scenario) => {
+test.each(['先前空白頁', '回訪已有空草稿', '回訪已有空 AI 草稿'])('手機暨大查課在%s後可匯入，完成後可繼續帶入下一門課', async (scenario) => {
   mockScope = { owner: scope.owner, schoolId: 'ncnu' };
   const key = `${personalImportStorageKey(mockScope)}:grid-draft:v1`;
-  if (scenario === '回訪已有空草稿') {
+  if (scenario === '回訪已有空 AI 草稿') {
+    await AsyncStorage.setItem(`campus.personal-import-draft.v1:${encodeURIComponent(mockScope.owner)}:ncnu`, JSON.stringify({
+      text: '  \n', options: { kind: 'grades', schoolId: 'ncnu', academicYear: '114', semester: '2', source: { type: 'paste' } },
+      rows: [], selected: [], issues: [], retryBatches: [],
+    }));
+  } else if (scenario === '回訪已有空草稿') {
     await AsyncStorage.setItem(key, JSON.stringify({
       version: 1, kind: 'grades', academicYear: '115', semester: '1', text: '  \n',
       source: { type: 'paste' }, rows: [], selected: [], issues: [], editedIds: [], backupPreview: null,
@@ -2217,6 +2223,8 @@ test.each(['先前空白頁', '回訪已有空草稿'])('手機暨大查課在%s
     expect(review.getByDisplayValue('資料庫管理系統')).toBeTruthy();
     expect(review.getByDisplayValue('130032')).toBeTruthy();
     expect(review.getByDisplayValue('管268')).toBeTruthy();
+    expect(review.getByLabelText('這批資料的學年度（例如 115）').props.value).toBe('115');
+    expect(review.getByLabelText('這批資料的學期（例如 1、2、暑期）').props.value).toBe('1');
     expect((await loadPersonalImports(mockScope!)).records).toHaveLength(0);
     fireEvent.press(review.getByText('確認新增 1 筆'));
     await waitFor(async () => {
@@ -2244,4 +2252,39 @@ test.each(['先前空白頁', '回訪已有空草稿'])('手機暨大查課在%s
     expect(draft.rows[0].title).toBe('下一門課');
     expect((await loadPersonalImports(mockScope!)).records).toHaveLength(1);
   } finally { globalThis.fetch = original; }
+});
+
+test('空核對草稿不會蓋掉只有文字的 AI 草稿，重新進頁仍保留文字', async () => {
+  const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+  const aiKey = `campus.personal-import-draft.v1:${encodeURIComponent(scope.owner)}:pu`;
+  await AsyncStorage.setItem(key, JSON.stringify({
+    version: 1, kind: 'timetable', academicYear: '115', semester: '1', text: ' ',
+    source: { type: 'paste' }, rows: [], selected: [], issues: [],
+  }));
+  await AsyncStorage.setItem(aiKey, JSON.stringify({
+    text: '尚未辨識的課程文字',
+    options: { kind: 'grades', schoolId: 'pu', academicYear: '114', semester: '2' },
+    rows: [], selected: [], issues: [], retryBatches: [],
+  }));
+  const view = render(<PersonalImportScreen />);
+  await waitForImportReady(view);
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('尚未辨識的課程文字');
+  await waitFor(async () => expect((await loadPersonalImportDraft(scope))?.text).toBe('尚未辨識的課程文字'));
+  view.unmount();
+  const returning = render(<PersonalImportScreen />);
+  await waitForImportReady(returning);
+  expect(returning.getByLabelText('貼上或修正原始文字').props.value).toBe('尚未辨識的課程文字');
+});
+
+test.each(['AI', '核對'])('%s 草稿損壞時阻擋自動寫入並保留原始資料', async (kind) => {
+  const key = kind === 'AI'
+    ? `campus.personal-import-draft.v1:${encodeURIComponent(scope.owner)}:pu`
+    : `${personalImportStorageKey(scope)}:grid-draft:v1`;
+  const raw = kind === 'AI' ? '{broken' : 'null';
+  await AsyncStorage.setItem(key, raw);
+  const view = render(<PersonalImportScreen />);
+  await view.findByText('草稿讀取失敗，請先離開並重試，避免覆蓋原草稿。');
+  await act(async () => {});
+  expect(view.queryByLabelText('貼上或修正原始文字')).toBeNull();
+  expect(await AsyncStorage.getItem(key)).toBe(raw);
 });

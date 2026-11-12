@@ -99,6 +99,8 @@ import {
 } from '../services/imports/personalImportAi';
 import AIModelManagerScreen from './AIModelManagerScreen';
 import {
+  hasPersonalImportDraft,
+  isEmptyPersonalImportDraft,
   loadPersonalImportDraft,
   savePersonalImportDraft,
 } from '../services/imports/personalImportDraft';
@@ -385,15 +387,47 @@ function ImportWorkspace({
   /** Picked PDF URI stays in memory only until confirm, cancel, or unmount / scope remount. */
   const documentSource = useRef<DocumentSource | null>(null);
   const profile = periodProfileForSchool(scope.schoolId);
+  const aiDraftActive = useRef(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState('');
   const draftKey = `${personalImportStorageKey(scope)}:grid-draft:v1`;
   useFocusEffect(useCallback(() => {
     let mounted = true;
+    const run = generation.current;
+    setDraftReady(false);
+    setDraftError('');
     readImportReviewDraft(draftKey)
-      .then((raw) => {
-        if (!mounted || raw === null) return;
-        const draft = JSON.parse(raw);
+      .then(async (raw) => {
+        const aiDraft = await loadPersonalImportDraft({ owner, schoolId });
+        if (!aiDraft && await hasPersonalImportDraft({ owner, schoolId })) throw new Error('invalid AI draft');
+        if (!mounted || generation.current !== run) return;
+        aiDraftActive.current = !!aiDraft && !isEmptyPersonalImportDraft(aiDraft);
+        const review = raw === null ? null : JSON.parse(raw);
+        if (raw === null || isEmptyImportReviewDraft(review)) {
+          if (!aiDraft || isEmptyPersonalImportDraft(aiDraft)) return;
+          const draft = aiDraft;
+          setKind(draft.options.kind);
+          setYear(draft.options.academicYear);
+          setSemester(draft.options.semester);
+          setText(draft.text);
+          setSource(draft.options.source ?? { type: 'paste' });
+          setRows(draft.rows);
+          setIssues(draft.issues);
+          setSelected(new Set(draft.selected ?? draft.rows.map((row) => row.id)));
+          setAiReviewed(false);
+          setAiRetry(
+            draft.retryBatches.length
+              ? {
+                  text: draft.text,
+                  source: draft.options.source ?? { type: 'paste' },
+                  batches: draft.retryBatches,
+                }
+              : null,
+          );
+          setNotice('已恢復上次完成的待核對草稿；未完成段落可以重試。');
+          return;
+        }
+        const draft = review;
         if (
           draft.version !== 1 ||
           !['timetable', 'grades', 'events'].includes(draft.kind) ||
@@ -429,6 +463,12 @@ function ImportWorkspace({
         setSelected(new Set(draft.selected));
         setIssues(draft.issues);
         setBackupPreview(draft.backupPreview);
+        // Review rows include subsequent edits; reuse only retry ranges for the same source.
+        setAiRetry(aiDraft?.text === draft.text && aiDraft.retryBatches.length
+          ? { text: aiDraft.text, source: aiDraft.options.source ?? { type: 'paste' }, batches: aiDraft.retryBatches }
+          : null);
+        if (aiDraftActive.current)
+          setNotice('已恢復上次完成的待核對草稿；未完成段落可以重試。');
       })
       .catch(() => {
         if (mounted) setDraftError('草稿讀取失敗，請先離開並重試，避免覆蓋原草稿。');
@@ -439,7 +479,7 @@ function ImportWorkspace({
     return () => {
       mounted = false;
     };
-  }, [draftKey, schoolId]));
+  }, [draftKey, schoolId, owner]));
   useEffect(() => {
     if (!draftReady || draftError) return;
     const draft = {
@@ -521,66 +561,29 @@ function ImportWorkspace({
     };
   }, []);
 
-  const draftLoaded = useRef(false);
   useEffect(() => {
-    let open = true;
-    const run = generation.current;
-    void loadPersonalImportDraft(scope)
-      .then((draft) => {
-        if (!open || !draft || generation.current !== run) return;
-        setKind(draft.options.kind);
-        setYear(draft.options.academicYear);
-        setSemester(draft.options.semester);
-        setText(draft.text);
-        setSource(draft.options.source ?? { type: 'paste' });
-        setRows(draft.rows);
-        setIssues(draft.issues);
-        setSelected(new Set(draft.selected ?? draft.rows.map((row) => row.id)));
-        setAiReviewed(false);
-        setAiRetry(
-          draft.retryBatches.length
-            ? {
-                text: draft.text,
-                source: draft.options.source ?? { type: 'paste' },
-                batches: draft.retryBatches,
-              }
-            : null,
-        );
-        setNotice('已恢復上次完成的待核對草稿；未完成段落可以重試。');
-      })
-      .catch(() => {
-        if (open && generation.current === run)
-          setNotice('讀不到上次未完成的草稿，這次仍可重新整理。已儲存資料沒有變更。');
-      })
-      .finally(() => {
-        draftLoaded.current = true;
-      });
-    return () => {
-      open = false;
-    };
-  }, [owner, schoolId]);
-  useEffect(() => {
-    if (!draftLoaded.current || aiRunning) return;
+    if (!draftReady || draftError || aiRunning) return;
     const draftRun = generation.current;
-    const hasDraft =
-      rows.length > 0 && (aiRetry || issues.some((issue) => issue.code.startsWith('ai-')));
+    const draft = {
+      text,
+      options: { kind, schoolId, academicYear, semester, source, periodProfile: profile },
+      rows,
+      selected: [...selected],
+      issues,
+      retryBatches: aiRetry?.text === text ? aiRetry.batches : [],
+    };
+    const hasDraft = (aiDraftActive.current || !!aiRetry ||
+      issues.some((issue) => issue.code.startsWith('ai-'))) && !isEmptyPersonalImportDraft(draft);
     void savePersonalImportDraft(
-      scope,
-      hasDraft
-        ? {
-            text,
-            options: { kind, schoolId, academicYear, semester, source, periodProfile: profile },
-            rows,
-            selected: [...selected],
-            issues,
-            retryBatches: aiRetry?.text === text ? aiRetry.batches : [],
-          }
-        : null,
+      { owner, schoolId },
+      hasDraft ? draft : null,
     ).catch(() => {
       if (alive.current && generation.current === draftRun)
         setNotice('目前草稿仍保留在畫面上，但無法保存到裝置。離開前請先完成核對；稍後可重試。');
     });
   }, [
+    draftReady,
+    draftError,
     owner,
     schoolId,
     kind,
@@ -815,6 +818,7 @@ function ImportWorkspace({
                 ? { text: inputText, source: inputSource, batches: partial.retryBatches }
                 : null,
             );
+            aiDraftActive.current = true;
             void savePersonalImportDraft(scope, {
               text: inputText,
               options: {

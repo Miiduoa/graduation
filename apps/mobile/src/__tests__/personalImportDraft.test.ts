@@ -99,12 +99,13 @@ test.each([['missing-row'], [123], 'invalid'])(
 
 test('查課忽略有效的空 AI 草稿，但保護有內容或損壞的已存草稿', async () => {
   const scope = { owner: 'returning', schoolId: 'ncnu' };
-  await savePersonalImportDraft(scope, {
+  const key = 'campus.personal-import-draft.v1:returning:ncnu';
+  await AsyncStorage.setItem(key, JSON.stringify({
     text: '  ', options: { ...options, schoolId: 'ncnu', academicYear: '', semester: '' },
     rows: [], selected: [], issues: [], retryBatches: [],
-  });
+  }));
+  expect(await loadPersonalImportDraft(scope)).not.toBeNull();
   expect(await hasPersonalImportDraft(scope)).toBe(false);
-  const key = 'campus.personal-import-draft.v1:returning:ncnu';
   await AsyncStorage.setItem(key, '{broken');
   expect(await hasPersonalImportDraft(scope)).toBe(true);
   expect(await AsyncStorage.getItem(key)).toBe('{broken');
@@ -113,4 +114,15 @@ test('查課忽略有效的空 AI 草稿，但保護有內容或損壞的已存�
     rows: [], issues: [], retryBatches: [],
   });
   expect(await hasPersonalImportDraft(scope)).toBe(true);
+});
+
+
+test('saving a recognized empty AI draft removes an older checkpoint', async () => {
+  const scope = { owner: 'first', schoolId: 'pu' };
+  await savePersonalImportDraft(scope, { text: source, options, ...result(), retryBatches: [] });
+  await savePersonalImportDraft(scope, {
+    text: ' \n', options, rows: [], selected: [], issues: [], retryBatches: [],
+  });
+  expect(await loadPersonalImportDraft(scope)).toBeNull();
+  expect(await hasPersonalImportDraft(scope)).toBe(false);
 });
