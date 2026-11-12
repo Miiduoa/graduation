@@ -820,3 +820,8 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 ### 2026-11-12：隱藏的語意 HTML 教材容器不再額外重建為原文表格
 
 有些講義以 `<article hidden>`、`<figure style="display:none">`、`<blockquote aria-hidden="true">` 或 `<fieldset style="visibility:hidden">` 包住尚未公開的示例。原解析器只追蹤 div／section／aside，會將這些明確隱藏區塊中的 Markdown 表格另外重建。現在將常見、具明確關閉標籤的語意區塊納入相同保守可見性界線；巢狀同名區塊不會讓外層提前關閉，真正公開的教材表格仍可保留。新增七個 Node/Vitest 回歸情境。不改動原始教材、個人筆記、JSON 備份格式、端側模型或資料傳輸；不假裝是完整 HTML/CSS 渲染，更不代表圖像理解、手機實機或 Ahaboard 同機對照。所有 CI／CodeQL 與指定 App 審查必須依最新 head 核查；PR 保持 Draft、未合併／部署。
+
+
+### 2026-11-12：程式課教材的 Markdown 管線運算表格可以正常逐欄閱讀
+
+修復「原文表格」遇到合法反斜線跳脫管線符號或行內程式碼範例就整張省略的問題。現在只讓未跳脫且不在成對單／雙反引號程式片段中的管線分隔欄位；反斜線奇偶數遵循 Markdown 管線跳脫規則，避免把資料移到錯誤欄位。未配對程式碼、欄數不符、隱藏 HTML 儲存格與收合答案仍保守拒收。新增 6 個 Vitest 回歸案例，獨立 JavaScript 邊界檢查 8/8 符合預期。這是原始教材文字表格改善，不代表影像圖表、WebGPU 語意正確性、iOS/Android 實測或 Ahaboard 同機比較完成。閱讀 v1/v2 與練習 checkpoint、私人筆記、原文及資料傳輸均不變；PR 繼續 Draft，不合併、不部署。

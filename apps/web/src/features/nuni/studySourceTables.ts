@@ -120,21 +120,65 @@ function hasHiddenHtmlAttribute(token: string): boolean {
 }
 
 function parseSimplePipeRow(line: string): string[] | null {
-  // Markdown renders four-space / tab-indented rows as code, not a table.
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
-  // HTML inside an otherwise plausible Markdown cell can contain hidden
-  // answers or formatting. Without a Markdown/HTML renderer we cannot tell
-  // what is visible, so omit the entire table instead of exposing it as text.
-  // Plain comparisons such as "x < y" are not HTML tags.
-  if (/<\/?[A-Za-z][\w:-]*(?=[\s/>])[^>]*>/u.test(trimmed)) return null;
-  // A literal pipe inside a cell or inline code needs a full Markdown parser.
-  // Do not silently shift the student's values into the wrong columns.
-  if (!trimmed.includes('|') || trimmed.includes('\\|') ||
-      trimmed.includes(String.fromCharCode(96)) ||
+  // HTML cells may contain teacher-only answers; never reconstruct them.
+  if (/<\/?[A-Za-z][\w:-]*(?=[\s/>])[^>]*>/u.test(trimmed) ||
       trimmed.includes('<!--') || trimmed.includes('-->')) return null;
-  const body = trimmed.replace(/^\|/u, '').replace(/\|$/u, '');
-  const cells = body.split('|').map((cell) => cell.trim());
+  // Only unescaped pipes outside paired inline-code spans separate columns.
+  // Reject unmatched code spans rather than shift values into the wrong cells.
+  const cells: string[] = [];
+  let current = '';
+  let codeWidth = 0;
+  let separators = 0;
+  let lastWasSeparator = false;
+  for (let index = 0; index < trimmed.length;) {
+    const character = trimmed[index];
+    if (character === String.fromCharCode(96)) {
+      let backslashes = 0;
+      for (let at = current.length - 1; at >= 0 && current[at] === '\\'; at -= 1)
+        backslashes += 1;
+      if (backslashes % 2 === 0) {
+        let next = index + 1;
+        while (trimmed[next] === String.fromCharCode(96)) next += 1;
+        const width = next - index;
+        if (codeWidth === 0) codeWidth = width;
+        else if (codeWidth === width) codeWidth = 0;
+        current += trimmed.slice(index, next);
+        index = next;
+        lastWasSeparator = false;
+        continue;
+      }
+    }
+    if (character === '|' && codeWidth === 0) {
+      let backslashes = 0;
+      for (let at = current.length - 1; at >= 0 && current[at] === '\\'; at -= 1)
+        backslashes += 1;
+      if (backslashes > 0) {
+        // Every paired backslash is literal; one final slash escapes the pipe.
+        current = current.slice(0, -backslashes) + '\\'.repeat(Math.floor(backslashes / 2));
+        if (backslashes % 2 === 1) {
+          current += '|';
+          index += 1;
+          lastWasSeparator = false;
+          continue;
+        }
+      }
+      cells.push(current.trim());
+      current = '';
+      separators += 1;
+      lastWasSeparator = true;
+      index += 1;
+      continue;
+    }
+    current += character;
+    lastWasSeparator = false;
+    index += 1;
+  }
+  if (codeWidth !== 0 || separators === 0) return null;
+  cells.push(current.trim());
+  if (trimmed.startsWith('|')) cells.shift();
+  if (lastWasSeparator) cells.pop();
   return cells.length >= 2 && cells.length <= MAX_COLUMNS ? cells : null;
 }
 

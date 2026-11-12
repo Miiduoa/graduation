@@ -550,3 +550,81 @@ describe('hidden semantic HTML wrappers must not publish lesson answer tables', 
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+
+describe('Markdown programming tables with escaped pipes and inline code', () => {
+  it('keeps an escaped pipe as content inside one example cell', () => {
+    const source = [
+      '| 運算 | 範例 |',
+      '| --- | --- |',
+      '| OR | a\\|b |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['運算', '範例'],
+      rows: [['OR', 'a|b']],
+    }]);
+  });
+
+  it('keeps one- and two-backtick code spans containing pipe characters', () => {
+    const tick = String.fromCharCode(96);
+    const source = [
+      '| 指令 | 範例 |',
+      '| --- | --- |',
+      '| OR | ' + tick + 'a|b' + tick + ' |',
+      '| 程式 | ' + tick + tick + 'a|' + tick + 'b' + tick + tick + ' |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['指令', '範例'],
+      rows: [['OR', tick + 'a|b' + tick], ['程式', tick + tick + 'a|' + tick + 'b' + tick + tick]],
+    }]);
+  });
+
+  it('splits after a pair of literal backslashes', () => {
+    const source = [
+      '| 主題 | 範例 | 備註 |',
+      '| --- | --- | --- |',
+      '| 轉義 | a\\\\|b | 合法 |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['主題', '範例', '備註'],
+      rows: [['轉義', 'a\\', 'b']],
+    }]);
+  });
+
+  it('rejects unmatched inline-code markup without shifting table cells', () => {
+    const tick = String.fromCharCode(96);
+    const source = [
+      '| 範例 | 說明 |',
+      '| --- | --- |',
+      '| OR | ' + tick + 'a|b |',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+
+  it('never reconstructs teacher-only HTML cells even alongside escaped pipes', () => {
+    const source = [
+      '| 例子 | 答案 |',
+      '| --- | --- |',
+      '| a\\|b | <span hidden>教師答案</span> |',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+
+  it('still omits source rows enclosed in a collapsed HTML disclosure', () => {
+    const tick = String.fromCharCode(96);
+    const source = [
+      '<details>',
+      '| 語法 | 範例 |',
+      '| --- | --- |',
+      '| OR | ' + tick + 'a|b' + tick + ' |',
+      '</details>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+});
