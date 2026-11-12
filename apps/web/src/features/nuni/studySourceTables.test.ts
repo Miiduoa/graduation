@@ -643,3 +643,59 @@ describe('Markdown programming tables with escaped pipes and inline code', () =>
     expect(extractStudySourceTables(source)).toEqual(realTable(6));
   });
 });
+
+describe('HTML slash endings cannot expose hidden lesson tables', () => {
+  it.each([
+    ['div', 'hidden'],
+    ['section', 'style="display:none"'],
+    ['article', 'aria-hidden="true"'],
+    ['details', ''],
+    ['dialog', ''],
+    ['pre', ''],
+    ['script', ''],
+    ['template', ''],
+  ])('treats a slash-ended <%s> as an HTML start tag', (tag, attrs) => {
+    // In text/html, the slash is ignored on non-void HTML elements.
+    // These source rows must not appear before the actual closing tag.
+    const source = [
+      `<${tag}${attrs ? ' ' + attrs : ''} />`,
+      '| 尚未公開答案 | 分數 |',
+      '| --- | --- |',
+      '| 不應額外呈現 | 999 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('keeps an outer hidden div active after a nested slash-ended div closes', () => {
+    const source = [
+      '<div hidden />',
+      '<div />',
+      '| 私有答案 | 分數 |',
+      '| --- | --- |',
+      '| 尚未公布 | 999 |',
+      '</div>',
+      '| 外層仍不可見 | 分數 |',
+      '| --- | --- |',
+      '| 測試 | 888 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+
+  it('preserves actual self-closing SVG and MathML foreign elements', () => {
+    const source = [
+      '<svg viewBox="0 0 10 10" />',
+      '<math />',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(3));
+  });
+
+  it('does not suppress an ordinary visible block solely because it uses a slash', () => {
+    const source = ['<div style="display:block" />', ...visibleTable, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});

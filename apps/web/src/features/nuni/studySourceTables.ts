@@ -286,7 +286,10 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       // nested containers of the same type inside a hidden wrapper must be
       // balanced, or the inner closing tag could expose unpublished rows.
       const closing = token.startsWith('</');
-      const selfClosing = /\/>$/u.test(token);
+      // A trailing slash on an HTML non-void element does not close it.
+      // Only tracked SVG/MathML foreign roots honor the slash: otherwise
+      // <div hidden /> could expose answers which the browser still hides.
+      const selfClosing = /\/>$/u.test(token) && (tag === 'svg' || tag === 'math');
       if (htmlCodeBlocks.length > 0) {
         const current = htmlCodeBlocks[htmlCodeBlocks.length - 1];
         if (closing && current === tag) htmlCodeBlocks.pop();

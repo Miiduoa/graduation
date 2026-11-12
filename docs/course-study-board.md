@@ -1,3 +1,9 @@
+## 2026-11-12：修復 HTML 非空元素斜線造成的隱藏教材外露
+
+- 同一個 Markdown 來源在 HTML 瀏覽器語意下，`<div hidden />` 的結尾斜線**不會**關閉 `div`。先前原文表格解析器把所有 `/>` 都當成自我關閉，可能把教師隱藏的練習答案另行重建成公開表格。現在追蹤的 HTML 非空元素會持續到其關閉標籤；`<details />`、`<pre />`、`<script />` 等原始碼示例也不會洩漏額外表格。僅 SVG／MathML 外來元素根節點仍接受真正的自我關閉語法。
+- 增加 11 組純函式回歸情境（8 類 HTML 標籤、巢狀 hidden、SVG/MathML、自身可見元素），保留資料列次序與原始教材。規範依據：HTML Standard https://html.spec.whatwg.org/multipage/syntax.html 與 MDN https://developer.mozilla.org/en-US/docs/Glossary/Void_element 。
+- 未修改私有教材、閱讀 v1/v2／練習 v1 備份、模型或外部傳輸，沒有新增套件。這是解析器及測試改動，完整 CI／CodeQL 須依新 SHA 查核；不是實機瀏覽器、App 5504170、Maestro 或 Ahaboard 同條件對測結果。PR 維持 Draft，不合併、不部署。
+
 ## 2026-11-12：依精確 CI Web Tests log 修復原文表格回歸與程式碼結束標記
 
 - 精確 head `7f1db060dc38a9731f272522765d21744659036b` 的 [CI #43219441490](https://github.com/Miiduoa/graduation/actions/runs/43219441490) 已完成，Web Tests job `131186896331` 有 3 項失敗。逐項讀取實際 log 後確認：兩個舊測試仍把現在合法的 `\\|` 視作錯誤；新測試的雙反斜線範例多放了一個資料欄，使表格長度不符。修正測試案例與欄位數，不放寬拒絕缺欄、多欄或不成對反引號的資料界線。
