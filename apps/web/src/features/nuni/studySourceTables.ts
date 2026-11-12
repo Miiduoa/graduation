@@ -15,7 +15,8 @@ const MAX_ROWS = 20;
 
 // A Markdown-looking table in an explicitly hidden HTML wrapper is not
 // visible course material. Do not infer CSS visibility or parse arbitrary
-// HTML: only recognize explicit hidden / aria-hidden=true containers.
+// HTML: recognize explicit hidden / aria-hidden=true and simple inline display:none;
+// this does not infer computed CSS, external stylesheets or chart meaning.
 const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
@@ -26,6 +27,22 @@ const TABLE_SUPPRESSED_HTML_TAGS = new Set([
   ...NESTABLE_HTML_BLOCKS, 'pre', 'code', 'script', 'style', 'textarea',
   'template', 'noscript', 'svg', 'math', 'table',
 ]);
+
+function hasExplicitHiddenDisplay(style: string): boolean {
+  // Handle literal inline display declarations, respecting overrides and !important.
+  // An attribute quoting "display:none" is not an active CSS declaration.
+  let effective: { hidden: boolean; important: boolean } | null = null;
+  for (const part of style.split(';')) {
+    const property = /^\s*display\s*:\s*(.*?)\s*$/iu.exec(part);
+    if (!property) continue;
+    const important = /\s*!important\s*$/iu.test(property[1]);
+    const value = property[1].replace(/\s*!important\s*$/iu, '').trim().toLowerCase();
+    if (!value) continue;
+    if (!effective || important || !effective.important)
+      effective = { hidden: value === 'none', important };
+  }
+  return effective?.hidden ?? false;
+}
 
 function hasHiddenHtmlAttribute(token: string): boolean {
   // Only actual HTML attributes count. Searching the whole token for words
@@ -38,6 +55,8 @@ function hasHiddenHtmlAttribute(token: string): boolean {
     const name = match[1].toLowerCase();
     // HTML's boolean hidden attribute is active even when written hidden="false".
     if (name === 'hidden') return true;
+    if (name === 'style' && hasExplicitHiddenDisplay(match[2] ?? match[3] ?? match[4] ?? ''))
+      return true;
     if (name === 'aria-hidden' &&
         (match[2] ?? match[3] ?? match[4] ?? '').toLowerCase() === 'true') return true;
   }

@@ -300,3 +300,69 @@ describe('visibility attributes must be outside HTML quoted values', () => {
     ].join('\n'))).toEqual(realTable(2));
   });
 });
+
+describe('explicit inline display:none on HTML lesson wrappers', () => {
+  it.each([
+    '<div style="display:none">',
+    "<section style='color: blue; DISPLAY : NONE !important'>",
+    '<aside title="demo" style="display: none; display: block; display:none">',
+  ])('does not expose hidden example rows inside %s', (opening) => {
+    const tag = /^<([a-z]+)/i.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 暫不公開 | 學分 |',
+      '| --- | --- |',
+      '| 模擬資料 | 99 |',
+      '</' + tag + '>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('keeps rows visible when a later display declaration overrides none', () => {
+    const source = [
+      '<div style="display:none; display:block">',
+      ...visibleTable,
+      '</div>',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+
+  it('honors an earlier important display value against a later normal declaration', () => {
+    const source = [
+      '<div style="display:none !important; display:block">',
+      '| 暫不公開 | 學分 |',
+      '| --- | --- |',
+      '| 模擬資料 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('does not mistake a quoted explanation or custom property for actual display:none', () => {
+    const source = [
+      '<section title="demo display:none" style="--example:display:none; display:block">',
+      ...visibleTable,
+      '</section>',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+
+  it('does not let a nested visible div expose its display:none parent', () => {
+    const source = [
+      '<div style="display: none">',
+      '<div class="example">',
+      '| 測試答案 | 分數 |',
+      '| --- | --- |',
+      '| 隱藏 | 999 |',
+      '</div>',
+      '| 外層仍隱藏 | 分數 |',
+      '| --- | --- |',
+      '| 隱藏 | 888 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+});

@@ -795,3 +795,7 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 ### 2026-11-12：數學複習題保留算式外層括號與小數點
 
 新生成複習題在比較題目／參考回答是否只是重複時，原本使用通用 Unicode 標點類別去除兩端符號，會錯把 `(a+b)` 和 `a+b`、`[a,b]` 和 `a,b`、以及 `.5` 和 `5` 當成一樣，讓學生被迫重新啟動裝置端模型。現在僅忽略句子兩端的問號、句號、引號等對話標點，保留具數學或集合意義的外層括號及數字前導小數點；普通「主鍵？」與「主鍵。」仍會判定為無效重複題。新增六組模擬 Worker 回歸情境，保留已儲存 v1/v2 講解與 v1 練習 checkpoint 的解析契約，沒有改寫原教材、對外傳輸、增加模型或依賴。獨立 JavaScript 邊界案例驗證不等於 GitHub 完整 CI、WebGPU 真實生成、iOS／Android 真機、App 5504170 審查或 Ahaboard 同機對照；PR 保持 Draft，不合併、不部署。
+
+### 2026-11-12：明確 display:none 的課程答案不再被重建為公開表格
+
+教材 Markdown 可能夾帶 `<div style="display:none">` 等 HTML 容器。原本「原文表格」重建只辨識 hidden／aria-hidden=true，會把這些明確不顯示的練習答案當成可見的正式表格。現在保守辨識 div／section／aside 的行內、字面 display:none 宣告，並依先後順序及 !important 處理覆寫；不會把 title 裡的 display:none、CSS 自訂屬性或已被 display:block 覆蓋的設定誤當隱藏。巢狀容器仍須等最外層關閉才恢復原文表格辨識。新增七項 Vitest 測試情境。此修補不處理外部樣式表、任意 CSS、DOM 的實際排版或圖像理解，也未修改原教材、備份格式與私人筆記。新版 CI/CodeQL、指定 App 5504170、Maestro、手機真機、WebGPU 與 Ahaboard 同機比較仍需依新 SHA 驗證；PR 保持 Draft、不合併、不部署。
