@@ -125,7 +125,9 @@ it('accepts a spoken question on Today, waits for consent and sends follow-ups i
   fireEvent.change(field, { target: { value: '下一堂課是什麼？' } });
   fireEvent.keyDown(field, { key: 'Enter' });
   expect(ask).not.toHaveBeenCalled();
+  await screen.findByText(/無法判定當天是否有課/);
   fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '下一堂課是什麼？' } });
   fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
   await screen.findByText('下一堂是資料庫。');
   expect(ask.mock.calls[0][0]).toMatchObject({
@@ -135,7 +137,8 @@ it('accepts a spoken question on Today, waits for consent and sends follow-ups i
     consent: true,
   });
   expect(synthesis.speak).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
+  const cloudReply = screen.getByText('下一堂是資料庫。').closest('article')!;
+  fireEvent.click(cloudReply.querySelector('button')!);
   expect(synthesis.speak).toHaveBeenCalledOnce();
   expect(synthesis.speak.mock.calls[0][0]).toMatchObject({
     text: '下一堂是資料庫。',
