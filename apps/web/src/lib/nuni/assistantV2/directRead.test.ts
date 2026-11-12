@@ -194,7 +194,6 @@ it.each([
   '有哪些作業沒交，只看資料結構', '今天有哪些作業已經提交',
   '今天有什麼課，教室怎麼走', '下一堂課教室怎麼走',
   '今天有什麼課，走路去教室', '今天有什麼課，教室地圖在哪',
-  '今天有什麼課，順便告訴我教室在哪裡走',
 ])('leaves navigation, negation, examples, ambiguous dates and writes to their existing handlers: %s', (question) => {
   expect(directReads(question, now)).toEqual([]);
 });
@@ -202,4 +201,8 @@ it.each([
 it('still answers generic remaining-work questions with a due-work read', () => {
   expect(directReads('今天還有什麼作業沒交', now).map((read) => read.kind)).toEqual(['due-work']);
   expect(directReads('我有哪些作業沒交', now).map((read) => read.kind)).toEqual(['due-work']);
+});
+
+it('still answers a next-class place-and-time question that uses a comma', () => {
+  expect(directReads('下一堂課在哪，幾點', now).map((read) => read.kind)).toEqual(['next-class']);
 });

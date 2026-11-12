@@ -41,7 +41,6 @@ export function directReads(question: string, now: number): DirectRead[] {
   const day = dates[0] || addDays(today, relativeDays[0] || 0);
   if (/空檔|空堂|有空|沒課/.test(text)) return [];
   if (/怎麼走|如何走|怎麼去|怎麼到|怎麼抵達|如何前往|如何抵達|帶我去|帶我到|導航|路線|交通指引|走路去|步行去|地圖/.test(text)) return [];
-  if (/[，,；;]/.test(text)) return [];
   if (/已繳|已交|繳了|交了|已提交|已經提交|提交的|交完/.test(text)) return [];
   if (mentionsSpecificCourseWork(text)) return [];
   const asking = /什麼|哪些|有沒有|幾點|在哪|哪裡|哪裏|多少|還有|未交|未繳|沒交|沒繳|查|告訴我|列出/.test(text);
