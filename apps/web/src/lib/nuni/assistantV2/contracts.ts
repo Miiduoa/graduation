@@ -234,17 +234,17 @@ export function proposalPermission(name: string): AssistantPermissionKey | undef
   if (name === 'propose_food_order' || name === 'reorder_last_food_order') return 'prepareFoodOrder';
 }
 
-/** Read again for each proposal and execution. Missing or unusable storage keeps existing actions available. */
+/** Recheck each proposal and execution; store defaults allow unset permissions, read failures block actions. */
 export async function requireAssistantPermission(adapter: Adapter, key: AssistantPermissionKey) {
   if (!adapter.permissions) return;
   let permissions: PlatformAssistantPermissions;
   try {
     permissions = await adapter.permissions();
   } catch (error) {
-    if ((error as { status?: number }).status === 401) throw error;
-    return;
+    if ((error as { status?: number } | null)?.status === 401) throw error;
+    return fail('ASSISTANT_PERMISSION_STORE_UNAVAILABLE', 503);
   }
-  if (!permissions) return;
+  if (!permissions) return fail('ASSISTANT_PERMISSION_STORE_UNAVAILABLE', 503);
   if (permissions[key] !== true) return fail('ASSISTANT_PERMISSION_DENIED', 403);
 }
 

@@ -4,7 +4,7 @@ import { confirm, reconcile, revoke, signCard } from './actions';
 import { createAdapter } from './adapter';
 import { createTools } from './tools';
 import { run } from './runner';
-import type { Adapter, Card, Model } from './contracts';
+import { requireAssistantPermission, V2Error, type Adapter, type Card, type Model } from './contracts';
 import {
   fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret,
 } from './fixtures';
@@ -51,6 +51,63 @@ describe('account permission proposal boundary', () => {
     expect(tools.cards).toHaveLength(0);
     expect(f.writes).toHaveLength(0);
     expect(f.orderCalls).toHaveLength(0);
+  });
+
+  it.each([
+    ['propose_personal_event', event],
+    ['propose_study_plan', { date: event.date }],
+    ['propose_food_order', cart],
+    ['reorder_last_food_order', {}],
+  ])('does not produce a %s card on a reader outage', async (name, args) => {
+    const f = fixtureAdapter(true);
+    f.adapter.permissions = async () => { throw new Error('database unavailable'); };
+    const tools = toolsFor(f.adapter);
+    await expect(tools.call(String(name), args)).rejects.toMatchObject({
+      status: 503, code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE',
+    });
+    expect(tools.cards).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
+    expect(f.orderCalls).toHaveLength(0);
+  });
+
+  it('preserves authentication errors and normalizes other reader failures', async () => {
+    const f = fixtureAdapter();
+    const unauthorized = new V2Error(401, 'SIGN_IN_REQUIRED');
+    f.adapter.permissions = async () => { throw unauthorized; };
+    await expect(requireAssistantPermission(f.adapter, 'createPersonalEvent')).rejects.toBe(unauthorized);
+    for (const error of [new V2Error(503, 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE'), new Error('ACL denied'), null]) {
+      f.adapter.permissions = async () => { throw error; };
+      await expect(requireAssistantPermission(f.adapter, 'createPersonalEvent')).rejects.toMatchObject({
+        status: 503, code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE',
+      });
+    }
+  });
+
+  it.each(['我今天有什麼課', '今天還有什麼作業沒交'])(
+    'keeps direct reads available on a reader outage: %s', async (question) => {
+      const f = fixtureAdapter();
+      f.adapter.permissions = vi.fn(async () => { throw new Error('database unavailable'); });
+      const model = vi.fn().mockRejectedValue(new Error('model should not be called'));
+      const result = await run({ question, history: [], binding, adapter: f.adapter,
+        secret, now, model, writes: true, signal: new AbortController().signal, log: () => {} });
+      expect(result.dataRead).toBe(true);
+      expect(result.cards).toHaveLength(0);
+      expect(f.adapter.permissions).not.toHaveBeenCalled();
+      expect(model).not.toHaveBeenCalled();
+      expect(f.writes).toHaveLength(0);
+    },
+  );
+
+  it('does not issue an explicit event card on a reader outage', async () => {
+    const f = fixtureAdapter();
+    f.adapter.permissions = async () => { throw new Error('database unavailable'); };
+    const model = vi.fn().mockRejectedValue(new Error('model should not be called'));
+    const result = await run({ question: '幫我明天 19:00 到 20:00 安排英文讀書', history: [], binding,
+      adapter: f.adapter, secret, now, model, writes: true, signal: new AbortController().signal, log: () => {} });
+    expect(result.cards).toHaveLength(0);
+    expect(result.answer).toContain('助理權限');
+    expect(model).not.toHaveBeenCalled();
+    expect(f.writes).toHaveLength(0);
   });
 
   it('keeps existing actions available without a reader, without blocking read-only tools or opening a page', async () => {
@@ -141,12 +198,18 @@ describe('execution, revocation and read-only recovery', () => {
     expect(f.writes).toHaveLength(1);
   });
 
-  it('keeps existing execution available on a reader outage', async () => {
-    const f = fixtureAdapter(), card = signedEvent();
-    f.adapter.permissions = async () => { throw new Error('database unavailable'); };
-    await expect(confirm(binding, raw(card), secret, now, f.adapter, true)).resolves.toBeTruthy();
-    expect(f.writes).toHaveLength(1);
-  });
+  it.each(['event', 'food-page', 'food-submit'])(
+    'blocks a signed old confirmation card on a reader outage: %s', async (kind) => {
+      const f = fixtureAdapter(kind === 'food-submit');
+      const card = kind === 'event' ? signedEvent() : await foodCard(f.adapter);
+      f.adapter.permissions = async () => { throw new Error('database unavailable'); };
+      await expect(confirm(binding, raw(card), secret, now, f.adapter, true)).rejects.toMatchObject({
+        status: 503, code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE',
+      });
+      expect(f.writes).toHaveLength(0);
+      expect(f.orderCalls).toHaveLength(0);
+    },
+  );
 
   it.each([false, true])('blocks old food cards in both page and submit modes (ordering=%s)', async (ordering) => {
     const f = fixtureAdapter(ordering), card = await foodCard(f.adapter);

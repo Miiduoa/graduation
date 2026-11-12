@@ -35,7 +35,7 @@ python3 deploy/nuni-api/build.py --assistant-permissions-candidate \
 
 發布前先核對實際執行中的 API immutable image、來源 tree 與已套用的 migration 清單。上述 input 是程式庫內固定的 lost-found 候選，**不代表此刻正式站必定是同一來源**。若正式站含有此候選未納入的程式變更或不同的 migration checksum，先以該真實來源重新整合及核驗，不可用這份候選覆蓋。固定來源、完整 typecheck/build、既有 API 回歸與隔離 migration 驗收須對同一個將發布的映像完成。
 
-依既有安全發布環境，用已核驗映像中的 `node apps/api/dist/migrate.js` 套用完整 manifest，再核對 283 checksum 與下表 ACL；API 啟動驗證完成後再發布 Web 與 App。若 282 尚未套用，必須先把它及前置 migration 的範圍納入同一發布審查，不能假設只會跑 283。不能讓 BFF 在 request 中建立資料表，也不能直接裸跑 SQL 規避 migration 紀錄。沒有表、ACL 或資料庫設定時，既有助理動作仍依預設開啟可用；設定寫入回 `ASSISTANT_PERMISSION_STORE_UNAVAILABLE`，不會顯示儲存成功。
+依既有安全發布環境，用已核驗映像中的 `node apps/api/dist/migrate.js` 套用完整 manifest，再核對 283 checksum 與下表 ACL；API 啟動驗證完成後再發布 Web 與 App。若 282 尚未套用，必須先把它及前置 migration 的範圍納入同一發布審查，不能假設只會跑 283。不能讓 BFF 在 request 中建立資料表，也不能直接裸跑 SQL 規避 migration 紀錄。尚未設定資料庫連線或已確認沒有權限設定紀錄時，store 回傳兩項預設開啟；已設定連線但缺表、ACL 失效或資料庫斷線等讀取故障時，提案與舊確認卡執行均回 `ASSISTANT_PERMISSION_STORE_UNAVAILABLE`（503），純查詢不受影響。設定寫入失敗也回此錯誤，不會顯示儲存成功。
 
 連線依序使用 `PLATFORM_ASSISTANT_DATABASE_URL`、既有 `ASSIGNMENT_FILE_DATABASE_URL`、`DATABASE_URL`，必須指向含 `platform_accounts` 的 nuni PostgreSQL。這是既有平台資料庫，不建立另一套 Storage 或 Firebase 權限。程式不讀取瀏覽器提供的連線設定、不輸出連線字串；測試也不使用正式環境連線。
 
