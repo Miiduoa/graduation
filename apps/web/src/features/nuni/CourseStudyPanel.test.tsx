@@ -1189,6 +1189,49 @@ it('explains when a long prior answer cannot fit in follow-up context and keeps 
   expect(screen.getByText('長'.repeat(1800))).toBeTruthy();
 });
 
+// A mobile WebView can silently ignore an anchor download without throwing.
+// Keep the exact TXT/JSON payload recoverable without a second export or model call.
+it.each([
+  ['下載本次筆記', '可選取的本次筆記文字'],
+  ['儲存閱讀進度', '可選取的閱讀進度 JSON'],
+])('offers a manual %s backup when the browser silently ignores a file download', (action, field) => {
+  const create = vi.fn().mockReturnValue('blob:ignored-download');
+  const revoke = vi.fn();
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '手機必須保留的筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('textbox', { name: field })).toBeNull();
+
+    const rescue = screen.getByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' });
+    rescue.focus();
+    fireEvent.click(rescue);
+    const backup = screen.getByRole('textbox', { name: field }) as HTMLTextAreaElement;
+    expect(backup.value).toContain('手機必須保留的筆記');
+    expect(backup.value).toContain(material.body);
+    expect(document.activeElement).toBe(backup);
+    if (action === '儲存閱讀進度') {
+      expect(parseCourseStudyProgress(backup.value, scope).passages['0:0'].note).toBe('手機必須保留的筆記');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(document.activeElement).toBe(rescue);
+
+    // A later edit must invalidate the old export instead of offering stale notes.
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '已修改的筆記' } });
+    expect(screen.queryByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: field })).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('downloads only after an explicit click, recovers from download failure, and clears the file URL on source replacement', async () => {
   const create = vi.fn().mockImplementationOnce(() => { throw new Error('unsupported'); }).mockReturnValue('blob:study-notes');
   const revoke = vi.fn();

@@ -148,6 +148,9 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const [restoredFile, setRestoredFile] = useState<string | null>(null);
   const [error, setError] = useState(initial.error);
   const [downloadStatus, setDownloadStatus] = useState('');
+  // Anchor.click() can return normally while a mobile WebView silently drops the file.
+  // Keep the exact in-memory export available for an explicit manual rescue.
+  const [downloadBackup, setDownloadBackup] = useState<{ text: string; kind: ManualCopyKind } | null>(null);
   const [downloadError, setDownloadError] = useState('');
   const [confirmClose, setConfirmClose] = useState(false);
   const [pendingSource, setPendingSource] = useState<PendingSource | null>(null);
@@ -383,6 +386,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     copyRequest.current += 1;
     restoreManualCopyFocus.current = false;
     setManualCopyText(null);
+    setDownloadBackup(null);
     setDownloadStatus('');
     setDownloadError('');
   }
@@ -469,7 +473,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       link.click();
       if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
       downloadUrl.current = url;
-      setDownloadStatus(`已交給瀏覽器下載${label}；若沒有出現檔案，請確認瀏覽器的下載設定。`);
+      setDownloadBackup(preparedFallback);
+      setDownloadStatus(`已交給瀏覽器下載${label}；若沒有出現檔案，可改用下方手動備份。`);
     } catch {
       if (url) URL.revokeObjectURL(url);
       if (previousManualCopy !== null) {
@@ -506,6 +511,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const request = ++copyRequest.current;
     const text = buildCourseStudyNotes(courseTitle, source, session.passages);
+    setDownloadBackup(null);
     setDownloadStatus('');
     setDownloadError('');
     setManualCopyText(null);
@@ -544,6 +550,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     const request = ++copyRequest.current;
     // Snapshot exactly the current user-visible disclosures at the click.
     const text = buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound);
+    setDownloadBackup(null);
     setDownloadStatus('');
     setDownloadError('');
     setManualCopyText(null);
@@ -574,6 +581,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const request = ++copyRequest.current;
     setManualCopyText(null);
+    setDownloadBackup(null);
     setDownloadStatus('');
     setDownloadError('');
     const fallback = () => {
@@ -990,6 +998,12 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         </div>}
         {!practiceRound && <p className={styles.note}>進度檔可還原閱讀位置、筆記、講解、試答與問題草稿，也含練習參考回答；文字筆記方便直接閱讀。檔案未加密，請自行保管。</p>}
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
+        {downloadBackup && <button type="button" className={styles.button} onClick={() => {
+          manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setManualCopyKind(downloadBackup.kind);
+          setManualCopyText(downloadBackup.text);
+          setDownloadStatus('已顯示同一份下載內容的完整手動備份，可全選後自行儲存。');
+        }}>沒有下載到檔案？顯示完整手動備份</button>}
         {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
         {manualCopyText !== null && <section className={styles.manualCopy}
           aria-label={MANUAL_COPY_LABELS[manualCopyKind].region}>
