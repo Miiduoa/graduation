@@ -699,3 +699,44 @@ describe('HTML slash endings cannot expose hidden lesson tables', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+
+describe('HTML numeric references and CSS escapes cannot disclose hidden source answers', () => {
+  const visible = ['| 科目 | 學分 |', '| --- | --- |', '| 資料庫 | 3 |'];
+  it.each([
+    ['<div style="display:&#110;one">', '</div>'],
+    ['<section style="dis&#112;lay:none">', '</section>'],
+    ['<aside style="display:&#x6e;one">', '</aside>'],
+    ['<article style="display:\\6e one">', '</article>'],
+    ['<figure style="dis\\70 lay:none">', '</figure>'],
+    ['<blockquote style="display:&#92;6e one">', '</blockquote>'],
+    ['<div style="visibility:\\68 idden">', '</div>'],
+    ['<section aria-hidden="tr&#117;e">', '</section>'],
+  ])('omits teacher-only rows with encoded visibility in %s', (opening, closing) => {
+    const source = [
+      opening, '| 教師答案 | 分數 |', '| --- | --- |', '| 暫不公開 | 99 |',
+      closing, ...visible,
+    ].join('\n');
+    const tables = extractStudySourceTables(source);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].rows).toEqual([['資料庫', '3']]);
+  });
+
+  it.each([
+    '<div style="display:&#110;one; display:block">',
+    '<div style="display:\\6e one; display:block !important">',
+  ])('keeps a legitimately visible table after a stronger override in %s', (opening) => {
+    const source = [opening, ...visible, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)[0]?.rows).toEqual([['資料庫', '3']]);
+  });
+
+  it('preserves an important encoded hidden rule against a later ordinary display', () => {
+    const source = [
+      '<div style="display:\\6e one !important; display:block">',
+      '| 教師答案 | 分數 |', '| --- | --- |', '| 暫不公開 | 99 |',
+      '</div>', ...visible,
+    ].join('\n');
+    expect(extractStudySourceTables(source).map((table) => table.rows))
+      .toEqual([[['資料庫', '3']]]);
+  });
+});

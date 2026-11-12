@@ -75,6 +75,32 @@ function splitInlineCssDeclarations(style: string): string[] {
   return declarations;
 }
 
+// HTML decodes numeric character references inside quoted attribute values
+// before applying inline styles / ARIA. Only decode numeric references here;
+// this is not a complete HTML entity or CSS cascade implementation.
+function decodeNumericHtmlAttributeReferences(value: string): string {
+  return value.replace(/&#(?:x([0-9a-f]+)|([0-9]+));?/giu, (_, hex: string | undefined, decimal: string | undefined) => {
+    const codePoint = Number.parseInt(hex ?? decimal ?? '', hex === undefined ? 10 : 16);
+    return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff &&
+      (codePoint < 0xd800 || codePoint > 0xdfff)
+      ? String.fromCodePoint(codePoint) : '\uFFFD';
+  });
+}
+
+// CSS identifiers may use a backslash followed by up to six hex digits and
+// optional whitespace. Without decoding, "display:\\6e one" is visually
+// hidden in a browser but looks non-hidden to a source-text table scanner.
+function decodeCssEscapes(value: string): string {
+  return value.replace(/\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\r\n\f])?|([^\r\n\f]))/giu,
+    (_, hex: string | undefined, literal: string | undefined) => {
+      if (hex === undefined) return literal ?? '';
+      const codePoint = Number.parseInt(hex, 16);
+      return codePoint > 0 && codePoint <= 0x10ffff &&
+        (codePoint < 0xd800 || codePoint > 0xdfff)
+        ? String.fromCodePoint(codePoint) : '\uFFFD';
+    });
+}
+
 function hasExplicitHiddenInlineStyle(style: string): boolean {
   // Only recognize literal inline visibility declarations. CSS properties
   // cascade independently; a visible value for one property cannot override
@@ -84,7 +110,8 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
   // CSS permits whitespace (including comments) between ! and important.
   // The comment splitter above normalizes /* ... */ to whitespace.
   const importantSuffix = /\s*!\s*important\s*$/iu;
-  for (const part of splitInlineCssDeclarations(style)) {
+  for (const declaration of splitInlineCssDeclarations(style)) {
+    const part = decodeCssEscapes(declaration);
     const property = /^\s*(display|visibility|content-visibility)\s*:\s*(.*?)\s*$/iu.exec(part);
     if (!property) continue;
     const name = property[1].toLowerCase();
@@ -109,12 +136,13 @@ function hasHiddenHtmlAttribute(token: string): boolean {
   const attributes = token.slice(opening[0].length);
   for (const match of attributes.matchAll(/\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\x60=<>]+)))?/gu)) {
     const name = match[1].toLowerCase();
+    const attributeValue = decodeNumericHtmlAttributeReferences(match[2] ?? match[3] ?? match[4] ?? '');
     // HTML's boolean hidden attribute is active even when written hidden="false".
     if (name === 'hidden') return true;
-    if (name === 'style' && hasExplicitHiddenInlineStyle(match[2] ?? match[3] ?? match[4] ?? ''))
+    if (name === 'style' && hasExplicitHiddenInlineStyle(attributeValue)
       return true;
     if (name === 'aria-hidden' &&
-        (match[2] ?? match[3] ?? match[4] ?? '').toLowerCase() === 'true') return true;
+        attributeValue.trim().toLowerCase() === 'true') return true;
   }
   return false;
 }
