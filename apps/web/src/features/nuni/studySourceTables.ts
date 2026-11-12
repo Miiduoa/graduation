@@ -29,13 +29,53 @@ const TABLE_SUPPRESSED_HTML_TAGS = new Set([
   'template', 'noscript', 'svg', 'math', 'table',
 ]);
 
+/** Split CSS declarations without treating semicolons in strings, URLs or comments as separators. */
+function splitInlineCssDeclarations(style: string): string[] {
+  const declarations: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let nestedFunctions = 0;
+  for (let index = 0; index < style.length; index += 1) {
+    const char = style[index];
+    if (quote) {
+      current += char;
+      if (char === '\\' && index + 1 < style.length) {
+        index += 1;
+        current += style[index];
+      } else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+    } else if (char === '/' && style[index + 1] === '*') {
+      // CSS comments are whitespace; a trailing comment must not change "none".
+      const end = style.indexOf('*/', index + 2);
+      current += ' ';
+      if (end < 0) break;
+      index = end + 1;
+    } else if (char === '(') {
+      nestedFunctions += 1;
+      current += char;
+    } else if (char === ')') {
+      nestedFunctions = Math.max(0, nestedFunctions - 1);
+      current += char;
+    } else if (char === ';' && nestedFunctions === 0) {
+      declarations.push(current);
+      current = '';
+    } else current += char;
+  }
+  declarations.push(current);
+  return declarations;
+}
+
 function hasExplicitHiddenInlineStyle(style: string): boolean {
   // Only recognize literal inline visibility declarations. CSS properties
   // cascade independently; a visible value for one property cannot override
   // a hidden value for another. Same-property !important and order still apply.
   // This is not a computed-style parser (external styles and var() are unknown).
   const effective = new Map<string, { value: string; important: boolean }>();
-  for (const part of style.split(';')) {
+  for (const part of splitInlineCssDeclarations(style)) {
     const property = /^\s*(display|visibility|content-visibility)\s*:\s*(.*?)\s*$/iu.exec(part);
     if (!property) continue;
     const name = property[1].toLowerCase();

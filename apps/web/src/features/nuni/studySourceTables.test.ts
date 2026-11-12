@@ -368,6 +368,40 @@ describe('explicit inline display:none on HTML lesson wrappers', () => {
 });
 
 
+describe('inline CSS strings and comments do not leak or hide lesson tables', () => {
+  it.each([
+    '<div style="display:none /* teacher-only example */">',
+    '<section style="display: /* explanation */ none !important; display:block">',
+    '<aside style="visibility:hidden/* not public */; content-visibility:visible">',
+  ])('keeps an explicitly hidden answer private with CSS comments in %s', (opening) => {
+    const tag = /^<([a-z]+)/i.exec(opening)?.[1] ?? 'div';
+    expect(extractStudySourceTables([
+      opening,
+      '| 教師答案 | 分數 |',
+      '| --- | --- |',
+      '| 暫不公開 | 99 |',
+      '</' + tag + '>',
+      ...visibleTable,
+    ].join('\n'))).toEqual(realTable(6));
+  });
+
+  it('keeps a visible table when a quoted CSS string only mentions a fake visibility declaration', () => {
+    expect(extractStudySourceTables([
+      '<div style="content:\'note; visibility:hidden; example\'; display:block">',
+      ...visibleTable,
+      '</div>',
+    ].join('\n'))).toEqual(realTable(2));
+  });
+
+  it('respects later CSS overrides despite comments and semicolons inside URL functions', () => {
+    expect(extractStudySourceTables([
+      '<section style="background:url(data:image/svg+xml;utf8,example); display:none/* draft */; display:block">',
+      ...visibleTable,
+      '</section>',
+    ].join('\n'))).toEqual(realTable(2));
+  });
+});
+
 describe('explicit inline CSS visibility in course source wrappers', () => {
   it.each([
     '<div style="visibility:hidden">',

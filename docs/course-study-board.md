@@ -805,3 +805,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修復原文表格重建未辨識行內 `visibility:hidden`、`visibility:collapse`、`content-visibility:hidden` 的問題。若教師以這些字面 CSS 屬性隱藏答案，白板不再另行抽出為可見表格。
 - 只辨識 div／section／aside 的明確行內宣告，同一屬性依 `!important` 與宣告先後處理；不同屬性的可見值不得取消另一屬性的隱藏值。title 中的說明文字、自訂 CSS 屬性及已被合法覆寫的隱藏宣告不會誤判。新增多組解析器回歸測試，保留後續真正公開的 Markdown 表格。
 - 保守處理巢狀隱藏容器，不宣稱具備完整 CSS／DOM 可見性計算；尤其外部樣式表、`var()`、CSS 註解及手機瀏覽器實際渲染不在本輪驗證範圍。原教材、個人筆記、v1/v2 進度及練習 checkpoint 格式、端側 AI 資料界線均未修改。不代表 iOS／Android 真機、WebGPU 中文教學、App 5504170 正式核准或 Ahaboard 同機比較已完成；PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-12：HTML 行內 CSS 註解與字串分號的公開表格判斷
+
+- 教師教材若使用 `style="display:none /* 註解 */"` 或 `visibility:hidden/* 註解 */` 隱藏練習答案，原本以字面比對 CSS 值可能漏判並將表格重建為公開內容。現在掃描行內 CSS 時把註解當作空白，再依同屬性宣告順序及 `!important` 判斷，避免漏出教師未公開的示例。
+- CSS 字串、URL 函式內的分號不再被當成新宣告，避免 `content:'說明; visibility:hidden; 範例'` 這類普通文字使真正可見的課程表格消失。加入隱藏、可見、覆寫與函式分號回歸測試。
+- 僅修復已存在於教材的明確行內 CSS；不宣稱解析外部 CSS、`var()`、瀏覽器完整排版或圖片圖表。原始教材、個人筆記、閱讀 v1/v2 與練習 checkpoint 不變，沒有新依賴、付費 API 或教材外傳。Web/Mobile CI、CodeQL、App 5504170、Maestro、真機與 Ahaboard 同機對照仍須按新精確 SHA 驗證；PR 維持 Draft，不合併、不部署。
