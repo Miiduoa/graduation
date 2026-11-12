@@ -89,7 +89,7 @@ it('loads homework without per-course activities on a cold list', async () => {
   expect(JSON.stringify(body)).not.toMatch(/secret|cookies/);
 });
 
-it('loads one activities request when opening a course and does not download locked files', async () => {
+it('loads general and filtered courseware activities without downloading locked files', async () => {
   const { request, source } = setup();
   await request();
   vi.mocked(source.fetchHomeworkPage).mockClear();
@@ -97,8 +97,9 @@ it('loads one activities request when opening a course and does not download loc
   const body = await (await request({ courseId: 10001 })).json();
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   expect(source.fetchCourses).not.toHaveBeenCalled();
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, '');
+  expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, 'type=courseware_activity');
   expect(source.fetchCourseAnnouncements).toHaveBeenCalledTimes(1);
   expect(body.result.materials[0].files).toEqual([
     expect.objectContaining({ name: 'notes.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/upload-key-notes/blob' }),
@@ -136,6 +137,62 @@ it('keeps the page up when one course feature returns 500', async () => {
     expect.objectContaining({ area: 'announcements', status: 500 }),
   ]);
   expect(body.result.announcements).toEqual([]);
+});
+
+it('includes courseware-only materials and deduplicates items shared by both feeds', async () => {
+  const { request, source } = setup();
+  const additional = {
+    id: 30999, title: '補充講義', type: 'courseware_activity',
+    uploads: [{ name: 'extra.pdf', key: 'extra-pdf', allow_download: true }],
+  };
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+    ok: true,
+    value: query === 'type=courseware_activity'
+      ? [LMS_FIXTURE_MATERIAL, additional] : [LMS_FIXTURE_MATERIAL],
+  }));
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(2);
+  expect(body.result.materials.filter((item: { id: number }) => item.id === LMS_FIXTURE_MATERIAL.id))
+    .toHaveLength(1);
+  expect(body.result.materials).toContainEqual(expect.objectContaining({
+    id: 30999, title: '補充講義',
+    files: [expect.objectContaining({
+      name: 'extra.pdf', downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/extra-pdf/blob',
+    })],
+  }));
+  expect(body.result.courseErrors).toEqual([]);
+  expect(source.fetchActivities).toHaveBeenCalledWith(
+    { session: 'lms-secret' }, 10001, 'type=courseware_activity',
+  );
+});
+
+it('does not cache partial materials when the filtered courseware feed rejects the session', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: false, status: 401 }
+      : { ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  const response = await request({ courseId: 10001 });
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+});
+
+it.each([404, 503])('keeps general materials after filtered courseware returns HTTP %s', async (status) => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: false, status }
+      : { ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(1);
+  // A missing optional endpoint is not an error; a live upstream 503 is.
+  expect(body.result.courseErrors).toEqual(status === 404
+    ? []
+    : [expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 })]);
 });
 
 it.each(['homework', 'activities', 'announcements'] as const)(
@@ -280,7 +337,7 @@ it('uses activity announcements on 404 without marking the course as empty succe
     expect.objectContaining({ title: '討論區公告', source: 'activity' }),
   ]);
   expect(body.result.materials).toHaveLength(1);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('keeps activity-only notices when the dedicated course announcement feed succeeds', async () => {
@@ -299,7 +356,7 @@ it('keeps activity-only notices when the dedicated course announcement feed succ
   ]);
   expect(body.result.materials).toHaveLength(1);
   expect(body.result.courseErrors).toEqual([]);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('deduplicates matching activity and course notices without hiding changed content', async () => {
@@ -493,7 +550,7 @@ it('discards versionless cached materials rather than mixing them with a new ses
   expect(body.result.materials).toEqual([]);
   expect(body.result.announcements).toEqual([]);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
 });
 
@@ -600,7 +657,7 @@ it('rejects an in-flight course read when its linked session changes before comp
     release = () => resolve({ ok: true, value: [LMS_FIXTURE_MATERIAL] });
   }));
   const pending = request({ courseId: 10001 });
-  await vi.waitFor(() => expect(source.fetchActivities).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(source.fetchActivities).toHaveBeenCalledTimes(2));
 
   const nextId = 'd'.repeat(32);
   Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: nextId });
