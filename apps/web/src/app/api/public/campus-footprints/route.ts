@@ -92,6 +92,11 @@ type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; osmBaseAt
 let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
+// Repeated errors from an overloaded public Overpass instance must not cause
+// 144 retries/day (a fixed ten-minute retry loop) on one server worker.
+// This is per process only; a multi-instance deployment also needs a shared
+// cooldown/cache before it can promise fleet-wide upstream request limits.
+let consecutiveUpstreamFailures = 0;
 
 // Overpass can omit Content-Length or serve compressed responses. Stop reading at the
 // decoded byte limit; checking .text().length afterwards would still buffer an
@@ -308,9 +313,17 @@ export async function GET() {
       }
       cache = candidate;
       unavailableUntil = 0;
+      consecutiveUpstreamFailures = 0;
     } catch (error) {
+      // A 10-minute fixed retry loop still sends 144 requests per day from
+      // one worker during an outage. Increase the quiet period on consecutive
+      // failures, capped at 24 hours. Never shorten a legitimate Retry-After or
+      // the fixed 24-hour pause for denied/invalid Overpass queries.
+      const backoffMs = Math.min(MAX_RETRY_AFTER_MS,
+        ERROR_COOLDOWN_MS * 2 ** Math.min(consecutiveUpstreamFailures, 8));
+      consecutiveUpstreamFailures += 1;
       unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError
-        ? error.cooldownMs : ERROR_COOLDOWN_MS);
+        ? Math.max(error.cooldownMs, backoffMs) : backoffMs);
     }
   }
   // Stale is an outage fallback, not an unlimited-lived source of campus geometry.
