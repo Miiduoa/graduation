@@ -107,10 +107,10 @@ test('暨大保留課表及匯入入口，查課後建立可核對的草稿再�
   } finally { globalThis.fetch = original; }
 });
 
-test('既有草稿及未確認帳號不會被查課結果覆蓋', async () => {
+test.each(['原有草稿', JSON.stringify({ version: 1, kind: 'grades', academicYear: '', semester: '', text: '尚未完成', source: { type: 'paste' }, rows: [], issues: [], selected: [], editedIds: [], backupPreview: null })])('既有或損壞草稿 %s 及未確認帳號不會被查課結果覆蓋', async (raw) => {
   setBrowsingSchoolId('ncnu');
   mockScope = { owner: 'guest:device', schoolId: 'ncnu' };
-  await AsyncStorage.setItem(draftKey, '原有草稿');
+  await AsyncStorage.setItem(draftKey, raw);
   const original = globalThis.fetch;
   globalThis.fetch = jest.fn().mockResolvedValue(ncnuJson([ncnuDatabaseCourse]));
   try {
@@ -119,7 +119,7 @@ test('既有草稿及未確認帳號不會被查課結果覆蓋', async () => {
     fireEvent.press(view.getByText('查詢課程'));
     fireEvent.press(await view.findByText('帶入課表核對'));
     await view.findByText('匯入頁已有待核對的草稿，請先前往「匯入我的資料」處理。');
-    expect(await AsyncStorage.getItem(draftKey)).toBe('原有草稿');
+    expect(await AsyncStorage.getItem(draftKey)).toBe(raw);
     mockScope = null;
     view.rerender(<CourseCatalogScreen navigation={nav} />);
     fireEvent.press(view.getByText('帶入課表核對'));

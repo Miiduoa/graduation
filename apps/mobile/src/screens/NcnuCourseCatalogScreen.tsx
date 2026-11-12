@@ -8,8 +8,8 @@ import { theme } from '../ui/theme';
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { personalImportStorageKey } from '../services/personalImports';
-import { readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
-import { loadPersonalImportDraft } from '../services/imports/personalImportDraft';
+import { hasImportReviewDraft, readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
+import { hasPersonalImportDraft } from '../services/imports/personalImportDraft';
 import { safeNavigate } from '../utils/safeNavigate';
 
 type Result =
@@ -39,9 +39,9 @@ export function NcnuCourseCatalogScreen({ initialQuery = '', navigation }: { ini
     try {
       const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
       const existing = await readImportReviewDraft(key);
-      const aiDraft = await loadPersonalImportDraft(scope);
+      const aiDraft = await hasPersonalImportDraft(scope);
       if (!current()) return;
-      if (existing || aiDraft) {
+      if (hasImportReviewDraft(existing) || aiDraft) {
         setNotice('匯入頁已有待核對的草稿，請先前往「匯入我的資料」處理。');
         return;
       }

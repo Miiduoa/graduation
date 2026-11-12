@@ -122,3 +122,16 @@ export async function loadPersonalImportDraft(
     return null;
   }
 }
+
+/** Protect unreadable stored AI drafts too, even when recovery cannot display them. */
+export async function hasPersonalImportDraft(scope: PersonalImportScope): Promise<boolean> {
+  const key = keyFor(scope);
+  await writes.get(key)?.catch(() => {});
+  const raw = await AsyncStorage.getItem(key);
+  if (raw === null) return false;
+  const draft = await loadPersonalImportDraft(scope);
+  if (!draft) return true;
+  return !!(draft.text.trim() || draft.rows.length || draft.issues.length ||
+    draft.retryBatches.length || draft.options.source?.name ||
+    (draft.options.source && draft.options.source.type !== 'paste'));
+}

@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
+import { isEmptyImportReviewDraft, readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
 import { TimetableReviewGrid } from '../components/TimetableReviewGrid';
 import {
   nextReviewRow,
@@ -392,7 +392,7 @@ function ImportWorkspace({
     let mounted = true;
     readImportReviewDraft(draftKey)
       .then((raw) => {
-        if (!mounted || !raw) return;
+        if (!mounted || raw === null) return;
         const draft = JSON.parse(raw);
         if (
           draft.version !== 1 ||
@@ -442,7 +442,7 @@ function ImportWorkspace({
   }, [draftKey, schoolId]));
   useEffect(() => {
     if (!draftReady || draftError) return;
-    const value = JSON.stringify({
+    const draft = {
       version: 1,
       editedIds,
       kind,
@@ -454,8 +454,8 @@ function ImportWorkspace({
       selected: [...selected],
       issues,
       backupPreview,
-    });
-    writeImportReviewDraft(draftKey, value).catch(() => {
+    };
+    writeImportReviewDraft(draftKey, isEmptyImportReviewDraft(draft) ? null : JSON.stringify(draft)).catch(() => {
       if (alive.current) setNotice('草稿未能保存在此裝置，離開前請重試。');
     });
   }, [
@@ -1356,6 +1356,7 @@ function ImportWorkspace({
       });
       if (!active()) return;
       setLedger(result.ledger);
+      setEditedIds([]);
       setBackupPreview(null);
       setRows([]);
       setAiRetry(null);

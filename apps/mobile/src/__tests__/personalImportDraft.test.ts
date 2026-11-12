@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parsePersonalImportAiResponse } from '@campus/shared/src/imports/aiRecognition';
 import {
+  hasPersonalImportDraft,
   loadPersonalImportDraft,
   savePersonalImportDraft,
 } from '../services/imports/personalImportDraft';
@@ -94,3 +95,22 @@ test.each([['missing-row'], [123], 'invalid'])(
     expect(await loadPersonalImportDraft(scope)).toBeNull();
   },
 );
+
+
+test('查課忽略有效的空 AI 草稿，但保護有內容或損壞的已存草稿', async () => {
+  const scope = { owner: 'returning', schoolId: 'ncnu' };
+  await savePersonalImportDraft(scope, {
+    text: '  ', options: { ...options, schoolId: 'ncnu', academicYear: '', semester: '' },
+    rows: [], selected: [], issues: [], retryBatches: [],
+  });
+  expect(await hasPersonalImportDraft(scope)).toBe(false);
+  const key = 'campus.personal-import-draft.v1:returning:ncnu';
+  await AsyncStorage.setItem(key, '{broken');
+  expect(await hasPersonalImportDraft(scope)).toBe(true);
+  expect(await AsyncStorage.getItem(key)).toBe('{broken');
+  await savePersonalImportDraft(scope, {
+    text: '未完成文字', options: { ...options, schoolId: 'ncnu' },
+    rows: [], issues: [], retryBatches: [],
+  });
+  expect(await hasPersonalImportDraft(scope)).toBe(true);
+});

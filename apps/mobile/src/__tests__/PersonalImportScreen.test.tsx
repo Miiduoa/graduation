@@ -2183,8 +2183,21 @@ test.each(['cancel', 'complete', 'empty', 'zero', 'error', 'restore'] as const)(
 );
 
 
-test('手機暨大查課結果帶入真正匯入頁，顯示可編輯課表並等待確認', async () => {
+test.each(['先前空白頁', '回訪已有空草稿'])('手機暨大查課在%s後可匯入，完成後可繼續帶入下一門課', async (scenario) => {
   mockScope = { owner: scope.owner, schoolId: 'ncnu' };
+  const key = `${personalImportStorageKey(mockScope)}:grid-draft:v1`;
+  if (scenario === '回訪已有空草稿') {
+    await AsyncStorage.setItem(key, JSON.stringify({
+      version: 1, kind: 'grades', academicYear: '115', semester: '1', text: '  \n',
+      source: { type: 'paste' }, rows: [], selected: [], issues: [], editedIds: [], backupPreview: null,
+    }));
+  } else {
+    const empty = render(<PersonalImportScreen />);
+    await waitForImportReady(empty);
+    await act(async () => {});
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    empty.unmount();
+  }
   const original = globalThis.fetch;
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
@@ -2205,5 +2218,30 @@ test('手機暨大查課結果帶入真正匯入頁，顯示可編輯課表並�
     expect(review.getByDisplayValue('130032')).toBeTruthy();
     expect(review.getByDisplayValue('管268')).toBeTruthy();
     expect((await loadPersonalImports(mockScope!)).records).toHaveLength(0);
+    fireEvent.press(review.getByText('確認新增 1 筆'));
+    await waitFor(async () => {
+      expect((await loadPersonalImports(mockScope!)).records).toHaveLength(1);
+      expect(await AsyncStorage.getItem(key)).toBeNull();
+      expect(await loadPersonalImportDraft(mockScope!)).toBeNull();
+    });
+    review.unmount();
+    // Keep the same storage through the next visit and course handoff.
+    const returning = render(<PersonalImportScreen />);
+    await waitForImportReady(returning);
+    returning.unmount();
+    nav.navigate.mockClear();
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+        schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall', truncated: false,
+        courses: [{ code: '130033', section: '0', title: '下一門課', department: '資管系', teacher: '王老師', time: '3efg', room: '管268', semester: '1151', credits: '3.0' }],
+      }),
+    });
+    const next = render(<NcnuCourseCatalogScreen navigation={nav} />);
+    fireEvent.press(next.getByText('查詢課程'));
+    fireEvent.press(await next.findByText('帶入課表核對'));
+    await waitFor(() => expect(nav.navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' }));
+    const draft = JSON.parse((await AsyncStorage.getItem(key))!);
+    expect(draft.rows[0].title).toBe('下一門課');
+    expect((await loadPersonalImports(mockScope!)).records).toHaveLength(1);
   } finally { globalThis.fetch = original; }
 });
