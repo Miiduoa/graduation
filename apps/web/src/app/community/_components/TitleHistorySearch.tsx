@@ -117,6 +117,8 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
   const opening = useRef(false);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  // IME candidate Enter can report isComposing=false before compositionend.
+  const composing = useRef(false);
   const more = useRef<HTMLButtonElement>(null);
   const resumeControl = useRef<HTMLButtonElement>(null);
   const summary = useRef<HTMLParagraphElement>(null);
@@ -318,8 +320,16 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
             onChange={(event) => edit(event.target.value)}
             aria-invalid={titleTooLong} aria-describedby={titleTooLong ? `${hintId} ${limitId}` : hintId}
             autoComplete="off" placeholder="例如：二手書、租屋"
+            onCompositionStart={() => { composing.current = true; }}
+            onCompositionEnd={() => { composing.current = false; }}
+            onBlur={() => { composing.current = false; }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault();
+              // Safari/WebKit may report isComposing=false for the Enter used to
+              // accept a Chinese IME candidate. Never submit its partial draft.
+              if (event.key === 'Enter' &&
+                  (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) {
+                event.preventDefault();
+              }
             }} />
         </div>
         <div className={styles.actions}>
