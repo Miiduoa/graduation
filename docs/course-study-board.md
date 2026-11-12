@@ -812,3 +812,7 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 教師教材若使用 `style="display:none /* 註解 */"` 或 `visibility:hidden/* 註解 */` 隱藏練習答案，原本以字面比對 CSS 值可能漏判並將表格重建為公開內容。現在掃描行內 CSS 時把註解當作空白，再依同屬性宣告順序及 `!important` 判斷，避免漏出教師未公開的示例。
 - CSS 字串、URL 函式內的分號不再被當成新宣告，避免 `content:'說明; visibility:hidden; 範例'` 這類普通文字使真正可見的課程表格消失。加入隱藏、可見、覆寫與函式分號回歸測試。
 - 僅修復已存在於教材的明確行內 CSS；不宣稱解析外部 CSS、`var()`、瀏覽器完整排版或圖片圖表。原始教材、個人筆記、閱讀 v1/v2 與練習 checkpoint 不變，沒有新依賴、付費 API 或教材外傳。Web/Mobile CI、CodeQL、App 5504170、Maestro、真機與 Ahaboard 同機對照仍須按新精確 SHA 驗證；PR 維持 Draft，不合併、不部署。
+
+### 2026-11-12：修正 CSS `! important` 合法空白造成的隱藏答案外露
+
+教材 HTML 行內樣式允許 `display:none ! important`（驚嘆號與 `important` 間有空白），甚至可由 CSS 註解分隔。原本原文表格解析器只認 `!important`，可能誤以為稍後的 `display:block` 覆寫前者，將教師隱藏答案重新整理成可見資料。本次僅修正解析器明確行內 CSS 的優先旗標，保留同優先級後寫者生效、不同屬性互不覆寫，以及無效 `! importantish` 不被誤認；新增六種來源表格回歸情境。此修正不代表支援外部 CSS 或計算樣式，不更動原始教材、私人筆記、備份格式或 AI 傳輸路徑。仍須以本提交 SHA 的完整 CI／CodeQL、真機、指定 App 5504170 審查與 Ahaboard 同機比較判定，PR 保持 Draft。

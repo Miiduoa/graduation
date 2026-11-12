@@ -469,3 +469,38 @@ describe('explicit inline CSS visibility in course source wrappers', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(11));
   });
 });
+
+describe('CSS important tokens with legal whitespace in hidden source wrappers', () => {
+  it.each([
+    '<div style="display:none ! important; display:block">',
+    '<section style="display:none ! /* teacher-only */ important; display:block">',
+    '<aside style="visibility:hidden ! important; visibility:visible">',
+    '<div style="content-visibility:hidden ! important; content-visibility:visible">',
+  ])('does not reveal teacher-only rows when the priority marker is spaced in %s', (opening) => {
+    const tag = /^<([a-z]+)/i.exec(opening)?.[1] ?? 'div';
+    expect(extractStudySourceTables([
+      opening,
+      '| 教師尚未發布 | 學分 |',
+      '| --- | --- |',
+      '| 隱藏範例 | 99 |',
+      '</' + tag + '>',
+      ...visibleTable,
+    ].join('\n'))).toEqual(realTable(6));
+  });
+
+  it('allows a later equally important declaration to make a table visible', () => {
+    expect(extractStudySourceTables([
+      '<div style="display:none ! important; display:block !important">',
+      ...visibleTable,
+      '</div>',
+    ].join('\n'))).toEqual(realTable(2));
+  });
+
+  it('does not mistake an invalid important-like word for a priority flag', () => {
+    expect(extractStudySourceTables([
+      '<div style="display:none ! importantish; display:block">',
+      ...visibleTable,
+      '</div>',
+    ].join('\n'))).toEqual(realTable(2));
+  });
+});

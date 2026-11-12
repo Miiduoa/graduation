@@ -75,12 +75,15 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
   // a hidden value for another. Same-property !important and order still apply.
   // This is not a computed-style parser (external styles and var() are unknown).
   const effective = new Map<string, { value: string; important: boolean }>();
+  // CSS permits whitespace (including comments) between ! and important.
+  // The comment splitter above normalizes /* ... */ to whitespace.
+  const importantSuffix = /\s*!\s*important\s*$/iu;
   for (const part of splitInlineCssDeclarations(style)) {
     const property = /^\s*(display|visibility|content-visibility)\s*:\s*(.*?)\s*$/iu.exec(part);
     if (!property) continue;
     const name = property[1].toLowerCase();
-    const important = /\s*!important\s*$/iu.test(property[2]);
-    const value = property[2].replace(/\s*!important\s*$/iu, '').trim().toLowerCase();
+    const important = importantSuffix.test(property[2]);
+    const value = property[2].replace(importantSuffix, '').trim().toLowerCase();
     if (!value) continue;
     const previous = effective.get(name);
     if (!previous || important || !previous.important)
