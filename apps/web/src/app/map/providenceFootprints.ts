@@ -51,6 +51,13 @@ const knownBuildingsByPoi = new Map(
 export const PROVIDENCE_OSM_BUILDING_WAY_IDS = [...knownWays.keys()];
 export const PROVIDENCE_OSM_BUILDING_RELATION_IDS = [...knownRelations.keys()];
 
+// Verified on 2026-11-12 against the OSM relation's full member list.
+// Until a changed member list is reviewed, do not replace Xijia's mapped
+// courtyard with an apparently solid building roof.
+const VERIFIED_RELATION_MEMBERS = new Map([
+  [9246899, { outer: 255783593, inner: 665651134 }],
+]);
+
 function knownBuildingForElement(element: Record<string, unknown>) {
   if (typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) return undefined;
   return element.type === 'way' ? knownWays.get(element.id)
@@ -184,6 +191,13 @@ function safeSimpleRelationGeometry(element: Record<string, unknown>):
   if (outerMembers.length !== 1 || outerMembers.length + innerMembers.length !== ways.length ||
       innerMembers.length > 1) return null;
   if (innerMembers.length && innerMembers[0]?.ref === outerMembers[0]?.ref) return null;
+  const audited = VERIFIED_RELATION_MEMBERS.get(element.id as number);
+  if (audited && (outerMembers[0]?.ref !== audited.outer ||
+      innerMembers.length !== 1 || innerMembers[0]?.ref !== audited.inner)) {
+    // In particular, a truncated/changed Xijia relation must not fill its
+    // previously verified courtyard with an invented roof.
+    return null;
+  }
   const outline = safeOutline(outerMembers[0]?.geometry);
   if (!outline) return null;
   if (!innerMembers.length) return { outline, holes: [] };
@@ -424,6 +438,10 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
       (item.heightBasis === 'illustrative' && item.heightMeters !== ILLUSTRATIVE_HEIGHT)) continue;
     const outline = safeClientRing(item.outline);
     if (!outline || !outlineNearPoi(outline, place)) continue;
+    // Missing the audited courtyard is not equivalent to a solid roof,
+    // including when an older cached/API response omits its holes field.
+    if (item.sourceUrl === 'https://www.openstreetmap.org/relation/9246899' &&
+        item.holes === undefined) continue;
     // The client must revalidate ring containment and reject forged holes on
     // ordinary ways. Missing/invalid holes must never become a solid courtyard.
     if (item.holes !== undefined && !place.sourceUrl.includes('/relation/')) continue;
