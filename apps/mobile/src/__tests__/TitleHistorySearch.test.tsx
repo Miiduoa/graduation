@@ -91,6 +91,26 @@ test('searches the literal title and opens only the scoped post identifier', asy
   expect(confirmOpen).toHaveBeenCalledWith('pu', 'one', '  二手書  ');
 });
 
+test('a pending native post confirmation disables the actual card until safe retry', async () => {
+  const pending = deferred<boolean>();
+  confirmOpen.mockReturnValueOnce(pending.promise);
+  const view = panel(); enter(view);
+  await view.findByText('二手書 one');
+  const card = view.getByLabelText('開啟貼文：二手書 one');
+  expect(card.props.disabled).toBe(false);
+  fireEvent.press(card);
+  const waiting = view.getByLabelText('開啟貼文：二手書 one');
+  // Announcing disabled without disabling Pressable leaves VoiceOver,
+  // Switch Control and touch interactions with contradictory semantics.
+  expect(waiting.props.accessibilityState).toMatchObject({ busy: true, disabled: true });
+  expect(waiting.props.disabled).toBe(true);
+  fireEvent.press(waiting);
+  expect(confirmOpen).toHaveBeenCalledTimes(1);
+  await act(async () => { pending.resolve(false); });
+  expect(view.getByLabelText('開啟貼文：二手書 one').props.disabled).toBe(false);
+  expect(view.open).not.toHaveBeenCalled();
+});
+
 test('opening the same historical result twice rapidly navigates only once', async () => {
   const view = panel(); enter(view);
   await view.findByText('二手書 one');
