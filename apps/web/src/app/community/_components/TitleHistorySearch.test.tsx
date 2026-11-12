@@ -567,6 +567,22 @@ it('keeps Chinese IME candidate confirmation from submitting history search when
   expect(mocks.search).toHaveBeenCalledExactlyOnceWith('pu', '二手書', null);
 });
 
+
+it('does not send an IME draft when the browser dispatches submit before compositionend', () => {
+  render(<TitleHistorySearch schoolId="pu" />);
+  const field = screen.getByRole('searchbox');
+  const form = field.closest('form')!;
+  fireEvent.change(field, { target: { value: '二手' } });
+  fireEvent.compositionStart(field);
+  // Some mobile keyboards send form submit without a cancellable Enter keydown.
+  fireEvent.submit(form);
+  expect(mocks.search).not.toHaveBeenCalled();
+  fireEvent.compositionEnd(field);
+  fireEvent.change(field, { target: { value: '二手書' } });
+  fireEvent.submit(form);
+  expect(mocks.search).toHaveBeenCalledExactlyOnceWith('pu', '二手書', null);
+});
+
 it('warns immediately about an overlong Web title but accepts 80 Unicode code points', async () => {
   render(<TitleHistorySearch schoolId="pu" />);
   const field = screen.getByRole('searchbox');
