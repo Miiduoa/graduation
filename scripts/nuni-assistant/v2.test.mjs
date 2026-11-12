@@ -45,21 +45,31 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
         JSON.stringify(result.toolSteps),
       );
       assert.equal(result.simulation, true);
-      if (result.question === directReadQuestion) {
-        // This exact information request has a deterministic reader. The
-        // remaining cases still exercise the bounded model/tool loop below.
+      if ([3, 4].includes(result.caseId)) {
+        // These complete data queries deliberately bypass the model, while
+        // still requiring a successful reader and the fixture's actual data.
         assert.equal(result.modelCalls, 0);
         assert.deepEqual(result.usage, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+        assert.equal(result.orderCalls, 0);
         assert.deepEqual(result.tools, []);
-        assert.deepEqual(result.toolSteps.map((step) => step.name), ['get_schedule']);
-        assert.match(result.finalAnswer, /13:00–15:00\u3000資料結構｜資訊202/);
-        assert.match(result.finalAnswer, /來源：已同步的個人課表/);
-        assert.doesNotMatch(result.finalAnswer, /程式設計|語文館|請開啟/);
         assert.deepEqual(result.actionCards, []);
         assert.equal(result.fixtureWrites, 0);
-        assert.equal(result.orderCalls, 0);
+        const reader = result.caseId === 3 ? 'get_due_work' : 'get_schedule';
+        assert.deepEqual(
+          result.toolSteps.map(({ name, status }) => ({ name, status })),
+          [{ name: reader, status: 'ok' }],
+        );
+        if (result.caseId === 3) {
+          assert.match(result.finalAnswer, /樹與圖作業.*2026-11-05 23:59/);
+          assert.match(result.finalAnswer, /程式練習.*2026-11-07 23:59/);
+          assert.doesNotMatch(result.finalAnswer, /已交報告/);
+        } else {
+          assert.match(result.finalAnswer, /13:00–15:00.*資料結構.*資訊202/);
+          assert.match(result.finalAnswer, /來源：已同步的個人課表/);
+          assert.doesNotMatch(result.finalAnswer, /程式設計|語文館|請開啟/);
+        }
       } else {
-        assert.ok(result.modelCalls >= 1 && result.modelCalls <= 4, result.question);
+        assert.ok(result.modelCalls >= 1 && result.modelCalls <= 4);
       }
       assert.ok(result.usage.total_tokens <= 7000);
       assert.doesNotMatch(JSON.stringify(result), /"token":|Bearer |GROQ_API_KEY/);
@@ -73,7 +83,6 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
       ['list_clubs', 'get_club_feed'],
     );
     assert.ok(results[0].tools.some((t) => t.name === 'get_day_overview'));
-    assert.ok(results[2].tools.some((t) => t.name === 'get_due_work'));
     assert.ok(results[9].tools.some((t) => t.name === 'get_day_overview'));
     assert.equal(results[0].actionCards.length, 2);
     assert.equal(results[7].fixtureWrites, 1);
@@ -140,4 +149,38 @@ test('fake model failures recover, flatten the last request, sanitize args and b
   assert.match(recovered.answer, /依已查資料規劃如下|部分結果/);
   assert.doesNotMatch(recovered.answer, /A1|B2/);
   assert.match(recovered.answer, /未查到交通/);
+});
+
+test('direct private reads mark plain text responses, including an interrupted read', async () => {
+  const m = await modules();
+  const fixture = m.fixtureAdapter();
+  const ledger = fixture.snapshot();
+  ledger.records[0].title = '**課名** [校名](https://example.invalid)\n\u202E尾';
+  fixture.adapter.ledger = async () => ledger;
+  const base = {
+    question: '今天課表',
+    history: [],
+    binding: m.fixtureBinding,
+    adapter: fixture.adapter,
+    secret: m.FIXTURE_SECRET,
+    now: m.FIXTURE_NOW,
+    writes: true,
+    signal: new globalThis.AbortController().signal,
+    model: async () => assert.fail('a direct read must not call the model'),
+    log: () => {},
+  };
+  const result = await m.run(base);
+  assert.equal(result.dataRead, true);
+  assert.equal(result.modelCalls, 0);
+  assert.match(result.answer, /\*\*課名\*\* \[校名\]\(https:\/\/example\.invalid\)/);
+  assert.doesNotMatch(result.answer, /\u202E/);
+
+  const interrupted = await m.run({
+    ...base,
+    adapter: { ...fixture.adapter, ledger: async () => new Promise(() => {}) },
+    previewDeadlineMs: 10,
+  });
+  assert.equal(interrupted.dataRead, true);
+  assert.equal(interrupted.modelCalls, 0);
+  assert.match(interrupted.answer, /目前無法讀取已同步課表|課表目前未能讀取/);
 });

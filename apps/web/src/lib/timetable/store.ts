@@ -112,21 +112,28 @@ function readLocalSnapshot(ownerKey: string, schoolId: string, strictCourses = f
   if (!hasTimetableContent(parsed)) {
     throw new TimetableLocalReadError('corrupt');
   }
-  if (strictCourses && parsed.courses.some((course, index) => {
-    const clean = cleanCourses([course])[0];
-    return typeof course.name !== 'string' || !course.name.trim() ||
-      typeof course.id !== 'string' || !course.id ||
-      !Number.isInteger(course.day) || !Number.isInteger(course.start) || !Number.isInteger(course.end) ||
-      course.day !== clean.day || course.start !== clean.start || course.end !== clean.end ||
-      (course.teacher !== undefined && typeof course.teacher !== 'string') ||
-      (course.room !== undefined && typeof course.room !== 'string') ||
-      parsed.courses.slice(0, index).some((previous) => previous.id === course.id);
-  })) throw new TimetableLocalReadError('corrupt');
   // An unscoped legacy copy without an explicit school must never be claimed.
   // A mismatched scoped copy is potentially damaged and must remain untouched.
   if (parsed.schoolId !== schoolId) {
     if (scopedRaw !== null) throw new TimetableLocalReadError('corrupt');
     return { timetable: emptyTimetable(schoolId), found: false, scoped: false, recordedAt: 0 };
+  }
+  if (strictCourses) {
+    const ids = new Set<string>();
+    for (const course of parsed.courses) {
+      // Editor normalization may repair legacy input. A factual assistant read
+      // must never turn a damaged period into a plausible first-period lesson.
+      if (typeof course.name !== 'string' || !course.name.trim() ||
+          typeof course.id !== 'string' || !course.id.trim() ||
+          !Number.isInteger(course.day) || !Number.isInteger(course.start) || !Number.isInteger(course.end) ||
+          (course.teacher !== undefined && typeof course.teacher !== 'string') ||
+          (course.room !== undefined && typeof course.room !== 'string'))
+        throw new TimetableLocalReadError('corrupt');
+      const clean = cleanCourses([course])[0];
+      if (course.day !== clean.day || course.start !== clean.start || course.end !== clean.end || ids.has(clean.id))
+        throw new TimetableLocalReadError('corrupt');
+      ids.add(clean.id);
+    }
   }
   return {
     timetable: {
@@ -147,15 +154,17 @@ function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
   return readLocalSnapshot(ownerKey, schoolId).timetable;
 }
 
-/** A synchronous device-only read; this never fetches or adopts another account's copy. */
-export function readPersonalTimetableOnDevice(owner: string, schoolId: string): {
+/** A strict, read-only device snapshot; no cloud lookup, migration or normalization repair. */
+export function readPersonalTimetableOnDevice(schoolId: string, ownerKey: string): {
   timetable: StoredTimetable;
   found: boolean;
 } {
-  const legacyUid = owner.startsWith('school:') ? owner.slice('school:'.length) : '';
-  const key = legacyUid && !hasLocal(owner, schoolId) ? legacyUid : owner;
-  const { timetable, found } = readLocalSnapshot(key, schoolId, true);
-  return { timetable, found };
+  let snapshot = readLocalSnapshot(ownerKey, schoolId, true);
+  // Only the exact school identity may recover its own earlier uid namespace.
+  // Existing empty or damaged copies must never revive an older timetable.
+  const legacyUid = ownerKey.startsWith('school:') ? ownerKey.slice('school:'.length) : '';
+  if (!snapshot.found && legacyUid) snapshot = readLocalSnapshot(legacyUid, schoolId, true);
+  return { timetable: snapshot.timetable, found: snapshot.found };
 }
 
 export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';

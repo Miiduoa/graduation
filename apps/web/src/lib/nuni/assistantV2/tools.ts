@@ -1,5 +1,6 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { informationKinds } from './information';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
@@ -441,6 +442,7 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
     if (requested) domains.push([label, tool]);
   };
   add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(informationKinds(question).includes('orders'), '訂單進度', 'list_food_orders');
   add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
   add(/教材/.test(question), '教材', 'get_materials');
   add(/社團/.test(question), '社團', 'list_clubs');
@@ -485,6 +487,12 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  const information = informationKinds(question);
+  // A shortcut card cannot satisfy a request for facts already available to readers.
+  if (information.length || personalSlotSelect(question)) out.delete('propose_open_page');
+  if (information.includes('schedule')) add('get_schedule');
+  if (information.includes('work')) add('get_due_work');
+  if (information.includes('orders')) add('list_food_orders', 'get_food_order');
   // School grades stay on campus readers; imported records need an explicit local source.
   if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
   if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
@@ -521,6 +529,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
+  if (information.length && !foodOrderIntent(question) && !scheduleIntent(question) && !personalSlotSelect(question)) {
+    out.delete('propose_personal_event');
+    out.delete('propose_study_plan');
+  }
   // Prioritize the requested domain, retaining proposals for planning questions.
   if (foodOrderIntent(question)) {
     out.delete('get_today_context');
