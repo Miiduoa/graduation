@@ -64,6 +64,7 @@ export function hasIntegratedCourseCatalog(schoolId?: string | null): boolean {
 // Course-only destinations verified through https://nust.edu.tw/resource.php
 // and the universities' course offices on 2026-11-06.
 const additionalPublicCourses = new Map<string, { label: string; url: string }>([
+  ['ncnu', { label: '暨南大學本學期開設課程', url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' }],
   ['ncue', { label: '彰師大開課課程查詢', url: 'https://webap0.ncue.edu.tw/DEANV2/Other/OB010' }],
   ['ncut', { label: '勤益科大本學期開課查詢', url: 'https://nmsd.ncut.edu.tw/wbcmss/Query/CourseView' }],
   ['ncyu', { label: '嘉義大學全校課程查詢', url: 'https://web085003.adm.ncyu.edu.tw/pub_course.aspx' }],

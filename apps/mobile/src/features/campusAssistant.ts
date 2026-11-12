@@ -40,7 +40,7 @@ type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; chec
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action' | 'school-directory';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory' | 'saved-academics' | 'calendar-action';
   route?: string;
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;

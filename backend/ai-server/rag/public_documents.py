@@ -11,6 +11,8 @@ PUBLIC_FIELDS = {
     "announcements": ("title", "body", "content", "source", "category", "publishedAt"),
     "events": ("title", "description", "location", "startsAt", "endsAt", "organizer"),
     "courses": ("name", "code", "teacher", "description", "credits", "department"),
+    "cafeterias": ("name", "location", "openingHours", "description"),
+    "menuItems": ("name", "description", "price", "category", "cafeteria"),
     "menus": ("name", "description", "price", "category", "cafeteria"),
     "pois": ("name", "category", "description", "address", "openingHours"),
 }
@@ -31,14 +33,18 @@ def retrieval_filter(school_id: object = None) -> dict:
         return app_help
     public_school = {"$and": [
         {"schoolId": school},
-        {"visibility": "public"},
         {"source": {"$in": [f"firestore:{name}" for name in PUBLIC_FIELDS]}},
     ]}
     return {"$or": [app_help, public_school]}
 
 
+def is_public_visibility(value: object) -> bool:
+    """Known public collections stay public when the marker is absent."""
+    return value is None or value == "public"
+
+
 def public_document(collection: str, data: dict, document_id: str) -> dict | None:
-    if collection not in PUBLIC_FIELDS or not isinstance(data, dict) or data.get("visibility") != "public":
+    if collection not in PUBLIC_FIELDS or not isinstance(data, dict) or not is_public_visibility(data.get("visibility")):
         return None
     school = public_school_id(data.get("schoolId"))
     if not school:
