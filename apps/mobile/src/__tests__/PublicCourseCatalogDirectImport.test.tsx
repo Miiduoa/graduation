@@ -87,7 +87,9 @@ test('a Monday filter still reviews and imports both Monday and Thursday meeting
 
 test.each(['nthu', 'ncnu'] as const)('duplicate %s periods stay visible but never expose direct import or clipboard', async (schoolId) => {
   mockScope = { owner: 'guest:device', schoolId };
-  const sourceUrl = resolvePublicCourseOperation(schoolId)!.sourceUrl;
+  const operation = resolvePublicCourseOperation(schoolId, 2)!;
+  const sourceUrl = operation.sourceUrl;
+  const filters = { weekday: schoolId === 'nthu' ? 1 : 4 };
   const original = schoolId === 'nthu' ? nthu : ncnu;
   const invalid: PublicCatalogCourse = schoolId === 'nthu'
     ? { ...original, title: '重複時段課程', time: 'M3M4\nM4M5', room: '教室甲\n教室乙', meetings: [
@@ -96,10 +98,11 @@ test.each(['nthu', 'ncnu'] as const)('duplicate %s periods stay visible but neve
     : { ...original, title: '重複時段課程', time: '4ef4fg' };
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
-      schoolId, sourceUrl, truncated: false, courses: [invalid],
+      schoolId, sourceUrl, truncated: false, courses: [invalid], filters, unresolvedCount: 0,
+      operation: { id: operation.id, version: 2, responseSchemaVersion: 2, access: operation.access },
     }),
   });
-  const view = render(<PublicCourseCatalogScreen schoolId={schoolId} initialQuery={original.code} />);
+  const view = render(<PublicCourseCatalogScreen schoolId={schoolId} initialQuery={original.code} initialFilters={filters} />);
   expect(await view.findByText('重複時段課程')).toBeTruthy();
   expect(view.getByText(/上課節次尚無法安全匯入/)).toBeTruthy();
   expect(view.queryByRole('button', { name: '核對並加入課表' })).toBeNull();

@@ -65,7 +65,7 @@ test('duplicate weekday-periods in the same public course require manual review,
   };
   for (const time of ['1ab1bc', '1abb', '1ab1ab']) {
     for (const semester of ['1151', '1161']) {
-      assert.equal(ncnuCourseMeetings(time, semester), null, time + semester);
+      assert.ok(ncnuCourseMeetings(time, semester));
       assert.equal(ncnuTimetableImportCsv({ ...sample, time, semester }), null);
     }
   }

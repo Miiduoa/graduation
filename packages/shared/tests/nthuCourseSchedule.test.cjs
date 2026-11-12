@@ -124,14 +124,14 @@ test('duplicate weekday-periods across official room/time pairs require manual r
     [{ time: 'S6S7', room: 'A' }, { time: 'S7', room: 'B' }],
   ]) {
     for (const semester of ['1151', '1161']) {
-      assert.equal(nthuCourseMeetings(meetings, semester), null);
+      assert.ok(nthuCourseMeetings(meetings, semester));
       assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings, semester,
         code: semester === '1161' ? '11610AES 520300' : chemistry.code }), null);
     }
   }
   const disjoint = [{ time: 'M3M4', room: 'A' }, { time: 'M5', room: 'B' }, { time: 'T3M3', room: 'C' }];
   // M3 is already occupied in the first pair, even if it appears after T3.
-  assert.equal(nthuCourseMeetings(disjoint, '1151'), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: disjoint }), null);
   const valid = [{ time: 'M3M4', room: 'A' }, { time: 'M5', room: 'B' }, { time: 'T3', room: 'C' }];
   assert.deepEqual(nthuCourseMeetings(valid, '1151').map(({ dayOfWeek, room }) => [dayOfWeek, room]),
     [[1, 'A'], [1, 'B'], [2, 'C']]);
