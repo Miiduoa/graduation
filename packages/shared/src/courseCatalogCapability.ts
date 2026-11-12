@@ -8,7 +8,7 @@ import { resolveSchoolPublicServices } from './schoolPublicServices';
  * Public course links are verified separately;
  * those links are not evidence of private academic / in-app catalog capability.
  */
-export type CourseCatalogProviderId = 'pu-mypu';
+export type CourseCatalogProviderId = 'pu-mypu' | 'ncnu-public';
 
 export type CourseCatalogCapability = {
   providerId: CourseCatalogProviderId;
@@ -31,6 +31,12 @@ const INTEGRATED_CATALOG_BY_PUBLIC_ID = Object.assign(
       label: '靜宜大學課綱查詢系統',
       officialQueryUrl: PU_INTEGRATED_CATALOG_URL,
     },
+    ncnu: {
+      providerId: 'ncnu-public' as const,
+      schoolId: 'ncnu',
+      label: '暨南大學本學期開設課程',
+      officialQueryUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall',
+    },
   },
 );
 
@@ -40,7 +46,7 @@ function lookupIntegratedCatalog(publicId: string): CourseCatalogCapability | nu
     return null;
   }
   const capability = INTEGRATED_CATALOG_BY_PUBLIC_ID[publicId];
-  return capability?.providerId === 'pu-mypu' && capability.schoolId === 'pu' ? capability : null;
+  return capability?.schoolId === publicId ? capability : null;
 }
 
 export function resolveCourseCatalogCapability(
@@ -92,7 +98,7 @@ export function resolveOfficialCourseQueryLink(
   return null;
 }
 
-/** Providence myPU catalog remains the only integrated provider today. */
+/** Only Providence accepts the myPU syllabus query format. */
 export function isPuCourseCatalogSchool(schoolId?: string | null): boolean {
   return isProvidenceSchoolId(schoolId);
 }
@@ -101,6 +107,7 @@ export function unsupportedCourseCatalogMessage(
   schoolId?: string | null,
   schoolName?: string | null,
 ): string {
+  if (schoolId === 'ncnu') return '請開啟「暨大開課查詢」搜尋本學期公開課程。';
   const resolvedName =
     (typeof schoolName === 'string' && schoolName.trim()) ||
     findSchoolById(toPublicSchoolId(schoolId) ?? undefined)?.name ||
