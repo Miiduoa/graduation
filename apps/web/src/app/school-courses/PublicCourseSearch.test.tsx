@@ -637,3 +637,21 @@ it.each([
   expect(screen.queryByRole('button', { name: '帶入課表核對' })).toBeNull();
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
 });
+
+it.each(['ncnu', 'nthu'] as const)('keeps a public %s course readable but blocks a duplicate weekday-period import', async (schoolId) => {
+  const original = schoolId === 'ncnu' ? course : nthuCourse;
+  const invalid = schoolId === 'ncnu'
+    ? { ...original, time: '5bc5cd', title: '重複節次測試課程' }
+    : { ...original, title: '重複節次測試課程', meetings: [
+        { time: 'M3M4', room: '教室甲' }, { time: 'M4M5', room: '教室乙' },
+      ] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([invalid], { schoolId })));
+  render(<PublicCourseSearch {...(schoolId === 'ncnu' ? props : nthuProps)} />);
+  submit('重複');
+  const heading = await screen.findByRole('heading', { name: '重複節次測試課程' });
+  const card = heading.closest('li')!;
+  expect(within(card).getByText(/上課節次尚無法安全匯入/)).toBeTruthy();
+  expect(within(card).queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(within(card).queryByRole('button', { name: '複製課表匯入資料' })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
