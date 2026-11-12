@@ -98,7 +98,7 @@ test.each(['nthu', 'ncnu'] as const)('duplicate %s periods stay visible but neve
     : { ...original, title: '重複時段課程', time: '4ef4fg' };
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
-      schoolId, sourceUrl, truncated: false, courses: [invalid], filters, unresolvedCount: 0,
+      schoolId, sourceUrl, fetchedAt: '2026-11-07T08:00:00.000Z', truncated: false, courses: [invalid], filters, unresolvedCount: 0,
       operation: { id: operation.id, version: 2, responseSchemaVersion: 2, access: operation.access },
     }),
   });
