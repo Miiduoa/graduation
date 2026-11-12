@@ -330,33 +330,19 @@ it('drops a building preview when its selected campus location is withdrawn', as
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
 });
 
-it('keeps floor-plan modelling off Providence stops, nodes and unverified parking ways', async () => {
-  const byId = (id: string) => PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === id)!;
-  const library = byId('pu-library'); // Cross-checked OSM building way
-  const dorm = byId('pu-xijia'); // Cross-checked OSM building relation
-  const health = byId('pu-health'); // Cross-checked location, but only an OSM node
-  const parking = byId('pu-parking-p1'); // A single-source way, not an audited building
-  const gate = byId('pu-gate-osm'); // Unverified entrance node
-  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
-  render(<CampusSpatialExplorer school="pu" locations={[library, dorm, health, parking, gate]}
-    selected={gate} onSelect={vi.fn()} />);
-  const dialog = await open();
-  const previewButton = () => within(dialog).queryByRole('button', { name: '平面圖建模預覽' });
-  expect(previewButton()).toBeNull();
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  for (const id of [health.id, parking.id]) {
-    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: id } });
-    expect(previewButton()).toBeNull();
-  }
-  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: library.id } });
-  expect(previewButton()).toBeTruthy();
-  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: dorm.id } });
-  expect(previewButton()).toBeTruthy();
-  fireEvent.click(previewButton()!);
-  const preview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
-  expect(preview.textContent).toContain('希嘉學苑');
-  expect(screen.getAllByRole('dialog')).toHaveLength(1);
-});
+it.each(['pu-library', 'pu-xijia', 'pu-health', 'pu-parking-p1', 'pu-gate-osm'])(
+  'keeps floor-plan modelling available for Providence location %s regardless of source type', async (id) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((candidate) => candidate.id === id)!;
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+    render(<CampusSpatialExplorer school="pu" locations={[place]} selected={place} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
+    const preview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+    expect(preview.textContent).toContain(place.name);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  },
+);
 
 it('adds source-checked Providence building shapes without changing navigation or hiding source dates', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
@@ -773,7 +759,7 @@ it('retries Providence building data after a temporary outage without closing th
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('withdraws expired 3D on tab resume and shows it again only after a valid refresh', async () => {
+it('refreshes an expired snapshot on tab resume and replaces it only after success', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -813,12 +799,10 @@ it('withdraws expired 3D on tab resume and shows it again only after a valid ref
     // A suspended device can pass the seven-day deadline before timers fire.
     clock += 6 * day;
     fireEvent(window, new Event('pageshow'));
-    expect(await within(dialog).findByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+    expect(await within(dialog).findByText(/正在檢查更新/)).toBeTruthy();
     const previousSceneCount = scene.create.mock.calls.length;
-    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    expect(within(dialog).queryByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeNull();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
     fireEvent(document, new Event('visibilitychange'));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const updatedBuildings = buildings.map((building) => ({ ...building, heightMeters: building.heightMeters + 1, heightBasis: 'osm-tag' as const }));
@@ -839,7 +823,7 @@ it('withdraws expired 3D on tab resume and shows it again only after a valid ref
   }
 });
 
-it.each(['visibilitychange', 'timer'])('withdraws 3D at the earlier OSM replication deadline via %s when refresh is expired', async (trigger) => {
+it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication deadline via %s and retains geometry when the response is expired', async (trigger) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -877,11 +861,10 @@ it.each(['visibilitychange', 'timer'])('withdraws 3D at the earlier OSM replicat
     } else {
       fireEvent(document, new Event('visibilitychange'));
     }
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(within(dialog).getByText(/超過七天來源期限/)).toBeTruthy();
-    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).queryByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeNull();
+    expect(await within(dialog).findByText(/更新未成功，仍顯示先前/)).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   } finally {
@@ -890,7 +873,7 @@ it.each(['visibilitychange', 'timer'])('withdraws 3D at the earlier OSM replicat
   }
 });
 
-it.each(['failure', 'timeout'])('does not restore expired 3D geometry after refresh %s', async (outcome) => {
+it.each(['failure', 'timeout'])('retains an expired stale outline after refresh %s', async (outcome) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -928,20 +911,12 @@ it.each(['failure', 'timeout'])('does not restore expired 3D geometry after refr
 
     clock += 2 * 60_000;
     fireEvent(window, new Event('pageshow'));
-    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    expect(within(dialog).getByText(/超過七天來源期限/)).toBeTruthy();
-    expect(within(dialog).getByText(/正在檢查更新；完成前不會顯示過期輪廓/)).toBeTruthy();
-    // While a request is in flight, the expired-volume fallback must not
-    // expose an enabled retry that cancels and restarts the public OSM fetch.
-    const retryWhilePending = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }) as HTMLButtonElement;
-    expect(retryWhilePending.disabled).toBe(true);
-    fireEvent.click(retryWhilePending);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    // React removes the expired UI immediately; replacing the lazy-loaded
-    // WebGL scene completes asynchronously. Assert the actual scene update,
-    // not merely the earlier status render, before checking failed refresh.
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
-    expect(scene.dispose).toHaveBeenCalled();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    fireEvent.click(retry);
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     if (outcome === 'timeout') {
       const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
@@ -949,15 +924,11 @@ it.each(['failure', 'timeout'])('does not restore expired 3D geometry after refr
       act(() => { (requestTimer![0] as () => void)(); });
     }
     await act(async () => { rejectRefresh(new Error('offline after snapshot expiry')); });
-    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    expect(within(dialog).queryByText(/更新未成功，仍顯示先前/)).toBeNull();
-    expect(within(dialog).getByText(/超過七天來源期限/)).toBeTruthy();
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
-    // A failed or timed-out request releases the manual retry while retaining
-    // the marker-only state and never reintroducing expired geometry.
-    await waitFor(() => expect((within(dialog).getByRole('button', {
-      name: '重新讀取建築輪廓',
-    }) as HTMLButtonElement).disabled).toBe(false));
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/更新未成功，仍顯示先前/)).toBeTruthy();
+    expect(retry.disabled).toBe(false);
+    expect(within(dialog).getByText(new RegExp(`資料讀取：${new Date(clock - 7 * day - 60_000).toISOString().slice(0, 10)}`))).toBeTruthy();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
     timerSpy.mockRestore();

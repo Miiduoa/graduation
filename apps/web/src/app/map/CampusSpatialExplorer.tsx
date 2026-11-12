@@ -214,7 +214,6 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintStale, setFootprintStale] = useState(false);
   const [footprintRefreshing, setFootprintRefreshing] = useState(false);
   const [footprintRefreshFailed, setFootprintRefreshFailed] = useState(false);
-  const [footprintExpired, setFootprintExpired] = useState(false);
   const staleSnapshotRef = useRef(false);
   // Refresh previously valid snapshots at their deadline, including in suspended tabs.
   const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
@@ -238,14 +237,6 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }, []);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
-  // The floor-plan editor models a BUILDING, not an arbitrary map point.
-  // At Providence only bundled, cross-checked OSM building ways/relations
-  // can open it. Keep other schools' existing flow unchanged until they have
-  // their own verified building-source mapping.
-  const canPreviewBuilding = place !== undefined && (school !== 'pu' ||
-    (source !== null &&
-      /^https:\/\/www\.openstreetmap\.org\/(?:way|relation)\/[1-9]\d*$/.test(source) &&
-      !isProvidencePendingVerification(school, place)));
   // The map can be filtered while a spatial dialog remains open. Never count,
   // attribute or frame OSM buildings whose POIs are no longer in that view.
   const visibleFootprints = useMemo(() => {
@@ -295,26 +286,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
       if (now >= footprintClock.expiresAt) {
-        // The seven-day limit is a hard provenance boundary, even if a tab
-        // slept through its timer. An expired outline must not remain visible
-        // while the API is offline, cooling down, or still being refreshed.
-        // Keep the independent POI markers and walking links available.
+        // Refresh once at the deadline, retaining the verified geometry and dates.
+        // A pending refresh already serves this purpose; do not restart it on resume.
         footprintExpiresAtRef.current = null;
-        staleSnapshotRef.current = false;
+        staleSnapshotRef.current = true;
         setFootprintClock(null);
-        setFootprints([]);
-        setFootprintDate(null);
-        setFootprintBaseDate(null);
-        setFootprintStale(false);
-        // A refresh already in flight must keep the retry control disabled
-        // after the old 3D source is withdrawn. Otherwise repeated taps abort
-        // and restart the same public-source check while it is still pending.
-        setFootprintRefreshing(footprintRequestActiveRef.current);
-        setFootprintRefreshFailed(false);
-        setFootprintExpired(true);
-        setFootprintStatus('unavailable');
-        // Refresh at most once; an existing request may still complete with
-        // a NEW independently validated snapshot. Never restart it here.
+        setFootprintStale(true);
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
@@ -341,9 +318,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
-    // Only an unexpired, dated stale snapshot may survive a refresh failure.
-    const preserveStale = staleSnapshotRef.current &&
-      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
+    // A local age deadline must not discard a previously verified outline.
+    const preserveStale = staleSnapshotRef.current;
     footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
@@ -357,8 +333,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
-        Date.now() < footprintExpiresAtRef.current;
+      const keepStale = preserveStale;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
@@ -404,16 +379,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         });
         setFootprintRefreshing(false);
         setFootprintRefreshFailed(false);
-        setFootprintExpired(false);
         setFootprintStatus('ready');
       })
       .catch(() => {
         if (!active || timedOut) return;
-        // A dated stale snapshot may survive failures only inside the seven-day
-        // hard limit. Expired data and first-load failures stay marker-only.
+        // Keep the previously verified snapshot even after its refresh deadline.
+        // Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
-          Date.now() < footprintExpiresAtRef.current;
+        const keepStale = preserveStale;
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
@@ -431,7 +404,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
-  if (buildingPlanOpen && canPreviewBuilding && place) {
+  if (buildingPlanOpen && place) {
     return <BuildingPlanPreview
       key={`${school}:${place.id}`}
       schoolId={school}
@@ -486,13 +459,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
                 {footprintStatus === 'unavailable' && <>
                   <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
-                  {footprintExpired && <span>先前的建築輪廓已超過七天來源期限，為避免將過期資料當成現況，已停止顯示。</span>}
-                  {footprintRefreshing && <span>正在檢查更新；完成前不會顯示過期輪廓。</span>}
                   {footprintRetryAfter !== null && <span>
                     來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
                   <button className={styles.retryFootprints} type="button"
-                    disabled={footprintRetryAfter !== null || footprintRefreshing}
+                    disabled={footprintRetryAfter !== null}
                     onClick={() => setFootprintAttempt((value) => value + 1)}>
                     重新讀取建築輪廓
                   </button>
@@ -599,7 +570,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
-                {canPreviewBuilding && <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>}
+                <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
               </> : <p className={styles.note} role="status">請選擇地點，確認位置後再開啟導航。</p>}
