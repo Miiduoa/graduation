@@ -21,17 +21,13 @@ const ACCEPTANCE_TOOLS: Record<string, string[]> = {
   ],
   '這禮拜有什麼要交的': [
     'get_today_context',
-    'propose_open_page',
     'get_due_work',
     'get_day_overview',
     'get_course_work',
     'find_free_time',
-    'propose_personal_event',
-    'propose_study_plan',
   ],
   '下一堂課在哪，幾點': [
     'get_today_context',
-    'propose_open_page',
     'get_schedule',
     'get_calendar',
     'find_free_time',
@@ -51,7 +47,6 @@ const ACCEPTANCE_TOOLS: Record<string, string[]> = {
   '有什麼未讀通知': ['get_today_context', 'propose_open_page'],
   '剛剛那份最急的，今晚八點幫我留一小時寫': [
     'get_today_context',
-    'propose_open_page',
     'get_due_work',
     'get_day_overview',
     'get_course_work',

@@ -32,6 +32,7 @@ import { assistantCalendarOwner, createAssistantCalendarTask, findPersistedAssis
   recheckAssistantCalendarTask, sameAssistantCalendarEvent,
   type AssistantCalendarTask } from '../services/assistantCalendarExecution';
 import { isNuniCampusPlanningQuestion } from '../services/nuniCampusPlanner';
+import { nuniAssistantDataIntent } from '../services/nuniAssistantDataRead';
 
 export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
 
@@ -40,7 +41,7 @@ type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; chec
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory' | 'saved-academics' | 'calendar-action';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory' | 'saved-academics' | 'calendar-action' | 'platform-data';
   route?: string;
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
@@ -163,7 +164,7 @@ export async function askCampusAssistant(input: {
     // forwarded, together with their preceding question, to a later model.
     .filter((message, index, history) => {
       const privateRead = (item?: CampusAssistantMessage) => !!item &&
-        (!!item.courseworkRead || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action'].includes(item.tool ?? ''));
+        (!!item.courseworkRead || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action', 'platform-data'].includes(item.tool ?? ''));
       return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
     })
     .map((message) => ({
@@ -386,6 +387,18 @@ export async function askCampusAssistant(input: {
     if (!gapQuery && (refiningGap || isSavedClassGapQuestion(question))) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false, route: '/timetable',
         content: '這個空堂條件還無法完整辨識，這次沒有套用。可以查今天、明天或後天，並指定「下午三點半以後」、「15:30–17:00」或「至少 45 分鐘」。若條件互相衝突，請重新問完整問題，例如「明天下午有哪些空堂？」。' };
+    }
+    const dataIntent = platform && !classQuery && !gapQuery ? nuniAssistantDataIntent(question) : null;
+    if (platform && dataIntent) {
+      const { readNuniAssistantData } = require('../services/nuniAssistantDataRead') as typeof import('../services/nuniAssistantDataRead');
+      const answer = await abortableCampusRead(() => readNuniAssistantData({
+        question, schoolId: input.scope.schoolId, platformTimetable: platform,
+        ...input.courseworkRequests, isCurrent: input.isCurrent, signal: input.signal,
+      }, dataIntent), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { ...(answer ?? { tool: 'platform-data', content: '資料在查詢期間已更新，請重新查詢一次，讓我核對最新內容。' }),
+        source: 'device', hasActions: false };
     }
     if (platform && !classQuery && !gapQuery) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,

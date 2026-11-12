@@ -6,6 +6,7 @@ import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
+import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
@@ -115,7 +116,7 @@ export function AssistantThread({
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (canAnswerAssistantLocally(question) || (consent && ready));
+    (canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -148,7 +149,7 @@ export function AssistantThread({
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
         <>
-          <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>直接查課程、時間、教室與未交作業。安排事情時會先列出內容，確認後再處理。</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -158,7 +159,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          模型目前無法使用。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程與已接通的 nuni 作業。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (

@@ -13,7 +13,7 @@ import {
 import { readPersonalImports, type PersonalImportScope } from './personalImports';
 
 export type LocalAssistantResult = {
-  kind: 'services' | 'academics';
+  kind: 'services' | 'academics' | 'personal';
   content: string;
   serviceIds: AssistantServiceId[];
 };
