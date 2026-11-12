@@ -450,8 +450,14 @@ function isStandingBuilding(value: unknown): boolean {
         !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
   }
   const condition = tags?.['building:condition'];
-  if (condition !== undefined && (typeof condition !== 'string' || !condition.trim() ||
-      RUINOUS_BUILDING_CONDITIONS.has(condition.trim().toLowerCase()))) return false;
+  if (condition !== undefined) {
+    if (typeof condition !== 'string') return false;
+    const state = condition.trim().toLowerCase();
+    // Multiple condition claims may contradict one another (e.g. good;ruinous).
+    // This scene draws one intact roof, not a partly damaged volume; do not
+    // certify any composite/ambiguous condition without a source review.
+    if (!state || /[;,|]/.test(state) || RUINOUS_BUILDING_CONDITIONS.has(state)) return false;
+  }
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
     // OSM lifecycle flags are usually strings. A present but unrecognized

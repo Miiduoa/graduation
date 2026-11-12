@@ -253,3 +253,7 @@ OSM 可能同時保有 `building=yes` 與 `building:condition=*`；完整建築�
 公開 Overpass 或中介閘道在過載時可能回傳 HTTP 502／504（不只 429／503）。先前這兩種錯誤會直接走一般 10 分鐘遞增重試，即使回應有合法 `Retry-After` 也被忽略。現在將 502／504 納入既有的上游冷卻處理：有 `Retry-After` 時遵守原本 10 分鐘至 24 小時的界限，無有效指示時沿用遞增失敗退避；同一個 Node 程序內冷卻期間不重複查詢。保留七天限制內且明示日期的過期 3D 快照，否則回到 POI／平面地圖，不推測建築與路線。
 
 新增合成 HTTP 502／504 正反回歸：分別驗證 3600／1800 秒來源指示、無標頭時 600 秒、冷卻截止前不回源、到期後成功恢復，以及已有來源快照時 HTTP 200／`stale=true`／`private, no-store` 的退路。這些測試不代表已實際連線到公開 Overpass，也未量測靜宜建築、找教室、步行路線或手機效能；本 commit 的 CI／Campus Spatial Browser／CodeQL 必須以其最新 head 結果為準。
+
+### 複合建築現況不得被解讀成完好量體（2026-11-13）
+
+當已核對 OSM way 同時回報單一 `building=yes` 與含分號、逗號或管線符號的複合 `building:condition`（例如 `good;ruinous`、`renovated,mainly_ruinous`、甚至 `good;preserved`）時，解析器不再將它們當成已確認的完好校舍來擠出 3D。單一有效的 `good`／`preserved`／`renovated`／`reconstructed` 與未標記情境仍不受影響。原有已核對地點與外部導航保留，不據此推斷靜宜建築損壞。新增合成標籤 Vitest，包含六種複合條件的拒絕與大寫／空白單值的接受；實際 Overpass、校園現地和競品同條件驗收仍未取得。

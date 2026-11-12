@@ -517,9 +517,21 @@ describe('Providence OSM building outlines', () => {
         })],
       }), String(condition)).toEqual([]);
     }
+    // Multi-valued states cannot prove a single intact building, even when
+    // one token is valid. These are synthetic conflicts, not real campus data.
+    for (const condition of [
+      'good;ruinous', 'ruinous;good', 'renovated,mainly_ruinous',
+      'preserved|partly_ruinous', 'good;preserved', '  ;  ',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:condition': condition,
+        })],
+      }), condition).toEqual([]);
+    }
     // Normal upkeep, a documented renovation, and no condition tag do not
     // invalidate a standing building that independently passed all checks.
-    for (const condition of ['good', 'preserved', 'renovated', 'reconstructed']) {
+    for (const condition of ['good', 'preserved', 'renovated', 'reconstructed', ' GOOD ']) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, {
           building: 'school', 'building:condition': condition,
