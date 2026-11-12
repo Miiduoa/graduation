@@ -19,7 +19,18 @@ export function reuseUnchangedProvidenceFootprints(
     if (before.name !== after.name || before.sourceUrl !== after.sourceUrl ||
         before.heightMeters !== after.heightMeters || before.heightBasis !== after.heightBasis ||
         before.osmVersion !== after.osmVersion || before.osmEditedAt !== after.osmEditedAt ||
-        before.outline.length !== after.outline.length) return next;
+        before.outline.length !== after.outline.length ||
+        (before.holes?.length ?? 0) !== (after.holes?.length ?? 0)) return next;
+    // Changing a courtyard must recreate the GPU geometry even when the
+    // outer building shape and source metadata are identical.
+    for (let h = 0; h < (after.holes?.length ?? 0); h += 1) {
+      const oldHole = before.holes?.[h];
+      const newHole = after.holes![h];
+      if (!oldHole || oldHole.length !== newHole.length) return next;
+      for (let k = 0; k < newHole.length; k += 1) {
+        if (oldHole[k][0] !== newHole[k][0] || oldHole[k][1] !== newHole[k][1]) return next;
+      }
+    }
     for (let j = 0; j < after.outline.length; j += 1) {
       if (before.outline[j][0] !== after.outline[j][0] ||
           before.outline[j][1] !== after.outline[j][1]) return next;
