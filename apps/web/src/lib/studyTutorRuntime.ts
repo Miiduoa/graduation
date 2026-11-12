@@ -123,7 +123,11 @@ function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
   if (!explanation.steps) return false;
   const seen = new Set<string>();
   for (const step of explanation.steps) {
-    const content = comparableGeneratedTeaching(step.explanation);
+    // A new step that only changes the closing punctuation does not give the
+    // student another explanation. Leave internal punctuation untouched:
+    // operators, decimal points and formula syntax can change the meaning.
+    const content = comparableGeneratedTeaching(step.explanation)
+      .replace(/[.!?。！？；;：:，、]+$/gu, '').trim();
     if (!content || seen.has(content)) return false;
     seen.add(content);
   }

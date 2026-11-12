@@ -371,6 +371,55 @@ describe('explicit local study generation', () => {
     await expect(retry).resolves.toEqual(lesson());
   });
 
+  it.each([
+    { label: 'Chinese full stop to exclamation', punctuation: '！' },
+    { label: 'Chinese full stop to ASCII question mark', punctuation: '?' },
+    { label: 'Chinese full stop to trailing punctuation sequence', punctuation: '！？' },
+  ])('rejects cosmetic $label in NEW steps while keeping old lessons readable', async ({ punctuation }) => {
+    const repeated = {
+      ...lesson(),
+      steps: [
+        lesson().steps![0],
+        {
+          ...lesson().steps![1],
+          title: '改標題與引句，卻沒教新內容',
+          explanation: '辨識唯一的紀錄' + punctuation,
+        },
+      ],
+    };
+    // Saved v1/v2 lessons retain their original permissive parser.
+    expect(parseTutorExplanation(JSON.stringify(repeated), passage()).steps).toHaveLength(2);
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(repeated) });
+    await expect(pending).rejects.toThrow('重複相同的教學步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
+  it('does not confuse distinct mathematical operations with punctuation-only duplicates', async () => {
+    const equations = {
+      ...lesson(),
+      steps: [
+        { ...lesson().steps![0], explanation: 'x - 1 = 2。' },
+        { ...lesson().steps![1], explanation: 'x + 1 = 2！' },
+      ],
+    };
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(equations) });
+    await expect(pending).resolves.toEqual(equations);
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects invisible Unicode changes that disguise a duplicate lesson step', async () => {
     const original = lesson().steps![0];
     const duplicated = {
