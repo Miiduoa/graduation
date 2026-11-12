@@ -31,6 +31,58 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('accepts only a single closed outer way in an audited multipolygon relation', () => {
+    // All coordinates and the height are synthetic test fixtures, not a field survey.
+    const dormOutline = [
+      { lat: 24.22797, lon: 120.58062 },
+      { lat: 24.22797, lon: 120.58072 },
+      { lat: 24.22807, lon: 120.58072 },
+      { lat: 24.22807, lon: 120.58062 },
+      { lat: 24.22797, lon: 120.58062 },
+    ];
+    const member = { type: 'way', ref: 123456, role: 'outer', geometry: dormOutline };
+    const relation = (members: unknown, tags: unknown = {
+      type: 'multipolygon', building: 'dormitory', height: '16',
+    }) => ({ type: 'relation', id: 9246899, tags, members });
+    const parsed = parseProvidenceOsmFootprints({ elements: [relation([member])] });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      poiId: 'pu-xijia', name: '希嘉學苑',
+      sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+      heightMeters: 16, heightBasis: 'osm-tag',
+    });
+    expect(parsed[0].outline).toHaveLength(4);
+    expect(parsed[0]).not.toHaveProperty('osmVersion');
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: parsed,
+    })).toEqual(parsed);
+
+    const invalidMembers: unknown[] = [
+      [], [member, member],
+      [member, { ...member, ref: 123457, role: 'inner' }],
+      [{ ...member, role: 'inner' }],
+      [{ ...member, geometry: dormOutline.slice(0, -1) }],
+      [{ ...member, geometry: [dormOutline[0], dormOutline[2], dormOutline[1],
+        dormOutline[3], dormOutline[0]] }],
+    ];
+    for (const members of invalidMembers) {
+      expect(parseProvidenceOsmFootprints({ elements: [relation(members)] })).toEqual([]);
+    }
+    for (const tags of [
+      { type: 'site', building: 'dormitory' },
+      { type: 'multipolygon', building: 'no' },
+      { type: 'multipolygon', building: 'roof' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({ elements: [relation([member], tags)] })).toEqual([]);
+    }
+    expect(parseProvidenceOsmFootprints({ elements: [
+      relation([member]), relation([member], { type: 'multipolygon', building: 'yes' }),
+    ] })).toEqual([]);
+    expect(parseProvidenceOsmFootprints({ elements: [
+      { ...relation([member]), id: 1111111 },
+    ] })).toEqual([]);
+  });
+
   it('uses an illustrative height only when height is absent, never for an explicit unknown unit', () => {
     const levelsOnly = parseProvidenceOsmFootprints({
       elements: [way(255784049, library, { building: 'yes', 'building:levels': '8' })],
