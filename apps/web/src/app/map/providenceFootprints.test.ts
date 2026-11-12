@@ -145,6 +145,46 @@ describe('Providence OSM building outlines', () => {
     })).toEqual([]);
   });
 
+  it('parses the audited 2026-11-12 OSM snapshot of Xijia with its real inner courtyard', () => {
+    // Source: https://api.openstreetmap.org/api/0.6/relation/9246899/full
+    // These coordinates are from an OSM snapshot, NOT a survey of current
+    // physical elevations, entrances or rooms; © OpenStreetMap contributors.
+    const coordinates = (pairs: Array<[number, number]>) =>
+      pairs.map(([lon, lat]) => ({ lon, lat }));
+    const outer = coordinates([
+      [120.5805085, 24.2287119], [120.5800933, 24.2274031],
+      [120.5802612, 24.2273588], [120.5803186, 24.2275397],
+      [120.5804542, 24.2275039], [120.5803975, 24.2273252],
+      [120.5805624, 24.2272817], [120.5809769, 24.2285882],
+      [120.5807994, 24.2286350], [120.5807446, 24.2284623],
+      [120.5806209, 24.2284949], [120.5806757, 24.2286678],
+      [120.5805085, 24.2287119],
+    ]);
+    const inner = coordinates([
+      [120.5803075, 24.2277138], [120.5805060, 24.2283547],
+      [120.5806389, 24.2283204], [120.5804404, 24.2276796],
+      [120.5803075, 24.2277138],
+    ]);
+    const parsed = parseProvidenceOsmFootprints({ elements: [{
+      type: 'relation', id: 9246899,
+      tags: { type: 'multipolygon', building: 'dormitory', 'building:levels': '5',
+        name: '希嘉學苑' },
+      members: [
+        { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+        { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+      ],
+    }] });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      poiId: 'pu-xijia', sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+      heightBasis: 'illustrative', heightMeters: 12,
+    });
+    expect(parsed[0].outline).toHaveLength(12);
+    expect(parsed[0].holes?.[0]).toHaveLength(4);
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: parsed }))
+      .toEqual(parsed);
+  });
+
   it('uses an illustrative height only when height is absent, never for an explicit unknown unit', () => {
     const levelsOnly = parseProvidenceOsmFootprints({
       elements: [way(255784049, library, { building: 'yes', 'building:levels': '8' })],
