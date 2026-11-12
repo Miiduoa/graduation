@@ -207,7 +207,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     }
     // Public Overpass gateways also report overload through 502/504.
     // Honour Retry-After for these transient gateway failures as for 429/503;
-    // otherwise a five-minute backoff may violate the operator's requested pause.
+    // otherwise a ten-minute backoff may violate the operator's requested pause.
     if ([429, 502, 503, 504].includes(response.status)) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
         response.headers.get('retry-after'), Date.now(),
