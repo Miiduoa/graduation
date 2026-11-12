@@ -247,3 +247,9 @@ React 回歸以**合成** 503 與 `Retry-After: 600`，檢查 10 分鐘內按鈕
 ## OSM 建築現況條件的保守處理（2026-11-13）
 
 OSM 可能同時保有 `building=yes` 與 `building:condition=*`；完整建築標籤不等於整棟牆面、屋頂仍完整。對於 [OSM building:condition](https://wiki.openstreetmap.org/wiki/Key:building:condition) 明示 `partly_ruinous`、`mainly_ruinous`、`completely_ruinous`、`recognizable_remains` 或 `ruinous` 的已核對圖徵，現有整棟等高度擠出模型會錯畫成完整建築，因此先排除 3D 量體，保留已知 POI 與原有導航；空白或非文字的條件亦不充當完整建築證據。`good`、`preserved`、`renovated`、`reconstructed` 與無此條件標籤的有效建物則不因本規則額外拒絕，仍必須通過原有來源、分類、幾何、POI 與高度檢查。該 OSM key 的可查證性亦有爭議，因此這是**避免錯誤立體示意的資料防護**，不是現場結構安全鑑定，也不是宣稱靜宜校舍實際有毀損。對應 Vitest 使用合成標籤正反例，仍需真實 Overpass 和現地驗收；無資料時不捏造樓高、入口或可行走道路。
+
+### Overpass 閘道過載 502／504 冷卻保護（2026-11-13）
+
+公開 Overpass 或中介閘道在過載時可能回傳 HTTP 502／504（不只 429／503）。先前這兩種錯誤會直接走一般 10 分鐘遞增重試，即使回應有合法 `Retry-After` 也被忽略。現在將 502／504 納入既有的上游冷卻處理：有 `Retry-After` 時遵守原本 10 分鐘至 24 小時的界限，無有效指示時沿用遞增失敗退避；同一個 Node 程序內冷卻期間不重複查詢。保留七天限制內且明示日期的過期 3D 快照，否則回到 POI／平面地圖，不推測建築與路線。
+
+新增合成 HTTP 502／504 正反回歸：分別驗證 3600／1800 秒來源指示、無標頭時 600 秒、冷卻截止前不回源、到期後成功恢復，以及已有來源快照時 HTTP 200／`stale=true`／`private, no-store` 的退路。這些測試不代表已實際連線到公開 Overpass，也未量測靜宜建築、找教室、步行路線或手機效能；本 commit 的 CI／Campus Spatial Browser／CodeQL 必須以其最新 head 結果為準。
