@@ -194,32 +194,22 @@ it('retries the same first-text message and switches to the existing conversatio
   expect(sendPrivateMessage).not.toHaveBeenCalled();
 });
 
-it('sends a photo as the first message, preserves the text draft and reuses one upload on retry', async () => {
-  vi.mocked(confirmDmPhoto).mockRejectedValueOnce(new Error('lost receipt'));
+it('shows 照片私訊尚未開通 on first-photo send, keeps the text draft, and never uploads', async () => {
   render(<NewPrivateConversation session={session} peerUid="bob" />);
   await screen.findByText('傳送文字或照片，開始這段對話。');
   const input = screen.getByRole('textbox', { name: '訊息內容' });
   fireEvent.change(input, { target: { value: '等等再傳的文字' } });
   selectPhoto();
   fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  await screen.findByRole('button', { name: '重新傳送照片' });
-  expect(watchConversationContents).not.toHaveBeenCalled();
-  const retry = screen.getByRole('button', { name: '重新傳送照片' });
-  retry.focus();
-  fireEvent.click(retry);
-  await screen.findByText('照片已傳送');
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '加入照片' })));
+  await screen.findByRole('alert');
+  expect(screen.getByRole('alert').textContent).toBe('照片私訊尚未開通');
   expect(input).toHaveProperty('value', '等等再傳的文字');
-  expect(uploadDmPhoto).toHaveBeenCalledTimes(1);
-  expect(confirmDmPhoto).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(uploadDmPhoto).mock.lastCall![0]).toEqual({
-    viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob',
-    conversationId: makePrepared().conversationId, messageId: firstMessageId,
-  });
-  expect(vi.mocked(confirmDmPhoto).mock.calls.map((call) => call[0])).toEqual([
-    vi.mocked(uploadDmPhoto).mock.lastCall![0], vi.mocked(uploadDmPhoto).mock.lastCall![0],
-  ]);
-  expect(watchConversationContents).toHaveBeenCalled();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
+  expect(watchConversationContents).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
+  expect(screen.getByRole('button', { name: '加入照片' })).toBeTruthy();
+  expect(input).toHaveProperty('value', '等等再傳的文字');
 });
 
 it.each(['snapshot-first', 'error-first'])('accepts the exact server-confirmed first text with a lost acknowledgment (%s)', async (ordering) => {
@@ -275,93 +265,22 @@ it.each([
   expect(vi.mocked(sendPreparedPrivateMessage).mock.calls.map((call) => call[2])).toEqual([firstMessageId, firstMessageId]);
 });
 
-it.each(['snapshot-first', 'error-first'])('accepts the exact immutable server photo with a lost acknowledgment (%s)', async (ordering) => {
-  const receipt = deferred<void>();
-  vi.mocked(confirmDmPhoto).mockReturnValueOnce(receipt.promise);
-  render(<NewPrivateConversation session={session} peerUid="bob" />);
-  await screen.findByText('傳送文字或照片，開始這段對話。');
-  const input = screen.getByRole('textbox', { name: '訊息內容' });
-  fireEvent.change(input, { target: { value: '照片旁邊的文字草稿' } });
-  selectPhoto();
-  fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  await waitFor(() => expect(confirmDmPhoto).toHaveBeenCalled());
-  const receive = vi.mocked(watchNewPrivateConversation).mock.lastCall![2];
-  if (ordering === 'error-first') {
-    await act(async () => receipt.reject(new Error('lost acknowledgment')));
-    expect(screen.getByRole('button', { name: '重新傳送照片' })).toBeTruthy();
-  }
-  act(() => receive({
-    ...empty(), exists: true,
-    messages: [{
-      id: firstMessageId, senderId: 'alice', type: 'image', content: '照片', createdAt: null, recalled: false,
-      attachmentPath: 'conversations/dm_pu_alice_bob/photos/hash/sent.jpg',
-    }],
-  }));
-  if (ordering === 'snapshot-first') await act(async () => receipt.reject(new Error('lost acknowledgment')));
-  expect(screen.getByText('照片已傳送')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: '重新傳送照片' })).toBeNull();
-  expect(input).toHaveProperty('value', '照片旁邊的文字草稿');
-  expect(uploadDmPhoto).toHaveBeenCalledTimes(1);
-  expect(confirmDmPhoto).toHaveBeenCalledTimes(1);
-  expect(watchConversationContents).toHaveBeenCalled();
-});
-
-it.each([
-  { mismatch: 'ID', patch: { id: 'another-message-id' } },
-  { mismatch: 'sender', patch: { senderId: 'bob' } },
-  { mismatch: 'path', patch: { attachmentPath: 'conversations/dm_pu_alice_bob/photos/other/sent.jpg' } },
-  { mismatch: 'type', patch: { type: 'text' } },
-])('keeps first-photo retry when a server message has a different $mismatch', async ({ patch }) => {
-  const receipt = deferred<void>();
-  vi.mocked(confirmDmPhoto).mockReturnValueOnce(receipt.promise);
-  render(<NewPrivateConversation session={session} peerUid="bob" />);
-  await screen.findByText('傳送文字或照片，開始這段對話。');
-  selectPhoto();
-  fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  await waitFor(() => expect(confirmDmPhoto).toHaveBeenCalled());
-  const receive = vi.mocked(watchNewPrivateConversation).mock.lastCall![2];
-  act(() => receive({
-    ...empty(), exists: true,
-    messages: [{
-      id: firstMessageId, senderId: 'alice', type: 'image', content: '照片', createdAt: null, recalled: false,
-      attachmentPath: 'conversations/dm_pu_alice_bob/photos/hash/sent.jpg', ...patch,
-    }],
-  }));
-  await act(async () => receipt.reject(new Error('unavailable')));
-  fireEvent.click(screen.getByRole('button', { name: '重新傳送照片' }));
-  await screen.findByText('照片已傳送');
-  expect(uploadDmPhoto).toHaveBeenCalledTimes(1);
-  expect(vi.mocked(confirmDmPhoto).mock.calls[0].slice(0, 2)).toEqual(vi.mocked(confirmDmPhoto).mock.calls[1].slice(0, 2));
-});
-
-it('discards a late first-photo confirmation after selecting a different recipient', async () => {
-  const receipt = deferred<void>();
-  vi.mocked(confirmDmPhoto).mockReturnValueOnce(receipt.promise);
+it('keeps a selected first photo draft after switching recipients without starting an upload', async () => {
   const view = render(<NewPrivateConversation session={session} peerUid="bob" />);
   await screen.findByText('傳送文字或照片，開始這段對話。');
+  const input = screen.getByRole('textbox', { name: '訊息內容' });
+  fireEvent.change(input, { target: { value: '先寫給這位同學' } });
   selectPhoto();
   fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  await waitFor(() => expect(confirmDmPhoto).toHaveBeenCalled());
-  const oldReceive = vi.mocked(watchNewPrivateConversation).mock.lastCall![2];
-  const oldSignal = vi.mocked(confirmDmPhoto).mock.lastCall![2];
+  await screen.findByText('照片私訊尚未開通');
   view.rerender(<NewPrivateConversation session={session} peerUid="charlie" />);
   await screen.findByRole('heading', { name: '林小雨' });
-  const input = screen.getByRole('textbox', { name: '訊息內容' });
-  fireEvent.change(input, { target: { value: '新收件人的文字' } });
-  selectPhoto();
-  act(() => oldReceive({
-    ...empty(), exists: true,
-    messages: [{
-      id: firstMessageId, senderId: 'alice', type: 'image', content: '照片', createdAt: null, recalled: false,
-      attachmentPath: 'conversations/dm_pu_alice_bob/photos/hash/sent.jpg',
-    }],
-  }));
-  await act(async () => receipt.reject(new Error('lost acknowledgment')));
-  expect(oldSignal.aborted).toBe(true);
-  expect(input).toHaveProperty('value', '新收件人的文字');
-  expect(screen.getByRole('img', { name: '待傳送照片預覽' })).toBeTruthy();
+  const next = screen.getByRole('textbox', { name: '訊息內容' });
+  fireEvent.change(next, { target: { value: '新收件人的文字' } });
+  expect(next).toHaveProperty('value', '新收件人的文字');
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
   expect(screen.queryByText('照片已傳送')).toBeNull();
-  expect(screen.queryByRole('button', { name: '重新傳送照片' })).toBeNull();
   expect(watchConversationContents).not.toHaveBeenCalled();
 });
 
@@ -380,31 +299,12 @@ it('shows a recipient-first message while preserving the local first-message dra
   expect(sendPreparedPrivateMessage).not.toHaveBeenCalled();
 });
 
-it('keeps focus in the text draft when a photo finishes while the user is typing', async () => {
-  const receipt = deferred<void>();
-  vi.mocked(confirmDmPhoto).mockReturnValueOnce(receipt.promise);
-  render(<NewPrivateConversation session={session} peerUid="bob" />);
-  await screen.findByText('傳送文字或照片，開始這段對話。');
-  selectPhoto();
-  fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  await waitFor(() => expect(confirmDmPhoto).toHaveBeenCalled());
-  const input = screen.getByRole('textbox', { name: '訊息內容' });
-  input.focus();
-  fireEvent.change(input, { target: { value: '照片傳送時繼續寫' } });
-  await act(async () => receipt.resolve());
-  await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  expect(document.activeElement).toBe(input);
-  expect(input).toHaveProperty('value', '照片傳送時繼續寫');
-});
-
-it.each(['peer', 'school', 'account'])('aborts the old first-photo request after switching %s', async (change) => {
-  const upload = deferred<string>();
-  vi.mocked(uploadDmPhoto).mockReturnValueOnce(upload.promise);
+it.each(['peer', 'school', 'account'])('does not start a first-photo upload after switching %s', async (change) => {
   const view = render(<NewPrivateConversation session={session} peerUid="bob" />);
   await screen.findByText('傳送文字或照片，開始這段對話。');
   selectPhoto();
   fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  const signal = vi.mocked(uploadDmPhoto).mock.lastCall![2];
+  await screen.findByText('照片私訊尚未開通');
   const next: MessagingSession = {
     uid: change === 'account' ? 'new-account' : 'alice',
     schoolId: change === 'school' ? 'another-school' : 'pu',
@@ -412,13 +312,11 @@ it.each(['peer', 'school', 'account'])('aborts the old first-photo request after
   account.user = { uid: next.uid };
   view.rerender(<NewPrivateConversation session={next} peerUid={change === 'peer' ? 'charlie' : 'bob'} />);
   await screen.findByText('傳送文字或照片，開始這段對話。');
-  expect(signal.aborted).toBe(true);
   const input = screen.getByRole('textbox', { name: '訊息內容' });
   fireEvent.change(input, { target: { value: '新對話草稿' } });
-  await act(async () => upload.resolve('conversations/dm_pu_alice_bob/photos/hash/photo.jpg'));
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
   expect(confirmDmPhoto).not.toHaveBeenCalled();
   expect(input).toHaveProperty('value', '新對話草稿');
-  expect(screen.queryByRole('img', { name: '待傳送照片預覽' })).toBeNull();
 });
 
 it('discards stale preparation and a late first-text receipt after changing recipient', async () => {

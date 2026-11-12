@@ -87,14 +87,14 @@ function grantUrl(grant: Grant) {
   return url;
 }
 
-export async function uploadDmPhoto(scope: PhotoScope, photo: LocalPhoto, signal: AbortSignal) {
+export async function uploadDmPhoto(scope: PhotoScope, photo: LocalPhoto, signal: AbortSignal): Promise<string> {
   checkSession(scope, signal);
   if (localPhoto(photo.uri, photo.contentType).size !== photo.size)
     throw new Error('photo-changed');
   throw new Error('photo-unavailable');
 }
 
-export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
+export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal): Promise<void> {
   checkSession(scope, signal);
   if (!photoParts(path, scope.conversationId, false)) throw new Error('photo-path');
   throw new Error('photo-unavailable');

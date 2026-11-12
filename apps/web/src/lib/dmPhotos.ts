@@ -73,13 +73,13 @@ function checkGrant(grant: Grant) {
   return url;
 }
 
-export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: AbortSignal) {
+export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: AbortSignal): Promise<string> {
   checkSession(scope, signal);
   if (!validDmPhoto(file)) throw new Error('photo-file');
   throw new Error('photo-unavailable');
 }
 
-export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
+export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal): Promise<void> {
   checkSession(scope, signal);
   if (!parseDmPhotoPath(path, scope.conversationId, false)) throw new Error('photo-path');
   throw new Error('photo-unavailable');
