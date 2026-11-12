@@ -30,7 +30,9 @@ export function directReads(question: string, now: number): DirectRead[] {
   const today = taipeiDate(now);
   const day = dates[0] || addDays(today, relativeDays[0] || 0);
   if (/空檔|空堂|有空|沒課/.test(text)) return [];
-  if (/(?:已繳|已交|繳了|交了)/.test(text) && !/(?:未繳|未交|沒繳|沒交|待繳|要交)/.test(text)) return [];
+  // This renderer only reports pending work. A mixed submitted/pending request
+  // still needs the full handler so its submitted half is not silently omitted.
+  if (/(?:已繳|已交|繳了|交了)/.test(text)) return [];
   const asking = /什麼|哪些|有沒有|幾點|在哪|哪裡|哪裏|多少|還有|未交|未繳|沒交|沒繳|查|告訴我|列出/.test(text);
   if (!asking && !/(?:我的|今天|今日|明天|明日|後天|後日|\d{4}-\d{2}-\d{2}).{0,4}(?:課表|行程|行事曆|作業)/.test(text)) return [];
   const reads: DirectRead[] = [];
