@@ -315,15 +315,20 @@ export async function GET() {
       unavailableUntil = 0;
       consecutiveUpstreamFailures = 0;
     } catch (error) {
-      // A 10-minute fixed retry loop still sends 144 requests per day from
-      // one worker during an outage. Increase the quiet period on consecutive
-      // failures, capped at 24 hours. Never shorten a legitimate Retry-After or
-      // the fixed 24-hour pause for denied/invalid Overpass queries.
-      const backoffMs = Math.min(MAX_RETRY_AFTER_MS,
-        ERROR_COOLDOWN_MS * 2 ** Math.min(consecutiveUpstreamFailures, 8));
-      consecutiveUpstreamFailures += 1;
-      unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError
-        ? Math.max(error.cooldownMs, backoffMs) : backoffMs);
+      // All callers awaiting the same pending fetch can enter this catch. Count
+      // the failed upstream attempt once, not once per simultaneous visitor:
+      // otherwise one transient outage could incorrectly impose 24 hours of
+      // cooldown on a popular campus map.
+      if (unavailableUntil <= Date.now()) {
+        // A fixed ten-minute retry loop would send 144 requests per day from
+        // one worker during an outage. Back off, capped at 24 hours; never
+        // shorten the public service's Retry-After or a denied-query pause.
+        const backoffMs = Math.min(MAX_RETRY_AFTER_MS,
+          ERROR_COOLDOWN_MS * 2 ** Math.min(consecutiveUpstreamFailures, 8));
+        consecutiveUpstreamFailures += 1;
+        unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError
+          ? Math.max(error.cooldownMs, backoffMs) : backoffMs);
+      }
     }
   }
   // Stale is an outage fallback, not an unlimited-lived source of campus geometry.
