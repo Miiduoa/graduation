@@ -134,35 +134,35 @@ describe('fresh server check before opening an older Web result', () => {
       data: () => ({ schoolId: 'pu', title: '二手書 old-1001', content: '可閱讀' }) });
   });
   it('reads the exact campus post document without a cached fallback', async () => {
-    await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).resolves.toBe(true);
+    await expect(confirmCampusPostTitleOpen('pu', 'old-1001', '二手書')).resolves.toBe(true);
     expect(mocks.open).toHaveBeenCalledExactlyOnceWith({ path: 'schools/pu/campusPosts/old-1001' });
     expect(mocks.cache).not.toHaveBeenCalled();
   });
   it('rejects a deleted or wrong-campus result', async () => {
     mocks.open.mockResolvedValueOnce({ exists: () => false, metadata: { fromCache: false, hasPendingWrites: false } });
-    await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).resolves.toBe(false);
+    await expect(confirmCampusPostTitleOpen('pu', 'old-1001', '二手書')).resolves.toBe(false);
     mocks.open.mockResolvedValueOnce({ id: 'old-1001', exists: () => true,
       metadata: { fromCache: false, hasPendingWrites: false }, data: () => ({ schoolId: 'other' }) });
-    await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).resolves.toBe(false);
+    await expect(confirmCampusPostTitleOpen('pu', 'old-1001', '二手書')).resolves.toBe(false);
   });
   it('will not accept stale cache or optimistic writes', async () => {
     for (const field of ['fromCache', 'hasPendingWrites']) {
       mocks.open.mockResolvedValueOnce({ id: 'old-1001', exists: () => true,
         metadata: { fromCache: false, hasPendingWrites: false, [field]: true },
         data: () => ({ schoolId: 'pu' }) });
-      await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).rejects.toMatchObject({ code: 'unavailable' });
+      await expect(confirmCampusPostTitleOpen('pu', 'old-1001', '二手書')).rejects.toMatchObject({ code: 'unavailable' });
     }
   });
   it('propagates a permission denial or an offline read', async () => {
     for (const code of ['permission-denied', 'unavailable']) {
       const failure = Object.assign(new Error(code), { code });
       mocks.open.mockRejectedValueOnce(failure);
-      await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).rejects.toBe(failure);
+      await expect(confirmCampusPostTitleOpen('pu', 'old-1001', '二手書')).rejects.toBe(failure);
     }
   });
   it.each([['', 'ok'], ['pu/other', 'ok'], ['pu', ''], ['pu', 'post/id']])
     ('rejects an unsafe document path (%s, %s) before fetching', async (school, id) => {
-      await expect(confirmCampusPostTitleOpen(school, id)).rejects.toMatchObject({ code: 'invalid-argument' });
+      await expect(confirmCampusPostTitleOpen(school, id, '二手書')).rejects.toMatchObject({ code: 'invalid-argument' });
       expect(mocks.open).not.toHaveBeenCalled();
     });
 });
