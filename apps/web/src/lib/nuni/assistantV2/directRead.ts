@@ -24,6 +24,22 @@ function mentionsSpecificCourseSchedule(text: string): boolean {
   return leftover.length >= 2;
 }
 
+/** Every term must belong to a supported read question. Unknown course names,
+ * time filters or additional requests keep the complete question on its normal
+ * path; finding one familiar noun is not enough to answer the whole request.
+ * Sticky matching consumes the original text without deleting unknown words.
+ */
+function hasOnlySupportedReadTerms(text: string): boolean {
+  const term = /(?:\d{4}-\d{2}-\d{2}|今[天日]|明[天日]|後[天日]|下(?:一)?(?:堂|節)(?:課)?|接下來(?:的)?(?:一堂|一節)?課|課表|課程|上課|課|個人行程|個人事件|行事曆|行程|安排|作業|測驗|請問|麻煩|可不可以|能不能|可以|請|謝謝|幫我|我想知道|我想看|我要看|我想查|查一下|查詢|查看|查|看一下|看看|告訴我|列出|有沒有|還有|有哪些|有什麼|哪些|什麼|幾點開始|幾點上課|幾點|哪幾堂|哪幾節|幾堂|幾節|在哪裡|在哪裏|在哪|哪裡|哪裏|哪個教室|教室|時間|地點|開始|結束|要交|待繳|未繳|沒交|未交|沒繳|截止|到期|接下來|目前|現在|最近|所有|全部|待辦|要上|要做|我的|我|上|有|的|了|嗎|呢|啊|吧|還|和|與|及|[\s，,；;。．.、？?!！:：]+)/uy;
+  let offset = 0;
+  while (offset < text.length) {
+    term.lastIndex = offset;
+    if (!term.exec(text)) return false;
+    offset = term.lastIndex;
+  }
+  return offset > 0;
+}
+
 /** Only unambiguous information requests get automatic, read-only retrieval. */
 export function directReads(question: string, now: number): DirectRead[] {
   if (question.length > 1000 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(question)) return [];
@@ -50,6 +66,7 @@ export function directReads(question: string, now: number): DirectRead[] {
   if (/衝突|撞期|重疊|撞堂/.test(text)) return [];
   if (mentionsSpecificCourseSchedule(text)) return [];
   if (/怎麼走|如何走|怎麼去|怎麼到|怎麼抵達|如何前往|如何抵達|帶我去|帶我到|導航|路線|交通指引|走路去|步行去|地圖/.test(text)) return [];
+  if (!hasOnlySupportedReadTerms(text)) return [];
   if (/已繳|已交|繳了|交了|已提交|已經提交|提交的|交完/.test(text)) return [];
   if (mentionsSpecificCourseWork(text)) return [];
   const asking = /什麼|哪些|有沒有|幾點|在哪|哪裡|哪裏|多少|還有|未交|未繳|沒交|沒繳|查|告訴我|列出/.test(text);

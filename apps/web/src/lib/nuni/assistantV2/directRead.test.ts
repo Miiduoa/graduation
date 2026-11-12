@@ -112,6 +112,20 @@ it('answers a combined timetable and pending-work question from both sources in 
   expect(model).not.toHaveBeenCalled();
 });
 
+it.each([
+  ['下一堂課在哪，幾點', ['get_schedule'], ['資料結構｜資訊202']],
+  ['今天有什麼課，還有什麼作業沒交', ['get_schedule', 'get_due_work'], ['程式設計｜資訊101', '樹與圖作業']],
+  ['今天的課表；行程與未繳作業', ['get_schedule', 'get_calendar', 'get_due_work'], ['程式設計｜資訊101', '讀書會', '樹與圖作業']],
+] as const)('keeps complete supported read clauses deterministic despite punctuation: %s', async (question, expectedTools, facts) => {
+  const model = vi.fn(vagueModel);
+  const result = await ask(question, fixtureAdapter(), model);
+  expect(result.steps.map((step) => step.name)).toEqual(expectedTools);
+  for (const fact of facts) expect(result.answer).toContain(fact);
+  expect(result.modelCalls).toBe(0);
+  expect(model).not.toHaveBeenCalled();
+  expect(result.cards).toEqual([]);
+});
+
 it('keeps factual queries independent of provider outages and model claims', async () => {
   const offline = vi.fn(async () => { throw new V2Error(429, 'PROVIDER_RATE_LIMITED'); });
   const unavailable = await ask('我今天有什麼課', fixtureAdapter(), offline);
@@ -195,6 +209,8 @@ it.each([
   '今天有什麼課，教室怎麼走', '下一堂課教室怎麼走',
   '今天有什麼課，走路去教室', '今天有什麼課，教室地圖在哪',
   '今天的課表和行程有衝突嗎', '程式設計今天幾點上課',
+  '今天中午有什麼課', '今天夜間有什麼課', '只有資料結構今天有沒有課',
+  '明天有哪些和小明的行程', '今天有什麼課，列印課表',
 ])('leaves navigation, negation, examples, ambiguous dates and writes to their existing handlers: %s', (question) => {
   expect(directReads(question, now)).toEqual([]);
 });
