@@ -1,10 +1,7 @@
-import { httpsCallable } from 'firebase/functions';
-import { getAuth, getFunctionsInstance } from './firebase';
-import { FunctionsUnconfiguredError } from './functionsUrl';
+import { getAuth } from './firebase';
 import { hostedWebCallablePath } from './hostedCallables';
 
 export function isCallableMissing(error: unknown): boolean {
-  if (error instanceof FunctionsUnconfiguredError) return true;
   if (!error || typeof error !== 'object') return false;
   const e = error as { code?: unknown; name?: unknown; status?: unknown; response?: { status?: unknown } };
   return e.name === 'FunctionsUnconfiguredError' ||
@@ -12,20 +9,13 @@ export function isCallableMissing(error: unknown): boolean {
     e.status === 404 || e.status === 'NOT_FOUND' || e.response?.status === 404;
 }
 
-/** Only these three deployed web handlers may replace an absent Firebase callable. */
+/** These three handlers always use same-origin /api/fn. Do not probe Firebase first. */
 export async function callWithHostedFallback<Input, Output>(
   name: 'prepareDmConversation' | 'sendDmText' | 'replyToCampusStory',
   data: Input,
   viewerUid: string,
   signal?: AbortSignal,
 ): Promise<{ data: Output }> {
-  // Always try the default Firebase endpoint first. Missing a custom Functions
-  // base URL is not proof the callable is absent.
-  try {
-    return await httpsCallable<Input, Output>(getFunctionsInstance(), name)(data);
-  } catch (error) {
-    if (!isCallableMissing(error)) throw error;
-  }
   const user = getAuth()?.currentUser;
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   if (!user || user.uid !== viewerUid) throw Object.assign(new Error('請先登入。'), { code: 'functions/unauthenticated' });

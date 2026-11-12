@@ -87,64 +87,17 @@ function grantUrl(grant: Grant) {
   return url;
 }
 
-export async function uploadDmPhoto(scope: PhotoScope, photo: LocalPhoto, signal: AbortSignal) {
+export async function uploadDmPhoto(scope: PhotoScope, photo: LocalPhoto, signal: AbortSignal): Promise<string> {
   checkSession(scope, signal);
   if (localPhoto(photo.uri, photo.contentType).size !== photo.size)
     throw new Error('photo-changed');
-  const fileName = filenames.get(photo.contentType)!;
-  const delivery = httpsCallable<Record<string, unknown>, UploadGrant>(
-    getFunctionsInstance(),
-    'dmAttachmentDelivery',
-  );
-  const { data } = await delivery({
-    ...scope,
-    action: 'uploadPhoto',
-    fileName,
-    contentType: photo.contentType,
-    size: photo.size,
-  });
-  checkSession(scope, signal);
-  grantUrl(data);
-  const parts = photoParts(data.path, scope.conversationId, false);
-  if (
-    data.method !== 'POST' ||
-    parts?.fileName !== fileName ||
-    parts.mediaId !== data.mediaId ||
-    data.fields?.key !== data.path ||
-    Object.values(data.fields).some((value) => typeof value !== 'string')
-  )
-    throw new Error('photo-policy');
-  const body = new FormData();
-  for (const [key, value] of Object.entries(data.fields)) body.append(key, value);
-  // React Native streams the native file descriptor. Keep the file last for signed GCS POST.
-  body.append('file', {
-    uri: photo.uri,
-    type: photo.contentType,
-    name: fileName,
-  } as unknown as Blob);
-  const result = await fetch(data.url, {
-    method: 'POST',
-    body,
-    signal,
-    credentials: 'omit',
-    redirect: 'error',
-  });
-  checkSession(scope, signal);
-  if (!result.ok) throw new Error('photo-upload');
-  return data.path;
+  throw new Error('photo-unavailable');
 }
 
-export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
+export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal): Promise<void> {
   checkSession(scope, signal);
   if (!photoParts(path, scope.conversationId, false)) throw new Error('photo-path');
-  const send = httpsCallable<
-    PhotoScope & { path: string },
-    { conversationId: string; messageId: string }
-  >(getFunctionsInstance(), 'sendDmPhoto');
-  const { data } = await send({ ...scope, path });
-  checkSession(scope, signal);
-  if (data?.conversationId !== scope.conversationId || data.messageId !== scope.messageId)
-    throw new Error('photo-unconfirmed');
+  throw new Error('photo-unavailable');
 }
 
 // Fetch only on tap. Render in-memory bytes so the native image loader never caches a bearer URL.
