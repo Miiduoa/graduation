@@ -189,6 +189,8 @@ it.each([
   '今天有什麼課，也幫我把課表分享給小明', '今天有哪些作業沒交？幫我交掉',
   '我有哪些已繳作業', '今天作業繳了嗎', '今天有什麼課，空檔有哪些', '今天有課嗎，空堂在哪裡',
   '今天有哪些已繳和未繳作業', '我有哪些已提交的作業', '資料結構有哪些作業沒交', '微積分的作業沒交',
+  '我有哪些已繳與未繳作業', '今天哪些作業交了，哪些還沒交',
+  '取消今天的未繳作業提醒', '幫我交掉今天未繳的作業',
 ])('leaves navigation, negation, examples, ambiguous dates and writes to their existing handlers: %s', (question) => {
   expect(directReads(question, now)).toEqual([]);
 });
