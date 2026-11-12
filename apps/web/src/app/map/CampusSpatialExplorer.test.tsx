@@ -330,6 +330,34 @@ it('drops a building preview when its selected campus location is withdrawn', as
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
 });
 
+it('keeps floor-plan modelling off Providence stops, nodes and unverified parking ways', async () => {
+  const byId = (id: string) => PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === id)!;
+  const library = byId('pu-library'); // Cross-checked OSM building way
+  const dorm = byId('pu-xijia'); // Cross-checked OSM building relation
+  const health = byId('pu-health'); // Cross-checked location, but only an OSM node
+  const parking = byId('pu-parking-p1'); // A single-source way, not an audited building
+  const gate = byId('pu-gate-osm'); // Unverified entrance node
+  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+  render(<CampusSpatialExplorer school="pu" locations={[library, dorm, health, parking, gate]}
+    selected={gate} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const previewButton = () => within(dialog).queryByRole('button', { name: '平面圖建模預覽' });
+  expect(previewButton()).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  for (const id of [health.id, parking.id]) {
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: id } });
+    expect(previewButton()).toBeNull();
+  }
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: library.id } });
+  expect(previewButton()).toBeTruthy();
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: dorm.id } });
+  expect(previewButton()).toBeTruthy();
+  fireEvent.click(previewButton()!);
+  const preview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+  expect(preview.textContent).toContain('希嘉學苑');
+  expect(screen.getAllByRole('dialog')).toHaveLength(1);
+});
+
 it('adds source-checked Providence building shapes without changing navigation or hiding source dates', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let resolveFetch: ((value: unknown) => void) | undefined;
