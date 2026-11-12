@@ -1,4 +1,6 @@
 import { maskMessages } from './privacy';
+import { directReads, directReadAnswer } from './directRead';
+import { prepareExplicitEventRequest } from './explicitEventRequest';
 import {
   formatImportedAcademicSummary,
   type ImportedAcademicSummary,
@@ -34,6 +36,7 @@ import {
   addDays,
 } from './contracts';
 import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
+import { explicitPageRequest, informationAnswer, informationReads, type InformationResult } from './information';
 import {
   createTools,
   schemas,
@@ -182,7 +185,11 @@ export type RunInput = {
 export async function run(input: RunInput) {
   const started = Date.now(),
     now = input.now ?? started;
+  const reads = directReads(input.question, now);
   const selectedNames = selectTools(input.question, input.adapter.simulation);
+  const requiredReads = !reads.length && !writeIntent(input.question) && !personalSlotSelect(input.question)
+    ? informationReads(input.question, now) : [];
+  const informationResults: InformationResult[] = [];
   const campusPrelude = campusInfoPrelude(input.question);
   const signal = AbortSignal.any([
     input.signal,
@@ -241,25 +248,105 @@ export async function run(input: RunInput) {
       simulation: input.adapter.simulation,
     });
   const requestId = randomUUID();
+  const answerWithInformation = (otherwise: string) => {
+    if (!informationResults.length) return otherwise;
+    const readNames = new Set(requiredReads.map((read) => read.name as string));
+    // Preserve separately requested domains without reintroducing unsupported
+    // model claims about facts already verified by these readers.
+    const extra = evidence.filter(({ tool }) => !readNames.has(tool) &&
+      !['get_today_context', 'get_day_overview', 'get_course_work', 'get_food_order'].includes(tool));
+    return informationAnswer(informationResults, now) +
+      (extra.length ? '\n\n' + partialAnswer(extra, tools.cards, input.question, now) : '');
+  };
   try {
+    const explicitEvent = await prepareExplicitEventRequest({ question: input.question, tools, signal, now });
+    if (explicitEvent) {
+      steps.push(...explicitEvent.steps);
+      stopReason = explicitEvent.stopReason;
+      log('assistant.completed');
+      return { version: 2, ...explicitEvent, modelCalls: 0, usage, simulation: input.adapter.simulation };
+    }
     const workOnly =
       /作業|要交|測驗|待繳/.test(input.question) &&
       !scheduleIntent(input.question) &&
       !/有空|行程|課表/.test(input.question);
-    const context = !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
+    const context = !reads.length && !requiredReads.length && !explicitPageRequest(input.question) && !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
       ? await bounded((child) => tools.withSignal(child, () => tools.context()), signal, 15000)
       : {
           now: new Date(now).toISOString(),
           school: input.binding.schoolId,
-          realms: (foodOrderIntent(input.question) || /點餐|吃|中午|訂|社團/.test(input.question))
+          realms: !requiredReads.length && !explicitPageRequest(input.question) && (foodOrderIntent(input.question) || /點餐|吃|中午|訂|社團/.test(input.question))
             ? await bounded(
                 (child) => tools.withSignal(child, () => input.adapter.realms()),
                 signal,
                 4000,
               )
             : [],
-          missing: ['未預讀私人資料'],
+          missing: reads.length ? [] : ['未預讀私人資料'],
         };
+    for (const read of reads) {
+      try {
+        const value = await bounded((child) => tools.withSignal(child, () => tools.call(read.tool, read.args)), signal, 4000);
+        evidence.push({ tool: read.tool, result: value.value });
+        steps.push({ name: read.tool, status: value.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+      } catch (error) {
+        if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+        steps.push({ name: read.tool, status: 'error', summary: safeCode(error) });
+      }
+    }
+    if (reads.length) {
+      signal.throwIfAborted();
+      stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
+      log('assistant.completed');
+      return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now),
+        steps, cards: [], modelCalls: 0, usage, stopReason, simulation: input.adapter.simulation };
+    }
+    // Read required facts before generation. A page card, an empty answer, or
+    // a provider outage cannot prevent a supported query from being completed.
+    for (const read of requiredReads) {
+      const entry: InformationResult = { read };
+      informationResults.push(entry);
+      try {
+        const result = await bounded((child) => tools.withSignal(child, () => tools.call(read.name, read.args)), signal, 4000);
+        entry.result = result.value;
+        evidence.push({ tool: read.name, result: result.value });
+        steps.push({ name: read.name, status: result.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+      } catch (error) {
+        if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+        failedResults.push({ tool: read.name, result: { error: safeCode(error), incomplete: true } });
+        steps.push({ name: read.name, status: 'error', summary: safeCode(error) });
+      }
+      if (read.kind === 'orders' && entry.result && steps.length < 8) {
+        const result = entry.result as Obj;
+        const listed = (result.data || result) as Obj;
+        const visible = Array.isArray(listed.orders) ? listed.orders as Obj[] : [];
+        const newest = [...visible].sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt)))[0];
+        if (typeof newest?.id === 'string') {
+          try {
+            // The dispatcher resolves a sole authorized realm and only accepts
+            // order IDs obtained from the list in this same request.
+            const detail = await bounded((child) => tools.withSignal(child, () => tools.call('get_food_order', { orderId: newest.id })), signal, 4000);
+            entry.detail = detail.value;
+            evidence.push({ tool: 'get_food_order', result: detail.value });
+            steps.push({ name: 'get_food_order', status: detail.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+          } catch (error) {
+            if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+            steps.push({ name: 'get_food_order', status: 'error', summary: safeCode(error) });
+          }
+        }
+      }
+    }
+    if (requiredReads.length) {
+      signal.throwIfAborted();
+      stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
+      // These strictly scoped questions are fully handled by verified readers.
+      // Do not wait for (or send private results to) an unnecessary model call.
+      log('assistant.completed');
+      return {
+        version: 2, dataRead: true, answer: withSelectionNotice(informationAnswer(informationResults, now)),
+        steps, cards: [], modelCalls, usage, stopReason, simulation: input.adapter.simulation,
+      };
+    }
     if (campusPrelude) {
       const preloads: Array<readonly [string, Obj]> = campusPrelude === 'directions'
         ? [['get_campus_info', { kind: 'map' }], ['get_transit', { action: 'campus' }]]
@@ -696,7 +783,7 @@ export async function run(input: RunInput) {
     log('assistant.completed');
     return {
       version: 2,
-      answer: withSelectionNotice(finalAnswer),
+      answer: withSelectionNotice(answerWithInformation(finalAnswer)),
       steps,
       cards: tools.cards,
       modelCalls,
@@ -707,16 +794,20 @@ export async function run(input: RunInput) {
     };
   } catch (e) {
     log('assistant.failed', e);
-    if (evidence.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
+    if (reads.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
+      return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now), steps,
+        cards: [], modelCalls, usage, stopReason: safeCode(e), simulation: input.adapter.simulation };
+    if ((evidence.length || informationResults.length) && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return {
         version: 2,
-        answer: withSelectionNotice(partialAnswer(evidence, tools.cards, input.question, now)),
+        answer: withSelectionNotice(answerWithInformation(partialAnswer(evidence, tools.cards, input.question, now))),
         steps,
         cards: tools.cards,
         modelCalls,
         usage,
         stopReason: safeCode(e),
         simulation: input.adapter.simulation,
+        ...(informationResults.length ? { dataRead: true } : {}),
       };
     if (e instanceof V2Error || (e as { status?: number }).status) throw e;
     throw new V2Error(

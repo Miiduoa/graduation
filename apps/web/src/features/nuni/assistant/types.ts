@@ -16,6 +16,8 @@ export type V2Reply = {
   steps: V2Step[];
   cards: V2Card[];
   simulation?: boolean;
+  /** Verified reader output stays literal and out of later model history. */
+  dataRead?: boolean;
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
 };
 

@@ -58,7 +58,7 @@ class RetrievalTests(unittest.TestCase):
             {"source": "app:navigation", "text": "課表操作", "metadata": {}},
             {"source": "firestore:announcements", "text": "舊索引", "metadata": {}},
             {"source": "firestore:announcements", "text": "缺標記舊公告", "metadata": {"schoolId": "nchu"}},
-            {"source": "firestore:announcements", "text": "內部公告", "metadata": {"visibility": "school", "schoolId": "nchu"}},
+            {"source": "firestore:announcements", "text": "靜宜內部公告", "metadata": {"visibility": "school", "schoolId": "nchu"}},
             {"source": "firestore:enrollments", "text": "私有課籍", "metadata": {"visibility": "public", "schoolId": "nchu"}},
         ]
         indexer.index_documents(documents, embedding_fn=embed)
@@ -108,7 +108,19 @@ class RetrievalTests(unittest.TestCase):
         before = retriever.retrieve("午餐時段", school_id="nchu", embedding_fn=embed, top_k=10)
         self.assertEqual([c.text for c in before if c.source.startswith("firestore:")], [])
 
+        write_ids = indexer.index_written_ids
+        self.enterContext(patch.object(
+            sync, "index_written_ids",
+            side_effect=lambda documents, collection_name="campus": write_ids(
+                documents, collection_name=collection_name, embedding_fn=embed
+            ),
+        ))
+        self.enterContext(patch.object(
+            sync, "sync_all", return_value={name: -1 for name in sync.PUBLIC_FIELDS}
+        ))
         with tempfile.TemporaryDirectory() as folder:
+            for name in sync.PUBLIC_FIELDS:
+                (Path(folder) / f"{name}.json").write_text("[]", encoding="utf-8")
             (Path(folder) / "announcements.json").write_text(
                 '[{"title": "午餐時段", "body": "舊公告", "schoolId": "nchu"}]',
                 encoding="utf-8",
@@ -172,6 +184,11 @@ class SyncTests(unittest.TestCase):
 
 class MigrationSafetyTests(unittest.TestCase):
     def _stub_rag_imports(self):
+        if HAS_RAG:
+            # Load installed dependencies before considering offline stand-ins.
+            # Otherwise these tests pollute the later real Chroma tests.
+            import chromadb
+            import langchain_text_splitters
         import sys
         import types
         if "chromadb" not in sys.modules:
@@ -304,4 +321,3 @@ class MigrationSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             result = sync.sync_from_json_dump(folder, collections={"announcements"})
         self.assertEqual(result, {"announcements": -1})
-

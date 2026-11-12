@@ -10,7 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
-export { boundedBytes } from '../server/boundedBytes';
+import { boundedBytes as readBoundedBytes } from '../server/boundedBytes';
+
+export const boundedBytes = readBoundedBytes as (
+  source: Request | Response, limit: number,
+) => ReturnType<typeof readBoundedBytes>;
 
 export const SESSION_COOKIE =
   process.env.NODE_ENV === 'production'
