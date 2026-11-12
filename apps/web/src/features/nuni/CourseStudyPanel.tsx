@@ -435,8 +435,11 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   }, [material, selectionSerial, requestSourceReplacement]);
 
   function downloadFile(contents: () => Blob, filename: string, label: string) {
-    // A new download supersedes any earlier selectable clipboard fallback.
-    // Keep old private JSON/notes out of view instead of showing a stale copy.
+    // A successful download supersedes an older clipboard fallback. If mobile
+    // download is blocked, keep that already validated, manually selectable
+    // snapshot instead of removing the student's only accessible backup.
+    const previousManualCopy = manualCopyText;
+    const previousManualKind = manualCopyKind;
     invalidateCopyFeedback();
     let url: string | null = null;
     const link = document.createElement('a');
@@ -452,7 +455,15 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       setDownloadStatus(`已交給瀏覽器下載${label}；若沒有出現檔案，請確認瀏覽器的下載設定。`);
     } catch {
       if (url) URL.revokeObjectURL(url);
-      setDownloadError('目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
+      if (previousManualCopy !== null) {
+        // React batches these state updates, so on failure the original
+        // textarea and its user-adjusted selection remain mounted.
+        setManualCopyKind(previousManualKind);
+        setManualCopyText(previousManualCopy);
+      }
+      setDownloadError(previousManualCopy !== null
+        ? '目前無法下載；先前可手動選取的備份仍保留，可複製文字或重試下載。'
+        : '目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
     } finally {
       link.remove();
     }

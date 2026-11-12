@@ -1497,6 +1497,37 @@ it('clears the earlier manual JSON fallback after a new explicit progress downlo
   }
 });
 
+it('preserves a selectable JSON backup after a blocked mobile download', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const create = vi.fn(() => { throw new Error('download blocked'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '這份進度還沒成功儲存到手機' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const input = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const snapshot = input.value;
+    input.setSelectionRange(4, 20);
+    fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+
+    expect(create).toHaveBeenCalledTimes(1);
+    const remaining = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(remaining).toBe(input);
+    expect(remaining.value).toBe(snapshot);
+    expect(remaining.selectionStart).toBe(4);
+    expect(remaining.selectionEnd).toBe(20);
+    expect(parseCourseStudyProgress(remaining.value, scope).passages['0:0'].note)
+      .toBe('這份進度還沒成功儲存到手機');
+    expect(screen.getByRole('alert').textContent).toContain('先前可手動選取的備份仍保留');
+  } finally {
+    vi.unstubAllGlobals();
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('copies a restorable reading-progress JSON with selectable fallback when download or clipboard is blocked', () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
