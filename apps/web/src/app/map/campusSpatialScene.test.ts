@@ -796,6 +796,49 @@ it('keeps an OSM relation courtyard open in Three.js and leaves its POI on the g
   expect(capHeight(filled.renderer)).toBeGreaterThan(capHeight(withHole.renderer) + 10);
 });
 
+it('keeps a POI on the ground when it falls on a courtyard or outer-ring boundary', () => {
+  // Synthetic geometry, not measured building walls or an entrance. The known
+  // Xijia POI is intentionally placed exactly on a rectangle's right edge.
+  const xijia = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  const campus = buildCampusSpatialModel([xijia]);
+  const footprint: ProvidenceFootprint = {
+    poiId: 'pu-xijia', name: xijia.name, sourceUrl: xijia.sourceUrl,
+    outline: [[120.58045, 24.22785], [120.58090, 24.22785],
+      [120.58090, 24.22818], [120.58045, 24.22818]],
+    heightMeters: 18, heightBasis: 'osm-tag',
+  };
+  const height = (item: ProvidenceFootprint) => {
+    const { renderer } = setup(campus, undefined, [item]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = graph.children.find((node): node is InstancedMesh =>
+      node instanceof InstancedMesh && node.geometry.type === 'SphereGeometry')!;
+    const matrix = new Matrix4();
+    caps.getMatrixAt(0, matrix);
+    return new Vector3().setFromMatrixPosition(matrix).y;
+  };
+  const onRoof = height(footprint);
+  const inCourtyard = height({
+    ...footprint,
+    holes: [[[120.58059, 24.22799], [120.58072, 24.22799],
+      [120.58072, 24.22805], [120.58059, 24.22805]]],
+  });
+  const onCourtyardEdge = height({
+    ...footprint,
+    holes: [[[120.58059, 24.22799], [xijia.lng, 24.22799],
+      [xijia.lng, 24.22805], [120.58059, 24.22805]]],
+  });
+  const onOuterEdge = height({
+    ...footprint,
+    outline: [[120.58045, 24.22785], [xijia.lng, 24.22785],
+      [xijia.lng, 24.22818], [120.58045, 24.22818]],
+  });
+  expect(onRoof).toBeGreaterThan(footprint.heightMeters);
+  expect(inCourtyard).toBeLessThan(footprint.heightMeters);
+  expect(onCourtyardEdge).toBeCloseTo(inCourtyard, 6);
+  expect(onOuterEdge).toBeCloseTo(inCourtyard, 6);
+});
+
 it('extrudes OSM footprints in geographically aligned meters only for known spatial points', () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const campus = buildCampusSpatialModel([library]);
