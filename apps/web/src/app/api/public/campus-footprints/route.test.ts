@@ -87,6 +87,41 @@ describe('public Providence building geometry route', () => {
     expect(JSON.stringify(body)).not.toContain('private-editor-name');
   });
 
+  it('serves an audited relation courtyard as a hole instead of a solid building roof', async () => {
+    const outer = [
+      { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+      { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+      { lat: 24.22785, lon: 120.58045 },
+    ];
+    const inner = [
+      { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+      { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+      { lat: 24.22799, lon: 120.58063 },
+    ];
+    const mockedFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      elements: [{
+        type: 'relation', id: 9246899,
+        tags: { type: 'multipolygon', building: 'dormitory', 'building:levels': '5' },
+        members: [
+          { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+          { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+        ],
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.buildings).toHaveLength(1);
+    expect(body.buildings[0]).toMatchObject({
+      poiId: 'pu-xijia', sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+      heightBasis: 'illustrative', heightMeters: 12,
+      holes: [[[120.58063, 24.22799], [120.58072, 24.22799],
+        [120.58072, 24.22805], [120.58063, 24.22805]]],
+    });
+  });
+
   it('refuses Overpass redirects instead of following a Location to another host or private network', async () => {
     const upstream = vi.fn().mockResolvedValue(new Response('moved', {
       status: 302,
