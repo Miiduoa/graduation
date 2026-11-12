@@ -31,6 +31,34 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('does not extrude a coordinate-closed but OSM-node-open way', () => {
+    // These IDs are synthetic. Real OSM way closure requires first/last
+    // node IDs to match; two different nodes may share the same coordinates.
+    const closedIds = [101, 102, 103, 104, 101];
+    const withNodes = (nodes: unknown) => ({
+      ...way(255784049, library, { building: 'school' }), nodes,
+    });
+    expect(parseProvidenceOsmFootprints({
+      elements: [withNodes(closedIds)],
+    })).toMatchObject([{ poiId: 'pu-library' }]);
+    for (const nodes of [
+      [101, 102, 103, 104, 105], // same first/last coordinates, different OSM node
+      [101, 102, 103, 101], // missing geometry reference
+      [101, 102, 103, 104, 101, 101], // extra reference
+      [101, 102, -3, 104, 101],
+      [101, 102, '103', 104, 101],
+      null,
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [withNodes(nodes)],
+      }), JSON.stringify(nodes)).toEqual([]);
+    }
+    // Synthetic fixtures without node references preserve legacy parsing.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'school' })],
+    })).toHaveLength(1);
+  });
+
   it('requires the reviewed Xijia outer and inner OSM members before publishing a 3D roof', () => {
     // All coordinates and height here are synthetic; member IDs and roles are
     // from OSM relation/9246899 checked on 2026-11-12.
@@ -74,8 +102,20 @@ describe('Providence OSM building outlines', () => {
       }],
     })).toEqual(parsed);
 
+    const withNodes = (member: typeof outerMember, refs: unknown) => ({
+      ...member, nodes: refs,
+    });
+    expect(parseProvidenceOsmFootprints({
+      elements: [relation([
+        withNodes(outerMember, [301, 302, 303, 304, 301]),
+        withNodes(innerMember, [401, 402, 403, 404, 401]),
+      ])],
+    })).toHaveLength(1);
     const invalidMembers: unknown[] = [
       [], [outerMember], [outerMember, outerMember],
+      [withNodes(outerMember, [301, 302, 303, 304, 305]), innerMember],
+      [outerMember, withNodes(innerMember, [401, 402, 403, 404, 405])],
+      [withNodes(outerMember, [301, 302, 303]), innerMember],
       [outerMember, { ...innerMember, ref: 123457 }],
       [{ ...outerMember, ref: 123456 }, innerMember],
       [outerMember, { ...innerMember, role: 'outer' }],
