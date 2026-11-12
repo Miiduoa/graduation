@@ -581,3 +581,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增 `privateFileAccess.test.ts` 合成回歸：五種未發布狀態、非作者一般成員／管理者拒絕、作者讀取、發布後恢復，以及無附件清單的明確草稿拒絕／已發布歷史相容。`backend/functions/privateGroupFiles.test.js` 加入三種 HTTP 403 與作者／發布後 200 案例。父 head `e18e6a98c4c594e0ca4bf09f7993997ec705abd2` 的 [CI](https://github.com/Miiduoa/graduation/actions/runs/43129558111)、[CodeQL](https://github.com/Miiduoa/graduation/actions/runs/43129558002)、[Course access](https://github.com/Miiduoa/graduation/actions/runs/43129557915) 已 completed/success；**新提交仍須以自身精確 head 的全部 CI 結果判定**。
 
 未觸碰正式資料、金鑰、token、migration、部署或 E 校園；未重跑受限的 npm/pnpm audit。仍待歷史附件可信清單、已發 GCS／Supabase URL 撤銷、真隔離 Storage 競態、minimatch 雙鎖檔相容性、主線整合、正式發布／回復與指定 nuni-merge-gate App 5504170 對精確 head 的「審查通過」。
+
+
+## 2026-11-12：作業明確非開放狀態不得簽發新上傳授權（PR #577）
+
+前一精確 head `cf0544c7b2d8e0bb3bf798ce5031193018354c0b` 的 CI #43157129296、CodeQL #43157129272、Course access #43157129281 已完成 success；這不代表本次新 head 已通過。共用授權原只將 assignment 的 `draft`、`closed` 視為關閉，但明確 `scheduled`、`pending`、`unpublished`、`archived`、`cancelled/canceled` 仍可能被當成開放上傳；尤其 global 與 canonical 鏡像狀態不同步時，一邊已撤回或封存仍可能簽發新 URL。
+
+最小修補統一兩種路徑的 canonical、global-only 與 global-mirror 開放狀態判定，明確的非開放狀態一律拒絕新上傳，即使設定 `allowLateSubmission:true`；真正開放的 legacy 草稿與作者已上傳檔案預覽、跨帳號／校籍撤銷原條件維持。新增 `apps/web/src/lib/server/privateFileAccess.test.ts` 的合成隔離回歸：兩種上傳路徑、global/canonical 雙佈局、global-only、狀態切換恢復、跨帳號及校籍撤銷。
+
+**驗證範圍**：僅是開發分支的授權守門與合成測試；必須對新精確 head 重新查核 CI、CodeQL、適用工作流與 App 5504170 的「審查通過」。此變更不撤銷先前已簽發的 GCS／Supabase URL，也不取代 Storage CAS／競態、可信歷史附件引用補齊、隔離 staging、minimatch 雙鎖檔和正式部署／回復驗證。未連 E 校園，未操作正式資料、金鑰、token 或 migration，未重送未獲准的 npm/pnpm audit payload。

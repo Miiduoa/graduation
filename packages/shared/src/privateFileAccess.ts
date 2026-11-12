@@ -29,6 +29,10 @@ export const PRIVATE_FILE_MAX_BYTES = {
 export const GROUP_COVER_FILENAME = /^cover\.[A-Za-z0-9]+$/;
 
 const CLOSED_ACCOUNT_STATUSES = new Set(['deleted', 'disabled', 'suspended', 'inactive']);
+// A scheduled, withdrawn or archived assignment cannot issue new upload URLs.
+const ASSIGNMENT_NOT_OPEN_STATUSES = new Set([
+  'draft', 'closed', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled',
+]);
 
 export type PrivateFileKind = 'group-cover' | 'group-post' | 'assignment' | 'story';
 
@@ -326,7 +330,7 @@ function legacyMirrorAcceptsNewPrivateUpload(data: Record<string, unknown>): boo
   const due = dueValue == null || typeof dueValue === 'number' || !validDueString
     ? null : storyExpiresAtMs(dueValue);
   return data.published !== false &&
-    !['draft', 'closed'].includes(String(data.status || '')) &&
+    !ASSIGNMENT_NOT_OPEN_STATUSES.has(String(data.status || '')) &&
     (data.dueAt == null || data.allowLateSubmission === true || (due !== null && Date.now() <= due));
 }
 
@@ -518,7 +522,7 @@ export async function authorizePrivateFile(
             new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
           );
           const due = dueValue == null || typeof dueValue === 'number' || !validDueString ? null : storyExpiresAtMs(dueValue);
-          if (data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+          if (data.published === false || ASSIGNMENT_NOT_OPEN_STATUSES.has(String(data.status || '')) ||
             (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due))) deny();
           // Submission update: isSubmissionOwner and submittedAt must still be null.
           if (submission.exists && (owner !== uid || previous.submittedAt != null)) deny();
@@ -581,7 +585,7 @@ export async function authorizePrivateFile(
             ? null : storyExpiresAtMs(dueValue);
           if (
             !mirror.exists || legacy.groupId !== groupId ||
-            legacy.published === false || ['draft', 'closed'].includes(String(legacy.status || '')) ||
+            legacy.published === false || ASSIGNMENT_NOT_OPEN_STATUSES.has(String(legacy.status || '')) ||
             (legacy.dueAt != null && legacy.allowLateSubmission !== true &&
               (due === null || Date.now() > due))
           ) deny();
@@ -600,7 +604,7 @@ export async function authorizePrivateFile(
         const due = dueValue == null || typeof dueValue === 'number' || !validDueString
           ? null : storyExpiresAtMs(dueValue);
         if (
-          data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+          data.published === false || ASSIGNMENT_NOT_OPEN_STATUSES.has(String(data.status || '')) ||
           (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due)) ||
           (submission.exists && (owner !== uid || previous.submittedAt != null))
         ) deny();

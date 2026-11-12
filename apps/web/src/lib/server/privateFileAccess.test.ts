@@ -223,6 +223,35 @@ it.each([GROUP_ANSWER, ANSWER])('does not reopen uploads when a same-group globa
   await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
 });
 
+it.each([GROUP_ANSWER, ANSWER])('refuses scheduled, unpublished and archived assignment uploads across canonical and global mirrors on %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course', published: true }]]);
+  // A closed side of a two-layout mirror must veto a still-open side.
+  for (const status of ['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled']) {
+    store.docs.set('groups/course/assignments/work', { published: true, status, allowLateSubmission: true });
+    await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+    store.docs.set('groups/course/assignments/work', { published: true });
+    store.docs.set('assignments/work', { groupId: 'course', published: true, status, allowLateSubmission: true });
+    await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+    store.docs.set('assignments/work', { groupId: 'course', published: true });
+  }
+  await expect(authorize(store, path, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, path, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
+it('rejects scheduled or archived legacy uploads even without a canonical assignment copy', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course', published: true }]]);
+  store.docs.delete('groups/course/assignments/work');
+  for (const status of ['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled']) {
+    store.docs.set('assignments/work', { groupId: 'course', published: true, status, allowLateSubmission: true });
+    await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('assignments/work', { groupId: 'course', published: true });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it('legacy upload checks global submission receipts even when canonical group assignment exists', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const globalReceipt = 'assignments/work/submissions/alice';
