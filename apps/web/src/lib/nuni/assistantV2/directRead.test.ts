@@ -193,6 +193,7 @@ it.each([
   '取消今天的未繳作業提醒', '幫我交掉今天未繳的作業',
   '有哪些作業沒交，只看資料結構', '今天有哪些作業已經提交',
   '今天有什麼課，教室怎麼走', '下一堂課教室怎麼走',
+  '今天有什麼課，走路去教室', '今天有什麼課，教室地圖在哪',
 ])('leaves navigation, negation, examples, ambiguous dates and writes to their existing handlers: %s', (question) => {
   expect(directReads(question, now)).toEqual([]);
 });
