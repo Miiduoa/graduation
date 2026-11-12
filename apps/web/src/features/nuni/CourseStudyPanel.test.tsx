@@ -1528,6 +1528,58 @@ it('preserves a selectable JSON backup after a blocked mobile download', () => {
   }
 });
 
+it('provides full selectable TXT on the first blocked download without clipboard access', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const create = vi.fn(() => { throw new Error('blob downloads blocked'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '必須在手機保存的課堂筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '下載本次筆記' }));
+    const backup = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(backup.value).toContain('必須在手機保存的課堂筆記');
+    expect(backup.value).toContain(material.body);
+    expect(screen.getByRole('alert').textContent).toContain('完整可選取的備份文字');
+    fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+    expect(backup.isConnected).toBe(true);
+    expect(inputValue(noteLabel)).toBe('必須在手機保存的課堂筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('provides restorable JSON on the first blocked progress download without a prior copy', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const create = vi.fn(() => { throw new Error('blob downloads blocked'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '不可遺失的期中複習草稿' } });
+    fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+    const backup = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(create).toHaveBeenCalledTimes(1);
+    const restored = parseCourseStudyProgress(backup.value, scope);
+    expect(restored.passages['0:0'].note).toBe('不可遺失的期中複習草稿');
+    expect(restored.position.mode).toBe('exam');
+    expect(screen.getByRole('alert').textContent).toContain('完整可選取的備份文字');
+    expect(inputValue(noteLabel)).toBe('不可遺失的期中複習草稿');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 // WebViews can throw on property access, even before a writeText promise exists.
 // Preserve both exports and their manual retry path without exposing lesson data.
 it.each(['clipboard', 'writeText'] as const)(

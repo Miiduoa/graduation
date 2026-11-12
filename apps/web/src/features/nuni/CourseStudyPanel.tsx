@@ -448,7 +448,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     // above makes effect reruns after state updates harmless.
   }, [material, selectionSerial, requestSourceReplacement]);
 
-  function downloadFile(contents: () => Blob, filename: string, label: string) {
+  function downloadFile(contents: () => { blob: Blob; text: string; kind: ManualCopyKind }, filename: string, label: string) {
     // A successful download supersedes an older clipboard fallback. If mobile
     // download is blocked, keep that already validated, manually selectable
     // snapshot instead of removing the student's only accessible backup.
@@ -456,9 +456,12 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     const previousManualKind = manualCopyKind;
     invalidateCopyFeedback();
     let url: string | null = null;
+    let preparedFallback: { text: string; kind: ManualCopyKind } | null = null;
     const link = document.createElement('a');
     try {
-      url = URL.createObjectURL(contents());
+      const prepared = contents();
+      preparedFallback = { text: prepared.text, kind: prepared.kind };
+      url = URL.createObjectURL(prepared.blob);
       link.href = url;
       link.download = filename;
       link.hidden = true;
@@ -470,14 +473,21 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     } catch {
       if (url) URL.revokeObjectURL(url);
       if (previousManualCopy !== null) {
-        // React batches these state updates, so on failure the original
-        // textarea and its user-adjusted selection remain mounted.
+        // A previously selected excerpt must remain mounted and retain the
+        // learner's selection when a second download attempt fails.
         setManualCopyKind(previousManualKind);
         setManualCopyText(previousManualCopy);
+      } else if (preparedFallback) {
+        // A first-time blocked download still yields the exact TXT/JSON
+        // export as selectable local text, without requiring another action.
+        setManualCopyKind(preparedFallback.kind);
+        setManualCopyText(preparedFallback.text);
       }
       setDownloadError(previousManualCopy !== null
         ? '目前無法下載；先前可手動選取的備份仍保留，可複製文字或重試下載。'
-        : '目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
+        : preparedFallback
+          ? '目前無法下載；已在下方提供完整可選取的備份文字，請手動複製保存。'
+          : '目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
     } finally {
       link.remove();
     }
@@ -485,8 +495,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
 
   function downloadNotes() {
     if (!source || !hasNotes) return;
-    downloadFile(() => new Blob(['\uFEFF', buildCourseStudyNotes(courseTitle, source, session.passages)],
-      { type: 'text/plain;charset=utf-8' }), courseStudyNotesFilename(source.title), '本次筆記');
+    downloadFile(() => {
+      const text = buildCourseStudyNotes(courseTitle, source, session.passages);
+      return { blob: new Blob(['\uFEFF', text], { type: 'text/plain;charset=utf-8' }), text, kind: 'notes' };
+    }, courseStudyNotesFilename(source.title), '本次筆記');
   }
 
   async function copyNotes() {
@@ -520,8 +532,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
 
   function downloadPractice() {
     if (!source || !practiceRound) return;
-    downloadFile(() => new Blob(['\uFEFF', buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound)],
-      { type: 'text/plain;charset=utf-8' }), courseStudyPracticeFilename(source.title), '本輪練習紀錄');
+    downloadFile(() => {
+      const text = buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound);
+      return { blob: new Blob(['\uFEFF', text], { type: 'text/plain;charset=utf-8' }), text, kind: 'practice' };
+    }, courseStudyPracticeFilename(source.title), '本輪練習紀錄');
   }
 
   async function copyPracticeNotes() {
@@ -651,8 +665,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       setDownloadError(failure instanceof Error ? failure.message : '練習進度無法整理，本輪作答仍保留。');
       return;
     }
-    downloadFile(() => new Blob([saved], { type: 'application/json;charset=utf-8' }),
-      courseStudyPracticeCheckpointFilename(source.title), '練習與閱讀進度');
+    downloadFile(() => ({ blob: new Blob([saved], { type: 'application/json;charset=utf-8' }),
+      text: saved, kind: 'practice-progress' }), courseStudyPracticeCheckpointFilename(source.title), '練習與閱讀進度');
   }
 
   function saveProgress() {
@@ -665,7 +679,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       setDownloadError(failure instanceof Error ? failure.message : '目前無法整理閱讀進度，原本內容仍保留。');
       return;
     }
-    downloadFile(() => new Blob([text], { type: 'application/json;charset=utf-8' }), courseStudyProgressFilename(source.title), '閱讀進度');
+    downloadFile(() => ({ blob: new Blob([text], { type: 'application/json;charset=utf-8' }),
+      text, kind: 'reading-progress' }), courseStudyProgressFilename(source.title), '閱讀進度');
   }
 
   async function chooseProgress(file: File) {
