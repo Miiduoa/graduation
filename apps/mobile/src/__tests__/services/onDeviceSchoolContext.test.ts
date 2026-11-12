@@ -3,6 +3,7 @@ import {
   collectOnDeviceSchoolContext,
   formatOnDeviceSchoolPrompt,
   type SavedClassOccurrence,
+  type OnDeviceSchoolContext,
 } from '../../services/onDeviceSchoolContext';
 import { classMeetingKey, type ClassException, type PersonalImportRecord } from '@campus/shared';
 import { loadPersonalImports } from '../../services/personalImports';
@@ -82,6 +83,43 @@ test('a restored invalid clock cannot crash the local prompt or expose private e
     const prompt = formatOnDeviceSchoolPrompt(damaged, saved, 'alice');
     expect(prompt).toContain('台灣當地時間：無法核對');
     expect(prompt).toContain('目前沒有可確認的本機個人課表');
+    expect(prompt).not.toContain('資料庫概論');
+    expect(prompt).not.toContain('Alice 私人作業');
+  }
+});
+
+test('a damaged restored timetable fails closed even with a valid clock and matching account', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const saved: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 私人作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const normal = formatOnDeviceSchoolPrompt(local, saved, 'alice');
+  expect(normal).toContain('資料庫概論');
+  expect(normal).toContain('Alice 私人作業');
+
+  // JSON-restored state is untrusted even when its timestamp is valid.
+  const brokenTimetables: unknown[] = [
+    null,
+    { ...local.timetable, courses: null },
+    { ...local.timetable, courses: '資料庫概論' },
+    { ...local.timetable, courses: [null] },
+    { ...local.timetable, courses: [{ name: '資料庫概論', day: 'Monday', start: 2, end: 3 }] },
+    { ...local.timetable, source: 'unknown' },
+    { ...local.timetable, updatedAt: { unsafe: true } },
+    { ...local.timetable, courses: Array.from({ length: 81 }, () => local.timetable.courses[0]) },
+  ];
+  for (const broken of brokenTimetables) {
+    const restored = { ...local, timetable: broken as OnDeviceSchoolContext['timetable'] };
+    const prompt = formatOnDeviceSchoolPrompt(restored, saved, 'alice');
+    expect(prompt).toContain('目前沒有可確認的本機個人課表');
+    expect(prompt).toContain('此回合沒有主動同步且有效的校園資料');
     expect(prompt).not.toContain('資料庫概論');
     expect(prompt).not.toContain('Alice 私人作業');
   }
