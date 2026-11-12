@@ -944,8 +944,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           aria-label={MANUAL_COPY_LABELS[manualCopyKind].region}>
           <label className={styles.field} htmlFor={manualCopyId}>{MANUAL_COPY_LABELS[manualCopyKind].field}
             <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
-              onFocus={(event) => selectManualCopyText(event.currentTarget)}
-              onClick={(event) => selectManualCopyText(event.currentTarget)} />
+              onFocus={(event) => selectManualCopyText(event.currentTarget)} />
           </label>
           <button type="button" className={styles.button}
             onClick={() => { void retryManualCopy(); }}>再次嘗試複製到剪貼簿</button>

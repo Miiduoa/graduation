@@ -1274,6 +1274,37 @@ it('offers a selectable reading-note fallback when mobile clipboard support is m
   }
 });
 
+// Mobile Safari/Chrome may dispatch click after the learner drags selection
+// handles. Never reselect the entire backup on every textarea tap: that would
+// prevent copying a chosen excerpt. The explicit select-all button still works.
+it.each([
+  ['複製本次筆記', '可選取的本次筆記文字'],
+  ['複製閱讀進度 JSON', '可選取的閱讀進度 JSON'],
+])('preserves manual selection on repeated taps in %s fallback', (action, field) => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '保留的手機練習筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    const manual = screen.getByRole('textbox', { name: field }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(manual);
+    expect(manual.selectionEnd).toBe(manual.value.length);
+    manual.setSelectionRange(5, 12);
+    fireEvent.click(manual);
+    expect(manual.selectionStart).toBe(5);
+    expect(manual.selectionEnd).toBe(12);
+    expect(manual.value).toContain('保留的手機練習筆記');
+    fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(manual.value.length);
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('retries a denied mobile JSON copy without changing the validated backup or note', async () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   const writeText = vi.fn().mockRejectedValueOnce(new Error('permission denied'))
