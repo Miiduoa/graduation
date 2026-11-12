@@ -24,6 +24,17 @@ type NcnuCourseMeeting = {
 
 export function ncnuCourseMeetings(time: string, semester?: string): NcnuCourseMeeting[] | null {
   if (!/^(?:[1-7][a-mxyz]+)+$/.test(time)) return null;
+  // One course cannot safely import the same weekday/period twice, even when
+  // the provider splits it into separate day groups. Keep the raw public listing
+  // for manual verification instead of writing overlapping personal sessions.
+  const occupied = new Set<string>();
+  for (const [, day, periods] of time.matchAll(/([1-7])([a-mxyz]+)/g)) {
+    for (const period of periods) {
+      const slot = `${day}:${period}`;
+      if (occupied.has(slot)) return null;
+      occupied.add(slot);
+    }
+  }
   const verified = semester === '1142' || semester === '1151';
   return Array.from(time.matchAll(/([1-7])([a-mxyz]+)/g)).flatMap(([, day, periods]) => {
     const runs: string[] = [];
