@@ -610,3 +610,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補在 comments 子集合的讀取與新留言建立增加固定父 post 檢查，保留作者草稿檢視；非作者遇到 `published:false`、`draft/scheduled/pending/unpublished/archived/cancelled/canceled`、刪除旗標或刪除時間立即拒絕；只有會員資格仍有效且貼文發布時才能讀取／留言。缺父貼文拒絕。已新增 `backend/tests/security-rules.test.js` Firebase emulator 合成回歸：既有可讀、草稿／撤回／刪除時 peer 與 instructor get/list/create 拒絕、作者可讀、重新發布恢復、再次撤回及作者校籍撤銷。這是拒絕新的 Firestore 存取，不會撤銷先前已簽 GCS/Supabase URL。
 
 此次只有開發分支修補與可重跑測試，**尚待此精確 head 的 Rules CI、全部適用 CI／CodeQL 與 nuni-merge-gate App 5504170 核可**。不合併／部署、不執行 migration、token 清理或正式資料測試；沿用 E 校園暫停與未授權 npm/pnpm audit 的限制。GCS/Supabase 已發 URL、真 Storage CAS／重放、歷史附件引用、minimatch 雙鎖檔、父貼文 list 相容改造及正式發布／回復仍待驗證。
+
+
+## 2026-11-13：群組留言撤回後的變更／刪除守門與 status=deleted 補漏（PR #577）
+
+延續精確父 head `0b926cccb4be49c0aff3567a00d9bb8592a14812`：當日父 head 主 CI #43262007810、CodeQL #43262007893、Course access #43262007784 均 completed/success，Firebase Rules 322/322、Web emulator 51/51；15 個 check runs 中未見 nuni-merge-gate App 5504170 的核可。原 `groups/{groupId}/posts/{postId}/comments` 子集合已對未發布／撤回父貼文拒絕 read/create，卻**沒有對 update/delete 套用相同父貼文查核**。知道既有 commentId 的同組留言作者或管理者，仍可能在父貼文撤回、封存或刪除後修改／刪除舊留言；另外只有 `status:'deleted'` 的父貼文仍被誤認為可公開讀取留言。
+
+本次最小修補將 `canReadPostComments()` 共同套至留言 update/delete，且在父貼文非公開狀態集合加入 `deleted`；原本的作者草稿預覽及已發布貼文留言編輯、管理者正常管理功能保留。合成 Firebase emulator 測試在既有安全案例中補上 `status:'deleted'`、留言作者與管理者對隱藏內容的 update/delete 拒絕、作者草稿編輯、重新發布後恢復、重度撤回後重放、學籍撤銷及父貼文刪除後拒絕。
+
+這些檢查只封鎖**新的 Firestore 操作**，沒有解決父貼文 documents 集合仍允許會員 list/read 的獨立暴露，也無法讓已簽發 GCS／Supabase URL 失效。真隔離 Storage CAS、可信歷史附件清單、minimatch 雙鎖檔、最新主線合併前整合、正式發布及回復仍待完成。此輪僅更新開發分支；不觸及正式資料、金鑰、token、migration、部署、E 校園連線及受限 pnpm/npm audit。**新 head 的實際 CI／CodeQL 必須重新驗收**，不得沿用本段父 head 成功結果；未取得指定 App 對精確 head 的「審查通過」前不得合併。

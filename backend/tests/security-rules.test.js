@@ -969,9 +969,11 @@ describe('firestore security rules', () => {
       // Ordinary/legacy posts without an explicit visibility flag remain usable.
       await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
       await assertSucceeds(teacher.collection(commentCollection).get());
+      const peerComment = bob.doc(commentCollection + '/bob-review');
+      await assertSucceeds(peerComment.set({ authorId: 'bob', body: 'Before withdrawal' }));
       for (const state of [
         { published: false, status: 'draft' },
-        ...['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled']
+        ...['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']
           .map((status) => ({ published: true, status })),
         { published: true, status: 'published', deleted: true },
         { published: true, status: 'published', deleted: false, deletedAt: new Date() },
@@ -983,7 +985,14 @@ describe('firestore security rules', () => {
         await assertFails(teacher.collection(commentCollection).get());
         await assertFails(bob.doc(commentPath).get({ source: 'server' }));
         await assertFails(bob.doc(commentCollection + '/new').set({ authorId: 'bob', body: 'Must not reply' }));
+        // Writes do not inherit read restrictions: enforce withdrawal on each
+        // comment mutation, even when the actor knows a document path.
+        await assertFails(teacher.doc(commentPath).update({ body: 'Moderator cannot edit withdrawn replies' }));
+        await assertFails(teacher.doc(commentPath).delete());
+        await assertFails(peerComment.update({ body: 'Peer cannot edit withdrawn replies' }));
+        await assertFails(peerComment.delete());
         await assertSucceeds(alice.doc(commentPath).get({ source: 'server' }));
+        await assertSucceeds(alice.doc(commentPath).update({ body: 'Author draft preview' }));
       }
       // Re-publication restores ordinary member access; a later withdrawal
       // revokes it again at the Firestore rules boundary.
@@ -992,10 +1001,19 @@ describe('firestore security rules', () => {
       }));
       await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
       await assertSucceeds(bob.doc(commentCollection + '/new').set({ authorId: 'bob', body: 'Published' }));
+      await assertSucceeds(teacher.doc(commentPath).update({ body: 'Moderator after publication' }));
+      await assertSucceeds(peerComment.update({ body: 'Peer after publication' }));
       await seedFirestore((admin) => admin.doc(postPath).update({ status: 'archived' }));
       await assertFails(bob.doc(commentCollection + '/new').get({ source: 'server' }));
+      await assertFails(teacher.doc(commentPath).update({ body: 'Replay after withdrawal' }));
+      await assertFails(peerComment.delete());
       await seedFirestore((admin) => admin.doc('schools/pu/members/alice').update({ status: 'removed' }));
       await assertFails(alice.doc(commentPath).get({ source: 'server' }));
+      await assertFails(alice.doc(commentPath).update({ body: 'After school revocation' }));
+      // Deleting the parent should also fail closed for remaining comments.
+      await seedFirestore((admin) => admin.doc(postPath).delete());
+      await assertFails(teacher.doc(commentPath).update({ body: 'Orphaned reply' }));
+      await assertFails(peerComment.delete());
     });
 
     test('editing cannot transfer authorship', async () => {

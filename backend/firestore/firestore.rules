@@ -1045,7 +1045,7 @@ service cloud.firestore {
                   postData.get('published', true) != false
                   && !(postData.get('status', '') in [
                     'draft', 'scheduled', 'pending', 'unpublished',
-                    'archived', 'cancelled', 'canceled'
+                    'archived', 'cancelled', 'canceled', 'deleted'
                   ])
                   && postData.get('deleted', false) != true
                   && postData.get('deletedAt', null) == null
@@ -1061,7 +1061,8 @@ service cloud.firestore {
             && request.resource.data.get('isAI', false) != true
             && !('generatedBy' in request.resource.data)
             && request.resource.data.get('authorName', '') != '助理回覆';
-          allow update: if commentId != 'assistant'
+          allow update: if canReadPostComments()
+            && commentId != 'assistant'
             && resource.data.authorId != 'campus-assistant'
             && resource.data.get('isAI', false) != true
             && request.resource.data.get('isAI', false) != true
@@ -1069,7 +1070,9 @@ service cloud.firestore {
             && request.resource.data.get('authorName', '') != '助理回覆'
             && request.resource.data.authorId == resource.data.authorId
             && (canManageGroup(groupId) || activeAuthor());
-          allow delete: if commentId != 'assistant' && (canManageGroup(groupId) || activeAuthor());
+          allow delete: if canReadPostComments()
+            && commentId != 'assistant'
+            && (canManageGroup(groupId) || activeAuthor());
         }
       }
 
