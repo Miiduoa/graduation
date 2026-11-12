@@ -277,6 +277,12 @@ function isStandingBuilding(value: unknown): boolean {
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
   if (!kind || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A closed OSM way tagged area=no is a line, not a polygon, even if an
+  // old building=* tag remains. Never extrude its enclosed space into walls.
+  // Unknown/invalid area markers are ambiguous and require source review.
+  const area = tags?.area;
+  if (area !== undefined && (typeof area !== 'string' ||
+      !['yes', 'true', '1'].includes(area.trim().toLowerCase()))) return false;
   // OSM building:part marks an individual section of a larger building. This
   // renderer only extrudes audited whole-building ways from the ground and
   // cannot reconstruct a part's neighbouring volumes or real base elevation.
