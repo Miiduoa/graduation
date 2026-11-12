@@ -304,28 +304,38 @@ function safeClientRing(value: unknown): Array<[number, number]> | null {
  * A moved or re-tagged way elsewhere on campus must not inherit the old POI's name.
  * The 30 m slack covers map alignment errors; it is not a room/entrance coordinate.
  */
-function outlineNearPoi(outline: readonly [number, number][], place: { lat: number; lng: number }): boolean {
+function outlineNearPoi(
+  outline: readonly [number, number][], place: { lat: number; lng: number },
+  holes: readonly (readonly [number, number][])[] = [],
+): boolean {
   const lonScale = EARTH_RADIUS * DEG * Math.cos(place.lat * DEG);
   const latScale = EARTH_RADIUS * DEG;
-  const vertices = outline.map(([lon, lat]) => [
-    (lon - place.lng) * lonScale, (lat - place.lat) * latScale,
-  ] as const);
-  let inside = false;
-  for (let i = 0; i < vertices.length; i += 1) {
-    const [ax, ay] = vertices[i];
-    const [bx, by] = vertices[(i + 1) % vertices.length];
-    const dx = bx - ax;
-    const dy = by - ay;
-    const lengthSquared = dx * dx + dy * dy;
-    const position = lengthSquared > 0
-      ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared))
-      : 0;
-    const nearestX = ax + position * dx;
-    const nearestY = ay + position * dy;
-    if (nearestX * nearestX + nearestY * nearestY <= MAX_POI_OFFSET_METERS ** 2) return true;
-    if ((ay > 0) !== (by > 0) && ax + (-ay * dx) / dy > 0) inside = !inside;
-  }
-  return inside;
+  // A courtyard is empty space, not part of the building surface. An audited
+  // POI deep inside a large courtyard must not match a surrounding building
+  // merely because it lies inside the *outer* polygon.
+  const nearRing = (ring: readonly [number, number][]): boolean => {
+    const vertices = ring.map(([lon, lat]) => [
+      (lon - place.lng) * lonScale, (lat - place.lat) * latScale,
+    ] as const);
+    for (let i = 0; i < vertices.length; i += 1) {
+      const [ax, ay] = vertices[i];
+      const [bx, by] = vertices[(i + 1) % vertices.length];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lengthSquared = dx * dx + dy * dy;
+      const position = lengthSquared > 0
+        ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared))
+        : 0;
+      const nearestX = ax + position * dx;
+      const nearestY = ay + position * dy;
+      if (nearestX * nearestX + nearestY * nearestY <= MAX_POI_OFFSET_METERS ** 2) return true;
+    }
+    return false;
+  };
+  if (nearRing(outline) || holes.some(nearRing)) return true;
+  const poi: [number, number] = [place.lng, place.lat];
+  return pointStrictlyInsideRing(poi, outline) &&
+    !holes.some((hole) => pointStrictlyInsideRing(poi, hole));
 }
 
 /** Whitelisted IDs can be edited in OSM. A former building or roof-only way must
@@ -512,7 +522,7 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
           return outline ? { outline, holes: [] } : null;
         })()
       : safeSimpleRelationGeometry(element);
-    if (!geometry || !outlineNearPoi(geometry.outline, place)) continue;
+    if (!geometry || !outlineNearPoi(geometry.outline, place, geometry.holes)) continue;
     const height = heightFromOsmTags(element.tags);
     if (!height) continue;
     seen.add(identity);
@@ -561,7 +571,7 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
       (item.heightBasis !== 'illustrative' && item.heightBasis !== 'osm-tag') ||
       (item.heightBasis === 'illustrative' && item.heightMeters !== ILLUSTRATIVE_HEIGHT)) continue;
     const outline = safeClientRing(item.outline);
-    if (!outline || !outlineNearPoi(outline, place)) continue;
+    if (!outline) continue;
     // Missing the audited courtyard is not equivalent to a solid roof,
     // including when an older cached/API response omits its holes field.
     if (item.sourceUrl === 'https://www.openstreetmap.org/relation/9246899' &&
@@ -573,6 +583,7 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
         (!Array.isArray(item.holes) || item.holes.length !== 1)) continue;
     const hole = Array.isArray(item.holes) ? safeClientRing(item.holes[0]) : null;
     if (item.holes !== undefined && (!hole || !holeStrictlyInsideOuter(hole, outline))) continue;
+    if (!outlineNearPoi(outline, place, hole ? [hole] : [])) continue;
     seen.add(item.poiId);
     accepted.push({
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
