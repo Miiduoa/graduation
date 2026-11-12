@@ -365,6 +365,16 @@ const LIFECYCLE_STATUS_TAGS = [
   'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
 ] as const;
 
+// building:condition is a separate OSM key. A polygon can still have
+// building=yes while the mapped structure is partly or wholly ruined.
+// This simplified renderer draws a full-height, intact volume, so those
+// explicit conditions cannot safely be presented as a normal campus block.
+// https://wiki.openstreetmap.org/wiki/Key:building:condition
+const RUINOUS_BUILDING_CONDITIONS = new Set([
+  'partly_ruinous', 'mainly_ruinous', 'completely_ruinous',
+  'recognizable_remains', 'ruinous',
+]);
+
 /** An audited OSM ID is not enough to inherit a campus building's old name.
  * If a mapper explicitly names a different building, do not attach the verified
  * POI identity to its volume until that name/source change is reviewed. A
@@ -439,6 +449,9 @@ function isStandingBuilding(value: unknown): boolean {
     if (marker !== undefined && (typeof marker !== 'string' ||
         !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
   }
+  const condition = tags?.['building:condition'];
+  if (condition !== undefined && (typeof condition !== 'string' || !condition.trim() ||
+      RUINOUS_BUILDING_CONDITIONS.has(condition.trim().toLowerCase()))) return false;
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
     // OSM lifecycle flags are usually strings. A present but unrecognized
