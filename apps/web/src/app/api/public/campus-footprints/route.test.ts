@@ -1113,6 +1113,75 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { status: 502, retryAfter: '3600', cooldownSeconds: 3600 },
+    { status: 504, retryAfter: '1800', cooldownSeconds: 1800 },
+    { status: 502, retryAfter: null, cooldownSeconds: 600 },
+    { status: 504, retryAfter: null, cooldownSeconds: 600 },
+  ])('respects overload HTTP $status Retry-After $retryAfter without premature public requests',
+    async ({ status, retryAfter, cooldownSeconds }) => {
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('Overpass gateway busy', {
+            status, ...(retryAfter ? { headers: { 'Retry-After': retryAfter } } : {}),
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+        const unavailable = await GET();
+        expect(unavailable.status).toBe(503);
+        expect(unavailable.headers.get('Retry-After')).toBe(String(cooldownSeconds));
+        expect(unavailable.headers.get('Cache-Control')).toBe('no-store');
+
+        clock.mockReturnValue(start + (cooldownSeconds - 1) * 1000);
+        const beforeDeadline = await GET();
+        expect(beforeDeadline.status).toBe(503);
+        expect(beforeDeadline.headers.get('Retry-After')).toBe('1');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + (cooldownSeconds + 1) * 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+  it.each([502, 504])('preserves an explicitly stale dated footprint during gateway HTTP %i overload', async (status) => {
+    const start = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(new Response('gateway busy', {
+          status, headers: { 'Retry-After': '3600' },
+        }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const initial = await (await GET()).json();
+
+      clock.mockReturnValue(start + day + 1000);
+      const stale = await GET();
+      expect(stale.status).toBe(200);
+      expect(stale.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(stale.headers.get('Retry-After')).toBe('3600');
+      expect(await stale.json()).toMatchObject({
+        stale: true, fetchedAt: initial.fetchedAt, buildings: initial.buildings,
+      });
+
+      clock.mockReturnValue(start + day + 30 * 60 * 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('backs off exponentially after repeated upstream errors and resets after recovery', async () => {
     const start = Date.now();
     const minute = 60 * 1000;
