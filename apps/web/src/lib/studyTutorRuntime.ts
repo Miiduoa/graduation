@@ -131,12 +131,21 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   const question = comparableGeneratedTeaching(explanation.question).toLowerCase();
   const answer = comparableGeneratedTeaching(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
-  const labels = /(?:正確答案|標準答案|參考答案|參考回答|解答|答案)\s*[:：]/gu;
+  // Generated answer keys also use 是／為, equals signs, or English labels.
+  // This is only a conservative disclosure check, not a semantic answer judge.
+  const labels = /(?:正確答案|標準答案|參考答案|參考回答|正解|解答|答案)\s*(?:[:：=＝]|[是為]\s*[:：=＝]?)|\b(?:answer|ans\.?)\s*[:：=＝]/giu;
   let label: RegExpExecArray | null;
   while ((label = labels.exec(question)) !== null) {
     const disclosed = question.slice(label.index + label[0].length)
       .replace(/^[\s"'“”‘’「『（(\[【]+/gu, '').replace(/\s+/gu, '');
-    if (disclosed.startsWith(answer)) return false;
+    if (!disclosed.startsWith(answer)) continue;
+    // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
+    // Keep decimal points and mathematical operators significant.
+    const finalAnswerCharacter = Array.from(answer).at(-1) ?? '';
+    const followingCharacter = disclosed.slice(answer.length).charAt(0);
+    if (/[\p{N}]/u.test(finalAnswerCharacter) && /[\p{N}.]/u.test(followingCharacter))
+      continue;
+    return false;
   }
   return true;
 }
