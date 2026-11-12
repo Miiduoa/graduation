@@ -90,6 +90,61 @@ describe('Providence OSM building outlines', () => {
     ] })).toEqual([]);
   });
 
+  it('keeps the real two-member relation topology: courtyard is empty and geometry is revalidated', () => {
+    // Geometry is deliberately synthetic, but member IDs/roles were checked
+    // against OSM relation 9246899 on 2026-11-12 (not a field survey).
+    const outer = [
+      { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+      { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+      { lat: 24.22785, lon: 120.58045 },
+    ];
+    const inner = [
+      { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+      { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+      { lat: 24.22799, lon: 120.58063 },
+    ];
+    const outerMember = { type: 'way', ref: 255783593, role: 'outer', geometry: outer };
+    const innerMember = { type: 'way', ref: 665651134, role: 'inner', geometry: inner };
+    const relation = (members: unknown) => ({
+      type: 'relation', id: 9246899,
+      tags: { type: 'multipolygon', building: 'dormitory', 'building:levels': '5' },
+      members,
+    });
+    const [building] = parseProvidenceOsmFootprints({ elements: [relation([outerMember, innerMember])] });
+    expect(building).toMatchObject({
+      poiId: 'pu-xijia', heightMeters: 12, heightBasis: 'illustrative',
+      holes: [[[120.58063, 24.22799], [120.58072, 24.22799],
+        [120.58072, 24.22805], [120.58063, 24.22805]]],
+    });
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [building] }))
+      .toEqual([building]);
+
+    const variants = [
+      [outerMember, { ...innerMember, geometry: inner.slice(0, -1) }],
+      [outerMember, { ...innerMember, geometry: inner.map((p) => ({ ...p, lon: p.lon - 0.00019 })) }],
+      [outerMember, { ...innerMember, geometry: inner.map((p) => ({ ...p, lon: p.lon - 0.00018 })) }],
+      [outerMember, innerMember, { ...innerMember, ref: 55555 }],
+      [innerMember],
+      [outerMember, { ...innerMember, ref: 255783593 }],
+    ];
+    for (const members of variants) {
+      expect(parseProvidenceOsmFootprints({ elements: [relation(members)] })).toEqual([]);
+    }
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{
+        ...building, holes: [[[120.58043, 24.22799], [120.58052, 24.22799],
+          [120.58052, 24.22805], [120.58043, 24.22805]]],
+      }],
+    })).toEqual([]);
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{ ...building, holes: [] }],
+    })).toEqual([]);
+    const [wayFootprint] = parseProvidenceOsmFootprints({ elements: [way(255784049)] });
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{ ...wayFootprint, holes: building.holes }],
+    })).toEqual([]);
+  });
+
   it('uses an illustrative height only when height is absent, never for an explicit unknown unit', () => {
     const levelsOnly = parseProvidenceOsmFootprints({
       elements: [way(255784049, library, { building: 'yes', 'building:levels': '8' })],
