@@ -262,6 +262,29 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('does not extrude a closed way explicitly marked as a line instead of a building area', () => {
+    // area=no overrides the usual polygon interpretation of building=* in OSM.
+    // A whitelisted ID and a visually closed ring are not enough to claim walls.
+    for (const area of ['no', 'NO', 'false', '0', 'unknown', '', null, true]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', area })],
+      }), String(area)).toEqual([]);
+    }
+    // Missing area is normal for OSM buildings; an explicit positive marker
+    // should not regress ordinary, verified closed building footprints.
+    for (const tags of [
+      { building: 'school' },
+      { building: 'school', area: 'yes' },
+      { building: 'school', area: 'YES' },
+      { building: 'school', area: 'true' },
+      { building: 'school', area: '1' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
   it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [{ ...way(255784049), tags: undefined }],
