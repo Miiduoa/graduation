@@ -31,20 +31,25 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
-  it('accepts only a single closed outer way in an audited multipolygon relation', () => {
-    // All coordinates and the height are synthetic test fixtures, not a field survey.
-    const dormOutline = [
-      { lat: 24.22797, lon: 120.58062 },
-      { lat: 24.22797, lon: 120.58072 },
-      { lat: 24.22807, lon: 120.58072 },
-      { lat: 24.22807, lon: 120.58062 },
-      { lat: 24.22797, lon: 120.58062 },
+  it('requires the reviewed Xijia outer and inner OSM members before publishing a 3D roof', () => {
+    // All coordinates and height here are synthetic; member IDs and roles are
+    // from OSM relation/9246899 checked on 2026-11-12.
+    const outer = [
+      { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+      { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+      { lat: 24.22785, lon: 120.58045 },
     ];
-    const member = { type: 'way', ref: 123456, role: 'outer', geometry: dormOutline };
+    const inner = [
+      { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+      { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+      { lat: 24.22799, lon: 120.58063 },
+    ];
+    const outerMember = { type: 'way', ref: 255783593, role: 'outer', geometry: outer };
+    const innerMember = { type: 'way', ref: 665651134, role: 'inner', geometry: inner };
     const relation = (members: unknown, tags: unknown = {
       type: 'multipolygon', building: 'dormitory', height: '16',
     }) => ({ type: 'relation', id: 9246899, tags, members });
-    const parsed = parseProvidenceOsmFootprints({ elements: [relation([member])] });
+    const parsed = parseProvidenceOsmFootprints({ elements: [relation([outerMember, innerMember])] });
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({
       poiId: 'pu-xijia', name: '希嘉學苑',
@@ -52,25 +57,32 @@ describe('Providence OSM building outlines', () => {
       heightMeters: 16, heightBasis: 'osm-tag',
     });
     expect(parsed[0].outline).toHaveLength(4);
+    expect(parsed[0].holes).toHaveLength(1);
     expect(parsed[0]).not.toHaveProperty('osmVersion');
     expect(parseProvidenceFootprintResponse({
       schoolId: 'pu', buildings: parsed,
     })).toEqual(parsed);
-    // Never let a stale/forged API attach way revision labels to a relation.
-    const injectedRevision = parseProvidenceFootprintResponse({
+    // A client receiving an older payload with no courtyard must also fail
+    // closed, instead of drawing a misleading solid roof.
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{ ...parsed[0], holes: undefined }],
+    })).toEqual([]);
+    // Never let a stale/forged API attach a way revision label to a relation.
+    expect(parseProvidenceFootprintResponse({
       schoolId: 'pu', buildings: [{
         ...parsed[0], osmVersion: 99, osmEditedAt: '2026-10-15T08:09:10Z',
       }],
-    });
-    expect(injectedRevision).toEqual(parsed);
+    })).toEqual(parsed);
 
     const invalidMembers: unknown[] = [
-      [], [member, member],
-      [member, { ...member, ref: 123457, role: 'inner' }],
-      [{ ...member, role: 'inner' }],
-      [{ ...member, geometry: dormOutline.slice(0, -1) }],
-      [{ ...member, geometry: [dormOutline[0], dormOutline[2], dormOutline[1],
-        dormOutline[3], dormOutline[0]] }],
+      [], [outerMember], [outerMember, outerMember],
+      [outerMember, { ...innerMember, ref: 123457 }],
+      [{ ...outerMember, ref: 123456 }, innerMember],
+      [outerMember, { ...innerMember, role: 'outer' }],
+      [{ ...outerMember, role: 'inner' }, innerMember],
+      [{ ...outerMember, geometry: outer.slice(0, -1) }, innerMember],
+      [{ ...outerMember, geometry: [outer[0], outer[2], outer[1], outer[3], outer[0]] }, innerMember],
+      [outerMember, { ...innerMember, geometry: inner.slice(0, -1) }],
     ];
     for (const members of invalidMembers) {
       expect(parseProvidenceOsmFootprints({ elements: [relation(members)] })).toEqual([]);
@@ -80,13 +92,16 @@ describe('Providence OSM building outlines', () => {
       { type: 'multipolygon', building: 'no' },
       { type: 'multipolygon', building: 'roof' },
     ]) {
-      expect(parseProvidenceOsmFootprints({ elements: [relation([member], tags)] })).toEqual([]);
+      expect(parseProvidenceOsmFootprints({
+        elements: [relation([outerMember, innerMember], tags)],
+      })).toEqual([]);
     }
     expect(parseProvidenceOsmFootprints({ elements: [
-      relation([member]), relation([member], { type: 'multipolygon', building: 'yes' }),
+      relation([outerMember, innerMember]),
+      relation([outerMember, innerMember], { type: 'multipolygon', building: 'yes' }),
     ] })).toEqual([]);
     expect(parseProvidenceOsmFootprints({ elements: [
-      { ...relation([member]), id: 1111111 },
+      { ...relation([outerMember, innerMember]), id: 1111111 },
     ] })).toEqual([]);
   });
 
