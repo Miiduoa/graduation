@@ -115,6 +115,22 @@ function intersects(a: [number, number], b: [number, number],
     (cdB === 0 && onSegment(b, c, d));
 }
 
+/** A closed OSM way repeats the *same node ID* at both ends. Coordinates can
+ * happen to coincide for different nodes even when the source is an open line.
+ * When Overpass supplies node refs, verify they describe the same geometry
+ * before treating the coordinate ring as a building. Legacy geometry-only
+ * fixtures remain supported, but malformed/mismatched refs fail closed.
+ */
+function hasConsistentOsmWayNodes(way: Record<string, unknown>): boolean {
+  const nodes = way.nodes;
+  if (nodes === undefined) return true;
+  if (!Array.isArray(nodes) || !Array.isArray(way.geometry) ||
+      nodes.length !== way.geometry.length || nodes.length < 4) return false;
+  return nodes.every((id) => typeof id === 'number' &&
+    Number.isSafeInteger(id) && id > 0) &&
+    nodes[0] === nodes[nodes.length - 1];
+}
+
 function safeOutline(value: unknown): Array<[number, number]> | null {
   if (!Array.isArray(value) || value.length < 4 || value.length > MAX_VERTICES + 1) return null;
   const points: Array<[number, number]> = [];
@@ -198,7 +214,10 @@ function safeSimpleRelationGeometry(element: Record<string, unknown>):
     // previously verified courtyard with an invented roof.
     return null;
   }
-  const outline = safeOutline(outerMembers[0]?.geometry);
+  if (!outerMembers[0] || !hasConsistentOsmWayNodes(outerMembers[0]) ||
+      (innerMembers.length > 0 && (!innerMembers[0] ||
+        !hasConsistentOsmWayNodes(innerMembers[0])))) return null;
+  const outline = safeOutline(outerMembers[0].geometry);
   if (!outline) return null;
   if (!innerMembers.length) return { outline, holes: [] };
   const hole = safeOutline(innerMembers[0]?.geometry);
@@ -392,7 +411,11 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const identity = `${element.type}:${element.id}`;
     if (!place || seen.has(identity) || !isStandingBuilding(element.tags)) continue;
     const geometry = element.type === 'way'
-      ? (() => { const outline = safeOutline(element.geometry); return outline ? { outline, holes: [] } : null; })()
+      ? (() => {
+          if (!hasConsistentOsmWayNodes(element)) return null;
+          const outline = safeOutline(element.geometry);
+          return outline ? { outline, holes: [] } : null;
+        })()
       : safeSimpleRelationGeometry(element);
     if (!geometry || !outlineNearPoi(geometry.outline, place)) continue;
     const height = heightFromOsmTags(element.tags);
