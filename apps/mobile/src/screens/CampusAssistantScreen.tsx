@@ -123,7 +123,8 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   const uid = loading || platformRoute || platform?.loading || platform?.pendingLogout || platform?.error || platform?.session
     ? '' : user?.uid ?? '';
   const { school, selection, selectionReady } = useSchool();
-  const schoolId = selectionReady ? selection.schoolId ?? '' : '';
+  // Older callers expose only school; an explicit empty selection still wins.
+  const schoolId = selectionReady === false ? '' : selection ? selection.schoolId ?? '' : school.id;
   const schoolName = schoolId ? school.name : '尚未選校';
   const resolved = !(selectionReady === false || loading || platform?.loading || platform?.pendingLogout || platform?.error);
   const session = platform?.loading || platform?.error || platform?.pendingLogout ? null : platform?.session;

@@ -97,6 +97,7 @@ function filteredResponse(empty = false) {
 }
 const navigation = () => ({ navigate: jest.fn(), getState: () => ({ routeNames: ['CourseCatalog'] }) });
 async function ask(view: ReturnType<typeof render>, question = '幫我查清大的資料庫課程') {
+  await view.findByText('送出問題');
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), question);
   await act(async () => fireEvent.press(view.getByText('送出問題')));
 }
@@ -207,6 +208,7 @@ test.each(['school', 'public'])('the global overlay actually navigates the activ
   if (owner === 'public') mockUid = null;
   const view = render(<AIOverlayHost />);
   expect(fetchSource).not.toHaveBeenCalled();
+  await view.findByText('送出問題');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await view.findByText('資料庫系統');
   fireEvent.press(view.getByText('開啟完整查課結果'));
@@ -227,6 +229,7 @@ test.each(['school', 'public'])('the global overlay actually navigates the activ
 
 test('an overlay without a ready navigation container does not present a false in-app destination', async () => {
   const view = render(<AIOverlayHost />);
+  await view.findByText('送出問題');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await view.findByText('資料庫系統');
   expect(view.queryByText('開啟完整查課結果')).toBeNull();
@@ -282,6 +285,7 @@ test.each(['school', 'public'])('the %s overlay preserves all filters through th
   fetchSource.mockResolvedValue(filteredResponse());
   const view = render(<AIOverlayHost />);
   expect(fetchSource).not.toHaveBeenCalled();
+  await view.findByText('送出問題');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await view.findByText('資料庫系統');
   fireEvent.press(view.getByText('開啟完整查課結果'));
