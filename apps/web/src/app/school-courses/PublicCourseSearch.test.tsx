@@ -361,6 +361,46 @@ it('serializes course clipboard writes and shows confirmation only for the lates
   expect(within(cards[1]).getByRole('link', { name: '前往課表匯入' })).toBeTruthy();
 });
 
+it.each(['edit', 'unmount'] as const)(
+  'does not write a queued old course to the clipboard after %s of the search page',
+  async (reason) => {
+    const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
+    let finishFirst!: () => void;
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }))
+      .mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const view = render(<PublicCourseSearch {...props} />);
+    try {
+      submit('課');
+      const cards = await screen.findAllByRole('listitem');
+      fireEvent.click(within(cards[0]).getByRole('button', { name: '複製課表匯入資料' }));
+      await act(async () => { await Promise.resolve(); });
+      expect(writeText).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(cards[1]).getByRole('button', { name: '複製課表匯入資料' }));
+      if (reason === 'edit') {
+        fireEvent.change(screen.getByRole('searchbox'), { target: { value: '下一筆課' } });
+      } else {
+        view.unmount();
+      }
+      await act(async () => { finishFirst(); await Promise.resolve(); });
+      // The first native/browser clipboard operation was already in flight;
+      // the queued second operation must never start after the user departs.
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
+      if (reason === 'edit') {
+        expect(screen.queryByText(/已複製/)).toBeNull();
+        expect(screen.queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+      }
+    } finally {
+      // Keep the module-level clipboard queue settled for subsequent tests.
+      await act(async () => { finishFirst?.(); });
+      view.unmount();
+    }
+  },
+);
+
 it('skips an obsolete queued copy before it reaches the clipboard, even across two classes', async () => {
   const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
