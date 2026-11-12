@@ -43,6 +43,10 @@ describe('Providence OSM building outlines', () => {
     })).toMatchObject([{ poiId: 'pu-library' }]);
     for (const nodes of [
       [101, 102, 103, 104, 105], // same first/last coordinates, different OSM node
+      // An internally repeated ID with two different geometry coordinates is
+      // contradictory even though the coordinate ring itself is valid.
+      [101, 102, 103, 102, 101],
+      [101, 101, 103, 104, 101],
       [101, 102, 103, 101], // missing geometry reference
       [101, 102, 103, 104, 101, 101], // extra reference
       [101, 102, -3, 104, 101],
@@ -115,6 +119,9 @@ describe('Providence OSM building outlines', () => {
       [], [outerMember], [outerMember, outerMember],
       [withNodes(outerMember, [301, 302, 303, 304, 305]), innerMember],
       [outerMember, withNodes(innerMember, [401, 402, 403, 404, 405])],
+      // Invalid interior node identity can distort either ring independently.
+      [withNodes(outerMember, [301, 302, 303, 302, 301]), innerMember],
+      [outerMember, withNodes(innerMember, [401, 402, 403, 402, 401])],
       [withNodes(outerMember, [301, 302, 303]), innerMember],
       [outerMember, { ...innerMember, ref: 123457 }],
       [{ ...outerMember, ref: 123456 }, innerMember],
