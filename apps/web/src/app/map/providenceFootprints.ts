@@ -377,7 +377,10 @@ function isStandingBuilding(value: unknown): boolean {
   const classification = tags?.building;
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
-  if (!kind || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A semicolon/comma/pipe-separated building type can mix standing and
+  // demolished or proposed classifications. Do not interpret one token as
+  // evidence of a complete building without a source review.
+  if (!kind || /[;,|]/.test(kind) || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
   // A closed OSM way tagged area=no is a line, not a polygon, even if an
   // old building=* tag remains. Never extrude its enclosed space into walls.
   // Unknown/invalid area markers are ambiguous and require source review.

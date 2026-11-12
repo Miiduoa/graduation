@@ -433,6 +433,25 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('rejects conflicting or multi-valued OSM building types without inventing a full building', () => {
+    // Synthetic tag drift: even if one token says "school" or "yes",
+    // another token can mark the volume as unfinished or removed.
+    for (const building of [
+      'school;construction', 'yes;no', 'roof;school',
+      'school,demolished', 'yes|proposed', 'school;dormitory',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building })],
+      }), building).toEqual([]);
+    }
+    // Unambiguous OSM classifications still work.
+    for (const building of ['yes', 'school', 'dormitory']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building })],
+      }), building).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
   it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [{ ...way(255784049), tags: undefined }],
