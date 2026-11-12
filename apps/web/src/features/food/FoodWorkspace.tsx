@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { SiteShell } from '@/components/SiteShell';
+import { AccountDemoDiningPanel } from './AccountDemoDiningPanel';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
@@ -22,7 +23,11 @@ const clientHydrated = () => true;
 const serverHydrated = () => false;
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
-export type PreparedFoodItem = { menuItemId: string; quantity: number; selectedOptionIds: string[] };
+export type PreparedFoodItem = {
+  menuItemId: string;
+  quantity: number;
+  selectedOptionIds: string[];
+};
 export function FoodWorkspace({
   initialTenant = '',
   initialOrder = '',
@@ -61,8 +66,23 @@ export function FoodWorkspace({
   }
   const orderingOn = isWebOnlineOrderingEnabled();
   const checkingAccount = !hydrated || auth.loading;
+  const nativeAccount = auth.session ? (
+    <>
+      <p className={styles.muted}>{foodPageSubtitle(orderingOn)}</p>
+      <FoodAccount
+        key={`${auth.session.platformAccountId}:${auth.session.context}`}
+        accountId={auth.session.platformAccountId}
+        context={auth.session.context}
+        cache={scope.drafts}
+        initialLocation={initialLocation}
+        initialTenant={initialTenant}
+        initialOrder={initialOrder}
+        initialItems={initialItems}
+      />
+    </>
+  ) : null;
   return (
-    <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(orderingOn)}>
+    <SiteShell title="點餐與取餐" subtitle="查看餐點、訂單與取餐進度。">
       <div className={styles.stack}>
         {cleanupError ? <p role="alert">{cleanupError}</p> : null}
         <nav className={styles.serviceNav} aria-label="餐飲服務">
@@ -72,7 +92,10 @@ export function FoodWorkspace({
           <Link href="/orders" className={styles.serviceLink}>
             App 餐廳訂單
           </Link>
-          <Link href="/merchant" className={styles.serviceLink}>
+          <Link
+            href={campusServiceHref('/merchant/workspace', browseSearch)}
+            className={styles.serviceLink}
+          >
             店家工作台
           </Link>
         </nav>
@@ -84,16 +107,11 @@ export function FoodWorkspace({
             <Button onClick={() => void auth.refresh()}>重新確認帳號</Button>
           </div>
         ) : auth.session && !auth.pendingLogout ? (
-          <FoodAccount
-            key={`${auth.session.platformAccountId}:${auth.session.context}`}
-            accountId={auth.session.platformAccountId}
-            context={auth.session.context}
-            cache={scope.drafts}
-            initialLocation={initialLocation}
-            initialTenant={initialTenant}
-            initialOrder={initialOrder}
-            initialItems={initialItems}
-          />
+          initialTenant || initialOrder || initialLocation ? (
+            nativeAccount
+          ) : (
+            <AccountDemoDiningPanel view="student" fallback={nativeAccount} />
+          )
         ) : (
           <NuniSignIn
             returnUrl={campusServiceHref(
@@ -164,7 +182,9 @@ function FoodAccount({
       return false;
     const locations = await client.listLocations(initialTenant, { limit: 30 });
     return locations.locations.some(
-      (l) => l.id === initialLocation && l.merchantMode === 'full' &&
+      (l) =>
+        l.id === initialLocation &&
+        l.merchantMode === 'full' &&
         l.allowedActions.includes('view-menu'),
     );
   }, [client, orderingOn, initialOrder, initialTenant, initialLocation]);
@@ -289,7 +309,8 @@ function FoodLocations({
   const validSelected =
     selected !== initialLocation ||
     locations.data?.locations.some(
-      (l) => l.id === selected && l.merchantMode === 'full' && l.allowedActions.includes('view-menu'),
+      (l) =>
+        l.id === selected && l.merchantMode === 'full' && l.allowedActions.includes('view-menu'),
     );
   if (selected && validSelected) {
     return (
@@ -415,10 +436,17 @@ function FoodMenuPreview({
               {prepared
                 .map((line) => {
                   const listed = menu.data;
-                  const item = listed?.sections.flatMap((section) => section.items).find((row) => row.id === line.menuItemId);
+                  const item = listed?.sections
+                    .flatMap((section) => section.items)
+                    .find((row) => row.id === line.menuItemId);
                   if (!item) return '';
                   const options = line.selectedOptionIds
-                    .map((id) => item.optionGroups.flatMap((group) => group.options).find((option) => option.id === id)?.name)
+                    .map(
+                      (id) =>
+                        item.optionGroups
+                          .flatMap((group) => group.options)
+                          .find((option) => option.id === id)?.name,
+                    )
                     .filter(Boolean);
                   return `${item.name} × ${line.quantity}${options.length ? `（${options.join('、')}）` : ''}`;
                 })

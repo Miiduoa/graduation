@@ -6,6 +6,8 @@ import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
+import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
+import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
@@ -35,6 +37,7 @@ export function AssistantThread({
   onConfirm,
   onCancel,
   onReconcile,
+  demoScope,
 }: {
   inline?: boolean;
   schoolId: string;
@@ -58,6 +61,7 @@ export function AssistantThread({
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
+  demoScope?: AccountDemoAssistantScope;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -115,7 +119,7 @@ export function AssistantThread({
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (canAnswerAssistantLocally(question) || (consent && ready));
+    (canAnswerAssistantLocally(question) || (!!demoScope && !!accountDemoAssistantIntent(question)) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -202,6 +206,7 @@ export function AssistantThread({
                   : <AssistantMarkdown text={turn.reply.answer} />}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
+                {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
                     <summary>查了哪些資料</summary>
@@ -224,6 +229,11 @@ export function AssistantThread({
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
+            {demoScope && turn.reply.demo?.proposal && <AccountDemoAssistantCard
+              key={JSON.stringify([demoScope.context, demoScope.accountId, demoScope.schoolId, turn.reply.demo.proposal.id])}
+              proposal={turn.reply.demo.proposal}
+              scope={demoScope}
+            />}
           </article>
         ))}
         {pending ? (

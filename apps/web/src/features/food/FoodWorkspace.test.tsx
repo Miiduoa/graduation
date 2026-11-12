@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/features/nuni/Session', () => ({
   browserRequest: mocks.request,
   useNuniSession: () => mocks.auth,
+  useOptionalNuniSession: () => mocks.auth,
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
@@ -56,6 +57,7 @@ vi.mock('qrcode', () => ({
 let order = orderFixture();
 let publicOpen = true;
 async function respond(path: string, _context: string, input?: Record<string, unknown>) {
+  if (path === 'account-demo') return { demo: null };
   if (path === 'realms')
     return {
       realms: publicOpen ? [{ tenantId: 'campus-one', name: '第一校園', services: ['food'] }] : [],
@@ -420,7 +422,7 @@ it('locks quick add and checkout if the location pauses while the quote is retur
 it('omits confirm-to-submit copy on /food when online ordering is off', async () => {
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
   render(<FoodWorkspace />);
-  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(await screen.findByText('目前還不能線上點餐')).toBeTruthy();
   expect(screen.queryByText('確認後才送出訂單')).toBeNull();
   expect(screen.queryByText('先看菜單與金額，確認後才送出訂單。')).toBeNull();
 });

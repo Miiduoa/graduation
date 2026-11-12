@@ -37,6 +37,8 @@ import {
   StudentCardNfcError,
 } from '../services/studentCardNfc';
 import { StudentCardNfc } from '../components/StudentCardNfc';
+import { AccountDemoStudentCard } from '../components/AccountDemoStudentCard';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
@@ -292,13 +294,14 @@ function Presentation({
 
 export default function StudentCardScreen() {
   const auth = useAuth();
+  const platform = useOptionalNuniSession();
   const { selectionReady, selection, school } = useSchool();
   const focused = useIsFocused();
   const s = useThemeStyleSheet(createStyles);
   const user = auth.user;
   const profile = auth.profile;
   const schoolId = toPublicSchoolId(selection.schoolId);
-  const ready = selectionReady && !auth.loading && !auth.profileLoading;
+  const ready = selectionReady && !auth.loading && !auth.profileLoading && !platform?.loading;
   let issue: string | undefined;
   if (!ready) issue = '正在確認帳號與學校…';
   else if (!user || user.isAnonymous || auth.tokenExpired) issue = '請先登入學校帳號。';
@@ -311,23 +314,39 @@ export default function StudentCardScreen() {
   )
     issue = '請切回帳號所屬的學校，再開啟學生證。';
   if (!focused) return null;
-  if (issue || !user || !profile || !schoolId)
-    return (
+  const regularCard =
+    issue || !user || !profile || !schoolId ? (
       <ScrollView style={s.page} contentContainerStyle={s.content}>
         <Text style={s.body}>{issue}</Text>
         {ready && <StudentCardNfc key={JSON.stringify([user?.uid, schoolId])} />}
         {ready && schoolId && <OfficialService key={schoolId} schoolId={schoolId} />}
       </ScrollView>
+    ) : (
+      <Wallet
+        key={JSON.stringify([user.uid, school.id, profile.studentId])}
+        user={user}
+        profile={profile}
+        schoolId={schoolId}
+        schoolName={school.name}
+      />
     );
-  return (
-    <Wallet
-      key={JSON.stringify([user.uid, school.id, profile.studentId])}
-      user={user}
-      profile={profile}
-      schoolId={schoolId}
-      schoolName={school.name}
-    />
-  );
+  const platformSession =
+    platform && !platform.pendingLogout && !platform.error ? platform.session : null;
+  if (ready && platformSession && schoolId) {
+    return (
+      <AccountDemoStudentCard
+        key={JSON.stringify([platformSession.platformAccountId, platformSession.context, schoolId])}
+        accountId={platformSession.platformAccountId}
+        context={platformSession.context}
+        schoolId={schoolId}
+        sessionExpiresAt={platformSession.expiresAt}
+        request={platform!.bffRequest}
+        fallback={regularCard}
+        footer={<OfficialService schoolId={schoolId} />}
+      />
+    );
+  }
+  return regularCard;
 }
 
 function Wallet({

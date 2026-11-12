@@ -445,6 +445,9 @@ describe('Nuni Google authorization code flow', () => {
   });
   it.each([
     '/social?campus=tw-pu',
+    '/orders?campus=pu',
+    '/student-card?campus=pu',
+    '/ai-assistant?campus=pu',
     '/merchant',
     '/merchant/apply',
     '/merchant/workspace',

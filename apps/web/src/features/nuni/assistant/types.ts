@@ -19,6 +19,7 @@ export type V2Reply = {
   /** Source-backed deterministic data: render as text and keep out of later model history. */
   dataRead?: boolean;
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
+  demo?: import('@/lib/accountDemoAssistant').AccountDemoAssistantAnswer;
 };
 
 export type V2Turn = { question: string; reply: V2Reply };
