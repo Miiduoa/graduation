@@ -90,7 +90,7 @@ describe('account permission proposal boundary', () => {
       const model = vi.fn().mockRejectedValue(new Error('model should not be called'));
       const result = await run({ question, history: [], binding, adapter: f.adapter,
         secret, now, model, writes: true, signal: new AbortController().signal, log: () => {} });
-      expect(result.dataRead).toBe(true);
+      expect(result).toHaveProperty('dataRead', true);
       expect(result.cards).toHaveLength(0);
       expect(f.adapter.permissions).not.toHaveBeenCalled();
       expect(model).not.toHaveBeenCalled();
