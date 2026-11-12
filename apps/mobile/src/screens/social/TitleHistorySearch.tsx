@@ -401,7 +401,9 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
             </Pressable>
           )}
           ListEmptyComponent={!busy && notice && !notice.startsWith('這篇貼文') && !error ? <Text style={styles.message}>沒有符合這個標題開頭的貼文。</Text> : null}
-          ListFooterComponent={hasMore && !error ? (
+          // An offline post-open check is not a failed page fetch. Keep the
+          // next-page action available unless the exact page needs retrying.
+          ListFooterComponent={hasMore && (!error || !retry.current) ? (
             <Pressable accessibilityRole="button" accessibilityLabel="載入更多歷史貼文"
               accessibilityState={{ disabled: busy || opening, busy: busy || opening }} disabled={busy || opening} style={styles.button}
               onPress={() => { if (cursor.current) void request(cursor.current, true); }}>
