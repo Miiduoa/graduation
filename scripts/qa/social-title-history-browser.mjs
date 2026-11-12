@@ -269,7 +269,7 @@ window.__fixtureToken=location.search;
     document.querySelector('input[type="search"]').value === value, pastedEmoji);
   await check('320: 81 emoji has a live and associated invalid explanation', () => {
     const field = document.querySelector('input[type="search"]');
-    const ids = (field.getAttribute('aria-describedby') || '').split(/\\s+/);
+    const ids = (field.getAttribute('aria-describedby') || '').split(/\s+/);
     const note = ids.map((id) => document.getElementById(id)).find((node) =>
       node?.textContent?.includes('標題開頭最多 80 字'));
     return field.getAttribute('aria-invalid') === 'true' &&

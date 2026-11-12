@@ -313,8 +313,9 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
       <form onSubmit={submit} className={styles.form}>
         <div className={styles.field}>
           <label htmlFor={fieldId}>標題開頭</label>
+          {/* Avoid a UTF-16 maxlength: pasting 81 emoji would silently become 80 before validation. */}
           <input id={fieldId} ref={input} type="search" value={draft}
-            onChange={(event) => edit(event.target.value)} maxLength={160}
+            onChange={(event) => edit(event.target.value)}
             aria-invalid={titleTooLong} aria-describedby={titleTooLong ? `${hintId} ${limitId}` : hintId}
             autoComplete="off" placeholder="例如：二手書、租屋"
             onKeyDown={(event) => {
