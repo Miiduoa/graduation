@@ -73,66 +73,16 @@ function checkGrant(grant: Grant) {
   return url;
 }
 
-export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: AbortSignal) {
+export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: AbortSignal): Promise<string> {
   checkSession(scope, signal);
   if (!validDmPhoto(file)) throw new Error('photo-file');
-  const fileName = `photo.${extensions.get(file.type)}`;
-  type Input = PhotoScope & {
-    action: 'uploadPhoto';
-    fileName: string;
-    contentType: string;
-    size: number;
-  };
-  type Upload = Grant & {
-    method: string;
-    path: string;
-    mediaId: string;
-    fields: Record<string, string>;
-  };
-  const { data } = await callPhotoFn<Input, Upload>('dmAttachmentDelivery', {
-    ...scope,
-    action: 'uploadPhoto',
-    fileName,
-    contentType: file.type,
-    size: file.size,
-  });
-  checkSession(scope, signal);
-  checkGrant(data);
-  const parts = parseDmPhotoPath(data.path, scope.conversationId, false);
-  if (
-    data.method !== 'POST' ||
-    !parts ||
-    parts.fileName !== fileName ||
-    parts.mediaId !== data.mediaId ||
-    data.fields?.key !== data.path
-  )
-    throw new Error('photo-policy');
-  const body = new FormData();
-  for (const [name, value] of Object.entries(data.fields)) body.append(name, value);
-  body.append('file', file, fileName);
-  const response = await fetch(data.url, {
-    method: 'POST',
-    body,
-    signal,
-    credentials: 'omit',
-    redirect: 'error',
-    referrerPolicy: 'no-referrer',
-  });
-  if (!response.ok) throw new Error('photo-upload');
-  checkSession(scope, signal);
-  return data.path;
+  throw new Error('photo-unavailable');
 }
 
-export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
+export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal): Promise<void> {
   checkSession(scope, signal);
   if (!parseDmPhotoPath(path, scope.conversationId, false)) throw new Error('photo-path');
-  const { data } = await callPhotoFn<
-    PhotoScope & { path: string },
-    { conversationId: string; messageId: string }
-  >('sendDmPhoto', { ...scope, path });
-  checkSession(scope, signal);
-  if (data?.conversationId !== scope.conversationId || data.messageId !== scope.messageId)
-    throw new Error('photo-unconfirmed');
+  throw new Error('photo-unavailable');
 }
 
 export async function readDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {

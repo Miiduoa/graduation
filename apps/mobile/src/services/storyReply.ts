@@ -1,5 +1,5 @@
-import { httpsCallable } from 'firebase/functions';
-import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { getAuthInstance, isFirebaseMockMode } from '../firebase';
+import { postNuniWebFn } from './nuniWebFn';
 import { deriveDmConversationId } from '../utils/conversationAccess';
 import { isDemoUid } from './demoSession';
 
@@ -20,11 +20,11 @@ export async function sendStoryReply(input: StoryReplyInput) {
     !isDemoUid(input.viewerUid) &&
     getAuthInstance().currentUser?.uid === input.viewerUid;
   if (!hasSession()) throw new Error('Story reply session changed');
-  const send = httpsCallable<StoryReplyInput, StoryReplyReceipt>(
-    getFunctionsInstance(),
+  const data = await postNuniWebFn<StoryReplyInput, StoryReplyReceipt>(
     'replyToCampusStory',
+    input,
+    input.viewerUid,
   );
-  const { data } = await send(input);
   if (
     !hasSession() ||
     data?.conversationId !==

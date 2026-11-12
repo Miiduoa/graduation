@@ -1,6 +1,6 @@
 const functionsConfig = vi.hoisted(() => ({ enabled: true }));
 vi.mock('./cloudFunctions', () => ({ areFunctionsConfigured: () => functionsConfig.enabled }));
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getDocFromServer, getDocsFromServer, onSnapshot, runTransaction } from 'firebase/firestore';
 import { deriveDmConversationId } from './conversationAccess';
 import {
@@ -107,6 +107,7 @@ function listener(path: string) {
   return { receive: call[2], error: call[3], query: call[0] };
 }
 const tx = { get: vi.fn(), set: vi.fn(), update: vi.fn() };
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   functionsConfig.enabled = true;
   vi.clearAllMocks();
@@ -116,6 +117,25 @@ beforeEach(() => {
   runtime.call.mockReset().mockResolvedValue({
     data: { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false },
   });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const name = String(url).split('/api/fn/')[1];
+    if (!name) throw new Error(`unexpected fetch ${url}`);
+    try {
+      const payload = JSON.parse(String(init?.body));
+      const returned = await runtime.call(payload.data);
+      return { ok: true, status: 200, json: async () => ({ result: returned.data }) };
+    } catch (error: any) {
+      if (error?.code && String(error.code).startsWith('functions/')) {
+        const status = String(error.code).slice(10).toUpperCase().replaceAll('-', '_');
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: { status, message: error.message || '' } }),
+        };
+      }
+      throw error;
+    }
+  }));
   vi.mocked(onSnapshot).mockReturnValue(vi.fn());
   vi.mocked(getDocFromServer).mockResolvedValue(
     document('bob', { displayName: '來源姓名' }) as never,
@@ -738,7 +758,7 @@ it('keeps stale or denied directory requests distinct from a successful empty se
 it.each([false, true])('prepares the exact canonical peer read-only when exists is %s', async (exists) => {
   runtime.call.mockResolvedValueOnce({ data: { conversationId: prepared.conversationId, peerUid: 'bob', exists } });
   expect(await preparePrivateConversation(session, 'bob', freshSignal())).toEqual({ ...prepared, exists });
-  expect(runtime.callable).toHaveBeenCalledWith('functions', 'prepareDmConversation');
+  expect(fetch).toHaveBeenCalledWith('/api/fn/prepareDmConversation', expect.anything());
   expect(runtime.call).toHaveBeenCalledWith({ viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob' });
   expect(runTransaction).not.toHaveBeenCalled();
   expect(onSnapshot).not.toHaveBeenCalled();
@@ -780,7 +800,7 @@ it('uses the same text intent for a failed first-send retry and requires its exa
   await expect(sendPreparedPrivateMessage(session, prepared, firstMessageId, '  嗨，同學  ', freshSignal()))
     .rejects.toMatchObject({ reason: 'unavailable' });
   await sendPreparedPrivateMessage(session, prepared, firstMessageId, '  嗨，同學  ', freshSignal());
-  expect(runtime.callable).toHaveBeenLastCalledWith('functions', 'sendDmText');
+  expect(fetch).toHaveBeenLastCalledWith('/api/fn/sendDmText', expect.anything());
   expect(runtime.call.mock.calls[0]).toEqual(runtime.call.mock.calls[1]);
   expect(runtime.call).toHaveBeenLastCalledWith({
     viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob', conversationId: prepared.conversationId,
@@ -934,9 +954,8 @@ it('keeps existing sends subject to server block and account-status denials', as
   expect(runtime.call).toHaveBeenCalledTimes(1);
 });
 
-it.each([false, true])('prepares a new conversation through hosted fallback (configured=%s)', async (configured) => {
+it.each([false, true])('prepares a new conversation through hosted /api/fn (configured=%s)', async (configured) => {
   functionsConfig.enabled = configured;
-  runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
   const fetcher = vi.fn().mockResolvedValue({
     ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false } }),
   });
@@ -950,9 +969,8 @@ it.each([false, true])('prepares a new conversation through hosted fallback (con
     expect(getDocFromServer).not.toHaveBeenCalledWith(expect.objectContaining({ path: 'conversations/dm_pu_alice_bob' }));
   } finally { vi.unstubAllGlobals(); }
 });
-it('sends a prepared first message through hosted after a missing callable', async () => {
+it('sends a prepared first message through hosted /api/fn', async () => {
   functionsConfig.enabled = false;
-  runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
   const fetcher = vi.fn().mockResolvedValue({
     ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', messageId: 'first-text-message-00001' } }),
   });
@@ -960,14 +978,12 @@ it('sends a prepared first message through hosted after a missing callable', asy
   try {
     await sendPreparedPrivateMessage(session, { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false, peerName: null },
       'first-text-message-00001', '你好', new AbortController().signal);
-    expect(runtime.callable).toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledWith('/api/fn/sendDmText', expect.anything());
   } finally { vi.unstubAllGlobals(); }
 });
 
 it('preserves stale cancellation when a hosted send is aborted', async () => {
   functionsConfig.enabled = false;
-  runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
   const controller = new AbortController();
   const fetcher = vi.fn().mockImplementation(async () => {
     controller.abort();
