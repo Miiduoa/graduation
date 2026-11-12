@@ -34,7 +34,7 @@
 .compass svg { flex-shrink: 0; }
 .cameraTools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .cameraTools > button { min-width: 44px; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
-.cameraTools > button:disabled { opacity: 0.55; cursor: default; }
+.cameraTools > button[aria-disabled='true'] { opacity: 0.55; cursor: default; }
 .cameraTools > span { color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 .sceneCaption {
   position: absolute;
