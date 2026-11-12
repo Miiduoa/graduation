@@ -7,9 +7,10 @@ import {
   validDmPhoto,
 } from './dmPhotos';
 
-const api = vi.hoisted(() => ({ uid: 'alice', callable: vi.fn() }));
+const api = vi.hoisted(() => ({ uid: 'alice', call: vi.fn(), callable: vi.fn() }));
 vi.mock('./firebase', () => ({
   getAuth: () => ({ currentUser: { uid: api.uid } }),
+  getFunctionsInstance: () => 'functions',
 }));
 vi.mock('firebase/functions', () => ({ httpsCallable: api.callable }));
 const scope = {
@@ -26,6 +27,7 @@ const file = () => new File(['bytes'], 'private-family.jpg', { type: 'image/jpeg
 beforeEach(() => {
   vi.clearAllMocks();
   api.uid = 'alice';
+  api.callable.mockReturnValue(api.call);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -53,14 +55,28 @@ it('accepts only nonempty JPEG, PNG and WebP strictly below 10 MiB', () => {
   }
 });
 
-it('does not probe Firebase or upload; send and read report photos unavailable', async () => {
+it('does not probe Firebase when sending a photo; send reports photos unavailable', async () => {
   const post = vi.fn();
   vi.stubGlobal('fetch', post);
   await expect(uploadDmPhoto(scope, file(), signal())).rejects.toThrow('photo-unavailable');
   await expect(confirmDmPhoto(scope, draft, signal())).rejects.toThrow('photo-unavailable');
-  await expect(readDmPhoto(scope, path, signal())).rejects.toThrow('photo-unavailable');
   expect(api.callable).not.toHaveBeenCalled();
   expect(post).not.toHaveBeenCalled();
+});
+
+it('still reads an existing photo through the callable grant path', async () => {
+  const grant = {
+    url: 'https://storage.googleapis.com/bucket/' + path + '?X-Goog-Signature=abc',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+  api.call.mockResolvedValueOnce({ data: grant });
+  expect(await readDmPhoto(scope, path, signal())).toEqual(grant);
+  expect(api.callable).toHaveBeenCalledWith('functions', 'dmAttachmentDelivery');
+});
+
+it('reports an existing photo unavailable only after the read callable is confirmed missing', async () => {
+  api.call.mockRejectedValueOnce({ code: 'functions/not-found' });
+  await expect(readDmPhoto(scope, path, signal())).rejects.toThrow('photo-unavailable');
 });
 
 it('never uploads after the viewer changes', async () => {
