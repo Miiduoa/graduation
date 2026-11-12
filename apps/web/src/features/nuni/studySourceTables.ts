@@ -139,7 +139,7 @@ function hasHiddenHtmlAttribute(token: string): boolean {
     const attributeValue = decodeNumericHtmlAttributeReferences(match[2] ?? match[3] ?? match[4] ?? '');
     // HTML's boolean hidden attribute is active even when written hidden="false".
     if (name === 'hidden') return true;
-    if (name === 'style' && hasExplicitHiddenInlineStyle(attributeValue)
+    if (name === 'style' && hasExplicitHiddenInlineStyle(attributeValue))
       return true;
     if (name === 'aria-hidden' &&
         attributeValue.trim().toLowerCase() === 'true') return true;
