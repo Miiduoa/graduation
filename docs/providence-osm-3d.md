@@ -198,3 +198,9 @@ React 回歸以**合成** 503 與 `Retry-After: 600`，檢查 10 分鐘內按鈕
 即使靜宜來源白名單 ID、building 標籤與多邊形座標都符合既有檢查，若上游 OSM 元素明示 `visible=false`（或帶有格式矛盾的 `visible` 欄位），不得用其歷史／不可信幾何重建「現存」建築。現在對外層 way／relation 以及 relation 的 outer／inner 成員分別檢查可見性；未提供欄位（正常 Overpass 回應常見）或明示 `visible=true` 保留原有流程。偵測到不可見元素即撤除該棟 3D，原有地點、OSM 署名和平面導覽不受影響。
 
 此修補使用**合成異常 OSM metadata** 測試，而非宣稱已發現靜宜或公開 Overpass 真實回覆 `visible=false`；未證實實地建築現況、實際建築高度、入口與可走路線。正式測試結果以對應 commit 的 CI／Spatial／CodeQL 為準。
+
+### 2026-11-12｜同一 OSM 閉合節點必須只有一個座標
+
+當 Overpass 提供 way 的 `nodes` 與 `geometry` 時，先核對首尾是同一 node ID，再要求該 ID 的首尾**經緯度完全一致**。舊解析器允許首尾相差不超過 `1e-9` 度的幾何容差；若兩端明確宣稱是同一 OSM 節點，卻被提供成不同座標，就不能用容差補成封閉屋頂。新檢查同時套用一般建築 way 和希嘉學苑 relation 的外環／中庭內環；不符合則不產生該建築 3D，仍保留已核對 POI 及外部導航。未附 `nodes` 的既有幾何格式仍走原容差檢查，**不宣稱已驗證 OSM 節點身分**。
+
+已加入合成的 `5e-10` 度端點差異與合法閉合正反例測試；這不表示已觀測到真實 OSM 具有矛盾節點，也不代表完成靜宜實地校舍或競品驗收。正式 CI、Campus Spatial Browser、CodeQL 必須核對此提交的 head。
