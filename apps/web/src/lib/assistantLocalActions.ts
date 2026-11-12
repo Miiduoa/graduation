@@ -14,7 +14,7 @@ import { readPersonalImports, type PersonalImportScope } from './personalImports
 import { answerLocalSchedule, parseLocalScheduleIntent } from './assistantLocalSchedule';
 
 export type LocalAssistantResult = {
-  kind: 'services' | 'academics' | 'schedule';
+  kind: 'services' | 'academics' | 'personal' | 'schedule';
   content: string;
   serviceIds: AssistantServiceId[];
 };

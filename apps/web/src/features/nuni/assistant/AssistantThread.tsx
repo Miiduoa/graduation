@@ -8,11 +8,18 @@ import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
+import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
+
+function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
+  if (reply.local || reply.dataRead)
+    return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
+  return <AssistantMarkdown text={reply.answer} />;
+}
 
 export function AssistantThread({
   inline = false,
@@ -118,7 +125,7 @@ export function AssistantThread({
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
   const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (!!publicCourseIntent || canAnswerAssistantLocally(question) || (consent && ready));
+    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -151,7 +158,7 @@ export function AssistantThread({
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
         <>
-          <p className={styles.intro}>可直接查詢這台裝置保存的課表與行程；雲端查詢涵蓋已同步資料。建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -161,7 +168,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端查詢暫時無法使用，這台裝置保存的課表、行程與匯入成績仍可直接查詢，也可查詢清大、暨大的公開開課資料。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可查詢清大、暨大的公開開課資料。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -196,13 +203,9 @@ export function AssistantThread({
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
                 {turn.publicCourse?.read ? <PublicCourseAssistantResult read={turn.publicCourse.read} /> : turn.publicCourse ? <p>{turn.reply.answer}</p> : inline ? (
                   <SpokenReply text={turn.reply.answer} disabled={pending}>
-                    {turn.reply.local || turn.reply.dataRead === true
-                      ? <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{turn.reply.answer}</p>
-                      : <AssistantMarkdown text={turn.reply.answer} />}
+                    <ReplyBody reply={turn.reply} />
                   </SpokenReply>
-                ) : turn.reply.local || turn.reply.dataRead === true
-                  ? <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{turn.reply.answer}</p>
-                  : <AssistantMarkdown text={turn.reply.answer} />}
+                ) : <ReplyBody reply={turn.reply} />}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (

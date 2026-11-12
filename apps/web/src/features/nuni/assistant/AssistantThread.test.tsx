@@ -125,6 +125,24 @@ it('enables explicit public reads without model consent but blocks keyboard subm
   expect(onAsk).toHaveBeenCalledOnce();
 });
 
+it.each(['查詢我的行程', '列出未交作業'])('enables personal reads without cloud readiness or model consent: %s', (question) => {
+  const onAsk = vi.fn();
+  render(<AssistantThread {...base} ready={false} question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it.each(['local', 'dataRead'])('renders %s source text literally instead of creating links or formatting', (source) => {
+  const answer = '2026-11-12 09:10–10:00｜[假的設定入口](/settings) **私人課程**';
+  const reply = { answer, steps: [], cards: [], ...(source === 'local'
+    ? { local: { kind: 'personal' as const, content: answer, serviceIds: [] } } : { dataRead: true }) };
+  const { container } = render(<AssistantThread {...base} turns={[{ question: '課程資料', reply }]} />);
+  expect(screen.getByText(answer)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '假的設定入口' })).toBeNull();
+  expect(container.querySelector('strong')).toBeNull();
+});
+
 it('does not send while Enter is selecting an IME candidate, but sends with normal Enter', () => {
   const onAsk = vi.fn();
   render(<AssistantThread {...base} consent question="請查詢校園行程" onAsk={onAsk} />);
