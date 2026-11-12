@@ -114,12 +114,26 @@ export function formatOnDeviceSchoolPrompt(
   // excerpt in the LLM prompt so a small local model cannot overflow context.
   // The prompt is a separate privacy boundary: a caller cannot pass a cached
   // timetable or campus snapshot for someone other than the active account.
-  const owned = verifiedClock && !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
-  const sampleCourses = owned ? snapshot.timetable.courses.slice(0, 8) : [];
-  const omitted = owned ? snapshot.timetable.courses.length - sampleCourses.length : 0;
-  const note = owned && snapshot.timetable.source === 'saved-device-copy'
+  // Restored state can also have a valid clock but a damaged timetable.
+  // Validate the complete small on-device excerpt before handing any private
+  // evidence (including synchronized campus summaries) to the local model.
+  const timetable = snapshot.timetable;
+  const validTimetable = !!timetable &&
+    ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
+    (timetable.updatedAt === null || typeof timetable.updatedAt === 'string') &&
+    Array.isArray(timetable.courses) && timetable.courses.length <= 80 &&
+    timetable.courses.every((course) => !!course &&
+      typeof course.name === 'string' &&
+      Number.isFinite(course.day) && Number.isFinite(course.start) &&
+      Number.isFinite(course.end) &&
+      (course.room === undefined || typeof course.room === 'string'));
+  const owned = verifiedClock && validTimetable &&
+    !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
+  const sampleCourses = owned && timetable ? timetable.courses.slice(0, 8) : [];
+  const omitted = owned && timetable ? timetable.courses.length - sampleCourses.length : 0;
+  const note = owned && timetable?.source === 'saved-device-copy'
     ? [
-        `裝置上有一份個人儲存課表；保存時間：${snapshot.timetable.updatedAt || '不詳'}。`,
+        `裝置上有一份個人儲存課表；保存時間：${timetable.updatedAt || '不詳'}。`,
         `課程時段 start/end 是節次索引，不能冒充鐘點或官方當天課程：${JSON.stringify(sampleCourses)}`,
         omitted > 0
           ? `僅向模型提供前 8 門課，尚有 ${omitted} 門未列出；不可據此判定某天沒課，完整查詢請使用本機課表工具。`
