@@ -235,6 +235,10 @@ describe('authenticated coursework reads', () => {
     expect(result?.content).toContain('2026/11/13');
     expect(result?.content).toContain('未交');
     expect(result?.content).not.toMatch(/已完成題目|不應回傳/);
+    expect(result?.courseworkTargets).toEqual([{
+      workspaceId, taskId: assignment(1).id, kind: 'assignment',
+      title: '資料庫期末實作', courseTitle: '資料庫', dueAt: assignment(1).dueAt,
+    }]);
     expect(browserRequest).toHaveBeenCalledWith('course-access/workspace-course', options().context, { workspaceId, schoolId: 'pu' });
     expect(vi.mocked(browserRequest).mock.calls.every(([, context]) => context === options().context)).toBe(true);
   });
@@ -245,6 +249,7 @@ describe('authenticated coursework reads', () => {
     const result = await answer('我有哪些未交作業？', scope, options());
     expect(result?.content).toContain('未查完整');
     expect(result?.content).not.toContain('資料庫期末實作');
+    expect(result?.courseworkTargets).toEqual([]);
     expect(vi.mocked(browserRequest).mock.calls.some(([path]) => path.endsWith('/assignments'))).toBe(false);
   });
 

@@ -178,6 +178,19 @@ export type Task = {
   submitted: boolean;
   state: string;
 };
+export type CourseworkStudyTarget = {
+  workspaceId: string;
+  taskId: string;
+  kind: 'assignment' | 'quiz';
+  date?: string;
+};
+export type CourseworkStudyGuard = {
+  workspaceId: string;
+  taskId: string;
+  kind: 'assignment' | 'quiz';
+  fingerprint: string;
+  policy: 'coursework-gap' | 'study';
+};
 export type Adapter = {
   simulation: boolean;
   permissions?(): Promise<PlatformAssistantPermissions>;
@@ -195,6 +208,8 @@ export type Adapter = {
   };
   ledger(): Promise<Ledger>;
   courses(): Promise<{ courses: Course[]; partial: boolean }>;
+  /** A fresh school-scoped student membership check for a specifically selected course. */
+  course?(courseId: string): Promise<Course | null>;
   work(courseId: string): Promise<Task[]>;
   materials(courseId: string, cursor?: string): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;

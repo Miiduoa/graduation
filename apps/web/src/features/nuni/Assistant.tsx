@@ -17,6 +17,7 @@ import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } fro
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
+import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 type Step = {
@@ -354,11 +355,32 @@ function V2Conversation({
       if (active()) setError('行程結果已核對，待核對清單暫時無法更新；再次開啟時只會查核，不會重複建立。');
     }
   }
-  async function ask() {
-    const current = question.trim();
+  async function ask(selection?: AssistantCourseworkSelection) {
+    const current = selection
+      ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
+      : question.trim();
     if (!current || busy.current) return;
-    const publicCourseIntent = resolvePublicCourseAssistantIntent(current, schoolId);
-    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
+    const publicCourseIntent = !selection && resolvePublicCourseAssistantIntent(current, schoolId);
+    const followup = !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
+    const targets = parseAssistantCourseworkTargets(turns.at(-1)?.reply.courseworkTargets);
+    const studyDate = followup?.date ?? turns.at(-1)?.reply.courseworkDate;
+    let studySelection = selection;
+    if (followup) {
+      if (targets.length !== 1) {
+        const content = targets.length
+          ? '要替哪一份安排？請選下方作業或測驗，我會重新核對來源與時段，再列出確認內容。'
+          : '請先查詢未交作業，或從剛才的作業清單選擇一份，再幫你找 30 分鐘的準備空堂。';
+        setTurns((previous) => [...previous, { question: current, reply: {
+          answer: content, steps: [], cards: [], dataRead: true,
+          courseworkTargets: targets, courseworkDate: studyDate,
+        } }]);
+        setQuestion('');
+        setError('');
+        return;
+      }
+      studySelection = { target: targets[0], ...(studyDate ? { date: studyDate } : {}) };
+    }
+    const local = !studySelection && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -366,8 +388,8 @@ function V2Conversation({
       setError('');
       return;
     }
-    const personalRead = canAnswerAssistantPersonalQuestion(current);
-    if (!publicCourseIntent && !personalRead && (!consent || !ready)) return;
+    const personalRead = !studySelection && canAnswerAssistantPersonalQuestion(current);
+    if ((!consent || !ready) && !publicCourseIntent && !personalRead && !studySelection) return;
     busy.current = true;
     const pendingAsk = new AbortController();
     askRequest.current = pendingAsk;
@@ -381,7 +403,7 @@ function V2Conversation({
     setError('');
     // Free the composer immediately so the next thought can be typed during a slow response.
     // The sent content remains captured in `current` and can be recovered on failure.
-    setQuestion('');
+    if (!selection) setQuestion('');
     try {
       if (publicCourseIntent) {
         const result = await answerPublicCourseQuestion({
@@ -407,24 +429,35 @@ function V2Conversation({
         if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
         if (direct) {
           setTurns((previous) => [...previous, { question: current,
-            reply: { answer: direct.content, steps: [], cards: [], local: direct } }]);
+            reply: { answer: direct.content, steps: [], cards: [], local: direct,
+              courseworkTargets: parseAssistantCourseworkTargets(direct.courseworkTargets) } }]);
           setRecoverableQuestion((previous) => previous === current ? '' : previous);
           return;
         }
       }
-      if (!ready || !consent) return;
-      const history = turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
+      if ((!ready || !consent) && !studySelection) return;
+      const history = studySelection ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
       ]);
-      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
+      const studyTarget = studySelection ? courseworkStudyTarget(studySelection) : undefined;
+      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current,
+        ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       if (reply.bootstrap) {
         conversation.current = reply.conversationId;
         routeToken.current = reply.routeToken;
-        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
+        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current,
+          ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      // The last selected source stays an untrusted hint for a fresh read, never a model-history fact.
+      reply.courseworkTargets = parseAssistantCourseworkTargets(
+        reply.courseworkTargets ?? (studySelection ? [studySelection.target] : undefined));
+      if (studySelection) {
+        reply.dataRead = true;
+        reply.courseworkDate = studySelection.date;
+      }
       if (reply.cards.length) {
         for (const card of turns.flatMap((turn) => turn.reply.cards)) {
           if (canConfirmAction(actionStates.current[card.mutationId]))
@@ -437,7 +470,7 @@ function V2Conversation({
       if (!controller.current?.signal.aborted) {
         setError(pendingAsk.signal.aborted ? '已停止這次回答。原問題已保留，沒有執行任何確認操作。'
           : e instanceof Error ? e.message : '查詢失敗');
-        setRecoverableQuestion(current);
+        if (!selection) setRecoverableQuestion(current);
       }
     } finally {
       scopeSignal.removeEventListener('abort', abortForScope);
@@ -645,6 +678,7 @@ function V2Conversation({
       recoverableQuestion={recoverableQuestion}
       onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
+      onStudyTarget={(target, date) => void ask({ target, date })}
       onStop={inlineDraft && asking ? () => askRequest.current?.abort() : undefined}
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}

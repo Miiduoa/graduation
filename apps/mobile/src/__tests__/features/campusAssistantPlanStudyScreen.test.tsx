@@ -181,6 +181,70 @@ beforeEach(async () => {
 });
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
 
+async function askText(view: ReturnType<typeof render>, question: string) {
+  await waitFor(() => expect(view.queryByText('正在找回並核對先前的行程操作…')).toBeNull());
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), question);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+}
+
+test('the ordinary assignment question follows the slide wording through exact-day selection, save and readback', async () => {
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  await askText(view, '我還有哪些作業待交？');
+  await view.findByText(/待交作業有 1 筆/);
+  expect(mockBff).toHaveBeenCalledTimes(1);
+  await askText(view, '幫這份作業，找今天的 30 分鐘空堂。');
+  const slot = await view.findByRole('button', { name: slotLabel });
+  expect(mockBff).toHaveBeenCalledTimes(3);
+  expect(ledgerWrites()).toHaveLength(0);
+  fireEvent.press(slot);
+  const confirm = await view.findByRole('button', { name: '確認建立準備行程' });
+  await act(async () => { fireEvent.press(confirm); fireEvent.press(confirm); });
+  await view.findByText('已在這台手機保存並核對行程。');
+  expect((await loadPersonalImports(scope)).records).toEqual([
+    expect.objectContaining({ title: '準備：期末資料模型', date: '2026-11-09', startTime: '10:10', endTime: '10:40' }),
+  ]);
+  expect(ledgerWrites()).toHaveLength(1);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
+  await view.findByText('已在這台手機保存並核對行程。');
+  expect(ledgerWrites()).toHaveLength(1);
+  expectNoModels();
+});
+
+test('a natural ordinal selects the displayed same-name assignment and rereads its current title before proposing time', async () => {
+  const secondId = `cwa_${uuid(2)}`;
+  mockExtraAssignments = [{ ...mockAssignment, id: secondId, dueAt: '2026-11-12T23:59:00+08:00' }];
+  const view = render(<CampusAssistantScreen route={route} />);
+  await askText(view, '我還有哪些作業待交？');
+  await askText(view, '幫這份作業今天找半小時空堂');
+  await view.findByText(/要替哪一份作業安排準備時間/);
+  expect(mockBff).toHaveBeenCalledTimes(1);
+  expect(view.queryByRole('button', { name: slotLabel })).toBeNull();
+  expect(ledgerWrites()).toHaveLength(0);
+  mockExtraAssignments = [{ ...mockExtraAssignments[0], title: '期末資料模型（第二份修訂）' }];
+  await askText(view, '第二份');
+  fireEvent.press(await view.findByRole('button', { name: slotLabel }));
+  expect(view.getByText('作業：期末資料模型（第二份修訂）')).toBeTruthy();
+  expect(mockBff).toHaveBeenCalledTimes(3);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '確認建立準備行程' })));
+  await view.findByText('已在這台手機保存並核對行程。');
+  expect((await loadPersonalImports(scope)).records).toEqual([
+    expect.objectContaining({ title: '準備：期末資料模型（第二份修訂）', date: '2026-11-09' }),
+  ]);
+});
+
+test('asking for today never opens a tomorrow proposal when only tomorrow has known gaps', async () => {
+  mockTimetable.mockResolvedValue({ timetable: null, schoolId: 'pu', updatedAt: record.importedAt,
+    records: [{ ...record, dayOfWeek: 2 }, { ...record, id: 'afternoon', dayOfWeek: 2,
+      startTime: '13:00', endTime: '14:00', linkedCourseId: undefined }] });
+  const view = render(<CampusAssistantScreen route={route} />);
+  await askText(view, '我還有哪些作業待交？');
+  await askText(view, '明天要交，今天哪 30 分鐘能準備？');
+  await view.findByText(/2026-11-09、作業截止前/);
+  expect(view.queryByRole('button', { name: /時段 1/ })).toBeNull();
+  expect(view.queryByRole('button', { name: '確認建立準備行程' })).toBeNull();
+  expect(ledgerWrites()).toHaveLength(0);
+});
+
 test('a real live plan rereads the selected assignment, saves one chosen slot and recovers its verified receipt', async () => {
   const nav = navigation();
   const view = render(<CampusAssistantScreen route={route} navigation={nav} />);
