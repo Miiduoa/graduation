@@ -131,7 +131,11 @@ test('projection accepts only explicit supported PU periods without changing sav
       'ntpu',
     )[0],
   ).toMatchObject({ start: 10, end: 13 });
-  expect(personalImportCourses([{ ...records[0], dayOfWeek: 6 }], 'pu')).toEqual([]);
+  for (const dayOfWeek of [6, 7]) {
+    expect(personalImportCourses([{ ...records[0], dayOfWeek }], 'pu'))
+      .toEqual([expect.objectContaining({ day: dayOfWeek, start: 1, end: 2 })]);
+  }
+  expect(personalImportCourses([{ ...records[0], dayOfWeek: 8 }], 'pu')).toEqual([]);
   expect(personalImportCourses([{ ...records[0], startPeriod: undefined }], 'pu')).toEqual([]);
   expect(records[0].id).toBe('a');
 });
