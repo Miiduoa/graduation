@@ -1031,6 +1031,8 @@ describe('public Providence building geometry route', () => {
   });
 
   it.each([
+    { status: 400, retryAfter: null, cooldown: '86400' },
+    { status: 403, retryAfter: null, cooldown: '86400' },
     { status: 406, retryAfter: null, cooldown: '86400' },
     { status: 429, retryAfter: '3600', cooldown: '3600' },
     { status: 503, retryAfter: '3600', cooldown: '3600' },
@@ -1074,12 +1076,12 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
-  it('backs off for 24 hours after an Overpass 406 instead of repeatedly querying a blocked client', async () => {
+  it.each([400, 403, 406])('backs off for 24 hours after an Overpass HTTP %i rejection', async (status) => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response('client blocked', { status: 406 }))
+        .mockResolvedValueOnce(new Response('client rejected', { status }))
         .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
@@ -1105,14 +1107,14 @@ describe('public Providence building geometry route', () => {
     }
   });
 
-  it('keeps an explicitly stale dated snapshot during a 406 access-denial cooldown', async () => {
+  it.each([400, 403, 406])('retains a dated stale snapshot during HTTP %i cooldown', async (status) => {
     const start = Date.now();
     const day = 24 * 60 * 60 * 1000;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
         .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
-        .mockResolvedValueOnce(new Response('client blocked', { status: 406 }));
+        .mockResolvedValueOnce(new Response('client rejected', { status }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
 
