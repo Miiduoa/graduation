@@ -313,7 +313,10 @@ function OrdersSources({
 }) {
   // The parent's account/context/campus/link key creates an isolated draft cache.
   const [cache] = useState<FoodDraftCache>(() => new Map());
-  const [source, setSource] = useState<'platform' | 'legacy'>(() => {
+  const [selectedSource, setSource] = useState<'platform' | 'legacy' | null>(null);
+  // Follow resolved sign-in state until the user explicitly chooses a source.
+  const source = selectedSource ?? (() => {
+    if (platformLink.orderId && !platformLink.invalid) return 'platform';
     if (focusOrderId && !platformLink.orderId) return 'legacy';
     if (!platform) return 'legacy';
     if (
@@ -325,7 +328,7 @@ function OrdersSources({
     )
       return 'platform';
     return 'legacy';
-  });
+  })();
   const showSources = !!platform && (!!legacyUid || !!focusOrderId);
   const signInSearch = new URLSearchParams({ campus: schoolId });
   if (!platformLink.invalid && platformLink.tenant) {

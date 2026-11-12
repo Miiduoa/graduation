@@ -181,6 +181,64 @@ it('keeps Firebase-only history visible and lets an account with both sessions c
   expect(screen.queryByRole('button', { name: '查看訂單：order-1' })).toBeNull();
 });
 
+it('automatically shows Firebase history after the platform session finishes loading as signed out', () => {
+  harness.account = null;
+  harness.legacyUid = 'firebase-a';
+  harness.loading = true;
+  const view = render(<OrdersPage />);
+  expect(screen.getByRole('status').textContent).toBe('正在確認 Google 帳號…');
+  expect(harness.legacyRead).not.toHaveBeenCalled();
+
+  harness.loading = false;
+  view.rerender(<OrdersPage />);
+  expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'App 餐廳訂單' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+  expect(harness.request).not.toHaveBeenCalled();
+});
+
+it('prioritizes a valid platform order link over an existing Firebase session', () => {
+  harness.account = null;
+  harness.legacyUid = 'firebase-a';
+  harness.search = 'tenant=pu&order=order-1';
+  render(<OrdersPage />);
+  expect(screen.getByRole('button', { name: '站內點餐訂單' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Forders%3Fcampus%3Dpu%26tenant%3Dpu%26order%3Dorder-1',
+  );
+  expect(harness.legacyRead).not.toHaveBeenCalled();
+  expect(harness.request).not.toHaveBeenCalled();
+});
+
+it.each(['站內點餐訂單', 'App 餐廳訂單'])(
+  'preserves an explicit %s choice when platform session loading changes',
+  (source) => {
+    harness.account = null;
+    harness.legacyUid = 'firebase-a';
+    harness.loading = true;
+    const view = render(<OrdersPage />);
+    fireEvent.click(screen.getByRole('button', { name: source }));
+
+    harness.loading = false;
+    view.rerender(<OrdersPage />);
+    expect(screen.getByRole('button', { name: source }).getAttribute('aria-pressed')).toBe('true');
+    if (source === '站內點餐訂單') {
+      expect(screen.getByRole('link', { name: '登入' })).toBeTruthy();
+      expect(screen.queryByText('取餐號碼 7')).toBeNull();
+    } else {
+      expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+      expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+    }
+
+    harness.loading = true;
+    view.rerender(<OrdersPage />);
+    expect(screen.getByRole('button', { name: source }).getAttribute('aria-pressed')).toBe('true');
+    if (source === 'App 餐廳訂單') expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+    else expect(screen.getByRole('status').textContent).toBe('正在確認 Google 帳號…');
+    expect(harness.request).not.toHaveBeenCalled();
+  },
+);
+
 it('does not turn failed or malformed API results into an empty order list', async () => {
   harness.request.mockRejectedValueOnce(new NuniError(503, 'TEMPORARILY_UNAVAILABLE'));
   render(<OrdersPage />);
