@@ -377,6 +377,26 @@ it('skips an obsolete queued copy before it reaches the clipboard, even across t
   expect(within(cards[0]).queryByText(/已複製/)).toBeNull();
 });
 
+
+it('does not resurrect copied feedback from an older search after its clipboard write completes', async () => {
+  const fetcher = vi.fn().mockResolvedValue(response([course]));
+  vi.stubGlobal('fetch', fetcher);
+  let finish!: () => void;
+  const writeText = vi.fn().mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PublicCourseSearch {...props} />);
+  submit('第一個查詢');
+  await screen.findByRole('heading', { name: course.title });
+  fireEvent.click(screen.getByRole('button', { name: '複製課表匯入資料' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(writeText).toHaveBeenCalledTimes(1);
+  submit('第二個查詢');
+  await screen.findByRole('heading', { name: course.title });
+  await act(async () => { finish(); });
+  expect(screen.queryByText(/已複製/)).toBeNull();
+  expect(screen.queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+});
+
 it('keeps only the latest result, including when the previous response arrives late', async () => {
   let finish!: (value: Response) => void;
   const fetcher = vi.fn().mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }))
