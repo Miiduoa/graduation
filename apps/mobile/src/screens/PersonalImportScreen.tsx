@@ -399,11 +399,14 @@ function ImportWorkspace({
     readImportReviewDraft(draftKey)
       .then(async (raw) => {
         const aiDraft = await loadPersonalImportDraft({ owner, schoolId });
-        if (!aiDraft && await hasPersonalImportDraft({ owner, schoolId })) throw new Error('invalid AI draft');
         if (!mounted || generation.current !== run) return;
         aiDraftActive.current = !!aiDraft && !isEmptyPersonalImportDraft(aiDraft);
         const review = raw === null ? null : JSON.parse(raw);
+        // A valid review includes later manual edits and can recover independently of AI storage.
         if (raw === null || isEmptyImportReviewDraft(review)) {
+          if (!aiDraft && await hasPersonalImportDraft({ owner, schoolId }))
+            throw new Error('invalid AI draft');
+          if (!mounted || generation.current !== run) return;
           if (!aiDraft || isEmptyPersonalImportDraft(aiDraft)) return;
           const draft = aiDraft;
           setKind(draft.options.kind);
@@ -568,7 +571,8 @@ function ImportWorkspace({
       text,
       options: { kind, schoolId, academicYear, semester, source, periodProfile: profile },
       rows,
-      selected: [...selected],
+      // Editing source text clears rows; old selection IDs cannot enter the AI checkpoint.
+      selected: [...selected].filter((id) => rows.some((row) => row.id === id)),
       issues,
       retryBatches: aiRetry?.text === text ? aiRetry.batches : [],
     };

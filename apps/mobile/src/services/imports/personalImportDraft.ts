@@ -28,6 +28,8 @@ export function savePersonalImportDraft(
 ): Promise<void> {
   const key = keyFor(scope);
   const serialized = draft && !isEmptyPersonalImportDraft(draft) ? JSON.stringify(draft) : null;
+  if (serialized && !parsePersonalImportDraft(scope, serialized))
+    return Promise.reject(new Error('Invalid personal import draft'));
   const write = (writes.get(key) ?? Promise.resolve())
     .catch(() => {})
     .then(() =>
@@ -48,12 +50,20 @@ export async function loadPersonalImportDraft(
   const key = keyFor(scope);
   await writes.get(key)?.catch(() => {});
   const raw = await AsyncStorage.getItem(key);
+  return raw === null ? null : parsePersonalImportDraft(scope, raw);
+}
+
+// Use the same limits and schema before writing and after reading storage.
+function parsePersonalImportDraft(
+  scope: PersonalImportScope,
+  raw: string,
+): PersonalImportDraft | null {
   if (!raw || raw.length > 1_000_000) return null;
   try {
     const draft = JSON.parse(raw) as PersonalImportDraft;
     if (
       typeof draft.text !== 'string' ||
-      draft.text.length > 40_000 ||
+      draft.text.length > 100_000 ||
       draft.options?.schoolId !== scope.schoolId ||
       !['grades', 'timetable', 'events'].includes(draft.options.kind) ||
       typeof draft.options.academicYear !== 'string' ||

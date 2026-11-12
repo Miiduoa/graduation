@@ -2288,3 +2288,72 @@ test.each(['AI', '核對'])('%s 草稿損壞時阻擋自動寫入並保留原始
   expect(view.queryByLabelText('貼上或修正原始文字')).toBeNull();
   expect(await AsyncStorage.getItem(key)).toBe(raw);
 });
+
+test.each([40_001, 100_000])('恢復 AI 草稿後手動輸入 %i 字，自動保存並重進仍可編輯', async (length) => {
+  const aiKey = `campus.personal-import-draft.v1:${encodeURIComponent(scope.owner)}:pu`;
+  const reviewKey = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+  const result = aiResult();
+  await AsyncStorage.setItem(aiKey, JSON.stringify({
+    text: aiSource,
+    options: { kind: 'grades', schoolId: 'pu', academicYear: '115', semester: '1' },
+    ...result, selected: result.rows.map((row) => row.id), retryBatches: [],
+  }));
+  const view = render(<PersonalImportScreen />);
+  await waitForImportReady(view);
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(aiSource);
+  const text = '字'.repeat(length);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), text);
+  await waitFor(async () => {
+    expect((await loadPersonalImportDraft(scope))?.text).toBe(text);
+    expect(JSON.parse((await AsyncStorage.getItem(reviewKey))!).text).toBe(text);
+  });
+  view.unmount();
+  const returning = render(<PersonalImportScreen />);
+  await waitForImportReady(returning);
+  expect(returning.queryByText(/草稿讀取失敗/)).toBeNull();
+  expect(returning.getByLabelText('貼上或修正原始文字').props.value).toBe(text);
+  expect(returning.getByLabelText('貼上或修正原始文字').props.editable).not.toBe(false);
+  expect((await loadPersonalImportDraft(scope))?.rows).toEqual([]);
+  expect((await loadPersonalImportDraft(scope))?.selected).toEqual([]);
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  fireEvent.changeText(returning.getByLabelText('貼上或修正原始文字'), '繼續修正');
+  await waitFor(async () => expect((await loadPersonalImportDraft(scope))?.text).toBe('繼續修正'));
+});
+
+test.each(['損壞 JSON', '超過 AI 草稿上限'])('AI 草稿%s時仍恢復有效核對草稿及後續編輯', async (damage) => {
+  const aiKey = `campus.personal-import-draft.v1:${encodeURIComponent(scope.owner)}:pu`;
+  const reviewKey = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+  const result = aiResult();
+  await AsyncStorage.setItem(aiKey, damage === '損壞 JSON' ? '{broken' : JSON.stringify({
+    text: '字'.repeat(100_001),
+    options: { kind: 'grades', schoolId: 'pu', academicYear: '115', semester: '1' },
+    ...result, retryBatches: [],
+  }));
+  await AsyncStorage.setItem(reviewKey, JSON.stringify({
+    version: 1, kind: 'grades', academicYear: '115', semester: '1', text: '字'.repeat(40_001),
+    source: { type: 'paste' }, rows: [{ ...result.rows[0], title: '已核對課程', grade: '90' }],
+    selected: [], issues: result.issues, editedIds: [result.rows[0].id],
+  }));
+  const view = render(<PersonalImportScreen />);
+  await waitForImportReady(view);
+  expect(view.queryByText(/草稿讀取失敗/)).toBeNull();
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toHaveLength(40_001);
+  expect(view.getByLabelText('匯入 已核對課程').props.accessibilityState.checked).toBe(false);
+  fireEvent.press(view.getByText('編輯與連結課班'));
+  fireEvent.changeText(view.getByLabelText('成績'), '91');
+  await waitFor(async () => {
+    const saved = JSON.parse((await AsyncStorage.getItem(reviewKey))!);
+    expect(saved.text).toBe('字'.repeat(40_001));
+    expect(saved.rows[0].grade).toBe('91');
+    expect(saved.editedIds).toEqual([result.rows[0].id]);
+    expect(saved.selected).toEqual([]);
+  });
+  view.unmount();
+  const returning = render(<PersonalImportScreen />);
+  await waitForImportReady(returning);
+  expect(returning.getByLabelText('貼上或修正原始文字').props.value).toHaveLength(40_001);
+  expect(returning.getByLabelText('匯入 已核對課程').props.accessibilityState.checked).toBe(false);
+  fireEvent.press(returning.getByText('編輯與連結課班'));
+  expect(returning.getByLabelText('成績').props.value).toBe('91');
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
