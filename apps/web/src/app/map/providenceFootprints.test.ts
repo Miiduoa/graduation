@@ -115,6 +115,13 @@ describe('Providence OSM building outlines', () => {
         withNodes(innerMember, [401, 402, 403, 404, 401]),
       ])],
     })).toHaveLength(1);
+    // An OSM node ID is global across way members. These otherwise valid,
+    // disjoint-looking coordinate rings must not share the same node ID:
+    // that would place node 303 at two different positions.
+    expect(parseProvidenceOsmFootprints({ elements: [relation([
+      withNodes(outerMember, [301, 302, 303, 304, 301]),
+      withNodes(innerMember, [401, 402, 303, 404, 401]),
+    ])] })).toEqual([]);
     const invalidMembers: unknown[] = [
       [], [outerMember], [outerMember, outerMember],
       [withNodes(outerMember, [301, 302, 303, 304, 305]), innerMember],
