@@ -852,7 +852,7 @@ describe('new lesson self-check quality boundary', () => {
   ])('rejects a tautological self-check ($label) while preserving saved formats and retry', async ({ question, answer }) => {
     const repeated = { ...lesson(), question, answer };
     // Legacy v1/v2 lesson decoding is deliberately unchanged.
-    expect(parseTutorExplanation(JSON.stringify(repeated), passage())).toMatchObject({ question, answer });
+    expect(parseTutorExplanation(JSON.stringify(repeated), passage())).toMatchObject({ question: question.trim(), answer: answer.trim() });
     const timing = vi.fn();
     const pending = runStudyTutor({
       passage: passage(), mode: 'exam',

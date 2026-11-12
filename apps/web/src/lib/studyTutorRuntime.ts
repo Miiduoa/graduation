@@ -113,7 +113,7 @@ function hasSubstantiveGeneratedReview(explanation: TutorExplanation): boolean {
 // characters for this NEW-output comparison; retain mathematical operators.
 function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
   const comparable = (value: string) => comparableGeneratedTeaching(value)
-    .replace(/[\p{P}\s]/gu, '').toLocaleLowerCase();
+    .replace(/[\p{P}\s]/gu, '').toLowerCase();
   return comparable(explanation.question) !== comparable(explanation.answer);
 }
 
