@@ -18,10 +18,10 @@ import {
   type SnapshotMetadata,
   type Transaction,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
+import { callWithHostedFallback } from './callableFallback';
 import { parseDmPhotoPath } from './dmPhotos';
 import { deriveDmConversationId } from './conversationAccess';
-import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
+import { getAuth, getDb, isFirebaseConfigured } from './firebase';
 import { leaveRequestHref, parseLeaveRequestId } from './leaveRequestLink';
 import {
   courseHrefFromData,
@@ -305,12 +305,11 @@ export async function preparePrivateConversation(
   if (signal.aborted) throw new MessagingError('stale');
   if (key(peerUid) === session.uid) throw new MessagingError('permission');
   const conversationId = deriveDmConversationId(key(session.schoolId), session.uid, peerUid);
-  const call = httpsCallable<
-    { viewerUid: string; schoolId: string; peerUid: string },
-    { conversationId: string; peerUid: string; exists: boolean }
-  >(getFunctionsInstance(), 'prepareDmConversation');
   try {
-    const { data } = await call({ viewerUid: session.uid, schoolId: session.schoolId, peerUid }).catch(async (error: unknown) => {
+    const { data } = await callWithHostedFallback<
+      { viewerUid: string; schoolId: string; peerUid: string },
+      { conversationId: string; peerUid: string; exists: boolean }
+    >('prepareDmConversation', { viewerUid: session.uid, schoolId: session.schoolId, peerUid }, session.uid, signal).catch(async (error: unknown) => {
       assertUser(session.uid);
       if (signal.aborted) throw new MessagingError('stale');
       // New-DM school eligibility does not revoke access to an existing member DM.
@@ -332,6 +331,7 @@ export async function preparePrivateConversation(
     if (signal.aborted) throw new MessagingError('stale');
     return { conversationId, peerUid, exists: data.exists, peerName: name };
   } catch (error) {
+    if (signal.aborted) throw new MessagingError('stale');
     throw new MessagingError(reason(error));
   }
 }
@@ -352,25 +352,25 @@ export async function sendPreparedPrivateMessage(
   if (prepared.peerUid === session.uid || prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
     throw new MessagingError('permission');
   }
-  const call = httpsCallable<
-    { viewerUid: string; schoolId: string; peerUid: string; conversationId: string; messageId: string; content: string },
-    { conversationId: string; messageId: string }
-  >(getFunctionsInstance(), 'sendDmText');
   try {
-    const { data } = await call({
+    const { data } = await callWithHostedFallback<
+      { viewerUid: string; schoolId: string; peerUid: string; conversationId: string; messageId: string; content: string },
+      { conversationId: string; messageId: string }
+    >('sendDmText', {
       viewerUid: session.uid,
       schoolId: session.schoolId,
       peerUid: prepared.peerUid,
       conversationId: prepared.conversationId,
       messageId,
       content: body,
-    });
+    }, session.uid, signal);
     assertUser(session.uid);
     if (signal.aborted) throw new MessagingError('stale');
     if (data?.conversationId !== prepared.conversationId || data.messageId !== messageId) {
       throw new MessagingError('unavailable');
     }
   } catch (error) {
+    if (signal.aborted) throw new MessagingError('stale');
     throw new MessagingError(reason(error));
   }
 }

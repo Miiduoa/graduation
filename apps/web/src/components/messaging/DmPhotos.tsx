@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { flushSync } from 'react-dom';
 import {
   confirmDmPhoto,
+  isDmPhotoUnavailable,
   photoAccept,
   readDmPhoto,
   uploadDmPhoto,
@@ -142,8 +143,8 @@ export function DmPhotoComposer({
       });
       if (controller.signal.aborted) return;
       finish();
-    } catch {
-      if (!controller.signal.aborted) setError('照片尚未確認送出，可以重試。');
+    } catch (error) {
+      if (!controller.signal.aborted) setError(isDmPhotoUnavailable(error) ? '照片私訊尚未開通' : '照片尚未確認送出，可以重試。');
     } finally {
       request.current = null;
       if (!controller.signal.aborted) setSending(false);
@@ -300,8 +301,8 @@ export function DmPhotoMessage({ scope, path }: { scope: PhotoScope; path: strin
     try {
       const next = await readDmPhoto(scope, path, controller.signal);
       if (!controller.signal.aborted && !document.hidden) setGrant(next);
-    } catch {
-      if (!controller.signal.aborted) setError('照片暫時無法開啟，請再試一次。');
+    } catch (error) {
+      if (!controller.signal.aborted) setError(isDmPhotoUnavailable(error) ? '照片私訊尚未開通' : '照片暫時無法開啟，請再試一次。');
     } finally {
       if (request.current === controller) {
         request.current = null;
