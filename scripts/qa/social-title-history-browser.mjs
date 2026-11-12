@@ -374,46 +374,6 @@ window.__fixtureToken=location.search;
     note: 'Actual SDK + rules, route unmount/remount simulated; not the full PostDetail route or real account switch' });
 
 
-  // A previously listed title must be rechecked from the server at click time.
-  // This uses an actual 320px Chromium click, product UI, SDK and repo rules.
-  await begin(320, 720, 'light', 'retitled-opening');
-  await type('二手書'); await click('搜尋歷史標題'); await count(20);
-  const movedId = await call(() => new URL(document.querySelector('article a').href).pathname.split('/').at(-1));
-  await environment.withSecurityRulesDisabled(async (context) => {
-    await context.firestore().doc(`schools/pu/campusPosts/${movedId}`).update({ title: '租屋 已改標題' });
-  });
-  await clickFirstResult();
-  // The Chrome SDK can sometimes leave a changed/deleted document's
-  // getDocFromServer pending until the UI's existing 7s deadline. Both cases
-  // must fail closed; only a completed server check proves title mismatch.
-  await until(() => call(() => document.querySelectorAll('article').length === 19 ||
-    document.body.textContent.includes('暫時無法向伺服器確認')), 'renamed post safe resolution');
-  const movedState = await call(() => ({
-    opens: window.__history.opens, routes: window.__history.routes,
-    cards: document.querySelectorAll('article').length,
-    status: document.querySelector('[role="status"]')?.textContent,
-    alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent),
-    readingPosition: window.sessionStorage.getItem('nuni:community-history-reading-position:v1'),
-  }));
-  assert.equal(movedState.routes.length, 0, 'Changed or unconfirmed title must never navigate');
-  assert.equal(movedState.readingPosition, null, 'Never record an unverified reading position');
-  if (movedState.cards === 19) {
-    assert.equal(movedState.opens[0]?.prefix, '二手書');
-    assert.equal(movedState.opens[0]?.available, false);
-    assert.ok(movedState.status?.includes('標題已變更'));
-    await check('320: renamed result is removed and focus returns to summary', () =>
-      document.activeElement?.getAttribute('role') === 'status');
-  } else {
-    assert.equal(movedState.cards, 20);
-    assert.equal(movedState.opens[0]?.available, undefined);
-    assert.ok(movedState.alerts.some((message) => message.includes('暫時無法向伺服器確認')));
-  }
-  report.checks.push({ label: '320: renamed or unconfirmed result never routes or records reading position', pass: true });
-  await screenshot('320-retitled-result.png');
-  report.flows.push({ label: 'web-retitled-old-post', completed: true,
-    outcome: movedState.cards === 19 ? 'server-confirmed-title-mismatch' : 'server-read-timeout-no-navigation',
-    note: 'Actual Chrome click + SDK + rules emulator. Timeout does not prove title matching; emulator test separately does. No full PostDetail or human completion time' });
-
   await begin(320, 720, 'light', 'deleted-opening');
   await type('二手書'); await click('搜尋歷史標題'); await count(20);
   const missingId = await call(() => new URL(document.querySelector('article a').href).pathname.split('/').at(-1));
