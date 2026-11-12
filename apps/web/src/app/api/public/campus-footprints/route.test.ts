@@ -48,12 +48,43 @@ describe('public Providence building geometry route', () => {
     expect(called.hostname).toBe('overpass-api.de');
     const query = called.searchParams.get('data')!;
     expect(query).toContain('way(id:');
+    expect(query).toContain('relation(id:9246899)');
     expect(query).toContain('255784049');
     expect(query).toContain('out meta geom;');
     expect(query).not.toContain('295686299'); // 未交叉確認的停車場
     const second = await GET();
     expect(second.status).toBe(200);
     expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns audited simple OSM relation geometry with attribution and no editor metadata', async () => {
+    const dormOutline = [
+      { lat: 24.22797, lon: 120.58062 },
+      { lat: 24.22797, lon: 120.58072 },
+      { lat: 24.22807, lon: 120.58072 },
+      { lat: 24.22807, lon: 120.58062 },
+      { lat: 24.22797, lon: 120.58062 },
+    ];
+    const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      elements: [{
+        type: 'relation', id: 9246899,
+        tags: { type: 'multipolygon', building: 'dormitory' },
+        members: [{ type: 'way', role: 'outer', ref: 123456, geometry: dormOutline }],
+        version: 7, user: 'private-editor-name', uid: 999,
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.buildings).toHaveLength(1);
+    expect(body.buildings[0]).toMatchObject({
+      poiId: 'pu-xijia', sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+      heightBasis: 'illustrative', heightMeters: 12,
+    });
+    expect(body.buildings[0]).not.toHaveProperty('osmVersion');
+    expect(JSON.stringify(body)).not.toContain('private-editor-name');
   });
 
   it('refuses Overpass redirects instead of following a Location to another host or private network', async () => {
