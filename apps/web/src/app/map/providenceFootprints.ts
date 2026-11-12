@@ -58,6 +58,14 @@ const VERIFIED_RELATION_MEMBERS = new Map([
   [9246899, { outer: 255783593, inner: 665651134 }],
 ]);
 
+/** Overpass normally omits visibility. A source explicitly marking a way or
+ * relation member invisible/deleted is not evidence of a standing building.
+ * Treat malformed visibility metadata as unverified rather than guessing.
+ */
+function isVisibleOsmElement(element: Record<string, unknown>): boolean {
+  return element.visible === undefined || element.visible === true;
+}
+
 function knownBuildingForElement(element: Record<string, unknown>) {
   if (typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) return undefined;
   return element.type === 'way' ? knownWays.get(element.id)
@@ -206,7 +214,7 @@ function safeSimpleRelationGeometry(element: Record<string, unknown>):
   // supported. Real OSM relation 9246899 has outer 255783593 / inner 665651134.
   if (!Array.isArray(members) || members.length < 1 || members.length > 2) return null;
   const ways = members.map(object);
-  if (ways.some((way) => !way || way.type !== 'way' ||
+  if (ways.some((way) => !way || !isVisibleOsmElement(way) || way.type !== 'way' ||
       typeof way.ref !== 'number' || !Number.isSafeInteger(way.ref))) return null;
   const outerMembers = ways.filter((way) => way?.role === 'outer');
   const innerMembers = ways.filter((way) => way?.role === 'inner');
@@ -427,7 +435,8 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     if (!element) continue;
     const place = knownBuildingForElement(element);
     const identity = `${element.type}:${element.id}`;
-    if (!place || seen.has(identity) || !isStandingBuilding(element.tags)) continue;
+    if (!place || seen.has(identity) || !isVisibleOsmElement(element) ||
+        !isStandingBuilding(element.tags)) continue;
     const geometry = element.type === 'way'
       ? (() => {
           if (!hasConsistentOsmWayNodes(element)) return null;
