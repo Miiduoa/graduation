@@ -10,10 +10,10 @@ export type DirectRead = {
 
 function mentionsSpecificCourseWork(text: string): boolean {
   if (!/作業|測驗/.test(text)) return false;
-  const generic = /我的?|我有|今[天日]|明[天日]|後[天日]|這[週周](?:一|二|三|四|五|六|日|天)?|本[週周]|接下來|最近|目前|現在|還有|有沒有|哪些|什麼|要交|待繳|未繳|沒交|未交|沒繳|列出|告訴我|查詢?|所有|全部|待辦|課表|行程|行事曆|上課|\d{4}-\d{2}-\d{2}/g;
-  const leftover = text.split(/作業|測驗/)[0]
-    .replace(generic, '')
-    .replace(/[的了嗎呢啊吧，,。．、？?\s有和與及]/g, '');
+  const generic = /我的?|我有|今[天日]|明[天日]|後[天日]|這[週周](?:一|二|三|四|五|六|日|天)?|本[週周]|接下來|最近|目前|現在|還有|有沒有|哪些|什麼|要交|待繳|未繳|沒交|未交|沒繳|列出|告訴我|查詢?|所有|全部|待辦|課表|行程|行事曆|上課|只看|只要|僅看|針對|關於|\d{4}-\d{2}-\d{2}/g;
+  const leftover = text.split(/作業|測驗/)
+    .map((part) => part.replace(generic, '').replace(/[的了嗎呢啊吧，,。．、？?\s有和與及]/g, ''))
+    .join('');
   return leftover.length >= 2;
 }
 
@@ -40,7 +40,7 @@ export function directReads(question: string, now: number): DirectRead[] {
   const today = taipeiDate(now);
   const day = dates[0] || addDays(today, relativeDays[0] || 0);
   if (/空檔|空堂|有空|沒課/.test(text)) return [];
-  if (/已繳|已交|繳了|交了|已提交|提交的|交完/.test(text)) return [];
+  if (/已繳|已交|繳了|交了|已提交|已經提交|提交的|交完/.test(text)) return [];
   if (mentionsSpecificCourseWork(text)) return [];
   const asking = /什麼|哪些|有沒有|幾點|在哪|哪裡|哪裏|多少|還有|未交|未繳|沒交|沒繳|查|告訴我|列出/.test(text);
   if (!asking && !/(?:我的|今天|今日|明天|明日|後天|後日|\d{4}-\d{2}-\d{2}).{0,4}(?:課表|行程|行事曆|作業)/.test(text)) return [];
