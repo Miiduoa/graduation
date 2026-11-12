@@ -503,6 +503,34 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('rejects explicitly ruinous OSM building conditions rather than drawing intact campus roofs', () => {
+    // Synthetic tagging regression, not an observation about Providence buildings.
+    // building=yes can coexist with building:condition=ruinous in OSM; this
+    // renderer has no measured walls to model a partly demolished structure.
+    for (const condition of [
+      'partly_ruinous', 'mainly_ruinous', 'completely_ruinous',
+      'recognizable_remains', 'ruinous', ' RUINOUS ', '', '  ', null, 42,
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:condition': condition,
+        })],
+      }), String(condition)).toEqual([]);
+    }
+    // Normal upkeep, a documented renovation, and no condition tag do not
+    // invalidate a standing building that independently passed all checks.
+    for (const condition of ['good', 'preserved', 'renovated', 'reconstructed']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'school', 'building:condition': condition,
+        })],
+      }), condition).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'school' })],
+    })).toHaveLength(1);
+  });
+
   it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [{ ...way(255784049), tags: undefined }],
