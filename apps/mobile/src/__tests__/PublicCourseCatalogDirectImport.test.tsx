@@ -84,3 +84,26 @@ test('a Monday filter still reviews and imports both Monday and Thursday meeting
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   expect(safeNavigate).not.toHaveBeenCalled();
 });
+
+test.each(['nthu', 'ncnu'] as const)('duplicate %s periods stay visible but never expose direct import or clipboard', async (schoolId) => {
+  mockScope = { owner: 'guest:device', schoolId };
+  const sourceUrl = resolvePublicCourseOperation(schoolId)!.sourceUrl;
+  const original = schoolId === 'nthu' ? nthu : ncnu;
+  const invalid: PublicCatalogCourse = schoolId === 'nthu'
+    ? { ...original, title: '重複時段課程', meetings: [
+        { time: 'M3M4', room: '教室甲' }, { time: 'M4M5', room: '教室乙' },
+      ] }
+    : { ...original, title: '重複時段課程', time: '4ef4fg' };
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+      schoolId, sourceUrl, truncated: false, courses: [invalid],
+    }),
+  });
+  const view = render(<PublicCourseCatalogScreen schoolId={schoolId} initialQuery={original.code} />);
+  expect(await view.findByText('重複時段課程')).toBeTruthy();
+  expect(view.getByText(/上課節次尚無法安全匯入/)).toBeTruthy();
+  expect(view.queryByRole('button', { name: '核對並加入課表' })).toBeNull();
+  expect(view.queryByRole('button', { name: '複製課表匯入資料' })).toBeNull();
+  expect((await loadPersonalImports(mockScope)).records).toHaveLength(0);
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+});
