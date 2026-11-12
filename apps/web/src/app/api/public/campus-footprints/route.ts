@@ -205,9 +205,10 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.status === 400 || response.status === 403 || response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
-    // 429 and 503 can contain a server-provided cooldown. Do not retry against
-    // the public endpoint every ten minutes when it explicitly requests longer.
-    if (response.status === 429 || response.status === 503) {
+    // Public Overpass gateways also report overload through 502/504.
+    // Honour Retry-After for these transient gateway failures as for 429/503;
+    // otherwise a five-minute backoff may violate the operator's requested pause.
+    if ([429, 502, 503, 504].includes(response.status)) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
         response.headers.get('retry-after'), Date.now(),
       ));
