@@ -138,7 +138,8 @@ function parseSimplePipeRow(line: string): string[] | null {
       let backslashes = 0;
       for (let at = current.length - 1; at >= 0 && current[at] === '\\'; at -= 1)
         backslashes += 1;
-      if (backslashes % 2 === 0) {
+      // Backslashes inside code spans are literal, including before closing ticks.
+      if (codeWidth !== 0 || backslashes % 2 === 0) {
         let next = index + 1;
         while (trimmed[next] === String.fromCharCode(96)) next += 1;
         const width = next - index;

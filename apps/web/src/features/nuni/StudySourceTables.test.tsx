@@ -26,7 +26,7 @@ it('keeps exact original values and column order in accessible table cells', () 
   expect(screen.getByRole('region', { name: /可左右捲動/ }).getAttribute('tabindex')).toBe('0');
 });
 
-it('does not render a guessed table for missing cells, escaped pipes or ordinary prose', () => {
+it('does not render a guessed table for missing cells or ordinary prose', () => {
   const invalid = [
     '| 科目 | 學分 |',
     '| --- | --- |',
@@ -34,11 +34,22 @@ it('does not render a guessed table for missing cells, escaped pipes or ordinary
     '這不是表格，只有 | 隨意分隔的句子。',
     '| 章節 | 概念 |',
     '| --- | --- |',
-    '| SQL \\| NoSQL | 資料庫 |',
+    '| SQL \\| NoSQL | 資料庫 | 多一欄 |',
   ].join('\n');
   expect(extractStudySourceTables(invalid)).toEqual([]);
   const view = render(<StudySourceTables text={invalid} />);
   expect(view.queryByRole('table')).toBeNull();
+});
+
+it('renders escaped pipes as one cell without inventing additional columns', () => {
+  const markdown = ['| 課題 | 說明 |', '| --- | --- |', '| SQL \\| NoSQL | 資料庫 |'].join('\n');
+  expect(extractStudySourceTables(markdown)).toEqual([{
+    startLine: 1,
+    headers: ['課題', '說明'],
+    rows: [['SQL | NoSQL', '資料庫']],
+  }]);
+  render(<StudySourceTables text={markdown} />);
+  expect(screen.getByText('SQL | NoSQL')).toBeTruthy();
 });
 
 it('ignores Markdown code fences and malformed captions rather than inventing data', () => {
@@ -96,7 +107,6 @@ it('omits the entire table if a later source row is malformed, rather than showi
   for (const broken of [
     '| 資工 | 3 | 加選 |',
     '| 資工 |',
-    '| SQL \\| NoSQL | 4 |',
   ]) {
     const text = [
       '| 科目 | 學分 |',

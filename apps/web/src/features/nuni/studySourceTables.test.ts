@@ -585,12 +585,27 @@ describe('Markdown programming tables with escaped pipes and inline code', () =>
     const source = [
       '| 主題 | 範例 | 備註 |',
       '| --- | --- | --- |',
-      '| 轉義 | a\\\\|b | 合法 |',
+      '| 轉義 | a\\\\|b |',
     ].join('\n');
     expect(extractStudySourceTables(source)).toEqual([{
       startLine: 1,
       headers: ['主題', '範例', '備註'],
       rows: [['轉義', 'a\\', 'b']],
+    }]);
+  });
+
+  it('closes inline code even when a literal backslash precedes the closing backtick', () => {
+    const tick = String.fromCharCode(96);
+    const slash = String.fromCharCode(92);
+    const source = [
+      '| 語法 | 範例 |',
+      '| --- | --- |',
+      '| 原始碼 | ' + tick + 'a' + slash + tick + ' |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['語法', '範例'],
+      rows: [['原始碼', tick + 'a' + slash + tick]],
     }]);
   });
 
