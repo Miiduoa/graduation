@@ -109,7 +109,6 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
-  const shelf = useStoryShelf(stories, schoolId, user.uid);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'order'), FEED_ORDERS);
@@ -161,22 +160,28 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       setSubscribedIds(new Set());
       return;
     }
-    const [rows, boardList, subs, storyRows] = await Promise.all([
-      fetchRecentCampusPosts(schoolId, undefined, 60),
-      listBoards(schoolId, 80),
-      listSubscribedBoardIds(user.uid, schoolId),
-      listActiveStoriesForSchool(schoolId, 80),
-    ]);
-    setPosts(rankFeedPosts(rows, 80));
-    setBoards(boardList);
-    setSubscribedIds(new Set(subs));
-    setStories(groupStoriesByAuthor(storyRows, user.uid));
+    try {
+      const [rows, boardList, subs, storyRows] = await Promise.all([
+        fetchRecentCampusPosts(schoolId, undefined, 60),
+        listBoards(schoolId, 80),
+        listSubscribedBoardIds(user.uid, schoolId),
+        listActiveStoriesForSchool(schoolId, 80),
+      ]);
+      setPosts(rankFeedPosts(rows, 80));
+      setBoards(boardList);
+      setSubscribedIds(new Set(subs));
+      setStories(groupStoriesByAuthor(storyRows, user.uid));
+    } catch (cause) {
+      if (isPermissionDeniedError(cause)) setStories([]);
+      throw cause;
+    }
   }, [schoolId, user]);
 
   const { loading, error, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取校園動態，請確認連線後重試。',
   );
+  const shelf = useStoryShelf(stories, schoolId, user.uid);
 
   // hydrate display names for post authors + story authors
   useEffect(() => {
@@ -448,7 +453,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     return nameByUid[p.authorUid] ?? '載入中…';
   };
 
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
+  if (error && !shelf.groups.length) return <CommunityLoadError message={error} retry={refresh} />;
 
   const selectedFeedLoading = loading ||
     (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ||
@@ -457,6 +462,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
 
   return (
     <div className={styles.feedColumn}>
+      {error && <CommunityLoadError message={error} retry={refresh} />}
       {/* ── Story strip ── */}
       <div
         style={{
