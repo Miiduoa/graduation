@@ -66,11 +66,14 @@ jest.mock('expo-device', () => ({
 }));
 
 // Mock expo-constants
+// Tests of LMS behaviour opt into the enabled path. Production default remains
+// false unless EXPO_PUBLIC_TRONCLASS_DATA_ENABLED is exactly 'true'.
 jest.mock('expo-constants', () => ({
   expoConfig: {
     name: 'Campus App',
     slug: 'campus-app',
     version: '1.0.0',
+    extra: { tronClassDataEnabled: true },
   },
 }));
 
@@ -140,6 +143,7 @@ jest.mock('firebase/firestore', () => ({
   doc: jest.fn(),
   getDoc: jest.fn(),
   getDocs: jest.fn(),
+  getDocsFromServer: jest.fn(),
   addDoc: jest.fn(),
   updateDoc: jest.fn(),
   deleteDoc: jest.fn(),

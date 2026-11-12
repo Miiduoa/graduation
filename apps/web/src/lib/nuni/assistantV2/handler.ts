@@ -16,6 +16,8 @@ import { directPlanRevision, selectPlanRevision, shiftPlanRevision } from './dir
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
 import { run, safeCode } from './runner';
+import { courseworkStudyTarget } from './courseworkStudy';
+import { COURSEWORK_STUDY_MESSAGES } from './courseworkStudyRequest';
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 let minute = 0,
@@ -99,11 +101,13 @@ export async function handleV2(request: NextRequest, action: string) {
     const raw = object(
       await boundedJson(request, 16384),
       action === 'ask'
-        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection']
+        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget']
         : action === 'revise'
           ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
           : ['schoolId', 'conversationId', 'token', 'args'],
     );
+    const studyTarget = action === 'ask' && raw.studyTarget !== undefined
+      ? courseworkStudyTarget(raw.studyTarget) : undefined;
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
@@ -143,7 +147,7 @@ export async function handleV2(request: NextRequest, action: string) {
       // Missing credentials can only bootstrap a fresh server-generated binding.
       // They can never issue a replacement for a client-selected old binding.
       if (raw.routeToken === undefined) {
-        if (raw.consent !== true) throw new V2Error(422, 'CONSENT_REQUIRED');
+        if (raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
         text(raw.question, 1000);
         history(raw.history);
         const fresh = { ...binding, conversationId: randomUUID() };
@@ -186,7 +190,7 @@ export async function handleV2(request: NextRequest, action: string) {
         ),
       );
     if (action === 'revise' && !writes) throw new V2Error(403, 'ASSISTANT_WRITE_UNAVAILABLE');
-    if (action === 'ask' && raw.consent !== true) throw new V2Error(422, 'CONSENT_REQUIRED');
+    if (action === 'ask' && raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
     const question = action === 'ask' ? text(raw.question, 1000) : '',
       memory = action === 'ask' ? history(raw.history) : [];
     const key = hash(principal.platformAccountId),
@@ -220,7 +224,8 @@ export async function handleV2(request: NextRequest, action: string) {
       }
       const result = await run({
         question,
-        history: memory,
+        ...(studyTarget ? { studyTarget } : {}),
+        history: studyTarget ? [] : memory,
         binding,
         adapter: source.adapter,
         secret,
@@ -303,6 +308,7 @@ export async function handleV2(request: NextRequest, action: string) {
           ? { message: PLAN_PROTECTION_MESSAGES[code] }
           : code === 'EVENT_START_PASSED'
           ? { message: '這個時段已經開始，請重新安排時間。' }
+          : COURSEWORK_STUDY_MESSAGES[code] ? { message: COURSEWORK_STUDY_MESSAGES[code] }
           : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
       },
       status,

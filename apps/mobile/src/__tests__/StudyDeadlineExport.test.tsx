@@ -46,6 +46,7 @@ it('previews selected tasks, retains selection for retry, and does not claim a s
   await waitFor(() => expect(view.getByText(/是否儲存或匯入/)).toBeTruthy());
   expect(share.mock.calls[1][0]).toContain('DTSTART:20261101T163000Z');
   expect(share.mock.calls[1][0]).toContain('DTEND:20261101T163000Z');
+  expect(share.mock.calls[1][0]).not.toMatch(/衝突|未知|學號|grade=|\b99\b/);
   fireEvent.press(view.getByRole('button', { name: '更新待辦資料' }));
   expect(retry).toHaveBeenCalledTimes(1);
 });
@@ -69,6 +70,53 @@ it('fences an outstanding share on unmount and prevents duplicate taps', async (
   view.unmount();
   expect(active()).toBe(false);
   await act(async () => finish());
+});
+it('keeps conflict copy, grades and student identifiers out of the shared ICS', async () => {
+  share.mockResolvedValueOnce();
+  const view = render(
+    <StudyDeadlineExport
+      tasks={[task()]}
+      partial={false}
+      retry={jest.fn()}
+      conflictSources={[
+        {
+          kind: 'events',
+          schoolId: 's',
+          termKey: '115|1',
+          start: '2026-11-01',
+          end: '2026-11-30',
+          status: 'complete',
+          records: [
+            {
+              id: 'secret',
+              batchId: 'b',
+              importedAt: '',
+              kind: 'events',
+              title: '學號A12345678的補考',
+              schoolId: 's',
+              academicYear: '115',
+              semester: '1',
+              grade: '99',
+              source: { type: 'paste', line: 1, rawText: '學號A12345678 grade=99' },
+              date: '2026-11-02',
+              startTime: '00:00',
+              endTime: '01:00',
+            },
+          ],
+        },
+      ]}
+    />,
+  );
+  fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  fireEvent.press(view.getByRole('checkbox'));
+  fireEvent.press(view.getByRole('button', { name: '預覽已選 1 項' }));
+  expect(view.getByText(/與個人事件衝突：學號A12345678的補考/)).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '分享 ICS' }));
+  await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+  expect(share.mock.calls[0][0]).toContain('UID:study-c:assignment:a@nuni.tw');
+  expect(share.mock.calls[0][0]).toContain('DTSTART:20261101T163000Z');
+  expect(share.mock.calls[0][0]).toContain('DTEND:20261101T163000Z');
+  expect(share.mock.calls[0][0]).not.toMatch(/學號A12345678|grade=99|衝突|未知|\b99\b/);
 });
 it('offers a next step when no precise unfinished deadline exists', () => {
   const view = render(

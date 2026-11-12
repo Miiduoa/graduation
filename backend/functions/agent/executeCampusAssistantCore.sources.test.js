@@ -118,6 +118,26 @@ test.each([
   },
 );
 
+test('answers school contact requests from the selected campus directory snapshot', async () => {
+  const result = await executeCampusAssistantCore({
+    request: {
+      auth: null,
+      data: {
+        messages: [{ role: 'user', content: '我們學校的總機電話是多少？' }],
+        context: { schoolId: 'yuntech' },
+      },
+    },
+    runId: 'school-directory',
+    startedAt: Date.now(),
+  });
+  expect(result.content).toContain('國立雲林科技大學');
+  expect(result.content).toContain('(05)5342601');
+  expect(result.citations[0].source).toBe('https://data.gov.tw/dataset/6091');
+  expect(result.debug).toMatchObject({ freshness: 'snapshot', sourcesUsed: 1 });
+  expect(mockWebSearch).not.toHaveBeenCalled();
+  expect(mockModel).not.toHaveBeenCalled();
+});
+
 test('web search fallback forwards the selected authorized schoolId', async () => {
   mockWebSearch.mockResolvedValueOnce({
     content: 'NTU 路線摘要',

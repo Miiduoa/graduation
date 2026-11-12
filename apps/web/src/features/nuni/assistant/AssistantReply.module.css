@@ -104,6 +104,12 @@
   min-width: 0;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .turn {
+    animation: assistantTurnAppear var(--motion-fast, 160ms) var(--ease-out, ease-out) both;
+  }
+}
+
 .row {
   display: flex;
   min-width: 0;
@@ -475,6 +481,12 @@
   font-size: 12px;
 }
 
+.prerequisiteRecovery {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
 .hint {
   margin: 0;
   color: var(--muted);
@@ -512,6 +524,47 @@
   gap: 8px;
 }
 
+.courseworkChoices {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.courseworkChoice {
+  display: grid;
+  gap: 5px;
+  min-height: 44px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.courseworkChoice > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.courseworkChoice .courseworkAction {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.courseworkChoice:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.courseworkChoice:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .chipsCompact {
   flex-wrap: nowrap;
   gap: 8px;
@@ -544,7 +597,26 @@
   background: var(--accent-soft);
 }
 
+.stopReply {
+  min-height: 44px;
+  margin-left: auto;
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.stopReply:hover {
+  background: var(--accent-soft);
+}
+
 .typing {
+  flex-wrap: wrap;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -648,6 +720,76 @@
   cursor: default;
 }
 
+.jumpLatest {
+  justify-self: end;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.jumpLatest:hover,
+.recover button:hover {
+  background: var(--accent-soft);
+}
+
+.composerHint {
+  margin: -4px 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.recover {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.recover p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.recover .recoverText {
+  width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.recover button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.recover button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .alert {
   margin: 0;
   padding: 12px 14px;
@@ -670,6 +812,17 @@
 .composer:focus-within a:focus-visible,
 .composer:focus-within button:focus-visible {
   outline-offset: 5px;
+}
+
+@keyframes assistantTurnAppear {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes assistantTyping {
@@ -719,4 +872,39 @@
     animation: none;
     opacity: 0.7;
   }
+}
+
+.inlineShell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.inlineShell .log {
+  max-height: min(48dvh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+}
+
+.inlineShell .composerDock {
+  grid-template-columns: minmax(0, 1fr);
+  position: static;
+  padding: 0;
+  background: none;
+  backdrop-filter: none;
+}
+
+.consentSettings summary {
+  width: fit-content;
+  min-height: 44px;
+  align-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.consentSettings summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
 }

@@ -881,7 +881,7 @@ it('retains the first and third same-name proposals with three edit clicks, no m
   planEvents = threeSameNameEvents();
   const { entry } = await initialPlan();
   const baseline = database.snapshot(), clicks = [];
-  expect(ui().getByRole('button', { name: '依序全部確認' })).toBeTruthy(); // Ordinary source plans retain their existing batch flow.
+  expect(ui().getByRole('button', { name: /依序確認/ })).toBeTruthy(); // Ordinary source plans retain their existing batch flow.
   const click = (control, description) => { clicks.push(description); testing.fireEvent.click(control); };
   click(ui().getByRole('button', { name: '選擇要建立的行程' }), 'open selection');
   const form = ui().getByRole('form', { name: '選擇待建立行程' });
@@ -902,7 +902,7 @@ it('retains the first and third same-name proposals with three edit clicks, no m
   assertNoAdditionalModel();
   await testing.act(async () => { held.release(); await Promise.resolve(); });
   await testing.waitFor(() => expect(uiCards()).toHaveLength(5));
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull(); // Retained replacement cards require separate confirmation.
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull(); // Retained replacement cards require separate confirmation.
   const replacement = count('revise')[0], retained = [planEvents[0], planEvents[2]];
   expect(replacement.status).toBe(200);
   expect(replacement.body.keepMutationIds).toEqual([entry.response.cards[0].mutationId, entry.response.cards[2].mutationId]);
@@ -1174,9 +1174,9 @@ async function askAgainInSameMount(composer, events) {
 it('jointly carries only retained items through exact time and protected text revision before manual final confirmation', async () => {
   planEvents = jointEvents();
   const original = await initialPlan(), source = structuredClone(planEvents), baseline = database.snapshot();
-  expect(ui().getByRole('button', { name: '依序全部確認' })).toBeTruthy();
+  expect(ui().getByRole('button', { name: /依序確認/ })).toBeTruthy();
   const selected = await retainFirstAndLast(original.entry);
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
   const time = currentTimeEditor(selected, 1, { startTime: '23:00', endDate: '2026-11-05', endTime: '01:00' });
   submitExactTime(time);
   await testing.waitFor(() => expect(uiCards()).toHaveLength(7));
@@ -1185,7 +1185,7 @@ it('jointly carries only retained items through exact time and protected text re
   expect(timed.body.originalCards).toEqual(selected.response.cards.map(({ token, args }) => ({ token, args })));
   const timedEvents = [source[0], { ...source[2], startTime: '23:00', endDate: '2026-11-05', endTime: '01:00' }];
   expect(timed.response.cards.map(card => card.args)).toEqual(timedEvents);
-  expect(ui().queryByRole('button', { name: '依序全部確認' }), 'selection descendant after exact time must remain per-card only').toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ }), 'selection descendant after exact time must remain per-card only').toBeNull();
   assertRealCards(timed);
   expect(fixture.provider).toHaveBeenCalledTimes(2);
   // Respect the real per-account three-request/minute limit while remaining
@@ -1196,7 +1196,7 @@ it('jointly carries only retained items through exact time and protected text re
   testing.fireEvent.submit(free);
   await testing.waitFor(() => expect(uiCards()).toHaveLength(9));
   const final = count('ask').at(-1);
-  expect(ui().queryByRole('button', { name: '依序全部確認' }), 'selection descendant after protected text revision must remain per-card only').toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ }), 'selection descendant after protected text revision must remain per-card only').toBeNull();
   expect(final.body.planProtection).toEqual({ originalEvents: timedEvents, protectedIndices: [0] });
   expect(JSON.parse(final.body.question.split('原安排：')[1].split('\n修改條件：')[0])).toEqual(timedEvents);
   expect(final.body.question).not.toContain(source[1].title);
@@ -1359,7 +1359,7 @@ it('group shift previews three exact rows by thirty minutes once, preserves leng
   assertRealCards(held.entry);
   await testing.act(async () => { held.release(); await Promise.resolve(); });
   await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
   expect(idsOf(held.entry).every(id => !idsOf(entry).includes(id))).toBe(true);
   await assertOriginalCannotExecute(entry);
   expect(database.snapshot()).toEqual(ledger);
@@ -1464,7 +1464,7 @@ it('group shift carries a text-protected row into fresh cards, disables it and c
   expect(shiftedCheckbox(nextShift, 0).disabled).toBe(true);
   expect(shiftedCheckbox(nextShift, 0).checked).toBe(false);
   for (const old of [entry, textRevision]) await assertOriginalCannotExecute(old);
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
   expect(count('confirm')).toHaveLength(0);
   expect(database.writes).toHaveLength(0);
   expect(fixture.provider).toHaveBeenCalledTimes(4);
@@ -1591,7 +1591,7 @@ it('group shift descendants keep individual confirmation through exact time and 
   await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
   const shifted = count('revise')[0];
   assertRealCards(shifted);
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
   const time = currentTimeEditor(shifted, 2, { startTime: '23:00', endTime: '23:45' });
   submitExactTime(time);
   await testing.waitFor(() => expect(uiCards()).toHaveLength(9));
@@ -1602,11 +1602,11 @@ it('group shift descendants keep individual confirmation through exact time and 
     { ...shifted.response.cards[2].args, startTime: '23:00', endTime: '23:45' },
   ]);
   assertRealCards(timed);
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
   now += 61000; // Retain the actual request limit and stay inside permit validity.
   const selected = await retainFirstAndLast(timed);
   expect(uiCards()).toHaveLength(11);
-  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
   expect(count('confirm')).toHaveLength(0);
   expect(database.writes).toHaveLength(0);
   for (const previous of [entry, shifted, timed]) await assertOriginalCannotExecute(previous);
@@ -1785,7 +1785,7 @@ it('shift draft restores default thirty-minute content after real remount, requi
     ]);
     assertRealCards(replacement);
     expect(ui().getByRole('heading', { name: '整組時間調整摘要' })).toBeTruthy();
-    expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+    expect(ui().queryByRole('button', { name: /依序確認/ })).toBeNull();
     expect(requests.slice(start).map(request => request.action)).toEqual(['cancel', 'cancel', 'cancel', 'revise']);
     for (const request of requests.slice(start)) expect(request.draftsAtDispatch).toEqual([]);
     expect(storedDrafts()).toEqual([]);

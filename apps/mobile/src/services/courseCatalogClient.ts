@@ -386,7 +386,7 @@ export async function queryCatalog(
     }
   }
 
-  // Integrated catalog today is Providence myPU only. Legacy callers omit schoolId and keep PU cache.
+  // This client serves the myPU provider. Legacy callers omit schoolId and keep the PU cache.
   const cacheSchoolId = capability?.schoolId === 'pu' ? 'pu' : requestedSchoolId ? null : 'pu';
   if (!cacheSchoolId) {
     return {

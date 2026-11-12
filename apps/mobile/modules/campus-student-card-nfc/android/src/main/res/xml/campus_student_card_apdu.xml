@@ -1,0 +1,10 @@
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+  android:description="@string/campus_student_card_nfc_description"
+  android:requireDeviceUnlock="true"
+  android:requireDeviceScreenOn="true">
+  <aid-group
+    android:description="@string/campus_student_card_nfc_description"
+    android:category="other">
+    <aid-filter android:name="F04E554E490101" />
+  </aid-group>
+</host-apdu-service>

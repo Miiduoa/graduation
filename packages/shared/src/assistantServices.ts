@@ -93,6 +93,10 @@ const services = [
     summary: '查看所選學校的地址、聯絡方式與官方網站。', mobileRoute: 'SchoolInfo',
   },
   {
+    id: 'student-card', label: '數位學生證', href: '/student-card', category: 'campus', access: 'personal',
+    summary: '開啟學生證卡面、出示學號，或查找校方證件說明。', mobileRoute: 'StudentCard',
+  },
+  {
     id: 'cafeteria', label: '校園餐廳', href: '/cafeteria', category: 'life', access: 'public',
     summary: '查看餐廳與菜單，點餐依店家開放情形使用。', mobileRoute: '餐廳總覽',
   },
@@ -131,6 +135,10 @@ const services = [
   {
     id: 'lost-found', label: '失物招領', href: '/lost-found', category: 'life', access: 'personal',
     summary: '查看失物招領，發布與聯絡依登入資格使用。', mobileRoute: 'LostFound',
+  },
+  {
+    id: 'public-social', label: '跨校公開交流', href: '/social', category: 'community', access: 'personal',
+    summary: '使用 Google 帳號閱讀公開貼文，參與開放看板。',
   },
   {
     id: 'community', label: '校園社群', href: '/community', category: 'community', access: 'personal',
@@ -262,6 +270,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   map: ['地圖', '校園地圖', 'map', 'campus map'],
   bus: ['公車', '校車', '公車資訊', '公車動態', '交通資訊', 'bus', 'transit'],
   'school-info': ['學校資訊', '校園資訊', '學校聯絡資訊', 'school info'],
+  'student-card': ['數位學生證', '學生證', '數位證件', '證件', '學生證卡面', 'student card', 'student id card'],
   cafeteria: ['餐廳', '校園餐廳', '學餐', '餐廳總覽', '菜單', 'cafeteria', 'dining', 'restaurants'],
   food: ['點餐與取餐', '點餐', '取餐', '取餐憑證', '餐點訂購', 'food', 'food orders', 'food pickup'],
   orders: ['訂單', '我的訂單', '訂餐紀錄', '餐廳訂單', 'orders', 'my orders'],
@@ -272,6 +281,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   appeals: ['課程申訴', '我的申訴', '課務申訴', 'appeals', 'course appeals'],
   teacher: ['課務申訴審核', '申訴審核', '教師申訴審核', '老師工作台', 'teacher review'],
   'lost-found': ['失物招領', '遺失物', 'lost and found', 'lost-found'],
+  'public-social': ['跨校公開交流', '公開交流', '跨校交流', '公開看板', 'public social', 'public exchange'],
   community: ['社群', '校園社群', '校園交流', '校園動態', '動態牆', '看板', 'community', 'feed'],
   messages: ['私訊', '私人訊息', '私人對話', '訊息', 'messages', 'direct messages', 'private messages', 'dms'],
   notifications: ['通知', '我的通知', '通知中心', 'notifications'],

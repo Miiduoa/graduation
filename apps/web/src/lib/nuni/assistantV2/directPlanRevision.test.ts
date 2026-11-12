@@ -388,3 +388,24 @@ it.each(['expired', 'aborted'] as const)('does not rotate or sign if the source 
   }
   expect(providerCall).toHaveBeenCalledTimes(modelCalls);
 });
+
+
+it.each(['denied', 'unavailable', 'unauthorized'] as const)(
+  'blocks replacement proposals when permissions become %s during the ledger read', async failure => {
+    const old = await initialPlan();
+    await cancelAll(old);
+    let checks = 0;
+    fixture.adapter.permissions = async () => {
+      if (++checks === 1) return { createPersonalEvent: true, prepareFoodOrder: true };
+      if (failure === 'unavailable') throw new Error('permission store unavailable');
+      if (failure === 'unauthorized') throw new V2Error(401, 'UNAUTHORIZED');
+      return { createPersonalEvent: false, prepareFoodOrder: true };
+    };
+    const result = await call('revise', revision(old));
+    expectFailure(result, failure === 'unauthorized' ? 401 : failure === 'denied' ? 403 : 503,
+      failure === 'unauthorized' ? 'UNAUTHORIZED' : failure === 'denied'
+        ? 'ASSISTANT_PERMISSION_DENIED' : 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE');
+    expect(signedCards()).toHaveLength(old.length);
+    expect(fixture.writes).toHaveLength(0);
+  },
+);

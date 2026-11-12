@@ -1,10 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, Card, Pill, LoadingState, ErrorState, SectionTitle } from '../ui/components';
+import { Screen, Card, LoadingState, ErrorState, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { isProvidenceSchoolId } from '@campus/shared/src/schoolIds';
+import { useSchool } from '../state/school';
+import { SchoolLearningLinks } from '../components/SchoolLearningLinks';
 import { useAuth } from '../state/auth';
 import { getAnyCachedTCCourses, refreshTCCourses } from '../services/puDataCache';
 import { tcFetchHomeworkActivities } from '../services/tronClassClient';
@@ -41,7 +44,7 @@ function formatDate(iso: string | null): string {
 }
 
 // ── 作業卡片 ────────────────────────────────────
-function HomeworkCard(props: { hw: TCHomework }) {
+function HomeworkCard(props: { hw: TCHomework; isCurrent: () => boolean }) {
   const { hw } = props;
   const now = new Date();
   const endTime = hw.end_time ? new Date(hw.end_time) : null;
@@ -71,6 +74,7 @@ function HomeworkCard(props: { hw: TCHomework }) {
   }
 
   const onPress = () => {
+    if (!props.isCurrent()) return;
     const url = `https://tronclass.pu.edu.tw/course/${hw.courseId}/content#/homework/${hw.id}`;
     void webBrowserOpenWithPuTronClassGate(url);
   };
@@ -131,20 +135,42 @@ function HomeworkCard(props: { hw: TCHomework }) {
 }
 
 // ── 主畫面 ──────────────────────────────────────
-export function GroupAssignmentsScreen(props: any) {
-  const nav = props?.navigation;
+export function GroupAssignmentsScreen() {
   const auth = useAuth();
+  const { school, selection, selectionReady } = useSchool();
+  const schoolId = selection.schoolId;
+  if (!selectionReady || auth.loading || auth.profileLoading) {
+    return <LoadingState title="作業" subtitle="正在確認學校與帳號…" rows={2} />;
+  }
+  const uid = auth.user?.uid;
+  const ownProvidence = uid && !auth.tokenExpired && auth.profile?.uid === uid
+    && isProvidenceSchoolId(auth.profile.schoolId) && isProvidenceSchoolId(schoolId);
+  if (!ownProvidence) {
+    return (
+      <Screen>
+        <Card title="校方課程與作業">
+          <SchoolLearningLinks key={JSON.stringify([uid, schoolId, school.name])}
+            schoolId={schoolId ?? ''} schoolName={school.name} />
+        </Card>
+      </Screen>
+    );
+  }
+  return <ProvidenceAssignments key={uid} />;
+}
 
+function ProvidenceAssignments() {
+  const active = useRef(false);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+  const [revision, setRevision] = useState(0);
   const [homeworks, setHomeworks] = useState<TCHomework[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // 載入所有課程的作業
   useEffect(() => {
-    if (!auth.user) {
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
 
     (async () => {
@@ -153,6 +179,7 @@ export function GroupAssignmentsScreen(props: any) {
       try {
         // 先取得課程列表
         let courses: TCCourse[] = (await getAnyCachedTCCourses().catch(() => null)) ?? [];
+        if (cancelled || !active.current) return;
         if (courses.length === 0) {
           courses = (await refreshTCCourses().catch(() => null)) ?? [];
         }
@@ -165,6 +192,7 @@ export function GroupAssignmentsScreen(props: any) {
           return;
         }
 
+        if (cancelled || !active.current) return;
         // 平行取得每門課的作業
         const allHomeworks: TCHomework[] = [];
         const results = await Promise.allSettled(
@@ -218,19 +246,7 @@ export function GroupAssignmentsScreen(props: any) {
     return () => {
       cancelled = true;
     };
-  }, [auth.user?.uid]);
-
-  const reload = () => {
-    setHomeworks([]);
-    setLoading(true);
-    setError(null);
-    // 重新觸發 useEffect
-    // trick: 透過設定一個 dummy 來觸發
-    setTimeout(() => {
-      setLoading(false);
-      setLoading(true);
-    }, 0);
-  };
+  }, [revision]);
 
   // 統計
   const pendingCount = useMemo(
@@ -247,18 +263,6 @@ export function GroupAssignmentsScreen(props: any) {
     [homeworks],
   );
 
-  if (!auth.user) {
-    return (
-      <Screen>
-        <Card title="作業" subtitle="請先登入以查看作業">
-          <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            登入後即可查看各課程的作業繳交狀態。
-          </Text>
-        </Card>
-      </Screen>
-    );
-  }
-
   if (loading) {
     return <LoadingState title="作業" subtitle="正在載入所有課程的作業..." rows={4} />;
   }
@@ -270,7 +274,7 @@ export function GroupAssignmentsScreen(props: any) {
         subtitle="載入作業失敗"
         hint={error}
         actionText="重試"
-        onAction={reload}
+        onAction={() => setRevision((value) => value + 1)}
       />
     );
   }
@@ -348,7 +352,7 @@ export function GroupAssignmentsScreen(props: any) {
           <View style={{ gap: 8 }}>
             <SectionTitle text={`共 ${homeworks.length} 份作業`} />
             {homeworks.map((hw) => (
-              <HomeworkCard key={`hw-${hw.courseId}-${hw.id}`} hw={hw} />
+              <HomeworkCard key={`hw-${hw.courseId}-${hw.id}`} hw={hw} isCurrent={() => active.current} />
             ))}
           </View>
         ) : (

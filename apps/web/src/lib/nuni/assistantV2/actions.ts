@@ -1,5 +1,6 @@
 import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
+import { courseworkStudyGuard, verifyCourseworkStudyGuard } from './courseworkStudy';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
@@ -16,9 +17,11 @@ import {
   hash,
   id,
   object,
+  requireAssistantPermission,
   type Adapter,
   type Binding,
   type Card,
+  type CourseworkStudyGuard,
   type EventArgs,
   type Ledger,
   type Obj,
@@ -128,6 +131,7 @@ export function signCard(
   now: number,
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
+  studyGuard?: CourseworkStudyGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
   const args =
@@ -146,6 +150,7 @@ export function signCard(
     binding: hash(binding),
     tool,
     argsHash: hash(args),
+    ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -226,6 +231,8 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   )
     return fail('CONFIRMATION_INVALID', 409);
   if (p.issuer !== undefined) machineId(p.issuer);
+  const studyGuard = p.studyGuard === undefined ? undefined : courseworkStudyGuard(p.studyGuard);
+  if (studyGuard && p.tool !== 'propose_personal_event') return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -243,6 +250,7 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
     card: {
       tool: p.tool as Card['tool'],
       args,
+      ...(studyGuard ? { studyGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -407,14 +415,23 @@ export async function reconcile(
   if (p.tool !== 'propose_personal_event') return fail('INVALID_INPUT', 422);
   const currentTime = elapsedClock(now, clock);
   return calendarOperation(binding, authenticated, async (state) => {
-    const ledger = await calendarLedger(binding, adapter), checkedAt = currentTime();
+    const ledger = await calendarLedger(binding, adapter);
+    let checkedAt = currentTime();
     const match = calendarMatch(binding, p, ledger);
     if (match.record) {
       const receipt = calendarReceipt(binding, p, ledger, checkedAt, true);
       state.uncertain = false;
       return receipt;
     }
-    const authorizationValid = hasAuthorization(binding, raw, secret, checkedAt);
+    let permissionGranted = false;
+    try {
+      await requireAssistantPermission(adapter, 'createPersonalEvent');
+      permissionGranted = true;
+    } catch {
+      // Receipt checks stay available even when the setting cannot be read.
+    }
+    checkedAt = currentTime();
+    const authorizationValid = permissionGranted && hasAuthorization(binding, raw, secret, checkedAt);
     if (match.conflict) return calendarCheck(binding, p, ledger, checkedAt, 'conflict', authorizationValid, false);
     if (knownRevoked(binding, authenticated)) {
       if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
@@ -480,6 +497,7 @@ export async function confirm(
   const currentTime = elapsedClock(now, clock);
   const p = verifyCard(binding, raw, secret, now);
   if (p.tool === 'propose_food_order') {
+    await requireAssistantPermission(adapter, 'prepareFoodOrder');
     const cart = cartArgs(p.args.cart);
     if (
       !(await adapter.realms()).some(
@@ -488,16 +506,22 @@ export async function confirm(
     )
       return fail('FORBIDDEN_SCOPE', 403);
     if (!adapter.food) return fail('ORDERING_DISABLED', 403);
-    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired)
+    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired) {
+      await requireAssistantPermission(adapter, 'prepareFoodOrder');
+      verifyCard(binding, raw, secret, currentTime());
+      operationSignal()?.throwIfAborted();
       return { href: String(p.args.href), reason: p.args.reason };
+    }
     const summary = priceCart(cart, await adapter.food.menu(cart.tenantId, cart.locationId));
     if (canonical(summary) !== canonical(p.args.summary)) return fail('PRICE_CHANGED', 409);
+    await requireAssistantPermission(adapter, 'prepareFoodOrder');
     verifyCard(binding, raw, secret, currentTime());
     operationSignal()?.throwIfAborted();
     return adapter.food.submit(cart, p.mutationId);
   }
   if (p.tool === 'propose_open_page') return { href: pageHref(p.args, binding.schoolId) };
   if (!writes) return fail('ASSISTANT_WRITE_UNAVAILABLE', 403);
+  await requireAssistantPermission(adapter, 'createPersonalEvent');
   const authenticated = authenticatedCard(binding, raw, secret, now);
   return calendarOperation(binding, authenticated, async (state) => {
     verifyCard(binding, raw, secret, currentTime());
@@ -522,9 +546,14 @@ export async function confirm(
       return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
     }
     const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
+    if (p.studyGuard)
+      await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
+    await requireAssistantPermission(adapter, 'createPersonalEvent');
     const writeTime = currentTime();
     verifyCard(binding, raw, secret, writeTime);
     const [start] = eventInterval(event);
+    if (p.studyGuard?.policy === 'coursework-gap' && start <= writeTime)
+      return fail('STUDY_SLOT_CHANGED', 409);
     // An explicitly backdated entry can still be recorded. Recheck a prospective
     // timed card after reading the ledger and before its first write.
     if (!event.allDay && start >= p.iat && start < Math.floor(writeTime / 60000) * 60000)

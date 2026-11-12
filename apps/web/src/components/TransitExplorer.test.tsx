@@ -707,7 +707,7 @@ it('highlights the next live bus and separates buses without a live estimate', a
   expect(screen.getByText('今天收班')).toBeTruthy();
 });
 
-it('keeps the last good arrivals and blocks repeated refreshes when rate limited', async () => {
+it('retains the route without reusing its old countdown after a rate limit', async () => {
   const now = new Date().toISOString();
   let nextCalls = 0;
   vi.mocked(queryTransit).mockImplementation(async (query) => {
@@ -724,7 +724,10 @@ it('keeps the last good arrivals and blocks repeated refreshes when rate limited
   const button = screen.getByRole('button', { name: '重新整理' }) as HTMLButtonElement;
   fireEvent.click(button);
   await waitFor(() => expect(nextCalls).toBe(2));
-  expect(screen.getByText('10')).toBeTruthy();
+  expect(await screen.findByRole('button', { name: /162.*資料待更新/ })).toBeTruthy();
+  expect(screen.queryByText('10')).toBeNull();
+  expect(screen.queryByTestId('campus-approach')).toBeNull();
+  expect(screen.getByText('目前無法確認最新班次，請稍後重試。')).toBeTruthy();
   expect(button.disabled).toBe(false);
 });
 

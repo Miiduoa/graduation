@@ -164,6 +164,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   MerchantHub: '我的',
   GlobalSearch: '我的',
   QRCode: '我的',
+  StudentCard: '我的',
 };
 
 export function resolveTabForRoute(route: string): TabName | null {

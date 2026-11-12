@@ -215,11 +215,11 @@ function HomeFeedContent() {
     } catch (cause) {
       if (loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
+        setStories([]);
         setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
-        setStories([]);
         setNameByUid({});
         setAvatarByUid({});
         setHasMore(false);
@@ -851,11 +851,21 @@ function HomeFeedContent() {
                     </View>
                   )}
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.authorRow} numberOfLines={1}>
-                      <Text style={styles.author}>{authorLine(item)}</Text>
-                      <Text style={styles.dot}>  ·  </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 28, gap: 6 }}>
+                      {!item.anonymous && item.authorUid ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`查看 ${authorLine(item)} 的個人頁`}
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            nav?.navigate?.('CreatorProfile' as never, { memberUid: item.authorUid, schoolId: school?.id } as never);
+                          }}
+                        >
+                          <Text style={styles.author} numberOfLines={1}>{authorLine(item)}</Text>
+                        </Pressable>
+                      ) : <Text style={styles.author} numberOfLines={1}>{authorLine(item)}</Text>}
                       <Text style={styles.meta}>{formatTs(item.createdAt)}</Text>
-                    </Text>
+                    </View>
                     <Pressable
                       hitSlop={6}
                       onPress={() =>

@@ -9,10 +9,12 @@
  *  - Story grid 可點開全螢幕 viewer，含進度條與左右切換
  */
 
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { PrivateImage } from '@/components/PrivateImage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { StoryViewer } from './StoryViewer';
+import styles from '../community.module.css';
 import { useStoryShelf } from './useStoryShelf';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
@@ -58,7 +60,6 @@ export function RealtimeTab(props: { schoolId: string }) {
   const [checkingIn, setCheckingIn] = useState(false);
   const checkInFlight = useRef(false);
   const checkedInHere = heartbeatSession?.poiId === selectedPoi;
-  const shelf = useStoryShelf(storyGroups, schoolId, user?.uid);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
@@ -67,8 +68,13 @@ export function RealtimeTab(props: { schoolId: string }) {
       setStoryGroups([]);
       return;
     }
-    const rows = await listActiveStoriesForSchool(schoolId, 80);
-    setStoryGroups(groupStoriesByAuthor(rows, user?.uid));
+    try {
+      const rows = await listActiveStoriesForSchool(schoolId, 80);
+      setStoryGroups(groupStoriesByAuthor(rows, user?.uid));
+    } catch (cause) {
+      if (isPermissionDeniedError(cause)) setStoryGroups([]);
+      throw cause;
+    }
   }, [schoolId, user]);
 
   const refreshPeers = useCallback(async () => {
@@ -95,6 +101,7 @@ export function RealtimeTab(props: { schoolId: string }) {
     error,
     refresh,
   } = useCommunityLoad(load, '暫時無法讀取校園動態，請確認連線後重試。');
+  const shelf = useStoryShelf(storyGroups, schoolId, user?.uid);
 
   useEffect(() => {
     (async () => {
@@ -139,10 +146,9 @@ export function RealtimeTab(props: { schoolId: string }) {
     }
   };
 
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
-
   return (
     <div>
+      {error && <CommunityLoadError message={error} retry={refresh} />}
       {!hasVerifiedPoiDirectory ? (
         <p role="status" className="card" style={{ padding: 18, marginBottom: 18 }}>
           這所學校尚未接入經核實的校園打卡地點。限時動態仍可使用，但不會套用靜宜大學的位置。
@@ -320,7 +326,7 @@ export function RealtimeTab(props: { schoolId: string }) {
         </Link>
       </div>
 
-      {storiesLoading ? (
+      {storiesLoading && shelf.groups.length === 0 ? (
         <div className="card" style={{ padding: 18, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
@@ -329,7 +335,7 @@ export function RealtimeTab(props: { schoolId: string }) {
           className="card"
           style={{ padding: 18, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}
         >
-          目前還沒有限時動態。分享一張照片或寫下此刻的心情。
+          目前還沒有限時動態。分享一張照片、一段短片，或寫下校園裡的新鮮事。
         </div>
       ) : (
         <div
@@ -343,6 +349,8 @@ export function RealtimeTab(props: { schoolId: string }) {
           {shelf.groups.map((g) => {
             const latest = g.stories[g.stories.length - 1] ?? g.stories[0];
             const isImage = latest?.kind === 'image' && latest.mediaUrl;
+            const isVideo = latest?.kind === 'video' && !!latest.mediaUrl;
+            const author = g.isMine ? '我' : nameByUid[g.authorUid] || '同學';
             return (
               <button
                 key={g.authorUid}
@@ -358,7 +366,7 @@ export function RealtimeTab(props: { schoolId: string }) {
                   cursor: 'pointer',
                   padding: 0,
                 }}
-                aria-label={`查看 ${g.isMine ? '我的' : (nameByUid[g.authorUid] ?? '同學')} 的限時動態`}
+                aria-label={`查看 ${author} 的限時動態${isVideo ? '，最新一則是影片' : ''}`}
               >
                 {isImage ? (
                   <PrivateImage
@@ -367,6 +375,11 @@ export function RealtimeTab(props: { schoolId: string }) {
                     alt=""
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
+                ) : isVideo ? (
+                  <span className={styles.storyVideoCover}>
+                    <span className={styles.storyVideoBadge}><span aria-hidden="true">▶</span> 影片</span>
+                    {latest?.text && <span className={styles.storyVideoCaption}>{latest.text}</span>}
+                  </span>
                 ) : (
                   <div
                     style={{

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from config import APP_SRC_ROOT
 from rag.indexer import index_documents, delete_by_source
+from rag.public_documents import APP_SOURCES
 from prompts.campus_knowledge import SCREEN_KNOWLEDGE
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def index_all_app_knowledge() -> int:
     """Index all static APP knowledge into ChromaDB."""
     all_docs: list[dict] = []
 
-    for source in ("app:types", "app:screens", "app:navigation"):
+    for source in APP_SOURCES:
         delete_by_source(source)
 
     types_path = APP_SRC_ROOT / "data" / "types.ts"

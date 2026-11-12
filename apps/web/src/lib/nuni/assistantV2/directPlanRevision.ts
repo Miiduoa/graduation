@@ -1,6 +1,6 @@
 import { buildPlanShift } from '@/lib/assistantPlanShift';
 import { beginProposal, calendarLedger, signCard, verifyRevokedCalendarPlan } from './actions';
-import { canonical, eventArgs, fail, id, object, type Adapter, type Binding, type Card, type EventArgs } from './contracts';
+import { canonical, eventArgs, fail, id, object, requireAssistantPermission, type Adapter, type Binding, type Card, type EventArgs } from './contracts';
 import { operationSignal } from './operation';
 import { validateEventProposal } from './tools';
 
@@ -83,7 +83,9 @@ async function issueReplacement(
   // The manifest proves every source was revoked without any dispatched or
   // unresolved write. One fresh scoped ledger checks the whole batch for actual
   // records; per-card read-back would exhaust the unchanged 12-call API budget.
+  await requireAssistantPermission(adapter, 'createPersonalEvent');
   const ledger = await calendarLedger(binding, adapter);
+  await requireAssistantPermission(adapter, 'createPersonalEvent');
   if (ledger.records.some(row => source.some(card => card.mutationId === row.id)))
     return fail('PLAN_REVISION_UNRESOLVED', 409);
 

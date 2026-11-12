@@ -1,4 +1,8 @@
 import { maskMessages } from './privacy';
+import { PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS } from '@campus/shared/src/platformAssistantPermissions';
+import { directReads, directReadAnswer, directReadCourseworkTargets } from './directRead';
+import { prepareExplicitEventRequest } from './explicitEventRequest';
+import { prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import {
   formatImportedAcademicSummary,
   type ImportedAcademicSummary,
@@ -17,11 +21,16 @@ import {
 import { randomUUID } from 'node:crypto';
 import {
   bounded,
+  assistantPermissionRecovery,
+  ASSISTANT_PERMISSION_SETTINGS_HREF,
   bytes,
   clip,
+  proposalPermission,
+  requireAssistantPermission,
   V2Error,
   type Adapter,
   type Card,
+  type CourseworkStudyTarget,
   type Binding,
   type History,
   type Message,
@@ -34,10 +43,12 @@ import {
   addDays,
 } from './contracts';
 import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
+import { explicitPageRequest, informationAnswer, informationReads, type InformationResult } from './information';
 import {
   createTools,
   schemas,
   selectTools,
+  toolSelectionNotice,
   scheduleIntent,
   studyPlanSelect,
   personalSlotSelect,
@@ -165,6 +176,7 @@ function packedResults(
 }
 export type RunInput = {
   question: string;
+  studyTarget?: CourseworkStudyTarget;
   history: History;
   binding: Binding;
   adapter: Adapter;
@@ -183,6 +195,11 @@ export type RunInput = {
 export async function run(input: RunInput) {
   const started = Date.now(),
     now = input.now ?? started;
+  const reads = input.planRevision ? [] : directReads(input.question, now);
+  const selectedNames = selectTools(input.question, input.adapter.simulation);
+  const requiredReads = !input.planRevision && !reads.length && !writeIntent(input.question) && !personalSlotSelect(input.question)
+    ? informationReads(input.question, now) : [];
+  const informationResults: InformationResult[] = [];
   const campusPrelude = input.planRevision ? null : campusInfoPrelude(input.question);
   const signal = AbortSignal.any([
     input.signal,
@@ -208,6 +225,28 @@ export async function run(input: RunInput) {
     : scheduledDate === '前天' ? addDays(taipeiDate(now), -2)
     : scheduledDate || relativeDate;
   const steps: Step[] = [];
+  let foodFallbackFailure = '';
+  const withSelectionNotice = (answer: string) => {
+    const completedNames = steps.filter((step) => step.status !== 'error').map((step) => step.name);
+    const blocked = steps.filter((step) => assistantPermissionRecovery(step.summary));
+    if (foodFallbackFailure) blocked.push({ name: 'propose_food_order', status: 'error', summary: foodFallbackFailure });
+    if (blocked.length) {
+      // Model text and fallback links cannot carry a prepared cart around the gate.
+      if (blocked.some((step) => proposalPermission(step.name) === 'prepareFoodOrder'))
+        answer = partialAnswer(evidence, tools.cards, input.question, now);
+      const denied = [...new Set(blocked.filter((step) => step.summary === 'ASSISTANT_PERMISSION_DENIED')
+        .map((step) => PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS.find((row) =>
+          row.key === proposalPermission(step.name))?.label || '助理操作'))];
+      const message = denied.length
+        ? `「${denied.join('」、「')}」的助理權限尚未開啟，這些操作尚未執行。`
+        : '目前無法確認助理操作權限，相關操作尚未執行。';
+      answer = verifyProposalAnswer(answer, tools.cards, input.question) + '\n' + message +
+        '請到設定 → 助理權限調整或重新讀取：' + ASSISTANT_PERMISSION_SETTINGS_HREF;
+      completedNames.push(...blocked.map((step) => step.name));
+    }
+    const notice = toolSelectionNotice(input.question, input.adapter.simulation, completedNames);
+    return notice ? answer + '\n' + notice : answer;
+  };
   const evidence: { tool: string; result: unknown }[] = [];
   const failedResults: { tool: string; result: unknown }[] = [];
   let modelCalls = 0,
@@ -237,25 +276,115 @@ export async function run(input: RunInput) {
       simulation: input.adapter.simulation,
     });
   const requestId = randomUUID();
+  const answerWithInformation = (otherwise: string) => {
+    if (!informationResults.length) return otherwise;
+    const readNames = new Set(requiredReads.map((read) => read.name as string));
+    // Preserve separately requested domains without reintroducing unsupported
+    // model claims about facts already verified by these readers.
+    const extra = evidence.filter(({ tool }) => !readNames.has(tool) &&
+      !['get_today_context', 'get_day_overview', 'get_course_work', 'get_food_order'].includes(tool));
+    return informationAnswer(informationResults, now) +
+      (extra.length ? '\n\n' + partialAnswer(extra, tools.cards, input.question, now) : '');
+  };
   try {
+    if (input.studyTarget) {
+      const study = await prepareCourseworkStudyRequest({ target: input.studyTarget,
+        adapter: input.adapter, binding: input.binding, secret: input.secret,
+        writes: input.writes, now, signal });
+      steps.push(...study.steps);
+      stopReason = study.stopReason;
+      log('assistant.completed');
+      return { version: 2, ...study, modelCalls: 0, usage, simulation: input.adapter.simulation };
+    }
+    const explicitEvent = input.planRevision ? null : await prepareExplicitEventRequest({ question: input.question, tools, signal, now });
+    if (explicitEvent) {
+      steps.push(...explicitEvent.steps);
+      stopReason = explicitEvent.stopReason;
+      log('assistant.completed');
+      return { version: 2, ...explicitEvent, modelCalls: 0, usage, simulation: input.adapter.simulation };
+    }
     const workOnly =
       /作業|要交|測驗|待繳/.test(input.question) &&
       !scheduleIntent(input.question) &&
       !/有空|行程|課表/.test(input.question);
-    const context = !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
+    const context = !reads.length && !requiredReads.length && !explicitPageRequest(input.question) && !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
       ? await bounded((child) => tools.withSignal(child, () => tools.context()), signal, 15000)
       : {
           now: new Date(now).toISOString(),
           school: input.binding.schoolId,
-          realms: (foodOrderIntent(input.question) || /點餐|吃|中午|訂|社團/.test(input.question))
+          realms: !requiredReads.length && !explicitPageRequest(input.question) && (foodOrderIntent(input.question) || /點餐|吃|中午|訂|社團/.test(input.question))
             ? await bounded(
                 (child) => tools.withSignal(child, () => input.adapter.realms()),
                 signal,
                 4000,
               )
             : [],
-          missing: ['未預讀私人資料'],
+          missing: reads.length ? [] : ['未預讀私人資料'],
         };
+    for (const read of reads) {
+      try {
+        const value = await bounded((child) => tools.withSignal(child, () => tools.call(read.tool, read.args)), signal, 4000);
+        evidence.push({ tool: read.tool, result: value.value });
+        steps.push({ name: read.tool, status: value.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+      } catch (error) {
+        if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+        steps.push({ name: read.tool, status: 'error', summary: safeCode(error) });
+      }
+    }
+    if (reads.length) {
+      signal.throwIfAborted();
+      stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
+      log('assistant.completed');
+      return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now),
+        courseworkTargets: directReadCourseworkTargets(reads, evidence, now),
+        steps, cards: [], modelCalls: 0, usage, stopReason, simulation: input.adapter.simulation };
+    }
+    // Read required facts before generation. A page card, an empty answer, or
+    // a provider outage cannot prevent a supported query from being completed.
+    for (const read of requiredReads) {
+      const entry: InformationResult = { read };
+      informationResults.push(entry);
+      try {
+        const result = await bounded((child) => tools.withSignal(child, () => tools.call(read.name, read.args)), signal, 4000);
+        entry.result = result.value;
+        evidence.push({ tool: read.name, result: result.value });
+        steps.push({ name: read.name, status: result.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+      } catch (error) {
+        if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+        failedResults.push({ tool: read.name, result: { error: safeCode(error), incomplete: true } });
+        steps.push({ name: read.name, status: 'error', summary: safeCode(error) });
+      }
+      if (read.kind === 'orders' && entry.result && steps.length < 8) {
+        const result = entry.result as Obj;
+        const listed = (result.data || result) as Obj;
+        const visible = Array.isArray(listed.orders) ? listed.orders as Obj[] : [];
+        const newest = [...visible].sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt)))[0];
+        if (typeof newest?.id === 'string') {
+          try {
+            // The dispatcher resolves a sole authorized realm and only accepts
+            // order IDs obtained from the list in this same request.
+            const detail = await bounded((child) => tools.withSignal(child, () => tools.call('get_food_order', { orderId: newest.id })), signal, 4000);
+            entry.detail = detail.value;
+            evidence.push({ tool: 'get_food_order', result: detail.value });
+            steps.push({ name: 'get_food_order', status: detail.cached ? 'cached' : 'ok', summary: '已查詢（僅本題資料）' });
+          } catch (error) {
+            if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+            steps.push({ name: 'get_food_order', status: 'error', summary: safeCode(error) });
+          }
+        }
+      }
+    }
+    if (requiredReads.length) {
+      signal.throwIfAborted();
+      stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
+      // These strictly scoped questions are fully handled by verified readers.
+      // Do not wait for (or send private results to) an unnecessary model call.
+      log('assistant.completed');
+      return {
+        version: 2, dataRead: true, answer: withSelectionNotice(informationAnswer(informationResults, now)),
+        steps, cards: [], modelCalls, usage, stopReason, simulation: input.adapter.simulation,
+      };
+    }
     if (campusPrelude) {
       const preloads: Array<readonly [string, Obj]> = campusPrelude === 'directions'
         ? [['get_campus_info', { kind: 'map' }], ['get_transit', { action: 'campus' }]]
@@ -273,7 +402,7 @@ export async function run(input: RunInput) {
     }
     const names = input.planRevision
       ? ['get_schedule', 'get_calendar', 'find_free_time', 'propose_personal_event']
-      : selectTools(input.question, input.adapter.simulation);
+      : [...selectedNames];
     // Avoid spending every task's bounded retry budget on unrelated domains.
     const serviceGuidance = names.includes('list_campus_services') ? '服務入口先查 list_campus_services。' : '';
     const academicGuidance = names.includes('get_imported_academics')
@@ -486,13 +615,19 @@ export async function run(input: RunInput) {
         } catch (e) {
           if ((e as { status?: number }).status === 401 || signal.aborted) throw e;
           if (safeCode(e) === 'UNKNOWN_TOOL' && ++toolFailures >= 2) names.length = 0;
+          const permissionRecovery = assistantPermissionRecovery(safeCode(e));
+          if (permissionRecovery) {
+            const permission = proposalPermission(call.function.name);
+            for (let i = names.length - 1; i >= 0; i--)
+              if (proposalPermission(names[i]) === permission) names.splice(i, 1);
+          }
           response = {
             error: safeCode(e),
             incomplete: true,
-            ...(call.function.name === 'reorder_last_food_order'
+            ...(!permissionRecovery && call.function.name === 'reorder_last_food_order'
               ? { hint: '請省略參數後重試，取餐時間由伺服器填入' }
               : {}),
-            ...tools.recovery(call.function.name),
+            ...(permissionRecovery || tools.recovery(call.function.name)),
           };
           failedResults.push({ tool: availableNames.includes(call.function.name) ? call.function.name : 'unknown', result: response });
           steps.push({
@@ -538,6 +673,9 @@ export async function run(input: RunInput) {
     }
     const ensure = async (name: string, args: unknown) => {
       if (signal.aborted || steps.length >= 8) return;
+      const permission = proposalPermission(name);
+      if (permission && steps.some((step) => proposalPermission(step.name) === permission &&
+          assistantPermissionRecovery(step.summary))) return;
       if (
         steps.some((s) => s.name === name && s.status !== 'error') &&
         name !== 'propose_food_order' &&
@@ -661,7 +799,19 @@ export async function run(input: RunInput) {
       !input.planRevision && foodOrderIntent(input.question) &&
       !tools.cards.some((card) => card.tool === 'propose_food_order')
     ) {
-      const href = foodLink(evidence, input.question, now);
+      let href = '/food';
+      const blocked = steps.some((step) => proposalPermission(step.name) === 'prepareFoodOrder' &&
+        assistantPermissionRecovery(step.summary));
+      if (!blocked) {
+        try {
+          // A link with items already prepares a cart, even without a confirmation card.
+          await requireAssistantPermission(input.adapter, 'prepareFoodOrder');
+          href = foodLink(evidence, input.question, now);
+        } catch (error) {
+          if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+          foodFallbackFailure = safeCode(error);
+        }
+      }
       if (!finalAnswer.includes(href) && !finalAnswer.includes('items='))
         finalAnswer = (finalAnswer ? finalAnswer + '\n' : '') + '請至點餐頁繼續選擇：' + href;
     }
@@ -698,7 +848,7 @@ export async function run(input: RunInput) {
     log('assistant.completed');
     return {
       version: 2,
-      answer: finalAnswer,
+      answer: withSelectionNotice(answerWithInformation(finalAnswer)),
       steps,
       cards: tools.cards,
       modelCalls,
@@ -709,16 +859,21 @@ export async function run(input: RunInput) {
     };
   } catch (e) {
     log('assistant.failed', e);
-    if (evidence.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
+    if (reads.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
+      return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now), steps,
+        courseworkTargets: directReadCourseworkTargets(reads, evidence, now),
+        cards: [], modelCalls, usage, stopReason: safeCode(e), simulation: input.adapter.simulation };
+    if ((evidence.length || informationResults.length) && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return {
         version: 2,
-        answer: partialAnswer(evidence, tools.cards, input.question, now),
+        answer: withSelectionNotice(answerWithInformation(partialAnswer(evidence, tools.cards, input.question, now))),
         steps,
         cards: tools.cards,
         modelCalls,
         usage,
         stopReason: safeCode(e),
         simulation: input.adapter.simulation,
+        ...(informationResults.length ? { dataRead: true } : {}),
       };
     if (e instanceof V2Error || (e as { status?: number }).status) throw e;
     throw new V2Error(
@@ -1119,7 +1274,7 @@ export function keepClubNews(
 }
 
 const EXECUTION_CLAIM =
-  /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?事件|建立(?:個人)?事件|安排好|訂購|儲存|預約)|已完成[。！]/;
+  /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?(?:事件|行程)|建立(?:個人)?(?:事件|行程)|安排好|訂購|儲存|預約)|已完成[。！]/;
 const CARD_CLAIM =
   /請[^。；！？\n.!?]*?(?:按|點|核對)[^。；！？\n.!?]*?卡|(?:按|點)[^。；！？\n.!?]*?確認[^。；！？\n.!?]*?卡|(?:已|成功)[^。；！？\n.!?]*?(?:產生|生成|建立)[^。；！？\n.!?]*?(?:卡|提案)/;
 

@@ -90,6 +90,22 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
+    function isGroupMember(groupId) {
+      return isAuthenticated()
+        && firestore.exists(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function canManageGroup(groupId) {
+      return isGroupMember(groupId)
+        && (
+          firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin'
+          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
+          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
+          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
+        );
+    }
+
     function conversationMember(conversationId) {
       // Conversation memberIds may survive account deletion; require a live canonical profile.
       // Storage rules can access only two unique Firestore documents per request.
@@ -247,7 +263,7 @@ service firebase.storage {
           // Story expiry is stored as epoch milliseconds by the mobile publisher.
           && story.expiresAt is int && story.expiresAt > request.time.toMillis()
           && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
-            || (story.kind == 'video' && resource.contentType.matches('video/.*')));
+            || (story.kind == 'video' && fileName == 'video' && resource.contentType == 'video/mp4'));
       }
       allow get: if storyAccountBoundToSchool()
         && (
@@ -263,7 +279,9 @@ service firebase.storage {
         && request.resource.metadata.ownerUid == request.auth.uid
         && (resource == null || resource.metadata.ownerUid == request.auth.uid)
         && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
-        && (isValidImage() && maxSize(10) || isValidVideo() && maxSize(100));
+        && request.resource.size > 0
+        && ((fileName == 'image' && isValidImage() && maxSize(10))
+          || (fileName == 'video' && request.resource.contentType == 'video/mp4' && maxSize(100)));
     }
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {

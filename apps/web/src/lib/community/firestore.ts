@@ -41,6 +41,7 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
@@ -457,6 +458,7 @@ export type CampusStoryDoc = {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
+  allowReplies?: boolean;
   text?: string;
   mediaUrl?: string | null;
   bgColor?: string;
@@ -480,6 +482,7 @@ export async function publishStory(payload: {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
+  allowReplies: boolean;
   text?: string;
   mediaUrl?: string | null;
   bgColor?: string;
@@ -493,6 +496,7 @@ export async function publishStory(payload: {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
+    allowReplies: payload.allowReplies,
     text: payload.text ?? '',
     mediaUrl: payload.mediaUrl ?? null,
     bgColor: payload.bgColor ?? '#0f172a',
@@ -563,9 +567,12 @@ export async function listActiveStoriesForSchool(
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
-  const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+export async function markStoryViewed(
+  story: Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>,
+  viewerUid: string,
+) {
+  if (story.authorUid === viewerUid) return;
+  const viewRef = doc(getDb(), ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, { viewerUid, viewedAt: serverTimestamp() });

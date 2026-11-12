@@ -48,6 +48,8 @@ jest.mock('../state/nuniSession', () => ({
     pendingLogout: false,
   }),
 }));
+// Course UI tests have no resolved local import scope; conflict coverage lives in StudyAgenda tests.
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => null }));
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').theme }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => `intent-${++mockUuid}-unique-key` }));
 

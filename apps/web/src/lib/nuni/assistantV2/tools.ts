@@ -1,7 +1,10 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { informationKinds } from './information';
+import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
+import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -10,6 +13,7 @@ import { buildPersonalToday } from '@campus/shared/src/imports/today';
 import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './actions';
 import {
   addDays,
+  assistantPermissionRecovery,
   bounded,
   bytes,
   canonical,
@@ -19,9 +23,12 @@ import {
   fail,
   id,
   object,
+  proposalPermission,
+  requireAssistantPermission,
   taipeiDate,
   text,
   type Adapter,
+  type AssistantPermissionKey,
   type Binding,
   type Card,
   type EventArgs,
@@ -429,9 +436,65 @@ export function studyWindow(question: string, answer = ''): { from: string; to: 
   return { from: '08:00', to: '22:00' };
 }
 export const toolNames = Object.keys(definitions);
+// One executable reader/proposal per explicitly requested domain takes precedence
+// over optional context and secondary tools when the eight-tool budget is full.
+function requestedToolDomains(question: string, simulation: boolean): [string, string][] {
+  const domains: [string, string][] = [];
+  const add = (requested: boolean, label: string, tool: string) => {
+    if (requested) domains.push([label, tool]);
+  };
+  add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(informationKinds(question).includes('orders'), '訂單進度', 'list_food_orders');
+  add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
+  add(/教材/.test(question), '教材', 'get_materials');
+  add(/社團/.test(question), '社團', 'list_clubs');
+  add(/公車|交通|到站/.test(question), '公車／交通', 'get_transit');
+  // Match campusInfoPrelude's exclusions: a mention in an example, negation or
+  // historical statement does not request a campus lookup.
+  const campusQuestion = question.normalize('NFKC').trim();
+  const campusLookup = question.length <= 1000 &&
+    !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(question) &&
+    !/[「」『』“”"'`]|不要|不用|不必|無須|不需要|不想|不是要|先別|別幫|翻譯|這句話|假設|如果|昨天|前天|剛才|之前|曾經|以前/.test(campusQuestion);
+  add(campusLookup && /圖書館|怎麼走|地圖|公告|活動/.test(campusQuestion), '校園資訊', 'get_campus_info');
+  add(foodOrderIntent(question) || /點餐|菜單|便當/.test(question), '點餐',
+    /再點|跟上次一樣/.test(question) ? 'reorder_last_food_order' : 'get_food_menu');
+  add(/吃|中午|餐廳/.test(question) && !foodOrderIntent(question), '餐廳', 'get_dining');
+  add(/課|有空|下午|行程/.test(question) && !studyPlanSelect(question), '課表／行程', 'get_schedule');
+  add(!studyPlanSelect(question) &&
+    (/行程|事件|今晚|今夜|明晚/.test(question) || personalSlotSelect(question)),
+    '個人事件', 'propose_personal_event');
+  add(/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question),
+    '匯入學業紀錄', 'get_imported_academics');
+  add(/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question),
+    '服務入口', 'list_campus_services');
+  add(simulation && /通知/.test(question), '通知', 'get_notifications');
+  return domains;
+}
+// Call only after execution, with successful (including cached) tool steps.
+// Selection alone does not establish coverage; preludes can cover unselected tools.
+export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[]): string {
+  const completed = new Set(completedNames);
+  // A successful day overview also reads due work and the schedule.
+  if (completed.has('get_day_overview')) {
+    completed.add('get_due_work');
+    completed.add('get_schedule');
+  }
+  if (completed.has('get_course_work')) completed.add('get_due_work');
+  const deferred = requestedToolDomains(question, simulation)
+    .filter(([, tool]) => !completed.has(tool)).map(([label]) => label);
+  return deferred.length
+    ? '本輪尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
+    : '';
+}
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  const information = informationKinds(question);
+  // A shortcut card cannot satisfy a request for facts already available to readers.
+  if (information.length || personalSlotSelect(question)) out.delete('propose_open_page');
+  if (information.includes('schedule')) add('get_schedule');
+  if (information.includes('work')) add('get_due_work');
+  if (information.includes('orders')) add('list_food_orders', 'get_food_order');
   // School grades stay on campus readers; imported records need an explicit local source.
   if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
   if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
@@ -468,6 +531,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
+  if (information.length && !foodOrderIntent(question) && !scheduleIntent(question) && !personalSlotSelect(question)) {
+    out.delete('propose_personal_event');
+    out.delete('propose_study_plan');
+  }
   // Prioritize the requested domain, retaining proposals for planning questions.
   if (foodOrderIntent(question)) {
     out.delete('get_today_context');
@@ -489,9 +556,12 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/再點|跟上次一樣/.test(question))
     return ['reorder_last_food_order', 'propose_food_order', 'get_food_menu', 'list_food_orders'];
   const names = [...out];
-  if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
-  if (names.length > 8 && names.includes('find_free_time'))
-    names.splice(names.indexOf('get_calendar'), 1);
+  const remove = (name: string) => {
+    const index = names.indexOf(name);
+    if (index >= 0) names.splice(index, 1);
+  };
+  if (names.length > 8) remove('propose_open_page');
+  if (names.length > 8 && names.includes('find_free_time')) remove('get_calendar');
   if (studyPlanSelect(question))
     return [
       'get_day_overview',
@@ -501,7 +571,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
-  return names.slice(0, 8);
+  if (names.length <= 8) return names;
+  const primary = requestedToolDomains(question, simulation)
+    .map(([, tool]) => tool).filter((tool) => names.includes(tool));
+  return [...new Set([...primary, ...names])].slice(0, 8);
 }
 export const schemas = (names: string[]) =>
   names.map((name) => ({
@@ -699,6 +772,22 @@ export function createTools(
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  async function requirePermission(key: AssistantPermissionKey) {
+    try {
+      await requireAssistantPermission(adapter, key);
+      operationSignal()?.throwIfAborted();
+    } catch (error) {
+      // Repeated calls cannot reuse an earlier card after its grant was revoked.
+      for (let i = cards.length - 1; i >= 0; i--) {
+        if (proposalPermission(cards[i].tool) === key) cards.splice(i, 1);
+      }
+      for (const cached of cache.keys()) {
+        const name = cached.slice(0, cached.indexOf('{'));
+        if (proposalPermission(name) === key) cache.delete(cached);
+      }
+      throw error;
+    }
+  }
   let proposalSeq: string | undefined;
   const sequence = () => (proposalSeq ||= beginProposal(binding, now));
   const diningIds = new Set<string>();
@@ -748,7 +837,7 @@ export function createTools(
     if (to < from || Date.parse(to) - Date.parse(from) > 30 * 86400000) return fail();
     const list = await getCourses();
     const unqueried: { id: string; title: string; reason: string }[] = [];
-    const found: Task[] = [];
+    const found: (Task & { courseTitle: string })[] = [];
     // Reserve whole assignment/quiz pairs before starting parallel work.
     let remaining = adapter.remainingApiCalls?.() ?? 12;
     const selected = list.filter((c) => {
@@ -768,7 +857,7 @@ export function createTools(
               (child) => withOperationSignal(child, () => work(c.id)),
               operationSignal() || new AbortController().signal,
               3000,
-            )),
+            )).map((task) => ({ ...task, courseTitle: c.title })),
           );
         } catch (e) {
           if ((e as { status?: number }).status === 401) throw e;
@@ -795,17 +884,20 @@ export function createTools(
       source: 'class-workspaces',
     };
   }
-  async function propose(raw: Obj) {
+  async function propose(raw: Obj, studyTask?: Task) {
     if (!writes)
       return {
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
-    if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title))
+    const explicit = parseAssistantCalendarIntent(question, now);
+    if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title) &&
+      !(explicit?.kind === 'draft' && raw.title === explicit.event.title))
       raw = { ...raw, title: studyTitle(raw.title) };
     const l = await getLedger();
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
     validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(question));
+    await requirePermission('createPersonalEvent');
     const card = signCard(
       binding,
       'propose_personal_event',
@@ -815,6 +907,7 @@ export function createTools(
       now,
       sequence(),
       priorEvents.at(-1),
+      studyTask ? studyGuardForTask(studyTask, 'study') : undefined,
     );
     cards.push(card);
     return { proposed: true, ...raw, requiresConfirmation: true };
@@ -939,6 +1032,7 @@ export function createTools(
                 ? '此訂單需付款，請到點餐頁完成'
                 : '確認後下單，自取',
         };
+        await requirePermission('prepareFoodOrder');
         cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
         return { proposed: true, mode, reason: args.reason, summary, href: args.href, requiresConfirmation: true };
       }
@@ -1168,7 +1262,7 @@ export function createTools(
               startTime: slot.startTime,
               endTime,
               allDay: false,
-            }),
+            }, task),
           );
           slot.startTime = endTime;
           slot.minutes -= minutes;
@@ -1307,6 +1401,8 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
+      const permission = proposalPermission(name);
+      if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
       if (!exactEventArguments && name === 'propose_personal_event') {
         const spoken = parseSpokenClock(question);
@@ -1435,6 +1531,7 @@ export function createTools(
       try {
         value = await cache.get(key);
       } catch (error) {
+        if (assistantPermissionRecovery(String((error as { code?: string }).code))) throw error;
         if (name !== 'reorder_last_food_order') throw error;
         const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
         const retryKey = name + canonical(filled);

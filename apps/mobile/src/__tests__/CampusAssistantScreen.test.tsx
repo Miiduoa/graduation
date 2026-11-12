@@ -20,6 +20,9 @@ jest.mock('../app/useAIOverlay', () => ({
 }));
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
+let mockSelection: { schoolId: string | null } | undefined;
+let mockLegacySchool = false;
+let mockSelectionReady: boolean | undefined = true;
 let mockPlatform: {
   loading?: boolean; session?: { platformAccountId: string; context?: string };
   isSessionCurrent?: (id: string, context: string) => boolean;
@@ -34,6 +37,8 @@ jest.mock('../state/auth', () => ({
 }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({
+    selectionReady: mockSelectionReady,
+    selection: mockLegacySchool ? undefined : mockSelection ?? { schoolId: mockSchool },
     school: {
       id: mockSchool,
       name: mockSchool === 'pu' ? '靜宜大學' : `學校（${mockSchool}）`,
@@ -103,6 +108,9 @@ beforeEach(async () => {
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([]);
   mockUid = 'A';
   mockSchool = 'pu';
+  mockSelection = undefined;
+  mockLegacySchool = false;
+  mockSelectionReady = true;
   mockUpcomingClass = false;
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
@@ -122,6 +130,27 @@ test('campus follow-up questions reuse one sessionId', async () => {
   expect(first.length).toBeGreaterThan(8);
   expect(second).toBe(first);
   expect(request.mock.calls[0][0].mode).toBe('campus');
+});
+
+test.each([
+  ['legacy selected school', undefined, true, 'pu'],
+  ['legacy caller without readiness', undefined, undefined, 'pu'],
+  ['explicit selection', { schoolId: 'nthu' }, true, 'nthu'],
+  ['explicitly unselected school', { schoolId: null }, true, ''],
+  ['selection still loading', undefined, false, ''],
+] as const)('%s preserves assistant access and school scope', async (_name, selection, ready, expectedSchoolId) => {
+  mockSelection = selection;
+  mockLegacySchool = selection === undefined;
+  mockSelectionReady = ready;
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '查校方公告');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  if (ready === false) {
+    expect(request).not.toHaveBeenCalled();
+  } else {
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ scope: { uid: 'A', schoolId: expectedSchoolId } }));
+  }
 });
 
 test.each(['account', 'school'])('changing %s starts a new campus sessionId', async (change) => {
@@ -2052,4 +2081,109 @@ test('all platform source limitations remain accessible in both live and saved p
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
   fireEvent.press(view.getByRole('button', { name: '查看全部 4 項資料限制' }));
   expect(view.getByText(/本次已達資料來源上限，不能判定其他課程沒有作業/)).toBeTruthy();
+});
+
+test.each(['device', 'campus'])(
+  '%s question leaves the composer usable and never clears a follow-up typed during the reply',
+  async (mode) => {
+    const waiting = deferred<{ content: string; hasActions: boolean }>();
+    request.mockReturnValueOnce(waiting.promise);
+    const view = render(<CampusAssistantScreen />);
+    if (mode === 'campus') selectCampusMode(view);
+    const field = view.getByLabelText('詢問校園助理');
+    fireEvent.changeText(field, '幫我核對這週作業');
+    act(() => fireEvent.press(view.getByText('送出問題')));
+    expect(field.props.editable).toBe(true);
+    expect(field.props.value).toBe('');
+    expect(view.getByText('幫我核對這週作業')).toBeTruthy();
+    fireEvent.changeText(field, '下一題請查空堂');
+    expect(field.props.value).toBe('下一題請查空堂');
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(async () => waiting.resolve({ content: '本週作業已核對', hasActions: false }));
+    expect(view.getByText('本週作業已核對')).toBeTruthy();
+    expect(field.props.value).toBe('下一題請查空堂');
+    expect(request).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('an unsuccessful mobile question can be recovered without deleting the newer draft', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '查明天的公告');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '下一題先寫好了');
+  await act(async () => waiting.reject(new Error('network unavailable')));
+  expect(field.props.value).toBe('下一題先寫好了');
+  expect(view.getByText('查明天的公告')).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+  fireEvent.press(view.getByText('切換到保留的問題'));
+  expect(field.props.value).toBe('查明天的公告');
+  expect(view.getByText('下一題先寫好了')).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('cancelling device inference restores its original question without wiping a follow-up', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '排今晚讀書時間');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '下一週也要安排');
+  expect(view.getByText('排今晚讀書時間')).toBeTruthy();
+  fireEvent.press(view.getByText('停止本機回答'));
+  expect(request.mock.calls[0][0].signal.aborted).toBe(true);
+  await act(async () => waiting.resolve({ content: '不該顯示的過期回答', hasActions: false }));
+  expect(view.queryByText('不該顯示的過期回答')).toBeNull();
+  expect(field.props.value).toBe('下一週也要安排');
+  expect(view.getByText('切換到保留的問題')).toBeTruthy();
+  fireEvent.press(view.getByText('切換到保留的問題'));
+  expect(field.props.value).toBe('排今晚讀書時間');
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('reading older phone replies stays in place until the user requests the latest reply', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  const field = view.getByLabelText('詢問校園助理');
+  const scroll = view.getByTestId('assistant-conversation-scroll');
+  fireEvent.changeText(field, '整理這週作業');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  // Simulate the reader swiping up while the answer is still pending.
+  act(() => fireEvent.scroll(scroll, { nativeEvent: {
+    contentOffset: { y: 0 }, layoutMeasurement: { height: 400 },
+    contentSize: { height: 1200 },
+  } }));
+  expect(view.getByText('回到最新回覆')).toBeTruthy();
+  await act(async () => waiting.resolve({ content: '已整理本週作業', hasActions: false }));
+  expect(view.getByText('已整理本週作業')).toBeTruthy();
+  expect(view.getByText('回到最新回覆')).toBeTruthy();
+  fireEvent.press(view.getByText('回到最新回覆'));
+  expect(view.queryByText('回到最新回覆')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('a running study brief still names its original task while the next draft is being written', async () => {
+  const syncing = deferred<Awaited<ReturnType<typeof refreshCampusSenseSnapshot>>>();
+  jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(syncing.promise);
+  const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
+  fireEvent.press(view.getByText('今日重點'));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '幫我查週末活動');
+  expect(field.props.value).toBe('幫我查週末活動');
+  expect(view.getByText('今天要先處理什麼？')).toBeTruthy();
+  fireEvent.press(view.getByText('取消這次同步'));
+  await act(async () => syncing.resolve({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
+  expect(field.props.value).toBe('幫我查週末活動');
+  expect(request).not.toHaveBeenCalled();
 });
