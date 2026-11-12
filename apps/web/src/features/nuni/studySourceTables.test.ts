@@ -504,3 +504,49 @@ describe('CSS important tokens with legal whitespace in hidden source wrappers',
     ].join('\n'))).toEqual(realTable(2));
   });
 });
+
+describe('hidden semantic HTML wrappers must not publish lesson answer tables', () => {
+  it.each([
+    ['article', 'hidden'],
+    ['figure', 'style="display:none"'],
+    ['blockquote', 'aria-hidden="true"'],
+    ['main', 'hidden'],
+    ['fieldset', 'style="visibility:hidden"'],
+  ])('omits answers inside <%s %s> but keeps the following public table', (tag, attribute) => {
+    const source = [
+      `<${tag} ${attribute}>`,
+      '| 教師未公開答案 | 分數 |',
+      '| --- | --- |',
+      '| 不應重建 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('keeps a hidden outer article closed until its matching closing tag', () => {
+    const source = [
+      '<article hidden>',
+      '<article>',
+      '| 尚未公布 | 分數 |',
+      '| --- | --- |',
+      '| 巢狀練習 | 99 |',
+      '</article>',
+      '| 外層仍隱藏 | 分數 |',
+      '| --- | --- |',
+      '| 尚未公布 | 88 |',
+      '</article>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+
+  it('does not suppress a visible figure just because its title mentions hidden', () => {
+    const source = [
+      '<figure title="教材示範 hidden 屬性" style="display:block">',
+      ...visibleTable,
+      '</figure>',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});

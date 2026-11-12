@@ -18,7 +18,13 @@ const MAX_ROWS = 20;
 // HTML: recognize explicit hidden / aria-hidden=true and literal inline display:none,
 // visibility:hidden / visibility:collapse / content-visibility:hidden;
 // this does not infer computed CSS, external stylesheets or chart meaning.
-const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
+// Also recognize hidden semantic block wrappers used in real course handouts.
+// Inline/implicitly-closed HTML needs a renderer; limit this to explicit
+// block containers with matching closing tags, without pretending to compute CSS.
+const HIDDEN_HTML_CONTAINERS = new Set([
+  'div', 'section', 'aside', 'article', 'figure', 'blockquote',
+  'main', 'header', 'footer', 'nav', 'form', 'fieldset',
+]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
 const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dialog']);

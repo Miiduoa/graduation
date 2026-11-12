@@ -816,3 +816,7 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 ### 2026-11-12：修正 CSS `! important` 合法空白造成的隱藏答案外露
 
 教材 HTML 行內樣式允許 `display:none ! important`（驚嘆號與 `important` 間有空白），甚至可由 CSS 註解分隔。原本原文表格解析器只認 `!important`，可能誤以為稍後的 `display:block` 覆寫前者，將教師隱藏答案重新整理成可見資料。本次僅修正解析器明確行內 CSS 的優先旗標，保留同優先級後寫者生效、不同屬性互不覆寫，以及無效 `! importantish` 不被誤認；新增六種來源表格回歸情境。此修正不代表支援外部 CSS 或計算樣式，不更動原始教材、私人筆記、備份格式或 AI 傳輸路徑。仍須以本提交 SHA 的完整 CI／CodeQL、真機、指定 App 5504170 審查與 Ahaboard 同機比較判定，PR 保持 Draft。
+
+### 2026-11-12：隱藏的語意 HTML 教材容器不再額外重建為原文表格
+
+有些講義以 `<article hidden>`、`<figure style="display:none">`、`<blockquote aria-hidden="true">` 或 `<fieldset style="visibility:hidden">` 包住尚未公開的示例。原解析器只追蹤 div／section／aside，會將這些明確隱藏區塊中的 Markdown 表格另外重建。現在將常見、具明確關閉標籤的語意區塊納入相同保守可見性界線；巢狀同名區塊不會讓外層提前關閉，真正公開的教材表格仍可保留。新增七個 Node/Vitest 回歸情境。不改動原始教材、個人筆記、JSON 備份格式、端側模型或資料傳輸；不假裝是完整 HTML/CSS 渲染，更不代表圖像理解、手機實機或 Ahaboard 同機對照。所有 CI／CodeQL 與指定 App 審查必須依最新 head 核查；PR 保持 Draft、未合併／部署。
