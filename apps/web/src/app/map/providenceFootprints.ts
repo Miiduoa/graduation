@@ -22,7 +22,7 @@ export type ProvidenceFootprint = {
 const EARTH_RADIUS = 6_371_008.8;
 const DEG = Math.PI / 180;
 const ALLOWANCE = 0.0004;
-const MAX_WAYS = 128;
+const MAX_OSM_ELEMENTS = 128;
 const MAX_VERTICES = 160;
 const MAX_POI_OFFSET_METERS = 30;
 const ILLUSTRATIVE_HEIGHT = 12;
@@ -34,9 +34,26 @@ const knownWays = new Map(
     return match ? [[Number(match[1]), place] as const] : [];
   }),
 );
+const knownRelations = new Map(
+  PROVIDENCE_CAMPUS_PLACES.flatMap((place) => {
+    if (place.verification !== 'cross-checked') return [];
+    const match = /^https:\/\/www\.openstreetmap\.org\/relation\/(\d+)$/.exec(place.sourceUrl);
+    return match ? [[Number(match[1]), place] as const] : [];
+  }),
+);
+const knownBuildingsByPoi = new Map(
+  [...knownWays.values(), ...knownRelations.values()].map((place) => [place.id, place] as const),
+);
 
-/** 只向 OSM 查詢已在本專案與官方地圖交叉核對的建築 way。 */
+/** Fixed audited OSM IDs only, never user-supplied queries or arbitrary relations. */
 export const PROVIDENCE_OSM_BUILDING_WAY_IDS = [...knownWays.keys()];
+export const PROVIDENCE_OSM_BUILDING_RELATION_IDS = [...knownRelations.keys()];
+
+function knownBuildingForElement(element: Record<string, unknown>) {
+  if (typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) return undefined;
+  return element.type === 'way' ? knownWays.get(element.id)
+    : element.type === 'relation' ? knownRelations.get(element.id) : undefined;
+}
 
 const object = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -117,7 +134,22 @@ function safeOutline(value: unknown): Array<[number, number]> | null {
   return area >= 20 && area <= 100_000 ? points : null;
 }
 
-/** Ensure a verified OSM way still covers (or is very close to) its named POI.
+/** A relation may contain holes, disconnected outers or fragmented ways. The
+ * current renderer supports ONE closed, hole-free outer way only. Reject all
+ * other multipolygons rather than silently filling a courtyard or inventing
+ * missing walls. Both relation and member geometry are checked independently.
+ */
+function safeSimpleRelationOutline(element: Record<string, unknown>): Array<[number, number]> | null {
+  if (object(element.tags)?.type !== 'multipolygon') return null;
+  const members = element.members;
+  if (!Array.isArray(members) || members.length !== 1) return null;
+  const member = object(members[0]);
+  if (!member || member.type !== 'way' || member.role !== 'outer' ||
+      typeof member.ref !== 'number' || !Number.isSafeInteger(member.ref)) return null;
+  return safeOutline(member.geometry);
+}
+
+/** Ensure a verified OSM way/relation still covers (or is very close to) its named POI.
  * A moved or re-tagged way elsewhere on campus must not inherit the old POI's name.
  * The 30 m slack covers map alignment errors; it is not a room/entrance coordinate.
  */
@@ -267,36 +299,40 @@ function heightFromOsmTags(value: unknown):
 /** Overpass JSON：不接收動態 way ID、不猜位置、不補無來源的建築。 */
 export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
-  if (!Array.isArray(data?.elements) || data.elements.length > MAX_WAYS) return [];
-  // A single OSM way cannot have two simultaneous outlines in one Overpass reply.
-  // Failing closed avoids a forged/partial first entry winning merely by order,
-  // even when its duplicate is missing tags or has invalid geometry.
-  const returnedKnownIds = new Set<number>();
+  if (!Array.isArray(data?.elements) || data.elements.length > MAX_OSM_ELEMENTS) return [];
+  // A known way/relation cannot appear twice in one Overpass reply. Fail closed
+  // even if the second copy lacks valid geometry or tags.
+  const returnedKnownIds = new Set<string>();
   for (const candidate of data.elements) {
     const item = object(candidate);
-    if (item?.type !== 'way' || typeof item.id !== 'number' || !knownWays.has(item.id)) continue;
-    if (returnedKnownIds.has(item.id)) return [];
-    returnedKnownIds.add(item.id);
+    if (!item || !knownBuildingForElement(item)) continue;
+    const identity = `${item.type}:${item.id}`;
+    if (returnedKnownIds.has(identity)) return [];
+    returnedKnownIds.add(identity);
   }
-  const seen = new Set<number>();
+  const seen = new Set<string>();
   const buildings: ProvidenceFootprint[] = [];
   for (const value of data.elements) {
     const element = object(value);
-    if (element?.type !== 'way' || typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) continue;
-    const place = knownWays.get(element.id);
-    if (!place || seen.has(element.id) || !isStandingBuilding(element.tags)) continue;
-    const outline = safeOutline(element.geometry);
+    if (!element) continue;
+    const place = knownBuildingForElement(element);
+    const identity = `${element.type}:${element.id}`;
+    if (!place || seen.has(identity) || !isStandingBuilding(element.tags)) continue;
+    const outline = element.type === 'way'
+      ? safeOutline(element.geometry) : safeSimpleRelationOutline(element);
     if (!outline || !outlineNearPoi(outline, place)) continue;
     const height = heightFromOsmTags(element.tags);
     if (!height) continue;
-    seen.add(element.id);
+    seen.add(identity);
     buildings.push({
       poiId: place.id,
       name: place.name,
       sourceUrl: place.sourceUrl,
       outline,
       ...height,
-      ...osmWayRevision(element),
+      // Relation revisions describe the relation, not its member-way geometry.
+      // The existing UI labels revisions as "OSM way", so never mislabel them.
+      ...(element.type === 'way' ? osmWayRevision(element) : {}),
     });
   }
   // 與共用靜宜地點名錄保持同順序，而非依伺服器回傳順序。
@@ -307,11 +343,12 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
 /** 將已篩過的資料再於使用端核對，不信任外來 JSON 的名稱與 URL。 */
 export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
-  if (data?.schoolId !== 'pu' || !Array.isArray(data.buildings) || data.buildings.length > knownWays.size) return [];
+  if (data?.schoolId !== 'pu' || !Array.isArray(data.buildings) ||
+      data.buildings.length > knownBuildingsByPoi.size) return [];
   // A trusted POI cannot have two different footprints in one API snapshot.
   // Reject the entire inconsistent payload, even if the second record has an
   // invalid name/shape. Never pick whichever duplicate arrived first.
-  const knownPoiIds = new Set([...knownWays.values()].map((place) => place.id));
+  const knownPoiIds = new Set(knownBuildingsByPoi.keys());
   const returnedPoiIds = new Set<string>();
   for (const candidate of data.buildings) {
     const id = object(candidate)?.poiId;
@@ -324,8 +361,7 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
   for (const value of data.buildings) {
     const item = object(value);
     if (typeof item?.poiId !== 'string' || seen.has(item.poiId)) continue;
-    const place = PROVIDENCE_CAMPUS_PLACES.find((p) => p.id === item.poiId && p.verification === 'cross-checked' &&
-      knownWays.has(Number(p.sourceUrl.split('/').at(-1))));
+    const place = knownBuildingsByPoi.get(item.poiId);
     if (!place || item.name !== place.name || item.sourceUrl !== place.sourceUrl) continue;
     if (typeof item.heightMeters !== 'number' || !Number.isFinite(item.heightMeters) ||
       item.heightMeters < 2.5 || item.heightMeters > 100 ||
