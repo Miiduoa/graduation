@@ -57,6 +57,43 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a contradictory OSM node ID reused at different coordinates across audited buildings', async () => {
+    // Each way alone is a geometrically valid closed building near its known
+    // campus POI. A cross-way identity conflict must reject the *whole*
+    // snapshot, not promote a mix of impossible 3D positions.
+    const secondOutline = [
+      { lat: 24.22690, lon: 120.58354 },
+      { lat: 24.22690, lon: 120.58364 },
+      { lat: 24.22700, lon: 120.58364 },
+      { lat: 24.22700, lon: 120.58354 },
+      { lat: 24.22690, lon: 120.58354 },
+    ];
+    const library = {
+      type: 'way', id: 255784049, geometry: libraryOutline,
+      nodes: [701, 702, 703, 704, 701], tags: { building: 'yes' },
+    };
+    const zhugu = {
+      type: 'way', id: 255784268, geometry: secondOutline,
+      nodes: [801, 802, 803, 804, 801], tags: { building: 'yes' },
+    };
+    const { parseProvidenceOsmFootprints } = await import('@/app/map/providenceFootprints');
+    expect(parseProvidenceOsmFootprints({ elements: [library, zhugu] })
+      .map((building) => building.poiId)).toEqual(['pu-zhugu', 'pu-library']);
+    // Node 701 cannot identify the library's SW corner and the distant
+    // Zhugu corner simultaneously; both rings remain individually closed.
+    const conflicting = { elements: [library, { ...zhugu, nodes: [701, 802, 803, 804, 701] }] };
+    expect(parseProvidenceOsmFootprints(conflicting)).toEqual([]);
+    const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify(conflicting), { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect((await response.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a truncated Xijia relation instead of rendering an invented solid roof', async () => {
     const dormOutline = [
       { lat: 24.22797, lon: 120.58062 },
