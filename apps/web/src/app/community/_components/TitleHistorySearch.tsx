@@ -308,7 +308,13 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
     }
   }
 
-  function submit(event: FormEvent) { event.preventDefault(); void search(); }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    // Mobile IMEs can fire a submit event without a cancellable Enter keydown.
+    // Never query the server for text that is still being composed.
+    if (composing.current) return;
+    void search();
+  }
 
   return (
     <section className={styles.panel} aria-label="歷史貼文標題搜尋">
