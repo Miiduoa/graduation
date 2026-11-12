@@ -56,6 +56,13 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceFootprintResponse({
       schoolId: 'pu', buildings: parsed,
     })).toEqual(parsed);
+    // Never let a stale/forged API attach way revision labels to a relation.
+    const injectedRevision = parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{
+        ...parsed[0], osmVersion: 99, osmEditedAt: '2026-10-15T08:09:10Z',
+      }],
+    });
+    expect(injectedRevision).toEqual(parsed);
 
     const invalidMembers: unknown[] = [
       [], [member, member],
