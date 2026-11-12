@@ -246,6 +246,27 @@ test('an offline confirmation retains the search and can open on the next tap', 
   expect(confirmOpen).toHaveBeenCalledTimes(2);
 });
 
+test('allows next-page reading after an offline post check without restarting the history search', async () => {
+  const first = result([row('one')], true);
+  search.mockResolvedValueOnce(first).mockResolvedValueOnce(result([row('two')]));
+  confirmOpen.mockRejectedValueOnce({ code: 'unavailable' });
+  const view = panel(); enter(view);
+  await view.findByText('二手書 one');
+
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await view.findByText(/暫時無法向伺服器確認/);
+  expect(view.open).not.toHaveBeenCalled();
+  expect(view.getByText('二手書 one')).toBeTruthy();
+  // A failed post-open verification is not a failed page query. Students
+  // must still be able to continue from their current successful cursor.
+  fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+  await view.findByText('二手書 two');
+  expect(search).toHaveBeenCalledTimes(2);
+  expect(search).toHaveBeenLastCalledWith('pu', '二手書', first.nextCursor);
+  expect(view.getByText('二手書 one')).toBeTruthy();
+  expect(confirmOpen).toHaveBeenCalledTimes(1);
+});
+
 test('permission withdrawal during opening clears results and restarts search at page one', async () => {
   confirmOpen.mockRejectedValueOnce({ code: 'permission-denied' });
   const view = panel(); enter(view); await view.findByText('二手書 one');
