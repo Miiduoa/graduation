@@ -208,4 +208,22 @@ suite('title search using the real SDK and repository authorization rules', () =
     });
     expect(await confirmCampusPostTitleOpen('pu', 'web-check')).toBe(false);
   });
+  it('does not open a server-confirmed old result after its title has moved to another prefix', async () => {
+    // The list was already fetched for 二手書. The author now changes the title
+    // before this student clicks; a fresh server read must reject this old link.
+    vi.mocked(getDb).mockReturnValue(alice);
+    const path = 'schools/pu/campusPosts/web-title-moved';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(path).set({
+        schoolId: 'pu', boardId: 'public', title: '二手書 原標題',
+        content: '學生仍可用新標題找到', authorUid: 'alice',
+      });
+    });
+    expect((await searchCampusPostTitles('pu', '二手書')).posts.some((post) => post.id === 'web-title-moved')).toBe(true);
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(path).update({ title: '租屋 已改標題' });
+    });
+    expect(await confirmCampusPostTitleOpen('pu', 'web-title-moved', '二手書')).toBe(false);
+    expect(await confirmCampusPostTitleOpen('pu', 'web-title-moved', '租屋')).toBe(true);
+  });
 });
