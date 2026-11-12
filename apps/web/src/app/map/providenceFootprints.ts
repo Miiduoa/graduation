@@ -87,6 +87,38 @@ function safeCoordinate(value: unknown): [number, number] | null {
   return [lon, lat];
 }
 
+/** An OSM node ID denotes one global coordinate, even when several audited
+ * building ways share it. Each individual ring can be simple while two rings
+ * in the *same* Overpass response assign contradictory positions to one ID.
+ * Reject that snapshot instead of displaying impossible campus geometry.
+ * Geometry-only responses cannot be identity-checked and keep the usual
+ * outline/POI validation; this does not invent missing node references.
+ */
+function hasConsistentOsmNodeGeometry(elements: unknown[]): boolean {
+  const positions = new Map<number, [number, number]>();
+  for (const candidate of elements) {
+    const element = object(candidate);
+    if (!element || !knownBuildingForElement(element)) continue;
+    const ways = element.type === 'way' ? [element]
+      : Array.isArray(element.members) ? element.members.map(object) : [];
+    for (const way of ways) {
+      if (!way || way.nodes === undefined) continue;
+      if (!Array.isArray(way.nodes) || !Array.isArray(way.geometry) ||
+          way.nodes.length !== way.geometry.length) return false;
+      for (let index = 0; index < way.nodes.length; index += 1) {
+        const nodeId = way.nodes[index];
+        const point = safeCoordinate(way.geometry[index]);
+        if (typeof nodeId !== 'number' || !Number.isSafeInteger(nodeId) ||
+            nodeId <= 0 || !point) return false;
+        const existing = positions.get(nodeId);
+        if (existing && (existing[0] !== point[0] || existing[1] !== point[1])) return false;
+        positions.set(nodeId, point);
+      }
+    }
+  }
+  return true;
+}
+
 function polygonAreaMeters(points: readonly [number, number][]): number {
   const origin = points[0];
   const lonScale = EARTH_RADIUS * DEG * Math.cos(origin[1] * DEG);
@@ -435,6 +467,7 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     if (returnedKnownIds.has(identity)) return [];
     returnedKnownIds.add(identity);
   }
+  if (!hasConsistentOsmNodeGeometry(data.elements)) return [];
   const seen = new Set<string>();
   const buildings: ProvidenceFootprint[] = [];
   for (const value of data.elements) {
