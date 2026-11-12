@@ -245,7 +245,7 @@ it('offers Google for course feedback while retaining the requested campus and t
 });
 
 it.each([
-  '/demo/account?campus=pu#account-permissions-title',
+  '/orders?campus=pu',
   '/student-card?campus=pu',
   '/ai-assistant?campus=pu',
   '/timetable?schoolId=ntu#today',

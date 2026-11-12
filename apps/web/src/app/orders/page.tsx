@@ -7,13 +7,17 @@ import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
+import { clearAllFoodPendingForAccount } from '@/features/food/foodPersistence';
+import type { FoodDraftCache } from '@/features/food/foodState';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { watchMyOrder, watchMyOrders, type MyOrder } from '@/lib/myOrders';
 import {
   describePickupNumber,
   formatShortOrderCode,
 } from '@campus/shared/src/ordering/pickupNumber';
-import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
+import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import home from '../home.module.css';
 import styles from './orders.module.css';
 import {
@@ -21,8 +25,10 @@ import {
   landOnOrder,
   orderFocusElementId,
   parseOrderFocusId,
+  parsePlatformOrderLink,
   resolveOrderFocus,
 } from './orderDeepLink';
+import { PlatformOrders } from './PlatformOrders';
 
 const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: '等店家接單',
@@ -87,22 +93,6 @@ function OrderCard({ order, focused = false }: { order: MyOrder; focused?: boole
   );
 }
 
-function ClosedOrderNotice({ schoolId }: { schoolId: string | null }) {
-  return (
-    <div className={styles.empty}>
-      <p role="status">線上點餐目前未開放，無法查看這筆訂單。</p>
-      <div className={styles.actions}>
-        <Link
-          className={home.secondary}
-          href={schoolId ? `/cafeteria?schoolId=${encodeURIComponent(schoolId)}` : '/cafeteria'}
-        >
-          查看餐廳資訊
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 function OrdersList({
   uid,
   schoolId,
@@ -115,36 +105,50 @@ function OrdersList({
   const [recent, setRecent] = useState<{ orders: MyOrder[]; fromCache: boolean } | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [linked, setLinked] = useState<{ order: MyOrder | null; fromCache: boolean } | 'error' | null>(null);
+  const [linked, setLinked] = useState<
+    { order: MyOrder | null; fromCache: boolean } | 'error' | null
+  >(null);
   const [linkedAttempt, setLinkedAttempt] = useState(0);
   const landed = useRef(false);
   useEffect(() => {
     let active = true;
     setRecent(null);
     setFailed(false);
-    const stop = watchMyOrders(uid, schoolId, (orders, fromCache) => {
-      if (active) setRecent({ orders, fromCache });
-    }, () => {
-      if (active) setFailed(true);
-    });
+    const stop = watchMyOrders(
+      uid,
+      schoolId,
+      (orders, fromCache) => {
+        if (active) setRecent({ orders, fromCache });
+      },
+      () => {
+        if (active) setFailed(true);
+      },
+    );
     return () => {
       active = false;
       stop();
     };
   }, [uid, schoolId, attempt]);
 
-  const lookupId = recent && !failed && !recent.orders.some((order) => order.id === focusOrderId)
-    ? focusOrderId
-    : null;
+  const lookupId =
+    recent && !failed && !recent.orders.some((order) => order.id === focusOrderId)
+      ? focusOrderId
+      : null;
   useEffect(() => {
     setLinked(null);
     if (!lookupId) return;
     let active = true;
-    const stop = watchMyOrder(uid, schoolId, lookupId, (order, fromCache) => {
-      if (active) setLinked({ order, fromCache });
-    }, () => {
-      if (active) setLinked('error');
-    });
+    const stop = watchMyOrder(
+      uid,
+      schoolId,
+      lookupId,
+      (order, fromCache) => {
+        if (active) setLinked({ order, fromCache });
+      },
+      () => {
+        if (active) setLinked('error');
+      },
+    );
     return () => {
       active = false;
       stop();
@@ -152,9 +156,10 @@ function OrdersList({
   }, [uid, schoolId, lookupId, linkedAttempt]);
 
   const extra = lookupId && linked !== 'error' ? linked : null;
-  const orders = useMemo(() => recent && (
-    extra?.order ? [...recent.orders, extra.order] : recent.orders
-  ), [recent, extra]);
+  const orders = useMemo(
+    () => recent && (extra?.order ? [...recent.orders, extra.order] : recent.orders),
+    [recent, extra],
+  );
   const fromCache = recent?.fromCache || extra?.fromCache;
 
   const grouped = useMemo(() => {
@@ -189,14 +194,17 @@ function OrdersList({
     );
   }
   if (orders === null) return <p role="status">正在讀取訂單…</p>;
-  const lookupNotice = lookupId && linked === 'error' ? (
-    <div className={styles.empty}>
-      <p role="alert">目前讀不到通知中的訂單。</p>
-      <div className={styles.actions}>
-        <Button onClick={() => setLinkedAttempt((n) => n + 1)}>重新讀取這筆訂單</Button>
+  const lookupNotice =
+    lookupId && linked === 'error' ? (
+      <div className={styles.empty}>
+        <p role="alert">目前讀不到通知中的訂單。</p>
+        <div className={styles.actions}>
+          <Button onClick={() => setLinkedAttempt((n) => n + 1)}>重新讀取這筆訂單</Button>
+        </div>
       </div>
-    </div>
-  ) : lookupId && !linked ? <p role="status">正在查詢通知中的訂單…</p> : null;
+    ) : lookupId && !linked ? (
+      <p role="status">正在查詢通知中的訂單…</p>
+    ) : null;
   if (!orders.length && lookupNotice) return lookupNotice;
   if (!orders.length && fromCache) {
     return <p role="status">正在等候連線確認訂單，這台裝置尚無可顯示的紀錄。</p>;
@@ -205,27 +213,15 @@ function OrdersList({
     return (
       <div className={styles.empty}>
         {focus.missing ? <p role="status">{ORDER_FOCUS_MISSING}</p> : null}
-        {!isWebOnlineOrderingEnabled() ? (
-          <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
-        ) : (
-          <>
-            <h2>還沒有訂單</h2>
-            <p>
-              這裡顯示 nuni App「餐廳」下的訂單與取餐號碼。網頁站內點餐與取餐請到「點餐與取餐」。
-            </p>
-            <div className={styles.actions}>
-              <Link className={home.primary} href="/food">
-                前往點餐與取餐
-              </Link>
-              <Link
-                className={home.secondary}
-                href={`/cafeteria?schoolId=${encodeURIComponent(schoolId)}`}
-              >
-                查看餐廳資訊
-              </Link>
-            </div>
-          </>
-        )}
+        <h2>還沒有 App 餐廳訂單</h2>
+        <p>這個帳號在目前校園還沒有 App 餐廳的訂單紀錄。</p>
+        {isWebOnlineOrderingEnabled() ? (
+          <div className={styles.actions}>
+            <Link className={home.primary} href="/food">
+              前往點餐與取餐
+            </Link>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -274,17 +270,9 @@ function OrdersRoute({
   focusOrderId: string | null;
 }) {
   const { user, loading, error } = useAuth();
-  if (!isWebOnlineOrderingEnabled() && focusOrderId) return <ClosedOrderNotice schoolId={schoolId} />;
   if (loading) return <p role="status">正在確認登入狀態…</p>;
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
-  if (!user) {
-    if (!isWebOnlineOrderingEnabled()) {
-      return (
-        <div className={styles.empty}>
-          <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
-        </div>
-      );
-    }
+  if (!user || user.isAnonymous) {
     return (
       <div className={styles.signIn}>
         <h2>登入後查看訂單</h2>
@@ -308,40 +296,168 @@ function OrdersRoute({
   );
 }
 
+function OrdersSources({
+  platform,
+  legacyUid,
+  schoolId,
+  schoolName,
+  focusOrderId,
+  platformLink,
+}: {
+  platform: ReturnType<typeof useOptionalNuniSession>;
+  legacyUid: string | null;
+  schoolId: string;
+  schoolName: string;
+  focusOrderId: string | null;
+  platformLink: ReturnType<typeof parsePlatformOrderLink>;
+}) {
+  // The parent's account/context/campus/link key creates an isolated draft cache.
+  const [cache] = useState<FoodDraftCache>(() => new Map());
+  const [source, setSource] = useState<'platform' | 'legacy'>(() => {
+    if (focusOrderId && !platformLink.orderId) return 'legacy';
+    if (!platform) return 'legacy';
+    if (
+      platform.session ||
+      platform.loading ||
+      platform.error ||
+      platform.pendingLogout ||
+      !legacyUid
+    )
+      return 'platform';
+    return 'legacy';
+  });
+  const showSources = !!platform && (!!legacyUid || !!focusOrderId);
+  const signInSearch = new URLSearchParams({ campus: schoolId });
+  if (!platformLink.invalid && platformLink.tenant) {
+    signInSearch.set('tenant', platformLink.tenant);
+    if (platformLink.orderId) signInSearch.set('order', platformLink.orderId);
+  }
+  const signInHref = '/login?returnUrl=' + encodeURIComponent(`/orders?${signInSearch.toString()}`);
+  let content;
+  if (source === 'legacy' || !platform) {
+    content = <OrdersRoute schoolId={schoolId} focusOrderId={focusOrderId} />;
+  } else if (platform.pendingLogout) {
+    content = (
+      <div role="alert">
+        <p>正在結束帳號登入，完成後即可重新確認訂單。</p>
+        <Button onClick={() => void platform.logout()}>重試登出</Button>
+      </div>
+    );
+  } else if (platform.loading) {
+    content = <p role="status">正在確認 Google 帳號…</p>;
+  } else if (platform.error) {
+    content = (
+      <div role="alert">
+        <p>暫時無法確認 Google 帳號，訂單尚未讀取。</p>
+        <Button onClick={() => void platform.refresh()}>重新確認帳號</Button>
+      </div>
+    );
+  } else if (!platform.session) {
+    content = (
+      <div className={styles.signIn}>
+        <h2>登入後查看訂單</h2>
+        <p>使用 Google 帳號查看站內點餐的訂單、處理進度與取餐憑證。</p>
+        <Link className={home.primary} href={signInHref}>
+          登入
+        </Link>
+      </div>
+    );
+  } else if (
+    platformLink.invalid ||
+    (platformLink.tenant && toPublicSchoolId(platformLink.tenant) !== toPublicSchoolId(schoolId))
+  ) {
+    content = (
+      <div className={styles.empty}>
+        <p role="alert">訂單連結無效或與目前校園不同，請確認連結與所選校園。</p>
+        <Link className={home.secondary} href={`/orders?campus=${encodeURIComponent(schoolId)}`}>
+          查看目前校園的訂單
+        </Link>
+      </div>
+    );
+  } else {
+    content = (
+      <PlatformOrders
+        accountId={platform.session.platformAccountId}
+        context={platform.session.context}
+        schoolId={schoolId}
+        schoolName={schoolName}
+        tenant={platformLink.tenant}
+        orderId={platformLink.orderId}
+        cache={cache}
+      />
+    );
+  }
+  return (
+    <>
+      {showSources ? (
+        <div className={styles.actions} role="group" aria-label="訂單來源">
+          <Button aria-pressed={source === 'platform'} onClick={() => setSource('platform')}>
+            站內點餐訂單
+          </Button>
+          <Button aria-pressed={source === 'legacy'} onClick={() => setSource('legacy')}>
+            App 餐廳訂單
+          </Button>
+        </div>
+      ) : null}
+      {source === 'legacy' ? (
+        <p className={styles.routeNote}>目前顯示 App「餐廳」留下的訂單。</p>
+      ) : null}
+      {content}
+    </>
+  );
+}
+
 export default function OrdersPage() {
-  const orderingOn = isWebOnlineOrderingEnabled();
+  const platform = useOptionalNuniSession();
+  const legacy = useAuth();
   const campus = useCampusBrowseContext();
   const searchParams = useSearchParams();
   const focusOrderId = parseOrderFocusId(searchParams.get('orderId'));
-  const closedDeepLink = !orderingOn && !!focusOrderId;
+  const platformLink = parsePlatformOrderLink(searchParams);
+  const accountId = platform?.session?.platformAccountId ?? null;
+  const context = platform?.session?.context ?? null;
+  const hasPlatform = platform !== null;
+  const platformLoading = platform?.loading ?? false;
+  const platformError = !!platform?.error;
+  const pendingLogout = platform?.pendingLogout ?? false;
+  const legacyUid =
+    !legacy.loading && !legacy.error && legacy.user && !legacy.user.isAnonymous
+      ? legacy.user.uid
+      : null;
+  const previousAccount = useRef<string | null>(null);
+  const [cleanupError, setCleanupError] = useState('');
+  useEffect(() => {
+    if (!hasPlatform) return;
+    if (pendingLogout || (!platformLoading && !platformError && !accountId)) {
+      const previous = previousAccount.current;
+      previousAccount.current = null;
+      if (previous) {
+        try {
+          clearAllFoodPendingForAccount(previous);
+        } catch {
+          setCleanupError('未能清除這個分頁的訂餐重試紀錄，關閉分頁即可清除。');
+        }
+      }
+    } else if (accountId) {
+      previousAccount.current = accountId;
+    }
+  }, [accountId, hasPlatform, platformLoading, platformError, pendingLogout]);
   const ready = campus.status === 'ready' && !!campus.schoolId;
   return (
     <SiteShell
-      title={orderingOn ? '我的訂單' : ONLINE_ORDERING_OFF_TEXT}
-      subtitle={
-        orderingOn
-          ? '取餐號碼和訂單狀態以店家那邊為準，會自動更新。'
-          : closedDeepLink
-            ? undefined
-            : ONLINE_ORDERING_OFF_TEXT
-      }
-      schoolName={orderingOn && ready ? campus.schoolName : undefined}
+      title="我的訂單"
+      subtitle="查看目前校園的訂單、取餐號碼與處理進度。"
+      schoolName={ready ? campus.schoolName : undefined}
     >
       <div className={styles.page}>
-        {orderingOn && ready ? (
+        {cleanupError ? <p role="alert">{cleanupError}</p> : null}
+        {ready ? (
           <p className={styles.routeNote}>
-            此頁是 App「餐廳」留下的訂單。站內點餐、付款與取餐憑證請到{' '}
-            <Link href="/food">點餐與取餐</Link>
-            ；瀏覽菜單請到{' '}
+            <Link href={`/food?campus=${encodeURIComponent(campus.schoolId!)}`}>點餐與取餐</Link>
+            {' · '}
             <Link href={`/cafeteria?schoolId=${encodeURIComponent(campus.schoolId!)}`}>
               餐廳資訊
             </Link>
-            。
-          </p>
-        ) : !orderingOn && !closedDeepLink ? (
-          <p className={styles.routeNote}>
-            這裡顯示 App 餐廳的取餐號碼。其他訂單請到 <Link href="/food">訂單與取餐進度</Link>{' '}
-            查看。
           </p>
         ) : null}
         {!ready ? (
@@ -349,20 +465,26 @@ export default function OrdersPage() {
             <p role="status">正在確認所選校園…</p>
           ) : campus.status === 'error' ? (
             <p role="alert">無法取得校園目錄，請稍後再試。</p>
-          ) : orderingOn ? (
-            <SchoolScopePlaceholder />
-          ) : closedDeepLink ? (
-            <ClosedOrderNotice schoolId={campus.schoolId} />
           ) : (
-            <div>
-              <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
-            </div>
+            <SchoolScopePlaceholder />
           )
         ) : (
-          <OrdersRoute
-            key={campus.schoolId!}
+          <OrdersSources
+            key={JSON.stringify([
+              accountId,
+              context,
+              legacyUid,
+              campus.schoolId,
+              focusOrderId,
+              platformLink.tenant,
+              platformLink.orderId,
+            ])}
+            platform={platform}
+            legacyUid={legacyUid}
             schoolId={campus.schoolId!}
+            schoolName={campus.schoolName}
             focusOrderId={focusOrderId}
+            platformLink={platformLink}
           />
         )}
       </div>

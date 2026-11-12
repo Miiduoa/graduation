@@ -159,8 +159,8 @@ describe('legacy route configuration', () => {
     },
   );
 
-  it.each(['/demo/account', '/student-card', '/ai-assistant'])(
-    'keeps account demonstration destination %s in the current app',
+  it.each(['/student-card', '/ai-assistant', '/orders'])(
+    'keeps account feature destination %s in the current app',
     async (path) => {
       const response = await responseFor(path, '?campus=pu');
       expect(getRewrittenUrl(response)).toBeNull();

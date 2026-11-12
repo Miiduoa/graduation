@@ -82,6 +82,7 @@ async function load(snapshot = fixture()) {
   harness.request.mockResolvedValue({ demo: snapshot });
   const view = render(<Probe />);
   await screen.findByTestId('account-data');
+  await waitFor(() => expect(controller).not.toBeNull());
   return view;
 }
 
@@ -237,6 +238,48 @@ describe('account data identity and lifetime', () => {
     expect(await oldController.mutate({ action: 'createOrder' })).toBe(false);
     expect(harness.request).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps a thirty-day grant until its actual expiry across the timer delay limit', async () => {
+    vi.useFakeTimers();
+    const duration = 30 * 86_400_000;
+    const maxDelay = 2_147_483_647;
+    const snapshot = fixture();
+    snapshot.expiresAt = new Date(Date.now() + duration).toISOString();
+    harness.request.mockResolvedValue({ demo: snapshot });
+    render(<Probe />);
+    await act(async () => {});
+
+    await act(async () => vi.advanceTimersByTime(maxDelay));
+    expect(screen.getByTestId('account-data')).toBeTruthy();
+    await act(async () => vi.advanceTimersByTime(duration - maxDelay - 1));
+    expect(screen.getByTestId('account-data')).toBeTruthy();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(screen.queryByTestId('account-data')).toBeNull();
+    expect(screen.getByText('一般功能')).toBeTruthy();
+    expect(harness.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the normal fallback when the grant expires during a pending refresh', async () => {
+    vi.useFakeTimers();
+    const snapshot = fixture();
+    snapshot.expiresAt = new Date(Date.now() + 1000).toISOString();
+    harness.request.mockResolvedValue({ demo: snapshot });
+    render(<Probe />);
+    await act(async () => {});
+    const refresh = deferred();
+    harness.request.mockReturnValueOnce(refresh.promise);
+    fireEvent.focus(window);
+    expect(screen.getByRole('status').textContent).toContain('正在核對帳號資料');
+
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(screen.queryByTestId('account-data')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('一般功能')).toBeTruthy();
+    await act(async () => refresh.resolve({ demo: snapshot }));
+    expect(screen.queryByTestId('account-data')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('一般功能')).toBeTruthy();
+  });
 });
 
 describe('account data writes and authoritative receipts', () => {
@@ -340,22 +383,32 @@ describe('account data writes and authoritative receipts', () => {
     },
   );
 
-  it.each(['changed', 'revoked', 'offline'])(
+  it.each(['changed', 'expiry', 'revoked', 'offline'])(
     'withholds success when the independent readback is %s', async (kind) => {
       const original = fixture();
       await load(original);
       const next = { ...original, revision: 8, state: { ...original.state, createOrder: true } };
       harness.request.mockResolvedValueOnce({ demo: next });
       if (kind === 'offline') harness.request.mockRejectedValueOnce(new Error('Network unavailable'));
-      else harness.request.mockResolvedValueOnce({ demo: kind === 'revoked' ? null : { ...next, revision: 9, permissions: { ...next.permissions, food: false } } });
+      else harness.request.mockResolvedValueOnce({ demo: kind === 'revoked' ? null : kind === 'expiry'
+        ? { ...next, expiresAt: new Date(Date.parse(next.expiresAt) + 1000).toISOString() }
+        : { ...next, revision: 9, permissions: { ...next.permissions, food: false } } });
       let result!: boolean;
       await act(async () => { result = await current().mutate({ action: 'createOrder' }); });
       expect(result).toBe(false);
       expect(harness.request).toHaveBeenCalledTimes(3);
       expect(screen.queryByText(/展示紀錄已儲存/)).toBeNull();
-      expect(current().blocked).toBe(true);
-      await act(async () => { result = await current().mutate({ action: 'createOrder' }); });
-      expect(result).toBe(false);
+      if (kind !== 'offline') {
+        expect(screen.queryByTestId('account-data')).toBeNull();
+        expect(screen.queryByText('測試同學')).toBeNull();
+        expect(screen.getByText('一般功能')).toBeTruthy();
+        expect(screen.getByRole('alert')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: '儲存訂餐紀錄' })).toBeNull();
+      } else {
+        expect(current().blocked).toBe(true);
+        await act(async () => { result = await current().mutate({ action: 'createOrder' }); });
+        expect(result).toBe(false);
+      }
       expect(harness.request).toHaveBeenCalledTimes(3);
     },
   );

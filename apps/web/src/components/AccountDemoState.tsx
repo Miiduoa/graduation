@@ -96,12 +96,21 @@ function Scope({ accountId, context, schoolId, children, fallback }: Props & {
 
   useEffect(() => {
     if (!demo) return;
-    const deadline = setTimeout(() => {
+    let deadline: ReturnType<typeof setTimeout>;
+    const expire = () => {
+      const remaining = Date.parse(demo.expiresAt) - Date.now();
+      if (remaining > 0) {
+        // Long grants need another timer segment, not an early revocation.
+        deadline = setTimeout(expire, Math.min(2_147_483_647, remaining));
+        return;
+      }
       generation.current += 1;
       setDemo(null);
       setNotice('');
       setBusy(false);
-    }, Math.min(2_147_483_647, Math.max(0, Date.parse(demo.expiresAt) - Date.now())));
+      setLoading(false);
+    };
+    expire();
     return () => clearTimeout(deadline);
   }, [demo]);
 
@@ -126,7 +135,13 @@ function Scope({ accountId, context, schoolId, children, fallback }: Props & {
           JSON.stringify(next.state) !== JSON.stringify(expectedState)) throw new Error('回執不相符');
       const verified = matchingSchool(await readAccountDemo(context, accountId));
       if (!isCurrent()) return false;
-      if (!verified || JSON.stringify(verified) !== JSON.stringify(next)) throw new Error('儲存後資料已變更');
+      if (!verified || verified.expiresAt !== next.expiresAt ||
+          JSON.stringify(verified.permissions) !== JSON.stringify(next.permissions)) {
+        setDemo(null);
+        setNotice('');
+        throw new Error('儲存後資料已變更');
+      }
+      if (JSON.stringify(verified) !== JSON.stringify(next)) throw new Error('儲存後資料已變更');
       setDemo(verified);
       setNotice('permissions' in change ? '展示權限已儲存。' : change.action === 'reset'
         ? '展示進度已重設，權限設定保留。' : `${ACCOUNT_DEMO_ACTION_LABELS[change.action]}：展示紀錄已儲存。`);

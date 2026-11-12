@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, Linking, type AppStateStatus } from 'react-native';
 import {
   createAccountDemoPermissions,
   createAccountDemoState,
@@ -121,7 +121,11 @@ test('a Google platform account can open its own server-authorized demonstration
   expect(v.queryByText('DEMO20261112')).toBeNull();
   expect(v.queryByText('請先登入學校帳號。')).toBeNull();
   expect(mockDemoRequest).toHaveBeenCalledWith('account-demo', 'native-session-a');
-  expect(v.getByText('展示資料與權限')).toBeTruthy();
+  const openSettings = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  fireEvent.press(v.getByText('學生證設定'));
+  expect(openSettings).toHaveBeenCalledWith(
+    'https://nuni.tw/settings?campus=pu&section=platform#account-demo-permissions',
+  );
 });
 
 test('the demonstration QR uses a separate marker and does not invoke verified student-card or NFC issuance', async () => {
@@ -129,7 +133,8 @@ test('the demonstration QR uses a separate marker and does not invoke verified s
   mockDemoRequest.mockResolvedValue({ demo: accountDemo() });
   const v = render(<StudentCardScreen />);
   fireEvent.press(await v.findByText('出示展示 QR Code'));
-  expect(v.getByText(/^nuni-demo-card:v1:pu:DEMO20261112:\d+$/)).toBeTruthy();
+  expect(await v.findByText(/^nuni-demo-card:v1:pu:DEMO20261112:\d+$/)).toBeTruthy();
+  expect(mockDemoRequest).toHaveBeenCalledTimes(2);
   expect(v.getByText('DEMO20261112')).toBeTruthy();
   expect(requestStudentCardCode).not.toHaveBeenCalled();
   expect(beginStudentCardNfcPresentation).not.toHaveBeenCalled();
@@ -137,6 +142,87 @@ test('the demonstration QR uses a separate marker and does not invoke verified s
   expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();
   expect(v.queryByText('DEMO20261112')).toBeNull();
 });
+
+test.each(['出示學號', '出示展示 QR Code'])(
+  'revalidates %s and clears a cached card after its permission is disabled elsewhere',
+  async (buttonName) => {
+    signInPlatform();
+    const demo = accountDemo();
+    mockDemoRequest.mockResolvedValue({ demo });
+    const v = render(<StudentCardScreen />);
+    const button = await v.findByText(buttonName);
+    mockDemoRequest.mockResolvedValueOnce({
+      demo: {
+        ...demo,
+        revision: demo.revision + 1,
+        permissions: { ...demo.permissions, studentCard: false },
+      },
+    });
+    fireEvent.press(button);
+    expect(await v.findByText('學生證展示尚未開啟')).toBeTruthy();
+    expect(mockDemoRequest).toHaveBeenCalledTimes(2);
+    expect(v.queryByLabelText('展示學生證')).toBeNull();
+    expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();
+    expect(v.queryByText('DEMO20261112')).toBeNull();
+  },
+);
+
+test('a rejected platform session clears cached card data without opening a presentation', async () => {
+  signInPlatform();
+  mockDemoRequest.mockResolvedValue({ demo: accountDemo() });
+  const v = render(<StudentCardScreen />);
+  const button = await v.findByText('出示展示 QR Code');
+  mockDemoRequest.mockRejectedValueOnce(new Error('Session expired'));
+  fireEvent.press(button);
+  expect(await v.findByText('暫時無法讀取展示學生證')).toBeTruthy();
+  expect(v.queryByLabelText('展示學生證')).toBeNull();
+  expect(v.queryByText('展示同學')).toBeNull();
+  expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();
+});
+
+test.each(['account', 'school', 'background'] as const)(
+  'ignores a pending presentation on %s changes and locks repeated presentation taps',
+  async (change) => {
+    let appStateChanged: ((value: AppStateStatus) => void) | undefined;
+    if (change === 'background')
+      jest.spyOn(AppState, 'addEventListener').mockImplementation((event, handler) => {
+        if (event === 'change') appStateChanged = handler as (value: AppStateStatus) => void;
+        return { remove: jest.fn() };
+      });
+    signInPlatform();
+    const demo = accountDemo();
+    mockDemoRequest.mockResolvedValue({ demo });
+    const v = render(<StudentCardScreen />);
+    const button = await v.findByText('出示展示 QR Code');
+    let finish!: (value: unknown) => void;
+    mockDemoRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.press(button);
+    fireEvent.press(v.getByText('出示學號'));
+    expect(mockDemoRequest).toHaveBeenCalledTimes(2);
+    expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();
+    if (change === 'background') {
+      act(() => appStateChanged?.('background'));
+    } else {
+      if (change === 'account')
+        mockPlatform.session = {
+          ...mockPlatform.session!,
+          platformAccountId: 'pa_22345678-1234-1234-1234-123456789abc',
+          context: 'native-session-b',
+        };
+      if (change === 'school') mockSchoolId = 'thu';
+      mockDemoRequest.mockResolvedValueOnce({ demo: null });
+      v.rerender(<StudentCardScreen />);
+    }
+    await act(async () => finish({ demo }));
+    expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();
+    expect(v.queryByText('DEMO20261112')).toBeNull();
+  },
+);
 
 test.each(['disabled', 'expired', 'other-school', 'other-account'] as const)(
   'the demonstration card rejects %s authorization',
@@ -194,7 +280,7 @@ test.each(['logout', 'context', 'school', 'unfocused'] as const)(
     mockDemoRequest.mockResolvedValue({ demo: accountDemo() });
     const v = render(<StudentCardScreen />);
     fireEvent.press(await v.findByText('出示展示 QR Code'));
-    expect(v.getByText('DEMO20261112')).toBeTruthy();
+    expect(await v.findByText('DEMO20261112')).toBeTruthy();
     if (change === 'logout') mockPlatform.pendingLogout = true;
     if (change === 'context') {
       mockPlatform.session = { ...mockPlatform.session!, context: 'native-session-new' };
@@ -222,6 +308,7 @@ test.each(['demo', 'session'] as const)(
       const v = render(<StudentCardScreen />);
       await act(async () => {});
       fireEvent.press(v.getByText('出示展示 QR Code'));
+      await act(async () => {});
       expect(v.getByText('DEMO20261112')).toBeTruthy();
       act(() => jest.advanceTimersByTime(3000));
       expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();

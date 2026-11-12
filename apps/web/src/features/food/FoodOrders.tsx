@@ -38,12 +38,15 @@ export function FoodOrders({
   accountId,
   tenantId,
   initialOrder,
+  orderHref,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
   tenantId: string;
   initialOrder: string;
+  /** A host page can keep its own URL while reusing the same order actions. */
+  orderHref?: (orderId?: string) => string;
 }) {
   const [state, setState] = useState('');
   const [pageCursors, setPageCursors] = useState<string[]>([]);
@@ -86,13 +89,18 @@ export function FoodOrders({
     window.history.replaceState(
       null,
       '',
-      `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
+      orderHref?.(orderId) ??
+        `/food?tenant=${encodeURIComponent(tenantId)}&order=${encodeURIComponent(orderId)}`,
     );
   }
 
   function closeOrder() {
     setSelected('');
-    window.history.replaceState(null, '', `/food?tenant=${encodeURIComponent(tenantId)}`);
+    window.history.replaceState(
+      null,
+      '',
+      orderHref?.() ?? `/food?tenant=${encodeURIComponent(tenantId)}`,
+    );
     queueMicrotask(() => {
       const target = returnFocusRef.current;
       returnFocusRef.current = null;

@@ -287,8 +287,8 @@ it('shows an account-owned demonstration card for Google platform sign-in withou
   expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
   expect(state.read).not.toHaveBeenCalled();
   expect(state.demoRequest).toHaveBeenCalledWith('account-demo', 'platform-session-a');
-  expect(screen.getByRole('link', { name: '展示資料與權限' }).getAttribute('href')).toBe(
-    '/settings?section=platform#account-demo-permissions',
+  expect(screen.getByRole('link', { name: '學生證設定' }).getAttribute('href')).toBe(
+    '/settings?campus=pu&section=platform#account-demo-permissions',
   );
 });
 
@@ -298,6 +298,7 @@ it('uses a separate DEMO QR payload and never asks the real card service to issu
   render(<StudentCardPage />);
   fireEvent.click(await screen.findByRole('button', { name: '出示展示 QR Code' }));
   await screen.findByAltText('DEMO 展示學生證 QR Code');
+  expect(state.demoRequest).toHaveBeenCalledTimes(2);
   expect(state.qr).toHaveBeenCalledWith(
     expect.stringMatching(/^nuni-demo-card:v1:pu:DEMO20261112:\d+$/),
     expect.objectContaining({ margin: 4, width: 512 }),
@@ -308,6 +309,83 @@ it('uses a separate DEMO QR payload and never asks the real card service to issu
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(screen.queryByText('DEMO20261112')).toBeNull();
 });
+
+it.each(['出示學號', '出示展示 QR Code'])(
+  'rechecks the current permission before %s and clears a card disabled in another settings page',
+  async (buttonName) => {
+    signInPlatform();
+    const demo = accountDemo();
+    state.demoRequest.mockResolvedValue({ demo });
+    render(<StudentCardPage />);
+    const button = await screen.findByRole('button', { name: buttonName });
+    state.demoRequest.mockResolvedValueOnce({
+      demo: {
+        ...demo,
+        revision: demo.revision + 1,
+        permissions: { ...demo.permissions, studentCard: false },
+      },
+    });
+    fireEvent.click(button);
+    await screen.findByRole('heading', { name: '學生證展示尚未開啟' });
+    expect(state.demoRequest).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('DEMO20261112')).toBeNull();
+    expect(state.qr).not.toHaveBeenCalled();
+  },
+);
+
+it('clears the cached card when the server rejects the session before presentation', async () => {
+  signInPlatform();
+  state.demoRequest.mockResolvedValue({ demo: accountDemo() });
+  render(<StudentCardPage />);
+  const button = await screen.findByRole('button', { name: '出示展示 QR Code' });
+  state.demoRequest.mockRejectedValueOnce(new Error('Session expired'));
+  fireEvent.click(button);
+  await screen.findByRole('heading', { name: '暫時無法讀取展示學生證' });
+  expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByText('展示同學')).toBeNull();
+  expect(state.qr).not.toHaveBeenCalled();
+});
+
+it.each(['account', 'school', 'blur'] as const)(
+  'rejects a pending presentation after %s changes and ignores repeated presentation clicks',
+  async (change) => {
+    signInPlatform();
+    const demo = accountDemo();
+    state.demoRequest.mockResolvedValue({ demo });
+    const { rerender } = render(<StudentCardPage />);
+    const button = await screen.findByRole('button', { name: '出示展示 QR Code' });
+    let finish!: (value: unknown) => void;
+    state.demoRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole('button', { name: '出示學號' }));
+    expect(state.demoRequest).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    if (change === 'blur') {
+      act(() => window.dispatchEvent(new Event('blur')));
+    } else {
+      if (change === 'account')
+        state.platform.session = {
+          platformAccountId: 'pa_22345678-1234-1234-1234-123456789abc',
+          context: 'platform-session-b',
+        };
+      if (change === 'school') state.schoolId = 'thu';
+      state.demoRequest.mockResolvedValueOnce({ demo: null });
+      rerender(<StudentCardPage />);
+    }
+    await act(async () => finish({ demo }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('DEMO20261112')).toBeNull();
+    expect(state.qr).not.toHaveBeenCalled();
+  },
+);
 
 it.each(['disabled', 'expired', 'other-school', 'other-account'] as const)(
   'does not show a demonstration card when its authorization is %s',
@@ -400,6 +478,7 @@ it('removes the demonstration card when the server authorization expires', async
   });
   expect(screen.getByRole('article', { name: '展示學生證' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '出示學號' }));
+  await act(async () => {});
   await act(async () => {
     vi.advanceTimersByTime(3000);
   });
