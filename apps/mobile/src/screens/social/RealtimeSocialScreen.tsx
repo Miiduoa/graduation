@@ -9,6 +9,7 @@
  *  - 「我在這裡」打卡會在 chip 上顯示 ACTIVE 標記
  *  - 同點位列表顯示頭像 / 姓名（從 directory 取）
  */
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { PrivateImage } from '../../ui/PrivateImage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -94,6 +95,8 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
   const storyDeck = useCampusStories(storyRows, school?.id, uid);
   const { groups: storyGroups, openGroup } = storyDeck;
   const [storiesLoading, setStoriesLoading] = useState(true);
+  const [storiesUnavailable, setStoriesUnavailable] = useState(false);
+  const storyRequest = React.useRef(0);
   const [peers, setPeers] = useState<PeerProfile[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [heartbeatSession, setHeartbeatSession] = useState<string | null>(null);
@@ -102,12 +105,22 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
   const refreshStories = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id || !uid) {
-      setStoryRows([]);
-      return;
+    const request = ++storyRequest.current;
+    setStoriesLoading(true);
+    setStoriesUnavailable(false);
+    try {
+      const rows = !isFirebaseMockMode() && school?.id && uid
+        ? await listActiveStoriesForSchool(school.id, 80, { throwOnError: true })
+        : [];
+      if (request === storyRequest.current) setStoryRows(rows);
+    } catch (cause) {
+      if (request === storyRequest.current) {
+        if (isPermissionDeniedError(cause)) setStoryRows([]);
+        setStoriesUnavailable(true);
+      }
+    } finally {
+      if (request === storyRequest.current) setStoriesLoading(false);
     }
-    const rows = await listActiveStoriesForSchool(school.id, 80);
-    setStoryRows(rows);
   }, [school?.id, uid]);
 
   const refreshPeers = useCallback(async () => {
@@ -139,15 +152,8 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
   }, [school?.id, selectedPoi, uid]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setStoriesLoading(true);
-      await refreshStories();
-      if (!cancelled) setStoriesLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void refreshStories();
+    return () => { storyRequest.current += 1; };
   }, [refreshStories]);
 
   useEffect(() => {
@@ -213,7 +219,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
       return;
     }
     const request = JSON.stringify([requestedSchoolId, requestedAuthorUid]);
-    if (storiesLoading || consumedRequest.current === request) return;
+    if (storiesLoading || storiesUnavailable || consumedRequest.current === request) return;
     consumedRequest.current = request;
     const group = requestedSchoolId === school?.id ? storyGroups.find(g => g.authorUid === requestedAuthorUid) : undefined;
     if (group) {
@@ -223,7 +229,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
       setStoryNotice('這則限時動態可能已到期或移除。');
     }
     onRequestConsumed?.();
-  }, [requestedAuthorUid, requestedSchoolId, school?.id, storiesLoading, storyGroups, openGroup, onRequestConsumed]);
+  }, [requestedAuthorUid, requestedSchoolId, school?.id, storiesLoading, storiesUnavailable, storyGroups, openGroup, onRequestConsumed]);
 
   const returningFromComposer = React.useRef(false);
   useFocusEffect(useCallback(() => {
@@ -340,13 +346,23 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
           </Pressable>
         </View>
 
-        {storiesLoading ? (
+        {storiesLoading && storyGroups.length === 0 && (
           <ActivityIndicator style={{ marginTop: theme.space.md }} color={theme.colors.accent} />
-        ) : storyGroups.length === 0 ? (
+        )}
+        {storiesUnavailable && (
+          <View style={{ paddingHorizontal: 14 }}>
+            <Text style={styles.softMuted}>暫時無法讀取限時動態，請確認連線與校園帳號。</Text>
+            <Pressable accessibilityRole="button" onPress={refreshStories} style={styles.storyComposeBtn}>
+              <Text style={styles.storyComposeTxt}>重新讀取限時動態</Text>
+            </Pressable>
+          </View>
+        )}
+        {storyGroups.length === 0 && !storiesLoading && !storiesUnavailable && (
           <Text style={[styles.softMuted, { paddingHorizontal: 14 }]}>
             目前沒有限時動態。分享第一則校園近況吧。
           </Text>
-        ) : (
+        )}
+        {storyGroups.length > 0 && (
           <View style={[styles.storyGrid, { paddingHorizontal: 14 }]}>
             {storyGroups.map((g) => {
               const latest = g.stories[g.stories.length - 1] ?? g.stories[0];
