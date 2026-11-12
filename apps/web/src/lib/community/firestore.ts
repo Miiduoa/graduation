@@ -458,6 +458,7 @@ export type CampusStoryDoc = {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
+  allowReplies?: boolean;
   text?: string;
   mediaUrl?: string | null;
   bgColor?: string;
@@ -481,6 +482,7 @@ export async function publishStory(payload: {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
+  allowReplies: boolean;
   text?: string;
   mediaUrl?: string | null;
   bgColor?: string;
@@ -494,6 +496,7 @@ export async function publishStory(payload: {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
+    allowReplies: payload.allowReplies,
     text: payload.text ?? '',
     mediaUrl: payload.mediaUrl ?? null,
     bgColor: payload.bgColor ?? '#0f172a',

@@ -67,9 +67,9 @@ it.each([
   ['/timetable', '課表', 'timetable'],
   ['/classroom', '課程與作業', 'timetable'],
   ['/classroom/course/cs101', '課程與作業', 'timetable'],
-  ['/school-courses', '玩課雲課程', 'timetable'],
-  ['/school-lms', '玩課雲作業', 'timetable'],
-  ['/school-lms/homework/10001/20001', '玩課雲作業', 'timetable'],
+  ['/school-courses', '校方課程', 'timetable'],
+  ['/school-lms', '校方作業與教材', 'timetable'],
+  ['/school-lms/homework/10001/20001', '校方作業與教材', 'timetable'],
   ['/grades', '成績', 'grades'],
   ['/credit-planner', '學分規劃', 'grades'],
   ['/credit-planner/review', '學分規劃', 'grades'],
@@ -151,11 +151,11 @@ it.each([
 
 it('hides readonly homework navigation by default and keeps shared labels', () => {
   renderShell(false);
-  expect(screen.queryByRole('link', { name: '玩課雲作業' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '校方作業與教材' })).toBeNull();
   expect(screen.queryByRole('link', { name: '作業與教材' })).toBeNull();
   const nav = screen.getByRole('navigation', { name: '課務導覽' });
   expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(defaultLabels);
   expect(destination('課表').pathname).toBe('/timetable');
   expect(destination('課程與作業').pathname).toBe('/classroom');
-  expect(destination('玩課雲課程').pathname).toBe('/school-courses');
+  expect(destination('校方課程').pathname).toBe('/school-courses');
 });

@@ -120,13 +120,15 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   useAssistantSessionExpiry(platformRoute ? platform : null);
   const uid = loading || platformRoute || platform?.loading || platform?.pendingLogout || platform?.error || platform?.session
     ? '' : user?.uid ?? '';
-  const { school, selectionReady } = useSchool();
+  const { school, selection, selectionReady } = useSchool();
+  const schoolId = selectionReady ? selection.schoolId ?? '' : '';
+  const schoolName = schoolId ? school.name : '尚未選校';
   const resolved = !(selectionReady === false || loading || platform?.loading || platform?.pendingLogout || platform?.error);
   const session = platform?.loading || platform?.error || platform?.pendingLogout ? null : platform?.session;
   const accountId = session?.platformAccountId;
   const context = session?.context;
   const verifyPlatform = platform?.isSessionCurrent;
-  const scope = JSON.stringify([uid, accountId, context, school.id, platformRoute, resolved]);
+  const scope = JSON.stringify([uid, accountId, context, schoolId, schoolName, platformRoute, resolved]);
   const active = useRef(scope);
   active.current = scope;
   const platformTimetable = useMemo<PlatformTimetableAccess | undefined>(() =>
@@ -145,8 +147,8 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
         request: (path, input) => platform.request(path, context, input),
         bffRequest: (path) => platform.bffRequest(path, context),
       } : undefined}
-      schoolId={school.id}
-      schoolName={school.name}
+      schoolId={schoolId}
+      schoolName={schoolName}
       initialPrompt={initialScope.current === scope ? prompt : ''}
       isScopeCurrent={() => active.current === scope && resolved}
       navigation={navigation}
@@ -1134,7 +1136,7 @@ function AssistantConversation({
             : message.tool === 'saved-academics' ? '成績與學分紀錄'
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
-            : message.announcementRead ? '校園公告'
+            : message.tool === 'school-directory' ? '學校聯絡資訊' : message.announcementRead ? '校園公告'
             : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
             {platformTimetable && message.courseworkRead && message.courseworkStudy ? (
               <View style={{ gap: 10 }}>
@@ -1367,7 +1369,7 @@ function AssistantConversation({
               <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 21, marginTop: 10 }}>
                 來源是這台手機的個人匯入紀錄，沒有重新查詢校方成績。
               </Text>
-            ) : !platformTimetable && message.source === 'device' && !message.savedClassRead && !message.serviceSelection && message.tool !== 'calendar-action' && (
+            ) : !platformTimetable && message.source === 'device' && message.tool !== 'school-directory' && !message.savedClassRead && !message.serviceSelection && message.tool !== 'calendar-action' && (
               <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
                 {message.tool === 'local-agent'
                   ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
