@@ -118,7 +118,7 @@ it('enables explicit public reads without model consent but blocks keyboard subm
   expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
   expect(onAsk).toHaveBeenCalledOnce();
-  view.rerender(<AssistantThread {...base} ready={false} question="我的下一堂課" onAsk={onAsk} />);
+  view.rerender(<AssistantThread {...base} ready={false} question="請幫我想一個社團介紹稿" onAsk={onAsk} />);
   expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
