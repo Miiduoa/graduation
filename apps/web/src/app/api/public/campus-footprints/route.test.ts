@@ -1221,4 +1221,84 @@ describe('public Providence building geometry route', () => {
     expect(firstFetch).toHaveBeenCalledTimes(2);
     vi.restoreAllMocks();
   });
+
+  it('does not silently replace a dated building with contradictory geometry under the same OSM replication timestamp', async () => {
+    // A replica must not assert two different heights/shapes for one identical
+    // database snapshot. Keep the last dated fallback until a newer snapshot
+    // can be verified; this is a synthetic upstream inconsistency fixture.
+    const start = Date.parse('2026-11-12T08:00:00Z');
+    const firstBase = '2026-11-12T07:00:00Z';
+    const nextBase = '2026-11-13T07:00:00Z';
+    const original = JSON.parse(osmPayload);
+    const payload = (base: string, height?: string) => JSON.stringify({
+      osm3s: { timestamp_osm_base: base },
+      elements: original.elements.map((element: { tags: Record<string, string> }) => ({
+        ...element, tags: height ? { ...element.tags, height } : element.tags,
+      })),
+    });
+    const upstream = vi.fn()
+      .mockResolvedValueOnce(new Response(payload(firstBase), { status: 200 }))
+      .mockResolvedValueOnce(new Response(payload(firstBase, '90 m'), { status: 200 }))
+      .mockResolvedValueOnce(new Response(payload(nextBase, '90 m'), { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const { GET } = await import('./route');
+      const initial = await (await GET()).json();
+      expect(initial.stale).toBe(false);
+      expect(initial.osmBaseAt).toBe(firstBase);
+      expect(initial.buildings[0].heightBasis).toBe('illustrative');
+
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000);
+      const inconsistent = await GET();
+      expect(inconsistent.status).toBe(200);
+      expect(inconsistent.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(inconsistent.headers.get('Retry-After')).toBe('600');
+      const retained = await inconsistent.json();
+      expect(retained.stale).toBe(true);
+      expect(retained.osmBaseAt).toBe(firstBase);
+      expect(retained.fetchedAt).toBe(initial.fetchedAt);
+      expect(retained.buildings).toEqual(initial.buildings);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000 + 11 * 60 * 1000);
+      const recovered = await (await GET()).json();
+      expect(recovered.stale).toBe(false);
+      expect(recovered.osmBaseAt).toBe(nextBase);
+      expect(recovered.buildings[0]).toMatchObject({
+        heightMeters: 90, heightBasis: 'osm-tag',
+      });
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('may refresh unchanged buildings with the same valid OSM replication timestamp', async () => {
+    const start = Date.parse('2026-11-12T08:00:00Z');
+    const source = JSON.stringify({
+      osm3s: { timestamp_osm_base: '2026-11-12T07:00:00Z' },
+      ...JSON.parse(osmPayload),
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(source, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const { GET } = await import('./route');
+      const initial = await (await GET()).json();
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000);
+      const refreshed = await GET();
+      expect(refreshed.status).toBe(200);
+      expect(refreshed.headers.get('Retry-After')).toBeNull();
+      const body = await refreshed.json();
+      expect(body.stale).toBe(false);
+      expect(body.buildings).toEqual(initial.buildings);
+      expect(body.osmBaseAt).toBe(initial.osmBaseAt);
+      expect(body.fetchedAt).not.toBe(initial.fetchedAt);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
 });
