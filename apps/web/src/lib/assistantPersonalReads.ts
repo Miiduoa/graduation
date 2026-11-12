@@ -79,7 +79,7 @@ export function personalAssistantReadIntent(question: string, now = new Date()):
   const current = schedule && /現在(?:在)?(?:上|有|是)|目前(?:正)?在上|正在上/.test(text);
   if (current && (next || from !== today || to !== today)) return null;
   if ((text.match(/早上|上午|中午|下午|晚上|今晚/g) ?? []).length > 1) return null;
-  if (next && from === today) to = addDays(today, 7);
+  if (next && temporal.length === 0) to = addDays(today, 6);
   const hours: [number, number] | undefined = /早上|上午/.test(text) ? [0, 12] : /中午/.test(text) ? [11, 14] :
     /下午/.test(text) ? [12, 18] : /晚上|今晚/.test(text) ? [18, 24] : undefined;
   if (coursework && hours) return null;

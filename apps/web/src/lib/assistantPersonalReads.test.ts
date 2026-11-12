@@ -52,6 +52,14 @@ describe('direct personal reads', () => {
     expect(result?.content).not.toContain('資料庫管理');
   });
 
+  it('keeps an explicitly requested next-class day or seven-day window intact', async () => {
+    save([lesson(), lesson({ id: 'tomorrow', title: '資訊安全', dayOfWeek: 5 })]);
+    const result = await answer('今天下一堂課在哪？', scope, options());
+    expect(result?.content).not.toContain('資訊安全');
+    expect(result?.content).toContain('沒有尚未開始的課程');
+    expect(intent('未來七天下一堂課在哪？', now)).toMatchObject({ from: '2026-11-12', to: '2026-11-18', next: true });
+  });
+
   it('answers the currently active class without including later classes', async () => {
     save([lesson(), lesson({ id: 'later', title: '下午的課', startTime: '14:10', endTime: '16:00' })]);
     const result = await answer('現在上什麼課？', scope, options());
