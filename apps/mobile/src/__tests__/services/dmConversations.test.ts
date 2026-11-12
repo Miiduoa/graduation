@@ -8,8 +8,7 @@ const mockStop = jest.fn();
 let mockNext: (snapshot: any) => void;
 let mockFail: (error: unknown) => void;
 jest.mock('../../firebase', () => ({
-  getAuthInstance: () => ({ currentUser: { uid: mockUid } }),
-  getFunctionsInstance: () => 'functions',
+  getAuthInstance: () => ({ currentUser: { uid: mockUid, getIdToken: async () => 'fake-token' } }),
   getDb: () => 'db',
   isFirebaseMockMode: () => false,
 }));
@@ -41,6 +40,23 @@ beforeEach(() => {
   jest.mocked(httpsCallable).mockClear();
   jest.mocked(onSnapshot).mockClear();
   jest.mocked(query).mockClear();
+  global.fetch = jest.fn(async (url: string | URL, init?: RequestInit) => {
+    if (!String(url).startsWith('https://nuni.tw/api/fn/')) throw new Error(`unexpected fetch ${url}`);
+    try {
+      const payload = JSON.parse(String(init?.body));
+      const returned = await mockCall(payload.data);
+      return { ok: true, json: async () => ({ result: returned.data }) } as Response;
+    } catch (error: any) {
+      if (error?.code && String(error.code).startsWith('functions/')) {
+        const status = String(error.code).slice(10).toUpperCase().replaceAll('-', '_');
+        return {
+          ok: false,
+          json: async () => ({ error: { status, message: error.message || '' } }),
+        } as Response;
+      }
+      throw error;
+    }
+  }) as typeof fetch;
 });
 
 test('prepares an existing canonical conversation ID longer than 120 characters', async () => {
@@ -60,7 +76,7 @@ test('prepares an existing canonical conversation ID longer than 120 characters'
 test('prepares the canonical peer conversation without subscribing or writing a placeholder', async () => {
   mockCall.mockResolvedValue({ data: prepared });
   await expect(prepareDmConversation(peer, signal())).resolves.toEqual(prepared);
-  expect(httpsCallable).toHaveBeenCalledWith('functions', 'prepareDmConversation');
+  expect(fetch).toHaveBeenCalledWith('https://nuni.tw/api/fn/prepareDmConversation', expect.anything());
   expect(mockCall).toHaveBeenCalledWith(peer);
   expect(onSnapshot).not.toHaveBeenCalled();
 });
@@ -79,7 +95,7 @@ test('sends the exact stable message and validates its acknowledgment', async ()
   const receipt = { conversationId, messageId: message.messageId };
   mockCall.mockResolvedValueOnce({ data: receipt });
   await expect(sendDmText(message, signal())).resolves.toEqual(receipt);
-  expect(httpsCallable).toHaveBeenCalledWith('functions', 'sendDmText');
+  expect(fetch).toHaveBeenCalledWith('https://nuni.tw/api/fn/sendDmText', expect.anything());
   expect(mockCall).toHaveBeenLastCalledWith({ ...message, content: '操場見' });
   mockCall.mockResolvedValueOnce({ data: { ...receipt, messageId: 'different' } });
   await expect(sendDmText(message, signal())).rejects.toThrow('尚未確認');

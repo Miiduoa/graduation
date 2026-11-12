@@ -1,5 +1,10 @@
 import { httpsCallable } from 'firebase/functions';
+import { isCallableMissing } from './callableFallback';
 import { getAuth, getFunctionsInstance } from './firebase';
+
+export function isDmPhotoUnavailable(error: unknown) {
+  return (error instanceof Error && error.message === 'photo-unavailable') || isCallableMissing(error);
+}
 
 export type PhotoScope = {
   viewerUid: string;
@@ -40,6 +45,15 @@ function checkSession(scope: PhotoScope, signal: AbortSignal) {
     throw new Error('photo-session');
 }
 
+async function callPhotoFn<I, O>(name: string, payload: I): Promise<{ data: O }> {
+  try {
+    return await httpsCallable<I, O>(getFunctionsInstance(), name)(payload);
+  } catch (error) {
+    if (isCallableMissing(error)) throw new Error('photo-unavailable');
+    throw error;
+  }
+}
+
 type Grant = { url: string; expiresAt: string };
 function checkGrant(grant: Grant) {
   const url = new URL(grant.url);
@@ -59,68 +73,16 @@ function checkGrant(grant: Grant) {
   return url;
 }
 
-export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: AbortSignal) {
+export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: AbortSignal): Promise<string> {
   checkSession(scope, signal);
   if (!validDmPhoto(file)) throw new Error('photo-file');
-  const fileName = `photo.${extensions.get(file.type)}`;
-  type Input = PhotoScope & {
-    action: 'uploadPhoto';
-    fileName: string;
-    contentType: string;
-    size: number;
-  };
-  type Upload = Grant & {
-    method: string;
-    path: string;
-    mediaId: string;
-    fields: Record<string, string>;
-  };
-  const call = httpsCallable<Input, Upload>(getFunctionsInstance(), 'dmAttachmentDelivery');
-  const { data } = await call({
-    ...scope,
-    action: 'uploadPhoto',
-    fileName,
-    contentType: file.type,
-    size: file.size,
-  });
-  checkSession(scope, signal);
-  checkGrant(data);
-  const parts = parseDmPhotoPath(data.path, scope.conversationId, false);
-  if (
-    data.method !== 'POST' ||
-    !parts ||
-    parts.fileName !== fileName ||
-    parts.mediaId !== data.mediaId ||
-    data.fields?.key !== data.path
-  )
-    throw new Error('photo-policy');
-  const body = new FormData();
-  for (const [name, value] of Object.entries(data.fields)) body.append(name, value);
-  body.append('file', file, fileName);
-  const response = await fetch(data.url, {
-    method: 'POST',
-    body,
-    signal,
-    credentials: 'omit',
-    redirect: 'error',
-    referrerPolicy: 'no-referrer',
-  });
-  if (!response.ok) throw new Error('photo-upload');
-  checkSession(scope, signal);
-  return data.path;
+  throw new Error('photo-unavailable');
 }
 
-export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
+export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal): Promise<void> {
   checkSession(scope, signal);
   if (!parseDmPhotoPath(path, scope.conversationId, false)) throw new Error('photo-path');
-  const call = httpsCallable<
-    PhotoScope & { path: string },
-    { conversationId: string; messageId: string }
-  >(getFunctionsInstance(), 'sendDmPhoto');
-  const { data } = await call({ ...scope, path });
-  checkSession(scope, signal);
-  if (data?.conversationId !== scope.conversationId || data.messageId !== scope.messageId)
-    throw new Error('photo-unconfirmed');
+  throw new Error('photo-unavailable');
 }
 
 export async function readDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
@@ -128,8 +90,9 @@ export async function readDmPhoto(scope: PhotoScope, path: string, signal: Abort
   const parts = parseDmPhotoPath(path, scope.conversationId);
   if (!parts) throw new Error('photo-path');
   type Input = PhotoScope & { action: 'read'; folder: 'photos'; mediaId: string; fileName: string };
-  const call = httpsCallable<Input, Grant>(getFunctionsInstance(), 'dmAttachmentDelivery');
-  const { data } = await call({ ...scope, action: 'read', folder: 'photos', ...parts });
+  const { data } = await callPhotoFn<Input, Grant>('dmAttachmentDelivery', {
+    ...scope, action: 'read', folder: 'photos', ...parts,
+  });
   checkSession(scope, signal);
   const url = checkGrant(data);
   const object =

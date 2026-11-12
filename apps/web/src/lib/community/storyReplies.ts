@@ -1,6 +1,6 @@
-import { httpsCallable } from 'firebase/functions';
+import { callWithHostedFallback } from '@/lib/callableFallback';
 import { deriveDmConversationId } from '@/lib/conversationAccess';
-import { getAuth, getFunctionsInstance, isFirebaseConfigured } from '@/lib/firebase';
+import { getAuth, isFirebaseConfigured } from '@/lib/firebase';
 
 type StoryReplyInput = {
   schoolId: string;
@@ -14,11 +14,10 @@ export async function sendStoryReply(viewerUid: string, input: StoryReplyInput):
   if (!isFirebaseConfigured() || !viewerUid || getAuth()?.currentUser?.uid !== viewerUid) {
     throw new Error('reply-session');
   }
-  const call = httpsCallable<
+  const { data } = await callWithHostedFallback<
     StoryReplyInput & { viewerUid: string },
     { conversationId: string; messageId: string }
-  >(getFunctionsInstance(), 'replyToCampusStory');
-  const { data } = await call({ ...input, viewerUid });
+  >('replyToCampusStory', { ...input, viewerUid }, viewerUid);
   if (getAuth()?.currentUser?.uid !== viewerUid) throw new Error('reply-session');
   if (
     typeof data?.messageId !== 'string' ||

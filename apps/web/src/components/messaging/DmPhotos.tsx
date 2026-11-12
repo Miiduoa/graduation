@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
-  confirmDmPhoto,
+  isDmPhotoUnavailable,
   photoAccept,
   readDmPhoto,
-  uploadDmPhoto,
   validDmPhoto,
   type PhotoScope,
 } from '@/lib/dmPhotos';
@@ -117,37 +116,10 @@ export function DmPhotoComposer({
     });
   }
 
+
   async function send() {
-    if (!draft?.previewReady || !ready || request.current) return;
-    const controller = new AbortController();
-    const pending = {
-      controller,
-      messageId: draft.messageId,
-      publishedPath: draft.uploadedPath?.replace(/\/photo\.(jpg|png|webp)$/, '/sent.$1'),
-      confirmed: false,
-    };
-    request.current = pending;
-    setSending(true);
-    setError('');
-    const submission = { ...scope, messageId: draft.messageId };
-    try {
-      const path =
-        draft.uploadedPath ?? (await uploadDmPhoto(submission, draft.file, controller.signal));
-      if (controller.signal.aborted) return;
-      pending.publishedPath = path.replace(/\/photo\.(jpg|png|webp)$/, '/sent.$1');
-      // A lost acknowledgment retries only the message commit, with the same ID and object.
-      if (!draft.uploadedPath) setDraft({ ...draft, uploadedPath: path });
-      await confirmDmPhoto(submission, path, controller.signal).catch((error) => {
-        if (!pending.confirmed) throw error;
-      });
-      if (controller.signal.aborted) return;
-      finish();
-    } catch {
-      if (!controller.signal.aborted) setError('照片尚未確認送出，可以重試。');
-    } finally {
-      request.current = null;
-      if (!controller.signal.aborted) setSending(false);
-    }
+    if (!ready || !draft?.previewReady || sending) return;
+    setError('照片私訊尚未開通');
   }
 
   return (
@@ -300,8 +272,8 @@ export function DmPhotoMessage({ scope, path }: { scope: PhotoScope; path: strin
     try {
       const next = await readDmPhoto(scope, path, controller.signal);
       if (!controller.signal.aborted && !document.hidden) setGrant(next);
-    } catch {
-      if (!controller.signal.aborted) setError('照片暫時無法開啟，請再試一次。');
+    } catch (error) {
+      if (!controller.signal.aborted) setError(isDmPhotoUnavailable(error) ? '照片私訊尚未開通' : '照片暫時無法開啟，請再試一次。');
     } finally {
       if (request.current === controller) {
         request.current = null;
