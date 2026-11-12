@@ -1,3 +1,9 @@
+## 2026-11-13：行動瀏覽器剪貼簿讀取即報錯時仍可手動保存筆記／進度
+
+- 某些 iOS 內嵌 WebView 或受權限限制的瀏覽器，不只寫入剪貼簿會被拒絕，連讀取 `navigator.clipboard`／`clipboard.writeText` 屬性都可能直接拋出 `SecurityError`。先前這種同步例外發生在複製函式的 `try` 外，學生按複製 TXT 或閱讀／練習 JSON 時無法得到手動備援。
+- 現在使用同一個防護讀取函式，取得可呼叫的剪貼簿寫入能力後才嘗試複製；屬性讀取失敗時走原本可選取文字／再次嘗試流程，保留教材、筆記、原答、閱讀模式與練習 checkpoint 格式。新增兩種同步 `SecurityError` 模擬 DOM 整合測試，核對 TXT、JSON 和再次嘗試均可存取，未呼叫 AI。
+- 不新增依賴、付費 API 或私人教材傳輸；瀏覽器模擬結果不等同 iOS Safari／Android Chrome 真機或 VoiceOver／TalkBack 驗收。PR 繼續 Draft，CI／CodeQL／指定 App 審查與競品同機測試須以本次精確 SHA 重新核對，未合併／部署。
+
 ## 2026-11-13：防止 HTML 原始文字區域中的假關閉標籤公開教師答案
 
 - 修補「原文表格」的 HTML 範圍追蹤：教材的隱藏 `<div>`／收合 `<details>` 內若有 `<script>`、`<style>` 或 `<textarea>`，其文字中出現的 `</div>` 或 `</details>` 不會真的關閉外層容器。先前掃描器未追蹤這些內層 raw-text／RCDATA 範圍，可能提前結束隱藏狀態，將下方教師答案重新重建為公開表格。

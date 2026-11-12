@@ -57,6 +57,20 @@ const MANUAL_COPY_LABELS: Record<ManualCopyKind, { region: string; field: string
   'practice-progress': { region: '手動複製練習與閱讀進度 JSON', field: '可選取的練習與閱讀進度 JSON' },
 };
 
+// Mobile browsers and embedded WebViews may throw SecurityError merely when
+// reading navigator.clipboard or clipboard.writeText. Fall back to a selectable
+// local snapshot instead of losing the student's export before a write starts.
+function studyClipboardWriter(): ((text: string) => Promise<void>) | null {
+  try {
+    const clipboard = navigator.clipboard;
+    return typeof clipboard?.writeText === 'function'
+      ? (text: string) => clipboard.writeText(text)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // iOS/WebKit can ignore or reject textarea.select() on a readonly backup.
 // Apply an explicit range as well; if either API fails, leave the original
 // local text available for long-press selection rather than losing the backup.
@@ -483,14 +497,15 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     setDownloadStatus('');
     setDownloadError('');
     setManualCopyText(null);
-    if (!navigator.clipboard?.writeText) {
+    const writeText = studyClipboardWriter();
+    if (!writeText) {
       setManualCopyKind('notes');
       setManualCopyText(text);
       setDownloadError('這個瀏覽器無法直接複製筆記，請在下方選取文字手動複製，或下載 TXT。');
       return;
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await writeText(text);
       if (copyRequest.current === request) {
         setDownloadStatus('已複製本次筆記到剪貼簿；內容含教材及個人筆記，請留意貼上位置。');
       }
@@ -518,14 +533,15 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     setDownloadStatus('');
     setDownloadError('');
     setManualCopyText(null);
-    if (!navigator.clipboard?.writeText) {
+    const writeText = studyClipboardWriter();
+    if (!writeText) {
       setManualCopyKind('practice');
       setManualCopyText(text);
       setDownloadError('這個瀏覽器無法直接複製，請在下方選取文字手動複製，或下載 TXT／JSON。');
       return;
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await writeText(text);
       if (copyRequest.current === request) {
         setDownloadStatus('已複製本輪練習紀錄到剪貼簿；內容含個人作答，請留意貼上位置。');
       }
@@ -551,9 +567,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       setManualCopyText(text);
       setDownloadError('無法直接複製進度 JSON。請選取下方文字，貼到純文字編輯器並儲存為 .json；原本學習內容仍保留。');
     };
-    if (!navigator.clipboard?.writeText) { fallback(); return; }
+    const writeText = studyClipboardWriter();
+    if (!writeText) { fallback(); return; }
     try {
-      await navigator.clipboard.writeText(text);
+      await writeText(text);
       if (copyRequest.current === request) {
         setDownloadStatus('已複製完整進度 JSON；請貼入純文字檔並儲存為 .json。內容含教材、筆記與參考回答，請勿公開分享。');
       }
@@ -569,13 +586,14 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     const text = manualCopyText;
     if (text === null) return;
     const request = ++copyRequest.current;
-    if (!navigator.clipboard?.writeText) {
+    const writeText = studyClipboardWriter();
+    if (!writeText) {
       setDownloadError('這個瀏覽器仍無法直接複製；請全選下方文字後使用裝置的複製功能。');
       manualCopyInput.current?.focus();
       return;
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await writeText(text);
       // Editing the lesson, closing the fallback or another copy request must
       // invalidate late permission responses, including a late success.
       if (copyRequest.current !== request) return;

@@ -1528,6 +1528,47 @@ it('preserves a selectable JSON backup after a blocked mobile download', () => {
   }
 });
 
+// WebViews can throw on property access, even before a writeText promise exists.
+// Preserve both exports and their manual retry path without exposing lesson data.
+it.each(['clipboard', 'writeText'] as const)(
+  'provides selectable TXT/JSON when mobile %s property access throws SecurityError',
+  (failureAt) => {
+    const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      get() {
+        if (failureAt === 'clipboard') throw new DOMException('blocked', 'SecurityError');
+        return Object.defineProperty({}, 'writeText', {
+          get() { throw new DOMException('blocked', 'SecurityError'); },
+        });
+      },
+    });
+    try {
+      render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+      fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '手機剪貼簿被封鎖的筆記' } });
+      fireEvent.click(screen.getByRole('button', { name: '複製本次筆記' }));
+      const notes = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+      expect(notes.value).toContain('手機剪貼簿被封鎖的筆記');
+      expect(notes.value).toContain(material.body);
+      fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+      expect(notes.isConnected).toBe(true);
+      expect(screen.getByRole('alert').textContent).toContain('全選下方文字');
+
+      fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+      const backup = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+      expect(parseCourseStudyProgress(backup.value, scope).passages['0:0'].note)
+        .toBe('手機剪貼簿被封鎖的筆記');
+      fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+      expect(backup.isConnected).toBe(true);
+      expect(screen.getByRole('alert').textContent).toContain('全選下方文字');
+      expect(mocks.run).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+      else Reflect.deleteProperty(window.navigator, 'clipboard');
+    }
+  },
+);
+
 it('copies a restorable reading-progress JSON with selectable fallback when download or clipboard is blocked', () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
