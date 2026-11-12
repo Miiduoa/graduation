@@ -88,11 +88,29 @@
 - [ ] 同校同任務與 Google 地圖、Apple 地圖、校方環景、UniTable 做可重複的操作比較，記錄成功率、錯誤目的地、步數、中位耗時、裝置效能與證據。詳見 [campus-spatial-benchmark.md](./campus-spatial-benchmark.md)。
 - [ ] 以上完成且靜宜實際有明確優勢後，再逐校新增**各校自己的**地圖邊界、POI 校核與建築輪廓，不以靜宜資料冒充他校。其他學校的選校／一般地圖功能不受此功能阻擋。
 
-## OSM relation 支援邊界（2026-11-12）
- 
-原本僅查詢已核對的 OSM `way`，因此靜宜地點清單中已核對、但 OSM 來源為 `relation/9246899` 的希嘉學苑不可能取得立體外框。本次固定白名單額外查詢該 relation（不開放任意 ID），**只接受 `type=multipolygon`、單一已閉合 `outer` way、沒有任何 inner 或第二組成員**的回應，並重新檢驗地理範圍、面積、自交、與官方地點對位和建築／樓高標註。其他複雜 relation 全部拒絕，不會把中庭或孔洞填成實體牆，也不假設目前上游一定符合此形狀。
+## OSM relation 中庭幾何（2026-11-12 核對）
 
-此支援是**保守的資料格式能力**：合成測試可證明簡單 relation 會保留 OSM 來源，不能據此宣稱希嘉學苑現有 OSM relation 的成員確實只有一條外環或已完成實地 3D 核對。關係的版本不代表其 member way 的幾何新鮮度，暫不呈現 relation 版本標籤。未新增入口、樓層、路線或校方照片；複雜 geometry 仍保持純 POI 與平面導航。參考 [OSM multipolygon 定義](https://wiki.openstreetmap.org/wiki/Multipolygon)。
+2026-11-12 查核 [OSM relation/9246899](https://www.openstreetmap.org/relation/9246899)
+與 [OSM 官方唯讀 API](https://api.openstreetmap.org/api/0.6/relation/9246899/full)：
+目前「希嘉學苑」確實是 `type=multipolygon`、`building=dormitory`，
+包含 **outer way/255783593** 與 **inner way/665651134** 兩個閉合成員，
+另外有 `building:levels=5`，**但沒有測量公尺高度**。不能再把此地點當成單一無孔外框，
+也不能將 `building:levels=5` 擅自換算成真實公尺樓高。
+
+Overpass 仍只查詢固定、已核對的 OSM way/relation ID，不接收任意使用者 ID。
+現在接受**一個封閉 outer 與可選一個封閉 inner** 的 multipolygon。
+外環和內環各自進行範圍、閉合、面積、自交與點數檢查；內環必須完整且嚴格位於
+外環內，邊界不得相交或相切，實心面積要足夠；複雜碎片、雙重內環、多外環一律
+拒絕。通過驗證的中庭隨 API 一同傳給前端，Three.js 使用 Shape.holes 挖空，
+不再將中庭擠出成實心屋頂；落在中庭的 POI 不被誤放到屋頂。
+前端再次驗證所有環、身分與來源；更新時內環變動會重建 WebGL 幾何。
+沒有真實高度的 3D 仍明示使用 **12 公尺示意值**。
+
+此線上 OSM 核對只證明當下公開資料的 **relation 結構與標籤**，
+沒有實地驗證校舍實際建築高度、立面、屋頂、可用入口、教室或步行道路；
+OSM 日後可能修改成員，不能把 2026-11-12 的快照當永久現況。
+來源使用 OSM 原始幾何及 ODbL 署名，不重製校方照片或環景。
+其他學校沿用共用資料結構，但不新增任何未核實校舍量體。
 
 ## 測試
 
