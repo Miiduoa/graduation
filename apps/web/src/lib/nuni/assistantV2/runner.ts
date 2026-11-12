@@ -1,7 +1,8 @@
 import { maskMessages } from './privacy';
 import { PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS } from '@campus/shared/src/platformAssistantPermissions';
-import { directReads, directReadAnswer } from './directRead';
+import { directReads, directReadAnswer, directReadCourseworkTargets } from './directRead';
 import { prepareExplicitEventRequest } from './explicitEventRequest';
+import { prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import {
   formatImportedAcademicSummary,
   type ImportedAcademicSummary,
@@ -29,6 +30,7 @@ import {
   V2Error,
   type Adapter,
   type Card,
+  type CourseworkStudyTarget,
   type Binding,
   type History,
   type Message,
@@ -174,6 +176,7 @@ function packedResults(
 }
 export type RunInput = {
   question: string;
+  studyTarget?: CourseworkStudyTarget;
   history: History;
   binding: Binding;
   adapter: Adapter;
@@ -281,6 +284,15 @@ export async function run(input: RunInput) {
       (extra.length ? '\n\n' + partialAnswer(extra, tools.cards, input.question, now) : '');
   };
   try {
+    if (input.studyTarget) {
+      const study = await prepareCourseworkStudyRequest({ target: input.studyTarget,
+        adapter: input.adapter, binding: input.binding, secret: input.secret,
+        writes: input.writes, now, signal });
+      steps.push(...study.steps);
+      stopReason = study.stopReason;
+      log('assistant.completed');
+      return { version: 2, ...study, modelCalls: 0, usage, simulation: input.adapter.simulation };
+    }
     const explicitEvent = await prepareExplicitEventRequest({ question: input.question, tools, signal, now });
     if (explicitEvent) {
       steps.push(...explicitEvent.steps);
@@ -321,6 +333,7 @@ export async function run(input: RunInput) {
       stopReason = steps.some((step) => step.status === 'error') ? 'SOURCE_UNAVAILABLE' : '';
       log('assistant.completed');
       return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now),
+        courseworkTargets: directReadCourseworkTargets(reads, evidence, now),
         steps, cards: [], modelCalls: 0, usage, stopReason, simulation: input.adapter.simulation };
     }
     // Read required facts before generation. A page card, an empty answer, or
@@ -839,6 +852,7 @@ export async function run(input: RunInput) {
     log('assistant.failed', e);
     if (reads.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now), steps,
+        courseworkTargets: directReadCourseworkTargets(reads, evidence, now),
         cards: [], modelCalls, usage, stopReason: safeCode(e), simulation: input.adapter.simulation };
     if ((evidence.length || informationResults.length) && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return {

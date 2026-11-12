@@ -16,6 +16,7 @@ import { browserRequest } from '@/features/nuni/Session';
 import { readPersonalImports, type PersonalImportScope } from './personalImports';
 import { readPersonalTimetableOnDevice } from './timetable/store';
 import type { LocalAssistantResult } from './assistantLocalActions';
+import { parseAssistantCourseworkTargets } from './assistantCoursework';
 
 type ReadIntent = {
   kind: 'schedule' | 'calendar' | 'coursework';
@@ -179,7 +180,12 @@ export async function answerAssistantPersonalQuestion(
       if (intent.from && agenda.tasks.some((task) => !task.dueAt && !task.submittedAt))
         lines.push('另有未設定截止日期的項目，未列入這段日期。');
       lines.push(`查詢時間：${formatTaipeiDateTime(now, { seconds: false })}。`);
-      return result(lines.join('\n'), ['classroom']);
+      const courseworkTargets = parseAssistantCourseworkTargets(tasks.slice(0, 12)
+        .filter((task) => !intent.submitted && task.state === 'open' && !task.submittedAt &&
+          task.dueAt && Date.parse(task.dueAt) > now.getTime())
+        .map((task) => ({ workspaceId: task.courseId, taskId: task.id, kind: task.kind,
+          title: clean(task.title), courseTitle: clean(task.courseTitle), dueAt: task.dueAt })));
+      return { ...result(lines.join('\n'), ['classroom']), courseworkTargets };
     } catch (error) {
       assertActive();
       if (sessionFailure(error)) throw new Error('登入狀態已變更，請重新登入後再查詢。');

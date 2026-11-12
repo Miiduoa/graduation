@@ -9,6 +9,8 @@ import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
+import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
@@ -40,6 +42,7 @@ export function AssistantThread({
   recoverableQuestion,
   onRecoverQuestion,
   onAsk,
+  onStudyTarget,
   onStop,
   onConfirm,
   onCancel,
@@ -63,6 +66,7 @@ export function AssistantThread({
   recoverableQuestion: string;
   onRecoverQuestion: () => void;
   onAsk: () => void;
+  onStudyTarget?: (target: AssistantCourseworkTarget, date?: string) => void;
   onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
@@ -125,7 +129,8 @@ export function AssistantThread({
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
   const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) || (consent && ready));
+    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+      (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -168,7 +173,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可查詢清大、暨大的公開開課資料。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -206,6 +211,22 @@ export function AssistantThread({
                     <ReplyBody reply={turn.reply} />
                   </SpokenReply>
                 ) : <ReplyBody reply={turn.reply} />}
+                {onStudyTarget && parseAssistantCourseworkTargets(turn.reply.courseworkTargets).length > 0 ? (
+                  <div className={styles.courseworkChoices} role="group" aria-label="安排作業準備時間">
+                    <p className={styles.muted}>先找時段並預覽，確認後才加入個人行程。</p>
+                    {parseAssistantCourseworkTargets(turn.reply.courseworkTargets).map((target) => (
+                      <button key={target.workspaceId + ':' + target.kind + ':' + target.taskId}
+                        type="button" className={styles.courseworkChoice}
+                        disabled={pending || !!onStop}
+                        aria-label={`替${target.courseTitle}的${target.title}安排30分鐘`}
+                        onClick={() => onStudyTarget(target, turn.reply.courseworkDate)}>
+                        <strong>{target.title}</strong>
+                        <span>{target.courseTitle} · {formatTaipeiDateTime(target.dueAt, { seconds: false })} 截止</span>
+                        <span className={styles.courseworkAction}>安排 30 分鐘</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (

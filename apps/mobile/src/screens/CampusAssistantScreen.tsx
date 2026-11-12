@@ -531,6 +531,7 @@ function AssistantConversation({
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
             classGapRead: reply.classGapRead,
+            courseworkList: reply.courseworkList,
             announcementRead: reply.announcementRead,
             publicCourseRead: reply.publicCourseRead,
           },
@@ -716,6 +717,10 @@ function AssistantConversation({
         if (current()) setError('無法核對這筆成績的帳號與學校，請再查一次。');
         return;
       }
+      if (reply.courseworkList && (reply.courseworkList.owner !== timetableOwner || reply.courseworkList.schoolId !== schoolId)) {
+        if (current()) setError('無法核對這份作業清單的帳號與學校，請重新查詢。');
+        return;
+      }
       if (reply.calendarTask && (reply.calendarTask.proposal.owner !== timetableOwner || reply.calendarTask.proposal.schoolId !== schoolId)) {
         if (current()) setError('無法核對這份行程的帳號與學校，請再提供一次。');
         return;
@@ -764,6 +769,7 @@ function AssistantConversation({
             savedClassRead: reply.savedClassRead,
             classGapRead: reply.classGapRead,
             courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
+            courseworkList: reply.courseworkList,
             courseworkStudy: reply.courseworkStudy,
             announcementRead: reply.announcementRead,
             publicCourseRead: reply.publicCourseRead,
@@ -1146,6 +1152,7 @@ function AssistantConversation({
             : message.tool === 'saved-academics' ? '成績與學分紀錄'
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
+            : message.courseworkList ? '待交作業'
             : message.tool === 'public-course-catalog' ? '公開開課查詢'
             : message.tool === 'school-directory' ? '學校聯絡資訊' : message.announcementRead ? '校園公告'
             : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
@@ -1165,6 +1172,7 @@ function AssistantConversation({
                 <NuniCourseworkStudyAction read={message.courseworkRead}
                   assignmentIds={message.courseworkStudy.assignmentIds} initialTime={message.courseworkStudy.time}
                   suggestTime={message.courseworkStudy.suggestTime}
+                  suggestDate={message.courseworkStudy.suggestDate}
                   context={calendarContext} requests={courseworkRequests}
                   task={message.calendarTask} sourceCheckedAt={message.courseworkStudyCheckedAt}
                   latest={index === messages.length - 1} disabled={busy || syncBusy || calendarBusy}

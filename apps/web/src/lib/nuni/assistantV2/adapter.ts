@@ -147,6 +147,15 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
     remainingApiCalls: () => Math.max(0, 12 - apiCalls),
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),
+    course: async (courseId) => {
+      const active = (await classes.list()).some((course) =>
+        course.id === courseId && course.state === 'active' && course.memberRole === 'student');
+      if (!active) return null;
+      const receipt = await createCourseAccess(request).workspace(courseId, schoolId);
+      return receipt.status === 'reviewed' && receipt.memberRole === 'student'
+        ? { id: receipt.workspaceId, title: receipt.course.title }
+        : null;
+    },
     courses: async () => {
       const candidates = (await classes.list()).filter(
         (course) => course.state === 'active' && course.memberRole === 'student',

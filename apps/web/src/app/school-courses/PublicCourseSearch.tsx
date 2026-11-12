@@ -53,14 +53,37 @@ function sameSearch(left: CourseSearch, right: CourseSearch): boolean {
   return left.query === right.query && left.filters?.weekday === right.filters?.weekday && left.filters?.credits === right.filters?.credits;
 }
 
-function CatalogCourse({ course, schoolId, importHref, review }: {
+// Serialize clipboard writes across cards. A slow earlier write must never
+// replace the student's most recently requested course after it finishes.
+let latestClipboardCopy = 0;
+let clipboardQueue: Promise<void> = Promise.resolve();
+
+function queuePublicCourseClipboardWrite(write: () => Promise<void>): Promise<'copied' | 'manual' | 'superseded'> {
+  const request = ++latestClipboardCopy;
+  const operation = clipboardQueue.then(async () => {
+    if (request !== latestClipboardCopy) return 'superseded' as const;
+    try {
+      await write();
+    } catch {
+      return request === latestClipboardCopy ? 'manual' as const : 'superseded' as const;
+    }
+    return request === latestClipboardCopy ? 'copied' as const : 'superseded' as const;
+  });
+  clipboardQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+type ClipboardFeedback = { csv: string; status: 'copied' | 'manual' };
+
+function CatalogCourse({ course, schoolId, importHref, review, copyFeedback, onCopy }: {
   course: PublicCatalogCourse;
   schoolId: PublicCourseCatalogResponse['schoolId'];
   importHref: string;
   review: (course: PublicCatalogCourse, csv: string) => string;
+  copyFeedback: ClipboardFeedback | null;
+  onCopy: (csv: string) => void;
 }) {
   const [notice, setNotice] = useState('');
-  const [copy, setCopy] = useState<'idle' | 'copied' | 'manual'>('idle');
   const meetings = schoolId === 'ncnu' ? ncnuCourseMeetings(course.time, course.semester) : null;
   const pairedMeetings = schoolId === 'nthu'
     ? nthuCourseMeetings(course.meetings ?? [], course.semester)?.map((meeting) => ({ time: meeting.label, room: meeting.room }))
@@ -68,15 +91,7 @@ function CatalogCourse({ course, schoolId, importHref, review }: {
     : null;
   const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
 
-  async function copyCourse() {
-    if (!csv) return;
-    try {
-      await navigator.clipboard.writeText(csv);
-      setCopy('copied');
-    } catch {
-      setCopy('manual');
-    }
-  }
+  const copyStatus = copyFeedback?.csv === csv ? copyFeedback.status : 'idle';
   return (
     <li>
       <p className={courseStyles.code}>{formatSemester(course.semester)} · 課號 {course.code || '未提供'} · 班別 {course.section || '未提供'}</p>
@@ -101,11 +116,11 @@ function CatalogCourse({ course, schoolId, importHref, review }: {
       {csv && (
         <div className={courseStyles.cardActions}>
           <button type="button" className="btn primary" onClick={() => setNotice(review(course, csv))}>帶入課表核對</button>
-          <button type="button" className="btn" onClick={() => void copyCourse()}>複製課表匯入資料</button>
+          <button type="button" className="btn" onClick={() => onCopy(csv)}>複製課表匯入資料</button>
           {notice && <p role="status">{notice}</p>}
-          {copy !== 'idle' && (
+          {copyStatus !== 'idle' && (
             <>
-              {copy === 'manual' ? (
+              {copyStatus === 'manual' ? (
                 <label className={styles.field}>複製下方資料
                   <textarea readOnly value={csv} onFocus={(event) => event.target.select()} />
                 </label>
@@ -157,10 +172,22 @@ function PublicCourseSearchForm({
     ? REPEATED_QUERY_NOTICE
     : !isPublicCourseOperationQuery(linked.query) ? QUERY_LENGTH_NOTICE : null);
   const [result, setResult] = useState<SearchResult | null>(() => linked.search ? { status: 'loading', ...linked.search } : null);
+  const [copyFeedback, setCopyFeedback] = useState<ClipboardFeedback | null>(null);
+  const copyAttempt = useRef(0);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
   const importHref = campusServiceHref('/import?kind=timetable', schoolSearch);
+  const copyCourse = useCallback(async (csv: string) => {
+    const attempt = ++copyAttempt.current;
+    setCopyFeedback(null);
+    const status = await queuePublicCourseClipboardWrite(() => navigator.clipboard.writeText(csv));
+    // Search/school changes invalidate clipboard feedback even if the old
+    // write completes while a fresh result containing the same CSV is shown.
+    if (status !== 'superseded' && attempt === copyAttempt.current) {
+      setCopyFeedback({ csv, status });
+    }
+  }, []);
 
   function review(course: PublicCatalogCourse, csv: string): string {
     const { scope } = context;
@@ -237,7 +264,9 @@ function PublicCourseSearchForm({
 
   function editSearch() {
     cancelSearch();
+    copyAttempt.current += 1;
     setResult(null);
+    setCopyFeedback(null);
   }
 
   function search(event: FormEvent<HTMLFormElement>) {
@@ -254,6 +283,8 @@ function PublicCourseSearchForm({
       return;
     }
     setQueryNotice(null);
+    copyAttempt.current += 1;
+    setCopyFeedback(null);
     const submitted = courseSearch(query, filters);
     setResult({ status: 'loading', ...submitted });
     void searchCourses(submitted);
@@ -360,6 +391,8 @@ function PublicCourseSearchForm({
                   schoolId={schoolId}
                   importHref={importHref}
                   review={review}
+                  copyFeedback={copyFeedback}
+                  onCopy={(csv) => { void copyCourse(csv); }}
                 />
               ))}
             </ul>
