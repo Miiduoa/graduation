@@ -137,7 +137,7 @@ function safeOutline(value: unknown): Array<[number, number]> | null {
 /** A relation may contain holes, disconnected outers or fragmented ways. The
  * current renderer supports ONE closed, hole-free outer way only. Reject all
  * other multipolygons rather than silently filling a courtyard or inventing
- * missing walls. Both relation and member geometry are checked independently.
+ * missing walls. We validate the member ring plus the relation's own tags.
  */
 function safeSimpleRelationOutline(element: Record<string, unknown>): Array<[number, number]> | null {
   if (object(element.tags)?.type !== 'multipolygon') return null;
@@ -379,7 +379,10 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
     accepted.push({
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
       heightMeters: item.heightMeters, heightBasis: item.heightBasis,
-      ...osmWayRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }),
+      // A relation's revision does not date the geometry of its member way.
+      // Never trust relation metadata as the UI's "OSM way" revision.
+      ...(place.sourceUrl.startsWith('https://www.openstreetmap.org/way/')
+        ? osmWayRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }) : {}),
     });
   }
   return accepted;
