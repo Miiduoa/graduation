@@ -379,22 +379,33 @@ it('skips an obsolete queued copy before it reaches the clipboard, even across t
 
 
 it('does not resurrect copied feedback from an older search after its clipboard write completes', async () => {
-  const fetcher = vi.fn().mockResolvedValue(response([course]));
+  // Each fetch needs its own body: Response.json() can only be consumed once.
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(response([course])));
   vi.stubGlobal('fetch', fetcher);
   let finish!: () => void;
-  const writeText = vi.fn().mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  const clipboardWrite = new Promise<void>(resolve => { finish = resolve; });
+  const writeText = vi.fn().mockReturnValue(clipboardWrite);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   render(<PublicCourseSearch {...props} />);
-  submit('第一個查詢');
-  await screen.findByRole('heading', { name: course.title });
-  fireEvent.click(screen.getByRole('button', { name: '複製課表匯入資料' }));
-  await act(async () => { await Promise.resolve(); });
-  expect(writeText).toHaveBeenCalledTimes(1);
-  submit('第二個查詢');
-  await screen.findByRole('heading', { name: course.title });
-  await act(async () => { finish(); });
-  expect(screen.queryByText(/已複製/)).toBeNull();
-  expect(screen.queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+  try {
+    submit('第一個查詢');
+    await screen.findByRole('heading', { name: course.title });
+    fireEvent.click(screen.getByRole('button', { name: '複製課表匯入資料' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    submit('第二個查詢');
+    await screen.findByRole('heading', { name: course.title });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      '/api/public-course-catalog?schoolId=ncnu&q=' + encodeURIComponent('第二個查詢'), expect.anything(),
+    );
+    await act(async () => { finish(); });
+    expect(screen.queryByText(/已複製/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+  } finally {
+    // Release the shared clipboard queue even when an assertion fails.
+    await act(async () => { finish(); });
+  }
 });
 
 it('keeps only the latest result, including when the previous response arrives late', async () => {
