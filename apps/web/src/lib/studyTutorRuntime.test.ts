@@ -867,6 +867,68 @@ describe('study cancellation and failure isolation', () => {
 });
 
 
+describe('new local lesson source-copy teaching boundary', () => {
+  it.each([
+    {
+      label: 'main explanation copies its citation',
+      mutate: (original: TutorExplanation) => ({ ...original, explanation: original.sourceQuote }),
+    },
+    {
+      label: 'step repeats its quote with a different sentence ending',
+      mutate: (original: TutorExplanation) => ({
+        ...original,
+        steps: [
+          original.steps![0],
+          { ...original.steps![1], explanation: '外鍵連接資料表！' },
+        ],
+      }),
+    },
+    {
+      label: 'step copies a quotation with invisible direction marks',
+      mutate: (original: TutorExplanation) => ({
+        ...original,
+        steps: [
+          { ...original.steps![0], explanation: '\u2066主鍵用來唯一識別一筆紀錄。\u2069' },
+          original.steps![1],
+        ],
+      }),
+    },
+  ])('rejects $label only for NEW generation, keeps saved lessons and retries', async ({ mutate }) => {
+    const repeated = mutate(lesson());
+    // Old locally saved explanations still decode without any migration.
+    expect(parseTutorExplanation(JSON.stringify(repeated), passage()).steps).toHaveLength(2);
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(repeated) });
+    await expect(pending).rejects.toThrow('只是照抄原文引句');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
+  it('retains a new lesson when its source quote supports a genuinely different explanation', async () => {
+    const valid = { ...lesson(), steps: [
+      { ...lesson().steps![0], explanation: '主鍵是資料列的識別依據。' },
+      { ...lesson().steps![1], explanation: '藉由外鍵把兩個資料表建立關聯。' },
+    ] };
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(valid) });
+    await expect(pending).resolves.toEqual(valid);
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+});
+
 describe('new lesson self-check quality boundary', () => {
   it.each([
     { field: 'question', label: 'punctuation-only question', content: '？？？' },

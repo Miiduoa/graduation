@@ -139,6 +139,21 @@ function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
   return true;
 }
 
+// An exact source citation is evidence, not a teaching explanation. A new
+// on-device lesson must add information beyond copying its own quote. Keep
+// the saved v1/v2 parser unchanged for earlier offline study records.
+function hasExplainedGeneratedEvidence(explanation: TutorExplanation): boolean {
+  const pairs: Array<[string, string]> = [
+    [explanation.explanation, explanation.sourceQuote],
+    ...(explanation.steps?.map((step): [string, string] => [step.explanation, step.sourceQuote]) ?? []),
+  ];
+  const comparable = (text: string) => comparableGeneratedTeaching(text)
+    // Ignore closing sentence punctuation, but retain internal operators and
+    // decimals: an equation and a changed equation must not compare equal.
+    .replace(/[.!?。！？；;：:，、]+$/gu, '').trim();
+  return pairs.every(([teaching, quote]) => comparable(teaching) !== comparable(quote));
+}
+
 function progressMessage(message: unknown, phase: unknown): string {
   if (phase === 'generating') return '正在依本段原文準備講解與自我檢查題…';
   const download = typeof message === 'string' && message.length <= 300
@@ -276,6 +291,8 @@ export async function runStudyTutor({
               throw new Error('這次講解有空白或重複相同的教學步驟，請重新講解。');
             if (!hasSubstantiveGeneratedTeaching(explanation))
               throw new Error('這次講解的說明只有標點或符號，無法作為教學內容。請重新講解。');
+            if (!hasExplainedGeneratedEvidence(explanation))
+              throw new Error('這次講解只是照抄原文引句，沒有額外解釋。請重新講解。');
             if (!hasSubstantiveGeneratedReview(explanation))
               throw new Error('這次講解的複習題或參考回答只有標點或符號，無法用來練習。請重新講解。');
             if (!hasDistinctGeneratedReview(explanation))
