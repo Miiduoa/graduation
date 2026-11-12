@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { createNuniClasses, parseNuniWorkspace } from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS } from '@campus/shared/src/wakeAwareRequest';
 import { handleNuni } from './api';
 import { finishGoogle, startGoogle } from './oauth';
 import {
@@ -56,9 +57,38 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+function useFakeRequestTimeouts() {
+  vi.useFakeTimers();
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+    const controller = new AbortController();
+    setTimeout(
+      () => controller.abort(new DOMException('Upstream timed out.', 'TimeoutError')),
+      milliseconds,
+    );
+    return controller.signal;
+  });
+}
+
+function responseWithPendingBody(signal: AbortSignal, status = 200) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        signal.addEventListener(
+          'abort',
+          () => controller.error(new DOMException('Body read aborted.', 'AbortError')),
+          { once: true },
+        );
+      },
+    }),
+    { status, headers: { 'Content-Type': 'application/json' } },
+  );
+}
 
 it('waits at least ten seconds and retries a waking API once', async () => {
   fetcher
@@ -75,6 +105,70 @@ it('does not retry a 4xx API failure', async () => {
   await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).rejects.toMatchObject({
     status: 401,
   });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('retries a GET when headers arrived but its first response body timed out', async () => {
+  useFakeRequestTimeouts();
+  fetcher
+    .mockImplementationOnce((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!),
+    )
+    .mockResolvedValueOnce(response({ workspaces: [workspace] }));
+  const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS - 1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await expect(outcome).resolves.toEqual({ value: { workspaces: [workspace] } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it.each(['POST', 'PUT'])(
+  'does not add a %s retry when its response body is aborted',
+  async (method) => {
+    useFakeRequestTimeouts();
+    fetcher.mockImplementation((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!),
+    );
+    const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {
+      method,
+      body: '{}',
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS);
+    await expect(outcome).resolves.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([401, 403])(
+  'does not retry HTTP %s when reading its error body times out',
+  async (status) => {
+    useFakeRequestTimeouts();
+    fetcher.mockImplementation((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!, status),
+    );
+    const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS);
+    await expect(outcome).resolves.toMatchObject({ status });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
+  ['malformed JSON', '{broken', 1024, 502, 'INVALID_RESPONSE'],
+  ['oversized body', '123456789', 4, 413, 'BODY_TOO_LARGE'],
+] as const)('does not retry a GET with %s', async (_kind, body, limit, status, code) => {
+  fetcher.mockResolvedValueOnce(
+    new Response(body, { headers: { 'Content-Type': 'application/json' } }),
+  );
+  await expect(
+    fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}, limit),
+  ).rejects.toMatchObject({ status, code });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
