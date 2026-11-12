@@ -40,6 +40,17 @@ export function nthuCourseMeetings(
   semester?: string,
 ): NthuCourseMeeting[] | null {
   if (!meetings.length || meetings.some(meeting => !/^(?:[MTWRFSU][1-9nabcd])+$/.test(meeting.time))) return null;
+  // Multiple official room/time pairs may describe one course. A repeated
+  // weekday/period would duplicate or overlap the student's imported timetable;
+  // require manual verification rather than silently importing both rooms.
+  const occupied = new Set<string>();
+  for (const meeting of meetings) {
+    for (const [, day, period] of meeting.time.matchAll(/([MTWRFSU])([1-9nabcd])/g)) {
+      const slot = `${day}:${period}`;
+      if (occupied.has(slot)) return null;
+      occupied.add(slot);
+    }
+  }
   // The published table was verified for the feed's 115-1 semester. Other terms
   // retain their own raw labels until their clock table has been checked.
   const verified = semester === '1151';
