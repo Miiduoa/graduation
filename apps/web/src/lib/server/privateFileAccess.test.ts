@@ -202,6 +202,27 @@ it.each([GROUP_ANSWER, ANSWER])('requires a meaningful submittedAt timestamp for
   }
 });
 
+it.each([GROUP_ANSWER, ANSWER])('does not reopen uploads when a same-group global mirror is closed on %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  // A canonical assignment remains published while its global mirror is closed.
+  await expect(authorize(store, path, 'alice', true)).resolves.toBeUndefined();
+  for (const closed of [
+    { groupId: 'course', published: false },
+    { groupId: 'course', status: 'closed' },
+    { groupId: 'course', dueAt: '2020-01-01T00:00:00Z' },
+    { groupId: 'course', dueAt: 'invalid' },
+  ]) {
+    store.docs.set('assignments/work', closed);
+    await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('assignments/work', {
+    groupId: 'course', dueAt: '2020-01-01T00:00:00Z', allowLateSubmission: true,
+  });
+  await expect(authorize(store, path, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it('legacy upload checks global submission receipts even when canonical group assignment exists', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const globalReceipt = 'assignments/work/submissions/alice';

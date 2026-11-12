@@ -562,3 +562,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補在**同一次 Firestore read-only transaction**中，當 global assignment 明確指向同一 `groupId` 時額外核對其 `submissions/{uid}`；錯 owner 或 `submittedAt != null` 一律拒絕 group-path 新上傳及 claim。沒有 global 鏡像、或該 global ID 屬於不同群組時維持原 canonical 權限，避免用其他校群的同名作業封鎖合法草稿。原有 canonical published/status/期限、跨帳號及校籍撤銷仍生效。
 
 新增 Web 合成授權回歸覆蓋正常未提交、global 已提交、錯 owner、合法草稿、跨帳號、不同群組的鏡像碰撞、canonical 關閉、校籍撤銷。精確 head 必須重新核對 CI、CodeQL、Firestore Rules、真 PostgreSQL CI 及適用專用工作流；未見 nuni-merge-gate App 5504170 對新 head「審查通過」之前不能合併。這次沒有操作正式資料、GCS／Supabase、金鑰、migration、token、E 校園及未授權 npm/pnpm audit。已發 URL、缺附件清單的歷史資料、真實隔離 Storage、minimatch 雙鎖檔、正式發布與回復仍未驗收。
+
+
+## 2026-11-12：global 作業鏡像關閉狀態不可被尚未同步的 canonical 作業重新開放（PR #577）
+
+在前一 head `8d711e97a26aab930ec30626b952fdabc0962387` 的共用上傳授權檢查發現：group-path 雖已讀取同群 global submission，卻未核對 global assignment 的 published/status/dueAt；legacy-path 在 canonical 作業存在時也只檢查 global submission，略過 global 作業是否已關閉。當 global 鏡像已關閉／逾期但 canonical 作業仍顯示開放，兩種 namespace 都可再取得新的寫入授權。這是資料同步狀態分歧下的「關閉後重新開放」缺口，與已簽發 URL 的回收不同。
+
+最小修補：新增只用於 global 鏡像的新上傳資格檢查，在相同的 read-only Firestore transaction 中同時核對 global published/status、dueAt/allowLateSubmission，並延續同群與已繳交收據／owner 比對。global 作業屬其他群組時 group-path 不受其關閉狀態影響；合法晚交仍准許，校籍撤銷與 canonical 關閉仍拒絕。合成 Web 回歸對 group-path 和 legacy-path 各驗證正常、未發布、關閉、過期、異常日期、明確晚交及撤權。
+
+**驗證分級：** 此文件記錄原始碼變更與可重跑合成案例；新精確 head 的 CI、CodeQL、Supabase／Python／Mobile Agent／適用 Maestro 與 App 5504170 審查狀態，必須以 GitHub 實際結果另核對，未完成不能說已通過。read-only 授權檢查不等於撤銷既有 GCS／Supabase 已簽 URL，後者及真隔離 GCS staging、歷史缺附件清單、minimatch 雙鎖檔、正式發布與回復仍待驗收。未觸碰正式資料、憑證、token、migration、部署、E 校園或未授權的 npm／pnpm audit。

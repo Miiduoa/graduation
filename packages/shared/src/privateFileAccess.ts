@@ -314,6 +314,22 @@ function storyExpiresAtMs(value: unknown): number | null {
   return null;
 }
 
+/** A global mirror can close before its group copy is synchronized. It must
+ * remain an independent guard for new signed uploads in either namespace. */
+function legacyMirrorAcceptsNewPrivateUpload(data: Record<string, unknown>): boolean {
+  const dueValue = data.dueAt;
+  const validDueString = typeof dueValue !== 'string' || (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+    Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+    new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+  );
+  const due = dueValue == null || typeof dueValue === 'number' || !validDueString
+    ? null : storyExpiresAtMs(dueValue);
+  return data.published !== false &&
+    !['draft', 'closed'].includes(String(data.status || '')) &&
+    (data.dueAt == null || data.allowLateSubmission === true || (due !== null && Date.now() <= due));
+}
+
 export function assertStoryMediaRead(input: {
   schoolId: string;
   uid: string;
@@ -474,6 +490,9 @@ export async function authorizePrivateFile(
           const globalAssignmentRef = db.collection('assignments').doc(scope.assignmentId || '');
           const globalAssignment = await tx.get(globalAssignmentRef);
           if (globalAssignment.exists && asRecord(globalAssignment.data()).groupId === groupId) {
+            // A closed/expired global mirror must not be reopened by a stale
+            // still-open canonical assignment while its state is syncing.
+            if (!legacyMirrorAcceptsNewPrivateUpload(asRecord(globalAssignment.data()))) deny();
             const globalSubmission = await tx.get(
               globalAssignmentRef.collection('submissions').doc(scope.userId || ''),
             );
@@ -532,6 +551,14 @@ export async function authorizePrivateFile(
           : 'uid' in previousLegacy ? previousLegacy.uid
             : 'studentId' in previousLegacy ? previousLegacy.studentId : scope.userId;
         if (legacySubmission.exists && (legacyOwner !== uid || previousLegacy.submittedAt != null)) deny();
+        // Even with a canonical copy, the global mirror that minted this
+        // legacy namespace can independently close or expire.
+        if (assignment.exists) {
+          const mirror = await tx.get(db.collection('assignments').doc(scope.assignmentId || ''));
+          const mirrorData = asRecord(mirror.data());
+          if (!mirror.exists || mirrorData.groupId !== groupId ||
+            !legacyMirrorAcceptsNewPrivateUpload(mirrorData)) deny();
+        }
         if (!assignment.exists) {
           // A global-only legacy assignment must not bypass current submission
           // closure or an already recorded submission in the global namespace.
