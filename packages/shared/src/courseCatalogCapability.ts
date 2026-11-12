@@ -8,7 +8,7 @@ import { resolveSchoolPublicServices } from './schoolPublicServices';
  * Public course links are verified separately;
  * those links are not evidence of private academic / in-app catalog capability.
  */
-export type CourseCatalogProviderId = 'pu-mypu' | 'ncnu-public';
+export type CourseCatalogProviderId = 'pu-mypu' | 'ncnu-public' | 'nthu-public';
 
 export type CourseCatalogCapability = {
   providerId: CourseCatalogProviderId;
@@ -37,6 +37,12 @@ const INTEGRATED_CATALOG_BY_PUBLIC_ID = Object.assign(
       label: '暨南大學本學期開設課程',
       officialQueryUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall',
     },
+    nthu: {
+      providerId: 'nthu-public' as const,
+      schoolId: 'nthu',
+      label: '清華大學課程查詢系統',
+      officialQueryUrl: 'https://curricul.site.nthu.edu.tw/p/406-1208-290365,r7880.php?Lang=zh-tw',
+    },
   },
 );
 
@@ -64,7 +70,6 @@ export function hasIntegratedCourseCatalog(schoolId?: string | null): boolean {
 // Course-only destinations verified through https://nust.edu.tw/resource.php
 // and the universities' course offices on 2026-11-06.
 const additionalPublicCourses = new Map<string, { label: string; url: string }>([
-  ['ncnu', { label: '暨南大學本學期開設課程', url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' }],
   ['ncue', { label: '彰師大開課課程查詢', url: 'https://webap0.ncue.edu.tw/DEANV2/Other/OB010' }],
   ['ncut', { label: '勤益科大本學期開課查詢', url: 'https://nmsd.ncut.edu.tw/wbcmss/Query/CourseView' }],
   ['ncyu', { label: '嘉義大學全校課程查詢', url: 'https://web085003.adm.ncyu.edu.tw/pub_course.aspx' }],
@@ -108,6 +113,7 @@ export function unsupportedCourseCatalogMessage(
   schoolName?: string | null,
 ): string {
   if (schoolId === 'ncnu') return '請開啟「暨大開課查詢」搜尋本學期公開課程。';
+  if (schoolId === 'nthu') return '請開啟「清大開課查詢」搜尋本學期公開課程。';
   const resolvedName =
     (typeof schoolName === 'string' && schoolName.trim()) ||
     findSchoolById(toPublicSchoolId(schoolId) ?? undefined)?.name ||

@@ -119,6 +119,27 @@ it('collapses suggestion chips to one scrolling row after a turn', () => {
   expect(screen.getByRole('button', { name: '送出' }).hasAttribute('disabled')).toBe(true);
 });
 
+it('enables explicit public reads without model consent but blocks keyboard submission of ordinary questions', () => {
+  const onAsk = vi.fn();
+  const view = render(<AssistantThread {...base} ready={false} question="幫我查清大資料庫課程" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+  view.rerender(<AssistantThread {...base} ready={false} question="請幫我想一個社團介紹稿" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it.each(['查詢我的行程', '列出未交作業'])('enables personal reads without cloud readiness or model consent: %s', (question) => {
+  const onAsk = vi.fn();
+  render(<AssistantThread {...base} ready={false} question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
 it.each(['local', 'dataRead'])('renders %s source text literally instead of creating links or formatting', (source) => {
   const answer = '2026-11-12 09:10–10:00｜[假的設定入口](/settings) **私人課程**';
   const reply = { answer, steps: [], cards: [], ...(source === 'local'

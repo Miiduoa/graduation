@@ -95,7 +95,9 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
   const [view, setView] = useState<'week' | 'day' | 'grid'>('week');
   const [day, setDay] = useState(() => {
     const today = new Date().getDay();
-    return today >= 1 && today <= 5 ? today : 1;
+    // Calendar dates are Sunday=0; timetable days use Monday=1…Sunday=7.
+    // Weekend classes are now visible, so open the actual current day.
+    return today === 0 ? 7 : today;
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const importScope = usePersonalImportScope();
@@ -212,9 +214,15 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
     }, [load]),
   );
 
+  // Weekend classes appear on the timetable; the existing free-time planner
+  // and meetup calculations still operate on Monday through Friday only.
+  const weekdayCourses = useMemo(
+    () => displayCourses.filter((course) => course.day >= 1 && course.day <= 5),
+    [displayCourses],
+  );
   const planner = useMemo(
-    () => profile && !loadError && importStatus === 'ready' && !listedImports.length ? new SchedulePlanner(displayCourses, friendId ? [{ id: friendId, name: '好友', courses: friendCourses }] : [], friendId, profile) : null,
-    [displayCourses, friendId, friendCourses, profile, listedImports.length, importStatus, loadError],
+    () => profile && !loadError && importStatus === 'ready' && !listedImports.length ? new SchedulePlanner(weekdayCourses, friendId ? [{ id: friendId, name: '好友', courses: friendCourses }] : [], friendId, profile) : null,
+    [weekdayCourses, friendId, friendCourses, profile, listedImports.length, importStatus, loadError],
   );
 
   if (!timetable) {
@@ -241,7 +249,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
   const visible = displayCourses
     .filter((course) => (view === 'day' ? course.day === day : course.day >= 1))
     .sort((a, b) => a.day - b.day || a.start - b.start);
-  const windows = friendId && profile && !loadError && importStatus === 'ready' && !listedImports.length ? meetupWindows(displayCourses, friendCourses, profile) : [];
+  const windows = friendId && profile && !loadError && importStatus === 'ready' && !listedImports.length ? meetupWindows(weekdayCourses, friendCourses, profile) : [];
   const nameOf = (id: string) => friends.find((friend) => friend.uid === id)?.name || '同學';
 
   const sendMeetup = async (kind: 'meal' | 'study', dayOfWeek: number, startMinute: number) => {
@@ -389,7 +397,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
         </Pressable>)}
         {view === 'day' ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {WEEKDAY_LABELS.map((label, index) => (
+            {TIMETABLE_DAY_LABELS.map((label, index) => (
               <Pressable key={label} onPress={() => setDay(index + 1)}>
                 <Text style={{ color: day === index + 1 ? theme.colors.accent : theme.colors.muted }}>{label}</Text>
               </Pressable>
@@ -397,11 +405,12 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
           </View>
         ) : null}
         {view === 'grid' ? (
-          <View>
+          <ScrollView horizontal showsHorizontalScrollIndicator accessibilityLabel="一週課表，可橫向捲動查看週末">
+          <View style={{ minWidth: 44 + 7 * 52 }}>
             <View style={{ flexDirection: 'row' }}>
               <Text style={{ width: 44, color: theme.colors.muted, fontSize: 11 }}>節</Text>
               {WEEKDAYS_SHORT.map((label) => (
-                <Text key={label} style={{ flex: 1, color: theme.colors.muted, fontSize: 11, textAlign: 'center' }}>
+                <Text key={label} style={{ flex: 1, minWidth: 52, color: theme.colors.muted, fontSize: 11, textAlign: 'center' }}>
                   {label}
                 </Text>
               ))}
@@ -415,7 +424,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
                     {'\n'}
                     {time[0]}
                   </Text>
-                  {WEEKDAY_LABELS.map((_, dayIndex) => {
+                  {TIMETABLE_DAY_LABELS.map((_, dayIndex) => {
                     const hit = displayCourses.find(
                       (course) => course.day === dayIndex + 1 && period >= course.start && period <= course.end,
                     );
@@ -425,6 +434,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
                         onPress={() => hit && openCourse(hit)}
                         style={{
                           flex: 1,
+                          minWidth: 52,
                           borderWidth: 0.5,
                           borderColor: theme.colors.separator,
                           backgroundColor: hit ? theme.colors.card : 'transparent',
@@ -443,6 +453,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
               );
             })}
           </View>
+          </ScrollView>
         ) : visible.length === 0 ? (
           <Text style={{ color: theme.colors.muted }}>{listedImports.length ? '以上課程保留原始時間，未放入節次格子。' : '這份課表目前沒有可列出的課程。可匯入或新增自己的資料。'}</Text>
         ) : (
@@ -460,7 +471,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
             >
               <Pressable onPress={() => openCourse(course)} accessibilityRole="button">
                 <Text style={{ color: theme.colors.muted }}>
-                  {WEEKDAY_LABELS[course.day - 1] || '未排定'} · {profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認'}
+                  {TIMETABLE_DAY_LABELS[course.day - 1] || '未排定'} · {profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認'}
                 </Text>
                 <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{course.name}</Text>
                 <Text style={{ color: theme.colors.muted }}>
@@ -566,7 +577,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
             disabled={!planner}
             onPress={() => {
               if (!profile || !planner) return;
-              const slots = studySlots(displayCourses, studyDay, studyHours, profile);
+              const slots = studySlots(weekdayCourses, studyDay, studyHours, profile);
               setAnswer(slots.length ? slots : ['這天的空堂都不夠長，換一天或少排一點。']);
             }}
           />
@@ -686,7 +697,8 @@ function MeetupWindowRow({
   );
 }
 
-const WEEKDAYS_SHORT = ['一', '二', '三', '四', '五'];
+const TIMETABLE_DAY_LABELS = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+const WEEKDAYS_SHORT = ['一', '二', '三', '四', '五', '六', '日'];
 
 const inputStyle = {
   borderWidth: 1,
