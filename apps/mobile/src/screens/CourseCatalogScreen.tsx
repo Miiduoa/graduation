@@ -515,7 +515,7 @@ export function CourseCatalogScreen(props: CatalogScreenProps) {
 
   if (capability?.providerId === 'ncnu-public') {
     const keyword = props.route?.params?.filter?.keyword;
-    return <NcnuCourseCatalogScreen key={scopeKey} initialQuery={typeof keyword === 'string' ? keyword.slice(0, 80) : ''} />;
+    return <NcnuCourseCatalogScreen key={scopeKey} navigation={props.navigation} initialQuery={typeof keyword === 'string' ? keyword.slice(0, 80) : ''} />;
   }
 
   if (!capability) {

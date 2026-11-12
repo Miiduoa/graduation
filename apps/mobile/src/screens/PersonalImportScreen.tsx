@@ -388,7 +388,7 @@ function ImportWorkspace({
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState('');
   const draftKey = `${personalImportStorageKey(scope)}:grid-draft:v1`;
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let mounted = true;
     readImportReviewDraft(draftKey)
       .then((raw) => {
@@ -439,7 +439,7 @@ function ImportWorkspace({
     return () => {
       mounted = false;
     };
-  }, [draftKey, schoolId]);
+  }, [draftKey, schoolId]));
   useEffect(() => {
     if (!draftReady || draftError) return;
     const value = JSON.stringify({

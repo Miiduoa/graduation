@@ -4,6 +4,10 @@ import { Linking } from 'react-native';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
 import { queryCatalog } from '../services/courseCatalogClient';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { personalImportStorageKey } from '../services/personalImports';
+let mockScope: { owner: string; schoolId: string } | null = { owner: 'guest:device', schoolId: 'ncnu' };
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
 let mockSchoolId = 'ncnu';
 const setBrowsingSchoolId = (value: string) => { mockSchoolId = value; };
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId, name: mockSchoolId } }) }));
@@ -74,4 +78,52 @@ test('NCNU late response is cancelled on school switch and a different-campus pa
     expect(await view.findByText('暫時無法讀取暨大課程，請重試或查看官方課程目錄。')).toBeTruthy();
     expect(view.queryByText('資料庫管理系統')).toBeNull();
   } finally { globalThis.fetch = original; }
+});
+
+const navigation = () => ({ navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalTimetable', 'PersonalImport'] }) });
+const draftKey = `${personalImportStorageKey({ owner: 'guest:device', schoolId: 'ncnu' })}:grid-draft:v1`;
+
+test('暨大保留課表及匯入入口，查課後建立可核對的草稿再導向匯入頁', async () => {
+  await AsyncStorage.clear();
+  setBrowsingSchoolId('ncnu');
+  mockScope = { owner: 'guest:device', schoolId: 'ncnu' };
+  const original = globalThis.fetch;
+  globalThis.fetch = jest.fn().mockResolvedValue(ncnuJson([ncnuDatabaseCourse]));
+  try {
+    const nav = navigation();
+    const view = render(<CourseCatalogScreen navigation={nav} />);
+    fireEvent.press(view.getByText('查看我的課表'));
+    expect(nav.navigate).toHaveBeenLastCalledWith('PersonalTimetable', undefined);
+    fireEvent.press(view.getByText('匯入我的資料'));
+    expect(nav.navigate).toHaveBeenLastCalledWith('PersonalImport', undefined);
+    fireEvent.press(view.getByText('查詢課程'));
+    fireEvent.press(await view.findByText('帶入課表核對'));
+    await waitFor(() => expect(nav.navigate).toHaveBeenLastCalledWith('PersonalImport', { kind: 'timetable' }));
+    const draft = JSON.parse((await AsyncStorage.getItem(draftKey))!);
+    expect(draft).toMatchObject({ version: 1, kind: 'timetable', academicYear: '115', semester: '1' });
+    expect(draft.rows).toEqual([expect.objectContaining({ schoolId: 'ncnu', title: '資料庫管理系統', courseCode: '130032', className: '0', location: '管268', dayOfWeek: 4, startTime: '13:30', endTime: '16:20', credits: 3 })]);
+    expect(draft.selected).toEqual(draft.rows.map((row: { id: string }) => row.id));
+    expect(draft.issues.some((issue: { severity: string }) => issue.severity === 'error')).toBe(false);
+  } finally { globalThis.fetch = original; }
+});
+
+test('既有草稿及未確認帳號不會被查課結果覆蓋', async () => {
+  setBrowsingSchoolId('ncnu');
+  mockScope = { owner: 'guest:device', schoolId: 'ncnu' };
+  await AsyncStorage.setItem(draftKey, '原有草稿');
+  const original = globalThis.fetch;
+  globalThis.fetch = jest.fn().mockResolvedValue(ncnuJson([ncnuDatabaseCourse]));
+  try {
+    const nav = navigation();
+    const view = render(<CourseCatalogScreen navigation={nav} />);
+    fireEvent.press(view.getByText('查詢課程'));
+    fireEvent.press(await view.findByText('帶入課表核對'));
+    await view.findByText('匯入頁已有待核對的草稿，請先前往「匯入我的資料」處理。');
+    expect(await AsyncStorage.getItem(draftKey)).toBe('原有草稿');
+    mockScope = null;
+    view.rerender(<CourseCatalogScreen navigation={nav} />);
+    fireEvent.press(view.getByText('帶入課表核對'));
+    await view.findByText('請先確認目前帳號與所選校園，再帶入課表核對。');
+    expect(nav.navigate).not.toHaveBeenCalled();
+  } finally { globalThis.fetch = original; mockScope = { owner: 'guest:device', schoolId: 'ncnu' }; }
 });

@@ -1,10 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Keyboard, Linking, Text, TextInput, View } from 'react-native';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
-import { ncnuCourseMeetings } from '@campus/shared/src/ncnuCourseSchedule';
-import { isNcnuPublicCourseCatalog, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
+import { isNcnuPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { Button, Card, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
+import { parsePersonalImport } from '@campus/shared/src/imports/parser';
+import { usePersonalImportScope } from '../state/personalImportScope';
+import { personalImportStorageKey } from '../services/personalImports';
+import { readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
+import { loadPersonalImportDraft } from '../services/imports/personalImportDraft';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type Result =
   | { status: 'loading' | 'error'; query: string }
@@ -13,7 +19,54 @@ type Result =
 const catalogUrl = resolveOfficialCourseQueryLink('ncnu')!.url;
 const maxBytes = 512 * 1024;
 
-export function NcnuCourseCatalogScreen({ initialQuery = '' }: { initialQuery?: string }) {
+export function NcnuCourseCatalogScreen({ initialQuery = '', navigation }: { initialQuery?: string; navigation?: Parameters<typeof safeNavigate>[0] }) {
+  const scope = usePersonalImportScope();
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const mounted = useRef(true);
+  const busy = useRef(false);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  async function review(course: PublicCatalogCourse) {
+    if (busy.current) return;
+    if (!scope || scope.schoolId !== 'ncnu') {
+      setNotice('請先確認目前帳號與所選校園，再帶入課表核對。');
+      return;
+    }
+    const current = () => mounted.current && scopeRef.current?.owner === scope.owner && scopeRef.current?.schoolId === scope.schoolId;
+    busy.current = true;
+    try {
+      const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+      const existing = await readImportReviewDraft(key);
+      const aiDraft = await loadPersonalImportDraft(scope);
+      if (!current()) return;
+      if (existing || aiDraft) {
+        setNotice('匯入頁已有待核對的草稿，請先前往「匯入我的資料」處理。');
+        return;
+      }
+      const text = ncnuTimetableImportCsv(course);
+      if (!text) return;
+      const academicYear = course.semester.slice(0, -1);
+      const semester = course.semester.slice(-1);
+      const source = { type: 'paste' as const, name: '暨南大學本學期開設課程' };
+      const { rows, issues } = parsePersonalImport(text, { kind: 'timetable', schoolId: 'ncnu', academicYear, semester, source });
+      if (!rows.length || issues.some(issue => issue.severity === 'error')) {
+        setNotice('課表資料需要手動核對，請前往匯入我的資料。');
+        return;
+      }
+      await writeImportReviewDraft(key, JSON.stringify({
+        version: 1, kind: 'timetable', academicYear, semester, text, source,
+        rows, issues, selected: rows.map(row => row.id), editedIds: [], backupPreview: null,
+      }));
+      if (current()) safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' });
+    } catch {
+      if (current()) setNotice('無法安全讀寫匯入草稿，請稍後重試。');
+    } finally {
+      busy.current = false;
+    }
+  }
+
   const [query, setQuery] = useState(initialQuery);
   const [result, setResult] = useState<Result | null>(null);
   const [linkError, setLinkError] = useState(false);
@@ -82,6 +135,9 @@ export function NcnuCourseCatalogScreen({ initialQuery = '' }: { initialQuery?: 
             setLinkError(false);
             void Linking.openURL(catalogUrl).catch(() => setLinkError(true));
           }} />
+          <Button text="查看我的課表" kind="ghost" onPress={() => { safeNavigate(navigation, 'PersonalTimetable'); }} />
+          <Button text="匯入我的資料" kind="ghost" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />
+          {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
           {linkError && <Text accessibilityRole="alert" style={body}>無法開啟校方網站，請稍後再試。</Text>}
           {result?.status === 'loading' && <Text accessibilityLiveRegion="polite" style={body}>正在查詢{label}…</Text>}
           {result?.status === 'error' && <Text accessibilityRole="alert" style={body}>暫時無法讀取暨大課程，請重試或查看官方課程目錄。</Text>}
@@ -96,6 +152,7 @@ export function NcnuCourseCatalogScreen({ initialQuery = '' }: { initialQuery?: 
             <Text style={body}>{[item.department, item.teacher, item.credits && item.credits + ' 學分'].filter(Boolean).join(' · ')}</Text>
             <Text style={body}>{meetings?.map(meeting => meeting.label).join('、') || (item.time ? '校方節次 ' + item.time : '上課時間未提供')}{item.room ? ' · ' + item.room : ''}</Text>
             <Text style={body}>{item.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期')}</Text>
+            {ncnuTimetableImportCsv(item) ? <Button text="帶入課表核對" kind="primary" onPress={() => { void review(item); }} /> : null}
           </Card>;
         }}
       />

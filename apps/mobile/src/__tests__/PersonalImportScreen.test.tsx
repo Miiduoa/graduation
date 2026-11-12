@@ -17,6 +17,7 @@ import {
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
 import * as ImagePicker from 'expo-image-picker';
 import PersonalImportScreen from '../screens/PersonalImportScreen';
+import { NcnuCourseCatalogScreen } from '../screens/NcnuCourseCatalogScreen';
 import { loadPersonalImports, personalImportStorageKey } from '../services/personalImports';
 import {
   runMobilePersonalImportAi,
@@ -100,6 +101,7 @@ jest.mock('../ui/components', () => {
   const React = require('react');
   const { View, Text, Pressable } = require('react-native');
   return {
+    Card: ({ children, title }: { children: ReactNode; title: string }) => <View><Text>{title}</Text>{children}</View>,
     Screen: ({ children, title }: { children: ReactNode; title: string }) => (
       <View>
         <Text>{title}</Text>
@@ -2179,3 +2181,29 @@ test.each(['cancel', 'complete', 'empty', 'zero', 'error', 'restore'] as const)(
     expect((await loadPersonalImports(scope)).records).toHaveLength(0);
   },
 );
+
+
+test('手機暨大查課結果帶入真正匯入頁，顯示可編輯課表並等待確認', async () => {
+  mockScope = { owner: scope.owner, schoolId: 'ncnu' };
+  const original = globalThis.fetch;
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+      schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall', truncated: false,
+      courses: [{ code: '130032', section: '0', title: '資料庫管理系統', department: '資管系', teacher: '王老師', time: '4efg', room: '管268', semester: '1151', credits: '3.0' }],
+    }),
+  });
+  try {
+    const nav = { navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalImport'] }) };
+    const catalog = render(<NcnuCourseCatalogScreen navigation={nav} />);
+    fireEvent.press(catalog.getByText('查詢課程'));
+    fireEvent.press(await catalog.findByText('帶入課表核對'));
+    await waitFor(() => expect(nav.navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' }));
+    catalog.unmount();
+    const review = render(<PersonalImportScreen route={{ params: { kind: 'timetable' } }} />);
+    fireEvent.press(await review.findByLabelText(/修正.*資料庫管理系統/));
+    expect(review.getByDisplayValue('資料庫管理系統')).toBeTruthy();
+    expect(review.getByDisplayValue('130032')).toBeTruthy();
+    expect(review.getByDisplayValue('管268')).toBeTruthy();
+    expect((await loadPersonalImports(mockScope!)).records).toHaveLength(0);
+  } finally { globalThis.fetch = original; }
+});
