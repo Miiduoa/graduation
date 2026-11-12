@@ -601,3 +601,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補只對非作者 GET 將上述三個狀態加入禁止公開清單，保留作者預覽、正常 `status:published` 的精確附件引用及沒有明確限制的歷史貼文相容。新增 Web 共用授權及 Functions HTTP 惰性 Storage 正反向回歸，涵蓋同組讀者／管理者拒絕、作者仍可讀，以及轉為 published 後合法讀取；原本的跨帳號、跨校、退組測試維持。新提交必須重新以精確 head 的 GitHub CI／CodeQL 驗證。
 
 **尚未解除的不同層面風險**：Firestore `groups/{groupId}/posts/{postId}` 規則目前仍對 active member 放行文件讀取，可能揭露尚未發布貼文的 metadata；收緊 Firestore list 規則可能要求同步修改群組動態查詢，不能以本次附件 HTTP 守門聲稱已修復。其他仍有舊 GCS／Supabase bearer/signed URL 撤銷、真隔離 Storage staging、缺附件清單歷史資料、minimatch 雙鎖檔、最新 main 整合、正式部署與回復。未操作正式資料、金鑰、token、migration、E 校園，未重送未授權 pnpm/npm audit；不合併、不部署，等 App 5504170 對新精確 head 核可後交主線窗口。
+
+
+## 2026-11-13：未發布／撤回的群組貼文，子集合留言不能被成員繞道讀取（PR #577）
+
+原 Firestore Rules 對 `groups/{groupId}/posts/{postId}/comments` 只檢查 active group membership。即使附件 HTTP 已阻擋非作者讀取未發布／撤回貼文，知道 postId 的其他有效成員仍可能直接列舉留言，包括未發表時的內容與助理回覆。這是與父貼文讀取不同的路徑授權漏洞，且不需要任何正式資料即可用合成文件重現判定。父貼文 `posts` 集合的 **list/read 還沒有收緊**：因既有 Mobile 無條件 `orderBy(createdAt)` 查詢包含缺 status 的歷史貼文，若只改 Rules 而不做雙路徑相容查詢／可信歷史資料補齊，會使正常動態全面失敗。此輪不宣稱父貼文本身的曝光已修復。
+
+最小修補在 comments 子集合的讀取與新留言建立增加固定父 post 檢查，保留作者草稿檢視；非作者遇到 `published:false`、`draft/scheduled/pending/unpublished/archived/cancelled/canceled`、刪除旗標或刪除時間立即拒絕；只有會員資格仍有效且貼文發布時才能讀取／留言。缺父貼文拒絕。已新增 `backend/tests/security-rules.test.js` Firebase emulator 合成回歸：既有可讀、草稿／撤回／刪除時 peer 與 instructor get/list/create 拒絕、作者可讀、重新發布恢復、再次撤回及作者校籍撤銷。這是拒絕新的 Firestore 存取，不會撤銷先前已簽 GCS/Supabase URL。
+
+此次只有開發分支修補與可重跑測試，**尚待此精確 head 的 Rules CI、全部適用 CI／CodeQL 與 nuni-merge-gate App 5504170 核可**。不合併／部署、不執行 migration、token 清理或正式資料測試；沿用 E 校園暫停與未授權 npm/pnpm audit 的限制。GCS/Supabase 已發 URL、真 Storage CAS／重放、歷史附件引用、minimatch 雙鎖檔、父貼文 list 相容改造及正式發布／回復仍待驗證。

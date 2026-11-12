@@ -1032,9 +1032,30 @@ service cloud.firestore {
         allow delete: if canManageGroup(groupId) || ownsOrdinaryPost();
 
         match /comments/{commentId} {
-          allow read: if isActiveGroupMember(groupId);
+          // Comments are a separate collection path: membership alone must not
+          // expose replies on an author's withdrawn or unpublished post.
+          // The parent lookup is fixed to this group/post, not client input.
+          function canReadPostComments() {
+            let postData = get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data;
+            return isActiveGroupMember(groupId)
+              && exists(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId))
+              && (
+                postData.get('authorId', null) == request.auth.uid
+                || (
+                  postData.get('published', true) != false
+                  && !(postData.get('status', '') in [
+                    'draft', 'scheduled', 'pending', 'unpublished',
+                    'archived', 'cancelled', 'canceled'
+                  ])
+                  && postData.get('deleted', false) != true
+                  && postData.get('deletedAt', null) == null
+                )
+              );
+          }
+
+          allow read: if canReadPostComments();
           // 助理回覆只由伺服器（Cloud Functions）寫入；用戶端不能寫、不能改、不能冒用助理的名字
-          allow create: if isActiveGroupMember(groupId)
+          allow create: if canReadPostComments()
             && commentId != 'assistant'
             && request.resource.data.authorId == request.auth.uid
             && request.resource.data.get('isAI', false) != true

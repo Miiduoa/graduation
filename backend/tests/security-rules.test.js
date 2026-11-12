@@ -956,6 +956,48 @@ describe('firestore security rules', () => {
       await assertFails(post.delete());
     });
 
+    test('unpublished, withdrawn and deleted group posts do not expose nested comments', async () => {
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      const teacher = testEnv.authenticatedContext('teacher').firestore();
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      const commentCollection = 'groups/course/posts/first/comments';
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+      });
+
+      // Ordinary/legacy posts without an explicit visibility flag remain usable.
+      await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(teacher.collection(commentCollection).get());
+      for (const state of [
+        { published: false, status: 'draft' },
+        ...['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled']
+          .map((status) => ({ published: true, status })),
+        { published: true, status: 'published', deleted: true },
+        { published: true, status: 'published', deleted: false, deletedAt: new Date() },
+      ]) {
+        await seedFirestore((admin) => admin.doc(postPath).update({
+          published: true, status: 'published', deleted: false, deletedAt: null, ...state,
+        }));
+        await assertFails(teacher.doc(commentPath).get({ source: 'server' }));
+        await assertFails(teacher.collection(commentCollection).get());
+        await assertFails(bob.doc(commentPath).get({ source: 'server' }));
+        await assertFails(bob.doc(commentCollection + '/new').set({ authorId: 'bob', body: 'Must not reply' }));
+        await assertSucceeds(alice.doc(commentPath).get({ source: 'server' }));
+      }
+      // Re-publication restores ordinary member access; a later withdrawal
+      // revokes it again at the Firestore rules boundary.
+      await seedFirestore((admin) => admin.doc(postPath).update({
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
+      await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(bob.doc(commentCollection + '/new').set({ authorId: 'bob', body: 'Published' }));
+      await seedFirestore((admin) => admin.doc(postPath).update({ status: 'archived' }));
+      await assertFails(bob.doc(commentCollection + '/new').get({ source: 'server' }));
+      await seedFirestore((admin) => admin.doc('schools/pu/members/alice').update({ status: 'removed' }));
+      await assertFails(alice.doc(commentPath).get({ source: 'server' }));
+    });
+
     test('editing cannot transfer authorship', async () => {
       const post = testEnv.authenticatedContext('alice').firestore().doc(postPath);
       await assertFails(post.update({ authorId: 'teacher' }));
