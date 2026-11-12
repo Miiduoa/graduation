@@ -99,6 +99,31 @@ async function askForPlan() {
   return question;
 }
 
+it.each(['ASSISTANT_PERMISSION_DENIED', 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE'])(
+  'shows permission recovery and only reads back a calendar result after %s', async (code) => {
+    const card = calendarCard();
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      if (url.endsWith('confirm')) return new Response(JSON.stringify({ error: code }), {
+        status: code === 'ASSISTANT_PERMISSION_DENIED' ? 403 : 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (url.endsWith('reconcile')) return json(checkFor(card, 'absent'));
+      return json({ answer: '請核對這筆行程', steps: [], cards: [card] });
+    }));
+    render(<Assistant />);
+    await askForPlan();
+    fireEvent.click(await screen.findByText('確認'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('這次沒有執行'));
+    await waitFor(() => expect(calls.filter((path) => path.endsWith('reconcile'))).toHaveLength(1));
+    expect(screen.getByRole('link', { name: '設定 AI 代辦權限' }).getAttribute('href')).toBe('/settings?section=assistant');
+    expect(calls.filter((path) => path.endsWith('confirm'))).toHaveLength(1);
+    expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+  },
+);
+
 it('v2 opens a scoped service while the provider is unavailable and without model consent', async () => {
   const fetch = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
   vi.stubGlobal('fetch', fetch);

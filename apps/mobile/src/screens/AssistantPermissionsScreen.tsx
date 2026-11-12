@@ -8,6 +8,8 @@ import {
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { useOptionalNuniSession } from '../state/nuniSession';
+import { PlatformAssistantPermissions } from './PlatformAssistantPermissions';
 import {
   loadAssistantWritePermissionsState,
   saveAssistantWritePermissions,
@@ -19,34 +21,36 @@ type Props = { navigation?: { goBack?: () => void } };
 export function AssistantPermissionsScreen({ navigation }: Props) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
+  const platform = useOptionalNuniSession();
   const scope = user?.uid ?? '';
   const active = useRef(scope);
   active.current = scope;
-  if (!user) {
-    return (
-      <AIDetailScreen title="助理權限" onBack={() => navigation?.goBack?.()}>
+  const hasPlatformState =
+    !!platform &&
+    !!(platform.session || platform.loading || platform.pendingLogout || platform.error);
+  return (
+    <AIDetailScreen title="助理權限" onBack={() => navigation?.goBack?.()}>
+      {!user && !hasPlatformState ? (
         <AICard title="請先登入">
           <Text style={{ color: aiTokens.muted }}>登入後即可調整助理可執行的寫入動作。</Text>
         </AICard>
-      </AIDetailScreen>
-    );
-  }
-  return (
-    <AssistantPermissionsEditor
-      key={scope}
-      navigation={navigation}
-      uid={user.uid}
-      isScopeCurrent={() => active.current === scope}
-    />
+      ) : null}
+      {hasPlatformState && platform ? <PlatformAssistantPermissions auth={platform} /> : null}
+      {user ? (
+        <AssistantPermissionsEditor
+          key={scope}
+          uid={user.uid}
+          isScopeCurrent={() => active.current === scope}
+        />
+      ) : null}
+    </AIDetailScreen>
   );
 }
 
 function AssistantPermissionsEditor({
-  navigation,
   uid,
   isScopeCurrent,
 }: {
-  navigation?: Props['navigation'];
   uid: string;
   isScopeCurrent: () => boolean;
 }) {
@@ -127,8 +131,8 @@ function AssistantPermissionsEditor({
   const disabled = !!busy || !prefs || state?.source === 'unavailable';
 
   return (
-    <AIDetailScreen title="助理權限" onBack={() => navigation?.goBack?.()}>
-      <AICard title="寫入動作">
+    <View style={{ gap: 12 }}>
+      <AICard title="學校帳號的寫入動作">
         <Text style={{ color: aiTokens.muted, lineHeight: 22, marginBottom: 8 }}>
           預設全部關閉。開啟後，助理仍須每次請你確認才會執行。涵蓋服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列；學餐頁一般下單不受「餐廳下單」開關影響。網頁與手機共用同一份設定。
         </Text>
@@ -186,7 +190,7 @@ function AssistantPermissionsEditor({
       {busy === 'load' ? (
         <Text style={{ color: aiTokens.muted, textAlign: 'center' }}>正在讀取設定…</Text>
       ) : null}
-    </AIDetailScreen>
+    </View>
   );
 }
 

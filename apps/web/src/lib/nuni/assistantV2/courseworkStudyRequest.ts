@@ -7,6 +7,7 @@ import {
 } from './courseworkStudy';
 import {
   bounded,
+  requireAssistantPermission,
   fail,
   type Adapter,
   type Binding,
@@ -17,6 +18,10 @@ import {
 import { withOperationSignal } from './operation';
 
 export const COURSEWORK_STUDY_MESSAGES: Record<string, string> = {
+  ASSISTANT_PERMISSION_DENIED:
+    '目前未開啟新增個人行程權限。請到[助理權限](/settings?section=assistant)開啟後再試。',
+  ASSISTANT_PERMISSION_STORE_UNAVAILABLE:
+    '目前無法核對你的助理權限，尚未建立行程。請稍後重試。',
   COURSEWORK_CHANGED:
     '這份作業或測驗的內容、期限或完成狀態已變更，請重新讀取後安排。這次沒有建立行程。',
   COURSEWORK_UNAVAILABLE:
@@ -47,6 +52,7 @@ export async function prepareCourseworkStudyRequest(input: {
     const result = await bounded(
       (signal) =>
         withOperationSignal(signal, async () => {
+          await requireAssistantPermission(input.adapter, 'createPersonalEvent');
           const task = await readCourseworkStudyTask(input.adapter, target);
           steps.push({
             name: 'get_course_work',
@@ -84,6 +90,8 @@ export async function prepareCourseworkStudyRequest(input: {
               stopReason: 'WRITES_DISABLED',
               dataRead: true as const,
             };
+          await requireAssistantPermission(input.adapter, 'createPersonalEvent');
+          signal.throwIfAborted();
           const card = signCard(
             input.binding,
             'propose_personal_event',

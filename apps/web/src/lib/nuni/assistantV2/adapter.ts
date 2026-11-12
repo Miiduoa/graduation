@@ -10,6 +10,7 @@ import {
 } from '@campus/shared/src/imports/sync';
 import { createTransitService } from '../../transit-server';
 import { apiOrigin, boundedJson, type PlatformSession } from '../server';
+import { readPlatformAssistantPermissions } from '../platformAssistantPermissionStore';
 import { bounded, id, object, V2Error, type Adapter, type Obj } from './contracts';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
@@ -120,6 +121,16 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
   }
   const food = createNuniFoodClient((path, input, query) => request(path, input, query));
   const adapter: Adapter = {
+    permissions: async () => {
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      const state = await readPlatformAssistantPermissions(verifiedPrincipal.platformAccountId);
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (state.accountId !== verifiedPrincipal.platformAccountId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
+      return state.permissions;
+    },
     food: {
       onlineEnabled: () => isWebOnlineOrderingEnabled(),
       enabled: () =>

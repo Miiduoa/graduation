@@ -11,7 +11,7 @@ import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
+import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
@@ -271,6 +271,9 @@ export function AssistantThread({
         {error ? (
           <p className={styles.alert} role="alert">
             {error}
+            {assistantPermissionSettingsHref(error) && <>
+              {' '}<Link href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</Link>
+            </>}
           </p>
         ) : null}
         {recoverableQuestion ? (

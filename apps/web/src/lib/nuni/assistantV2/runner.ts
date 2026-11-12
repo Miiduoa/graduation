@@ -1,4 +1,5 @@
 import { maskMessages } from './privacy';
+import { PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS } from '@campus/shared/src/platformAssistantPermissions';
 import { directReads, directReadAnswer, directReadCourseworkTargets } from './directRead';
 import { prepareExplicitEventRequest } from './explicitEventRequest';
 import { prepareCourseworkStudyRequest } from './courseworkStudyRequest';
@@ -20,8 +21,12 @@ import {
 import { randomUUID } from 'node:crypto';
 import {
   bounded,
+  assistantPermissionRecovery,
+  ASSISTANT_PERMISSION_SETTINGS_HREF,
   bytes,
   clip,
+  proposalPermission,
+  requireAssistantPermission,
   V2Error,
   type Adapter,
   type Card,
@@ -217,8 +222,25 @@ export async function run(input: RunInput) {
     : scheduledDate === '前天' ? addDays(taipeiDate(now), -2)
     : scheduledDate || relativeDate;
   const steps: Step[] = [];
+  let foodFallbackFailure = '';
   const withSelectionNotice = (answer: string) => {
     const completedNames = steps.filter((step) => step.status !== 'error').map((step) => step.name);
+    const blocked = steps.filter((step) => assistantPermissionRecovery(step.summary));
+    if (foodFallbackFailure) blocked.push({ name: 'propose_food_order', status: 'error', summary: foodFallbackFailure });
+    if (blocked.length) {
+      // Model text and fallback links cannot carry a prepared cart around the gate.
+      if (blocked.some((step) => proposalPermission(step.name) === 'prepareFoodOrder'))
+        answer = partialAnswer(evidence, tools.cards, input.question, now);
+      const denied = [...new Set(blocked.filter((step) => step.summary === 'ASSISTANT_PERMISSION_DENIED')
+        .map((step) => PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS.find((row) =>
+          row.key === proposalPermission(step.name))?.label || '助理操作'))];
+      const message = denied.length
+        ? `「${denied.join('」、「')}」的助理權限尚未開啟，這些操作尚未執行。`
+        : '目前無法確認助理操作權限，相關操作尚未執行。';
+      answer = verifyProposalAnswer(answer, tools.cards, input.question) + '\n' + message +
+        '請到設定 → 助理權限調整或重新讀取：' + ASSISTANT_PERMISSION_SETTINGS_HREF;
+      completedNames.push(...blocked.map((step) => step.name));
+    }
     const notice = toolSelectionNotice(input.question, input.adapter.simulation, completedNames);
     return notice ? answer + '\n' + notice : answer;
   };
@@ -586,13 +608,19 @@ export async function run(input: RunInput) {
         } catch (e) {
           if ((e as { status?: number }).status === 401 || signal.aborted) throw e;
           if (safeCode(e) === 'UNKNOWN_TOOL' && ++toolFailures >= 2) names.length = 0;
+          const permissionRecovery = assistantPermissionRecovery(safeCode(e));
+          if (permissionRecovery) {
+            const permission = proposalPermission(call.function.name);
+            for (let i = names.length - 1; i >= 0; i--)
+              if (proposalPermission(names[i]) === permission) names.splice(i, 1);
+          }
           response = {
             error: safeCode(e),
             incomplete: true,
-            ...(call.function.name === 'reorder_last_food_order'
+            ...(!permissionRecovery && call.function.name === 'reorder_last_food_order'
               ? { hint: '請省略參數後重試，取餐時間由伺服器填入' }
               : {}),
-            ...tools.recovery(call.function.name),
+            ...(permissionRecovery || tools.recovery(call.function.name)),
           };
           failedResults.push({ tool: availableNames.includes(call.function.name) ? call.function.name : 'unknown', result: response });
           steps.push({
@@ -638,6 +666,9 @@ export async function run(input: RunInput) {
     }
     const ensure = async (name: string, args: unknown) => {
       if (signal.aborted || steps.length >= 8) return;
+      const permission = proposalPermission(name);
+      if (permission && steps.some((step) => proposalPermission(step.name) === permission &&
+          assistantPermissionRecovery(step.summary))) return;
       if (
         steps.some((s) => s.name === name && s.status !== 'error') &&
         name !== 'propose_food_order' &&
@@ -761,7 +792,19 @@ export async function run(input: RunInput) {
       foodOrderIntent(input.question) &&
       !tools.cards.some((card) => card.tool === 'propose_food_order')
     ) {
-      const href = foodLink(evidence, input.question, now);
+      let href = '/food';
+      const blocked = steps.some((step) => proposalPermission(step.name) === 'prepareFoodOrder' &&
+        assistantPermissionRecovery(step.summary));
+      if (!blocked) {
+        try {
+          // A link with items already prepares a cart, even without a confirmation card.
+          await requireAssistantPermission(input.adapter, 'prepareFoodOrder');
+          href = foodLink(evidence, input.question, now);
+        } catch (error) {
+          if ((error as { status?: number }).status === 401 || signal.aborted) throw error;
+          foodFallbackFailure = safeCode(error);
+        }
+      }
       if (!finalAnswer.includes(href) && !finalAnswer.includes('items='))
         finalAnswer = (finalAnswer ? finalAnswer + '\n' : '') + '請至點餐頁繼續選擇：' + href;
     }
@@ -1222,7 +1265,7 @@ export function keepClubNews(
 }
 
 const EXECUTION_CLAIM =
-  /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?事件|建立(?:個人)?事件|安排好|訂購|儲存|預約)|已完成[。！]/;
+  /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?(?:事件|行程)|建立(?:個人)?(?:事件|行程)|安排好|訂購|儲存|預約)|已完成[。！]/;
 const CARD_CLAIM =
   /請[^。；！？\n.!?]*?(?:按|點|核對)[^。；！？\n.!?]*?卡|(?:按|點)[^。；！？\n.!?]*?確認[^。；！？\n.!?]*?卡|(?:已|成功)[^。；！？\n.!?]*?(?:產生|生成|建立)[^。；！？\n.!?]*?(?:卡|提案)/;
 

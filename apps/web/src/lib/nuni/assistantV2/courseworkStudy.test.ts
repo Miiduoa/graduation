@@ -44,6 +44,45 @@ async function prepare(f = fixtureAdapter(), selected = target, at = now) {
 }
 
 describe('selected coursework preview and verified execution', () => {
+  it.each(['denied', 'unavailable', 'revoked'] as const)(
+    'blocks selected-task cards when permission is %s', async (state) => {
+      const f = fixtureAdapter();
+      f.adapter.permissions = vi.fn(async () => {
+        if (state === 'unavailable') throw new Error('store unavailable');
+        return { createPersonalEvent: state === 'revoked', prepareFoodOrder: true };
+      });
+      if (state === 'revoked') {
+        const readWork = f.adapter.work;
+        f.adapter.work = async (courseId) => {
+          const tasks = await readWork(courseId);
+          f.adapter.permissions = async () => ({ createPersonalEvent: false, prepareFoodOrder: true });
+          return tasks;
+        };
+      }
+      const reply = await prepare(f);
+      expect(reply.cards).toEqual([]);
+      expect(reply.stopReason).toBe(state === 'unavailable'
+        ? 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE' : 'ASSISTANT_PERMISSION_DENIED');
+      expect(reply.answer).toContain('助理');
+      expect(f.writes).toHaveLength(0);
+    },
+  );
+
+  it('rechecks permission after the confirmation source guard reads coursework', async () => {
+    const f = fixtureAdapter();
+    const { cards: [card] } = await prepare(f);
+    f.adapter.permissions = async () => ({ createPersonalEvent: true, prepareFoodOrder: true });
+    const readWork = f.adapter.work;
+    f.adapter.work = async (courseId) => {
+      const tasks = await readWork(courseId);
+      f.adapter.permissions = async () => ({ createPersonalEvent: false, prepareFoodOrder: true });
+      return tasks;
+    };
+    await expect(confirm(binding, { token: card.token, args: card.args }, secret, now,
+      f.adapter, true, () => now)).rejects.toMatchObject({ code: 'ASSISTANT_PERMISSION_DENIED' });
+    expect(f.writes).toHaveLength(0);
+  });
+
   it('freshly reads the exact selected task, proposes 30 minutes and writes only after confirmation', async () => {
     const f = fixtureAdapter();
     const readTask = vi.spyOn(f.adapter, 'work');

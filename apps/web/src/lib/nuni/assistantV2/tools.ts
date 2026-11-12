@@ -13,6 +13,7 @@ import { buildPersonalToday } from '@campus/shared/src/imports/today';
 import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './actions';
 import {
   addDays,
+  assistantPermissionRecovery,
   bounded,
   bytes,
   canonical,
@@ -22,9 +23,12 @@ import {
   fail,
   id,
   object,
+  proposalPermission,
+  requireAssistantPermission,
   taipeiDate,
   text,
   type Adapter,
+  type AssistantPermissionKey,
   type Binding,
   type Card,
   type Ledger,
@@ -744,6 +748,22 @@ export function createTools(
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  async function requirePermission(key: AssistantPermissionKey) {
+    try {
+      await requireAssistantPermission(adapter, key);
+      operationSignal()?.throwIfAborted();
+    } catch (error) {
+      // Repeated calls cannot reuse an earlier card after its grant was revoked.
+      for (let i = cards.length - 1; i >= 0; i--) {
+        if (proposalPermission(cards[i].tool) === key) cards.splice(i, 1);
+      }
+      for (const cached of cache.keys()) {
+        const name = cached.slice(0, cached.indexOf('{'));
+        if (proposalPermission(name) === key) cache.delete(cached);
+      }
+      throw error;
+    }
+  }
   let proposalSeq: string | undefined;
   const sequence = () => (proposalSeq ||= beginProposal(binding, now));
   const diningIds = new Set<string>();
@@ -871,6 +891,7 @@ export function createTools(
     )
       return fail('EVENT_CONFLICT', 409);
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
+    await requirePermission('createPersonalEvent');
     const card = signCard(
       binding,
       'propose_personal_event',
@@ -1005,6 +1026,7 @@ export function createTools(
                 ? '此訂單需付款，請到點餐頁完成'
                 : '確認後下單，自取',
         };
+        await requirePermission('prepareFoodOrder');
         cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
         return { proposed: true, mode, reason: args.reason, summary, href: args.href, requiresConfirmation: true };
       }
@@ -1373,6 +1395,8 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
+      const permission = proposalPermission(name);
+      if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
       if (name === 'propose_personal_event') {
         const spoken = parseSpokenClock(question);
@@ -1501,6 +1525,7 @@ export function createTools(
       try {
         value = await cache.get(key);
       } catch (error) {
+        if (assistantPermissionRecovery(String((error as { code?: string }).code))) throw error;
         if (name !== 'reorder_last_food_order') throw error;
         const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
         const retryKey = name + canonical(filled);
