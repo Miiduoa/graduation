@@ -895,6 +895,28 @@ describe('new lesson self-check quality boundary', () => {
   });
 
   it.each([
+    { label: 'a decimal point', question: 'x = 1.2？', answer: 'x = 12' },
+    { label: 'parenthesized arithmetic', question: '(a+b) * c？', answer: 'a+b * c' },
+    { label: 'numeric grouping punctuation', question: '1,000？', answer: '1000' },
+  ])('retains a NEW mathematical self-check when only its INTERNAL punctuation differs ($label)', async ({ question, answer }) => {
+    const mathematical = { ...lesson(), question, answer };
+    // The question and answer are not the same mathematical expression.
+    // Legacy v1/v2 study progress parsing remains untouched.
+    expect(parseTutorExplanation(JSON.stringify(mathematical), passage()))
+      .toMatchObject({ question, answer });
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam',
+      signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(mathematical) });
+    await expect(pending).resolves.toEqual(mathematical);
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'success' }));
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it.each([
     { label: 'exact repetition', question: '主鍵', answer: '主鍵' },
     { label: 'punctuation and direction marks', question: '\u2066主鍵？', answer: '主鍵。' },
     { label: 'case and whitespace', question: 'SQL ? ', answer: 'sql' },
