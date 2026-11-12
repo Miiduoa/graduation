@@ -113,10 +113,11 @@ function hasSubstantiveGeneratedReview(explanation: TutorExplanation): boolean {
 // characters for this NEW-output comparison; retain mathematical operators.
 function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
   const comparable = (value: string) => comparableGeneratedTeaching(value)
-    // Strip cosmetic punctuation around the question, not punctuation inside
-    // a mathematical value: 1.2 is not 12, and (a+b)*c is not a+b*c.
+    // Only drop sentence/quote marks at the ends. Generic punctuation includes
+    // grouping brackets and leading decimal points: (a+b) is NOT a+b, and
+    // .5 is NOT 5. Neither should trigger an unnecessary AI regeneration.
     .replace(/\s+/gu, '')
-    .replace(/^[\p{P}]+|[\p{P}]+$/gu, '')
+    .replace(/^[?!？!。；;：:，、"'“”‘’「」『』…]+|[.!?。！？；;：:，、"'“”‘’「」『』…]+$/gu, '')
     .toLowerCase();
   return comparable(explanation.question) !== comparable(explanation.answer);
 }

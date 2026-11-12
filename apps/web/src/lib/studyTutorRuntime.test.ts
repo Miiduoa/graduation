@@ -898,6 +898,10 @@ describe('new lesson self-check quality boundary', () => {
     { label: 'a decimal point', question: 'x = 1.2？', answer: 'x = 12' },
     { label: 'parenthesized arithmetic', question: '(a+b) * c？', answer: 'a+b * c' },
     { label: 'numeric grouping punctuation', question: '1,000？', answer: '1000' },
+    { label: 'outer parentheses affect grouping', question: '(a+b)？', answer: 'a+b' },
+    { label: 'square brackets denote a collection', question: '[a,b]？', answer: 'a,b' },
+    { label: 'leading decimal point is a number', question: '.5？', answer: '5' },
+    { label: 'full-width expression brackets', question: '（a+b）？', answer: 'a+b' },
   ])('retains a NEW mathematical self-check when only its INTERNAL punctuation differs ($label)', async ({ question, answer }) => {
     const mathematical = { ...lesson(), question, answer };
     // The question and answer are not the same mathematical expression.
@@ -920,6 +924,8 @@ describe('new lesson self-check quality boundary', () => {
     { label: 'exact repetition', question: '主鍵', answer: '主鍵' },
     { label: 'punctuation and direction marks', question: '\u2066主鍵？', answer: '主鍵。' },
     { label: 'case and whitespace', question: 'SQL ? ', answer: 'sql' },
+    { label: 'cosmetic Chinese quote marks', question: '「主鍵？」', answer: '主鍵。' },
+    { label: 'English sentence punctuation', question: 'SQL!', answer: 'sql' },
   ])('rejects a tautological self-check ($label) while preserving saved formats and retry', async ({ question, answer }) => {
     const repeated = { ...lesson(), question, answer };
     // Legacy v1/v2 lesson decoding is deliberately unchanged.
