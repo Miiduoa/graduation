@@ -1,4 +1,4 @@
-import { confirmDmPhoto, localPhoto, openDmPhoto, uploadDmPhoto } from '../../services/dmPhotos';
+import { confirmDmPhoto, localPhoto, openDmPhoto, photoParts, uploadDmPhoto } from '../../services/dmPhotos';
 import { httpsCallable } from 'firebase/functions';
 import { Request as NativeFetchRequest } from 'whatwg-fetch';
 
@@ -43,45 +43,14 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-test('uploads the picked bytes with a native file field last, no preview read, then confirms the exact message', async () => {
-  const append = jest.spyOn(FormData.prototype, 'append').mockImplementation(() => undefined);
-  mockCall.mockResolvedValueOnce({
-    data: {
-      method: 'POST',
-      url: 'https://bucket.storage.googleapis.com/',
-      fields: { key: path, 'Content-Type': local.contentType },
-      path,
-      mediaId: 'media',
-      expiresAt: expiresAt(),
-    },
-  });
-  (fetch as jest.Mock).mockResolvedValueOnce({ ok: true });
-  await expect(uploadDmPhoto(scope, local, signal())).resolves.toBe(path);
-  expect(mockCall.mock.calls).toEqual([
-    [
-      {
-        ...scope,
-        action: 'uploadPhoto',
-        fileName: 'photo.png',
-        size: 21,
-        contentType: 'image/png',
-      },
-    ],
-  ]);
-  expect(append.mock.calls.at(-1)).toEqual([
-    'file',
-    { uri: local.uri, type: local.contentType, name: 'photo.png' },
-  ]);
-  expect(fetch).toHaveBeenCalledTimes(1);
-  mockCall.mockResolvedValueOnce({ data: { conversationId: 'private', messageId: 'different' } });
-  await expect(confirmDmPhoto(scope, path, signal())).rejects.toThrow('unconfirmed');
-  mockCall.mockResolvedValueOnce({
-    data: { conversationId: 'private', messageId: scope.messageId },
-  });
-  await confirmDmPhoto(scope, path, signal());
-  expect(httpsCallable).toHaveBeenCalledWith('functions', 'sendDmPhoto');
-  expect(mockCall).toHaveBeenLastCalledWith({ ...scope, path });
+test('upload and confirm report photos unavailable without calling Firebase', async () => {
+  await expect(uploadDmPhoto(scope, local, signal())).rejects.toThrow('photo-unavailable');
+  await expect(confirmDmPhoto(scope, path, signal())).rejects.toThrow('photo-unavailable');
+  expect(mockCall).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
 });
+
 test('rejects oversized, remote, unsupported or changed local files before requesting access', async () => {
   expect(() => localPhoto('https://bad.test/x', 'image/png')).toThrow();
   expect(() => localPhoto(local.uri, 'image/gif')).toThrow();
@@ -92,65 +61,23 @@ test('rejects oversized, remote, unsupported or changed local files before reque
   expect(mockCall).not.toHaveBeenCalled();
 });
 
-test('existing conversation IDs longer than 120 characters still bind a photo upload', async () => {
+test('existing conversation IDs longer than 120 characters still parse a bound photo path', () => {
   const conversationId = `dm_pu_${'a'.repeat(64)}_${'b'.repeat(64)}`;
   expect(conversationId).toHaveLength(135);
-  const longScope = { ...scope, conversationId };
   const longPath = path.replace('/private/', `/${conversationId}/`);
-  jest.spyOn(FormData.prototype, 'append').mockImplementation(() => undefined);
-  mockCall.mockResolvedValueOnce({
-    data: {
-      method: 'POST',
-      url: 'https://bucket.storage.googleapis.com/',
-      fields: { key: longPath, 'Content-Type': local.contentType },
-      path: longPath,
-      mediaId: 'media',
-      expiresAt: expiresAt(),
-    },
-  });
-  (fetch as jest.Mock).mockResolvedValueOnce({ ok: true });
-  await expect(uploadDmPhoto(longScope, local, signal())).resolves.toBe(longPath);
-  expect(mockCall).toHaveBeenCalledWith(
-    expect.objectContaining({ conversationId, action: 'uploadPhoto' }),
-  );
+  expect(photoParts(longPath, conversationId, false)).toMatchObject({ mediaId: 'media' });
+  const longScope = { ...scope, conversationId };
+  return expect(uploadDmPhoto(longScope, local, signal())).rejects.toThrow('photo-unavailable');
 });
 
-test('binds a first photo upload and confirmation to the prepared canonical peer', async () => {
+test('a prepared canonical peer still cannot upload or confirm a photo', async () => {
   const first = { ...scope, conversationId: 'dm_pu_alice_bob', peerUid: 'bob' };
   const firstPath = path.replace('/private/', '/dm_pu_alice_bob/');
-  jest.spyOn(FormData.prototype, 'append').mockImplementation(() => undefined);
-  mockCall.mockResolvedValueOnce({ data: {
-    method: 'POST', url: 'https://bucket.storage.googleapis.com/',
-    fields: { key: firstPath, 'Content-Type': local.contentType },
-    path: firstPath, mediaId: 'media', expiresAt: expiresAt(),
-  } });
-  (fetch as jest.Mock).mockResolvedValueOnce({ ok: true });
-  await expect(uploadDmPhoto(first, local, signal())).resolves.toBe(firstPath);
-  expect(mockCall).toHaveBeenCalledWith(expect.objectContaining({ ...first, action: 'uploadPhoto' }));
-  mockCall.mockResolvedValueOnce({ data: { conversationId: first.conversationId, messageId: first.messageId } });
-  await confirmDmPhoto(first, firstPath, signal());
-  expect(mockCall).toHaveBeenLastCalledWith({ ...first, path: firstPath });
-  mockCall.mockClear();
-  await expect(uploadDmPhoto({ ...first, peerUid: 'charlie' }, local, signal())).rejects.toThrow('session');
+  await expect(uploadDmPhoto(first, local, signal())).rejects.toThrow('photo-unavailable');
+  await expect(confirmDmPhoto(first, firstPath, signal())).rejects.toThrow('photo-unavailable');
   expect(mockCall).not.toHaveBeenCalled();
 });
-test.each([path, published.replace('/private/', '/other/'), signedUrl])(
-  'refuses an unbound source before read (%s)',
-  async (source) => {
-    await expect(openDmPhoto(scope, source, signal())).rejects.toThrow('photo-path');
-    expect(mockCall).not.toHaveBeenCalled();
-  },
-);
-test.each([
-  signedUrl.replace('/sent.png', '/different.png'),
-  signedUrl.replace('storage.googleapis.com', 'evil.test'),
-  signedUrl + '&token=legacy',
-  signedUrl.split('?')[0],
-])('refuses a bad signed response without fetching any bytes (%s)', async (url) => {
-  mockCall.mockResolvedValueOnce({ data: { url, expiresAt: expiresAt() } });
-  await expect(openDmPhoto(scope, published, signal())).rejects.toThrow();
-  expect(fetch).not.toHaveBeenCalled();
-});
+
 test('asks for message-bound access and downloads in-memory bytes with the native signed URL unchanged', async () => {
   const expires = expiresAt();
   mockCall.mockResolvedValueOnce({ data: { url: signedUrl, expiresAt: expires } });

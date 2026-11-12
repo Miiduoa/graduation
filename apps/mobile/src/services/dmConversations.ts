@@ -1,6 +1,6 @@
 import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { getAuthInstance, getDb, isFirebaseMockMode } from '../firebase';
+import { postNuniWebFn } from './nuniWebFn';
 import { deriveDmConversationId } from '../utils/conversationAccess';
 import { isDemoUid } from './demoSession';
 
@@ -23,8 +23,7 @@ function checkPeer(input: DmPeer, signal?: AbortSignal) {
 
 export async function prepareDmConversation(input: DmPeer, signal: AbortSignal): Promise<PreparedDm> {
   const conversationId = checkPeer(input, signal);
-  const prepare = httpsCallable<DmPeer, PreparedDm>(getFunctionsInstance(), 'prepareDmConversation');
-  const { data } = await prepare(input);
+  const data = await postNuniWebFn<DmPeer, PreparedDm>('prepareDmConversation', input, input.viewerUid, signal);
   checkPeer(input, signal);
   if (
     data?.conversationId !== conversationId || data.peerUid !== input.peerUid ||
@@ -41,12 +40,11 @@ export async function sendDmText(input: DmText, signal: AbortSignal) {
     !/^[A-Za-z0-9_-]{20,64}$/.test(input.messageId) ||
     !content || content.length > 4000
   ) throw Object.assign(new Error('請確認訊息內容。'), { code: 'invalid-argument' });
-  const send = httpsCallable<DmText, { conversationId: string; messageId: string }>(
-    getFunctionsInstance(), 'sendDmText',
-  );
   let data: { conversationId: string; messageId: string };
   try {
-    ({ data } = await send({ ...input, content }));
+    data = await postNuniWebFn<DmText, { conversationId: string; messageId: string }>(
+      'sendDmText', { ...input, content }, input.viewerUid, signal,
+    );
   } catch (error: any) {
     if (typeof error?.code === 'string' && error.code.startsWith('functions/')) {
       throw Object.assign(new Error('訊息尚未送出，請再試一次。'), { code: error.code.slice(10) });

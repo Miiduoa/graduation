@@ -1,6 +1,5 @@
-import { httpsCallable } from 'firebase/functions';
 import { isCallableMissing } from './callableFallback';
-import { getAuth, getFunctionsInstance } from './firebase';
+import { getAuth } from './firebase';
 
 export function isDmPhotoUnavailable(error: unknown) {
   return (error instanceof Error && error.message === 'photo-unavailable') || isCallableMissing(error);
@@ -45,13 +44,9 @@ function checkSession(scope: PhotoScope, signal: AbortSignal) {
     throw new Error('photo-session');
 }
 
-async function callPhotoFn<I, O>(name: string, payload: I): Promise<{ data: O }> {
-  try {
-    return await httpsCallable<I, O>(getFunctionsInstance(), name)(payload);
-  } catch (error) {
-    if (isCallableMissing(error)) throw new Error('photo-unavailable');
-    throw error;
-  }
+async function callPhotoFn<I, O>(_name: string, _payload: I): Promise<{ data: O }> {
+  // Spark has no Storage/Functions; never probe Firebase or fake an upload.
+  throw new Error('photo-unavailable');
 }
 
 type Grant = { url: string; expiresAt: string };
