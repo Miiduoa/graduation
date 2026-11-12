@@ -173,14 +173,20 @@ function PublicCourseSearchForm({
     : !isPublicCourseOperationQuery(linked.query) ? QUERY_LENGTH_NOTICE : null);
   const [result, setResult] = useState<SearchResult | null>(() => linked.search ? { status: 'loading', ...linked.search } : null);
   const [copyFeedback, setCopyFeedback] = useState<ClipboardFeedback | null>(null);
+  const copyAttempt = useRef(0);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
   const importHref = campusServiceHref('/import?kind=timetable', schoolSearch);
   const copyCourse = useCallback(async (csv: string) => {
+    const attempt = ++copyAttempt.current;
     setCopyFeedback(null);
     const status = await queuePublicCourseClipboardWrite(() => navigator.clipboard.writeText(csv));
-    if (status !== 'superseded') setCopyFeedback({ csv, status });
+    // Search/school changes invalidate clipboard feedback even if the old
+    // write completes while a fresh result containing the same CSV is shown.
+    if (status !== 'superseded' && attempt === copyAttempt.current) {
+      setCopyFeedback({ csv, status });
+    }
   }, []);
 
   function review(course: PublicCatalogCourse, csv: string): string {
@@ -258,6 +264,7 @@ function PublicCourseSearchForm({
 
   function editSearch() {
     cancelSearch();
+    copyAttempt.current += 1;
     setResult(null);
     setCopyFeedback(null);
   }
@@ -276,6 +283,7 @@ function PublicCourseSearchForm({
       return;
     }
     setQueryNotice(null);
+    copyAttempt.current += 1;
     setCopyFeedback(null);
     const submitted = courseSearch(query, filters);
     setResult({ status: 'loading', ...submitted });
