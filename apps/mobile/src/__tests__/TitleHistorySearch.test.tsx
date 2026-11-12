@@ -1,5 +1,5 @@
 import React from 'react';
-import { AccessibilityInfo, FlatList, Modal, Platform, Pressable, StyleSheet } from 'react-native';
+import { AccessibilityInfo, FlatList, Modal, Platform, StyleSheet } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { TitleHistoryLauncher, TitleHistorySearch } from '../screens/social/TitleHistorySearch';
 import { CommunityScreen } from '../screens/CommunityScreen';
@@ -91,25 +91,23 @@ test('searches the literal title and opens only the scoped post identifier', asy
   expect(confirmOpen).toHaveBeenCalledWith('pu', 'one', '  二手書  ');
 });
 
-test('a pending native post confirmation disables the actual card until safe retry', async () => {
+test('native historical results reject press responder while server is rechecking a card', async () => {
   const pending = deferred<boolean>();
   confirmOpen.mockReturnValueOnce(pending.promise);
   const view = panel(); enter(view);
   await view.findByText('二手書 one');
-  const actualCard = () => view.UNSAFE_getAllByType(Pressable)
-    .find((node) => node.props.accessibilityLabel === '開啟貼文：二手書 one');
   const card = view.getByLabelText('開啟貼文：二手書 one');
-  // Testing Library's accessible host View does not expose Pressable.disabled.
-  // Inspect the composite, then verify the same accessible host semantics.
-  expect(actualCard()?.props.disabled).toBe(false);
+  // Check the actual native Pressability responder, not only the accessibility
+  // label. A disabled accessibilityState alone leaves touch handling enabled.
+  expect(card.props.onStartShouldSetResponder()).toBe(true);
   fireEvent.press(card);
   const waiting = view.getByLabelText('開啟貼文：二手書 one');
   expect(waiting.props.accessibilityState).toMatchObject({ busy: true, disabled: true });
-  expect(actualCard()?.props.disabled).toBe(true);
+  expect(waiting.props.onStartShouldSetResponder()).toBe(false);
   fireEvent.press(waiting);
   expect(confirmOpen).toHaveBeenCalledTimes(1);
   await act(async () => { pending.resolve(false); });
-  expect(actualCard()?.props.disabled).toBe(false);
+  expect(view.getByLabelText('開啟貼文：二手書 one').props.onStartShouldSetResponder()).toBe(true);
   expect(view.open).not.toHaveBeenCalled();
 });
 
