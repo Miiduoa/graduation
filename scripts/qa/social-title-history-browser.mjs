@@ -17,7 +17,8 @@ if (process.env.GCLOUD_PROJECT) assert.equal(process.env.GCLOUD_PROJECT, project
 const [hostname, port] = host.split(':');
 const web = path.join(root, 'apps/web');
 const fixture = path.join(web, '.title-history-browser-fixture');
-const output = path.join(root, 'artifacts/campus-title-history');
+const emojiOnly = process.env.TITLE_HISTORY_BROWSER_MODE === 'emoji-limit';
+const output = path.join(root, emojiOnly ? 'artifacts/campus-title-history-emoji' : 'artifacts/campus-title-history');
 const dist = path.join(fixture, 'dist');
 const report = {
   sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
@@ -259,6 +260,7 @@ window.__fixtureToken=location.search;
     await send('Page.navigate', { url: origin + '/' + token });
     await until(() => call((expected) => window.__fixtureToken === expected && Boolean(document.querySelector('input[type="search"]')), token), 'search editor');
   }
+  if (!emojiOnly) {
   for (const [width, height, theme] of [[320,720,'light'],[390,844,'dark'],[1366,900,'light']]) {
     const label = `${width}-${theme}`;
     await begin(width, height, theme);
@@ -403,6 +405,8 @@ window.__fixtureToken=location.search;
   }
   report.checks.push({ label: '320: deletion or stalled server read never opens unverified content', pass: true });
 
+  }
+  if (emojiOnly) {
   // Keep the independent Unicode input scenario after the navigation/revocation scenarios.
   // Exercise the actual Chrome input limit, not a DOM test that bypasses HTML maxlength.
   // 81 emoji are 162 UTF-16 units: the old maxLength=160 silently changed the query.
@@ -435,6 +439,7 @@ window.__fixtureToken=location.search;
   await check('320: exactly 80 emoji are submitted unchanged through real Firebase SDK', () =>
     window.__history.calls[0].prefix === '😀'.repeat(80));
 
+  }
   assert.equal(report.errors.length, 0, 'Browser exceptions');
   assert.equal(report.externalRequests.length, 0, 'Unexpected external requests');
   await writeFile(path.join(output, 'chrome.log'), chromeLog);
