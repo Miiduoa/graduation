@@ -614,3 +614,29 @@ test('warns before searching an overlong native title, but accepts 80 Unicode co
   fireEvent.press(view.getByLabelText('搜尋歷史標題'));
   await waitFor(() => expect(search).toHaveBeenCalledWith('pu', '😀'.repeat(80), null));
 });
+
+test('iOS VoiceOver announces an overlong title exactly once per invalid entry without speaking the draft', async () => {
+  const previousOS = Platform.OS;
+  Platform.OS = 'ios';
+  const spoken = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+  const warning = '標題開頭最多 80 字，請刪減後搜尋。';
+  try {
+    const view = panel();
+    const field = view.getByLabelText('記得的標題開頭');
+    fireEvent.changeText(field, 'a'.repeat(81));
+    expect(view.getByText(warning)).toBeTruthy();
+    await waitFor(() => expect(spoken).toHaveBeenCalledWith(warning));
+    const count = spoken.mock.calls.length;
+    fireEvent.changeText(field, 'a'.repeat(82));
+    expect(spoken).toHaveBeenCalledTimes(count);
+    expect(spoken.mock.calls.flat().join(' ')).not.toContain('a'.repeat(81));
+
+    fireEvent.changeText(field, '😀'.repeat(80));
+    expect(view.queryByText(warning)).toBeNull();
+    fireEvent.changeText(field, '😀'.repeat(81));
+    await waitFor(() => expect(spoken).toHaveBeenCalledTimes(count + 1));
+  } finally {
+    spoken.mockRestore();
+    Platform.OS = previousOS;
+  }
+});
