@@ -148,7 +148,7 @@ export function AssistantThread({
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
         <>
-          <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>可直接查詢這台裝置保存的課表與行程；雲端查詢涵蓋已同步資料。建立個人事件不會發送推播提醒。</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -158,7 +158,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          模型目前無法使用。
+          雲端查詢暫時無法使用，這台裝置保存的課表、行程與匯入成績仍可直接查詢。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -193,9 +193,13 @@ export function AssistantThread({
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
                 {inline ? (
                   <SpokenReply text={turn.reply.answer} disabled={pending}>
-                    <AssistantMarkdown text={turn.reply.answer} />
+                    {turn.reply.local || turn.reply.dataRead === true
+                      ? <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{turn.reply.answer}</p>
+                      : <AssistantMarkdown text={turn.reply.answer} />}
                   </SpokenReply>
-                ) : <AssistantMarkdown text={turn.reply.answer} />}
+                ) : turn.reply.local || turn.reply.dataRead === true
+                  ? <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{turn.reply.answer}</p>
+                  : <AssistantMarkdown text={turn.reply.answer} />}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (
