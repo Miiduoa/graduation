@@ -553,6 +553,9 @@ it('times out reading-position lookup without replaying a cached article or losi
 it('warns immediately about an overlong Web title but accepts 80 Unicode code points', async () => {
   render(<TitleHistorySearch schoolId="pu" />);
   const field = screen.getByRole('searchbox');
+  // A browser maxLength of 160 UTF-16 units silently changes 81 emoji into 80.
+  // Reject the full submitted prefix visibly instead of secretly shortening it.
+  expect((field as HTMLInputElement).maxLength).toBe(-1);
   fireEvent.change(field, { target: { value: 'a'.repeat(81) } });
   expect(field.getAttribute('aria-invalid')).toBe('true');
   expect(screen.getByText('標題開頭最多 80 字，請刪減後搜尋。')).toBeTruthy();

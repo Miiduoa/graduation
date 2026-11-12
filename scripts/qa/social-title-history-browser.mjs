@@ -259,6 +259,37 @@ window.__fixtureToken=location.search;
     await send('Page.navigate', { url: origin + '/' + token });
     await until(() => call((expected) => window.__fixtureToken === expected && Boolean(document.querySelector('input[type="search"]')), token), 'search editor');
   }
+  // Exercise the actual Chrome input limit, not a DOM test that bypasses HTML maxlength.
+  // 81 emoji are 162 UTF-16 units: the old maxLength=160 silently changed the query.
+  await begin(320, 720, 'light', 'emoji-input-limit');
+  const pastedEmoji = '😀'.repeat(81);
+  await type(pastedEmoji);
+  await until(() => call(() => document.querySelector('input[type="search"]')?.value.length > 0), 'emoji pasted');
+  await check('320: browser preserves all 81 pasted emoji for explicit validation', (value) =>
+    document.querySelector('input[type="search"]').value === value, pastedEmoji);
+  await check('320: 81 emoji has a live and associated invalid explanation', () => {
+    const field = document.querySelector('input[type="search"]');
+    const ids = (field.getAttribute('aria-describedby') || '').split(/\\s+/);
+    const note = ids.map((id) => document.getElementById(id)).find((node) =>
+      node?.textContent?.includes('標題開頭最多 80 字'));
+    return field.getAttribute('aria-invalid') === 'true' &&
+      note?.getAttribute('aria-live') === 'polite';
+  });
+  await screenshot('320-81-emoji-visible-error.png');
+  await click('搜尋歷史標題');
+  await check('320: invalid emoji prefix never reaches Firebase', () =>
+    window.__history.calls.length === 0 && document.querySelectorAll('article').length === 0);
+  await type('😀'.repeat(80));
+  await check('320: 80 emoji remain valid without truncation', () => {
+    const field = document.querySelector('input[type="search"]');
+    return field.value === '😀'.repeat(80) && field.getAttribute('aria-invalid') === 'false';
+  });
+  await click('搜尋歷史標題');
+  await until(() => call(() => window.__history.calls.length === 1 &&
+    window.__history.calls[0].returned === 0), '80 emoji valid Firebase search');
+  await check('320: exactly 80 emoji are submitted unchanged through real Firebase SDK', () =>
+    window.__history.calls[0].prefix === '😀'.repeat(80));
+
   for (const [width, height, theme] of [[320,720,'light'],[390,844,'dark'],[1366,900,'light']]) {
     const label = `${width}-${theme}`;
     await begin(width, height, theme);
