@@ -281,27 +281,47 @@ async function loadCourseContents(
   course: CourseRow,
 ): Promise<CourseContents> {
   const errors: LmsCourseError[] = [];
-  const [activitiesResult, announcementResult] = await Promise.all([
+  const [activitiesResult, coursewareResult, announcementResult] = await Promise.all([
     source.fetchActivities(cookies, course.id, ''),
+    // TronClass can keep courseware in a separately filtered activity feed.
+    // Read both rather than mistaking the unfiltered feed for a complete list.
+    source.fetchActivities(cookies, course.id, 'type=courseware_activity'),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
+  // A denied supplementary feed is still a denied session: never return or cache
+  // earlier results from the general activities endpoint after a school 401.
   if (!activitiesResult.ok) requireAuthorizedSchoolRead(activitiesResult.status);
+  if (!coursewareResult.ok) requireAuthorizedSchoolRead(coursewareResult.status);
   if (!announcementResult.ok) requireAuthorizedSchoolRead(announcementResult.status);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
-  if (activitiesResult.ok) {
-    for (const raw of activitiesResult.value) {
-      const material = parseMaterial(raw, course);
-      if (material) materials.push(material);
-      if (isAnnouncementActivityType(record(raw).type)) {
-        const item = parseAnnouncement(raw, 'activity', course);
-        if (item) activityAnnouncements.push(item);
-      }
+  const seenMaterials = new Set<number>();
+  // A courseware item may appear in both feeds; keep its first occurrence so
+  // the UI never duplicates the same assignment material.
+  const activities = [
+    ...(activitiesResult.ok ? activitiesResult.value : []),
+    ...(coursewareResult.ok ? coursewareResult.value : []),
+  ];
+  for (const raw of activities) {
+    const material = parseMaterial(raw, course);
+    if (material && !seenMaterials.has(material.id)) {
+      seenMaterials.add(material.id);
+      materials.push(material);
     }
-  } else {
+    if (isAnnouncementActivityType(record(raw).type)) {
+      const item = parseAnnouncement(raw, 'activity', course);
+      if (item) activityAnnouncements.push(item);
+    }
+  }
+  if (!activitiesResult.ok) {
     errors.push({ courseId: course.id, courseName: course.name, area: 'materials', status: activitiesResult.status });
+  }
+  // A missing optional filtered endpoint (404) is tolerated. Other failures
+  // remain visible as incomplete sync even if general courseware was readable.
+  if (!coursewareResult.ok && coursewareResult.status !== 404) {
+    errors.push({ courseId: course.id, courseName: course.name, area: 'materials', status: coursewareResult.status });
   }
 
   let announcements: LmsAnnouncementItem[] = [];
@@ -321,7 +341,7 @@ async function loadCourseContents(
       seen.add(signature);
       announcements.push(item);
     }
-  } else if (activitiesResult.ok) {
+  } else if (activitiesResult.ok || coursewareResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
       errors.push({
