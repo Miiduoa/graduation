@@ -134,6 +134,13 @@ function hasConsistentOsmWayNodes(way: Record<string, unknown>): boolean {
   if (nodes === undefined) return true;
   if (!Array.isArray(nodes) || !Array.isArray(way.geometry) ||
       nodes.length !== way.geometry.length || nodes.length < 4) return false;
+  // The same closing node ID must resolve to exactly the same coordinate.
+  // safeOutline intentionally tolerates tiny coordinate-rounding gaps for
+  // geometry-only payloads, but a supplied OSM node identity is stronger
+  // evidence: contradictory endpoint positions cannot describe one node.
+  const first = object(way.geometry[0]);
+  const last = object(way.geometry[way.geometry.length - 1]);
+  if (!first || !last || first.lon !== last.lon || first.lat !== last.lat) return false;
   // Every intermediate OSM node must be distinct. Repeating an ID inside
   // the ring (rather than only to close it) is not a simple building loop,
   // even when an upstream geometry array assigns that ID two different
