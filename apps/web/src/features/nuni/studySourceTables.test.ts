@@ -81,6 +81,53 @@ it('does not reveal hidden HTML course rows after an inner div closes', () => {
   }]);
 });
 
+describe('raw HTML text inside a hidden lesson wrapper cannot close its parent', () => {
+  it.each(['script', 'style', 'textarea'])('keeps unpublished answers hidden when <%s> contains a literal </div>', (tag) => {
+    const source = [
+      '<div hidden>',
+      `<${tag}>`,
+      '</div>', // Text inside the raw/RCDATA element, not an HTML closing tag.
+      `</${tag}>`,
+      '| 教師未公開答案 | 分數 |',
+      '| --- | --- |',
+      '| 不得額外展示 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(9));
+  });
+
+  it('does not let a literal disclosure close inside nested script release its answer', () => {
+    const source = [
+      '<details>',
+      '<script>',
+      '</details>',
+      '</script>',
+      '| 收合中的練習答案 | 分數 |',
+      '| --- | --- |',
+      '| 未公布 | 100 |',
+      '</details>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(9));
+  });
+
+  it('restores the public table after the real hidden wrapper close', () => {
+    const source = [
+      '<section aria-hidden="true">',
+      '<style>',
+      '</section>',
+      '</style>',
+      '| 尚未發布 | 分數 |',
+      '| --- | --- |',
+      '| 範例 | 99 |',
+      '</section>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(9));
+  });
+});
+
 it('omits aria-hidden course samples without hiding the later visible Markdown table', () => {
   const source = [
     '<section aria-hidden="true">',

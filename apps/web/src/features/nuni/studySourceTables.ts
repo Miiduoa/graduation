@@ -28,6 +28,10 @@ const HIDDEN_HTML_CONTAINERS = new Set([
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
 const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dialog']);
+// Raw-text/RCDATA children can contain a literal closing tag for their parent.
+// Track them even inside a hidden wrapper: </div> in a script string must not
+// release unpublished answer rows. This is source-boundary tracking, not an HTML parser.
+const RAW_HTML_TEXT_BLOCKS = new Set(['script', 'style', 'textarea']);
 // Scan every syntactically complete tag so quoted attributes on other HTML
 // elements cannot smuggle fake opening/closing tags into the block tracker.
 const TABLE_SUPPRESSED_HTML_TAGS = new Set([
@@ -321,7 +325,8 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       if (htmlCodeBlocks.length > 0) {
         const current = htmlCodeBlocks[htmlCodeBlocks.length - 1];
         if (closing && current === tag) htmlCodeBlocks.pop();
-        else if (!closing && !selfClosing && current === tag && NESTABLE_HTML_BLOCKS.has(tag))
+        else if (!closing && !selfClosing && !RAW_HTML_TEXT_BLOCKS.has(current) &&
+            ((current === tag && NESTABLE_HTML_BLOCKS.has(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
           htmlCodeBlocks.push(tag);
       } else if (!closing && !selfClosing &&
           (!HIDDEN_HTML_CONTAINERS.has(tag) || hasHiddenHtmlAttribute(token))) {
