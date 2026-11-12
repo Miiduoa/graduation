@@ -52,6 +52,11 @@ describe('Providence OSM building outlines', () => {
       { building: 'school', name: null },
       { building: 'school', name: '蓋夏圖書館', 'name:zh': '希嘉學苑' },
       { building: 'school', name: 'Guixa Library', 'name:zh': ' ' },
+      // A conflicting Chinese primary label must not be silently overridden
+      // by a matching name:zh (a real bilingual label remains accepted above).
+      { building: 'school', name: '希嘉學苑', 'name:zh': '蓋夏圖書館' },
+      { building: 'school', name: '主顧樓', 'name:zh': '蓋夏圖書館' },
+      { building: 'school', name: '蓋夏圖書館／希嘉學苑', 'name:zh': '蓋夏圖書館' },
     ]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, tags)],

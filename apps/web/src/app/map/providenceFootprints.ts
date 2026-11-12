@@ -367,8 +367,15 @@ function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
   const primary = record.name;
   if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
   const chinese = record['name:zh'];
-  if (chinese !== undefined) return typeof chinese === 'string' &&
-    chinese.trim() === expectedName;
+  if (chinese !== undefined) {
+    if (typeof chinese !== 'string' || chinese.trim() !== expectedName) return false;
+    // A bilingual English primary name may differ from the audited Chinese
+    // label, but an explicitly different Chinese primary name contradicts it.
+    // Do not let name:zh override an unrelated Han-script building identity.
+    if (typeof primary === 'string' && /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(primary) &&
+        primary.trim() !== expectedName) return false;
+    return true;
+  }
   return primary === undefined || primary.trim() === expectedName;
 }
 
