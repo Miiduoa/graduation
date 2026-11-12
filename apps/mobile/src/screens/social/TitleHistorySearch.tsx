@@ -114,6 +114,14 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     const message = error || (notice ? `${notice} 目前顯示 ${posts.length} 篇。` : '');
     if (message) AccessibilityInfo.announceForAccessibility(message);
   }, [error, notice, posts.length]);
+  // On iOS, live regions do not automatically announce text changes. Announce
+  // only when the draft first crosses the limit, not on each additional keystroke.
+  // The spoken message is generic and never exposes the entered title.
+  React.useEffect(() => {
+    if (Platform.OS === 'ios' && titleTooLong) {
+      AccessibilityInfo.announceForAccessibility('標題開頭最多 80 字，請刪減後搜尋。');
+    }
+  }, [titleTooLong]);
 
   const cursor = useRef<TitleSearchCursor | null>(null);
   const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
