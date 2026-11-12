@@ -88,7 +88,7 @@ test('searches the literal title and opens only the scoped post identifier', asy
   expect(view.getByText(/英文區分大小寫；不搜尋內文/)).toBeTruthy();
   fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
   await waitFor(() => expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' }));
-  expect(confirmOpen).toHaveBeenCalledWith('pu', 'one');
+  expect(confirmOpen).toHaveBeenCalledWith('pu', 'one', '  二手書  ');
 });
 
 test('opening the same historical result twice rapidly navigates only once', async () => {

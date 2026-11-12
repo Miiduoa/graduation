@@ -279,7 +279,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
         : '伺服器確認貼文逾時，已保留搜尋結果。請確認連線後再次點擊貼文。');
     }, 7_000);
     try {
-      const stillReadable = await confirmCampusPostTitleOpen(schoolId, item.id);
+      const stillReadable = await confirmCampusPostTitleOpen(schoolId, item.id, text);
       if (!live.current || attempt !== version.current) return;
       if (!stillReadable) {
         setPosts((current) => current.filter((row) => row.id !== item.id));
@@ -288,9 +288,9 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
           // Preserve that exact cursor so a student never silently skips it.
           retry.current = interrupted;
           setNotice('');
-          setError('這篇貼文已刪除或不再提供，已從搜尋結果移除。未完成的下一頁已保留，可原地重試。');
+          setError('這篇貼文已刪除或不再提供（也可能是標題已變更），已從搜尋結果移除。未完成的下一頁已保留，可原地重試。');
         } else {
-          setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
+          setNotice('這篇貼文已刪除或不再提供（也可能是標題已變更），已從搜尋結果移除。');
         }
         return;
       }

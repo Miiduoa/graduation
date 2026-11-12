@@ -88,12 +88,21 @@ async function readTitlePage(
 }
 
 
-/** Recheck a historical result at the moment it is opened; never trust a cached list item. */
-export async function confirmCampusPostTitleOpen(schoolId: string, postId: string): Promise<boolean> {
+/** Recheck a historical hit against the server, including its original title prefix.
+ * Passing the prefix prevents a renamed post from silently opening as an
+ * unrelated result. Existing non-search callers can omit this check.
+ */
+export async function confirmCampusPostTitleOpen(
+  schoolId: string, postId: string, titlePrefix?: string,
+): Promise<boolean> {
   if (!schoolId || schoolId.includes('/') || !postId || postId.includes('/')) throw invalidTitleSearch();
+  const prefix = titlePrefix === undefined ? undefined : parseTitlePrefix(titlePrefix);
   const document = await getDocFromServer(doc(getDb(), 'schools', schoolId, 'campusPosts', postId));
   if (document.metadata.fromCache || document.metadata.hasPendingWrites) {
     throw Object.assign(new Error('貼文尚未取得伺服器確認。'), { code: 'unavailable' });
   }
-  return document.exists() && document.data().schoolId === schoolId;
+  if (!document.exists()) return false;
+  const data = document.data();
+  return data.schoolId === schoolId &&
+    (prefix === undefined || titleSearchPost(document.id, data, schoolId, prefix) !== null);
 }
