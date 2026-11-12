@@ -751,6 +751,51 @@ describe('controlled spatial camera input', () => {
   });
 });
 
+it('keeps an OSM relation courtyard open in Three.js and leaves its POI on the ground', () => {
+  // Synthetic ring coordinates; the real source has 1 outer + 1 inner way.
+  const xijia = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  const campus = buildCampusSpatialModel([xijia]);
+  const outer = [
+    { lon: 120.58045, lat: 24.22785 }, { lon: 120.58090, lat: 24.22785 },
+    { lon: 120.58090, lat: 24.22818 }, { lon: 120.58045, lat: 24.22818 },
+    { lon: 120.58045, lat: 24.22785 },
+  ];
+  const inner = [
+    { lon: 120.58063, lat: 24.22799 }, { lon: 120.58071, lat: 24.22799 },
+    { lon: 120.58071, lat: 24.22805 }, { lon: 120.58063, lat: 24.22805 },
+    { lon: 120.58063, lat: 24.22799 },
+  ];
+  const [footprint] = parseProvidenceOsmFootprints({ elements: [{
+    type: 'relation', id: 9246899,
+    tags: { type: 'multipolygon', building: 'dormitory', height: '18 m' },
+    members: [
+      { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+      { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+    ],
+  }] });
+  expect(footprint?.holes).toHaveLength(1);
+  const withHole = setup(campus, undefined, [footprint]);
+  const filled = setup(campus, undefined, [{ ...footprint, holes: undefined }]);
+  drawFrame();
+  const graph = withHole.renderer.render.mock.calls.at(-1)![0] as Scene;
+  let extruded: Mesh | null = null;
+  graph.traverse((node) => {
+    if (node instanceof Mesh && node.geometry instanceof ExtrudeGeometry) extruded = node;
+  });
+  expect(extruded).not.toBeNull();
+  const shapes = (extruded!.geometry as ExtrudeGeometry).parameters.shapes;
+  expect(Array.isArray(shapes) ? shapes[0].holes.length : shapes.holes.length).toBe(1);
+  const capHeight = (renderer: typeof withHole.renderer) => {
+    const scene = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = scene.children.find((node): node is InstancedMesh =>
+      node instanceof InstancedMesh && node.geometry.type === 'SphereGeometry')!;
+    const matrix = new Matrix4();
+    caps.getMatrixAt(0, matrix);
+    return new Vector3().setFromMatrixPosition(matrix).y;
+  };
+  expect(capHeight(filled.renderer)).toBeGreaterThan(capHeight(withHole.renderer) + 10);
+});
+
 it('extrudes OSM footprints in geographically aligned meters only for known spatial points', () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const campus = buildCampusSpatialModel([library]);
