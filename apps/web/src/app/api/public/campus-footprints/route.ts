@@ -292,9 +292,17 @@ export async function GET() {
       // a previously dated snapshot with older (or undated) OSM database state
       // and falsely present the regression as the newest campus geometry.
       // Preserve the last trusted snapshot as dated, no-store stale fallback.
+      // The same database replication timestamp should describe the same
+      // audited geometry and heights. A replica serving different buildings
+      // under that exact timestamp may be partial/inconsistent, even though
+      // both copies pass the independent 48-hour freshness check.
+      // Parser output is in stable POI order, so this also compares holes,
+      // sourced height labels and revisions without depending on OSM order.
       if (cache?.osmBaseAt && (!candidate.osmBaseAt ||
-          Date.parse(candidate.osmBaseAt) < Date.parse(cache.osmBaseAt))) {
-        throw new Error('Overpass replication timestamp regressed');
+          Date.parse(candidate.osmBaseAt) < Date.parse(cache.osmBaseAt) ||
+          (candidate.osmBaseAt === cache.osmBaseAt &&
+            JSON.stringify(candidate.buildings) !== JSON.stringify(cache.buildings)))) {
+        throw new Error('Overpass replication snapshot inconsistent');
       }
       cache = candidate;
       unavailableUntil = 0;
