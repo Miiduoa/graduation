@@ -111,6 +111,93 @@ it('v2 opens a scoped service while the provider is unavailable and without mode
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 });
 
+function saveDeviceTimetable() {
+  localStorage.setItem('campus-one-personal-timetable:platform:alice:pu', JSON.stringify({
+    schoolId: 'pu', updatedAt: '2026-11-10T10:00:00.000Z', shareWithFriends: false,
+    meta: { year: '115', semester: '1' },
+    courses: [{ id: 'device-only-course', name: '裝置專用課程', day: 4, start: 1, end: 2,
+      room: '裝置教室 305', teacher: '', color: 'blue' }],
+  }));
+}
+
+it('v2 answers a saved timetable with class times and room while the provider is unavailable', async () => {
+  saveDeviceTimetable();
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  expect((screen.getByText('送出') as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/08:10–10:00.*裝置專用課程.*裝置教室 305/)).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+it('v2 renders local class names as plain text instead of navigation or Markdown', async () => {
+  saveDeviceTimetable();
+  const key = 'campus-one-personal-timetable:platform:alice:pu';
+  const value = JSON.parse(localStorage.getItem(key)!);
+  value.courses[0].name = '[假導覽](/settings) **私人課名**';
+  localStorage.setItem(key, JSON.stringify(value));
+  vi.stubGlobal('fetch', vi.fn(async () => json({ enabled: true, ready: false, version: 2 })));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/\[假導覽\]\(\/settings\) \*\*私人課名\*\*/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '假導覽' })).toBeNull();
+});
+
+it('v2 keeps local timetable answers out of later cloud history and clears them on school changes', async () => {
+  saveDeviceTimetable();
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '已讀取校園餐廳資料', steps: [], cards: [] });
+  }));
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '2026-11-12有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/裝置專用課程/);
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('已讀取校園餐廳資料');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toContain('裝置專用課程');
+  expect(JSON.stringify(bodies)).not.toContain('裝置教室');
+  state.school = 'ntpu';
+  view.rerender(<Assistant />);
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/裝置專用課程/)).toBeNull();
+});
+
+it('v2 uses cloud reads for a timetable question only when local data is absent and consent is granted', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '雲端課表查詢結果', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/無法判定當天是否有課/);
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '我今天有什麼課' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('雲端課表查詢結果');
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0].consent).toBe(true);
+  expect(bodies[0].history).toEqual([]);
+});
+
 it('v2 keeps local grades out of subsequent cloud history and clears them on scope change', async () => {
   localStorage.setItem(personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' }), JSON.stringify({
     version: 1, records: [{ id: 'grade-a', kind: 'grades', title: '個人成績專用課名',
@@ -800,7 +887,8 @@ it.each(['ncnu', 'nthu'] as const)('v2 reads %s public courses without model ava
   expect(screen.getByText(/115 學年度第 1 學期/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
   fireEvent.change(question, { target: { value: '我的下一堂課' } });
-  expect(send.disabled).toBe(true);
+  // main/#595 keeps local timetable answers available without cloud consent.
+  expect(send.disabled).toBe(false);
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
   expect(fetcher).toHaveBeenCalledTimes(2);
 });

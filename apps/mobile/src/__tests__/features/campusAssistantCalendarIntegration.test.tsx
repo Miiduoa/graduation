@@ -21,6 +21,7 @@ jest.mock('../../firebase', () => ({
 }));
 jest.mock('../../state/auth', () => ({ useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }) }));
 jest.mock('../../state/school', () => ({ useSchool: () => ({
+  selection: { schoolId: mockSchool },
   school: { id: mockSchool, name: '靜宜大學' }, selectionReady: mockSelectionReady,
 }) }));
 jest.mock('../../state/nuniSession', () => ({ useOptionalNuniSession: () => mockPlatform }));

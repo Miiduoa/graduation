@@ -6,6 +6,9 @@ import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
 import { queryCatalog } from '../services/courseCatalogClient';
 
 let mockSchoolId = 'ncnu';
+jest.mock('../state/personalImportScope', () => ({
+  usePersonalImportScope: () => ({ owner: 'guest:device', schoolId: mockSchoolId }),
+}));
 const setBrowsingSchoolId = (value: string) => { mockSchoolId = value; };
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId, name: mockSchoolId } }) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: null, profile: null }) }));
@@ -299,7 +302,7 @@ test.each([
     const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
     await view.findByText('分析化學專題');
     fireEvent.press(view.getByText('複製課表匯入資料'));
-    expect(clipboard).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(clipboard).toHaveBeenCalledTimes(1));
     fireEvent.press(view.getByText('複製課表匯入資料'));
     // The newer native write must start only after the older write finishes:
     // otherwise the earlier OS completion could replace the latest clipboard.

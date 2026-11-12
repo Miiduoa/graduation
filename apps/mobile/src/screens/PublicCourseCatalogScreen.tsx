@@ -11,6 +11,12 @@ import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOpe
 import { Button, Card, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
+import { parsePersonalImport } from '@campus/shared/src/imports/parser';
+import { usePersonalImportScope } from '../state/personalImportScope';
+import { personalImportStorageKey } from '../services/personalImports';
+import { hasImportReviewDraft, readImportReviewDraft, writeImportReviewDraft } from '../services/personalImportDrafts';
+import { hasPersonalImportDraft } from '../services/imports/personalImportDraft';
+
 import { PublicCourseImportAction } from '../components/PublicCourseImportAction';
 import { queuePublicCourseClipboardCopy } from '../services/publicCourseClipboardQueue';
 
@@ -34,6 +40,53 @@ type Props = {
 };
 
 function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCatalogCourse }) {
+  const scope = usePersonalImportScope();
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const mounted = useRef(true);
+  const busy = useRef(false);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  async function review(course: PublicCatalogCourse) {
+    if (busy.current) return;
+    if (!scope || scope.schoolId !== schoolId) {
+      setNotice('請先確認目前帳號與所選校園，再帶入課表核對。');
+      return;
+    }
+    const current = () => mounted.current && scopeRef.current?.owner === scope.owner && scopeRef.current?.schoolId === scope.schoolId;
+    busy.current = true;
+    try {
+      const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+      const existing = await readImportReviewDraft(key);
+      const aiDraft = await hasPersonalImportDraft(scope);
+      if (!current()) return;
+      if (hasImportReviewDraft(existing) || aiDraft) {
+        setNotice('匯入頁已有待核對的草稿，請先前往「匯入我的資料」處理。');
+        return;
+      }
+      const text = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
+      if (!text) return;
+      const academicYear = course.semester.slice(0, -1);
+      const semester = course.semester.slice(-1);
+      const source = { type: 'paste' as const, name: schoolId === 'nthu' ? '清華大學本學期開設課程' : '暨南大學本學期開設課程' };
+      const { rows, issues } = parsePersonalImport(text, { kind: 'timetable', schoolId, academicYear, semester, source });
+      if (!rows.length || issues.some(issue => issue.severity === 'error')) {
+        setNotice('課表資料需要手動核對，請前往匯入我的資料。');
+        return;
+      }
+      await writeImportReviewDraft(key, JSON.stringify({
+        version: 1, kind: 'timetable', academicYear, semester, text, source,
+        rows, issues, selected: rows.map(row => row.id), editedIds: [], backupPreview: null,
+      }));
+      if (current()) safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' });
+    } catch {
+      if (current()) setNotice('無法安全讀寫匯入草稿，請稍後重試。');
+    } finally {
+      busy.current = false;
+    }
+  }
+
   const [copyState, setCopyState] = useState<{ csv: string; status: 'copied' | 'manual' } | null>(null);
   const copyAttempt = useRef(0);
   const meetings = schoolId === 'nthu'
@@ -73,6 +126,8 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
     {!meetings && rawMeetings.length === 0 && <Text style={body}>上課時間未提供</Text>}
     <Text style={body}>{course.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期').replace(/^(\d{3})3$/, '$1 學年度暑期')}</Text>
     {csv && <View style={{ gap: 8, marginTop: 8 }}>
+      <Button text="帶入課表核對" kind="primary" onPress={() => { void review(course); }} />
+      {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
       <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
       <Button text="複製課表匯入資料" kind="ghost" onPress={() => void copy()} />
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
@@ -256,6 +311,8 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
             setLinkError(false);
             void Linking.openURL(catalogUrl).catch(() => setLinkError(true));
           }} />
+          <Button text="查看我的課表" kind="ghost" onPress={() => { safeNavigate(navigation, 'PersonalTimetable'); }} />
+          <Button text="匯入我的資料" kind="ghost" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />
           {linkError && <Text accessibilityRole="alert" style={body}>無法開啟校方網站，請稍後再試。</Text>}
           {filterLabel && <Text style={body}>本次查詢條件：{filterLabel}</Text>}
           {result?.status === 'loading' && <Text accessibilityLiveRegion="polite" style={body}>正在查詢{label}…</Text>}

@@ -91,7 +91,7 @@ function hasTimetableContent(value: unknown): boolean {
   );
 }
 
-function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRead {
+function readLocalSnapshot(ownerKey: string, schoolId: string, strictCourses = false): LocalTimetableRead {
   let scopedRaw: string | null;
   let legacyRaw: string | null;
   try {
@@ -112,6 +112,16 @@ function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRe
   if (!hasTimetableContent(parsed)) {
     throw new TimetableLocalReadError('corrupt');
   }
+  if (strictCourses && parsed.courses.some((course, index) => {
+    const clean = cleanCourses([course])[0];
+    return typeof course.name !== 'string' || !course.name.trim() ||
+      typeof course.id !== 'string' || !course.id ||
+      !Number.isInteger(course.day) || !Number.isInteger(course.start) || !Number.isInteger(course.end) ||
+      course.day !== clean.day || course.start !== clean.start || course.end !== clean.end ||
+      (course.teacher !== undefined && typeof course.teacher !== 'string') ||
+      (course.room !== undefined && typeof course.room !== 'string') ||
+      parsed.courses.slice(0, index).some((previous) => previous.id === course.id);
+  })) throw new TimetableLocalReadError('corrupt');
   // An unscoped legacy copy without an explicit school must never be claimed.
   // A mismatched scoped copy is potentially damaged and must remain untouched.
   if (parsed.schoolId !== schoolId) {
@@ -135,6 +145,17 @@ function readLocalSnapshot(ownerKey: string, schoolId: string): LocalTimetableRe
 
 function readLocal(ownerKey: string, schoolId: string): StoredTimetable {
   return readLocalSnapshot(ownerKey, schoolId).timetable;
+}
+
+/** A synchronous device-only read; this never fetches or adopts another account's copy. */
+export function readPersonalTimetableOnDevice(owner: string, schoolId: string): {
+  timetable: StoredTimetable;
+  found: boolean;
+} {
+  const legacyUid = owner.startsWith('school:') ? owner.slice('school:'.length) : '';
+  const key = legacyUid && !hasLocal(owner, schoolId) ? legacyUid : owner;
+  const { timetable, found } = readLocalSnapshot(key, schoolId, true);
+  return { timetable, found };
 }
 
 export const CLOUD_NEEDS_SCHOOL_COPY = '登入學校帳號後才能存到雲端';

@@ -1,7 +1,7 @@
 """A school switch must not carry Providence prompt or route defaults across requests."""
 
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from prompts.campus_knowledge import get_full_knowledge_text
@@ -57,3 +57,34 @@ class SchoolContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sources, [])
             self.assertNotIn("台中", content)
         client.get.assert_not_awaited()
+
+    async def test_weather_particles_keep_providence_location(self):
+        response = MagicMock()
+        response.json.return_value = {
+            "current": {"temperature_2m": 26, "relative_humidity_2m": 70, "rain": 0, "wind_speed_10m": 2}
+        }
+        client = AsyncMock()
+        client.get.return_value = response
+        content, sources = await _fetch_weather("靜宜今天天氣呢", client, school_id="pu")
+        self.assertIn("靜宜", content)
+        self.assertEqual(len(sources), 1)
+        client.get.assert_awaited()
+        client.get.reset_mock()
+        content, sources = await _fetch_weather("今天天氣呢", client, school_id="pu")
+        self.assertIn("靜宜", content)
+        client.get.assert_awaited()
+
+    async def test_weather_natural_followups_keep_providence_location(self):
+        response = MagicMock()
+        response.json.return_value = {
+            "current": {"temperature_2m": 26, "relative_humidity_2m": 70, "rain": 0, "wind_speed_10m": 2}
+        }
+        client = AsyncMock()
+        client.get.return_value = response
+        content, sources = await _fetch_weather("靜宜今天天氣好嗎", client, school_id="pu")
+        self.assertIn("靜宜", content)
+        self.assertEqual(len(sources), 1)
+        client.get.reset_mock()
+        content, sources = await _fetch_weather("今天天氣好不好", client, school_id="pu")
+        self.assertIn("靜宜", content)
+        client.get.assert_awaited()
