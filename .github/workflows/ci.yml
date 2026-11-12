@@ -94,6 +94,9 @@ jobs:
           node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
           node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
           python3 deploy/nuni-api/food-ordering/build_test.py
+          python3 scripts/platform-lost-found/prepare_test.py
+          python3 deploy/nuni-api/assistant-permissions/prepare_test.py
+          python3 deploy/nuni-api/assistant-permissions/prepare.py --verify-only
           node --test deploy/nuni-web-legacy/source.test.mjs deploy/nuni-web-legacy/build.test.mjs deploy/nuni-api/security/source.test.mjs
 
       - name: Test public cafeteria HTTP and PostgreSQL contracts
@@ -309,12 +312,12 @@ jobs:
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
 
-      - name: Run PostgreSQL attachment race and submission regressions
-        # The two suites otherwise silently skip 13 PostgreSQL-backed cases.
+      - name: Run PostgreSQL attachment and assistant permission regressions
+        # Include real multi-connection CAS and account-closure races for AI settings.
         env:
           NUNI_TEST_POSTGRES_PORT: '5432'
           PGPASSWORD: attachment_test_only
-        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts --reporter=verbose
+        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts src/lib/nuni/platformAssistantPermissionStore.database.test.ts --reporter=verbose
 
       - name: Run web tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；

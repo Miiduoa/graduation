@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import styles from './settings.module.css';
 
-export function PlatformServiceControls() {
+export function PlatformServiceControls({ onManageAssistant }: { onManageAssistant?: () => void }) {
   return (
     <section className={styles.stack} aria-label="Google 平台權限">
       <div className={styles.sectionHeading}>
@@ -22,6 +22,11 @@ export function PlatformServiceControls() {
             <h3>雲端 AI 助理</h3>
             <p>維持開啟，無法關閉。模型資料分享與每項寫入動作仍需另外確認。</p>
           </div>
+          {onManageAssistant ? (
+            <button type="button" className="btn" onClick={onManageAssistant}>設定 AI 代辦權限</button>
+          ) : (
+            <Link className="btn" href="/settings?section=assistant">設定 AI 代辦權限</Link>
+          )}
         </div>
         <div className={styles.row}>
           <div className={styles.rowText}>

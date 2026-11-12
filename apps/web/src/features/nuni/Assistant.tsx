@@ -11,7 +11,7 @@ import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
-import { inAppHref } from './assistant/copy';
+import { assistantPermissionMessage, inAppHref } from './assistant/copy';
 import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
@@ -27,6 +27,7 @@ type Step = {
   simulation: boolean;
 };
 type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
+class AssistantPermissionFailure extends Error {}
 export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady, initialDraft = '' }: {
   initialDraft?: string;
   context: string;
@@ -321,6 +322,8 @@ function V2Conversation({
       body: JSON.stringify({ schoolId, conversationId: conversation.current, ...input }),
     });
     const result = await response.json();
+    const permissionMessage = assistantPermissionMessage(result.error);
+    if (!response.ok && permissionMessage) throw new AssistantPermissionFailure(permissionMessage);
     if (!response.ok)
       throw new Error(
         typeof result.message === 'string' && result.message
@@ -527,8 +530,15 @@ function V2Conversation({
             setAction(card, { status: 'handoff', href,
               message: card.tool === 'propose_food_order' ? '點餐內容已備妥，請到點餐頁完成確認與付款。' : '服務入口已備妥。' });
           }
-        } catch {
+        } catch (error) {
           if (!active()) break;
+          if (error instanceof AssistantPermissionFailure) {
+            setError(error.message);
+            // A prior attempt may still need its receipt read back; never retry a write here.
+            if (card.tool === 'propose_personal_event') await checkCalendar(card);
+            else setAction(card, { status: 'blocked', message: error.message });
+            break;
+          }
           // A lost response may follow a committed write. Recovery is read-only.
           if (card.tool === 'propose_personal_event') {
             if (!await checkCalendar(card)) break;
