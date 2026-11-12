@@ -383,8 +383,21 @@ window.__fixtureToken=location.search;
     await context.firestore().doc(`schools/pu/campusPosts/${movedId}`).update({ title: '租屋 已改標題' });
   });
   await clickFirstResult();
-  await until(() => call(() => document.querySelectorAll('article').length === 19 &&
-    document.querySelector('[role="status"]')?.textContent.includes('標題已變更')), 'renamed old result removal');
+  try {
+    await until(() => call(() => document.querySelectorAll('article').length === 19 &&
+      document.querySelector('[role="status"]')?.textContent.includes('標題已變更')), 'renamed old result removal');
+  } catch (cause) {
+    const state = await call(() => ({
+      opens: window.__history.opens, routes: window.__history.routes,
+      cards: document.querySelectorAll('article').length,
+      status: document.querySelector('[role="status"]')?.textContent,
+      alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent),
+      first: document.querySelector('article a')?.textContent,
+      active: document.activeElement?.outerHTML?.slice(0, 220),
+      readingPosition: window.sessionStorage.getItem('nuni:community-history-reading-position:v1'),
+    })).catch((error) => ({ captureError: String(error) }));
+    throw new Error(`${String(cause)}; renamed-link state=${JSON.stringify(state)}`);
+  }
   await check('320: edited title cannot navigate from the old prefix or save a false position', (id) =>
     window.__history.opens.length === 1 && window.__history.opens[0].id === id &&
     window.__history.opens[0].prefix === '二手書' && window.__history.opens[0].available === false &&
