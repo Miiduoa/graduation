@@ -11,7 +11,7 @@ import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchool, name: '測試校園' } }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ selectionReady: true, selection: { schoolId: mockSchool }, school: { id: mockSchool, name: '測試校園' } }) }));
 jest.mock('../features/campusAssistant', () => ({
   askCampusAssistant: jest.fn(),
   getOnDeviceAssistantReadiness: jest.fn(async () => ({ available: true, ready: false, modelId: 'qwen2.5-0.5b' })),
