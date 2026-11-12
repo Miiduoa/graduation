@@ -238,6 +238,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }, []);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
+  // The floor-plan editor models a BUILDING, not an arbitrary map point.
+  // At Providence only bundled, cross-checked OSM building ways/relations
+  // can open it. Keep other schools' existing flow unchanged until they have
+  // their own verified building-source mapping.
+  const canPreviewBuilding = place !== undefined && (school !== 'pu' ||
+    (source !== null &&
+      /^https:\/\/www\.openstreetmap\.org\/(?:way|relation)\/[1-9]\d*$/.test(source) &&
+      !isProvidencePendingVerification(school, place)));
   // The map can be filtered while a spatial dialog remains open. Never count,
   // attribute or frame OSM buildings whose POIs are no longer in that view.
   const visibleFootprints = useMemo(() => {
@@ -423,7 +431,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
-  if (buildingPlanOpen && place) {
+  if (buildingPlanOpen && canPreviewBuilding && place) {
     return <BuildingPlanPreview
       key={`${school}:${place.id}`}
       schoolId={school}
@@ -591,7 +599,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
-                <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
+                {canPreviewBuilding && <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>}
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
               </> : <p className={styles.note} role="status">請選擇地點，確認位置後再開啟導航。</p>}
