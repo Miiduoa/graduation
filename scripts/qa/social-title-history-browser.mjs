@@ -88,9 +88,9 @@ export {parseTitlePrefix};
 export const calls=[];
 export const opens=[];
 export const resumes=[];
-export async function confirmCampusPostTitleOpen(school,id) {
- const entry={school,id};opens.push(entry);
- try{entry.available=await realConfirm(school,id);return entry.available;}
+export async function confirmCampusPostTitleOpen(school,id,prefix) {
+ const entry={school,id,prefix};opens.push(entry);
+ try{entry.available=await realConfirm(school,id,prefix);return entry.available;}
  catch(error){entry.error=error?.code??'unknown';throw error;}
 }
 export async function searchCampusPostTitles(school,prefix,cursor){
@@ -372,6 +372,35 @@ window.__fixtureToken=location.search;
   await screenshot('390-return-to-reading-position.png');
   report.flows.push({ label: 'web-confirm-open-and-resume', completed: true,
     note: 'Actual SDK + rules, route unmount/remount simulated; not the full PostDetail route or real account switch' });
+
+
+  // A previously listed title must be rechecked from the server at click time.
+  // This uses an actual 320px Chromium click, product UI, SDK and repo rules.
+  await begin(320, 720, 'light', 'retitled-opening');
+  await type('二手書'); await click('搜尋歷史標題'); await count(20);
+  const movedId = await call(() => new URL(document.querySelector('article a').href).pathname.split('/').at(-1));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc(`schools/pu/campusPosts/${movedId}`).update({ title: '租屋 已改標題' });
+  });
+  await clickFirstResult();
+  await until(() => call(() => document.querySelectorAll('article').length === 19 &&
+    document.querySelector('[role="status"]')?.textContent.includes('標題已變更')), 'renamed old result removal');
+  await check('320: edited title cannot navigate from the old prefix or save a false position', (id) =>
+    window.__history.opens.length === 1 && window.__history.opens[0].id === id &&
+    window.__history.opens[0].prefix === '二手書' && window.__history.opens[0].available === false &&
+    window.__history.routes.length === 0 &&
+    !window.sessionStorage.getItem('nuni:community-history-reading-position:v1'), movedId);
+  await check('320: removed link returns keyboard focus to the status', () =>
+    document.activeElement?.getAttribute('role') === 'status');
+  await screenshot('320-retitled-result.png');
+  await type('租屋'); await click('搜尋歷史標題'); await count(1);
+  await clickFirstResult();
+  await until(() => call(() => window.__history.routes.length === 1), 'renamed post via current prefix');
+  await check('320: the same post is still readable from its new prefix', (id) =>
+    window.__history.opens.length === 2 && window.__history.opens[1].id === id &&
+    window.__history.opens[1].prefix === '租屋' && window.__history.opens[1].available === true, movedId);
+  report.flows.push({ label: 'web-retitled-old-post', completed: true,
+    note: 'Actual Chrome click + SDK + rules emulator; not full PostDetail or human completion time' });
 
   await begin(320, 720, 'light', 'deleted-opening');
   await type('二手書'); await click('搜尋歷史標題'); await count(20);
