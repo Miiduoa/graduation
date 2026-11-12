@@ -326,7 +326,14 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   // inside the close handler can be undone when React removes the active button.
   useEffect(() => {
     if (manualCopyText !== null) {
-      manualCopyInput.current?.focus();
+      // Select the snapshot once when the fallback first appears. Mobile
+      // app switching, tapping controls or returning from screen-reader
+      // navigation must not reset a manually selected excerpt.
+      const input = manualCopyInput.current;
+      if (input) {
+        input.focus();
+        selectManualCopyText(input);
+      }
       return;
     }
     if (!restoreManualCopyFocus.current) return;
@@ -943,8 +950,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         {manualCopyText !== null && <section className={styles.manualCopy}
           aria-label={MANUAL_COPY_LABELS[manualCopyKind].region}>
           <label className={styles.field} htmlFor={manualCopyId}>{MANUAL_COPY_LABELS[manualCopyKind].field}
-            <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
-              onFocus={(event) => selectManualCopyText(event.currentTarget)} />
+            <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText} />
           </label>
           <button type="button" className={styles.button}
             onClick={() => { void retryManualCopy(); }}>再次嘗試複製到剪貼簿</button>

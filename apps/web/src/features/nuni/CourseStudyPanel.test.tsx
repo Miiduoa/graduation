@@ -1305,6 +1305,41 @@ it.each([
   }
 });
 
+it('preserves a selected JSON excerpt after focus leaves and returns on mobile', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '切回 App 後仍要保留的筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const backup = manual.value;
+    expect(document.activeElement).toBe(manual);
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(backup.length);
+
+    manual.setSelectionRange(5, 18);
+    const retry = screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' });
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+    manual.focus();
+    expect(document.activeElement).toBe(manual);
+    expect(manual.selectionStart).toBe(5);
+    expect(manual.selectionEnd).toBe(18);
+
+    fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(backup.length);
+    expect(manual.value).toBe(backup);
+    expect(parseCourseStudyProgress(backup, scope).passages['0:0'].note)
+      .toBe('切回 App 後仍要保留的筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('retries a denied mobile JSON copy without changing the validated backup or note', async () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   const writeText = vi.fn().mockRejectedValueOnce(new Error('permission denied'))
