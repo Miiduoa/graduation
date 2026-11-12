@@ -2,7 +2,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
-import { resetUidRateLimitForTests } from './uidRateLimit';
+import { checkUidRateLimit, resetUidRateLimitForTests } from './uidRateLimit';
 import { HOSTED_WEB_CALLABLES } from '../hostedCallables';
 import { getCloudFunctionUrl } from '../cloudFunctions';
 
@@ -78,4 +78,27 @@ it.each(cases)('%s hosts writes and returns 503 when Admin is unavailable', asyn
 it('does not host photo or attachment callables', () => {
   expect(HOSTED_WEB_CALLABLES).not.toContain('sendDmPhoto');
   expect(HOSTED_WEB_CALLABLES).not.toContain('dmAttachmentDelivery');
+});
+
+it('does not share the hosted per-minute cap with text DMs or story replies', async () => {
+  const { runtime } = setup();
+  for (let i = 1; i <= 11; i += 1) {
+    const messageId = `test-message-${String(i).padStart(12, '0')}`;
+    const sent = await dispatchFnRequest(
+      'sendDmText',
+      request({ ...text, messageId }, 'fake-valid'),
+      runtime,
+    );
+    expect(sent.status).toBe(200);
+  }
+  const replay = await dispatchFnRequest(
+    'prepareDmConversation',
+    request(text, 'fake-valid'),
+    runtime,
+  );
+  expect(replay.status).toBe(200);
+  for (let i = 0; i < 10; i += 1) {
+    expect(() => checkUidRateLimit('alice')).not.toThrow();
+  }
+  expect(() => checkUidRateLimit('alice')).toThrow(/Too many requests/);
 });

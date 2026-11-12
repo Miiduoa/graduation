@@ -283,7 +283,11 @@ export async function dispatchFnRequest(
     );
     uid = auth?.uid;
     if (uid) {
-      checkUidRateLimit(uid);
+      // DM / story-reply Functions have no per-UID minute cap. Do not share
+      // the hosted 10/min budget with chat, or a long conversation is rejected.
+      if (name !== 'prepareDmConversation' && name !== 'sendDmText' && name !== 'replyToCampusStory') {
+        checkUidRateLimit(uid);
+      }
       if (name === 'joinGroupByCode') {
         assertJoinCodeAttemptsAllowed(uid);
       }

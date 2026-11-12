@@ -15,13 +15,13 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 const scope = { viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob', conversationId: 'dm_pu_alice_bob' };
-it('retains the photo button and honestly explains Spark availability', () => {
+it('keeps the photo button even without a custom Functions URL', () => {
   runtime.configured = false;
   render(<DmPhotoComposer scope={scope} ready onSent={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '加入照片' }));
-  expect(screen.getByRole('alert').textContent).toBe('照片私訊尚未開通');
+  expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByRole('button', { name: '加入照片' })).toBeTruthy();
-  expect(runtime.upload).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('選擇私訊照片')).toBeTruthy();
 });
 it.each(['upload', 'confirm'] as const)('reports an absent %s callable without fake success', async (stage) => {
   const onSent = vi.fn();

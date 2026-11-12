@@ -1,6 +1,5 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuth, getFunctionsInstance } from './firebase';
-import { areFunctionsConfigured } from './cloudFunctions';
 import { FunctionsUnconfiguredError } from './functionsUrl';
 import { hostedWebCallablePath } from './hostedCallables';
 
@@ -9,7 +8,7 @@ export function isCallableMissing(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const e = error as { code?: unknown; name?: unknown; status?: unknown; response?: { status?: unknown } };
   return e.name === 'FunctionsUnconfiguredError' ||
-    ['functions/not-found', 'functions/unconfigured', 'NOT_FOUND'].includes(String(e.code)) ||
+    ['functions/not-found', 'functions/unconfigured', 'functions-unconfigured', 'NOT_FOUND'].includes(String(e.code)) ||
     e.status === 404 || e.status === 'NOT_FOUND' || e.response?.status === 404;
 }
 
@@ -20,12 +19,12 @@ export async function callWithHostedFallback<Input, Output>(
   viewerUid: string,
   signal?: AbortSignal,
 ): Promise<{ data: Output }> {
-  if (areFunctionsConfigured()) {
-    try {
-      return await httpsCallable<Input, Output>(getFunctionsInstance(), name)(data);
-    } catch (error) {
-      if (!isCallableMissing(error)) throw error;
-    }
+  // Always try the default Firebase endpoint first. Missing a custom Functions
+  // base URL is not proof the callable is absent.
+  try {
+    return await httpsCallable<Input, Output>(getFunctionsInstance(), name)(data);
+  } catch (error) {
+    if (!isCallableMissing(error)) throw error;
   }
   const user = getAuth()?.currentUser;
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');

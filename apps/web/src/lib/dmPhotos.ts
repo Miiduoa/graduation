@@ -1,5 +1,4 @@
 import { httpsCallable } from 'firebase/functions';
-import { areFunctionsConfigured } from './cloudFunctions';
 import { isCallableMissing } from './callableFallback';
 import { getAuth, getFunctionsInstance } from './firebase';
 
@@ -44,7 +43,15 @@ export function parseDmPhotoPath(path: unknown, conversationId: string, publishe
 function checkSession(scope: PhotoScope, signal: AbortSignal) {
   if (signal.aborted || getAuth()?.currentUser?.uid !== scope.viewerUid)
     throw new Error('photo-session');
-  if (!areFunctionsConfigured()) throw new Error('photo-unavailable');
+}
+
+async function callPhotoFn<I, O>(name: string, payload: I): Promise<{ data: O }> {
+  try {
+    return await httpsCallable<I, O>(getFunctionsInstance(), name)(payload);
+  } catch (error) {
+    if (isCallableMissing(error)) throw new Error('photo-unavailable');
+    throw error;
+  }
 }
 
 type Grant = { url: string; expiresAt: string };
@@ -82,8 +89,7 @@ export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: Abort
     mediaId: string;
     fields: Record<string, string>;
   };
-  const call = httpsCallable<Input, Upload>(getFunctionsInstance(), 'dmAttachmentDelivery');
-  const { data } = await call({
+  const { data } = await callPhotoFn<Input, Upload>('dmAttachmentDelivery', {
     ...scope,
     action: 'uploadPhoto',
     fileName,
@@ -120,11 +126,10 @@ export async function uploadDmPhoto(scope: PhotoScope, file: File, signal: Abort
 export async function confirmDmPhoto(scope: PhotoScope, path: string, signal: AbortSignal) {
   checkSession(scope, signal);
   if (!parseDmPhotoPath(path, scope.conversationId, false)) throw new Error('photo-path');
-  const call = httpsCallable<
+  const { data } = await callPhotoFn<
     PhotoScope & { path: string },
     { conversationId: string; messageId: string }
-  >(getFunctionsInstance(), 'sendDmPhoto');
-  const { data } = await call({ ...scope, path });
+  >('sendDmPhoto', { ...scope, path });
   checkSession(scope, signal);
   if (data?.conversationId !== scope.conversationId || data.messageId !== scope.messageId)
     throw new Error('photo-unconfirmed');
@@ -135,8 +140,9 @@ export async function readDmPhoto(scope: PhotoScope, path: string, signal: Abort
   const parts = parseDmPhotoPath(path, scope.conversationId);
   if (!parts) throw new Error('photo-path');
   type Input = PhotoScope & { action: 'read'; folder: 'photos'; mediaId: string; fileName: string };
-  const call = httpsCallable<Input, Grant>(getFunctionsInstance(), 'dmAttachmentDelivery');
-  const { data } = await call({ ...scope, action: 'read', folder: 'photos', ...parts });
+  const { data } = await callPhotoFn<Input, Grant>('dmAttachmentDelivery', {
+    ...scope, action: 'read', folder: 'photos', ...parts,
+  });
   checkSession(scope, signal);
   const url = checkGrant(data);
   const object =

@@ -936,7 +936,7 @@ it('keeps existing sends subject to server block and account-status denials', as
 
 it.each([false, true])('prepares a new conversation through hosted fallback (configured=%s)', async (configured) => {
   functionsConfig.enabled = configured;
-  if (configured) runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
+  runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
   const fetcher = vi.fn().mockResolvedValue({
     ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false } }),
   });
@@ -950,8 +950,9 @@ it.each([false, true])('prepares a new conversation through hosted fallback (con
     expect(getDocFromServer).not.toHaveBeenCalledWith(expect.objectContaining({ path: 'conversations/dm_pu_alice_bob' }));
   } finally { vi.unstubAllGlobals(); }
 });
-it('sends a prepared first message through hosted on Spark', async () => {
+it('sends a prepared first message through hosted after a missing callable', async () => {
   functionsConfig.enabled = false;
+  runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
   const fetcher = vi.fn().mockResolvedValue({
     ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', messageId: 'first-text-message-00001' } }),
   });
@@ -959,13 +960,14 @@ it('sends a prepared first message through hosted on Spark', async () => {
   try {
     await sendPreparedPrivateMessage(session, { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false, peerName: null },
       'first-text-message-00001', '你好', new AbortController().signal);
+    expect(runtime.callable).toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledWith('/api/fn/sendDmText', expect.anything());
-    expect(runtime.callable).not.toHaveBeenCalled();
   } finally { vi.unstubAllGlobals(); }
 });
 
 it('preserves stale cancellation when a hosted send is aborted', async () => {
   functionsConfig.enabled = false;
+  runtime.call.mockRejectedValueOnce({ code: 'functions/not-found' });
   const controller = new AbortController();
   const fetcher = vi.fn().mockImplementation(async () => {
     controller.abort();

@@ -13,7 +13,6 @@ import {
 } from '@/lib/dmPhotos';
 import { newPrivateMessageId, type PrivateMessage } from '@/lib/privateMessages';
 import styles from './messaging.module.css';
-import { areFunctionsConfigured } from '@/lib/cloudFunctions';
 
 function PhotoIcon() {
   return (
@@ -172,10 +171,7 @@ export function DmPhotoComposer({
           type="button"
           disabled={!ready}
           title="JPG、PNG 或 WebP，小於 10 MiB"
-          onClick={() => {
-            if (!areFunctionsConfigured()) setError('照片私訊尚未開通');
-            else input.current?.click();
-          }}
+          onClick={() => input.current?.click()}
         >
           <PhotoIcon /> 加入照片
         </button>

@@ -172,10 +172,11 @@ it('requests a fresh, scoped GET each time and checks expiry, URL type and objec
   }
 });
 
-it('reports photos unavailable without attempting callables on Spark', async () => {
+it('reports photos unavailable after the callable is confirmed missing', async () => {
   functionsConfig.enabled = false;
+  api.call.mockRejectedValue({ code: 'functions/not-found' });
   await expect(uploadDmPhoto(scope, file(), signal())).rejects.toThrow('photo-unavailable');
   await expect(confirmDmPhoto(scope, draft, signal())).rejects.toThrow('photo-unavailable');
   await expect(readDmPhoto(scope, path, signal())).rejects.toThrow('photo-unavailable');
-  expect(api.callable).not.toHaveBeenCalled();
+  expect(api.callable).toHaveBeenCalled();
 });

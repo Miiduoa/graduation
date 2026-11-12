@@ -56,15 +56,15 @@ it('prevents demo and stale-account requests, and hides a response after sign-ou
 
 it.each([false, true])('delivers through hosted when absent (configured=%s)', async (configured) => {
   functionsConfig.enabled = configured;
-  if (configured) runtime.invoke.mockRejectedValueOnce({ code: 'functions/not-found' });
+  runtime.invoke.mockRejectedValueOnce({ code: 'functions/not-found' });
   const fetcher = vi.fn().mockResolvedValue({
     ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_reader', messageId: 'story-receipt' } }),
   });
   vi.stubGlobal('fetch', fetcher);
   try {
     await expect(sendStoryReply('reader', input)).resolves.toBe('dm_pu_alice_reader');
+    expect(httpsCallable).toHaveBeenCalledWith({}, 'replyToCampusStory');
     expect(fetcher).toHaveBeenCalledWith('/api/fn/replyToCampusStory', expect.anything());
-    if (!configured) expect(httpsCallable).not.toHaveBeenCalled();
   } finally { vi.unstubAllGlobals(); }
 });
 it('does not downgrade a denied story reply', async () => {

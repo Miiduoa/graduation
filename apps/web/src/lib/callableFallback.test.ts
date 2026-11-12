@@ -28,10 +28,11 @@ it.each(names)('%s calls only Firebase when deployed', async (name) => {
   expect(runtime.callable).toHaveBeenCalledWith('functions', name);
   expect(runtime.fetch).not.toHaveBeenCalled();
 });
-it.each(names)('%s directly posts hosted with token and callable envelope on Spark', async (name) => {
+it.each(names)('%s still tries Firebase first without a custom Functions URL, then posts hosted', async (name) => {
   runtime.configured = false;
+  runtime.invoke.mockRejectedValueOnce({ code: 'functions/not-found' });
   await expect(callWithHostedFallback(name, { viewerUid: 'alice' }, 'alice')).resolves.toEqual({ data: { receipt: true } });
-  expect(runtime.callable).not.toHaveBeenCalled();
+  expect(runtime.callable).toHaveBeenCalledWith('functions', name);
   expect(runtime.fetch).toHaveBeenCalledWith('/api/fn/' + name, expect.objectContaining({
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fake-id-token' },
     body: JSON.stringify({ data: { viewerUid: 'alice' } }),
@@ -56,12 +57,12 @@ it.each([
   expect(runtime.fetch).not.toHaveBeenCalled();
 });
 it('preserves hosted permission error codes', async () => {
-  runtime.configured = false;
+  runtime.invoke.mockRejectedValueOnce({ code: 'functions/not-found' });
   runtime.fetch.mockResolvedValue({ ok: false, json: async () => ({ error: { status: 'PERMISSION_DENIED', message: '拒絕' } }) });
   await expect(callWithHostedFallback('sendDmText', {}, 'alice')).rejects.toMatchObject({ code: 'functions/permission-denied', message: '拒絕' });
 });
 it('checks abort and account again after fetching the token', async () => {
-  runtime.configured = false;
+  runtime.invoke.mockRejectedValue({ code: 'functions/not-found' });
   const controller = new AbortController();
   runtime.token.mockImplementationOnce(async () => { controller.abort(); return 'fake'; });
   await expect(callWithHostedFallback('sendDmText', {}, 'alice', controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
