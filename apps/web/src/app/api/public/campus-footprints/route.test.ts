@@ -1281,7 +1281,7 @@ describe('public Providence building geometry route', () => {
       osm3s: { timestamp_osm_base: '2026-11-12T07:00:00Z' },
       ...JSON.parse(osmPayload),
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(source, { status: 200 }));
+    const upstream = vi.fn().mockImplementation(async () => new Response(source, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
