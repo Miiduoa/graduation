@@ -333,6 +333,81 @@ it('searches the public endpoint, distinguishes sections and copies a school-sco
   expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
 });
 
+
+it('serializes course clipboard writes and shows confirmation only for the latest selected class', async () => {
+  const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
+  let finishFirst!: () => void;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PublicCourseSearch {...props} />);
+  submit('課');
+  const cards = await screen.findAllByRole('listitem');
+  expect(cards).toHaveLength(2);
+  fireEvent.click(within(cards[0]).getByRole('button', { name: '複製課表匯入資料' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
+  fireEvent.click(within(cards[1]).getByRole('button', { name: '複製課表匯入資料' }));
+  expect(within(cards[0]).queryByText(/已複製/)).toBeNull();
+  await act(async () => { finishFirst(); });
+  expect(writeText).toHaveBeenCalledTimes(2);
+  expect(writeText).toHaveBeenLastCalledWith(ncnuTimetableImportCsv(second));
+  expect(within(cards[0]).queryByText(/已複製/)).toBeNull();
+  expect(within(cards[1]).getByText(/已複製/)).toBeTruthy();
+  expect(within(cards[0]).queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+  expect(within(cards[1]).getByRole('link', { name: '前往課表匯入' })).toBeTruthy();
+});
+
+it('skips an obsolete queued copy before it reaches the clipboard, even across two classes', async () => {
+  const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PublicCourseSearch {...props} />);
+  submit('課');
+  const cards = await screen.findAllByRole('listitem');
+  fireEvent.click(within(cards[0]).getByRole('button', { name: '複製課表匯入資料' }));
+  fireEvent.click(within(cards[1]).getByRole('button', { name: '複製課表匯入資料' }));
+  expect(await within(cards[1]).findByText(/已複製/)).toBeTruthy();
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(second));
+  expect(within(cards[0]).queryByText(/已複製/)).toBeNull();
+});
+
+
+it('does not resurrect copied feedback from an older search after its clipboard write completes', async () => {
+  // Each fetch needs its own body: Response.json() can only be consumed once.
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(response([course])));
+  vi.stubGlobal('fetch', fetcher);
+  let finish!: () => void;
+  const clipboardWrite = new Promise<void>(resolve => { finish = resolve; });
+  const writeText = vi.fn().mockReturnValue(clipboardWrite);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PublicCourseSearch {...props} />);
+  try {
+    submit('第一個查詢');
+    await screen.findByRole('heading', { name: course.title });
+    fireEvent.click(screen.getByRole('button', { name: '複製課表匯入資料' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    submit('第二個查詢');
+    await screen.findByRole('heading', { name: course.title });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      '/api/public-course-catalog?schoolId=ncnu&q=' + encodeURIComponent('第二個查詢'), expect.anything(),
+    );
+    await act(async () => { finish(); });
+    expect(screen.queryByText(/已複製/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+  } finally {
+    // Release the shared clipboard queue even when an assertion fails.
+    await act(async () => { finish(); });
+  }
+});
+
 it('keeps only the latest result, including when the previous response arrives late', async () => {
   let finish!: (value: Response) => void;
   const fetcher = vi.fn().mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }))
