@@ -393,7 +393,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
           )}
           renderItem={({ item }) => (
             <Pressable accessibilityRole="button" accessibilityLabel={`開啟貼文：${item.title}`}
-              accessibilityState={{ busy: opening, disabled: opening }}
+              accessibilityState={{ busy: opening, disabled: opening }} disabled={opening}
               style={styles.card} onPress={() => { void openResult(item); }}>
               <Text style={styles.postTitle}>{item.title}</Text>
               <Text style={styles.muted}>{item.anonymous ? '匿名貼文' : '校園貼文'}</Text>
