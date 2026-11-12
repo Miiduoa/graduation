@@ -72,3 +72,25 @@ it('never treats duplicate POIs as the same complete snapshot', () => {
   const next = [copy(), copy()];
   expect(reuseUnchangedProvidenceFootprints(previousDuplicates, next)).toBe(next);
 });
+
+it('reuses equivalent courtyard rings but rebuilds when an OSM inner ring changes', () => {
+  // Synthetic shapes only: proves a changed hole must trigger new GPU geometry.
+  const old: ProvidenceFootprint = {
+    ...copy(), poiId: 'pu-xijia',
+    sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+    holes: [[[120.58135, 24.22626], [120.58138, 24.22626], [120.58138, 24.22629]]],
+  };
+  const identical = {
+    ...old, outline: old.outline.map(([lon, lat]): [number, number] => [lon, lat]),
+    holes: old.holes!.map((ring) => ring.map(([lon, lat]): [number, number] => [lon, lat])),
+  };
+  expect(reuseUnchangedProvidenceFootprints([old], [identical])).toBeInstanceOf(Array);
+  const same = [old];
+  expect(reuseUnchangedProvidenceFootprints(same, [identical])).toBe(same);
+  const moved = [{ ...identical, holes: [[[120.58135, 24.22626], [120.58140, 24.22626], [120.58138, 24.22629]]] as Array<Array<[number, number]>> }];
+  expect(reuseUnchangedProvidenceFootprints(same, moved)).toBe(moved);
+  const removed = [{ ...identical, holes: undefined }];
+  expect(reuseUnchangedProvidenceFootprints(same, removed)).toBe(removed);
+  expect(reuseUnchangedProvidenceFootprints([copy()], [{ ...copy(), holes: identical.holes }]))
+    .not.toEqual([copy()]);
+});
