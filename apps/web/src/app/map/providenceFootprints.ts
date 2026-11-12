@@ -355,6 +355,23 @@ const LIFECYCLE_STATUS_TAGS = [
   'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
 ] as const;
 
+/** An audited OSM ID is not enough to inherit a campus building's old name.
+ * If a mapper explicitly names a different building, do not attach the verified
+ * POI identity to its volume until that name/source change is reviewed. A
+ * matching Chinese name can validate a bilingual primary name. Missing name
+ * tags remain valid because many real OSM building polygons are unnamed.
+ */
+function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
+  const record = object(tags);
+  if (!record) return false;
+  const primary = record.name;
+  if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
+  const chinese = record['name:zh'];
+  if (chinese !== undefined) return typeof chinese === 'string' &&
+    chinese.trim() === expectedName;
+  return primary === undefined || primary.trim() === expectedName;
+}
+
 function isStandingBuilding(value: unknown): boolean {
   const tags = object(value);
   const classification = tags?.building;
@@ -476,7 +493,8 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const place = knownBuildingForElement(element);
     const identity = `${element.type}:${element.id}`;
     if (!place || seen.has(identity) || !isVisibleOsmElement(element) ||
-        !isStandingBuilding(element.tags)) continue;
+        !isStandingBuilding(element.tags) ||
+        !matchesAuditedOsmName(element.tags, place.name)) continue;
     const geometry = element.type === 'way'
       ? (() => {
           if (!hasConsistentOsmWayNodes(element)) return null;

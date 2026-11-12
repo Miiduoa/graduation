@@ -31,6 +31,34 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('does not attach an audited campus POI name to a renamed OSM building', () => {
+    // Synthetic source drift: the way ID and geometry remain valid, but OSM
+    // now explicitly names a different place. Keep the point marker; omit
+    // the misleading 3D volume until the new source/name is verified.
+    for (const tags of [
+      { building: 'school' },
+      { building: 'school', name: '蓋夏圖書館' },
+      { building: 'school', name: 'Guixa Library', 'name:zh': '蓋夏圖書館' },
+      { building: 'school', 'name:zh': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+    for (const tags of [
+      { building: 'school', name: '希嘉學苑' },
+      { building: 'school', name: '  ' },
+      { building: 'school', name: 99 },
+      { building: 'school', name: null },
+      { building: 'school', name: '蓋夏圖書館', 'name:zh': '希嘉學苑' },
+      { building: 'school', name: 'Guixa Library', 'name:zh': ' ' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+  });
+
   it('does not render explicitly invisible or deleted OSM ways as current buildings', () => {
     // Synthetic Overpass-like metadata: a geometry/tag match alone is not
     // proof that an explicitly invisible element is still a visible building.
