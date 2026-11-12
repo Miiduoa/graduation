@@ -286,3 +286,26 @@ test('deletion between fresh anchor and page reads cannot silently resume at ano
     record({ realInterleavedDeletion: true, neighbourNotReturned: true });
   } finally { observed.mockRestore(); await restore?.(); }
 });
+
+test('retitling a visible historical result before opening must not navigate to an unrelated article', async () => {
+  const onOpenPost = jest.fn();
+  const view = render(<TitleHistoryLauncher onOpenPost={onOpenPost} />);
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  fireEvent.changeText(view.getByLabelText('記得的標題開頭'), '二手書');
+  fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+  await count(view, 20);
+  expect(rows(view).some((post) => post.id === 'old-004')).toBe(true);
+  const restore = await changeAnchor((doc) => doc.update({ title: '租屋 已改標題' }));
+  try {
+    // The old card is still on screen. Only an uncached server recheck may
+    // authorize opening it as a result of the original title-prefix search.
+    fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 01')[1]);
+    await view.findByText(/這篇貼文已刪除或不再提供/, {}, { timeout: 10000 });
+    expect(onOpenPost).not.toHaveBeenCalled();
+    expect(rows(view).some((post) => post.id === 'old-004')).toBe(false);
+    // The same legitimate student can still search by the new title; this
+    // must not be implemented as a blanket denial of the document.
+    expect(await service.confirmCampusPostTitleOpen('pu', 'old-004', '租屋')).toBe(true);
+    record({ renamedFrom: '二手書 01', renamedTo: '租屋 已改標題', staleNavigation: false, legitimateNewPrefixAllowed: true });
+  } finally { await restore(); }
+});
