@@ -186,6 +186,44 @@ test('a damaged restored timetable fails closed even with a valid clock and matc
   expect(formatOnDeviceSchoolPrompt(noPeriod, saved, 'alice')).toContain('Alice 私人作業');
 });
 
+test('impossible restored source dates cannot authorize offline course and assignment excerpts', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const sense: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 私人作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  for (const updatedAt of [
+    '2026-02-30T10:00:00.000Z', // Date.parse silently accepts February 30.
+    '2026-02-29T10:00:00Z', // 2026 is not a leap year.
+    '2026-04-31T09:00:00+08:00', // Offset timestamps need calendar validation too.
+    '2026-11-31T18:00:00.000Z',
+  ]) {
+    const prompt = formatOnDeviceSchoolPrompt({
+      ...local, timetable: { ...local.timetable, updatedAt },
+    }, sense, 'alice');
+    expect(prompt).toContain('目前沒有可確認的本機個人課表');
+    expect(prompt).not.toContain('資料庫概論');
+    expect(prompt).not.toContain('Alice 私人作業');
+  }
+  for (const updatedAt of [
+    '2024-02-29T17:00:00+08:00', // Actual leap day remains valid.
+    '2026-10-25T17:00:00.000+08:00',
+    '2026-10-25T09:00:00.000Z',
+  ]) {
+    const prompt = formatOnDeviceSchoolPrompt({
+      ...local, timetable: { ...local.timetable, updatedAt },
+    }, sense, 'alice');
+    expect(prompt).toContain('資料庫概論');
+    expect(prompt).toContain('Alice 私人作業');
+  }
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
