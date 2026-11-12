@@ -25,7 +25,8 @@ export async function GET(request: Request) {
   if (params.getAll('q').length > 1 || !isPublicCourseOperationQuery(query)) {
     return Response.json({ error: '搜尋內容請限制在 80 字以內。' }, { status: 400, headers });
   }
-  if ([...params.keys()].some((key) => !['schoolId', 'q', 'weekday', 'credits'].includes(key))) {
+  // Legacy React Native fetch adds `_` for cache: 'no-store'; ignore it as transport metadata.
+  if ([...params.keys()].some((key) => !['schoolId', 'q', 'weekday', 'credits', '_'].includes(key))) {
     return Response.json({ error: '課程查詢只接受學校、搜尋內容、星期與學分。' }, { status: 400, headers });
   }
   const filters = parsePublicCourseFilterParams(params);

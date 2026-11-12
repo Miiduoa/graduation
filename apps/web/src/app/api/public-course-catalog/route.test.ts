@@ -247,6 +247,35 @@ describe('school-scoped public course catalog dispatch', () => {
   beforeEach(() => { vi.resetModules(); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it.each(['ncnu', 'nthu'])('ignores the legacy cache-busting parameter while searching %s with the v1 response', async (schoolId) => {
+    const nthu = [{
+      科號: '11510AES 520300', 課程中文名稱: '環境化學', 課程英文名稱: 'Environment Chemistry', 學分數: '3',
+      授課教師: '董瑞安', 教室與上課時間: 'BMES醫環618\tM3M4', 停開註記: '',
+    }];
+    const fetchSource = vi.fn().mockImplementation((url: string) => url.endsWith('.json')
+      ? new Response(JSON.stringify(nthu), { headers: { 'Content-Type': 'text/plain' } }) : csv());
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET } = await import('./route');
+    const query = schoolId === 'ncnu' ? '005076' : '環境化學';
+    const params = 'schoolId=' + schoolId + '&q=' + encodeURIComponent(query);
+    const response = await GET(request(params + '&_=1730000000000'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    const body = await response.json();
+    expect(body).toEqual(await (await GET(request(params))).json());
+    expect(body.operation).toEqual({
+      id: schoolId + '.courses.search', version: 1, responseSchemaVersion: 1, access: 'anonymous-public',
+    });
+    expect(body).not.toHaveProperty('filters');
+    expect(body.courses.map((course: { code: string }) => course.code)).toEqual(
+      schoolId === 'ncnu' ? ['005076', '005076'] : ['11510AES 520300'],
+    );
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+    expect(fetchSource.mock.calls[0][0]).not.toContain('_=');
+    expect((await GET(request(params + '&_=1730000000000&extra=1'))).status).toBe(400);
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps NCNU and NTHU results and caches separate, with no caller credentials in upstream requests', async () => {
     const nthu = [{
       科號: '11510AES 520300', 課程中文名稱: '環境化學', 課程英文名稱: 'Environment Chemistry', 學分數: '3',
