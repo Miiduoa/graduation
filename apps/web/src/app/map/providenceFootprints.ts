@@ -223,6 +223,18 @@ function safeSimpleRelationGeometry(element: Record<string, unknown>):
   if (!outerMembers[0] || !hasConsistentOsmWayNodes(outerMembers[0]) ||
       (innerMembers.length > 0 && (!innerMembers[0] ||
         !hasConsistentOsmWayNodes(innerMembers[0])))) return null;
+  // A node ID identifies one OSM coordinate globally, not once per ring.
+  // When both member ways expose node refs, a shared ID would mean the
+  // courtyard touches the outer wall or the source assigns one node to two
+  // different coordinates. Either case must not become a 3D building.
+  if (innerMembers.length) {
+    const outerNodes = outerMembers[0].nodes;
+    const innerNodes = innerMembers[0]?.nodes;
+    if (Array.isArray(outerNodes) && Array.isArray(innerNodes)) {
+      const outerIds = new Set(outerNodes.slice(0, -1));
+      if (innerNodes.slice(0, -1).some((id) => outerIds.has(id))) return null;
+    }
+  }
   const outline = safeOutline(outerMembers[0].geometry);
   if (!outline) return null;
   if (!innerMembers.length) return { outline, holes: [] };
