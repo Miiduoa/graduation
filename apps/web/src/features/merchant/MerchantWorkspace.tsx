@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { AccountDemoEntry } from '@/components/AccountDemoEntry';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
@@ -95,6 +96,7 @@ export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOvervi
   }
   return (
     <SiteShell title={entry.title} subtitle={entry.subtitle}>
+      {view !== 'apply' ? <AccountDemoEntry destination="merchant" /> : null}
       {cleanupError ? <p role="alert">{cleanupError}</p> : null}
       {auth.session && !auth.pendingLogout && !auth.error ? (
         <AccountWorkspace

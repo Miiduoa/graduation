@@ -14,6 +14,7 @@ import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assist
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
+import { accountDemoAssistantIntent, prepareAccountDemoAssistant } from '@/lib/accountDemoAssistant';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 import { AssistantLocalEntry } from '@/components/AssistantLocalEntry';
@@ -342,6 +343,30 @@ function V2Conversation({
   async function ask() {
     const current = question.trim();
     if (!current || busy.current) return;
+    if (accountDemoAssistantIntent(current)) {
+      busy.current = true;
+      setPending(true);
+      setPendingAction('ask');
+      setError('');
+      setQuestion('');
+      try {
+        const demo = await prepareAccountDemoAssistant(current, { context, accountId, schoolId }, undefined, active);
+        if (!active() || !demo) return;
+        setTurns((previous) => [...previous, { question: current,
+          reply: { answer: demo.answer, steps: [], cards: [], demo } }]);
+        setRecoverableQuestion((previous) => previous === current ? '' : previous);
+      } catch (failure) {
+        if (active()) {
+          setError(failure instanceof Error && !/^[A-Z_]+$/.test(failure.message)
+            ? failure.message : '展示資料目前讀不到，請稍後再試。');
+          setRecoverableQuestion(current);
+        }
+      } finally {
+        busy.current = false;
+        if (active()) setPending(false);
+      }
+      return;
+    }
     const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId });
     if (local) {
       setTurns((previous) => [...previous, { question: current,
@@ -366,7 +391,7 @@ function V2Conversation({
     // The sent content remains captured in `current` and can be recovered on failure.
     setQuestion('');
     try {
-      const history = turns.filter((turn) => !turn.reply.local &&
+      const history = turns.filter((turn) => !turn.reply.local && !turn.reply.demo &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -377,7 +402,8 @@ function V2Conversation({
         routeToken.current = reply.routeToken;
         reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
       }
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      // Demo proposals are created from this account's verified API read, never model output.
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       if (reply.cards.length) {
         for (const card of turns.flatMap((turn) => turn.reply.cards)) {
           if (canConfirmAction(actionStates.current[card.mutationId]))
@@ -595,6 +621,7 @@ function V2Conversation({
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
+      demoScope={{ context, accountId, schoolId }}
     />
     </>
   );

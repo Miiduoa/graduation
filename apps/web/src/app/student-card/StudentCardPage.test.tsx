@@ -237,8 +237,8 @@ it('leaves school services available to visitors and other roles', async () => {
   state.signedIn = false;
   state.schoolId = 'thu';
   const { rerender } = render(<StudentCardPage />);
-  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toContain(
-    'student-card',
+  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
+    '/login?returnUrl=' + encodeURIComponent('/student-card?campus=thu'),
   );
   expect(screen.getByRole('link', { name: '開啟校方服務' }).getAttribute('href')).toContain(
     'page.line.me',
@@ -284,7 +284,7 @@ it('shows an account-owned demonstration card for Google platform sign-in withou
   expect(card.textContent).toContain('展示同學');
   expect(card.textContent).toContain('DEMO');
   expect(card.textContent).not.toContain('DEMO20261112');
-  expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
   expect(state.read).not.toHaveBeenCalled();
   expect(state.demoRequest).toHaveBeenCalledWith('account-demo', 'platform-session-a');
   expect(screen.getByRole('link', { name: '展示資料與權限' }).getAttribute('href')).toBe(
@@ -362,7 +362,7 @@ it('cannot restore an old account response after the platform account changes', 
   };
   state.demoRequest.mockResolvedValueOnce({ demo: null });
   rerender(<StudentCardPage />);
-  await screen.findByRole('link', { name: '登入學校帳號' });
+  await screen.findByRole('link', { name: '登入帳號' });
   await act(async () => finish({ demo: accountDemo() }));
   expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
   expect(screen.queryByText('展示同學')).toBeNull();

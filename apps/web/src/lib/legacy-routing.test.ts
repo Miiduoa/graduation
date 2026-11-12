@@ -159,6 +159,15 @@ describe('legacy route configuration', () => {
     },
   );
 
+  it.each(['/demo/account', '/student-card', '/ai-assistant'])(
+    'keeps account demonstration destination %s in the current app',
+    async (path) => {
+      const response = await responseFor(path, '?campus=pu');
+      expect(getRewrittenUrl(response)).toBeNull();
+      expect(redirectLocation(response)).toBeNull();
+    },
+  );
+
   it.each([
     '/auth/account/token',
     '/auth/callback',

@@ -17,6 +17,7 @@ export type V2Reply = {
   cards: V2Card[];
   simulation?: boolean;
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
+  demo?: import('@/lib/accountDemoAssistant').AccountDemoAssistantAnswer;
 };
 
 export type V2Turn = { question: string; reply: V2Reply };

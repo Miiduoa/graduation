@@ -96,12 +96,12 @@ export function StudentCardPage() {
     !user || user.isAnonymous ? (
       <section className={styles.message}>
         <h2>把學號放進隨身卡片</h2>
-        <p>使用學校帳號登入後，可查看個人資料並取得學號驗證碼。</p>
+        <p>登入後查看已開通的卡片與學生資料。</p>
         <Link
           className={styles.button}
           href={'/login?returnUrl=' + encodeURIComponent('/student-card?campus=' + schoolId)}
         >
-          登入學校帳號
+          登入帳號
         </Link>
       </section>
     ) : schoolId ? (

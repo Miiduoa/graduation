@@ -47,6 +47,16 @@ export const ACCOUNT_DEMO_ACTIONS = [
 export type AccountDemoStateKey = (typeof ACCOUNT_DEMO_ACTIONS)[number];
 export type AccountDemoAction = AccountDemoStateKey | 'reset';
 export type AccountDemoState = Record<AccountDemoStateKey, boolean>;
+/** Fixed synthetic meal shared by the account workspace and assistant confirmation. */
+export const ACCOUNT_DEMO_MEAL = {
+  merchant: '小日子食堂',
+  name: '香煎雞腿飯',
+  detail: '香煎雞腿、當日蔬菜、白飯',
+  price: 95,
+  quantity: 1,
+  pickup: '12:10',
+  place: '學生餐廳取餐櫃檯',
+} as const;
 export const ACCOUNT_DEMO_ACTION_LABELS: Record<AccountDemoAction, string> = {
   submitAssignment: '繳交作業',
   checkIn: '完成簽到',

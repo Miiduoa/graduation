@@ -15,6 +15,8 @@ const harness = vi.hoisted(() => ({
     platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
     context: 'session-one',
   } as { platformAccountId: string; context: string } | null,
+  error: '',
+  refresh: vi.fn(),
   request: vi.fn(),
   enableSync: vi.fn(),
   sync: vi.fn(),
@@ -26,6 +28,8 @@ vi.mock('@/features/nuni/Session', () => ({
     session: harness.session,
     loading: false,
     pendingLogout: false,
+    error: harness.error,
+    refresh: harness.refresh,
   }),
   browserRequest: harness.request,
 }));
@@ -68,6 +72,8 @@ beforeEach(() => {
     this.open = false;
   };
   vi.clearAllMocks();
+  harness.error = '';
+  harness.refresh.mockResolvedValue(undefined);
   harness.session = { platformAccountId: fixture().accountId, context: 'session-one' };
   harness.request.mockResolvedValue({ demo: fixture() });
   harness.enableSync.mockResolvedValue(undefined);
@@ -81,6 +87,15 @@ afterEach(() => {
 });
 
 describe('account presentation workspace', () => {
+  it('offers session recovery instead of loading private data when identity cannot be confirmed', async () => {
+    harness.error = '目前無法確認帳號，請稍後重試。';
+    render(<AccountDemoWorkspace />);
+    expect(screen.getByRole('alert').textContent).toBe(harness.error);
+    expect(harness.request).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新確認帳號' }));
+    expect(harness.refresh).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '建立訂餐' })).toBeNull();
+  });
   it('asks unauthenticated visitors to sign in without reading private data', () => {
     harness.session = null;
     render(<AccountDemoWorkspace />);
@@ -93,6 +108,9 @@ describe('account presentation workspace', () => {
     expect(screen.getAllByRole('switch')).toHaveLength(12);
     expect(screen.getByRole('link', { name: /開啟展示學生證/ }).getAttribute('href')).toBe(
       '/student-card?campus=pu',
+    );
+    expect(screen.getByRole('link', { name: /開啟助理/ }).getAttribute('href')).toBe(
+      '/ai-assistant?campus=pu',
     );
     expect(harness.request).toHaveBeenCalledWith('account-demo', 'session-one');
   });

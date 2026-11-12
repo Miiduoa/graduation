@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { SiteShell } from '@/components/SiteShell';
+import { AccountDemoEntry } from '@/components/AccountDemoEntry';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
@@ -64,6 +65,7 @@ export function FoodWorkspace({
   return (
     <SiteShell title="點餐與取餐" subtitle={foodPageSubtitle(orderingOn)}>
       <div className={styles.stack}>
+        {hydrated ? <AccountDemoEntry destination="food" /> : null}
         {cleanupError ? <p role="alert">{cleanupError}</p> : null}
         <nav className={styles.serviceNav} aria-label="餐飲服務">
           <Link href="/cafeteria" className={styles.serviceLink}>

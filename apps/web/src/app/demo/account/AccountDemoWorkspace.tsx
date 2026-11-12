@@ -26,6 +26,7 @@ import {
   syncPersonalImports,
 } from '@/lib/personalImportSync';
 import { readPersonalImports } from '@/lib/personalImports';
+import { AccountDemoDining } from './AccountDemoDining';
 import styles from './accountDemo.module.css';
 
 const MODULES: {
@@ -45,12 +46,6 @@ const MODULES: {
     detail: '完成課堂簽到，將請假申請交給示範教師審核。',
     feature: 'attendance',
     actions: ['checkIn', 'requestLeave', 'approveLeave'],
-  },
-  {
-    title: '午餐與取餐',
-    detail: '香煎雞腿飯 1 份，取餐時間 12:10，展示訂單建立與店家備餐。',
-    feature: 'food',
-    actions: ['createOrder', 'readyOrder'],
   },
   {
     title: '圖書館',
@@ -313,7 +308,8 @@ function Workspace({ accountId, context }: { accountId: string; context: string 
                 </button>
                 <Link href={`/classroom${schoolSearch}`}>課程與作業 ↗</Link>
                 <Link href={`/timetable${schoolSearch}`}>我的課表 ↗</Link>
-                <Link href={`/assistant${schoolSearch}`}>開啟助理 ↗</Link>
+                <a href="#account-dining">點餐與店家展示 ↓</a>
+                <Link href={`/ai-assistant${schoolSearch}`}>開啟助理 ↗</Link>
               </div>
             </section>
 
@@ -366,11 +362,13 @@ function Workspace({ accountId, context }: { accountId: string; context: string 
                   <h3>目前進度</h3>
                   <p>{summary}。</p>
                   <p className={styles.explanation}>
-                    摘要依本帳號的展示紀錄更新；日常課業查詢請使用上方的助理入口。
+                    開啟上方助理，輸入「查看展示進度」查詢；輸入「展示點餐」或「展示預約座位」，核對確認卡後即可完成操作。
                   </p>
                 </aside>
               ) : null}
             </section>
+
+            <AccountDemoDining demo={demo} blocked={blocked} onAction={setPending} />
 
             <section className={styles.panel} aria-labelledby="account-permissions-title">
               <div className={styles.sectionHeader}>
@@ -450,6 +448,18 @@ export function AccountDemoWorkspace() {
     return (
       <SiteShell title="我的展示工作區">
         <p role="status">正在確認帳號…</p>
+      </SiteShell>
+    );
+  if (auth?.error)
+    return (
+      <SiteShell title="我的展示工作區">
+        <section className={styles.panel}>
+          <h2>暫時無法確認登入狀態</h2>
+          <p role="alert">{auth.error}</p>
+          <button type="button" onClick={() => void auth.refresh()}>
+            重新確認帳號
+          </button>
+        </section>
       </SiteShell>
     );
   if (!auth?.session)
