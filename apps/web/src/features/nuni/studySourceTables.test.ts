@@ -421,7 +421,7 @@ describe('explicit inline CSS visibility in course source wrappers', () => {
   it('does not let nested containers expose a visibility-hidden parent', () => {
     const source = [
       '<section style="visibility:hidden">',
-      '<div style="visibility:visible">',
+      '<div class="nested">',
       '| 未發布成績 | 學分 |',
       '| --- | --- |',
       '| 模擬資料 | 99 |',

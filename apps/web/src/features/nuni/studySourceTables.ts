@@ -15,7 +15,8 @@ const MAX_ROWS = 20;
 
 // A Markdown-looking table in an explicitly hidden HTML wrapper is not
 // visible course material. Do not infer CSS visibility or parse arbitrary
-// HTML: recognize explicit hidden / aria-hidden=true and literal inline display:none,\n// visibility:hidden / visibility:collapse / content-visibility:hidden;
+// HTML: recognize explicit hidden / aria-hidden=true and literal inline display:none,
+// visibility:hidden / visibility:collapse / content-visibility:hidden;
 // this does not infer computed CSS, external stylesheets or chart meaning.
 const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
