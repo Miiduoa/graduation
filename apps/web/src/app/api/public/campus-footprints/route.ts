@@ -3,6 +3,7 @@ import {
   parseProvidenceOsmFootprints,
   stripOsmRevisionsAfter,
   PROVIDENCE_OSM_BUILDING_WAY_IDS,
+  PROVIDENCE_OSM_BUILDING_RELATION_IDS,
   type ProvidenceFootprint,
 } from '@/app/map/providenceFootprints';
 
@@ -83,8 +84,9 @@ function freshCacheControl(validUntil: number): string {
   const secondsRemaining = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
   return `public, max-age=0, s-maxage=${Math.min(3600, secondsRemaining)}`;
 }
-const query = '[out:json][timeout:12];way(id:' +
-  PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
+const query = '[out:json][timeout:12];(way(id:' +
+  PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');relation(id:' +
+  PROVIDENCE_OSM_BUILDING_RELATION_IDS.join(',') + '););out meta geom;';
 
 type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; osmBaseAt: string | null; validUntil: number; discardAfter: number };
 let cache: Snapshot | null = null;
