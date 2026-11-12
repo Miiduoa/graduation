@@ -88,6 +88,46 @@ test('a restored invalid clock cannot crash the local prompt or expose private e
   }
 });
 
+test('expired or future-restored context cannot replay private evidence into the offline model', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-12T08:00:00.000Z'));
+  try {
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+    const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+    const sense: CampusSenseSnapshot = {
+      userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'available', count: 1 },
+      assignments: {
+        status: 'available', count: 1,
+        items: [{ title: '私人課程作業', groupName: '資料庫', dueAt: null }],
+      },
+      announcements: { status: 'available', items: [] },
+    };
+    const format = (restored = local) => formatOnDeviceSchoolPrompt(restored, sense, 'alice');
+    expect(format()).toContain('資料庫概論');
+    expect(format()).toContain('私人課程作業');
+
+    // The exact five-minute boundary remains usable; one ms later must re-collect.
+    jest.advanceTimersByTime(5 * 60_000);
+    expect(format()).toContain('資料庫概論');
+    jest.advanceTimersByTime(1);
+    const expired = format();
+    expect(expired).toContain('台灣當地時間：無法核對');
+    expect(expired).not.toContain('資料庫概論');
+    expect(expired).not.toContain('私人課程作業');
+
+    jest.setSystemTime(new Date('2026-11-12T08:00:00.000Z'));
+    const future = { ...local, checkedAt: new Date(Date.now() + 31_000).toISOString() };
+    const futurePrompt = format(future);
+    expect(futurePrompt).toContain('台灣當地時間：無法核對');
+    expect(futurePrompt).not.toContain('資料庫概論');
+    expect(futurePrompt).not.toContain('私人課程作業');
+    const tolerableClockSkew = { ...local, checkedAt: new Date(Date.now() + 30_000).toISOString() };
+    expect(format(tolerableClockSkew)).toContain('資料庫概論');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('a damaged restored timetable fails closed even with a valid clock and matching account', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });

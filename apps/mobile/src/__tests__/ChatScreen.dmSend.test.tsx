@@ -482,12 +482,10 @@ function pickPhoto() {
   jest.mocked(Photos.localPhoto).mockReturnValue({ uri: 'file:///pick.png', contentType: 'image/png', size: 10 });
 }
 
-test('local preview is removable and retries reuse one upload and the same message until acknowledged', async () => {
+test('local preview is removable and sending a photo shows it is not yet available', async () => {
   pickPhoto();
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  let ack!: () => void;
-  jest.mocked(Photos.confirmDmPhoto).mockReset().mockRejectedValueOnce(new Error('lost receipt'))
-    .mockImplementation(() => new Promise((done) => { ack = done; }));
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
   const view = render(photoChat());
   expect(view.queryByLabelText('加入照片')).toBeNull();
   verifyPhotoChat(true);
@@ -505,25 +503,22 @@ test('local preview is removable and retries reuse one upload and the same messa
   expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
   await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
   await act(async () => fireEvent.press(view.getByText('傳送照片')));
-  expect(view.getByText('尚未確認送達，照片已保留。')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
   await act(async () => {
     fireEvent.press(view.getByText('重新傳送照片'));
   });
-  expect(view.getByText('照片傳送中…')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
   expect(view.queryByText('照片已傳送')).toBeNull();
-  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
-  const scope = { conversationId: photoConvo, viewerUid: 'alice', schoolId: 'pu', messageId: photoId };
-  expect(jest.mocked(Photos.confirmDmPhoto).mock.calls.map(args => args.slice(0, 2))).toEqual([[scope, staged], [scope, staged]]);
-  await act(async () => ack());
-  expect(view.getByText('照片已傳送')).toBeTruthy();
-  expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
+  expect(view.queryByText('照片傳送中…')).toBeNull();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
 });
 
-test('blurring the screen keeps the photo composer mounted with the same draft and uploaded path', async () => {
+test('blurring the screen keeps the photo composer mounted with the same draft', async () => {
   pickPhoto();
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  let ack!: () => void;
-  jest.mocked(Photos.confirmDmPhoto).mockReset().mockImplementation(() => new Promise((done) => { ack = done; }));
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
   const navigation = navigationWithFocus();
   const view = render(photoChat(photoConvo, navigation));
   verifyPhotoChat();
@@ -539,22 +534,21 @@ test('blurring the screen keeps the photo composer mounted with the same draft a
   expect(view.queryByLabelText('加入照片')).toBeNull();
   fireEvent.press(view.getByText('傳送照片'));
   expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(view.queryByText('照片私訊尚未開通')).toBeNull();
   await act(async () => { navigation.emit('focus'); });
   expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
   await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
-  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
-  expect(jest.mocked(Photos.uploadDmPhoto).mock.calls[0][0]).toEqual({
-    conversationId: photoConvo, viewerUid: 'alice', schoolId: 'pu', messageId: photoId,
-  });
-  await act(async () => ack());
-  expect(view.getByText('照片已傳送')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(view.queryByText('照片已傳送')).toBeNull();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
 });
 
-test('pending typing and presence writes preserve a verified photo draft and in-flight send', async () => {
+test('pending typing and presence writes preserve a verified photo draft after send is declined', async () => {
   pickPhoto();
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  let ack!: () => void;
-  jest.mocked(Photos.confirmDmPhoto).mockReset().mockImplementation(() => new Promise(done => { ack = done; }));
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
   const view = render(photoChat());
   verifyPhotoChat();
   await act(async () => {
@@ -573,13 +567,13 @@ test('pending typing and presence writes preserve a verified photo draft and in-
     lastReadBy: { alice: { seconds: 20 } },
   });
   expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
-  expect(view.getByText('照片傳送中…')).toBeTruthy();
-  expect(jest.mocked(Photos.uploadDmPhoto).mock.calls[0][2].aborted).toBe(false);
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(view.queryByText('照片傳送中…')).toBeNull();
   verifyPhotoChat();
-  await act(async () => ack());
-  expect(view.getByText('照片已傳送')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
   expect(view.getByDisplayValue('搭配照片的文字')).toBeTruthy();
-  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -634,10 +628,9 @@ test('offline cache preserves loaded messages, a photo draft, and verified acces
   expect(view.getByText('重新連線後的訊息')).toBeTruthy();
 });
 
-test.each(['account', 'school', 'thread'])('switching %s discards a private draft and cancels a late upload', async (kind) => {
+test.each(['account', 'school', 'thread'])('switching %s discards a private draft after photo send is declined', async (kind) => {
   pickPhoto();
-  let uploaded!: (path: string) => void;
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockImplementation(() => new Promise(done => { uploaded = done; }));
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
   jest.mocked(Photos.confirmDmPhoto).mockReset();
   const view = render(photoChat());
   expect(view.queryByLabelText('加入照片')).toBeNull();
@@ -646,13 +639,15 @@ test.each(['account', 'school', 'thread'])('switching %s discards a private draf
   await act(async () => {
     fireEvent.press(view.getByText('傳送照片'));
   });
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
   if (kind === 'account') mockViewer = 'other';
   if (kind === 'school') mockSchool = 'another';
   view.rerender(photoChat(kind === 'thread' ? 'other-thread' : photoConvo));
-  await act(async () => uploaded(staged));
   expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
+  expect(view.queryByText('照片私訊尚未開通')).toBeNull();
   expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
-  expect(jest.mocked(Photos.uploadDmPhoto).mock.calls[0][2].aborted).toBe(true);
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
 });
 
 test('only canonical message photos open on tap, close at expiry, and disappear on recall', async () => {
@@ -827,16 +822,16 @@ test.each(['unchanged', 'new text after error', 'edited back after error', 'new 
   },
 );
 
-test('an incoming first message keeps an in-flight first photo and its text draft intact', async () => {
+test('an incoming first message keeps a declined first photo and its text draft intact', async () => {
   pickPhoto();
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  let acknowledge!: () => void;
-  jest.mocked(Photos.confirmDmPhoto).mockReset().mockImplementation(() => new Promise(resolve => { acknowledge = resolve; }));
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
   const view = render(firstChat());
   await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
   await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
   fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '照片留給你');
   await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
   expect(mockSnapshotHandlers.size).toBe(0);
   act(() => mockIncomingThread?.());
   const conversation = mockSnapshotHandlers.get(`conversations/${photoConvo}`);
@@ -844,145 +839,92 @@ test('an incoming first message keeps an in-flight first photo and its text draf
   await act(async () => emitMessages([{ id: 'cached', data: { senderId: 'bob', content: '未經確認的快取', readBy: ['alice'] } }], true));
   expect(view.queryByText('未經確認的快取')).toBeNull();
   expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
-  expect(view.getByText('照片傳送中…')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
   expect(view.getByDisplayValue('照片留給你')).toBeTruthy();
-  expect(jest.mocked(Photos.uploadDmPhoto).mock.calls[0][2].aborted).toBe(false);
   verifyPhotoChat();
   await act(async () => emitMessages([{ id: photoId, data: { senderId: 'bob', type: 'image', content: '照片', attachmentPath: published, readBy: ['alice'] } }]));
   expect(view.getByText('查看照片')).toBeTruthy();
-  await act(async () => acknowledge());
-  expect(view.getByText('照片已傳送')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(view.queryByText('照片已傳送')).toBeNull();
   expect(view.getByDisplayValue('照片留給你')).toBeTruthy();
-  expect(Photos.confirmDmPhoto).toHaveBeenCalledWith({
-    viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob', conversationId: photoConvo, messageId: photoId,
-  }, staged, expect.anything());
-  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
 });
 
-test.each([
-  { name: 'exact photo', change: {}, confirmed: true },
-  { name: 'different sender', change: { senderId: 'bob' }, confirmed: false },
-  { name: 'different path', change: { attachmentPath: published.replace('/media-1/', '/other-media/') }, confirmed: false },
-  { name: 'different type', change: { type: 'file' }, confirmed: false },
-  { name: 'different document', documentId: 'photo_message_00000002', change: { id: photoId }, confirmed: false },
-  { name: 'cache-only photo', fromCache: true, change: {}, confirmed: false },
-  { name: 'pending photo', hasPendingWrites: true, change: {}, confirmed: false },
-])('a first-photo late timeout respects only its $name server confirmation', async ({ change, confirmed, documentId, fromCache, hasPendingWrites }) => {
+test('sending a first photo is declined and later server photos do not mark it sent', async () => {
   pickPhoto();
-  let rejectReceipt!: (error: unknown) => void;
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  jest.mocked(Photos.confirmDmPhoto).mockReset()
-    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectReceipt = reject; }))
-    .mockResolvedValue(undefined);
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
   const view = render(firstChat());
   await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
   await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
   fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '照片旁的文字草稿');
   await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
-  act(() => mockIncomingThread?.());
-  await act(async () => emitMessages([{ id: documentId ?? photoId, hasPendingWrites, data: {
-    senderId: 'alice', type: 'image', attachmentPath: published, readBy: ['alice'], ...change,
-  } }], fromCache));
-  await act(async () => rejectReceipt({ code: 'functions/deadline-exceeded' }));
-  expect(view.getByDisplayValue('照片旁的文字草稿')).toBeTruthy();
-  if (confirmed) {
-    expect(view.getByText('照片已傳送')).toBeTruthy();
-    expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
-    expect(Photos.confirmDmPhoto).toHaveBeenCalledTimes(1);
-  } else {
-    expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
-    await act(async () => { fireEvent.press(view.getByText('重新傳送照片')); });
-    expect(Photos.confirmDmPhoto).toHaveBeenCalledTimes(2);
-    expect(jest.mocked(Photos.confirmDmPhoto).mock.calls[1].slice(0, 2)).toEqual(
-      jest.mocked(Photos.confirmDmPhoto).mock.calls[0].slice(0, 2),
-    );
-  }
-  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
-});
-
-test('a confirmed first photo cannot complete a different recipient session after a late failure', async () => {
-  pickPhoto();
-  let rejectReceipt!: (error: unknown) => void;
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  jest.mocked(Photos.confirmDmPhoto).mockReset()
-    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectReceipt = reject; }));
-  const view = render(firstChat());
-  await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
-  await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
-  await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
   act(() => mockIncomingThread?.());
   await act(async () => emitMessages([{ id: photoId, data: {
     senderId: 'alice', type: 'image', attachmentPath: published, readBy: ['alice'],
   } }]));
+  expect(view.getByDisplayValue('照片旁的文字草稿')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(view.queryByText('照片已傳送')).toBeNull();
   jest.mocked(DmConversations.prepareDmConversation).mockResolvedValueOnce({
     conversationId: 'dm_pu_alice_charlie', peerUid: 'charlie', exists: false,
   });
   view.rerender(firstChat('charlie'));
   await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
-  await act(async () => rejectReceipt({ code: 'functions/deadline-exceeded' }));
-  expect(jest.mocked(Photos.confirmDmPhoto).mock.calls[0][2].aborted).toBe(true);
   expect(view.queryByText('照片已傳送')).toBeNull();
   expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
-  expect(mockSnapshotHandlers.size).toBe(0);
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
 });
 
-test.each(['unchanged', 'replacement'])(
-  'a late first-photo server snapshot settles only the failed uploaded photo (%s)',
-  async (selection) => {
-    pickPhoto();
-    jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-    jest.mocked(Photos.confirmDmPhoto).mockReset().mockRejectedValueOnce({ code: 'functions/deadline-exceeded' });
-    const view = render(firstChat());
-    await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
-    await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
-    await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
-    expect(view.getByText('尚未確認送達，照片已保留。')).toBeTruthy();
-    if (selection === 'replacement') {
-      fireEvent.press(view.getByLabelText('移除照片'));
-      mockPhotoId = 'photo_message_00000002';
-      jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValueOnce({
-        canceled: false, assets: [{ uri: 'file:///next-photo.png', mimeType: 'image/png', width: 20, height: 20 }],
-      });
-      jest.mocked(Photos.localPhoto).mockReturnValueOnce({ uri: 'file:///next-photo.png', contentType: 'image/png', size: 20 });
-      await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
-    }
-    fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '稍後才傳的新文字');
-    act(() => mockIncomingThread?.());
-    await act(async () => emitMessages([{ id: photoId, data: {
-      senderId: 'alice', type: 'image', attachmentPath: published.replace('/media-1/', '/other-media/'), readBy: ['alice'],
-    } }]));
-    expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
-    expect(view.queryByText('照片已傳送')).toBeNull();
-    await act(async () => emitMessages([{ id: photoId, data: {
-      senderId: 'alice', type: 'image', attachmentPath: published, readBy: ['alice'],
-    } }]));
-    expect(view.getByDisplayValue('稍後才傳的新文字')).toBeTruthy();
-    if (selection === 'unchanged') {
-      expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
-      expect(view.queryByText('尚未確認送達，照片已保留。')).toBeNull();
-      expect(view.getByText('照片已傳送')).toBeTruthy();
-    } else {
-      expect(view.getByLabelText('待傳送照片預覽').props.source.uri).toBe('file:///next-photo.png');
-      expect(view.queryByText('照片已傳送')).toBeNull();
-    }
-    expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
-    expect(Photos.confirmDmPhoto).toHaveBeenCalledTimes(1);
-  },
-);
-
-test('a first-photo receipt starts the live conversation without clearing a typed message', async () => {
+test('a declined first photo can be replaced without a late snapshot marking it sent', async () => {
   pickPhoto();
-  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
-  jest.mocked(Photos.confirmDmPhoto).mockReset().mockResolvedValue(undefined);
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
+  const view = render(firstChat());
+  await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
+  await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
+  await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('移除照片'));
+  mockPhotoId = 'photo_message_00000002';
+  jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValueOnce({
+    canceled: false, assets: [{ uri: 'file:///next-photo.png', mimeType: 'image/png', width: 20, height: 20 }],
+  });
+  jest.mocked(Photos.localPhoto).mockReturnValueOnce({ uri: 'file:///next-photo.png', contentType: 'image/png', size: 20 });
+  await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
+  fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '稍後才傳的新文字');
+  act(() => mockIncomingThread?.());
+  await act(async () => emitMessages([{ id: photoId, data: {
+    senderId: 'alice', type: 'image', attachmentPath: published, readBy: ['alice'],
+  } }]));
+  expect(view.getByLabelText('待傳送照片預覽').props.source.uri).toBe('file:///next-photo.png');
+  expect(view.getByDisplayValue('稍後才傳的新文字')).toBeTruthy();
+  expect(view.queryByText('照片已傳送')).toBeNull();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
+});
+
+test('declining a first photo keeps the typed message and does not start a live send', async () => {
+  pickPhoto();
+  jest.mocked(Photos.uploadDmPhoto).mockReset();
+  jest.mocked(Photos.confirmDmPhoto).mockReset();
   const view = render(firstChat());
   await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
   await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
   fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '接著說的話');
   await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
-  expect(view.getByText('照片已傳送')).toBeTruthy();
+  expect(view.getByText('照片私訊尚未開通')).toBeTruthy();
   expect(view.getByDisplayValue('接著說的話')).toBeTruthy();
-  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true);
-  expect(mockIncomingThread).toBeNull();
+  expect(view.queryByText('照片已傳送')).toBeNull();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(Photos.confirmDmPhoto).not.toHaveBeenCalled();
   expect(setDoc).not.toHaveBeenCalled();
 });
 

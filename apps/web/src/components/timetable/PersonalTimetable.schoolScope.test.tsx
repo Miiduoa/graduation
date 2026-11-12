@@ -128,6 +128,23 @@ it('shows only imported courses belonging to the selected university', async () 
   expect(context.academic).toHaveBeenCalledWith('courses', false);
 });
 
+it('exports verified clock times without a school period profile and keeps the selected campus scope', async () => {
+  context.records = [
+    { ...record('nthu', 'clock', '已核對時鐘課程'), startTime: '13:20', endTime: '15:10' },
+    record('nthu', 'raw', '僅有節次課程'),
+    { ...record('pu', 'other', '其他學校私人課程'), startTime: '13:10', endTime: '15:00' },
+  ];
+  render(<PersonalTimetable />);
+  await screen.findByText(/自行匯入 2 筆/);
+  const calendar = screen.getByRole('region', { name: '匯出課表快照' });
+  fireEvent.click(within(calendar).getByText(/匯出至行事曆/));
+  expect(within(calendar).getByRole('button', { name: '下載課表 ICS' }).hasAttribute('disabled')).toBe(false);
+  fireEvent.click(within(calendar).getByRole('button', { name: '查看逐堂明細' }));
+  expect(within(calendar).getByText(/13:20.*15:10.*已核對時鐘課程/)).toBeTruthy();
+  expect(within(calendar).getByText(/僅有節次課程.*星期或時間未確認/)).toBeTruthy();
+  expect(within(calendar).queryByText(/其他學校私人課程/)).toBeNull();
+});
+
 it('restores the configured grid after switching from an unknown period school', async () => {
   const view = render(<PersonalTimetable />);
   await screen.findByText(/尚未取得這所學校的節次時間/);
@@ -333,6 +350,19 @@ it('falls back to ordinal labels when imported clock times are invalid', async (
     expect(screen.getByText(/第 3–4 節（時間未確認）/)).toBeTruthy();
     expect(screen.queryByText(`${times.startTime}–${times.endTime}`)).toBeNull();
   }
+});
+
+it.each([false, true])('preserves raw school period labels with numeric slots %s', async (hasSlots) => {
+  context.records = [{
+    ...record('nthu', 'raw-periods', '校方節次課程'),
+    startPeriod: hasSlots ? 3 : undefined,
+    endPeriod: hasSlots ? 4 : undefined,
+    periodLabel: 'cd',
+  }];
+  render(<PersonalTimetable />);
+  expect(await screen.findByText('校方節次課程')).toBeTruthy();
+  expect(screen.getByText(/校方節次 cd/)).toBeTruthy();
+  expect(screen.queryByText(/08:10|第 3–4 節/)).toBeNull();
 });
 
 it('does not take actual clock from another school or academic term with the same id', async () => {

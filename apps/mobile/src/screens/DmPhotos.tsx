@@ -13,11 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { randomUUID } from 'expo-crypto';
 import {
-  confirmDmPhoto,
   localPhoto,
   openDmPhoto,
   photoFormatHint,
-  uploadDmPhoto,
   type LocalPhoto,
   type PhotoScope,
   type PhotoThread,
@@ -93,30 +91,7 @@ export function DmPhotoComposer({
 
   async function send() {
     if (!enabled || !thread || !draft || request.current) return;
-    const controller = new AbortController();
-    request.current = controller;
-    setError('');
-    setPending(true);
-    const scope = { ...thread, messageId: draft.messageId };
-    let path = draft.uploadedPath;
-    try {
-      if (!path) path = await uploadDmPhoto(scope, draft.photo, controller.signal);
-      if (controller.signal.aborted) return;
-      if (!draft.uploadedPath) setDraft({ ...draft, uploadedPath: path });
-      await confirmDmPhoto(scope, path, controller.signal);
-    } catch {
-      if (controller.signal.aborted || !path || !hasConfirmedPhoto?.(scope, path)) {
-        if (!controller.signal.aborted) setError('尚未確認送達，照片已保留。');
-        return;
-      }
-    } finally {
-      request.current = null;
-      if (!controller.signal.aborted) setPending(false);
-    }
-    if (controller.signal.aborted) return;
-    setDraft(null);
-    setSent(true);
-    onSent?.();
+    setError('照片私訊尚未開通');
   }
 
   return (

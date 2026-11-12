@@ -11,20 +11,15 @@ jest.mock('../screens/social/CampusSocialNavContext', () => ({
 let mockAuthUid: string | null = 'alice';
 let mockDemo = false;
 let mockSerial = 0;
-const mockSend = jest.fn();
+const mockFetch = jest.fn();
 jest.mock('expo-crypto', () => ({
   randomUUID: () => `00000000-0000-4000-8000-00000000000${++mockSerial}`,
 }));
 jest.mock('../firebase', () => ({
   isFirebaseMockMode: () => mockDemo,
-  getFunctionsInstance: () => 'functions',
-  getAuthInstance: () => ({ currentUser: { uid: mockAuthUid } }),
-}));
-jest.mock('firebase/functions', () => ({
-  httpsCallable: (_functions: unknown, name: string) => {
-    if (name !== 'replyToCampusStory') throw new Error('Unexpected callable');
-    return mockSend;
-  },
+  getAuthInstance: () => ({
+    currentUser: mockAuthUid ? { uid: mockAuthUid, getIdToken: async () => 'fake-token' } : null,
+  }),
 }));
 jest.mock('../services/stories', () => ({
   ...jest.requireActual('../services/stories'),
@@ -62,7 +57,8 @@ beforeEach(() => {
   mockDemo = false;
   mockAuthUid = 'alice';
   mockSerial = 0;
-  mockSend.mockReset();
+  mockFetch.mockReset();
+  global.fetch = mockFetch;
   mockNavigate.mockReset();
 });
 afterEach(() => jest.useRealTimers());
@@ -79,24 +75,24 @@ test('reply pauses the remaining countdown; a missing receipt retains the draft 
   const input = view.getByLabelText('私訊回覆內容');
   fireEvent.changeText(input, '   ');
   fireEvent.press(view.getByText('傳送私訊'));
-  expect(mockSend).not.toHaveBeenCalled();
+  expect(mockFetch).not.toHaveBeenCalled();
   fireEvent.changeText(input, ' 我也會到！ ');
-  mockSend.mockResolvedValueOnce({ data: { conversationId: 'dm_pu_alice_bob' } });
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob' } }) });
   await act(async () => fireEvent.press(view.getByText('傳送私訊')));
   expect(view.getByDisplayValue(' 我也會到！ ')).toBeTruthy();
-  mockSend.mockResolvedValueOnce({ data: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } });
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } }) });
   await act(async () => fireEvent.press(view.getByText('再試一次')));
-  expect(mockSend.mock.calls[0]).toEqual([
-    {
-      viewerUid: 'alice',
-      schoolId: 'pu',
-      storyId: 's1',
-      authorUid: 'bob',
-      content: '我也會到！',
-      replyId: expect.stringMatching(/^[a-zA-Z0-9_-]{20,64}$/),
-    },
-  ]);
-  expect(mockSend.mock.calls[1]).toEqual(mockSend.mock.calls[0]);
+  const posted = mockFetch.mock.calls.map((call) => JSON.parse(String(call[1].body)).data);
+  expect(mockFetch.mock.calls[0][0]).toBe('https://nuni.tw/api/fn/replyToCampusStory');
+  expect(posted[0]).toEqual({
+    viewerUid: 'alice',
+    schoolId: 'pu',
+    storyId: 's1',
+    authorUid: 'bob',
+    content: '我也會到！',
+    replyId: expect.stringMatching(/^[a-zA-Z0-9_-]{20,64}$/),
+  });
+  expect(posted[1]).toEqual(posted[0]);
   expect(view.getByText('已送出 · 查看私訊')).toBeTruthy();
   act(() => jest.advanceTimersByTime(4499));
   expect(view.getByText('球場集合')).toBeTruthy();
@@ -129,21 +125,21 @@ test('a native video stays paused while composing and a stale completion cannot 
   fireEvent.press(view.getByText('私訊回覆'));
   fireEvent.changeText(view.getByLabelText('私訊回覆內容'), '只給小柏');
   let finish!: (data: unknown) => void;
-  mockSend.mockImplementation(
+  mockFetch.mockImplementation(
     () =>
       new Promise((resolve) => {
         finish = resolve;
       }),
   );
   const submit = view.getByText('傳送私訊');
-  act(() => {
+  await act(async () => {
     fireEvent.press(submit);
     fireEvent.press(submit);
   });
-  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(mockFetch).toHaveBeenCalledTimes(1);
   mockAuthUid = 'carol';
   view.rerender(<Shelf rows={rows} uid="carol" />);
-  await act(async () => finish({ data: { conversationId: 'x', messageId: 'y' } }));
+  await act(async () => finish({ ok: true, json: async () => ({ result: { conversationId: 'x', messageId: 'y' } }) }));
   expect(view.queryByText('已送出 · 查看私訊')).toBeNull();
   expect(view.queryByDisplayValue('只給小柏')).toBeNull();
   fireEvent.press(view.getByText('私訊回覆'));
@@ -161,7 +157,7 @@ test.each([
   );
   fireEvent.press(view.getByText('開啟bob'));
   expect(view.queryByText('私訊回覆')).toBeNull();
-  expect(mockSend).not.toHaveBeenCalled();
+  expect(mockFetch).not.toHaveBeenCalled();
 });
 
 test('a story with replies explicitly disabled has no reply entry', () => {
@@ -180,9 +176,9 @@ test('a legacy story without allowReplies can send a reply', async () => {
   fireEvent.press(view.getByText('開啟bob'));
   fireEvent.press(view.getByText('私訊回覆'));
   fireEvent.changeText(view.getByLabelText('私訊回覆內容'), '舊限動也能回覆');
-  mockSend.mockResolvedValueOnce({ data: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } });
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } }) });
   await act(async () => fireEvent.press(view.getByText('傳送私訊')));
-  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(mockFetch).toHaveBeenCalledTimes(1);
   expect(view.getByText('已送出 · 查看私訊')).toBeTruthy();
 });
 
@@ -191,12 +187,16 @@ test('opens the confirmed private conversation, never a receipt for a different 
   fireEvent.press(view.getByText('開啟bob'));
   fireEvent.press(view.getByText('私訊回覆'));
   fireEvent.changeText(view.getByLabelText('私訊回覆內容'), '等我一下');
-  mockSend.mockResolvedValueOnce({
-    data: { conversationId: 'dm_pu_bob_carol', messageId: 'wrong' },
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ result: { conversationId: 'dm_pu_bob_carol', messageId: 'wrong' } }),
   });
   await act(async () => fireEvent.press(view.getByText('傳送私訊')));
   expect(view.queryByText('已送出 · 查看私訊')).toBeNull();
-  mockSend.mockResolvedValueOnce({ data: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } });
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } }),
+  });
   await act(async () => fireEvent.press(view.getByText('再試一次')));
   fireEvent.press(view.getByLabelText('已送出私訊，查看對話'));
   expect(mockNavigate).toHaveBeenCalledWith('訊息', {

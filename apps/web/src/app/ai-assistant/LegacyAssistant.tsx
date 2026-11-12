@@ -15,6 +15,9 @@ import {
   type SetStateAction,
 } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { answerPublicCourseQuestion, type PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply, stopSpokenReply } from '@/components/SpokenReply';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
@@ -52,9 +55,10 @@ import {
 import home from '../home.module.css';
 import styles from './assistant.module.css';
 
-type Message =
+type Message = (
   | { role: 'user'; content: string; local?: never }
-  | { role: 'assistant'; content: string; response: CampusAssistantEnvelope; local?: LocalAssistantResult };
+  | { role: 'assistant'; content: string; response: CampusAssistantEnvelope; local?: LocalAssistantResult }
+) & { publicCourse?: { read?: PublicCourseAssistantRead } };
 function visibleMessage(message: Message) {
   return message.role === 'assistant' && !isWebOnlineOrderingEnabled() && hasOrderProposal(message.response)
     ? ONLINE_ORDERING_OFF_TEXT
@@ -110,8 +114,9 @@ export function AssistantConversation({
   const composer = useRef<HTMLTextAreaElement>(null);
   const seededUrlDraft = useRef(false);
   const functionsReady = areFunctionsConfigured();
+  const publicCourseIntent = resolvePublicCourseAssistantIntent(draft, schoolId);
   const localQuestion = canAnswerAssistantLocally(draft);
-  const latestCloudReply = messages.findLastIndex((message) => message.role === 'assistant' && !message.local);
+  const latestCloudReply = messages.findLastIndex((message) => message.role === 'assistant' && !message.local && !message.publicCourse);
 
   useLayoutEffect(() => {
     // 網址 ?q= 有值且與現有草稿不同：以網址為準覆寫（明確深連結手遞）；無 q 才保留草稿。
@@ -135,7 +140,7 @@ export function AssistantConversation({
     if (!content || request.current) return;
     if (inline) stopSpokenReply();
     const local = answerAssistantLocally(content, { owner: localOwner, schoolId }, { preferCampusReads: functionsReady });
-    if (local) {
+    if (local && !publicCourseIntent) {
       setMessages((previous) => [...previous, { role: 'user', content },
         { role: 'assistant', content: local.content, response: { content: local.content }, local }]);
       setDraft('');
@@ -143,8 +148,8 @@ export function AssistantConversation({
       composer.current?.focus();
       return;
     }
-    if (!functionsReady) return;
-    if (!isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
+    if (!publicCourseIntent && !functionsReady) return;
+    if (!publicCourseIntent && !isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
       setMessages((previous) => [
         ...previous,
         { role: 'user', content },
@@ -161,10 +166,32 @@ export function AssistantConversation({
     }
     const controller = new AbortController();
     request.current = controller;
-    sessionId.current ??= crypto.randomUUID();
     setPending(true);
     setError('');
     try {
+      if (publicCourseIntent) {
+        const result = await answerPublicCourseQuestion({
+          question: content,
+          schoolId,
+          origin: 'web',
+          signal: controller.signal,
+          isCurrent: () => request.current === controller && !controller.signal.aborted,
+        });
+        if (controller.signal.aborted || request.current !== controller || !result) return;
+        setMessages((previous) => [
+          ...previous,
+          { role: 'user', content, publicCourse: {} },
+          {
+            role: 'assistant',
+            content: result.content,
+            response: { content: result.content },
+            publicCourse: { read: result.read },
+          },
+        ]);
+        setDraft('');
+        return;
+      }
+      sessionId.current ??= crypto.randomUUID();
       const response = await callCampusAssistant(
         {
           userId,
@@ -173,7 +200,7 @@ export function AssistantConversation({
           sessionId: sessionId.current,
           messages: [
             ...messages
-              .filter((message, index) => !message.local && !messages[index + 1]?.local)
+              .filter((message, index) => !message.publicCourse && !message.local && !messages[index + 1]?.local)
               .map(({ role, content: text }) => ({ role, content: text })),
             { role: 'user', content },
           ],
@@ -234,7 +261,7 @@ export function AssistantConversation({
       <div className={styles.toolbar}>
         <p className={home.intro}>
           {!functionsReady
-            ? '雲端助理尚未啟用。'
+            ? '雲端助理尚未啟用，可先查詢清大、暨大的公開開課資料。'
             : groupId
               ? '正在這門課的範圍內詢問。'
               : '查詢課務、校園地點或服務資訊。'}
@@ -251,7 +278,7 @@ export function AssistantConversation({
           <p>
             {functionsReady
               ? '寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。'
-              : '正式站尚未接上雲端函式服務。你仍可開啟校園服務，或查看此帳號在這台裝置匯入的成績紀錄。'}
+              : '正式站尚未接上雲端函式服務。你仍可查詢公開開課資料、開啟校園服務，或查看此帳號在這台裝置匯入的成績紀錄。'}
           </p>
           {(
             <div className={styles.exampleQuestions} aria-label="常用問題">
@@ -290,9 +317,10 @@ export function AssistantConversation({
             className={message.role === 'user' ? styles.question : styles.answer}
           >
             <p className={styles.author}>{message.role === 'user' ? '你' : '校園助理'}</p>
-            <p className={styles.content}>{visibleMessage(message)}</p>
+            {!message.publicCourse?.read && <p className={styles.content}>{visibleMessage(message)}</p>}
             {message.role === 'assistant' && (
               <>
+                {message.publicCourse?.read && <PublicCourseAssistantResult read={message.publicCourse.read} />}
                 {inline && <SpokenReply text={visibleMessage(message)} disabled={pending} />}
                 {message.local && <AssistantServiceLinks serviceIds={message.local.serviceIds} schoolId={schoolId} />}
                 {index === latestCloudReply && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
@@ -398,7 +426,7 @@ export function AssistantConversation({
         <div className={styles.submitRow}>
           <p id={`${idPrefix}-note`} className={styles.note}>
             {!functionsReady
-              ? '雲端助理尚未啟用；仍可尋找服務與查看這台裝置的個人匯入紀錄。'
+              ? '雲端助理尚未啟用；仍可查詢公開開課資料、尋找服務與查看這台裝置的個人匯入紀錄。'
               : isWebOnlineOrderingEnabled()
                 ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
                 : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
@@ -412,7 +440,7 @@ export function AssistantConversation({
               key="send"
               type="submit"
               className={home.primary}
-              disabled={(!functionsReady && !localQuestion) || pending || !draft.trim()}
+              disabled={(!functionsReady && !localQuestion && !publicCourseIntent) || pending || !draft.trim()}
             >
               {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
             </button>

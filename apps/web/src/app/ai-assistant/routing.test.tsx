@@ -19,7 +19,11 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
-beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); });
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+  vi.stubEnv('NEXT_PUBLIC_FUNCTIONS_BASE_URL', '');
+  vi.stubEnv('NEXT_PUBLIC_USE_FIREBASE_EMULATOR', 'false');
+});
 afterEach(() => {
   cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals();
   Object.assign(identity, { loading: false, error: '', pendingLogout: false, platform: true, school: false });
@@ -36,14 +40,27 @@ it('preserves the school account entry when only the platform infrastructure is 
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it('retains the school engine for a dual session when platform cloud is disabled', () => {
+it('retains the configured school engine for a dual session when platform cloud is disabled', () => {
+  vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
+  vi.stubEnv('NEXT_PUBLIC_FUNCTIONS_BASE_URL', 'https://functions.example.test');
+  identity.school = true;
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  render(<AssistantPage />);
+  expect(screen.getByText(/Legacy entry/)).toBeTruthy();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('uses the local platform conversation for a dual session when cloud and school Functions are disabled', () => {
   vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
   vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
   identity.school = true;
   const fetch = vi.fn();
   vi.stubGlobal('fetch', fetch);
   render(<AssistantPage />);
-  expect(screen.getByText(/Legacy entry/)).toBeTruthy();
+  expect(screen.queryByText(/Legacy entry/)).toBeNull();
+  expect(screen.getByRole('textbox', { name: '問題' })).toBeTruthy();
   expect(fetch).not.toHaveBeenCalled();
 });
 

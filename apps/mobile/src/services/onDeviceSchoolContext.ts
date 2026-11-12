@@ -99,8 +99,13 @@ export function formatOnDeviceSchoolPrompt(
   const checkedAt = typeof snapshot.checkedAt === 'string' &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(snapshot.checkedAt)
     ? new Date(snapshot.checkedAt) : new Date(NaN);
-  const verifiedClock = Number.isFinite(checkedAt.getTime()) &&
-    checkedAt.toISOString() === snapshot.checkedAt;
+  // A canonical timestamp may still be a replay from an older session or
+  // far in the future after a device clock change. Recheck immediately before
+  // composing the local model prompt; the collector can be run again offline.
+  const clockAgeMs = Date.now() - checkedAt.getTime();
+  const verifiedClock = Number.isFinite(clockAgeMs) &&
+    checkedAt.toISOString() === snapshot.checkedAt &&
+    clockAgeMs >= -30_000 && clockAgeMs <= 5 * 60_000;
   const now = verifiedClock ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei',
     year: 'numeric',
@@ -109,7 +114,7 @@ export function formatOnDeviceSchoolPrompt(
     weekday: 'long',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(checkedAt) : '無法核對（請重新整理裝置資料）';
+  }).format(new Date()) : '無法核對（請重新整理裝置資料）';
   // The rule-based timetable tool uses every saved course. Keep only a short
   // excerpt in the LLM prompt so a small local model cannot overflow context.
   // The prompt is a separate privacy boundary: a caller cannot pass a cached

@@ -853,29 +853,19 @@ it('replaces and revokes local preview URLs when the selected File changes and o
   }
 });
 
-it('requires confirmation, suppresses duplicate clicks and retries a lost receipt without uploading again', async () => {
+it('sending a photo shows it is not yet available and never starts an upload', async () => {
   vi.mocked(newPrivateMessageId).mockReturnValue(photoId);
-  const path = 'conversations/previous/photos/hash/photo.jpg';
-  vi.mocked(uploadDmPhoto).mockResolvedValue(path);
-  const first = deferred<void>();
-  vi.mocked(confirmDmPhoto).mockReturnValueOnce(first.promise).mockResolvedValueOnce(undefined);
   render(<Chat id="previous" />);
   await screen.findByText('伺服器的訊息');
   selectPhoto();
   fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
-  fireEvent.click(screen.getByRole('button', { name: '照片傳送中…' }));
-  const scope = { viewerUid: 'alice', schoolId: 'pu', conversationId: 'previous', messageId: photoId };
-  await waitFor(() => expect(confirmDmPhoto).toHaveBeenCalledWith(scope, path, expect.anything()));
-  expect(screen.queryByText('照片已傳送')).toBeNull();
-  await act(async () => first.reject(new Error('ack lost')));
-  expect(screen.getByRole('img', { name: '待傳送照片預覽' })).toBeTruthy();
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重新傳送照片' }));
-  await screen.findByText('照片已傳送');
-  expect(confirmDmPhoto).toHaveBeenCalledTimes(2);
-  expect(confirmDmPhoto).toHaveBeenLastCalledWith(scope, path, expect.anything());
-  expect(newPrivateMessageId).toHaveBeenCalledTimes(1);
-  expect(uploadDmPhoto).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(screen.getByRole('img', { name: '待傳送照片預覽' })).toBeTruthy();
+  expect(screen.queryByText('照片已傳送')).toBeNull();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
   expect(sessionStorage.length).toBe(0);
 });
 
@@ -907,27 +897,27 @@ it('requests each chat photo on demand, hides upon recall and drops image failur
   expect(sessionStorage.length).toBe(0);
 });
 
-it('discards a pending photo read and pending upload when switching conversations', async () => {
+it('discards a pending photo read and a declined photo draft when switching conversations', async () => {
   showPhotoMessage();
   const read = deferred<{ url: string; expiresAt: string }>();
-  const upload = deferred<string>();
   vi.mocked(readDmPhoto).mockReturnValueOnce(read.promise);
-  vi.mocked(uploadDmPhoto).mockReturnValueOnce(upload.promise);
   const view = render(<Chat id="previous" />);
   fireEvent.click(await screen.findByRole('button', { name: '查看照片' }));
   selectPhoto();
   fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
   const oldRead = vi.mocked(readDmPhoto).mock.lastCall![2];
-  const oldUpload = vi.mocked(uploadDmPhoto).mock.lastCall![2];
   view.rerender(<Chat id="next" />);
   await screen.findByText('伺服器的訊息');
-  expect(oldRead.aborted && oldUpload.aborted).toBe(true);
+  expect(oldRead.aborted).toBe(true);
   await act(async () => {
     read.resolve({ url: 'https://old-private.test/secret', expiresAt: new Date(Date.now() + 60_000).toISOString() });
-    upload.resolve('conversations/previous/photos/hash/photo.jpg');
   });
   expect(screen.queryByRole('img')).toBeNull();
   expect(screen.queryByText('照片已傳送')).toBeNull();
+  expect(screen.queryByText('照片私訊尚未開通')).toBeNull();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
   expect(confirmDmPhoto).not.toHaveBeenCalled();
 });
 
@@ -953,24 +943,24 @@ it('closes an expired photo and requests a fresh grant if the viewer opens it ag
   }
 });
 
-it('retains a local photo through a stale connection and retries a failed upload with the same message ID', async () => {
+it('retains a local photo through a stale connection and keeps showing it is not yet available', async () => {
   vi.mocked(newPrivateMessageId).mockReturnValue(photoId);
-  vi.mocked(uploadDmPhoto).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce('conversations/previous/photos/hash/photo.jpg');
-  vi.mocked(confirmDmPhoto).mockResolvedValueOnce(undefined);
   render(<Chat id="previous" />);
   await screen.findByText('伺服器的訊息');
   selectPhoto();
   fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
   await screen.findByRole('button', { name: '重新傳送照片' });
   const [, , receive, fail] = vi.mocked(watchConversationContents).mock.lastCall!;
   act(() => fail('stale'));
   expect(screen.getByRole('img', { name: '待傳送照片預覽' })).toBeTruthy();
-  expect((screen.getByRole('button', { name: '重新傳送照片' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
   act(() => receive(contents()));
   fireEvent.click(screen.getByRole('button', { name: '重新傳送照片' }));
-  await screen.findByText('照片已傳送');
-  expect(newPrivateMessageId).toHaveBeenCalledTimes(1);
-  expect(vi.mocked(uploadDmPhoto).mock.calls.map(([scope]) => scope.messageId)).toEqual([photoId, photoId]);
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(screen.queryByText('照片已傳送')).toBeNull();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
 });
 
 it('discards an unreadable local preview before upload and lets the user pick a replacement', async () => {

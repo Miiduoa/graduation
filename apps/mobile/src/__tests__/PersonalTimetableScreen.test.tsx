@@ -136,7 +136,11 @@ test('the term selected on Today remains selected in the complete timetable', as
   expect(view.queryByText('成大課程')).toBeNull();
 });
 
-test('unknown school clock times remain readable without borrowing another school period table', async () => {
+test.each([
+  { startTime: '09:00', endTime: '10:00', periodLabel: 'ab', expected: '09:00–10:00' },
+  { startTime: undefined, endTime: undefined, periodLabel: 'cd', expected: '校方節次 cd' },
+  { startTime: undefined, endTime: undefined, periodLabel: '', expected: '時間未確認' },
+])('unknown school imports preserve their schedule $expected', async ({ expected, ...schedule }) => {
   mockSchool = { id: 'unknown', name: '其他學校' };
   mockScope = { owner: 'guest:device', schoolId: 'unknown' };
   jest
@@ -150,8 +154,7 @@ test('unknown school clock times remain readable without borrowing another schoo
           dayOfWeek: 6,
           startPeriod: undefined,
           endPeriod: undefined,
-          startTime: '09:00',
-          endTime: '10:00',
+          ...schedule,
         }),
       ],
       batches: [],
@@ -159,9 +162,58 @@ test('unknown school clock times remain readable without borrowing another schoo
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週末課程');
   expect(view.queryByText('開啟課前提醒')).toBeNull();
-  expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
+  expect(view.getByText(new RegExp(`週六 · ${expected}`))).toBeTruthy();
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
+});
+
+test('verified weekend imports appear in week, day and scrollable grid without changing weekday planning', async () => {
+  // Use local calendar noon so Sunday is stable across CI runner timezones.
+  jest.setSystemTime(new Date(2026, 9, 25, 12));
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1,
+    records: [
+      record({ id: 'sat', title: '週六實驗課', dayOfWeek: 6 }),
+      record({ id: 'sun', title: '週日實作課', dayOfWeek: 7 }),
+    ],
+    batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週六實驗課');
+  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByRole('button', { name: '排讀書時間' })).not.toBeDisabled();
+  // The clock is pinned to Sunday. The day view must not jump to Monday.
+  fireEvent.press(view.getByText('單日'));
+  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  expect(view.queryByText('週六實驗課')).toBeNull();
+  fireEvent.press(view.getByText('星期六'));
+  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
+  // The separate today's exceptions summary still includes Sunday's class.
+  expect(view.queryByText('星期日 · 08:00–09:50')).toBeNull();
+  fireEvent.press(view.getByText('星期日'));
+  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  fireEvent.press(view.getByText('格子'));
+  expect(view.getAllByText('週日實作課').length).toBeGreaterThan(1);
+  expect(view.getByText('六')).toBeTruthy();
+  expect(view.getByText('日')).toBeTruthy();
+});
+
+test('Saturday classes are the default single-day view on Saturday', async () => {
+  jest.setSystemTime(new Date(2026, 9, 24, 12));
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1,
+    records: [
+      record({ id: 'sat', title: '週六實驗課', dayOfWeek: 6 }),
+      record({ id: 'sun', title: '週日實作課', dayOfWeek: 7 }),
+    ],
+    batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findAllByText('週六實驗課');
+  fireEvent.press(view.getByText('單日'));
+  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
+  expect(view.queryByText('週日實作課')).toBeNull();
 });
 
 test('unresolved logout never loads a guest or account timetable', () => {
@@ -413,4 +465,23 @@ test('a failed import read does not report a class cancellation from a notificat
   fireEvent.press(view.getByText('重新核對這堂課'));
   await view.findByText('2026-11-02 · 08:00–09:50 · 教室 303');
   expect(loadPersonalTimetable).toHaveBeenLastCalledWith(null, 'ncku', 'nuni:account-a');
+});
+
+test.each([
+  ['ncnu', '國立暨南國際大學', '暨大資料庫', '13:30', '16:20'],
+  ['nthu', '國立清華大學', '清大資料庫', '10:10', '12:00'],
+])('%s retains reviewed public course times in the personal timetable', async (schoolId, name, title, startTime, endTime) => {
+  mockSchool = { id: schoolId, name };
+  mockScope = { owner: 'guest:device', schoolId };
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    courses: [], schoolId, shareWithFriends: false, updatedAt: null,
+    meta: { year: '', semester: '', school: '', className: '', credits: 0, title: '' },
+  });
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1, records: [record({ schoolId, title, startPeriod: undefined, endPeriod: undefined, startTime, endTime })], batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText(title);
+  expect(view.getByText(new RegExp(`週一 · ${startTime}–${endTime}`))).toBeTruthy();
+  expect(loadPersonalTimetable).toHaveBeenCalledWith(null, schoolId, undefined);
 });

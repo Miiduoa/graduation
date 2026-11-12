@@ -3,20 +3,22 @@ import Link from 'next/link';
 import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssistantClient';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
-import { inAppHref } from './assistant/copy';
+import { assistantPermissionMessage, inAppHref } from './assistant/copy';
 import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
+import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
-import { AssistantLocalEntry } from '@/components/AssistantLocalEntry';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -25,7 +27,9 @@ type Step = {
   simulation: boolean;
 };
 type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
-export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady }: {
+class AssistantPermissionFailure extends Error {}
+export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady, initialDraft = '' }: {
+  initialDraft?: string;
   context: string;
   schoolId: string;
   accountId: string;
@@ -38,6 +42,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
   const [providerReady, setProviderReady] = useState(false);
   const [fallback, setFallback] = useState(false);
   const [capabilityUnavailable, setCapabilityUnavailable] = useState(!cloudEnabled);
+  const [capabilityChecked, setCapabilityChecked] = useState(!cloudEnabled);
   const [step, setStep] = useState<Step | null>(null);
   const [source, setSource] = useState('');
   const [href, setHref] = useState('');
@@ -84,12 +89,14 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
           setProviderReady(value.ready === true);
           setFallback(value.fallback === true);
           setCapabilityUnavailable(value.enabled !== true);
+          setCapabilityChecked(true);
         }
       })
       .catch((e) => {
         if (active) {
           setError(e.message);
           setCapabilityUnavailable(true);
+          setCapabilityChecked(true);
         }
       });
     return () => {
@@ -126,14 +133,17 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
       if (!signal.aborted) setPending(false);
     }
   }
+  if (!capabilityChecked) return <p role="status">正在確認助理是否啟用…</p>;
   if (v2 || capabilityUnavailable) return <>
     {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
-    <V2Conversation context={context} schoolId={schoolId} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback} />
+    <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback} />
   </>;
   return (
     <section aria-label="公開校園助理">
-      <p>此助理目前提供公開資訊，尚未支援代辦寫入。私人課表、作業與借閱快照尚未支援。</p>
-      <AssistantLocalEntry owner={accountId ? 'platform:' + accountId : ''} schoolId={schoolId} />
+      <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId}
+        inlineDraft={inlineDraft} ready={false} fallback={false} />
+      <details>
+      <summary>公開校園資訊查詢</summary>
       {!ready && <p role="status">{error || '正在確認助理是否啟用…'}</p>}
       {!ready && <AssistantServiceLinks serviceIds={ASSISTANT_SERVICES.map((service) => service.id)} schoolId={schoolId} audience="platform" />}
       {ready && (
@@ -204,6 +214,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
           {pending && <p role="status">查詢中…</p>}
         </>
       )}
+      </details>
     </section>
   );
 }
@@ -217,6 +228,7 @@ const ASSISTANT_PENDING_STATUS = {
 function V2Conversation({
   context,
   schoolId,
+  initialDraft,
   ready,
   fallback,
   inlineDraft,
@@ -224,6 +236,7 @@ function V2Conversation({
 }: {
   context: string;
   schoolId: string;
+  initialDraft: string;
   ready: boolean;
   fallback: boolean;
   inlineDraft?: InlineDraft;
@@ -231,7 +244,7 @@ function V2Conversation({
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
-  const [localQuestion, setLocalQuestion] = useState('');
+  const [localQuestion, setLocalQuestion] = useState(initialDraft);
   const question = inlineDraft?.text ?? localQuestion;
   const setQuestion = inlineDraft?.setText ?? setLocalQuestion;
   const [turns, setTurns] = useState<V2Turn[]>([]);
@@ -309,6 +322,8 @@ function V2Conversation({
       body: JSON.stringify({ schoolId, conversationId: conversation.current, ...input }),
     });
     const result = await response.json();
+    const permissionMessage = assistantPermissionMessage(result.error);
+    if (!response.ok && permissionMessage) throw new AssistantPermissionFailure(permissionMessage);
     if (!response.ok)
       throw new Error(
         typeof result.message === 'string' && result.message
@@ -342,15 +357,17 @@ function V2Conversation({
   async function ask() {
     const current = question.trim();
     if (!current || busy.current) return;
-    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId });
-    if (local) {
+    const publicCourseIntent = resolvePublicCourseAssistantIntent(current, schoolId);
+    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
+    if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
       setQuestion('');
       setError('');
       return;
     }
-    if (!consent || !ready) return;
+    const personalRead = canAnswerAssistantPersonalQuestion(current);
+    if (!publicCourseIntent && !personalRead && (!consent || !ready)) return;
     busy.current = true;
     const pendingAsk = new AbortController();
     askRequest.current = pendingAsk;
@@ -366,7 +383,37 @@ function V2Conversation({
     // The sent content remains captured in `current` and can be recovered on failure.
     setQuestion('');
     try {
-      const history = turns.filter((turn) => !turn.reply.local &&
+      if (publicCourseIntent) {
+        const result = await answerPublicCourseQuestion({
+          question: current,
+          schoolId,
+          origin: 'web',
+          signal: pendingAsk.signal,
+          isCurrent: () => !pendingAsk.signal.aborted,
+        });
+        if (pendingAsk.signal.aborted || !result) return;
+        setTurns((t) => [...t, {
+          question: current,
+          reply: { answer: result.content, steps: [], cards: [] },
+          publicCourse: { read: result.read },
+        }]);
+        return;
+      }
+      if (personalRead) {
+        const direct = await withAssistantRequestDeadline(pendingAsk.signal, 45000, (signal) =>
+          answerAssistantPersonalQuestion(current, localScope, {
+            context, signal, fallbackOnMissing: ready && consent,
+          }));
+        if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+        if (direct) {
+          setTurns((previous) => [...previous, { question: current,
+            reply: { answer: direct.content, steps: [], cards: [], local: direct } }]);
+          setRecoverableQuestion((previous) => previous === current ? '' : previous);
+          return;
+        }
+      }
+      if (!ready || !consent) return;
+      const history = turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -483,8 +530,15 @@ function V2Conversation({
             setAction(card, { status: 'handoff', href,
               message: card.tool === 'propose_food_order' ? '點餐內容已備妥，請到點餐頁完成確認與付款。' : '服務入口已備妥。' });
           }
-        } catch {
+        } catch (error) {
           if (!active()) break;
+          if (error instanceof AssistantPermissionFailure) {
+            setError(error.message);
+            // A prior attempt may still need its receipt read back; never retry a write here.
+            if (card.tool === 'propose_personal_event') await checkCalendar(card);
+            else setAction(card, { status: 'blocked', message: error.message });
+            break;
+          }
           // A lost response may follow a committed write. Recovery is read-only.
           if (card.tool === 'propose_personal_event') {
             if (!await checkCalendar(card)) break;
@@ -607,19 +661,23 @@ function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {
     campus: search.get('campus') ?? undefined,
     school: search.get('school') ?? undefined,
   });
+  const initialDraft = (search.get('q') || '').slice(0, 1000);
   if (auth.loading) return <p role="status">正在確認登入狀態…</p>;
   if (auth.pendingLogout || auth.error)
     return <p role="alert">登入狀態尚未確認，請先完成登入或登出。</p>;
-  if (!auth.session)
-    return <Link href="/login?returnTo=%2Fai-assistant">請先登入以使用校園助理</Link>;
+  if (!auth.session) {
+    const returnTo = '/ai-assistant' + (search.size ? `?${search.toString()}` : '');
+    return <Link href={'/login?returnTo=' + encodeURIComponent(returnTo)}>請先登入以使用校園助理</Link>;
+  }
   if (campus.status !== 'ready' || !campus.schoolId) return <p role="status">請先選擇學校。</p>;
   return (
     <Conversation
-      key={auth.session.context + ':' + auth.session.platformAccountId + ':' + campus.schoolId + ':' + cloudEnabled}
+      key={JSON.stringify([auth.session.context, auth.session.platformAccountId, campus.schoolId, cloudEnabled, initialDraft])}
       context={auth.session.context}
       accountId={auth.session.platformAccountId}
       cloudEnabled={cloudEnabled}
       schoolId={campus.schoolId}
+      initialDraft={initialDraft}
     />
   );
 }

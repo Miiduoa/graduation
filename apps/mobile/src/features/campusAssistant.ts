@@ -1,4 +1,6 @@
 import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { answerPublicCourseQuestion, type PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
 import { httpsCallable } from 'firebase/functions';
 import { ASSISTANT_SERVICES, resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
 import { parseImportedAcademicIntent, summarizeImportedAcademics,
@@ -32,6 +34,7 @@ import { assistantCalendarOwner, createAssistantCalendarTask, findPersistedAssis
   recheckAssistantCalendarTask, sameAssistantCalendarEvent,
   type AssistantCalendarTask } from '../services/assistantCalendarExecution';
 import { isNuniCampusPlanningQuestion } from '../services/nuniCampusPlanner';
+import { nuniAssistantDataIntent } from '../services/nuniAssistantDataRead';
 
 export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
 
@@ -40,7 +43,7 @@ type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; chec
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory' | 'saved-academics' | 'calendar-action';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action' | 'school-directory' | 'public-course-catalog' | 'platform-data';
   route?: string;
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
@@ -51,6 +54,7 @@ export type CampusAssistantMessage = {
   savedClassRead?: SavedClassRead;
   classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
+  publicCourseRead?: PublicCourseAssistantRead;
   courseworkStudy?: CourseworkStudySelection;
   courseworkStudyCheckedAt?: string;
 };
@@ -125,7 +129,7 @@ export async function askCampusAssistant(input: {
   schoolName?: string | null;
   /** Authorized campus reads are only used after an explicit user refresh. */
   senseSnapshot?: CampusSenseSnapshot | null;
-  /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
+  /** Device mode also supports explicit anonymous public lookups. Campus mode requires authentication. */
   mode?: CampusAssistantMode;
   /** Stable cloud conversation id; omit only when the caller has not started one. */
   sessionId?: string;
@@ -146,6 +150,7 @@ export async function askCampusAssistant(input: {
   courseworkRead?: CourseworkRead;
   courseworkStudy?: CourseworkStudySelection;
   announcementRead?: AnnouncementRead;
+  publicCourseRead?: PublicCourseAssistantRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -158,12 +163,21 @@ export async function askCampusAssistant(input: {
   assertNotCancelled();
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
+    // Public catalog turns may describe another campus. Keep them in the UI,
+    // but omit each public reply and its preceding question from model history.
+    // The current question and input.messages used by scoped follow-ups stay intact.
+    .filter((message, index, history) => {
+      if (index === history.length - 1) return true;
+      if (message.role === 'assistant' && message.tool === 'public-course-catalog') return false;
+      const next = history[index + 1];
+      return !(message.role === 'user' && next?.role === 'assistant' && next.tool === 'public-course-catalog');
+    })
     .slice(-20)
     // Source-backed plans, local records and calendar tasks stay in the conversation without being
     // forwarded, together with their preceding question, to a later model.
     .filter((message, index, history) => {
       const privateRead = (item?: CampusAssistantMessage) => !!item &&
-        (!!item.courseworkRead || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action'].includes(item.tool ?? ''));
+        (!!item.courseworkRead || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action', 'platform-data'].includes(item.tool ?? ''));
       return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
     })
     .map((message) => ({
@@ -305,13 +319,34 @@ export async function askCampusAssistant(input: {
   }
 
   if (mode === 'device') {
-    const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
-      require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
-    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const question = messages[messages.length - 1].content;
     const contact = getSchoolContactAnswer(input.scope.schoolId, question, input.schoolName);
     if (contact && !input.courseworkChoice) {
       return { content: contact, source: 'device', hasActions: false, tool: 'school-directory' };
     }
+    // Public catalog reads need no account, personal timetable or downloaded model.
+    // Keep the platform-account timetable assistant limited to its existing scope.
+    if (!input.platformTimetable && !input.courseworkChoice &&
+        resolvePublicCourseAssistantIntent(question, input.scope.schoolId)) {
+      const publicCourses = await answerPublicCourseQuestion({
+        question, schoolId: input.scope.schoolId, origin: 'mobile',
+        signal: input.signal, isCurrent: input.isCurrent,
+      }).catch((error: unknown) => {
+        scopeCheck(input, false);
+        assertNotCancelled();
+        throw error;
+      });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      if (publicCourses) return {
+        content: publicCourses.content, source: 'device', hasActions: false,
+        tool: 'public-course-catalog',
+        ...(publicCourses.read ? { publicCourseRead: publicCourses.read } : {}),
+      };
+    }
+    const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
+      require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
+    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;
@@ -386,6 +421,18 @@ export async function askCampusAssistant(input: {
     if (!gapQuery && (refiningGap || isSavedClassGapQuestion(question))) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false, route: '/timetable',
         content: '這個空堂條件還無法完整辨識，這次沒有套用。可以查今天、明天或後天，並指定「下午三點半以後」、「15:30–17:00」或「至少 45 分鐘」。若條件互相衝突，請重新問完整問題，例如「明天下午有哪些空堂？」。' };
+    }
+    const dataIntent = platform && !classQuery && !gapQuery ? nuniAssistantDataIntent(question) : null;
+    if (platform && dataIntent) {
+      const { readNuniAssistantData } = require('../services/nuniAssistantDataRead') as typeof import('../services/nuniAssistantDataRead');
+      const answer = await abortableCampusRead(() => readNuniAssistantData({
+        question, schoolId: input.scope.schoolId, platformTimetable: platform,
+        ...input.courseworkRequests, isCurrent: input.isCurrent, signal: input.signal,
+      }, dataIntent), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { ...(answer ?? { tool: 'platform-data', content: '資料在查詢期間已更新，請重新查詢一次，讓我核對最新內容。' }),
+        source: 'device', hasActions: false };
     }
     if (platform && !classQuery && !gapQuery) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,

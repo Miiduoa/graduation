@@ -1,7 +1,9 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { informationKinds } from './information';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
+import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -10,6 +12,7 @@ import { buildPersonalToday } from '@campus/shared/src/imports/today';
 import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './actions';
 import {
   addDays,
+  assistantPermissionRecovery,
   bounded,
   bytes,
   canonical,
@@ -19,9 +22,12 @@ import {
   fail,
   id,
   object,
+  proposalPermission,
+  requireAssistantPermission,
   taipeiDate,
   text,
   type Adapter,
+  type AssistantPermissionKey,
   type Binding,
   type Card,
   type Ledger,
@@ -436,6 +442,7 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
     if (requested) domains.push([label, tool]);
   };
   add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(informationKinds(question).includes('orders'), '訂單進度', 'list_food_orders');
   add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
   add(/教材/.test(question), '教材', 'get_materials');
   add(/社團/.test(question), '社團', 'list_clubs');
@@ -480,6 +487,12 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  const information = informationKinds(question);
+  // A shortcut card cannot satisfy a request for facts already available to readers.
+  if (information.length || personalSlotSelect(question)) out.delete('propose_open_page');
+  if (information.includes('schedule')) add('get_schedule');
+  if (information.includes('work')) add('get_due_work');
+  if (information.includes('orders')) add('list_food_orders', 'get_food_order');
   // School grades stay on campus readers; imported records need an explicit local source.
   if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
   if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
@@ -516,6 +529,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
+  if (information.length && !foodOrderIntent(question) && !scheduleIntent(question) && !personalSlotSelect(question)) {
+    out.delete('propose_personal_event');
+    out.delete('propose_study_plan');
+  }
   // Prioritize the requested domain, retaining proposals for planning questions.
   if (foodOrderIntent(question)) {
     out.delete('get_today_context');
@@ -730,6 +747,22 @@ export function createTools(
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  async function requirePermission(key: AssistantPermissionKey) {
+    try {
+      await requireAssistantPermission(adapter, key);
+      operationSignal()?.throwIfAborted();
+    } catch (error) {
+      // Repeated calls cannot reuse an earlier card after its grant was revoked.
+      for (let i = cards.length - 1; i >= 0; i--) {
+        if (proposalPermission(cards[i].tool) === key) cards.splice(i, 1);
+      }
+      for (const cached of cache.keys()) {
+        const name = cached.slice(0, cached.indexOf('{'));
+        if (proposalPermission(name) === key) cache.delete(cached);
+      }
+      throw error;
+    }
+  }
   let proposalSeq: string | undefined;
   const sequence = () => (proposalSeq ||= beginProposal(binding, now));
   const diningIds = new Set<string>();
@@ -832,7 +865,9 @@ export function createTools(
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
-    if (typeof raw.title === 'string' && /^寫/.test(raw.title))
+    const explicit = parseAssistantCalendarIntent(question, now);
+    if (typeof raw.title === 'string' && /^寫/.test(raw.title) &&
+      !(explicit?.kind === 'draft' && raw.title === explicit.event.title))
       raw = { ...raw, title: studyTitle(raw.title) };
     const l = await getLedger(),
       e = eventArgs(raw),
@@ -855,6 +890,7 @@ export function createTools(
     )
       return fail('EVENT_CONFLICT', 409);
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
+    await requirePermission('createPersonalEvent');
     const card = signCard(
       binding,
       'propose_personal_event',
@@ -988,6 +1024,7 @@ export function createTools(
                 ? '此訂單需付款，請到點餐頁完成'
                 : '確認後下單，自取',
         };
+        await requirePermission('prepareFoodOrder');
         cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
         return { proposed: true, mode, reason: args.reason, summary, href: args.href, requiresConfirmation: true };
       }
@@ -1356,6 +1393,8 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
+      const permission = proposalPermission(name);
+      if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
       if (name === 'propose_personal_event') {
         const spoken = parseSpokenClock(question);
@@ -1484,6 +1523,7 @@ export function createTools(
       try {
         value = await cache.get(key);
       } catch (error) {
+        if (assistantPermissionRecovery(String((error as { code?: string }).code))) throw error;
         if (name !== 'reorder_last_food_order') throw error;
         const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
         const retryKey = name + canonical(filled);
