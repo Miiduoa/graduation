@@ -4,17 +4,23 @@ import {
   doc,
   FieldPath,
   getDocFromServer,
+  getDocsFromServer,
+  endAt,
   limit,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAt,
   where,
   type DocumentData,
   type SnapshotMetadata,
   type Transaction,
 } from 'firebase/firestore';
+import { callWithHostedFallback } from './callableFallback';
+import { parseDmPhotoPath } from './dmPhotos';
+import { deriveDmConversationId } from './conversationAccess';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
 import { leaveRequestHref, parseLeaveRequestId } from './leaveRequestLink';
 import {
@@ -49,11 +55,25 @@ export type PrivateMessage = {
   type: string;
   createdAt: string | null;
   recalled: boolean;
+  isStoryReply?: boolean;
+  attachmentPath?: string;
   reactions?: Record<string, string[]>;
 };
 export type ConversationContents = {
   conversation: PrivateConversation;
   messages: PrivateMessage[];
+  exists?: boolean;
+};
+export type PrivateMessageRecipient = {
+  uid: string;
+  displayName: string;
+  department: string | null;
+};
+export type PreparedPrivateConversation = {
+  conversationId: string;
+  peerUid: string;
+  peerName: string | null;
+  exists: boolean;
 };
 export type AccountNotification = {
   id: string;
@@ -69,7 +89,9 @@ export type NotificationFeed = { notifications: AccountNotification[]; unscopedC
 type Fail = (reason: MessagingFailure) => void;
 function reason(error: unknown): MessagingFailure {
   if (error instanceof MessagingError) return error.reason;
-  return (error as { code?: string })?.code === 'permission-denied' ? 'permission' : 'unavailable';
+  return ['permission-denied', 'functions/permission-denied', 'functions/unauthenticated'].includes(
+    (error as { code?: string })?.code ?? '',
+  ) ? 'permission' : 'unavailable';
 }
 function key(value: string) {
   if (!value || value.includes('/')) throw new MessagingError('permission');
@@ -122,7 +144,8 @@ export function parseConversation(
     memberIds: members,
     peerUid: members.find((uid) => uid !== session.uid)!,
     peerName: null,
-    preview: text(row.lastMessageText) || text(row.lastMessage?.content),
+    preview: row.lastMessage?.type === 'image' || row.lastMessageType === 'image'
+      ? '照片' : text(row.lastMessageText) || text(row.lastMessage?.content),
     lastMessageAt: messageTime(row.lastMessageAt ?? row.updatedAt),
     lastSenderId: text(row.lastMessageSenderId) || text(row.lastMessage?.senderId) || null,
     lastReadAt: messageTime(object(row.lastReadBy)[session.uid]),
@@ -149,14 +172,23 @@ function parseMessage(
     (row.conversationId && row.conversationId !== conversation.id)
   )
     throw new MessagingError('permission');
-  if (typeof row.content !== 'string') throw new MessagingError('unavailable');
+  const storyRef = object(row.storyReplyTo);
+  if (row.type !== 'image' && typeof row.content !== 'string') throw new MessagingError('unavailable');
   return {
     id,
     senderId: row.senderId,
-    content: row.content,
+    content: row.type === 'image' ? '照片' : row.content,
+    attachmentPath: row.type === 'image' && !row.recalledAt && parseDmPhotoPath(row.attachmentPath, conversation.id)
+      ? row.attachmentPath : undefined,
     type: text(row.type) || 'text',
     createdAt: messageTime(row.createdAt),
     recalled: !!row.recalledAt,
+    isStoryReply:
+      row.type === 'text' &&
+      typeof storyRef.storyId === 'string' &&
+      !!storyRef.storyId &&
+      conversation.memberIds.includes(text(storyRef.authorUid)) &&
+      storyRef.authorUid !== row.senderId,
     reactions: parseReactions(row.reactions),
   };
 }
@@ -232,6 +264,164 @@ async function peerName(session: MessagingSession, uid: string): Promise<string 
   } catch {
     return null;
   }
+}
+
+export async function findPrivateMessageRecipients(
+  session: MessagingSession,
+  name: string,
+  signal: AbortSignal,
+): Promise<PrivateMessageRecipient[]> {
+  assertUser(session.uid);
+  const prefix = name.trim();
+  if (signal.aborted) throw new MessagingError('stale');
+  if (!prefix || prefix.length > 80) return [];
+  const snapshot = await getDocsFromServer(query(
+    collection(getDb(), 'schools', key(session.schoolId), 'directory'),
+    where('isDiscoverable', '==', true),
+    orderBy('displayName'),
+    startAt(prefix),
+    endAt(prefix + '\uf8ff'),
+    limit(20),
+  ));
+  assertUser(session.uid);
+  if (signal.aborted || !confirmed(snapshot.metadata)) throw new MessagingError('stale');
+  return snapshot.docs.flatMap((entry) => {
+    const row = entry.data();
+    const displayName = text(row.displayName).trim();
+    return entry.id !== session.uid && row.isDiscoverable === true && displayName ? [{
+      uid: entry.id,
+      displayName,
+      department: text(row.department) || null,
+    }] : [];
+  });
+}
+
+export async function preparePrivateConversation(
+  session: MessagingSession,
+  peerUid: string,
+  signal: AbortSignal,
+): Promise<PreparedPrivateConversation> {
+  assertUser(session.uid);
+  if (signal.aborted) throw new MessagingError('stale');
+  if (key(peerUid) === session.uid) throw new MessagingError('permission');
+  const conversationId = deriveDmConversationId(key(session.schoolId), session.uid, peerUid);
+  try {
+    const { data } = await callWithHostedFallback<
+      { viewerUid: string; schoolId: string; peerUid: string },
+      { conversationId: string; peerUid: string; exists: boolean }
+    >('prepareDmConversation', { viewerUid: session.uid, schoolId: session.schoolId, peerUid }, session.uid, signal).catch(async (error: unknown) => {
+      assertUser(session.uid);
+      if (signal.aborted) throw new MessagingError('stale');
+      // New-DM school eligibility does not revoke access to an existing member DM.
+      const snapshot = await getDocFromServer(doc(getDb(), 'conversations', conversationId));
+      assertUser(session.uid);
+      if (signal.aborted) throw new MessagingError('stale');
+      if (!confirmed(snapshot.metadata) || !snapshot.exists()) throw error;
+      const existing = parseConversation(conversationId, snapshot.data(), session);
+      if (existing.peerUid !== peerUid) throw new MessagingError('permission');
+      return { data: { conversationId, peerUid, exists: true } };
+    });
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    if (data?.conversationId !== conversationId || data.peerUid !== peerUid || typeof data.exists !== 'boolean') {
+      throw new MessagingError('permission');
+    }
+    const name = await peerName(session, peerUid);
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    return { conversationId, peerUid, exists: data.exists, peerName: name };
+  } catch (error) {
+    if (signal.aborted) throw new MessagingError('stale');
+    throw new MessagingError(reason(error));
+  }
+}
+
+export async function sendPreparedPrivateMessage(
+  session: MessagingSession,
+  prepared: PreparedPrivateConversation,
+  messageId: string,
+  content: string,
+  signal: AbortSignal,
+) {
+  assertUser(session.uid);
+  if (signal.aborted) throw new MessagingError('stale');
+  const body = content.trim();
+  if (!body || body.length > 4000 || !/^[A-Za-z0-9_-]{20,64}$/.test(messageId)) {
+    throw new MessagingError('unavailable');
+  }
+  if (prepared.peerUid === session.uid || prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
+    throw new MessagingError('permission');
+  }
+  try {
+    const { data } = await callWithHostedFallback<
+      { viewerUid: string; schoolId: string; peerUid: string; conversationId: string; messageId: string; content: string },
+      { conversationId: string; messageId: string }
+    >('sendDmText', {
+      viewerUid: session.uid,
+      schoolId: session.schoolId,
+      peerUid: prepared.peerUid,
+      conversationId: prepared.conversationId,
+      messageId,
+      content: body,
+    }, session.uid, signal);
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    if (data?.conversationId !== prepared.conversationId || data.messageId !== messageId) {
+      throw new MessagingError('unavailable');
+    }
+  } catch (error) {
+    if (signal.aborted) throw new MessagingError('stale');
+    throw new MessagingError(reason(error));
+  }
+}
+
+export function watchNewPrivateConversation(
+  session: MessagingSession,
+  prepared: PreparedPrivateConversation,
+  receive: (contents: ConversationContents) => void,
+  fail: Fail,
+) {
+  assertUser(session.uid);
+  if (prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
+    throw new MessagingError('permission');
+  }
+  if (prepared.exists) return watchConversationContents(session, prepared.conversationId, receive, fail);
+  let active = true;
+  let stopContents: (() => void) | undefined;
+  let stopInbox: (() => void) | undefined;
+  stopInbox = watchPrivateConversations(session, (rows) => {
+    if (!active || stopContents) return;
+    const existing = rows.find((row) => row.id === prepared.conversationId);
+    if (existing) {
+      if (existing.peerUid !== prepared.peerUid) {
+        fail('permission');
+        return;
+      }
+      stopContents = watchConversationContents(session, existing.id, receive, fail);
+      stopInbox?.();
+      return;
+    }
+    receive({
+      exists: false,
+      conversation: {
+        id: prepared.conversationId,
+        memberIds: [session.uid, prepared.peerUid],
+        peerUid: prepared.peerUid,
+        peerName: prepared.peerName,
+        preview: '',
+        lastMessageAt: null,
+        lastSenderId: null,
+        lastReadAt: null,
+      },
+      messages: [],
+    });
+  }, fail);
+  if (stopContents) stopInbox();
+  return () => {
+    active = false;
+    stopInbox?.();
+    stopContents?.();
+  };
 }
 export function watchPrivateConversations(
   session: MessagingSession,
