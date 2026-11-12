@@ -113,6 +113,7 @@ function CatalogCourse({ course, schoolId, importHref, review, copyFeedback, onC
           </>
         )}
       </dl>
+      {!csv && <p role="status">校方課號或上課節次尚無法安全匯入（可能缺漏或重複），請先至校方課程目錄核對。</p>}
       {csv && (
         <div className={courseStyles.cardActions}>
           <button type="button" className="btn primary" onClick={() => setNotice(review(course, csv))}>帶入課表核對</button>
