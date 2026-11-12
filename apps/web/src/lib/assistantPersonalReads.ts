@@ -3,6 +3,7 @@
 import { buildPersonalToday } from '@campus/shared/src/imports/today';
 import { exclusiveAllDayEnd } from '@campus/shared/src/imports/eventCalendar';
 import { manualClassRecords, withClassExceptions, classDate, validClassDate } from '@campus/shared/src/timetable/classExceptions';
+import { parsePersonalImportSnapshot, personalImportRecordsEqual } from '@campus/shared/src/imports/sync';
 import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
 import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
 import { createNuniClasses, type NuniWorkspace } from '@campus/shared/src/nuni';
@@ -76,7 +77,7 @@ export function personalAssistantReadIntent(question: string, now = new Date()):
   } else if (/昨天|前天|\d+月|\d+\/\d+|星期[一二三四五六日天]|週[一二三四五六日天]|下個月|下月|本月|這個月/.test(text)) return null;
   if (!coursework && !from) from = to = today;
   const next = schedule && /下一堂|下堂課/.test(text);
-  const current = schedule && /現在(?:在)?(?:上|有|是)|目前(?:正)?在上|正在上/.test(text);
+  const current = schedule && /現在|目前|正在上/.test(text);
   if (current && (next || from !== today || to !== today)) return null;
   if ((text.match(/早上|上午|中午|下午|晚上|今晚/g) ?? []).length > 1) return null;
   if (next && temporal.length === 0) to = addDays(today, 6);
@@ -190,9 +191,32 @@ export async function answerAssistantPersonalQuestion(
   try { imported = readPersonalImports(scope); } catch { unavailable = true; }
   assertActive();
   if (intent.kind === 'calendar') {
-    if (unavailable) return result('目前無法讀取這個帳號的個人行程，尚未確認這段時間是否有安排。原始資料仍保留。', ['calendar']);
-    const events = imported.filter((row) => row.kind === 'events');
-    if (!events.length && options.fallbackOnMissing) return null;
+    let events = imported.filter((row) => row.kind === 'events');
+    let cloudRead = false;
+    let cloudUnavailable = false;
+    let conflicts = false;
+    if (options.fallbackOnMissing) {
+      try {
+        const snapshot = parsePersonalImportSnapshot(
+          await browserRequest('personal-imports/read', options.context, { schoolId: scope.schoolId }),
+          scope.schoolId,
+        );
+        assertActive();
+        const merged = new Map(events.map((row) => [row.id, row]));
+        for (const row of snapshot.records.filter((row) => row.kind === 'events')) {
+          const local = merged.get(row.id);
+          if (local && !personalImportRecordsEqual([local], [row])) conflicts = true;
+          merged.set(row.id, row);
+        }
+        events = [...merged.values()];
+        cloudRead = true;
+      } catch (error) {
+        assertActive();
+        if (sessionFailure(error)) throw new Error('登入狀態已變更，請重新登入後再查詢。');
+        cloudUnavailable = true;
+      }
+    }
+    const partial = unavailable || cloudUnavailable;
     const matches = events.filter((row) => {
       if (!row.date) return false;
       const start = Date.parse(`${row.date}T${row.allDay ? '00:00' : row.startTime}:00+08:00`);
@@ -208,9 +232,14 @@ export async function answerAssistantPersonalQuestion(
     const lines = [`${intent.from}${intent.to !== intent.from ? '～' + intent.to : ''} 的個人行程：`];
     for (const row of matches.slice(0, 15))
       lines.push(`- ${row.date} ${row.allDay ? '全天' : `${row.startTime}–${row.endTime}`}${row.endDate && row.endDate !== row.date ? `（${row.allDay ? '結束日不含當天：' : '至'}${row.endDate}）` : ''}｜${clean(row.title)}${row.location ? '｜' + clean(row.location) : ''}`);
-    if (!matches.length) lines.push('這個帳號在此瀏覽器保存的個人行程中，沒有這段日期的紀錄。');
+    if (!matches.length) lines.push(partial
+      ? '部分行程來源未能讀取，已取得的資料沒有這段日期的紀錄，尚無法確認是否有安排。'
+      : cloudRead ? '這個帳號的雲端與本機個人行程中，沒有這段日期的紀錄。'
+      : '這個帳號在此瀏覽器保存的個人行程中，沒有這段日期的紀錄。');
+    if (partial) lines.push('部分行程來源尚未查完整；以上只列已讀到的內容，原始資料仍保留。');
+    if (conflicts) lines.push('部分相同識別碼的行程與本機內容不同，這次顯示雲端內容；本機資料未變更，請在行事曆核對。');
     if (matches.length > 15) lines.push(`另有 ${matches.length - 15} 項，請在個人行事曆查看。`);
-    lines.push('資料來源：此帳號在此瀏覽器保存的個人行程。');
+    lines.push(cloudRead ? '資料來源：此帳號在所選校園的雲端行程與此瀏覽器保存的個人行程（依識別碼核對）。' : '資料來源：此帳號在此瀏覽器保存的個人行程；未取得完整雲端資料。');
     return result(lines.join('\n'), ['calendar']);
   }
   try {

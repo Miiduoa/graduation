@@ -67,6 +67,88 @@ describe('direct personal reads', () => {
     expect(result?.content).not.toContain('下午的課');
   });
 
+  it.each(['現在上什麼課？', '現在有哪些課？', '目前上什麼課？', '目前有哪些課？', '目前正在上什麼課？'])(
+    'filters the current time consistently: %s', async (question) => {
+      save([lesson(), lesson({ id: 'past', title: '已下課', startTime: '08:10', endTime: '09:00' }),
+        lesson({ id: 'later', title: '未開始', startTime: '10:10', endTime: '11:00' })]);
+      expect(intent(question, now)).toMatchObject({ current: true });
+      const result = await answer(question, scope, options());
+      expect(result?.content).toContain('資料庫管理');
+      expect(result?.content).not.toMatch(/已下課|未開始/);
+      expect((await answer(question, scope, { ...options(), now: new Date('2026-11-12T10:00:00+08:00') }))?.content)
+        .toContain('這個時間沒有排課');
+    });
+
+  const event = (id: string, extra: Partial<PersonalImportRecord> = {}) => lesson({
+    id, kind: 'events', title: id, date: '2026-11-12', dayOfWeek: undefined, ...extra,
+  });
+  const remote = (records: PersonalImportRecord[], schoolId = scope.schoolId) => ({
+    schoolId, revision: 2, updatedAt: '2026-11-12T01:00:00Z', records,
+  });
+
+  it('reads cloud events even with a partial local receipt and merges IDs without writes', async () => {
+    const receipt = event('receipt');
+    save([receipt, event('local-only')]);
+    const before = localStorage.getItem(personalImportsStorageKey(scope));
+    vi.mocked(browserRequest).mockResolvedValueOnce(remote([receipt, event('cloud-only')]));
+    const result = await answer('今天有哪些行程？', scope, { ...options(), fallbackOnMissing: true });
+    expect(result?.content).toContain('local-only');
+    expect(result?.content).toContain('cloud-only');
+    expect(result?.content?.match(/｜receipt/g)).toHaveLength(1);
+    expect(browserRequest).toHaveBeenCalledExactlyOnceWith('personal-imports/read', options().context, { schoolId: 'pu' });
+    expect(localStorage.getItem(personalImportsStorageKey(scope))).toBe(before);
+  });
+
+  it('finds a cloud event when the local receipt is outside the requested day', async () => {
+    save([event('yesterday', { date: '2026-11-11' })]);
+    vi.mocked(browserRequest).mockResolvedValueOnce(remote([event('today-cloud')]));
+    expect((await answer('今天有哪些行程？', scope, { ...options(), fallbackOnMissing: true }))?.content)
+      .toContain('today-cloud');
+  });
+
+  it('labels conflicting IDs and uses cloud content without replacing local storage', async () => {
+    save([event('same', { title: '本機版本' })]);
+    vi.mocked(browserRequest).mockResolvedValueOnce(remote([event('same', { title: '雲端版本' })]));
+    const result = await answer('今天有哪些行程？', scope, { ...options(), fallbackOnMissing: true });
+    expect(result?.content).toContain('｜雲端版本');
+    expect(result?.content).toContain('本機內容不同');
+    expect(result?.content).not.toContain('｜本機版本');
+  });
+
+  it.each(['network', 'campus', 'local'])('reports incomplete sources: %s', async (failure) => {
+    if (failure === 'network') vi.mocked(browserRequest).mockRejectedValueOnce(new Error('offline'));
+    if (failure === 'campus') vi.mocked(browserRequest).mockResolvedValueOnce(remote([event('foreign')], 'nthu'));
+    if (failure === 'local') {
+      localStorage.setItem(personalImportsStorageKey(scope), '{broken');
+      vi.mocked(browserRequest).mockResolvedValueOnce(remote([event('cloud-only')]));
+    }
+    const result = await answer('今天有哪些行程？', scope, { ...options(), fallbackOnMissing: true });
+    expect(result?.content).toContain('尚未查完整');
+    expect(result?.content).not.toContain('foreign');
+    if (failure === 'local') expect(result?.content).toContain('cloud-only');
+    else expect(result?.content).toContain('尚無法確認');
+  });
+
+  it('keeps calendar reads local without cloud consent or availability', async () => {
+    save([event('local-only')]);
+    const result = await answer('今天有哪些行程？', scope, options());
+    expect(result?.content).toContain('local-only');
+    expect(result?.content).toContain('未取得完整雲端資料');
+    expect(browserRequest).not.toHaveBeenCalled();
+  });
+
+  it('discards calendar results on session expiry and cancellation', async () => {
+    vi.mocked(browserRequest).mockRejectedValueOnce(new NuniError(401, 'UNAUTHENTICATED'));
+    await expect(answer('今天有哪些行程？', scope, { ...options(), fallbackOnMissing: true })).rejects.toThrow('登入狀態已變更');
+    const controller = new AbortController();
+    vi.mocked(browserRequest).mockImplementationOnce(async () => {
+      controller.abort();
+      return remote([event('late')]);
+    });
+    await expect(answer('今天有哪些行程？', scope, { ...options(), fallbackOnMissing: true, signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('applies saved class cancellations and afternoon filtering', async () => {
     const original = lesson();
     vi.mocked(readPersonalTimetableOnDevice).mockReturnValueOnce({ found: true, timetable: {
