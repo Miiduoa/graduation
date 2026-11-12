@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import Link from 'next/link';
+import { useId } from 'react';
 import {
   ACCOUNT_DEMO_MEAL as MEAL,
   type AccountDemoSnapshot,
@@ -14,21 +15,14 @@ export function AccountDemoDining({
   demo,
   blocked,
   onAction,
+  view,
 }: {
   demo: AccountDemoSnapshot;
   blocked: boolean;
   onAction: (action: DiningAction) => void;
+  /** Original feature pages keep one role and navigate through their existing routes. */
+  view: 'student' | 'merchant';
 }) {
-  const [view, setView] = useState<'student' | 'merchant'>('student');
-  useEffect(() => {
-    const selectLinkedView = () => {
-      if (window.location.hash === '#merchant-demo') setView('merchant');
-      if (window.location.hash === '#account-dining') setView('student');
-    };
-    selectLinkedView();
-    window.addEventListener('hashchange', selectLinkedView);
-    return () => window.removeEventListener('hashchange', selectLinkedView);
-  }, []);
   const titleId = useId();
   const created = demo.state.createOrder;
   const ready = created && demo.state.readyOrder;
@@ -36,31 +30,27 @@ export function AccountDemoDining({
   const orderReference = `${demo.profile.studentId}-01`;
   const foodAllowed = demo.permissions.food;
   const merchantAllowed = foodAllowed && demo.permissions.administration;
+  const campus = `?campus=${encodeURIComponent(demo.profile.schoolId)}`;
+  const studentHref = `/food${campus}`;
+  const merchantHref = `/merchant/workspace${campus}`;
 
   return (
     <section id="account-dining" className={styles.dining} aria-labelledby={titleId}>
       <header id="merchant-demo" className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>午餐時段 · 帳號展示</p>
-          <h2 id={titleId}>點好午餐，接著看看店家端</h2>
-          <p className={styles.intro}>學生與店家共用同一筆展示訂單，進度會跟著帳號保存。</p>
+          <p className={styles.eyebrow}>本人帳號 · 合成示範資料</p>
+          <h2 id={titleId}>{view === 'student' ? '今日菜單與取餐單' : '門市訂單'}</h2>
+          <p className={styles.intro}>
+            {view === 'student'
+              ? '確認餐點後建立訂單，接著在取餐單查看備餐進度。'
+              : '查看收到的訂單，完成備餐後更新取餐狀態。'}
+          </p>
         </div>
-        <div className={styles.viewControls} role="group" aria-label="訂餐展示視角">
-          <button
-            type="button"
-            aria-pressed={view === 'student'}
-            onClick={() => setView('student')}
-          >
-            學生點餐
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === 'merchant'}
-            onClick={() => setView('merchant')}
-          >
-            店家接單
-          </button>
-        </div>
+        <nav className={styles.nativeLinks} aria-label="餐飲功能導覽">
+          <Link href={view === 'student' ? merchantHref : studentHref}>
+            {view === 'student' ? '店家工作台' : '點餐與取餐'}
+          </Link>
+        </nav>
       </header>
 
       <ol className={styles.steps} aria-label="訂餐處理進度">
@@ -143,7 +133,7 @@ export function AccountDemoDining({
                 <p className={styles.receiptCopy}>
                   {ready
                     ? `請於 ${MEAL.pickup} 前往${MEAL.place}，出示這張取餐單。`
-                    : '切換「店家接單」完成備餐，再回來查看取餐狀態。'}
+                    : '店家完成備餐後，這裡會更新可取餐狀態。'}
                 </p>
                 <dl className={styles.details}>
                   <div>
@@ -166,9 +156,9 @@ export function AccountDemoDining({
                   </div>
                 </dl>
                 {!ready ? (
-                  <button type="button" onClick={() => setView('merchant')}>
+                  <Link className={styles.nativeLink} href={merchantHref}>
                     前往店家接單
-                  </button>
+                  </Link>
                 ) : null}
               </>
             ) : (
@@ -230,17 +220,17 @@ export function AccountDemoDining({
               {ready ? (
                 <p className={styles.saved}>可取餐狀態已儲存，學生取餐單已同步更新。</p>
               ) : null}
-              <button type="button" onClick={() => setView('student')}>
+              <Link className={styles.nativeLink} href={studentHref}>
                 查看學生取餐單
-              </button>
+              </Link>
             </article>
           ) : (
             <div className={styles.empty}>
               <p>目前沒有展示訂單</p>
               <span>先從學生端建立一筆訂餐，再回到這裡處理。</span>
-              <button type="button" onClick={() => setView('student')}>
+              <Link className={styles.nativeLink} href={studentHref}>
                 前往學生點餐
-              </button>
+              </Link>
             </div>
           )}
         </div>

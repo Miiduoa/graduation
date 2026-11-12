@@ -35,6 +35,8 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
     const results = await preview(['--model=fake', '--cases=all']);
     assert.equal(results.length, 10);
     assert.equal(output.trim().split('\n').length, 10);
+    const directReadQuestion = '下一堂課在哪，幾點';
+    assert.equal(results.filter((result) => result.question === directReadQuestion).length, 1);
     for (const result of results) {
       assert.equal(result.error, undefined);
       assert.equal(result.stopReason, '');
@@ -43,7 +45,22 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
         JSON.stringify(result.toolSteps),
       );
       assert.equal(result.simulation, true);
-      assert.ok(result.modelCalls >= 1 && result.modelCalls <= 4);
+      if (result.question === directReadQuestion) {
+        // This exact information request has a deterministic reader. The
+        // remaining cases still exercise the bounded model/tool loop below.
+        assert.equal(result.modelCalls, 0);
+        assert.deepEqual(result.usage, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+        assert.deepEqual(result.tools, []);
+        assert.deepEqual(result.toolSteps.map((step) => step.name), ['get_schedule']);
+        assert.match(result.finalAnswer, /13:00–15:00\u3000資料結構｜資訊202/);
+        assert.match(result.finalAnswer, /來源：已同步的個人課表/);
+        assert.doesNotMatch(result.finalAnswer, /程式設計|語文館|請開啟/);
+        assert.deepEqual(result.actionCards, []);
+        assert.equal(result.fixtureWrites, 0);
+        assert.equal(result.orderCalls, 0);
+      } else {
+        assert.ok(result.modelCalls >= 1 && result.modelCalls <= 4, result.question);
+      }
       assert.ok(result.usage.total_tokens <= 7000);
       assert.doesNotMatch(JSON.stringify(result), /"token":|Bearer |GROQ_API_KEY/);
     }

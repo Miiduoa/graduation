@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { AccountDemoEntry } from '@/components/AccountDemoEntry';
+import { AccountDemoDiningPanel } from '@/features/food/AccountDemoDiningPanel';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
@@ -94,21 +94,31 @@ export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOvervi
     setOperationScope({ accountId: confirmedAccount, locations: new Map(), food: new Map() });
     return null;
   }
+  const nativeWorkspace = auth.session ? (
+    <AccountWorkspace
+      key={`${auth.session.platformAccountId}:${auth.session.context}`}
+      view={view}
+      context={auth.session.context}
+      operationDrafts={operationScope.locations}
+      foodDrafts={operationScope.food}
+      suspended={auth.loading}
+      onSwitchAccount={auth.logout}
+      onExpired={auth.refresh}
+    />
+  ) : null;
   return (
     <SiteShell title={entry.title} subtitle={entry.subtitle}>
-      {view !== 'apply' ? <AccountDemoEntry destination="merchant" /> : null}
       {cleanupError ? <p role="alert">{cleanupError}</p> : null}
       {auth.session && !auth.pendingLogout && !auth.error ? (
-        <AccountWorkspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
-          view={view}
-          context={auth.session.context}
-          operationDrafts={operationScope.locations}
-          foodDrafts={operationScope.food}
-          suspended={auth.loading}
-          onSwitchAccount={auth.logout}
-          onExpired={auth.refresh}
-        />
+        view === 'apply' ? (
+          nativeWorkspace
+        ) : (
+          <AccountDemoDiningPanel
+            view="merchant"
+            entryOnly={view === 'overview'}
+            fallback={nativeWorkspace}
+          />
+        )
       ) : (
         <NuniSignIn returnUrl={entry.path} />
       )}

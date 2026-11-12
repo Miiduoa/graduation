@@ -74,8 +74,8 @@ it('uses the existing conversation to confirm and verify a demonstration order w
   expect(calls.filter((call) => call.input)).toEqual([
     { url: '/api/nuni/account-demo', input: { expectedRevision: 0, action: 'createOrder' } },
   ]);
-  expect(screen.getByRole('link', { name: '查看展示結果' }).getAttribute('href'))
-    .toBe('/demo/account?campus=pu#merchant-demo');
+  expect(screen.getByRole('link', { name: '開啟點餐與取餐' }).getAttribute('href'))
+    .toBe('/food?campus=pu');
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 });
 

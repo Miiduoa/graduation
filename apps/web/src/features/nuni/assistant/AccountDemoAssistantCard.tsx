@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ACCOUNT_DEMO_ACTION_LABELS } from '@campus/shared/src/accountDemo';
 import {
   accountDemoActionSummary,
+  accountDemoActionDestination,
   executeAccountDemoAssistant,
   type AccountDemoAssistantProposal,
   type AccountDemoAssistantScope,
@@ -20,8 +21,7 @@ export function AccountDemoAssistantCard({ proposal, scope }: {
   const lifetime = useRef<AbortController | null>(null);
   const lock = useRef(false);
   const title = ACCOUNT_DEMO_ACTION_LABELS[proposal.action];
-  const href = '/demo/account?campus=' + encodeURIComponent(scope.schoolId) +
-    (proposal.action === 'createOrder' || proposal.action === 'readyOrder' ? '#merchant-demo' : '');
+  const destination = accountDemoActionDestination(proposal.action, scope.schoolId);
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
@@ -40,7 +40,7 @@ export function AccountDemoAssistantCard({ proposal, scope }: {
       if (active()) {
         setStatus('unknown');
         setError(failure instanceof Error && !/^[A-Z_]+$/.test(failure.message)
-          ? failure.message : '操作結果尚未核對，請到展示工作區查看。');
+          ? failure.message : '操作結果尚未核對，請開啟對應功能查看。');
       }
     } finally {
       lock.current = false;
@@ -62,11 +62,11 @@ export function AccountDemoAssistantCard({ proposal, scope }: {
       {status === 'cancelled' && <p className={styles.status}>已取消，沒有送出展示操作。</p>}
       {status === 'verified' && <div className={styles.receipt} aria-label="展示執行回執">
         <p className={`${styles.status} ${styles.statusOk}`}>已完成「{title}」，帳號展示紀錄已核對。</p>
-        <Link className={styles.pageLink} href={href}>查看展示結果</Link>
+        <Link className={styles.pageLink} href={destination.href}>開啟{destination.label}</Link>
       </div>}
       {status === 'unknown' && <div>
         <p className={styles.alert} role="alert">{error}</p>
-        <Link className={styles.pageLink} href={href}>核對展示工作區</Link>
+        <Link className={styles.pageLink} href={destination.href}>開啟{destination.label}核對</Link>
       </div>}
     </article>
   );

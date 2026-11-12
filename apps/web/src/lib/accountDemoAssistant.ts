@@ -28,6 +28,30 @@ export type AccountDemoAssistantAnswer = {
 };
 type Request = (input?: { expectedRevision: number; action: AccountDemoStateKey }) => Promise<unknown>;
 
+const actionPages: Record<AccountDemoStateKey, { path: string; label: string }> = {
+  submitAssignment: { path: '/classroom', label: '課程與作業' },
+  checkIn: { path: '/classroom', label: '課程與點名' },
+  requestLeave: { path: '/leave', label: '請假' },
+  approveLeave: { path: '/leave/review', label: '請假審核' },
+  publishGrade: { path: '/grades?tab=feedback', label: '課程成績' },
+  createOrder: { path: '/food', label: '點餐與取餐' },
+  readyOrder: { path: '/merchant/workspace', label: '店家工作台' },
+  postStory: { path: '/community/me', label: '我的社群頁' },
+  sendMessage: { path: '/dms', label: '訊息' },
+  reserveSeat: { path: '/library', label: '圖書館' },
+  renewBook: { path: '/library', label: '圖書館' },
+  requestRepair: { path: '/dormitory', label: '宿舍' },
+  postAnnouncement: { path: '/announcements', label: '公告' },
+};
+
+export function accountDemoActionDestination(action: AccountDemoStateKey, schoolId: string) {
+  const page = actionPages[action];
+  return {
+    label: page.label,
+    href: page.path + (page.path.includes('?') ? '&' : '?') + 'campus=' + encodeURIComponent(schoolId),
+  };
+}
+
 const actions: readonly [RegExp, AccountDemoStateKey][] = [
   [/^(?:訂餐|點餐|建立訂餐|訂一份雞腿飯)$/, 'createOrder'],
   [/^(?:標示可取餐|餐點已完成|完成餐點)$/, 'readyOrder'],
@@ -62,7 +86,7 @@ function readSnapshot(raw: unknown, scope: AccountDemoAssistantScope): AccountDe
   if (!demo || demo.profile.schoolId !== scope.schoolId)
     throw new Error('這個帳號在目前校園沒有可用的展示資料。');
   if (!demo.permissions.assistant)
-    throw new Error('展示助理目前已關閉，請先在展示工作區開啟。');
+    throw new Error('展示助理目前已關閉，請先在設定開啟。');
   return demo;
 }
 function same(left: unknown, right: unknown): boolean {
@@ -77,7 +101,7 @@ function assertAction(demo: AccountDemoSnapshot, action: AccountDemoStateKey) {
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? error.code : '';
     if (code === 'DEMO_FEATURE_DISABLED')
-      throw new Error('這項展示功能目前已關閉，請先在展示工作區開啟。');
+      throw new Error('這項展示功能目前已關閉，請先在設定開啟。');
     if (code === 'DEMO_ACTION_NOT_READY')
       throw new Error('這項展示需要先完成前一步，請先建立訂餐、送出請假或繳交作業。');
     throw new Error('這項展示操作目前無法執行。');
@@ -88,7 +112,7 @@ export function accountDemoActionSummary(action: AccountDemoStateKey): string {
   if (action === 'createOrder' || action === 'readyOrder') {
     return `${ACCOUNT_DEMO_MEAL.merchant} · ${ACCOUNT_DEMO_MEAL.name} × ${ACCOUNT_DEMO_MEAL.quantity} · NT$${ACCOUNT_DEMO_MEAL.price}；${ACCOUNT_DEMO_MEAL.pickup} 於${ACCOUNT_DEMO_MEAL.place}取餐。`;
   }
-  return `${ACCOUNT_DEMO_ACTION_LABELS[action]}，並把結果保存至此帳號的展示工作區。`;
+  return `${ACCOUNT_DEMO_ACTION_LABELS[action]}，並把結果保存至此帳號的展示紀錄。`;
 }
 
 export async function prepareAccountDemoAssistant(
@@ -116,7 +140,7 @@ export async function prepareAccountDemoAssistant(
   }
   assertAction(demo, intent);
   if (demo.state[intent]) {
-    return { answer: `展示紀錄已確認「${ACCOUNT_DEMO_ACTION_LABELS[intent]}」完成，這次沒有重複送出。可以到展示工作區查看目前進度。` };
+    return { answer: `展示紀錄已確認「${ACCOUNT_DEMO_ACTION_LABELS[intent]}」完成，這次沒有重複送出。可以到「${actionPages[intent].label}」查看目前資料。` };
   }
   return {
     answer: `已備好「${ACCOUNT_DEMO_ACTION_LABELS[intent]}」的展示操作，請核對下方內容後確認。`,
@@ -147,11 +171,11 @@ export async function executeAccountDemoAssistant(
   const saved = readSnapshot(written, scope);
   const expected = { ...current, revision: current.revision + 1, state: expectedState };
   if (!same(saved, expected))
-    throw new Error('展示操作的回執尚未核對，請到展示工作區查看。');
+    throw new Error('展示操作的回執尚未核對，請開啟對應功能查看。');
   const confirmed = await request();
   ensureActive(active);
   const verified = readSnapshot(confirmed, scope);
   if (!same(verified, saved))
-    throw new Error('展示操作的儲存結果尚未核對，請到展示工作區查看。');
+    throw new Error('展示操作的儲存結果尚未核對，請開啟對應功能查看。');
   return verified;
 }

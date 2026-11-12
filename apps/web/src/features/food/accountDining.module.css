@@ -1,9 +1,45 @@
 .dining {
+  color: var(--text, #172a22);
   padding: 28px;
   border: 1px solid var(--border, #dce2db);
   border-radius: 18px;
   background: var(--surface, #fff);
   scroll-margin-top: 100px;
+}
+.dining button {
+  font: inherit;
+  font-size: 13px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #ccd6ce);
+  border-radius: 9px;
+  background: var(--surface, #fff);
+  color: inherit;
+  cursor: pointer;
+}
+.dining button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.dining button:focus-visible,
+.dining a:focus-visible {
+  outline: 3px solid var(--brand, #314d40);
+  outline-offset: 4px;
+}
+.nativeLinks {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  min-height: 44px;
+}
+.nativeLinks a,
+.nativeLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 13px;
+  color: inherit;
+  text-underline-offset: 4px;
 }
 .header,
 .merchantHeading,
@@ -44,24 +80,6 @@
 }
 .intro {
   margin: 8px 0 0;
-}
-.dining .viewControls {
-  display: flex;
-  flex-shrink: 0;
-  padding: 4px;
-  gap: 4px;
-  border: 1px solid var(--border, #dce2db);
-  border-radius: 12px;
-  background: var(--bg-soft, #f3f5f1);
-}
-.dining .viewControls button {
-  border-color: transparent;
-  background: transparent;
-}
-.dining .viewControls button[aria-pressed='true'] {
-  background: var(--surface, #fff);
-  border-color: var(--border, #dce2db);
-  font-weight: 650;
 }
 .steps {
   display: grid;
@@ -313,12 +331,6 @@
 @media (max-width: 540px) {
   .dining {
     padding: 20px;
-  }
-  .dining .viewControls {
-    width: 100%;
-  }
-  .viewControls button {
-    flex: 1;
   }
   .steps {
     gap: 6px;

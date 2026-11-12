@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => mocks.auth,
+  useOptionalNuniSession: () => mocks.auth,
   browserRequest: mocks.request,
 }));
 vi.mock('@/components/SiteShell', () => ({
@@ -55,6 +56,7 @@ const application = {
   submittedAt: '2026-10-09T02:00:00.000Z',
 };
 function respond(path: string, _context?: string, input?: unknown) {
+  if (path === 'account-demo') return Promise.resolve({ demo: null });
   if (input) return Promise.resolve(application);
   if (path === 'merchant-onboarding-programs') return Promise.resolve({ programs });
   if (path === 'merchant-applications') return Promise.resolve({ applications: [] });
@@ -252,7 +254,7 @@ it('hides private data and forms while the current session is being verified', a
   mocks.auth.loading = true;
   view.rerender(<MerchantWorkspace />);
   expect(screen.queryByLabelText('對外品牌名稱')).toBeNull();
-  expect(screen.getByRole('status').textContent).toContain('店家資料暫時隱藏');
+  expect(screen.getByRole('status').textContent).toContain('正在核對帳號資料');
   mocks.auth.pendingLogout = true;
   view.rerender(<MerchantWorkspace />);
   expect(screen.getByRole('link', { name: '登入或建立帳號' })).toBeTruthy();

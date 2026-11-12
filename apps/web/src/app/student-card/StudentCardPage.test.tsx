@@ -288,7 +288,7 @@ it('shows an account-owned demonstration card for Google platform sign-in withou
   expect(state.read).not.toHaveBeenCalled();
   expect(state.demoRequest).toHaveBeenCalledWith('account-demo', 'platform-session-a');
   expect(screen.getByRole('link', { name: '展示資料與權限' }).getAttribute('href')).toBe(
-    '/demo/account',
+    '/settings?section=platform#account-demo-permissions',
   );
 });
 

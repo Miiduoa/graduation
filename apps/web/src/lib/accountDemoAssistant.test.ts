@@ -6,6 +6,7 @@ import {
 } from '@campus/shared/src/accountDemo';
 import {
   accountDemoAssistantIntent,
+  accountDemoActionDestination,
   executeAccountDemoAssistant,
   prepareAccountDemoAssistant,
   type AccountDemoAssistantProposal,
@@ -40,6 +41,24 @@ describe('explicit account demonstration intents', () => {
   it.each(['幫我點餐', '展示別人的訂單', '展示刪除帳號', '不要展示點餐', '展示點餐並付款', '開啟學生證'])('does not reinterpret %s as a demo write', (question) => {
     expect(accountDemoAssistantIntent(question)).toBeNull();
   });
+});
+
+it.each([
+  ['submitAssignment', '/classroom?campus=pu'],
+  ['checkIn', '/classroom?campus=pu'],
+  ['requestLeave', '/leave?campus=pu'],
+  ['approveLeave', '/leave/review?campus=pu'],
+  ['publishGrade', '/grades?tab=feedback&campus=pu'],
+  ['createOrder', '/food?campus=pu'],
+  ['readyOrder', '/merchant/workspace?campus=pu'],
+  ['postStory', '/community/me?campus=pu'],
+  ['sendMessage', '/dms?campus=pu'],
+  ['reserveSeat', '/library?campus=pu'],
+  ['renewBook', '/library?campus=pu'],
+  ['requestRepair', '/dormitory?campus=pu'],
+  ['postAnnouncement', '/announcements?campus=pu'],
+] as const)('keeps %s in the existing feature page', (action, href) => {
+  expect(accountDemoActionDestination(action, 'pu').href).toBe(href);
 });
 
 it('reads only the current account and produces a proposal without writing', async () => {

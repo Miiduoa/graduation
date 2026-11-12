@@ -107,9 +107,9 @@ export function AccountDemoStudentCard({
         <p>
           {!sameSchool && !expired
             ? `這張展示學生證屬於${demo.profile.schoolName}，從上方切換學校後即可查看。`
-            : '到帳號展示頁確認學生證的開啟狀態。'}
+            : '到設定的「平台權限」確認學生證的開啟狀態。'}
         </p>
-        <Link className={styles.link} href="/demo/account">
+        <Link className={styles.link} href="/settings?section=platform#account-demo-permissions">
           展示資料與權限
         </Link>
       </section>
@@ -159,7 +159,7 @@ function DemoWallet({ demo }: { demo: AccountDemoSnapshot }) {
         </div>
         <p className={styles.note}>這張卡使用你的帳號展示資料，出示後會在 60 秒內自動收起。</p>
         <p className={styles.edit}>
-          <Link href="/demo/account">展示資料與權限</Link>
+          <Link href="/settings?section=platform#account-demo-permissions">展示資料與權限</Link>
         </p>
       </div>
       <aside className={styles.guide}>
