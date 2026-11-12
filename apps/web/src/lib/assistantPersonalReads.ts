@@ -265,6 +265,6 @@ export async function answerAssistantPersonalQuestion(
   if (unavailable && visible.length) lines.push('部分課表來源暫時讀不到，以上只列已讀到的內容。');
   if (unplaced) lines.push(`另有 ${unplaced} 門課缺少可判定的時間，未列入。`);
   if (!intent.next && entries.length > 20) lines.push(`先列出 20 堂，其餘 ${entries.length - 20} 堂可在課表查看。`);
-  lines.push(`資料來源：此帳號在此瀏覽器保存的課表${term ? `（${clean(term.replace('|', ' 學年第 '))} 學期）` : ''}，已套用保存的停課與調課紀錄。`);
+  lines.push(`資料來源：此帳號在此瀏覽器保存的課表${term ? `（${clean(term.replaceAll('|', ' 學年第 '))} 學期）` : ''}，已套用保存的停課與調課紀錄。`);
   return result(lines.join('\n'), ['timetable']);
 }
