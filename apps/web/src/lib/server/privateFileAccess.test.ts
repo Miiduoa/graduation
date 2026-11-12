@@ -349,6 +349,9 @@ it.each([
   { status: 'scheduled' },
   { status: 'pending' },
   { status: 'unpublished' },
+  { status: 'archived' },
+  { status: 'cancelled' },
+  { status: 'canceled' },
 ])('keeps unpublished group post attachments private from other members %j', async (visibility) => {
   const path = 'groups/course/posts/one';
   const store = fileStore([[path, { authorId: 'alice', attachments: [POST], ...visibility }]]);

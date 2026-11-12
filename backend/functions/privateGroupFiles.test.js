@@ -107,6 +107,9 @@ describe('private group file HTTP handler', () => {
     { published: false },
     { status: 'draft' },
     { status: 'scheduled' },
+    { status: 'archived' },
+    { status: 'cancelled' },
+    { status: 'canceled' },
   ])('does not stream explicitly unpublished post attachments to another member %j', async (visibility) => {
     store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST], ...visibility });
     expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);

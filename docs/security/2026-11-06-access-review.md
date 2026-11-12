@@ -590,3 +590,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補統一兩種路徑的 canonical、global-only 與 global-mirror 開放狀態判定，明確的非開放狀態一律拒絕新上傳，即使設定 `allowLateSubmission:true`；真正開放的 legacy 草稿與作者已上傳檔案預覽、跨帳號／校籍撤銷原條件維持。新增 `apps/web/src/lib/server/privateFileAccess.test.ts` 的合成隔離回歸：兩種上傳路徑、global/canonical 雙佈局、global-only、狀態切換恢復、跨帳號及校籍撤銷。
 
 **驗證範圍**：僅是開發分支的授權守門與合成測試；必須對新精確 head 重新查核 CI、CodeQL、適用工作流與 App 5504170 的「審查通過」。此變更不撤銷先前已簽發的 GCS／Supabase URL，也不取代 Storage CAS／競態、可信歷史附件引用補齊、隔離 staging、minimatch 雙鎖檔和正式部署／回復驗證。未連 E 校園，未操作正式資料、金鑰、token 或 migration，未重送未獲准的 npm/pnpm audit payload。
+
+
+## 2026-11-12：群組貼文撤回／封存狀態仍不得開放私人媒體 GET（PR #577）
+
+核對目前 PR #577 父 head `a92c895d4c2425bd8b53aad530c05469405b900f` 的所有主要適用檢查：CI #43185909288、CodeQL #43185909552、Course access #43185909415 已完成 success；沒有 Functions／Rules／Web 等既有失敗先修項。Supabase permissions／Python security／Mobile Agent／Maestro 未於此 head 個別觸發，不能算成功；指定 nuni-merge-gate App 5504170 對此 head 仍未見「審查通過」。
+
+共用 `authorizePrivateFile` 已阻擋 draft、scheduled、pending、unpublished 貼文的非作者媒體讀取，但明確 `status:archived/cancelled/canceled` 的貼文，只要附件列在 `attachments`，其他同組成員與 manager 仍可能經過 HTTP GCS 或 Supabase private URL 簽發入口讀取。這些撤回／封存狀態不應等同對群組公開；這是授權決策的隔離可重現條件，不表示已找到真實外洩樣本。
+
+最小修補只對非作者 GET 將上述三個狀態加入禁止公開清單，保留作者預覽、正常 `status:published` 的精確附件引用及沒有明確限制的歷史貼文相容。新增 Web 共用授權及 Functions HTTP 惰性 Storage 正反向回歸，涵蓋同組讀者／管理者拒絕、作者仍可讀，以及轉為 published 後合法讀取；原本的跨帳號、跨校、退組測試維持。新提交必須重新以精確 head 的 GitHub CI／CodeQL 驗證。
+
+**尚未解除的不同層面風險**：Firestore `groups/{groupId}/posts/{postId}` 規則目前仍對 active member 放行文件讀取，可能揭露尚未發布貼文的 metadata；收緊 Firestore list 規則可能要求同步修改群組動態查詢，不能以本次附件 HTTP 守門聲稱已修復。其他仍有舊 GCS／Supabase bearer/signed URL 撤銷、真隔離 Storage staging、缺附件清單歷史資料、minimatch 雙鎖檔、最新 main 整合、正式部署與回復。未操作正式資料、金鑰、token、migration、E 校園，未重送未授權 pnpm/npm audit；不合併、不部署，等 App 5504170 對新精確 head 核可後交主線窗口。

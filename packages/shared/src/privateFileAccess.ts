@@ -474,7 +474,7 @@ export async function authorizePrivateFile(
           // A draft/scheduled post is not published merely because an upload
           // URL or an attachment path is present on the document.
           data.published === false ||
-          ['draft', 'scheduled', 'pending', 'unpublished'].includes(String(data.status || '')) ||
+          ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled'].includes(String(data.status || '')) ||
           !allowsListedOrLegacyPrivateFile(data, scope.path)
         )) deny();
       }
