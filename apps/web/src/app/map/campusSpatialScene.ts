@@ -13,6 +13,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Path,
   PlaneGeometry,
   RingGeometry,
   Scene,
@@ -108,6 +109,19 @@ function poiWithinOutline(point: CampusSpatialPoint, footprint: ProvidenceFootpr
       inside = !inside;
     }
   }
+  // A point in a mapped courtyard is on the ground, not on a roof.
+  if (inside && footprint.holes?.some((hole) => {
+    let inHole = false;
+    for (let i = 0, previous = hole.length - 1; i < hole.length; previous = i, i += 1) {
+      const [lon, latitude] = hole[i];
+      const [previousLon, previousLat] = hole[previous];
+      if ((latitude > lat) !== (previousLat > lat) &&
+          lng < lon + (lat - latitude) * (previousLon - lon) / (previousLat - latitude)) {
+        inHole = !inHole;
+      }
+    }
+    return inHole;
+  })) return false;
   return inside;
 }
 
@@ -606,7 +620,7 @@ export function createCampusSpatialScene(
     ground.position.y = -0.1;
     scene.add(ground);
 
-    // Only published OSM way outlines that passed the Providence source whitelist are extruded.
+    // Only source-checked OSM way/relation outlines are extruded; courtyards stay open.
     // The shape is geographic; without a recorded OSM height the 12 m volume is illustrative.
     for (const footprint of visibleFootprints) {
       const shape = new Shape();
@@ -617,6 +631,17 @@ export function createCampusSpatialScene(
         else shape.lineTo(x, -z);
       });
       shape.closePath();
+      for (const courtyard of footprint.holes ?? []) {
+        const hole = new Path();
+        courtyard.forEach(([longitude, latitude], index) => {
+          const x = anchor.x + (longitude - anchor.location.lng) * longitudeScale;
+          const z = anchor.z - (latitude - anchor.location.lat) * latitudeScale;
+          if (index === 0) hole.moveTo(x, -z);
+          else hole.lineTo(x, -z);
+        });
+        hole.closePath();
+        shape.holes.push(hole);
+      }
       const material = ownMaterial(new MeshStandardMaterial({
         color: '#abbab2', roughness: 0.93, metalness: 0,
       }));
