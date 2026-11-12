@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { SchoolLearningLinks } from '@/components/academic/SchoolLearningLinks';
+import { getPublicSchoolInfo } from '@campus/shared/src/publicSchoolInfo';
+import { PublicCourseSearch } from './PublicCourseSearch';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolCourseReconciliation } from '@/components/academic/SchoolCourseReconciliation';
 import { AcademicConnectionError } from '@/lib/academicClient';
@@ -222,7 +224,12 @@ export default function SchoolCoursesPage() {
       ) : browse.status !== 'ready' || !browse.schoolId ? (
         <section className={styles.status}><h2>請先選擇一所學校</h2><p>選擇校園後，再連線該校的學習平臺。</p></section>
       ) : !isOfficialAcademicSchool(browse.schoolId) ? (
-        <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
+        <>
+          {browse.schoolId === 'ncnu' && getPublicSchoolInfo(browse.schoolId, browse.schoolName) && (
+            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName} schoolSearch={browse.schoolSearch} />
+          )}
+          <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
+        </>
       ) : !user ? (
         <>
           <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
