@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { Assistant } from './Assistant';
@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   school: 'pu',
   pending: false,
   authenticated: true,
+  query: '',
 }));
 vi.mock('./Session', () => ({
   browserRequest: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock('./Session', () => ({
     session: state.authenticated ? { context: state.context, platformAccountId: 'alice' } : null,
   }),
 }));
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => ({ status: 'ready', schoolId: state.school }),
 }));
@@ -49,9 +50,27 @@ afterEach(() => {
   state.school = 'pu';
   state.pending = false;
   state.authenticated = true;
+  state.query = '';
 });
 const json = (value: object) =>
   new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+function publicCatalog(schoolId: 'ncnu' | 'nthu', changes: Record<string, unknown> = {}) {
+  return json({
+    schoolId,
+    sourceUrl: schoolId === 'ncnu'
+      ? 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall'
+      : 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-07T08:00:00.000Z',
+    operation: { id: `${schoolId}.courses.search`, version: 1, responseSchemaVersion: 1, access: 'anonymous-public' },
+    courses: [{
+      code: 'CS430000', section: '01', title: '公開資料庫課程', department: '資訊系',
+      teacher: '公開授課老師', credits: '3', time: '一34', room: '資電館101', semester: '1151',
+    }],
+    truncated: false,
+    ...changes,
+  });
+}
+
 
 const calendarCard = (id = 'calendar-event-1', title = '精確作業安排', startTime = '20:00'): V2Card => ({
   tool: 'propose_personal_event', token: 'token-' + id, mutationId: id, schoolId: 'pu',
@@ -985,6 +1004,133 @@ it('v2 renders markdown, assignment rows and food cards without raw paths', asyn
   expect(screen.getByText('合成蔬食餐廳')).toBeTruthy();
   expect(screen.getByRole('link', { name: '前往點餐頁' }).getAttribute('href')).toContain('/food?');
   expect(screen.getByText('確認')).toBeTruthy();
+});
+
+it.each(['ncnu', 'nthu'] as const)('v2 reads %s public courses without model availability or cloud consent', async (schoolId) => {
+  state.school = schoolId;
+  const fetcher = vi.fn(async (url: string) => url.endsWith('capability')
+    ? json({ enabled: true, ready: false, version: 2 }) : publicCatalog(schoolId));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '幫我查資料庫課程' } });
+  const send = screen.getByRole('button', { name: '送出' }) as HTMLButtonElement;
+  expect(send.disabled).toBe(false);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(send);
+  await screen.findByText('公開資料庫課程');
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  const url = new URL(fetcher.mock.calls[1][0], 'https://nuni.tw');
+  expect(url.pathname).toBe('/api/public-course-catalog');
+  expect(url.searchParams.get('schoolId')).toBe(schoolId);
+  expect(url.searchParams.get('q')).toBe('資料庫');
+  expect(screen.getByRole('link', { name: '校方資料來源' })).toBeTruthy();
+  expect(screen.getByText(/115 學年度第 1 學期/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  fireEvent.change(question, { target: { value: '我的下一堂課' } });
+  // main/#595 keeps local timetable answers available without cloud consent.
+  expect(send.disabled).toBe(false);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it('v2 preserves the sign-in gate and seeds a shared q only as an editable draft', async () => {
+  state.query = 'q=' + encodeURIComponent('幫我查清大資料庫課程');
+  state.authenticated = false;
+  const fetcher = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<Assistant />);
+  const login = screen.getByRole('link', { name: '請先登入以使用校園助理' });
+  const returnTo = new URL(login.getAttribute('href')!, 'https://nuni.tw').searchParams.get('returnTo');
+  expect(new URL(returnTo!, 'https://nuni.tw').searchParams.get('q')).toBe('幫我查清大資料庫課程');
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
+  state.authenticated = true;
+  view.rerender(<Assistant />);
+  expect((await screen.findByLabelText('問題') as HTMLTextAreaElement).value).toBe('幫我查清大資料庫課程');
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+});
+
+it('v2 retains signed proposal state and private conversation binding across another-campus public lookup', async () => {
+  const card = { ...calendarCard('keep-card', '待確認的讀書安排'), token: 'signed-pu-card' };
+  const bodies: Record<string, unknown>[] = [];
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.startsWith('/api/public-course-catalog?')) return publicCatalog('nthu');
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    bodies.push(body);
+    if (url.endsWith('confirm')) return json(receiptFor(card));
+    if (!body.routeToken) return json({ bootstrap: true, conversationId: 'bound-conversation', routeToken: 'bound-route' });
+    return json({ answer: '原校園私人提議', steps: [], cards: [card] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '幫我安排讀書時間' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('待確認的讀書安排');
+  expect(bodies).toHaveLength(2);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '幫我查清大資料庫課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('公開資料庫課程');
+  const href = new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(bodies).toHaveLength(2);
+  expect(screen.queryByText('已被新提議取代')).toBeNull();
+  expect(screen.queryByText('已核對並加入個人行事曆')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '確認' }));
+  await screen.findByText('已核對並加入個人行事曆');
+  expect(bodies[2]).toMatchObject({ schoolId: 'pu', token: 'signed-pu-card', conversationId: 'bound-conversation' });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '接續安排' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(bodies).toHaveLength(4));
+  expect(bodies[3]).toMatchObject({
+    schoolId: 'pu', conversationId: 'bound-conversation', routeToken: 'bound-route',
+    history: [{ role: 'user', content: '幫我安排讀書時間' }, { role: 'assistant', content: expect.stringContaining('原校園私人提議') }],
+  });
+});
+
+it('v2 shows a source failure without treating it as an empty catalog or asking the model', async () => {
+  const fetcher = vi.fn(async (url: string) => url.endsWith('capability')
+    ? json({ enabled: true, ready: true, version: 2 })
+    : publicCatalog('nthu', { sourceUrl: 'https://example.test/unreviewed-courses' }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '幫我查清大資料庫課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText(/暫時無法取得可核對/);
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByText(/沒有符合的開課資料/)).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls.every(([url]) => !url.endsWith('/ask'))).toBe(true);
+});
+
+it.each(['account', 'school', 'logout'] as const)('v2 cancels public results when the %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | undefined;
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: false, version: 2 });
+    signal = init.signal as AbortSignal;
+    return new Promise<Response>((resolve) => { finish = resolve; });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '幫我查清大資料庫課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(signal).toBeDefined());
+  if (change === 'account') state.context = 'session-b';
+  else if (change === 'school') state.school = 'ncnu';
+  else state.pending = true;
+  view.rerender(<Assistant />);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(publicCatalog('nthu')); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+  expect(fetcher.mock.calls.every(([url]) => !url.endsWith('/ask'))).toBe(true);
 });
 
 it('handles an obsolete service error as a request failure without offering a disable control', async () => {

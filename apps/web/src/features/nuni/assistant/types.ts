@@ -1,3 +1,5 @@
+import type { PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
+
 export type V2Card = {
   tool: string;
   args: Record<string, unknown>;
@@ -21,7 +23,12 @@ export type V2Reply = {
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
 };
 
-export type V2Turn = { question: string; reply: V2Reply };
+export type V2Turn = {
+  question: string;
+  reply: V2Reply;
+  /** Local public lookup, outside the model conversation and signed action cards. */
+  publicCourse?: { read?: PublicCourseAssistantRead };
+};
 
 export type V2ActionState =
   | { status: 'executing' | 'checking' }

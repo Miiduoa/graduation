@@ -225,8 +225,10 @@ export default function SchoolCoursesPage() {
         <section className={styles.status}><h2>請先選擇一所學校</h2><p>選擇校園後，再連線該校的學習平臺。</p></section>
       ) : !isOfficialAcademicSchool(browse.schoolId) ? (
         <>
-          {browse.schoolId === 'ncnu' && getPublicSchoolInfo(browse.schoolId, browse.schoolName) && (
-            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName} schoolSearch={browse.schoolSearch} />
+          {(browse.schoolId === 'ncnu' || browse.schoolId === 'nthu') && getPublicSchoolInfo(browse.schoolId, browse.schoolName) && (
+            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName}
+              schoolSearch={browse.schoolSearch} queryParameters={params.getAll('q')}
+              weekdayParameters={params.getAll('weekday')} creditsParameters={params.getAll('credits')} />
           )}
           <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
         </>

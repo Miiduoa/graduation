@@ -38,7 +38,9 @@ import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchedule } from '../state/schedule';
 import { useSchool } from '../state/school';
-import { NcnuCourseCatalogScreen } from './NcnuCourseCatalogScreen';
+import { PublicCourseCatalogScreen } from './PublicCourseCatalogScreen';
+import { parsePublicCourseFilters, type PublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
+import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOperations';
 import { safeNavigate } from '../utils/safeNavigate';
 
 import {
@@ -501,21 +503,74 @@ function UnsupportedCourseCatalogScreen(props: {
   );
 }
 
+function publicCatalogEntry(value: unknown): { keyword: string; filters: PublicCourseFilters; requestedSemester?: string } | null {
+  if (value === undefined) return { keyword: '', filters: {} };
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    let keyword = '';
+    let requestedSemester: string | undefined;
+    const filterValues: Record<string, unknown> = {};
+    for (const key of Reflect.ownKeys(value)) {
+      if (key !== 'keyword' && key !== 'weekday' && key !== 'credits' && key !== 'semester') return null;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor)) return null;
+      if (key === 'keyword') {
+        if (!isPublicCourseOperationQuery(descriptor.value)) return null;
+        keyword = descriptor.value;
+      } else if (key === 'semester') {
+        if (typeof descriptor.value !== 'string' || !/^\d{3}[12]$/.test(descriptor.value)) return null;
+        requestedSemester = descriptor.value;
+      } else filterValues[key] = descriptor.value;
+    }
+    const filters = parsePublicCourseFilters(filterValues);
+    return filters ? { keyword, filters, ...(requestedSemester ? { requestedSemester } : {}) } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function CourseCatalogScreen(props: CatalogScreenProps) {
   const { school } = useSchool();
   const auth = useAuth();
+  const requestedPublicSchool = props.route?.params?.publicSchoolId;
+  const publicSchoolId = requestedPublicSchool === 'ncnu' || requestedPublicSchool === 'nthu'
+    ? requestedPublicSchool : null;
+  const capability = resolveCourseCatalogCapability(publicSchoolId ?? school.id);
+  const isPublicCatalog = capability?.providerId === 'ncnu-public' || capability?.providerId === 'nthu-public';
+  const entry = isPublicCatalog ? publicCatalogEntry(props.route?.params?.filter) : null;
   const scopeKey = JSON.stringify({
     schoolId: school.id,
+    publicSchoolId,
     uid: auth.user?.uid ?? auth.profile?.uid ?? null,
-    entryFilter: props.route?.params?.filter ?? null,
+    entryFilter: isPublicCatalog ? entry ?? 'invalid-public-filter' : props.route?.params?.filter ?? null,
+    autoSearch: props.route?.params?.autoSearch === true,
   });
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
-  const capability = resolveCourseCatalogCapability(school.id);
 
-  if (capability?.providerId === 'ncnu-public') {
-    const keyword = props.route?.params?.filter?.keyword;
-    return <NcnuCourseCatalogScreen key={scopeKey} navigation={props.navigation} initialQuery={typeof keyword === 'string' ? keyword.slice(0, 80) : ''} />;
+  // A public handoff may browse another campus, but never changes the selected
+  // school or the account used by the existing personal-import review.
+  if (requestedPublicSchool !== undefined && !publicSchoolId) {
+    return <Screen title="公開開課查詢" subtitle="查課連結無法確認">
+      <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+        這個公開查課連結的學校無法確認，請回到助理重新查詢。
+      </Text>
+    </Screen>;
+  }
+
+  if (capability?.providerId === 'ncnu-public' || capability?.providerId === 'nthu-public') {
+    if (!entry) return <Screen title="公開開課查詢" subtitle="查課條件無法確認">
+      <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+        這個公開查課連結的星期、學分或搜尋條件無法確認，請回到助理重新查詢。
+      </Text>
+    </Screen>;
+    const schoolId = capability.providerId === 'nthu-public' ? 'nthu' : 'ncnu';
+    return <PublicCourseCatalogScreen key={scopeKey} schoolId={schoolId} navigation={props.navigation}
+      initialQuery={entry.keyword} initialFilters={entry.filters} requestedSemester={entry.requestedSemester}
+      autoSearch={props.route?.params?.autoSearch === true}
+      currentSchoolName={publicSchoolId && publicSchoolId !== school.id ? school.name : undefined} />;
   }
 
   if (!capability) {
