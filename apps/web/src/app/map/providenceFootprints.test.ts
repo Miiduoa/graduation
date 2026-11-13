@@ -522,7 +522,7 @@ describe('Providence OSM building outlines', () => {
     // and unusual delimiters, not observations of the real campus.
     for (const condition of [
       'collapsed', 'destroyed', 'unsafe', 'badly_damaged',
-      'unknown', 'good/ruinous', 'good\\nruinous', 'preserved:ruinous',
+      'unknown', 'good/ruinous', 'good\nruinous', 'preserved:ruinous',
     ]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, {
