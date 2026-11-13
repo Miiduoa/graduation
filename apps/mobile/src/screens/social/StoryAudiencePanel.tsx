@@ -5,6 +5,7 @@ import { listStoryViewers, type CampusStoryDoc } from '../../services/stories';
 
 type ViewerPage = Awaited<ReturnType<typeof listStoryViewers>>;
 type Cursor = ViewerPage['nextCursor'];
+const AUDIENCE_READ_TIMEOUT_MS = 15_000;
 
 type StoryAudiencePanelProps = {
   story: CampusStoryDoc;
@@ -34,9 +35,18 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   const { id, schoolId, authorUid } = story;
   useEffect(() => {
     let active = true;
+    // Firestore's server read may remain pending after a network interruption.
+    // Release the UI after a bounded wait. This does not cancel the SDK read:
+    // the inactive guard also excludes a late denial or successful result.
+    const timeout = setTimeout(() => {
+      if (!active) return;
+      active = false;
+      setStatus('error');
+    }, AUDIENCE_READ_TIMEOUT_MS);
     void listStoryViewers({ id, schoolId, authorUid }, request.cursor)
       .then((next) => {
         if (!active) return;
+        clearTimeout(timeout);
         setPage((previous) => ({
           viewers: request.cursor ? [...previous.viewers, ...next.viewers] : next.viewers,
           nextCursor: next.nextCursor,
@@ -45,6 +55,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       })
       .catch((error: unknown) => {
         if (!active) return;
+        clearTimeout(timeout);
         if ((error as { code?: string } | null)?.code === 'permission-denied') {
           setPage({ viewers: [], nextCursor: null });
           setStatus('denied');
@@ -54,6 +65,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       });
     return () => {
       active = false;
+      clearTimeout(timeout);
     };
   }, [id, schoolId, authorUid, request]);
 
