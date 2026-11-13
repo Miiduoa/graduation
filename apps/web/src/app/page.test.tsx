@@ -254,7 +254,7 @@ it('keeps teaching courses on today and no longer lists studying courses as a gr
   expect(screen.queryByRole('heading', { name: /修習課程/ })).toBeNull();
 });
 
-it('does not tell a teacher they have no homework and opens the teaching course list', async () => {
+it('does not tell a teacher they have no homework and opens the teacher course workspace', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };
   vi.mocked(loadNuniHomeSections).mockResolvedValue({
     courses: [{ id: 'teach', name: '教學實習', role: 'owner-teacher', unreadCount: 0 }],
@@ -264,9 +264,10 @@ it('does not tell a teacher they have no homework and opens the teaching course 
   render(<HomePage />);
   const teacherToday = await screen.findByTestId('teacher-today');
   expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
+  // The teacher workspace manages assignments; /course/teach remains the content page.
   expect(
     within(teacherToday).getByRole('link', { name: /教學實習/ }).getAttribute('href'),
-  ).toBe('/course/teach');
+  ).toBe('/teacher/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
   expect(screen.queryByTestId('student-today')).toBeNull();
 });
