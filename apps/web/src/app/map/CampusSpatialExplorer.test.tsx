@@ -551,6 +551,47 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
   }
 });
 
+it('ignores an old queued cooldown timeout after a newer Overpass Retry-After', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: false, status: 503,
+      headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+    })
+    .mockResolvedValueOnce({
+      ok: false, status: 503,
+      headers: { get: (name: string) => name === 'retry-after' ? '3600' : null },
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    const oldRelease = timeoutSpy.mock.calls.find(([, delay]) =>
+      typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
+    expect(typeof oldRelease).toBe('function');
+
+    // Simulate the old pause expiring, then a second 503 with a longer pause.
+    await act(async () => { (oldRelease as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+
+    // A callback already queued by the browser may run after React clears
+    // its timer. It must not release the NEW 60-minute server cooldown.
+    await act(async () => { (oldRelease as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(retry);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
 it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
