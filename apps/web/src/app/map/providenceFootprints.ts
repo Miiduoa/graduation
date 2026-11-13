@@ -370,9 +370,11 @@ const LIFECYCLE_STATUS_TAGS = [
 // This simplified renderer draws a full-height, intact volume, so those
 // explicit conditions cannot safely be presented as a normal campus block.
 // https://wiki.openstreetmap.org/wiki/Key:building:condition
-const RUINOUS_BUILDING_CONDITIONS = new Set([
-  'partly_ruinous', 'mainly_ruinous', 'completely_ruinous',
-  'recognizable_remains', 'ruinous',
+const VERIFIED_STANDING_BUILDING_CONDITIONS = new Set([
+  // Only these condition values have been explicitly reviewed as describing
+  // an intact/renovated volume. Unknown values may describe damage or an
+  // unmapped state: keep the POI instead of guessing a solid 3D roof.
+  'good', 'preserved', 'renovated', 'reconstructed',
 ]);
 
 /** An audited OSM ID is not enough to inherit a campus building's old name.
@@ -456,7 +458,8 @@ function isStandingBuilding(value: unknown): boolean {
     // Multiple condition claims may contradict one another (e.g. good;ruinous).
     // This scene draws one intact roof, not a partly damaged volume; do not
     // certify any composite/ambiguous condition without a source review.
-    if (!state || /[;,|]/.test(state) || RUINOUS_BUILDING_CONDITIONS.has(state)) return false;
+    if (!state || /[;,|]/.test(state) ||
+        !VERIFIED_STANDING_BUILDING_CONDITIONS.has(state)) return false;
   }
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
