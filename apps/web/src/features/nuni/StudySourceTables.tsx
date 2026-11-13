@@ -29,7 +29,9 @@ export function StudySourceTables({ text }: { text: string }) {
             <tbody>
               {table.rows.map((row, rowIndex) =>
                 <tr key={rowIndex}>{row.map((cell, column) =>
-                  <td key={column}>{cell}</td>)}</tr>)}
+                  column === 0 && cell.trim()
+                    ? <th scope="row" key={column}>{cell}</th>
+                    : <td key={column}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
         </div>

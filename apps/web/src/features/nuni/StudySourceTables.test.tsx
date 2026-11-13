@@ -22,6 +22,12 @@ it('keeps exact original values and column order in accessible table cells', () 
   expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent))
     .toEqual(['科目', '學分', '教室']);
   expect(within(table).getAllByRole('row')).toHaveLength(3);
+  // Screen readers can now identify each source row by its first non-empty cell
+  // while retaining the exact column headers and data values.
+  expect(within(table).getAllByRole('rowheader').map((cell) => cell.textContent))
+    .toEqual(['資料庫', '計算機概論']);
+  expect(within(table).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['3', '301', '2', '205']);
   expect(within(table).getByText('301')).toBeTruthy();
   expect(screen.getByRole('region', { name: /可左右捲動/ }).getAttribute('tabindex')).toBe('0');
 });
@@ -556,4 +562,20 @@ it('omits hidden HTML template and noscript samples while keeping the following 
     headers: ['正式課程', '學分'],
     rows: [['資料庫', '3']],
   }]);
+});
+
+it('does not invent a row label for an empty first source cell', () => {
+  const markdown = [
+    '| 課程 | 數值 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+    '|  | 尚未填寫 |',
+  ].join('\n');
+  render(<StudySourceTables text={markdown} />);
+  const table = screen.getByRole('table');
+  expect(within(table).getAllByRole('rowheader').map((cell) => cell.textContent))
+    .toEqual(['資料庫']);
+  const rows = within(table).getAllByRole('row');
+  expect(within(rows[2]).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['', '尚未填寫']);
 });

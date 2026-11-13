@@ -1023,3 +1023,8 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 若裝置端模型把答案寫成 `Answer: <strong class="key">SQL</strong>`、`參考答案：<code lang="zh-TW">主鍵</code>`，舊的明示答案檢查只跳過無屬性的 HTML 呈現標記，會讓學生在作答前看到答案。現在只在**新生成內容的檢查副本**允許最多三層短的 strong/em/b/i/code/span 開始標記（含有上限的字面屬性）；不執行 HTML、不改寫顯示題目或私人教材。
 - 增加五組明示答案拒收、四組較長識別字／不同答案保留的模擬 Worker 回歸。保留 SQL 與 SQLServer、選項 B 與 B2、數字 1 與 12 的區別；超長、跨行、不完整與非列舉標籤不作 HTML 解析宣稱。已保存 v1/v2 講解、閱讀進度、逐題 checkpoint 與個人筆記不變，不新增依賴、付費 API 或私有教材外傳。
 - 本輪仍需依精確 SHA 重新驗證 Web Tests、Build Web/Mobile、Lint/TypeCheck、Security Gates、CodeQL、指定 App 5504170、Maestro、iOS/Android 真機與 Ahaboard 同教材同題同裝置對照。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-14：原文表格的列標題方便手機讀屏逐列核對
+
+原本從授權教材逐字還原的 Markdown 表格只有欄標題，VoiceOver／TalkBack 使用者跨欄閱讀時較難確認正在查看哪一筆。現在將每列第一欄**非空白的原文**標記為 HTML 列標題（`th scope="row"`），並保留其餘欄位原文及原有欄標題；空白第一欄仍是普通資料格，不虛構標題。新增模擬 DOM 測試確認列／欄標題、原始學分數值與空白儲存格。沒有推論資料、修改教材、匯出格式或外傳私人資料；這是瀏覽器語意標記的改進，**不是** iOS Safari／Android Chrome／VoiceOver／TalkBack 真機驗收，更非 WebGPU 教學正確率或 Ahaboard 同機優勢證據。PR 保持 Draft，不合併、不部署。
