@@ -1,3 +1,9 @@
+## 2026-11-13：修正隱藏教材內 HTML 註解的假關閉標記
+
+- 修補原文表格掃描器：教師將答案放在 `<div hidden>`、收合 `<details>` 或 `<pre>` 範例內時，內部 HTML 註解出現字面的 `</div>`／`</details>`，先前可能錯誤關閉隱藏區並將下方答案重新排版成公開表格。現在在一般 HTML 容器內持續追蹤註解，直到真正的 `-->` 或 `--!>`；`<script>`、`<style>`、`<textarea>` 原始文字仍不把 `<!--` 誤認成新註解。
+- 新增六項純函式回歸情境，涵蓋三種 HTML 容器、跨行註解、raw-text 與公開表格恢復；僅修改表格衍生顯示，原始教材、私人筆記、備份格式及外部傳輸不變。純函式測試不等同瀏覽器或真機驗收。
+- 以新 head 的 GitHub CI、CodeQL、指定 App 5504170、Maestro、iOS／Android 真機及 Ahaboard 同教材同題同機比較分開驗證；在完整證據前 PR 保持 Draft，不合併、不部署，也不宣稱已超越競品。
+
 ## 2026-11-13：修復多行答案清單在 Web Tests 漏檢
 
 - 精確前版 head `94e293835fb969074841291a1b2f744a54c54db7` 的 [CI #43359197516](https://github.com/Miiduoa/graduation/actions/runs/43359197516) 確認 Web Tests 有 3 項失敗：`Answer:\n- SQL`、`答案：\n• 主鍵`、`解答：\n1. \`SQL\`` 沒被拒收；其他 Build Web／Mobile、Lint／TypeCheck、Security Gates、CodeQL、Course access review 均在該 SHA 通過。失敗不是模型輸出不穩，而是比對共用正規化器先把所有換行摺成空白，導致新的清單偵測永遠看不到真正換行。

@@ -324,7 +324,11 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         continue;
       }
       if (token === '<!--') {
-        if (htmlCodeBlocks.length === 0) inHtmlComment = true;
+        // A real HTML comment still begins inside a hidden <div>, <details>,
+        // or <pre>. Closing-tag text inside it must not release unpublished
+        // lesson rows. Only script/style/textarea consume <!-- as raw text.
+        if (!RAW_HTML_TEXT_BLOCKS.has(htmlCodeBlocks[htmlCodeBlocks.length - 1] ?? ''))
+          inHtmlComment = true;
         hiddenLine = true;
         continue;
       }

@@ -789,6 +789,58 @@ describe('HTML numeric references and CSS escapes cannot disclose hidden source 
 });
 
 
+describe('comments inside suppressed HTML cannot expose unpublished tables', () => {
+  it.each([
+    { label: 'hidden div', open: '<div hidden>', close: '</div>' },
+    { label: 'collapsed disclosure', open: '<details>', close: '</details>' },
+    { label: 'preformatted example', open: '<pre>', close: '</pre>' },
+  ])('keeps a fake closing $label tag in an HTML comment inert', ({ open, close }) => {
+    const source = [
+      open,
+      `<!-- ${close} is only an example -->`,
+      '| 未公開解答 | 分數 |',
+      '| --- | --- |',
+      '| 應被隱藏 | 99 |',
+      close,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('honors multiline comments and the valid --!> terminator inside a hidden wrapper', () => {
+    const source = [
+      '<section hidden>',
+      '<!-- 下方關閉標記只是註解',
+      '</section>',
+      '--!>',
+      '| 教師答案 | 分數 |',
+      '| --- | --- |',
+      '| 尚未公開 | 88 |',
+      '</section>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(9));
+  });
+
+  it('does not treat <!-- inside script text as a comment hiding later public rows', () => {
+    const source = [
+      '<div hidden>',
+      '<script>const marker = "<!--";</script>',
+      '| 教師答案 | 分數 |',
+      '| --- | --- |',
+      '| 尚未公開 | 88 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('still shows an ordinary table after a real comment outside any hidden wrapper', () => {
+    const source = ['<!-- 這只是一段註解 -->', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});
+
 describe('multiline HTML markup cannot reveal hidden course tables', () => {
   it.each([
     { label: 'hidden attribute after a newline', opening: ['<div', '  hidden>'], closing: ['</div>'] },
