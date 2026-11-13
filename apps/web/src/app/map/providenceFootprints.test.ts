@@ -517,6 +517,19 @@ describe('Providence OSM building outlines', () => {
         })],
       }), String(condition)).toEqual([]);
     }
+    // A condition not on the reviewed standing-building allowlist cannot
+    // certify an intact roof. This includes explicit damage, unknown values
+    // and unusual delimiters, not observations of the real campus.
+    for (const condition of [
+      'collapsed', 'destroyed', 'unsafe', 'badly_damaged',
+      'unknown', 'good/ruinous', 'good\\nruinous', 'preserved:ruinous',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:condition': condition,
+        })],
+      }), condition).toEqual([]);
+    }
     // Multi-valued states cannot prove a single intact building, even when
     // one token is valid. These are synthetic conflicts, not real campus data.
     for (const condition of [
