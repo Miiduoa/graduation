@@ -1,4 +1,5 @@
 import { MAX_PERIOD_SLOTS } from '@campus/shared';
+import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
@@ -127,17 +128,22 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
       !count(schedule.count) || !count(assignments.count) ||
       (schedule.status === 'available' && schedule.count === null) ||
       (assignments.status === 'available' && assignments.count === null) ||
+      (schedule.status === 'unavailable' && schedule.count !== null) ||
+      (assignments.status === 'unavailable' && assignments.count !== null) ||
       !Array.isArray(assignments.items) || assignments.items.length > 400 ||
+      (assignments.count !== null && assignments.items.length > assignments.count) ||
       !Array.isArray(announcements.items) || announcements.items.length > 12 ||
       (assignments.status === 'unavailable' && assignments.items.length > 0) ||
       (announcements.status === 'unavailable' && announcements.items.length > 0)) return false;
   return assignments.items.every((item) => !!item &&
     typeof item.title === 'string' && item.title.length <= 140 &&
     typeof item.groupName === 'string' && item.groupName.length <= 100 &&
-    (item.dueAt === null || typeof item.dueAt === 'string')) &&
+    (item.dueAt === null || (typeof item.dueAt === 'string' && item.dueAt.length <= 48 && Number.isFinite(Date.parse(item.dueAt)))) &&
+    (item.source === undefined || !!parseCampusAssignmentSource(item.source))) &&
     announcements.items.every((item) => !!item &&
       typeof item.title === 'string' && item.title.length <= 140 &&
-      (item.publishedAt === null || typeof item.publishedAt === 'string'));
+      (item.publishedAt === null || (typeof item.publishedAt === 'string' &&
+        item.publishedAt.length <= 48 && Number.isFinite(Date.parse(item.publishedAt)))));
 }
 
 export function formatOnDeviceSchoolPrompt(
@@ -218,7 +224,9 @@ export function formatOnDeviceSchoolPrompt(
         '校方課表來源：' + verifiedSense.schedule.status + '；無法取得不能等同今天沒課。',
         '已接通作業：' + verifiedSense.assignments.status +
           '；數量：' + (verifiedSense.assignments.count ?? '無法取得') +
-          '；部分項目：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5)),
+          '；部分項目：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5).map(({
+            title, groupName, dueAt, source,
+          }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '不可把同步資料說成現在最新結果，不得執行任何寫入。',
