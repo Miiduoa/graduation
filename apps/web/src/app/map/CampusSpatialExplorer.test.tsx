@@ -102,6 +102,13 @@ it('connects scene markers, the progress control, directions and the original ma
   const warning = within(dialog).getByText(/導航僅以目前地點標記為目的地.*並非已核實的校舍入口/);
   expect(directionLink.getAttribute('aria-describedby')).toBe(warning.id);
   expect(warning.textContent).toContain('無障礙動線');
+  const appleLink = within(dialog).getByRole('link', { name: 'Apple 地圖步行導航' });
+  const appleDirections = new URL(appleLink.getAttribute('href')!);
+  expect(appleDirections.origin).toBe('https://maps.apple.com');
+  expect(appleDirections.searchParams.get('daddr')).toBe('24.228,120.582');
+  expect(appleDirections.searchParams.get('dirflg')).toBe('w');
+  expect(appleLink.getAttribute('aria-describedby')).toBe(warning.id);
+  expect(appleLink.getAttribute('rel')).toBe('noopener noreferrer');
   expect(within(dialog).getByRole('button', { name: '下一個地點' }).hasAttribute('disabled')).toBe(true);
   fireEvent.change(within(dialog).getByRole('slider'), { target: { value: '0' } });
   expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain('本校圖書館');
@@ -164,6 +171,7 @@ it('keeps real place information and navigation available after WebGL failure an
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
   expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: 'Apple 地圖步行導航' })).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '重試立體畫面' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm' }));

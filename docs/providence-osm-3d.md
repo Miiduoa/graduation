@@ -299,3 +299,9 @@ OSM 可能同時保有 `building=yes` 與 `building:condition=*`；完整建築�
 `building:levels=*` 是地上樓層**數量**，不是公尺高度，不能據此乘出建築樓高。過去固定白名單校舍即使被編輯成 `building:levels=0`、負數、複合值或無法解讀的文字，仍可能繼續顯示完整的 12m 示意量體。現在只有明確、有限且大於 0、最多 100 的十進位地上層數標記能通過此額外資料檢查；完全缺少此可選標籤不會影響原有判斷，例如 `1`、`5` 的正整數值可通過；`1.5` 這類小數依 [OSM building:levels 標籤規範](https://wiki.openstreetmap.org/wiki/Key:building:levels) 不接受。這個 100 層僅是保守的資料審閱上限，不是靜宜建築高度或樓層的事實判斷；超出時先保留 POI 而不繪製整棟 3D。合法層數**仍完全不拿來推估公尺高度**，無明示 height 的輪廓仍標示「12 公尺示意」。
 
 新增 parser 正反向及 API 503／no-store／快取冷卻測試，涵蓋合成的零、負數、分隔值、非數字、超出審閱上限與合理層數。這些測試只防護資料編輯／解讀矛盾，**沒有查出靜宜真實 Overpass 存在此問題**；正式結果應依本 commit 的 Web Tests、Spatial Browser、CodeQL，仍須完成現地幾何、路線、手機／輔助工具及競品同條件比較。
+
+### 2026-11-13｜Apple 地圖步行導航入口（待實機／現地驗收）
+
+3D 空間導覽除了原有的 Google 步行導航，新增使用者可選的 Apple 地圖步行連結，使用同一已選地點標記的經緯度，不新增或推斷校舍入口、樓層、校園步道或無障礙路線。Apple 連結採相容舊版 iOS 的 `maps.apple.com/?daddr=...&dirflg=w`，由外部地圖服務自行計算路線。兩個外部導航均關聯同一份 `aria-describedby` 安全提醒，WebGL 失敗時仍可選地點並使用連結。適用跨校共用 UI，不改來源、權限、建築輪廓、OSM 署名。參考 [Apple Map Links](https://developer.apple.com/library/archive/featuredarticles/iPhoneURLScheme_Reference/MapLinks/MapLinks.html)。
+
+新增 URL 參數及 React 選擇／外部導航／WebGL 降級回歸。此項驗證**僅檢查連結格式與標記座標**，不表示 Apple／Google 真正算路成功，更不證明實際可通行、教室入口或競品優勢。仍需 iPhone Safari、Android 以及靜宜同機同任務現地驗收。

@@ -14,7 +14,7 @@ import {
   type CampusSpatialCamera,
 } from './campusSpatialCamera';
 import type { CampusSpatialScene } from './campusSpatialScene';
-import { walkingDirectionsUrl, type MapLocation } from './mapService';
+import { appleWalkingDirectionsUrl, walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
@@ -586,6 +586,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   在平面地圖查看
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
+                <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>Apple 地圖步行導航</a>
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
