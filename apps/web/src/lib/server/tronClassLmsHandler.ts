@@ -300,16 +300,21 @@ async function loadCourseContents(
   const seenMaterials = new Set<number>();
   // A courseware item may appear in both feeds; keep its first occurrence so
   // the UI never duplicates the same assignment material.
-  const activities = [
-    ...(activitiesResult.ok ? activitiesResult.value : []),
+  const generalActivities = activitiesResult.ok ? activitiesResult.value : [];
+  // The filtered source contributes courseware only. It is not an independent
+  // announcement feed, even if an adapter unexpectedly includes other types.
+  const materialActivities = [
+    ...generalActivities,
     ...(coursewareResult.ok ? coursewareResult.value : []),
   ];
-  for (const raw of activities) {
+  for (const raw of materialActivities) {
     const material = parseMaterial(raw, course);
     if (material && !seenMaterials.has(material.id)) {
       seenMaterials.add(material.id);
       materials.push(material);
     }
+  }
+  for (const raw of generalActivities) {
     if (isAnnouncementActivityType(record(raw).type)) {
       const item = parseAnnouncement(raw, 'activity', course);
       if (item) activityAnnouncements.push(item);
@@ -341,7 +346,7 @@ async function loadCourseContents(
       seen.add(signature);
       announcements.push(item);
     }
-  } else if (activitiesResult.ok || coursewareResult.ok) {
+  } else if (activitiesResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
       errors.push({
