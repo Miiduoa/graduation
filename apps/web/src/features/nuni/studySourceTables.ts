@@ -261,7 +261,21 @@ function isInsideInlineCode(line: string, target: number): boolean {
 
 export function extractStudySourceTables(source: string): StudySourceTable[] {
   if (!source.includes('|')) return [];
-  const lines = source.split(/\r?\n/u);
+  // A valid HTML opening/closing tag may wrap its attributes across lines:
+  // <section\n aria-hidden="true">. Scanning one line at a time would miss
+  // that hidden wrapper and expose a teacher-only table as a public table.
+  // Fold only complete, tracked HTML tags in the scanner's temporary copy.
+  // Move each original line break after its tag so source line numbers stay
+  // unchanged; never rewrite or export the student's original source.
+  const scanSource = source.replace(
+    /<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gu,
+    (token, tag: string) => {
+      if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !token.includes('\n')) return token;
+      const newlines = token.match(/\r?\n/gu) ?? [];
+      return token.replace(/\r?\n/gu, ' ') + '\n'.repeat(newlines.length);
+    },
+  );
+  const lines = scanSource.split(/\r?\n/u);
   const tables: StudySourceTable[] = [];
   let fence: { character: string; length: number } | null = null;
   let inHtmlComment = false;

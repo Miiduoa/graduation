@@ -787,3 +787,65 @@ describe('HTML numeric references and CSS escapes cannot disclose hidden source 
       .toEqual([[['資料庫', '3']]]);
   });
 });
+
+
+describe('multiline HTML markup cannot reveal hidden course tables', () => {
+  it.each([
+    { label: 'hidden attribute after a newline', opening: ['<div', '  hidden>'], closing: ['</div>'] },
+    { label: 'hidden inline style after a newline', opening: ['<section', '  style="display:none">'], closing: ['</section>'] },
+    { label: 'quoted greater-than and aria-hidden across lines',
+      opening: ['<article', '  title="進度 > 結果"', '  aria-hidden="true">'], closing: ['</article>'] },
+    { label: 'open HTML disclosure with multiline attributes',
+      opening: ['<details', '  open>'], closing: ['</details>'] },
+  ])('does not reconstruct teacher-only rows inside $label', ({ opening, closing }) => {
+    const source = [
+      ...opening,
+      '| 教師未公布 | 成績 |',
+      '| --- | --- |',
+      '| 隱藏答案 | 99 |',
+      ...closing,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(opening.length + closing.length + 4));
+  });
+
+  it('keeps nested hidden containers balanced when a closing tag spans lines', () => {
+    const source = [
+      '<div hidden>',
+      '<div',
+      '  class="example">',
+      '| 未公開解答 | 分數 |',
+      '| --- | --- |',
+      '| 假資料 | 90 |',
+      '</div',
+      '>',
+      '| 外層仍未公開 | 分數 |',
+      '| --- | --- |',
+      '| 假資料 | 88 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(13));
+  });
+
+  it('does not hide legitimate source tables after a visible multiline wrapper', () => {
+    const source = [
+      '<section',
+      '  title="教材 > 公開">',
+      '</section>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+
+  it('does not interpret multiline markup inside a fenced code example as active HTML', () => {
+    const source = [
+      '```html',
+      '<div',
+      ' hidden>',
+      '```',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(5));
+  });
+});
