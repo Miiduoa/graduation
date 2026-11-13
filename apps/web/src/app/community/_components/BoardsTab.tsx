@@ -58,6 +58,8 @@ function BoardsContent(props: {
   const { user } = useAuth();
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
+  const [pendingSubscriptionIds, setPendingSubscriptionIds] = useState<Set<string>>(new Set());
+  const subscriptionRequests = useRef<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
   const [composeEpoch, setComposeEpoch] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -179,24 +181,42 @@ function BoardsContent(props: {
       alert('請先登入');
       return;
     }
+    // React state is asynchronous; a ref also blocks a second click before rerender.
+    if (subscriptionRequests.current.has(b.id)) return;
+    subscriptionRequests.current.add(b.id);
+    setPendingSubscriptionIds((previous) => new Set(previous).add(b.id));
+    const uid = user.uid;
     const wasSub = subscribed.has(b.id);
-    setSubscribed((prev) => {
-      const next = new Set(prev);
+    setSubscribed((previous) => {
+      const next = new Set(previous);
       if (wasSub) next.delete(b.id);
       else next.add(b.id);
       return next;
     });
     try {
-      if (wasSub) await unsubscribeFromBoard(user.uid, schoolId, b.id);
-      else await subscribeToBoard(user.uid, schoolId, b.id);
+      if (wasSub) await unsubscribeFromBoard(uid, schoolId, b.id);
+      else await subscribeToBoard(uid, schoolId, b.id);
     } catch {
-      alert('這次未能訂閱，請稍後再試。');
-      setSubscribed((prev) => {
-        const next = new Set(prev);
-        if (wasSub) next.add(b.id);
-        else next.delete(b.id);
-        return next;
-      });
+      // Parent remounts on account/school change. Late failures must never alert
+      // or change the new school's subscription state.
+      if (mounted.current) {
+        setSubscribed((previous) => {
+          const next = new Set(previous);
+          if (wasSub) next.add(b.id);
+          else next.delete(b.id);
+          return next;
+        });
+        alert(wasSub ? '這次未能取消訂閱，請稍後再試。' : '這次未能訂閱，請稍後再試。');
+      }
+    } finally {
+      subscriptionRequests.current.delete(b.id);
+      if (mounted.current) {
+        setPendingSubscriptionIds((previous) => {
+          const next = new Set(previous);
+          next.delete(b.id);
+          return next;
+        });
+      }
     }
   };
 
@@ -311,6 +331,7 @@ function BoardsContent(props: {
               >
                 {arr.map((b) => {
                   const isSub = subscribed.has(b.id);
+                  const subscriptionPending = pendingSubscriptionIds.has(b.id);
                   return (
                     <div
                       key={b.id}
@@ -382,7 +403,11 @@ function BoardsContent(props: {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => onToggleSub(b)}
+                        onClick={() => void onToggleSub(b)}
+                        disabled={subscriptionPending}
+                        aria-pressed={isSub}
+                        aria-busy={subscriptionPending}
+                        aria-label={isSub ? `取消訂閱${b.name}` : `訂閱${b.name}`}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -394,7 +419,8 @@ function BoardsContent(props: {
                           color: isSub ? 'var(--on-brand)' : 'var(--brand)',
                           fontSize: 11,
                           fontWeight: 700,
-                          cursor: 'pointer',
+                          cursor: subscriptionPending ? 'wait' : 'pointer',
+                          opacity: subscriptionPending ? 0.65 : 1,
                           flexShrink: 0,
                         }}
                       >

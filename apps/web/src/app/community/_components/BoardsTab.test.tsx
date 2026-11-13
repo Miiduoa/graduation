@@ -101,7 +101,7 @@ async function openCreate() {
 it('keeps existing board subscriptions available to ordinary members', async () => {
   mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  fireEvent.click(await screen.findByRole('button', { name: '訂閱' }));
+  fireEvent.click(await screen.findByRole('button', { name: '訂閱科學討論' }));
   await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
   expect(screen.queryByRole('button', { name: /建立看板/ })).toBeNull();
   expect(screen.getByRole('link', { name: /科學討論/ }).getAttribute('href')).toBe('/community/board/science?schoolId=pu');
