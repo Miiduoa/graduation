@@ -141,11 +141,11 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // Generated Markdown may wrap a disclosed key in inline code or emphasis.
     // Strip only opening presentation marks for comparison, never displayed text.
     const rawDisclosed = question.slice(label.index + label[0].length);
-    // A multiline Markdown answer key may use a bullet or numbered item.
-    // Only remove a marker on a NEW line: "- 1" on the same line could be
-    // negative numeric notation, not an answer-list bullet.
+    // Answer keys may place blank lines or Markdown quote markers before bullets.
+    // Only remove markers after a NEW line: "- 1" on the same line remains
+    // negative-number notation, not a Markdown answer list.
     const revealedItem = rawDisclosed.replace(
-      /^[ \t]*\r?\n[ \t]*(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)/u, '',
+      /^(?:[ \t]*\r?\n){1,3}[ \t]*(?:>[ \t]*){0,2}(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)?/u, '',
     );
     // An opening _ or __ is presentation markup, not part of a leaked answer.
     // Remember its length so a closing underscore is not mistaken for an identifier.

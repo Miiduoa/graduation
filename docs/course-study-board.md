@@ -917,3 +917,8 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 根據精確 head `1058f8fd5d16ad685772367c457032a34e8c5135` 的 CI #43345113824，Web Tests job 131622496914 失敗（`single underscore emphasis`）：`Solution: _SQL_` 的結尾 `_` 被當成英文識別字延續，未拒收明示答案。其餘已執行檢查包含 Build Web/Mobile、Lint/TypeCheck、Security Gates 與 CodeQL 均通過，但不能拿來取代失敗的 Web Tests。
 - 新生成複習題現在辨識與開頭配對的 `_`／`__` 結尾；只有明確強調符號結束且後面不接字母／數字／底線才視為揭露。`SQL_joins`、`_SQL_joins`、`__SQL__Server` 及沒有開頭底線的 `SQL_` 仍保留，避免攔截較長識別字。補足兩項拒收與四項保留的模擬 Worker 回歸。已儲存的教材、閱讀進度 v1/v2 和練習 checkpoint 不變。
 - 這只修正失敗 CI 指出的新生成文字檢查；沒有新套件、付費 API 或私人教材傳輸。仍需依新精確 SHA 的 Web Tests／全套 CI、CodeQL、指定 App 5504170 APPROVED、Maestro、iOS/Android 真機及 Ahaboard 同教材同題同裝置對照逐一驗收。PR 保持 Draft、不合併、不部署。
+
+
+### 2026-11-13：複習題多行／引用清單避免提前曝光答案
+
+本機模型若將參考回答放在答案標籤後的空白行或 Markdown 引用清單（例如 `Answer: ↵ ↵ - SQL`、`答案：↵ > - 主鍵`），先前只略過一個換行，可能讓學生在試答前就看見答案。本輪僅在新生成複習題的檢查副本允許最多三個換行及兩層引用標記，再核對實際參考回答；保留同一行的負數條件、較長識別字 `SQLServer`、`SQL_joins` 與數字 `12`／`1` 的區別。新增正反模擬 Worker 回歸，不修改教材、已存 v1/v2 閱讀進度、v1 逐題 checkpoint、其他代理功能或資料傳送路徑。這是文字規則改善，尚不能代替 WebGPU 實際生成、iOS／Android 真機、指定 App 5504170 審查與 Ahaboard 同教材同題同機對照；PR 保留 Draft，不合併／部署。

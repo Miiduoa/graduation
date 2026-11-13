@@ -1044,6 +1044,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'Markdown list plus bold answer', question: 'Correct answer:\n* **SQL**', answer: 'SQL' },
     { label: 'CRLF answer list with indentation', question: 'Answer:\r\n\t- SQL', answer: 'SQL' },
     { label: 'two-digit numbered answer list', question: '答案：\n12. 主鍵', answer: '主鍵' },
+    { label: 'blank line before Markdown bullet', question: 'Answer:\n\n- SQL', answer: 'SQL' },
+    { label: 'indented blank line and numbered key', question: '解答：\n  \n  1. 主鍵', answer: '主鍵' },
+    { label: 'quoted Markdown bullet', question: 'Answer:\n> - SQL', answer: 'SQL' },
+    { label: 'CRLF blank lines and nested quote', question: '答案：\r\n\r\n>> * 主鍵', answer: '主鍵' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1092,6 +1096,9 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: 'Answer:\n- SQLServer', answer: 'SQL' },
     { question: '答案：\r\n- 12', answer: '1' },
     { question: 'Answer:\r\n12. SQLServer', answer: 'SQL' },
+    { question: 'Answer:\n\n- SQLServer', answer: 'SQL' },
+    { question: '答案：\n> - 12', answer: '1' },
+    { question: 'Answer:\n> - SQL_joins', answer: 'SQL' },
     { question: 'Answer is what?', answer: 'SQL' },
     { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
