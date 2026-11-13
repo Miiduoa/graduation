@@ -588,7 +588,7 @@ it('offers an opt-in comparison with only exact, positive source table values', 
     '| 資料庫 | 3 |',
     '| 網路 | 2.5 |',
     '| 程式設計 | 0 |',
-  ].join('\\n');
+  ].join('\n');
   const { container, rerender } = render(<StudySourceTables text={material} />);
   const details = container.querySelector('details');
   expect(details?.open).toBe(false);
@@ -617,14 +617,14 @@ it('does not draw misleading bars for formulas, dates, percentages, units or amb
     ['1,000', '200'], ['Infinity', '2'],
   ]) {
     const source = ['| 項目 | 值 |', '| --- | --- |',
-      '| A | ' + secondColumn[0] + ' |', '| B | ' + secondColumn[1] + ' |'].join('\\n');
+      '| A | ' + secondColumn[0] + ' |', '| B | ' + secondColumn[1] + ' |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={source} />);
     expect(screen.getByRole('table')).toBeTruthy();
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
   const repeated = ['| 項目 | 分數 |', '| --- | --- |',
-    '| A | 10 |', '| A | 20 |'].join('\\n');
+    '| A | 10 |', '| A | 20 |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
   expect(container.querySelector('meter')).toBeNull();
 });

@@ -18,7 +18,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {
     if (!label?.trim() || !original ||
-        !/^(?:0|[1-9]\\d{0,5})(?:\\.\\d{1,2})?$/u.test(original) ||
+        !/^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u.test(original) ||
         labels.has(label.trim())) return null;
     const amount = Number(original);
     if (!Number.isFinite(amount)) return null;
