@@ -229,18 +229,24 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // Search only narrows the destination list. The current selection remains
   // visible and unchanged even when it does not match the typed query.
   const searchTerm = placeSearch.trim().normalize('NFKC').toLocaleLowerCase('zh-TW');
+  // Build a normalized index once per campus model, not per mobile keystroke.
+  // All whitespace-separated terms must match, regardless of their order.
+  const searchIndex = useMemo(() => model.points.map((point) => {
+    const location = point.location;
+    const searchable = [
+      point.name, location.category, location.description,
+      location.building, location.floor, ...(location.facilities ?? []),
+    ].filter((part): part is string => typeof part === 'string')
+      .join(' ').normalize('NFKC').toLocaleLowerCase('zh-TW');
+    return { point, searchable };
+  }), [model.points]);
+  const searchTokens = useMemo(() => searchTerm.split(/\s+/u).filter(Boolean), [searchTerm]);
   const matchingPoints = useMemo(() => {
-    if (!searchTerm) return model.points;
-    return model.points.filter((point) => {
-      const location = point.location;
-      const searchable = [
-        point.name, location.category, location.description,
-        location.building, location.floor, ...(location.facilities ?? []),
-      ].filter((part): part is string => typeof part === 'string')
-        .join(' ').normalize('NFKC').toLocaleLowerCase('zh-TW');
-      return searchable.includes(searchTerm);
-    });
-  }, [model.points, searchTerm]);
+    if (searchTokens.length === 0) return model.points;
+    return searchIndex
+      .filter(({ searchable }) => searchTokens.every((token) => searchable.includes(token)))
+      .map(({ point }) => point);
+  }, [model.points, searchIndex, searchTokens]);
   const selectionOutsideSearch = Boolean(
     selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id),
   );
@@ -550,6 +556,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   type="search"
                   value={placeSearch}
                   onChange={(event) => setPlaceSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    // IME Enter commits Chinese input; it must never select a POI.
+                    if (event.key !== 'Enter' || event.nativeEvent.isComposing ||
+                        event.keyCode === 229 || matchingPoints.length !== 1 ||
+                        matchingPoints[0].id === selectedPoint?.id) return;
+                    event.preventDefault();
+                    selectPlace(matchingPoints[0].id);
+                  }}
                   aria-controls={selectId}
                   autoComplete="off"
                   placeholder="建築、教室、設施或地點名稱"
@@ -557,6 +571,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {searchTerm && <small className={styles.searchCount} role="status">
                   找到 {matchingPoints.length} / {model.points.length} 個地點；目前選擇不會因搜尋改變。
                 </small>}
+                {searchTerm && matchingPoints.length === 1 && matchingPoints[0].id !== selectedPoint?.id && (
+                  <button className={styles.searchMatch} type="button"
+                    onClick={() => selectPlace(matchingPoints[0].id)}>
+                    在空間圖查看「{matchingPoints[0].name}」
+                  </button>
+                )}
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}

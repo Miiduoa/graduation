@@ -119,6 +119,39 @@ it('searches existing campus place metadata without losing a selection or restar
   expect(onSelect).not.toHaveBeenCalled();
 });
 
+it('matches multi-keyword and full-width POI metadata without unexpected destination changes', async () => {
+  const onSelect = vi.fn();
+  const synthetic: MapLocation[] = [
+    ...places,
+    { id: 'sample-room', name: '樣本教室', category: '教學', description: '合成測試資料',
+      lat: 24.227, lng: 120.581, building: 'Ａ棟', floor: '２Ｆ', facilities: ['影印'] },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={synthetic} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const search = within(dialog).getByRole('searchbox', { name: '搜尋地點' });
+
+  fireEvent.change(search, { target: { value: '2f　a棟' } });
+  expect(within(dialog).getByRole('option', { name: '樣本教室' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: '本校圖書館' })).toBeNull();
+  const choose = within(dialog).getByRole('button', { name: '在空間圖查看「樣本教室」' });
+  // An Enter key used by a Chinese/Japanese IME is not a selection.
+  fireEvent.keyDown(search, { key: 'Enter', isComposing: true });
+  expect(within(dialog).queryByRole('heading', { name: '樣本教室' })).toBeNull();
+  fireEvent.click(choose);
+  expect(within(dialog).getByRole('heading', { name: '樣本教室' })).toBeTruthy();
+
+  fireEvent.change(search, { target: { value: '本校' } });
+  expect(within(dialog).queryByRole('button', { name: /在空間圖查看/ })).toBeNull();
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(within(dialog).getByRole('heading', { name: '樣本教室' })).toBeTruthy();
+  fireEvent.change(search, { target: { value: '自習　本校' } });
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
 it('connects scene markers, the progress control, directions and the original map selection', async () => {
   const onSelect = vi.fn();
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={onSelect} />);
