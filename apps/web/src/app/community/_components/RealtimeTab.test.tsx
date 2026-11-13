@@ -106,3 +106,24 @@ it.each(['stories', 'peers'] as const)('preserves the open text story during ref
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '限時動態' })).toBeNull());
   expect(screen.queryByRole('button', { name: '查看 bob 的限時動態' })).toBeNull();
 });
+
+
+it('does not show the previous campus students or check-in when switching schools with the same POI', async () => {
+  mocks.peers.mockImplementation((school: string) =>
+    Promise.resolve([{ uid: school === 'pu' ? '甲校同學' : '乙校同學' }]));
+  const { rerender } = render(<RealtimeTab schoolId="pu" />);
+  await screen.findByText('甲校同學');
+  fireEvent.click(screen.getByRole('button', { name: '我在這裡' }));
+  await screen.findByText('已在這個地點打卡。你可以隨時取消。');
+
+  rerender(<RealtimeTab schoolId="tw-pu" />);
+  // The school changed; no previous campus identity or location claim may remain visible,
+  // even for one render while the new Firestore request is pending.
+  expect(screen.queryByText('甲校同學')).toBeNull();
+  expect(screen.queryByText('已在這個地點打卡。你可以隨時取消。')).toBeNull();
+  expect(screen.getByRole('button', { name: '我在這裡' })).toBeTruthy();
+
+  await screen.findByText('乙校同學');
+  expect(mocks.peers).toHaveBeenCalledWith('tw-pu', 'library');
+  expect(mocks.clear).not.toHaveBeenCalledWith('tw-pu', 'session');
+});
