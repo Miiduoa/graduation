@@ -576,7 +576,7 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['0', '-2', '2;3', '101'])(
+  it.each(['0', '-2', '1.5', '2;3', '101'])(
     'does not cache an OSM building with contradictory building:levels=%s',
     async (levels) => {
       // Synthetic malformed level metadata; not an observed campus source.
