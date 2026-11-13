@@ -610,6 +610,30 @@ describe('Providence OSM building outlines', () => {
     })[0]).toMatchObject({ poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag' });
   });
 
+  it('does not depict active demolition tags as an intact campus building', () => {
+    // Synthetic cases only: these tags are not claims about buildings at PU.
+    // The mapped ID alone cannot prove that a roof is intact during demolition.
+    for (const kind of ['demolition', 'demolishing', ' DEMOLITION ']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: kind })],
+      }), kind).toEqual([]);
+    }
+    for (const marker of [
+      'demolition', 'demolishing', 'demolition:building', 'demolishing:building',
+    ]) {
+      for (const value of ['yes', 'in_progress', '  ', null]) {
+        expect(parseProvidenceOsmFootprints({
+          elements: [way(255784049, library, { building: 'yes', [marker]: value })],
+        }), `${marker}=${value}`).toEqual([]);
+      }
+      // An explicitly negative historical flag must not hide an otherwise
+      // independently verified standing outline.
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', [marker]: 'no' })],
+      }), marker).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
   it('fails closed on contradictory lifecycle tags even when building=yes remains', () => {
     // Edits can leave a historic lifecycle tag alongside an older building=yes.
     // Do not present ambiguous construction/demolition status as a full 3D building.
