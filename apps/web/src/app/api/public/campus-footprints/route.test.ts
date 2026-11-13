@@ -576,6 +576,27 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['0', '-2', '2;3', '101'])(
+    'does not cache an OSM building with contradictory building:levels=%s',
+    async (levels) => {
+      // Synthetic malformed level metadata; not an observed campus source.
+      const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        elements: [{
+          type: 'way', id: 255784049, geometry: libraryOutline,
+          tags: { building: 'yes', 'building:levels': levels },
+        }],
+      }), { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect((await response.json()).error).toMatch(/temporarily unavailable/);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('keeps POI-only fallback when OSM says a listed building is under demolition', async () => {
     // Synthetic conflicting tags, not a report of demolition at Providence.
     const inconsistent = JSON.stringify({
