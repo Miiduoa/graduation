@@ -586,3 +586,15 @@ it('stops automatic target lookup on a repeated cursor', async () => {
   expect(state.request).toHaveBeenCalledTimes(3);
   expect(screen.queryByText(COURSE_WORK_MISSING_MATERIAL)).toBeNull();
 });
+
+it.each(['student', 'owner-teacher'] as const)('lets %s open the same reading destinations as mobile and keeps unsafe URLs plain', async (memberRole) => {
+  state.request.mockResolvedValue({ materials: [{ ...material, body: '課前閱讀：https://example.test/reading。\n補充 HTTP://example.test/notes，請讀完。\nhttps://user:pass@example.test/private javascript:alert(1) https://' }], nextCursor: null });
+  render(<CourseMaterials workspace={{ ...workspace, memberRole }} />);
+  const reading = await screen.findByRole('link', { name: 'https://example.test/reading' });
+  expect(reading.getAttribute('href')).toBe('https://example.test/reading');
+  expect(reading.getAttribute('target')).toBe('_blank');
+  expect(screen.getByRole('link', { name: 'HTTP://example.test/notes' }).getAttribute('href'))
+    .toBe('http://example.test/notes');
+  expect(screen.queryByRole('link', { name: /user:pass|javascript|^https:\/\/$/ })).toBeNull();
+  expect(screen.getByText(/https:\/\/user:pass@example.test\/private/)).toBeTruthy();
+});
