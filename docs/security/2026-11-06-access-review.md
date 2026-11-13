@@ -639,3 +639,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 可重跑的 Firebase Rules emulator 案例加入 `backend/tests/security-rules.test.js` 既有 assistant reply 測試：作者與管理員偽造他人投票、偽造採納、500 票重放均拒絕；正常建立、本人投票／取消、本文編輯及管理員採納仍通過。**本段是原始碼與測試設計紀錄，提交後新 head 的 CI／CodeQL 成功與否必須另行核對，不代表正式發布驗收。**
 
 父貼文 documents 的 Firestore read/list 權限仍會對有效會員放行未發布資訊；其 Mobile／Web 查詢與歷史相容要獨立改造。GCS／Supabase 已發 URL 撤銷、真隔離 Storage 競態、歷史檔案引用、minimatch 雙鎖檔、主線整合及正式發布／回復也未解除。未操作正式資料、金鑰、token、migration、部署、E 校園或重跑未授權 npm/pnpm audit。
+
+
+## 2026-11-13：留言作者與父貼文作者混淆造成跨帳號編輯（PR #577）
+
+先前 `groups/{groupId}/posts/{postId}/comments/{commentId}` 的 update/delete 以 `activeAuthor()` 判定一般使用者權限，但該函式取的是**父貼文**的 `resource.data.authorId`。所以有效會員若是貼文作者，可能修改或刪除其他會員的留言；反而留言作者不一定能編輯自己的留言。投票也錯誤依賴父貼文作者身分。這是規則可推導的跨帳號寫入缺口，不代表正式資料曾被篡改。
+
+最小修補把文字編輯／刪除授權改為**留言文件**的 `resource.data.authorId == request.auth.uid` 或有效群組管理員；其他有效會員若只更新 `likedBy/likeCount/updatedAt`，仍須通過既有 `changesOnlyOwnVote` 本人單票增減檢查，絕不可藉投票改留言正文或最佳解答欄位。原有父貼文撤回/封存、校籍、帳號停用與 AI 回覆防護保留。
+
+新增 `backend/tests/security-rules.test.js` 的 Firebase Emulator 合成測試，驗證貼文作者無法冒名修改／刪除 Bob 留言、Bob 可編輯及刪除自己的留言、Charlie 不能改寫、跨校 Mallory 拒絕、教師可以管理、Bob 對 Alice 留言合法按讚／取消但不能以投票改正文，以及移除群組資格後重放與父貼文封存後的拒絕。這是**開發分支的可重跑隔離回歸**，必須在新精確 head 的 CI 執行通過後才標示已驗證；不等於已合併、部署或正式資料驗收。
+
+其他高風險保留：父貼文 Firestore get/list 對未發布內容的曝光、舊 GCS／Supabase URL 撤銷、真正隔離 Storage CAS／競態、歷史可信附件引用、minimatch 雙鎖檔、與最新主線整合和正式回復測試。指定 App 5504170 對精確 head 審查通過前不合併。無正式資料／金鑰／token、migration、部署、E 校園或未獲授權 npm/pnpm audit 操作。

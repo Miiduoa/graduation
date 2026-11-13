@@ -1046,6 +1046,53 @@ describe('firestore security rules', () => {
       await assertFails(comment.update({ body: 'Replay after revocation' }));
     });
 
+    test('comment ownership is independent of parent post ownership, including votes and revocation', async () => {
+      const owner = testEnv.authenticatedContext('alice').firestore();
+      const commenter = testEnv.authenticatedContext('bob').firestore();
+      const peer = testEnv.authenticatedContext('charlie').firestore();
+      const outsider = testEnv.authenticatedContext('mallory').firestore();
+      const moderator = testEnv.authenticatedContext('teacher').firestore();
+      const replyPath = postPath + '/comments/bobs-reply';
+      await seedFirestore(async (admin) => {
+        for (const uid of ['bob', 'charlie']) {
+          await admin.doc('schools/pu/members/' + uid).set({ status: 'active' });
+          await admin.doc('groups/course/members/' + uid).set({ status: 'active', role: 'member' });
+        }
+        // A cross-school account must not inherit access from a forged group membership.
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc(replyPath).set({ authorId: 'bob', body: 'Original reply', likedBy: [], likeCount: 0 });
+      });
+
+      // Alice owns the post, not Bob's reply: she may not rewrite or delete his words.
+      await assertFails(owner.doc(replyPath).update({ body: 'Forged as Bob' }));
+      await assertFails(owner.doc(replyPath).delete());
+      await assertFails(peer.doc(replyPath).update({ body: 'Peer impersonation' }));
+      await assertFails(peer.doc(replyPath).delete());
+      await assertFails(outsider.doc(replyPath).update({ body: 'Cross-school edit' }));
+      await assertFails(outsider.doc(replyPath).delete());
+
+      await assertSucceeds(commenter.doc(replyPath).update({ body: 'Bob edited his reply' }));
+      await assertFails(commenter.doc(commentPath).update({ body: 'Bob rewrote Alice' }));
+      // Reacting to another member's comment must not grant permission to edit it.
+      await assertSucceeds(commenter.doc(commentPath).update({ likedBy: ['bob'], likeCount: 1 }));
+      await assertFails(commenter.doc(commentPath).update({ likedBy: ['bob', 'charlie'], likeCount: 2 }));
+      await assertFails(commenter.doc(commentPath).update({ body: 'Disguised as a vote', likedBy: [], likeCount: 0 }));
+      await assertSucceeds(commenter.doc(commentPath).update({ likedBy: [], likeCount: 0 }));
+      await assertSucceeds(moderator.doc(replyPath).update({ body: 'Instructor moderation' }));
+
+      // A previously authorized client cannot replay changes after membership removal.
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(commenter.doc(replyPath).update({ body: 'Replay after removal' }));
+      await assertFails(commenter.doc(commentPath).update({ likedBy: ['bob'], likeCount: 1 }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'active' }));
+      // Revocation by withdrawing the parent also blocks deletion by the reply owner.
+      await seedFirestore((admin) => admin.doc(postPath).update({ status: 'archived' }));
+      await assertFails(commenter.doc(replyPath).delete());
+      await seedFirestore((admin) => admin.doc(postPath).update({ status: 'published', published: true }));
+      await assertSucceeds(commenter.doc(replyPath).delete());
+    });
+
     test('editing cannot transfer authorship', async () => {
       const post = testEnv.authenticatedContext('alice').firestore().doc(postPath);
       await assertFails(post.update({ authorId: 'teacher' }));

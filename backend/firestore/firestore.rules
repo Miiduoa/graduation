@@ -1118,10 +1118,26 @@ service cloud.firestore {
                 )
               )
             )
-            && (canManageGroup(groupId) || activeAuthor());
+            // The parent post author is not automatically the author of each
+            // reply. Only the reply author or an active manager may edit text;
+            // any active member may make an own-vote-only reaction change.
+            && (
+              canManageGroup(groupId)
+              || resource.data.authorId == request.auth.uid
+              || (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['likedBy', 'likeCount', 'updatedAt'])
+                && changesOnlyOwnVote(
+                  resource.data.get('likedBy', []),
+                  request.resource.data.get('likedBy', []),
+                  resource.data.get('likeCount', 0),
+                  request.resource.data.get('likeCount', 0)
+                )
+              )
+            );
           allow delete: if canReadPostComments()
             && commentId != 'assistant'
-            && (canManageGroup(groupId) || activeAuthor());
+            && (canManageGroup(groupId) || resource.data.authorId == request.auth.uid);
         }
       }
 
