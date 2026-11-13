@@ -120,9 +120,16 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // length header, so comparing those lengths would reject valid compressed
   // responses. Keep the decoded 500 KB cap for every encoding.
   const contentEncoding = response.headers.get('content-encoding');
-  const verifyIdentityLength = lengthHeader !== null &&
-    (contentEncoding === null || contentEncoding.trim().toLowerCase() === 'identity');
-  if (!Number.isSafeInteger(declared) || declared > MAX_RESPONSE_BYTES) {
+  const identityEncoded = contentEncoding === null ||
+    contentEncoding.trim().toLowerCase() === 'identity';
+  const verifyIdentityLength = lengthHeader !== null && identityEncoded;
+  // Fetch delivers decoded bytes, while Content-Length for gzip/br describes
+  // compressed wire bytes. A valid compressed response can exceed the decoded
+  // cap on the wire (compression adds framing overhead), so do not reject it
+  // as if the header measured the decoded body. Still bound both the declared
+  // encoded transport (2x) and the streamed decoded payload (500 KB).
+  const declaredLimit = identityEncoded ? MAX_RESPONSE_BYTES : MAX_RESPONSE_BYTES * 2;
+  if (!Number.isSafeInteger(declared) || declared > declaredLimit) {
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
