@@ -136,8 +136,10 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer|ans\.?|solution)\s*(?:[:：=＝]|\bis\b\s*[:：=＝]?)/giu;
   let label: RegExpExecArray | null;
   while ((label = labels.exec(question)) !== null) {
+    // Generated Markdown may wrap a disclosed key in inline code or emphasis.
+    // Strip only opening presentation marks for comparison, never displayed text.
     const disclosed = question.slice(label.index + label[0].length)
-      .replace(/^[\s"'“”‘’「『（(\[【]+/gu, '').replace(/\s+/gu, '');
+      .replace(/^[\s"'“”‘’「『（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
     // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
     // Keep decimal points and mathematical operators significant.

@@ -1030,6 +1030,12 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'an English correct answer key', question: 'What? Correct answer: SQL', answer: 'SQL' },
     { label: 'an English solution key', question: 'What? Solution = SQL', answer: 'SQL' },
     { label: 'an English reference answer', question: 'What? Reference answer is SQL', answer: 'SQL' },
+    { label: 'Markdown inline code answer', question: 'What? Answer: `SQL`', answer: 'SQL' },
+    { label: 'Markdown bold Chinese answer', question: '複習題。答案：**主鍵**', answer: '主鍵' },
+    { label: 'Markdown bold English answer', question: 'What? Correct answer: **SQL**', answer: 'SQL' },
+    { label: 'nested quote and code marker', question: '參考答案：「`SQL`」', answer: 'SQL' },
+    { label: 'single underscore emphasis', question: 'What? Solution: _SQL_', answer: 'SQL' },
+    { label: 'Markdown emphasis on decimal', question: '解答：*1.2*', answer: '1.2' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1064,6 +1070,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: 'Answer: SQL 這個提示代表什麼？', answer: '主鍵' },
     { question: '答案：SQLServer 的語法用途？', answer: 'SQL' },
     { question: '正確選項：B2 如何處理？', answer: 'B' },
+    { question: '答案：**SQLServer** 的用途是什麼？', answer: 'SQL' },
+    { question: '答案：`B2` 這個符號代表什麼？', answer: 'B' },
+    { question: '答案：**12** 是否合理？', answer: '1' },
+    { question: '答案：`SQL` 為何要使用？', answer: '外鍵' },
     { question: 'Answer is what?', answer: 'SQL' },
     { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
