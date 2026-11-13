@@ -14,6 +14,11 @@ type SourceValueRow = { label: string; original: string; amount: number };
  */
 function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
+  // Numeric-looking years and identifiers are not scalar measures; comparing
+  // them as bars would imply a magnitude that the source does not support.
+  const column = table.headers[1].trim();
+  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+      /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column)) return null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {
@@ -32,13 +37,14 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
 function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
   const rows = sourceValueRows(table);
   if (!rows) return null;
-  const max = Math.max(...rows.map((row) => row.amount));
+  const maxRow = rows.reduce((best, row) => row.amount > best.amount ? row : best);
+  const max = maxRow.amount;
   return (
     <details className={styles.sourceValueComparison}>
       <summary>展開第 2 欄「{table.headers[1]}」的原文數值比較</summary>
       <p className={styles.note}>
         只比較這張文字表格中明確寫出的非負數；以本欄最大值為滿格，不補值、不解讀單位，
-        也不是圖片圖表辨識。數字請核對上方原文。
+        不比較日期或編號，也不是圖片圖表辨識。數字請核對上方原文。
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (
@@ -48,7 +54,8 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
               <span>{row.original}</span>
             </div>
             <meter min={0} max={max} value={row.amount}
-              aria-label={row.label + '：' + row.original} />
+              aria-label={row.label + '：' + row.original}
+              aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
           </li>
         ))}
       </ul>

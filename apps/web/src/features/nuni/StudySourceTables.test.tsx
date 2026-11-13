@@ -598,10 +598,11 @@ it('offers an opt-in comparison with only exact, positive source table values', 
     max: bar.getAttribute('max'),
     value: bar.getAttribute('value'),
     label: bar.getAttribute('aria-label'),
+    valueText: bar.getAttribute('aria-valuetext'),
   }))).toEqual([
-    { min: '0', max: '3', value: '3', label: '資料庫：3' },
-    { min: '0', max: '3', value: '2.5', label: '網路：2.5' },
-    { min: '0', max: '3', value: '0', label: '程式設計：0' },
+    { min: '0', max: '3', value: '3', label: '資料庫：3', valueText: '3；本欄最大值 3' },
+    { min: '0', max: '3', value: '2.5', label: '網路：2.5', valueText: '2.5；本欄最大值 3' },
+    { min: '0', max: '3', value: '0', label: '程式設計：0', valueText: '0；本欄最大值 3' },
   ]);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['3', '2.5', '0']);
@@ -627,4 +628,29 @@ it('does not draw misleading bars for formulas, dates, percentages, units or amb
     '| A | 10 |', '| A | 20 |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
   expect(container.querySelector('meter')).toBeNull();
+});
+
+it('does not turn numeric years or identifiers into misleading comparison bars', () => {
+  for (const header of ['年份', '學年度', '學號', '課程編號', '帳號', '郵遞區號', '年度', 'year', 'ID']) {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| A | 2024 |', '| B | 2025 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+  // The calendar word in a real measure must not hide valid annual budget values.
+  const annualBudget = ['| 項目 | 年度預算 |', '| --- | --- |',
+    '| A | 120 |', '| B | 200 |'].join('\n');
+  const { container } = render(<StudySourceTables text={annualBudget} />);
+  expect(container.querySelectorAll('meter')).toHaveLength(2);
+});
+
+it('reads the exact source numeric spelling, rather than inferring a percentage', () => {
+  const material = ['| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3.00 |', '| 網路 | 2.50 |'].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => bar.getAttribute('aria-valuetext')))
+    .toEqual(['3.00；本欄最大值 3.00', '2.50；本欄最大值 3.00']);
 });
