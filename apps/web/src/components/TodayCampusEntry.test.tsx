@@ -94,17 +94,26 @@ function reply(answer: string) {
   return Response.json({ answer, steps: [], cards: [] });
 }
 
-function saveTodayLesson() {
+function saveTodayLesson(): string {
   const now = new Date();
+  // PU's verified timetable profile accepts Monday–Friday. At Taiwan midnight
+  // on weekends, a same-day test lesson would be rejected as damaged storage.
+  // Keep the fixture valid and ask for the next teaching day instead.
   const taipei = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const weekday = taipei.getUTCDay() || 7;
+  const daysAhead = weekday === 6 ? 2 : weekday === 7 ? 1 : 0;
+  const lessonDate = new Date(now.getTime() + daysAhead * 86_400_000);
+  const lessonWeekday = new Date(lessonDate.getTime() + 8 * 60 * 60 * 1000).getUTCDay() || 7;
   const row = {
     id: 'today-entry-lesson', kind: 'timetable', title: '入口測試資料庫', schoolId: state.school,
-    academicYear: String(rocSchoolYear(now)), semester: currentSemesterStartUtc(now).getUTCMonth() === 7 ? '1' : '2',
-    dayOfWeek: taipei.getUTCDay() || 7, startTime: '10:10', endTime: '11:00', location: '任垣305',
+    academicYear: String(rocSchoolYear(lessonDate)),
+    semester: currentSemesterStartUtc(lessonDate).getUTCMonth() === 7 ? '1' : '2',
+    dayOfWeek: lessonWeekday, startTime: '10:10', endTime: '11:00', location: '任垣305',
     batchId: 'entry-fixture', importedAt: now.toISOString(), source: { type: 'paste', line: 1, rawText: '來源原文不應外送' },
   };
   localStorage.setItem(personalImportsStorageKey({ owner: 'platform:' + state.context, schoolId: state.school }),
     JSON.stringify({ version: 1, records: [row] }));
+  return daysAhead === 2 ? '後天有哪些課？' : daysAhead === 1 ? '明天有哪些課？' : '今天有哪些課？';
 }
 
 beforeEach(() => {
@@ -515,11 +524,11 @@ it('stops a school query without clearing previous answers or letting the cancel
 it('answers a saved lesson on Today without cloud consent or an assistant request', async () => {
   const ask = vi.fn(() => reply('不應使用模型回答'));
   mockNuniAsk(ask);
-  saveTodayLesson();
+  const lessonQuestion = saveTodayLesson();
   render(entry());
   const field = await screen.findByRole('textbox', { name: '問題' });
   expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
-  fireEvent.change(field, { target: { value: '今天有哪些課？' } });
+  fireEvent.change(field, { target: { value: lessonQuestion } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
   expect(screen.getByText(/10:10–11:00.*任垣305/)).toBeTruthy();
@@ -533,10 +542,10 @@ it.each([null, 'school-a'])('keeps verified platform reads reachable with cloud 
   state.functionsConfigured = false;
   const fetch = vi.fn();
   vi.stubGlobal('fetch', fetch);
-  saveTodayLesson();
+  const lessonQuestion = saveTodayLesson();
   render(entry(false));
   const field = await screen.findByRole('textbox', { name: '問題' });
-  fireEvent.change(field, { target: { value: '今天有哪些課？' } });
+  fireEvent.change(field, { target: { value: lessonQuestion } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: '你的問題' })).toBeNull();
@@ -601,8 +610,8 @@ it('aborts an old cloud answer when the feature flag changes while keeping direc
   await act(async () => finish(reply('不應回流的雲端答案')));
   expect(screen.queryByText('不應回流的雲端答案')).toBeNull();
   expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
-  saveTodayLesson();
-  fireEvent.change(screen.getByRole('textbox', { name: '問題' }), { target: { value: '今天有哪些課？' } });
+  const lessonQuestion = saveTodayLesson();
+  fireEvent.change(screen.getByRole('textbox', { name: '問題' }), { target: { value: lessonQuestion } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
 });
