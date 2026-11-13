@@ -178,7 +178,9 @@ it('matches multi-keyword and full-width POI metadata without unexpected destina
   expect(within(dialog).getByRole('heading', { name: '樣本教室' })).toBeTruthy();
 
   fireEvent.change(search, { target: { value: '本校' } });
-  expect(within(dialog).queryByRole('button', { name: /在空間圖查看/ })).toBeNull();
+  expect(within(dialog).getByRole('button', { name: '在空間圖查看「本校圖書館」' })).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: '在空間圖查看「本校宿舍」' })).toBeTruthy();
+  // Multiple matches must never be auto-selected by Enter.
   fireEvent.keyDown(search, { key: 'Enter' });
   expect(within(dialog).getByRole('heading', { name: '樣本教室' })).toBeTruthy();
   fireEvent.change(search, { target: { value: '自習　本校' } });
@@ -187,6 +189,34 @@ it('matches multi-keyword and full-width POI metadata without unexpected destina
   expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
   expect(onSelect).not.toHaveBeenCalled();
   expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('offers up to five mobile-friendly search shortcuts while keeping all matches in the select', async () => {
+  const onSelect = vi.fn();
+  // Synthetic same-campus places: this checks interaction, not real school geometry.
+  const rooms: MapLocation[] = Array.from({ length: 7 }, (_, i) => ({
+    id: `sample-${i}`, name: `示意教室 ${i + 1}`, category: '教學空間',
+    description: '純測試地點', lat: 24.226 + i * 0.0001, lng: 120.58 + i * 0.0001,
+  }));
+  render(<CampusSpatialExplorer school="other-school" locations={rooms} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const search = within(dialog).getByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(search, { target: { value: '教學空間' } });
+  const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
+  expect(within(shortcuts).getAllByRole('button', { name: /在空間圖查看/ })).toHaveLength(5);
+  expect(within(shortcuts).getByText(/僅顯示前 5 筆搜尋捷徑/)).toBeTruthy();
+  expect(within(dialog).getAllByRole('option')).toHaveLength(8); // Placeholder + all seven.
+  expect(within(dialog).getByText('找到 7 / 7 個地點；目前選擇不會因搜尋改變。')).toBeTruthy();
+  fireEvent.click(within(shortcuts).getByRole('button', { name: '在空間圖查看「示意教室 2」' }));
+  expect(within(dialog).getByRole('heading', { name: '示意教室 2' })).toBeTruthy();
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-1');
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  // If the user changes the search, the chosen destination remains selected.
+  fireEvent.change(search, { target: { value: '不會有結果' } });
+  expect(within(dialog).queryByRole('group', { name: '搜尋結果捷徑' })).toBeNull();
+  expect(within(dialog).getByRole('option', { name: '示意教室 2（目前選擇）' })).toBeTruthy();
 });
 
 it('connects scene markers, the progress control, directions and the original map selection', async () => {

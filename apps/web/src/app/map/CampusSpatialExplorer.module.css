@@ -149,6 +149,8 @@
 }
 .selectField input[type='search'] { font-weight: 400; }
 .selectField .searchCount { color: var(--muted); font-size: 0.75rem; line-height: 1.6; }
+.searchMatches { display: grid; gap: 6px; }
+.searchMatches > small { color: var(--muted); font-size: 0.75rem; line-height: 1.6; }
 .searchMatch {
   box-sizing: border-box;
   width: 100%;
