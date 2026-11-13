@@ -119,6 +119,43 @@ it('searches existing campus place metadata without losing a selection or restar
   expect(onSelect).not.toHaveBeenCalled();
 });
 
+it('keeps a valid map destination after the selected POI is removed by live filtering', async () => {
+  const onSelect = vi.fn();
+  const view = render(
+    <CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={onSelect} />,
+  );
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }), {
+    target: { value: 'dorm' },
+  });
+  expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
+
+  // The parent map narrows its list while the modal is still mounted. The old
+  // in-dialog ID has disappeared; keep the still-valid external selection.
+  view.rerender(
+    <CampusSpatialExplorer school="other-school" locations={[places[0]]} selected={places[0]} onSelect={onSelect} />,
+  );
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value).toBe('library');
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe('24.226,120.58');
+  await waitFor(() => expect(scene.setView).toHaveBeenLastCalledWith(
+    expect.objectContaining({ selectedId: 'library' }),
+  ));
+  expect(onSelect).not.toHaveBeenCalled();
+
+  // Without an external selection there is no reason to guess a replacement.
+  view.rerender(
+    <CampusSpatialExplorer school="other-school" locations={[places[0]]} selected={null} onSelect={onSelect} />,
+  );
+  expect(within(dialog).queryByRole('heading', { name: '本校圖書館' })).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  await waitFor(() => expect(scene.setView).toHaveBeenLastCalledWith(
+    expect.objectContaining({ selectedId: null }),
+  ));
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
 it('matches multi-keyword and full-width POI metadata without unexpected destination changes', async () => {
   const onSelect = vi.fn();
   const synthetic: MapLocation[] = [
