@@ -14,6 +14,7 @@ require.extensions['.ts'] = (module, filename) => {
 const { nthuCourseIdentity, nthuCourseMeetings, nthuTimetableImportCsv } = require('../src/nthuCourseSchedule.ts');
 const { isPublicCourseCatalog, isNcnuPublicCourseCatalog } = require('../src/publicCourseCatalog.ts');
 const { parsePersonalImport } = require('../src/imports/parser.ts');
+const { previewPersonalCalendar, serializePersonalCalendar } = require('../src/timetable/personalCalendarExport.ts');
 require.extensions['.ts'] = original;
 
 // Exact room/time pairs and identity from the public 115-1 JSON, retrieved 2026-11-06.
@@ -169,8 +170,7 @@ require('./nthuCourseBreaks.cjs');
 
 
 test('115-1 NTHU CSV imports keep all three free breaks in a one-day ICS snapshot', () => {
-  const { previewPersonalCalendar, serializePersonalCalendar } =
-    require('../src/timetable/personalCalendarExport.ts');
+
   const time = 'M2M3M4MnM5M6M7';
   const meetings = [{ time, room: '教室甲' }];
   const csv = nthuTimetableImportCsv({ ...chemistry, time, room: '教室甲', meetings });
