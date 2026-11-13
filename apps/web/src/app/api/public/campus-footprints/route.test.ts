@@ -272,6 +272,64 @@ describe('public Providence building geometry route', () => {
     expect((await response.json()).buildings).toHaveLength(1);
   });
 
+  it('accepts decoded JSON below 500 KB when gzip wire length is slightly larger', async () => {
+    // Fetch can expose already-decoded JSON but preserve compressed wire
+    // Content-Length. A transport length over the decoded cap is not, by
+    // itself, evidence that the decoded OSM JSON exceeds our memory budget.
+    // This is a synthetic Fetch header/body contract, not a live OSM request.
+    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '500001' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a decoded gzip body over 500 KB despite a short encoded length', async () => {
+    // Untrusted compressed bodies must still obey the *decoded* streaming cap.
+    const upstream = vi.fn().mockResolvedValue(new Response(' '.repeat(500_001), {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '42' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized encoded gzip response without reading its stalled stream', async () => {
+    vi.useFakeTimers();
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() {
+        cancelled += 1;
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '1000001' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    let settled = false;
+    const pending = GET().then((result) => { settled = true; return result; });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(settled).toBe(true);
+    expect((await pending).status).toBe(503);
+    expect(cancelled).toBe(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('retains a dated stale snapshot instead of replacing it with HTTP 206 geometry', async () => {
     const originalTime = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(originalTime);
