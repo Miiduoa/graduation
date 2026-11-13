@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -47,6 +48,9 @@ export function AssistantThread({
   onConfirm,
   onCancel,
   onReconcile,
+  renderPlanRevision,
+  renderPlanComparison,
+  allowBatchConfirmation,
 }: {
   inline?: boolean;
   schoolId: string;
@@ -71,6 +75,9 @@ export function AssistantThread({
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
+  renderPlanRevision?: (turn: V2Turn) => ReactNode;
+  renderPlanComparison?: (turn: V2Turn) => ReactNode;
+  allowBatchConfirmation?: (turn: V2Turn) => boolean;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -243,14 +250,17 @@ export function AssistantThread({
                 ) : null}
               </div>
             </div>
+            {renderPlanComparison?.(turn)}
             <AssistantCardStack
               cards={turn.reply.cards}
+              allowBatchConfirmation={allowBatchConfirmation?.(turn) ?? true}
               states={states}
               pending={pending}
               onConfirm={onConfirm}
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
+            {renderPlanRevision?.(turn)}
           </article>
         ))}
         {pending ? (
