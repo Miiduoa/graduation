@@ -19,11 +19,14 @@ const MAX_ROWS = 20;
 // visibility:hidden / visibility:collapse / content-visibility:hidden;
 // this does not infer computed CSS, external stylesheets or chart meaning.
 // Also recognize hidden semantic block wrappers used in real course handouts.
-// Inline/implicitly-closed HTML needs a renderer; limit this to explicit
-// block containers with matching closing tags, without pretending to compute CSS.
+// Inline/implicitly-closed HTML needs a renderer. Only follow explicit
+// wrappers with matching closing tags when they are hidden; this is not CSS
+// layout computation and never rewrites the original course source.
 const HIDDEN_HTML_CONTAINERS = new Set([
   'div', 'section', 'aside', 'article', 'figure', 'blockquote',
   'main', 'header', 'footer', 'nav', 'form', 'fieldset',
+  // Hidden handout answers can also be wrapped in inline/list elements.
+  'span', 'ul', 'ol', 'li',
 ]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.

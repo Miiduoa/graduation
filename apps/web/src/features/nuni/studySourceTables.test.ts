@@ -953,3 +953,60 @@ describe('visible Markdown inline-code examples in course source tables', () => 
     expect(extractStudySourceTables(source)).toEqual(realTable(4));
   });
 });
+
+describe('hidden inline and list wrappers never become extra public source tables', () => {
+  it.each([
+    { tag: 'span', attribute: 'hidden' },
+    { tag: 'span', attribute: 'style="display:none"' },
+    { tag: 'ul', attribute: 'aria-hidden="true"' },
+    { tag: 'ol', attribute: 'style="visibility:hidden"' },
+    { tag: 'li', attribute: 'hidden' },
+  ])('suppresses a table inside explicitly hidden <$tag $attribute>', ({ tag, attribute }) => {
+    const source = [
+      `<${tag} ${attribute}>`,
+      '| 教師未公開答案 | 分數 |',
+      '| --- | --- |',
+      '| 不能提前揭露 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('keeps a hidden outer span active when a nested span closes first', () => {
+    const source = [
+      '<span hidden>',
+      '<span>',
+      '| 第一段未公開 | 分數 |',
+      '| --- | --- |',
+      '| 隱藏 | 99 |',
+      '</span>',
+      '| 第二段未公開 | 分數 |',
+      '| --- | --- |',
+      '| 仍然隱藏 | 88 |',
+      '</span>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+
+  it('does not hide a public table merely because visible span attributes mention hidden', () => {
+    const source = [
+      '<span title="hidden CSS property example" style="display:inline">',
+      ...visibleTable,
+      '</span>',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+
+  it('keeps an inline-code span example as visible lesson text', () => {
+    const source = [
+      '| 程式 | 說明 |',
+      '| --- | --- |',
+      '| `<span hidden>` | 這是可見的 HTML 語法範例 |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)[0]?.rows).toEqual([
+      ['`<span hidden>`', '這是可見的 HTML 語法範例'],
+    ]);
+  });
+});
