@@ -54,7 +54,7 @@ export function tronClassUploadKey(value: string | null | undefined): string | n
 
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 
-async function downloadedFile(response: Response): Promise<{ blob: Blob; filename: string }> {
+export async function downloadedTronClassFile(response: Response): Promise<{ blob: Blob; filename: string }> {
   const type = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
   const disposition = response.headers.get('Content-Disposition') ?? '';
   const encodedName = /(?:^|;)\s*filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)?.[1];
@@ -150,7 +150,7 @@ function isReceipt(value: unknown): boolean {
   );
 }
 
-function parseResult(action: string, value: unknown, input: Record<string, unknown>): unknown {
+export function parseTronClassResult(action: string, value: unknown, input: Record<string, unknown>): unknown {
   if (!isRecord(value)) return invalidResponse();
   if (['status', 'connect', 'disconnect'].includes(action)) {
     if (
@@ -336,7 +336,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
       body: JSON.stringify({ ...input, action }),
     });
     const value = await responseValue<unknown>(response);
-    return parseResult(action, value, input) as T;
+    return parseTronClassResult(action, value, input) as T;
   }
 
   return {
@@ -377,7 +377,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
         body: JSON.stringify(input),
       });
       if (!response.ok) await responseValue<unknown>(response);
-      return downloadedFile(response);
+      return downloadedTronClassFile(response);
     },
     prepare: (courseId: number, homeworkId: number) =>
       request<TronClassPreparation>('prepare', { courseId, homeworkId }),
@@ -419,7 +419,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
         body: input.file,
       });
       const value = await responseValue<unknown>(response);
-      return parseResult('upload', value, {
+      return parseTronClassResult('upload', value, {
         fileId: input.fileId,
         name: input.file.name,
         size: input.file.size,

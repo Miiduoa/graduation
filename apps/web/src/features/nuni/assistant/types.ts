@@ -30,6 +30,13 @@ export type V2Turn = {
   reply: V2Reply;
   /** Local public lookup, outside the model conversation and signed action cards. */
   publicCourse?: { read?: PublicCourseAssistantRead };
+  /** A private, typed TronClass result never becomes cloud model history. */
+  tronClass?: {
+    result?: import('@/lib/tronClassAgentTypes').TronClassAgentReply;
+    accessRequired?: boolean;
+    unconnected?: boolean;
+    inactive?: boolean;
+  };
 };
 
 export type V2ActionState =

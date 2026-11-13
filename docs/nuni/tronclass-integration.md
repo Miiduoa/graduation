@@ -13,13 +13,31 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 本人 ongoing / upcoming 課程、作業與截止時間 | 已實作，分頁不完整會顯示部分失敗 |
 | 選定課程的公告與教材 | 已實作，包含一般活動與 courseware 活動 |
 | 使用已綁定 session 下載教材附件 | 已實作，重新確認本人課程、活動與附件下載權限；真人下載仍待驗收 |
+| 既有 Assistant 直接查詢 TronClass | 已實作，回傳本人課程、作業狀態、公告與教材；私有結果不加入雲端模型歷史 |
+| Agent 代理下載與準備作業 | 已實作，需使用者分別授權；在聊天內下載附件、選定作業並開啟預覽 |
+| 隨時調整／撤銷 Agent 權限 | 已實作，綁定 revision 與權限版本雙重檢查；換綁後重新授權 |
 | 作業文字、附件選擇、預覽、複製內容 | 已實作，草稿及檔案只留在目前頁面記憶體 |
 | 上傳 → 最終送出 → 讀回收據 | 服務及 UI 已實作，以注入測試來源驗證 |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
 | 重交、撤回、小組繳交、代替其他人繳交 | 未實作；不得套用一般個人作業送出流程 |
-| 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊的未完成 writer 改為明確拒絕，避免假成功 |
+| 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊作業、討論發文／回覆、問卷與同儕互評 writer 改為明確拒絕，避免假成功 |
 
 TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的收件、附件與教師批改，不是 TronClass 的正式繳交證據。
+
+## 在既有 Assistant 使用 Agent
+
+先登入 nuni，在 `/tronclass` 連接學校帳號，再於「TronClass 助理權限」選擇允許的能力。三項權限預設全關：讀取課程資料、下載教材、準備作業。下載與準備均需要同時開啟讀取權限，沒有「代為寫入」權限。
+
+使用者可以在既有 `/ai-assistant` 對話中輸入「TronClass 有哪些未交作業」、「查詢 TronClass 公告」、「幫我下載 TronClass 教材」或「幫我準備 TronClass 作業」。結果直接顯示在對話：課程與作業選項、校方繳交狀態、公告、附件下載及作業預覽，不需要另開一個 Agent。一般概念說明、否定操作與不支援的寫入要求不會被當成下載授權。
+
+- Agent 根據當次使用者文字選擇有型別的工具；校方作業內文、公告、歷史訊息與模型輸出不會變成工具指令。
+- 未確認的繳交狀態維持 `null`，和已交／未交分開顯示；資料不完整不代表全部作業已完成。
+- 課程、作業或附件目標不唯一時，顯示可選項目。只有明確下載要求、完整資料與唯一可確認附件才可直接啟動下載；其他情況由使用者選擇。
+- 聊天中的作業流程只可準備與預覽。即使未來人工繳交 adapter 開放，Agent 的 upload、submit、reconcile 仍明確拒絕，不會暗自取得寫入能力。
+- TronClass 對話與結果不加入雲端模型 history；資料顯示為文字，不執行校方 HTML 或工具要求。這不代表已具備通用模型分析、背景排程、自動答題或所有校方操作。
+- 對話結果列出來源、查詢時間、已執行／部分完成／未執行的操作及可用能力；下載只在取得合格檔案後啟動瀏覽器下載，不宣稱已保存至使用者磁碟。
+
+Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision` 與 `expectedVersion` 做 transaction compare-and-set。解除連接、重新連接與關帳都會移除原授權；重新開啟權限產生新版本，舊請求仍不能繼續。每次操作前後會重驗目前 nuni actor、綁定與授權；前端對已取消或切換身分的晚到結果不啟動下載。已顯示的資料無法因事後撤權從使用者記憶中收回，撤權約束後續操作與尚未完成的結果。
 
 ## 登入與資料隔離
 
@@ -58,6 +76,21 @@ TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的�
 
 下載完成前再確認綁定與 nuni 身分；前端也會丟棄舊 owner／revision／課程的晚到結果。下載 bytes、檔名與權限不是由前端原始連結直接採信。
 
+### Agent 介面
+
+三個 Agent 路由沿用同一身分驗證、緊急停止設定與私人不快取回應。JSON 上限 8 KiB，僅接受明列欄位，不接受由客戶端指定 owner。
+
+| 路由 | action／資料 | 用途 |
+| --- | --- | --- |
+| `POST /api/tronclass/agent-permissions` | `status` | 取得目前綁定的權限與版本，不包含校方 session |
+| 同上 | `set`, `revision`, `expectedVersion`, `permissions` | 交易式更新三項權限；其他裝置先更新時拒絕舊版本覆蓋 |
+| `POST /api/tronclass/agent` | `capability` | 取得可用能力；正式作業送出固定為 false |
+| 同上 | `ask`, `question`；可帶 `courseId`、準備流程的 `homeworkId` | 執行當次唯讀查詢／選目標／準備並回傳結構化結果 |
+| 同上 | `prepare`, `courseId`, `homeworkId` | 在 Agent 權限內重新讀取作業準備條件，`canSubmit` 固定 false |
+| `POST /api/tronclass/agent/download` | `courseId`, `activityId`, `uploadKey`, `revision` | 重用教材下載器，再加上可撤銷的讀取與下載權限檢查 |
+
+權限管理與 Agent 一般請求每 owner 每程序每分鐘 30 次；昂貴的 ask／prepare 每分鐘 6 次。下載沿用既有大小、時間與並行上限。這些限制不是跨程序全域配額。
+
 ## 送出與失敗恢復
 
 1. 讀取本人課程與作業，確認來源已提供明確規則。
@@ -88,6 +121,12 @@ production `createTronClassSubmissionSource()` 目前為 `contractVerified: fals
 - 在隔離環境驗證之後，才能實作 verified adapter，再開啟 runtime write switch。
 
 目前未使用真人校方帳號、未對學校送出作業，也未證明所有上述契約已成立。
+
+### 離線契約查核工具
+
+`scripts/tronclass/analyze-har.mjs` 可在本機檢查已獲授權的 HAR，輸出固定靜宜 origin、白名單路徑模板、HTTP method／status、去值化 JSON 型別與 upload → final → 本人 readback 的證據缺口。原始 header、cookie、query、學生代號、檔名、內容及未知欄位名稱都不輸出；輸入、分析深度與輸出均有限制，錯誤也使用固定代碼。
+
+此工具不連網、不重播操作，不會自行開放 adapter。HAR 可被編輯，HTTP 2xx 或完整觀察鏈也不能取代真人校方驗收，報告的 `contractVerified` 永遠是 false。使用方式、輸入限制與缺口說明見 [`scripts/tronclass/README.md`](../../scripts/tronclass/README.md)。原始 HAR 不應提交 Git 或傳入對話。
 
 ## 環境設定
 
@@ -131,9 +170,11 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 ## 驗證方式與範圍
 
-使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、client、TronClassWorkspace 與既有 NuniApp 的相關回歸；另外驗證 Mobile 舊 writer 沒有任何網路送出。
+使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、Agent grants／意圖／工具／下載、client、TronClassWorkspace 與既有 Assistant／NuniApp 回歸；另外驗證 Mobile 五個舊 writer 沒有任何網路送出。HAR 測試使用 `node --test scripts/tronclass/analyze-har.test.mjs`，已加入既有 CI。
 
-本輪集中執行結果（Node 22.23.4）：Web 11 個測試檔 **241 / 241**、backend accountDeletion **44 / 44**、Mobile 舊 writer **2 / 2**，合計 **287 項通過**。本次 Web 修改檔 ESLint 零錯誤；NuniApp 的 4 項既有 effect 警告位於未修改處。
+Agent 追加開發的集中執行結果（Node 22.23.4）：Web **40 個測試檔、711 / 711**（15 個後端／意圖測試檔 293 項、20 個既有助理／頁面回歸檔 372 項、5 個整合 UI／client 檔 46 項）、Mobile 舊 writer **10 / 10**、離線 HAR **12 / 12**，合計 **733 項通過**。涵蓋跨 owner、scope、revision／grant version 變更、撤權後晚到查詢／檔案、未知與部分結果、單一／多個下載目標，以及完整引用／解說文字不執行操作。
+
+本輪 Web 新增與修改檔 ESLint 零錯誤；Mobile 原有 9 項警告位於未修改區段。完整 Web TypeScript 檢查及 UI design gate 另列於 PR 驗證結果。前一輪 accountDeletion 的 44 項測試已通過，這輪未變更其實作。
 
 測試中的 verified provider、帳號、課程及收據都是合成資料，用於證明權限隔離、防重、失敗與恢復行為；不能拿來宣稱真實校方整合已驗收。瀏覽器無法連接本機預覽，後續又受 URL policy 限制，因此本輪沒有宣告桌面／窄螢幕／深色模式的視覺驗證通過。
 

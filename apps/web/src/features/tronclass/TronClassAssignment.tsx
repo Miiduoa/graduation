@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   tronClassErrorMessage,
   TronClassRequestError,
@@ -41,8 +41,9 @@ export function TronClassAssignment({
   onBusy,
   onConnectionChanged,
   onSubmitted,
+  prepareOnly = false,
 }: {
-  client: TronClassClient;
+  client: Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'>;
   revision: string;
   owner: string;
   homework: TronClassHomeworkItem;
@@ -50,7 +51,10 @@ export function TronClassAssignment({
   onBusy: (busy: boolean) => void;
   onConnectionChanged: () => void;
   onSubmitted: () => void;
+  /** An Agent can prepare locally without inheriting manual submission authority. */
+  prepareOnly?: boolean;
 }) {
+  const fieldId = useId();
   const [preparation, setPreparation] = useState<TronClassPreparation | null>(null);
   const [preparing, setPreparing] = useState(true);
   const [prepareEpoch, setPrepareEpoch] = useState(0);
@@ -97,18 +101,23 @@ export function TronClassAssignment({
   }, []);
 
   useEffect(() => {
+    if (prepareOnly) {
+      // Agent preparation never resumes a separate manual submission operation.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- scoped preparation has no submission journal to restore
+      setRestored(true);
+      return;
+    }
     try {
       const existing = sessionStorage.getItem(storageKey);
       if (existing && /^[A-Za-z0-9_-]{16,80}$/.test(existing)) {
         operation.current = existing;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- restore only the account-scoped operation ID before allowing a new submission
         setPhase('unknown');
       }
     } catch {
       // A storage failure is reported before any submission is dispatched.
     }
     setRestored(true);
-  }, [storageKey]);
+  }, [storageKey, prepareOnly]);
 
   useEffect(() => {
     let current = true;
@@ -229,7 +238,7 @@ export function TronClassAssignment({
   }
 
   async function submit() {
-    if (lock.current || phase !== 'preview' || !confirmed || !preparation?.canSubmit || !restored)
+    if (prepareOnly || lock.current || phase !== 'preview' || !confirmed || !preparation?.canSubmit || !restored)
       return;
     lock.current = true;
     callbacks.current.onBusy(true);
@@ -387,17 +396,17 @@ export function TronClassAssignment({
   return (
     <section
       className={`${styles.panel} ${styles.assignment}`}
-      aria-labelledby="tronclass-assignment-title"
+      aria-labelledby={`${fieldId}-title`}
     >
       <div className={styles.heading}>
         <div>
           <p className={styles.eyebrow}>{homework.courseName}</p>
-          <h2 id="tronclass-assignment-title" ref={title} tabIndex={-1}>
+          <h2 id={`${fieldId}-title`} ref={title} tabIndex={-1}>
             {homework.title}
           </h2>
         </div>
         <button className={styles.textButton} disabled={working} onClick={onClose}>
-          返回作業清單
+          {prepareOnly ? '關閉作業準備' : '返回作業清單'}
         </button>
       </div>
       <p className={styles.muted}>
@@ -476,10 +485,10 @@ export function TronClassAssignment({
         <>
           {phase === 'editing' ? (
             <div className={styles.form}>
-              <label htmlFor="tronclass-answer">
+              <label htmlFor={`${fieldId}-answer`}>
                 作業內容
                 <textarea
-                  id="tronclass-answer"
+                  id={`${fieldId}-answer`}
                   value={content}
                   maxLength={20000}
                   rows={9}
@@ -491,10 +500,10 @@ export function TronClassAssignment({
                 />
               </label>
               <p className={styles.characterCount}>{content.length.toLocaleString()} / 20,000 字</p>
-              <label htmlFor="tronclass-attachments">
+              <label htmlFor={`${fieldId}-attachments`}>
                 作業附件
                 <input
-                  id="tronclass-attachments"
+                  id={`${fieldId}-attachments`}
                   type="file"
                   multiple
                   accept={permitted.length ? permitted.join(',') : undefined}
@@ -585,7 +594,7 @@ export function TronClassAssignment({
               <>
                 <button
                   className="btn primary"
-                  disabled={working || !confirmed || !preparation?.canSubmit || preparing}
+                  disabled={prepareOnly || working || !confirmed || !preparation?.canSubmit || preparing}
                   onClick={() => void submit()}
                 >
                   {phase === 'uploading'

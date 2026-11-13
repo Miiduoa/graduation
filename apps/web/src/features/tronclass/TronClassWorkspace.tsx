@@ -22,6 +22,8 @@ import type {
 import { TronClassAssignment } from './TronClassAssignment';
 import { SourceLink, tronClassTime } from './TronClassSource';
 import { TronClassMaterialDownload } from './TronClassMaterialDownload';
+import { TronClassAgentAccess } from './TronClassAgentAccess';
+import { createTronClassAgentClient } from '@/lib/tronClassAgentClient';
 import styles from './tronclass.module.css';
 
 export function TronClassWorkspace() {
@@ -95,6 +97,7 @@ export function TronClassWorkspace() {
 
 function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; owner: string }) {
   const client = useMemo(() => createTronClassClient(identity), [identity]);
+  const agentClient = useMemo(() => createTronClassAgentClient(identity), [identity]);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [loading, setLoading] = useState(true);
   const [epoch, setEpoch] = useState(0);
@@ -315,6 +318,10 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
           </div>
         )}
       </section>
+      {connection?.connected && connection.revision && (
+        <TronClassAgentAccess key={`agent:${connection.revision}`} client={agentClient}
+          revision={connection.revision} onConnectionChanged={reloadStatus} />
+      )}
       {connection?.connected && connection.revision && (
         <ConnectedWorkspace
           key={connection.revision}

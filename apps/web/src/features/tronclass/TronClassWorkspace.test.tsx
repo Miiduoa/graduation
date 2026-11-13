@@ -143,6 +143,9 @@ async function defaultResponse(
   init?: RequestInit,
 ): Promise<Response> {
   const value = body(init);
+  if (String(url) === '/api/tronclass/agent-permissions') return json({
+    revision, version: null, permissions: { readCourseData: false, downloadMaterials: false, prepareHomework: false }, updatedAt: null,
+  });
   if (init?.method === 'PUT') {
     const query = new URL(String(url), 'https://nuni.tw').searchParams;
     const file = init.body as File;

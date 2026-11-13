@@ -142,6 +142,30 @@
   padding: 0;
   min-width: 0;
 }
+.permissionLegend {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding: 0;
+}
+.form .permissionOption {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 0;
+}
+.permissionOption input {
+  accent-color: var(--brand);
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin: 3px 0 0;
+}
+.permissionOption strong,
+.permissionOption span span {
+  display: block;
+  line-height: 1.7;
+}
 .credentials,
 .filters {
   display: grid;
