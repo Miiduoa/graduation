@@ -256,6 +256,73 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['', 'x-unknown', 'identity, gzip', 'gzip, br'])(
+    'rejects ambiguous Overpass Content-Encoding %j rather than trust decoded JSON',
+    async (encoding) => {
+      // This synthetic fetch body is already valid JSON. An unreviewed or
+      // stacked coding must not disable identity length verification simply
+      // because Content-Encoding is non-null.
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': encoding, 'Content-Length': '1' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect((await response.json()).error).toMatch(/temporarily unavailable/);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('rejects unsupported encoding before reading a stalled response body', async () => {
+    vi.useFakeTimers();
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() {
+        cancelled += 1;
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Encoding': 'x-unknown' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    let settled = false;
+    const pending = GET().then((response) => { settled = true; return response; });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(settled).toBe(true);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(cancelled).toBe(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['gzip', 'BR', 'deflate', 'identity'])(
+    'accepts recognized Overpass single Content-Encoding %s',
+    async (encoding) => {
+      // A mocked Fetch response provides already-decoded JSON; no claim about
+      // live Overpass compression or transfer correctness.
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': encoding,
+          'Content-Length': encoding === 'identity'
+            ? String(new TextEncoder().encode(osmPayload).byteLength) : '42' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(200);
+      expect((await response.json()).buildings).toHaveLength(1);
+    },
+  );
+
   it('does not compare decoded gzip bytes against the encoded Content-Length header', async () => {
     // Fetch exposes decompressed Response.body bytes but may preserve the
     // original compressed length header. Model that Fetch contract, without
