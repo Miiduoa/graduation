@@ -207,4 +207,73 @@ describe('story audience scope transitions', () => {
     jest.useRealTimers();
   });
 
+  test('an owner can refresh the current audience from the first page without replaying cached viewers or an old cursor', async () => {
+    const pendingRefresh = deferred<Page>();
+    const cursor = { id: 'old-cursor' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'first', displayName: '原本觀看者' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => pendingRefresh.promise);
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('原本觀看者')).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+    expect(fetchViewers).toHaveBeenLastCalledWith(
+      { id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner' },
+      null,
+    );
+    expect(view.queryByText('原本觀看者')).toBeNull();
+    expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+
+    await act(async () => {
+      pendingRefresh.resolve({
+        viewers: [{ uid: 'new', displayName: '新觀看者' }],
+        nextCursor: null,
+      });
+      await pendingRefresh.promise;
+    });
+    expect(view.getByText('新觀看者')).toBeTruthy();
+    expect(view.queryByText('原本觀看者')).toBeNull();
+    view.unmount();
+  });
+
+  test('refresh denial clears old viewer names and permits a server recheck after access returns', async () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'previous', displayName: '撤權前觀看者' }],
+        nextCursor: null,
+      })
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '恢復權限後觀看者' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('撤權前觀看者')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+      await Promise.resolve();
+    });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null, null]);
+    expect(view.getByText('恢復權限後觀看者')).toBeTruthy();
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+    view.unmount();
+  });
+
 });
