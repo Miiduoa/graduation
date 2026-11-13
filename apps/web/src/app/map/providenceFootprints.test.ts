@@ -64,6 +64,36 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('uses localized traditional Chinese OSM names without allowing conflicting POI identities', () => {
+    // Synthetic OSM tag drift: a matching name:zh is not enough when an
+    // explicit Taiwanese/traditional name identifies a different building.
+    // This does not claim any actual campus OSM way currently has a mismatch.
+    const checked = { building: 'school', name: 'Guixa Library' };
+    for (const tags of [
+      { ...checked, 'name:zh-TW': '蓋夏圖書館' },
+      { ...checked, 'name:zh-Hant': '蓋夏圖書館' },
+      { ...checked, 'name:zh': '蓋夏圖書館', 'name:zh-TW': '蓋夏圖書館',
+        'name:zh-Hant': '蓋夏圖書館' },
+      { building: 'school', 'name:zh-TW': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+    for (const tags of [
+      { ...checked, 'name:zh': '蓋夏圖書館', 'name:zh-TW': '希嘉學苑' },
+      { ...checked, 'name:zh': '蓋夏圖書館', 'name:zh-Hant': '主顧樓' },
+      { ...checked, 'name:zh-TW': '蓋夏圖書館', 'name:zh-Hant': '希嘉學苑' },
+      { ...checked, 'name:zh-TW': '' },
+      { ...checked, 'name:zh-Hant': null },
+      { building: 'school', name: '主顧樓', 'name:zh-TW': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+  });
+
   it('does not render explicitly invisible or deleted OSM ways as current buildings', () => {
     // Synthetic Overpass-like metadata: a geometry/tag match alone is not
     // proof that an explicitly invisible element is still a visible building.
