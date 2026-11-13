@@ -154,9 +154,15 @@ function hasHiddenHtmlAttribute(token: string): boolean {
 function parseSimplePipeRow(line: string): string[] | null {
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
-  // HTML cells may contain teacher-only answers; never reconstruct them.
-  if (/<\/?[A-Za-z][\w:-]*(?=[\s/>])[^>]*>/u.test(trimmed) ||
-      trimmed.includes('<!--') || trimmed.includes('-->')) return null;
+  // Literal HTML in paired Markdown inline-code spans is visible lesson
+  // text (for example, a programming syntax table), not active HTML. An
+  // actual element or comment outside paired code still makes the entire
+  // table ambiguous, so hidden teacher-only cells are never reconstructed.
+  for (const marker of trimmed.matchAll(
+    /<\/?[A-Za-z][\w:-]*(?=[\s/>])[^>]*>|<!--|--!?>/gu,
+  )) {
+    if (!isInsideInlineCode(trimmed, marker.index ?? 0)) return null;
+  }
   // Only unescaped pipes outside paired inline-code spans separate columns.
   // Reject unmatched code spans rather than shift values into the wrong cells.
   const cells: string[] = [];

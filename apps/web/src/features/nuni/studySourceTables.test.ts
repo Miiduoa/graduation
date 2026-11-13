@@ -849,3 +849,55 @@ describe('multiline HTML markup cannot reveal hidden course tables', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(5));
   });
 });
+
+describe('visible Markdown inline-code examples in course source tables', () => {
+  it('keeps literal HTML tags and comments in a programming worksheet', () => {
+    const source = [
+      '| 語法 | 說明 |',
+      '| --- | --- |',
+      '| `<section hidden>` | 原始 HTML 語法範例 |',
+      '| `<!-- 草稿 -->` | 註解符號示範 |',
+      '| `<svg viewBox="0 0 20 20">` | 繪圖標籤示範 |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['語法', '說明'],
+      rows: [
+        ['`<section hidden>`', '原始 HTML 語法範例'],
+        ['`<!-- 草稿 -->`', '註解符號示範'],
+        ['`<svg viewBox="0 0 20 20">`', '繪圖標籤示範'],
+      ],
+    }]);
+  });
+
+  it('still rejects an active hidden HTML cell beside a safe inline-code example', () => {
+    const source = [
+      '| 名稱 | 內容 |',
+      '| --- | --- |',
+      '| 示範 | `<span hidden>` 和 <span hidden>未公布答案</span> |',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+
+  it('rejects an unmatched inline-code delimiter around an HTML element', () => {
+    const source = [
+      '| 名稱 | 內容 |',
+      '| --- | --- |',
+      '| 範例 | `<span hidden>尚未公開 |',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+
+  it('does not misclassify escaped backticks as a paired code span', () => {
+    const tick = String.fromCharCode(96);
+    const source = [
+      '| 名稱 | 內容 |',
+      '| --- | --- |',
+      '| 範例 | \\' + tick + '<span hidden>' + tick + ' 不是程式碼開頭 |',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+});
