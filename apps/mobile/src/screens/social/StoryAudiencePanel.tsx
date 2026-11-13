@@ -6,13 +6,27 @@ import { listStoryViewers, type CampusStoryDoc } from '../../services/stories';
 type ViewerPage = Awaited<ReturnType<typeof listStoryViewers>>;
 type Cursor = ViewerPage['nextCursor'];
 
-export function StoryAudiencePanel({
-  story,
-  onBack,
-}: {
+type StoryAudiencePanelProps = {
   story: CampusStoryDoc;
   onBack: () => void;
-}) {
+};
+
+/**
+ * The viewer list is private to a story, school, and author. Keep its
+ * pagination cursor and pending SDK reads inside that exact scope.
+ * A new scope remounts the list before stale viewers can be painted.
+ */
+export function StoryAudiencePanel(props: StoryAudiencePanelProps) {
+  const { id, schoolId, authorUid } = props.story;
+  return (
+    <StoryAudienceContents
+      key={JSON.stringify([schoolId, authorUid, id])}
+      {...props}
+    />
+  );
+}
+
+function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   const [page, setPage] = useState<ViewerPage>({ viewers: [], nextCursor: null });
   const [request, setRequest] = useState<{ cursor: Cursor }>({ cursor: null });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'denied'>('loading');
