@@ -58,6 +58,30 @@ test('all seven weekday codes and nonadjacent periods remain separate meetings',
   ]);
 });
 
+test('115-1 verified 20-minute breaks stay free in timetable and CSV round-trip', () => {
+  const time = 'M2M3M4MnM5M6M7';
+  const meetings = [{ time, room: '教室甲' }];
+  const expected = [
+    ['2', '09:00', '09:50'],
+    ['34n', '10:10', '13:00'],
+    ['56', '13:20', '15:10'],
+    ['7', '15:30', '16:20'],
+  ];
+  assert.deepEqual(nthuCourseMeetings(meetings, '1151').map(row =>
+    [row.periodLabel, row.startTime, row.endTime]), expected);
+  const csv = nthuTimetableImportCsv({ ...chemistry, time, room: '教室甲', meetings });
+  assert.ok(csv);
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  });
+  assert.deepEqual(parsed.rows.map(row => [row.periodLabel, row.startTime, row.endTime]), expected);
+  assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+  assert.ok(parsed.rows.every(row => row.location === '教室甲' &&
+    row.schoolId === 'nthu' && row.academicYear === '115' && row.semester === '1'));
+  // Do not infer clock breaks for terms without an audited timetable.
+  assert.deepEqual(nthuCourseMeetings(meetings, '1152').map(row => row.periodLabel), ['234n567']);
+});
+
 test('a real two-room course keeps each room, weekday and verified clock through the CSV importer', () => {
   const csv = nthuTimetableImportCsv(chemistry);
   const parsed = parsePersonalImport(csv, { kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '' });

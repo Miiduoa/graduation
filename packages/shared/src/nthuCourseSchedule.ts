@@ -26,6 +26,11 @@ const clocks: Record<string, readonly [string, string]> = {
 const periodOrder = '1234n56789abcd';
 const weekdays = 'MTWRFSU';
 
+function clockMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
 export type NthuCourseMeeting = {
   dayOfWeek: number;
   periodLabel: string;
@@ -48,8 +53,15 @@ export function nthuCourseMeetings(
     for (const [, day, period] of meeting.time.matchAll(/([MTWRFSU])([1-9nabcd])/g)) {
       const dayOfWeek = weekdays.indexOf(day) + 1;
       const previous = runs[runs.length - 1];
-      if (previous && previous.dayOfWeek === dayOfWeek &&
-        periodOrder.indexOf(period) === periodOrder.indexOf(previous.periodLabel.slice(-1)) + 1) {
+      const previousPeriod = previous?.periodLabel.slice(-1);
+      // Some consecutive official period numbers still have a 20-minute break.
+      // Only 115-1 has a verified clock table: keep longer breaks free instead
+      // of stretching a single timetable block across them.
+      const longVerifiedBreak = verified && previousPeriod !== undefined &&
+        clockMinutes(clocks[period][0]) - clockMinutes(clocks[previousPeriod][1]) > 10;
+      if (previous && previousPeriod && previous.dayOfWeek === dayOfWeek &&
+        periodOrder.indexOf(period) === periodOrder.indexOf(previousPeriod) + 1 &&
+        !longVerifiedBreak) {
         previous.periodLabel += period;
       } else {
         runs.push({ dayOfWeek, periodLabel: period });
