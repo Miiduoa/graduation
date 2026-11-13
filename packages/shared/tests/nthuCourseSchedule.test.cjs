@@ -166,3 +166,50 @@ test('duplicate weekday-periods across official room/time pairs require manual r
 
 // Keep the exhaustive clock/CSV matrix in the existing fixed CI test selection.
 require('./nthuCourseBreaks.cjs');
+
+
+test('115-1 NTHU CSV imports keep all three free breaks in a one-day ICS snapshot', () => {
+  const { previewPersonalCalendar, serializePersonalCalendar } =
+    require('../src/timetable/personalCalendarExport.ts');
+  const time = 'M2M3M4MnM5M6M7';
+  const meetings = [{ time, room: '教室甲' }];
+  const csv = nthuTimetableImportCsv({ ...chemistry, time, room: '教室甲', meetings });
+  assert.ok(csv);
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  });
+  assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+  const records = parsed.rows.map((row, index) => ({
+    ...row, id: 'confirmed-' + index, batchId: 'course-import',
+    importedAt: '2026-11-13T00:00:00.000Z',
+  }));
+  assert.equal(records.length, 4);
+  const foreign = { ...records[0], id: 'other-campus', schoolId: 'ncnu' };
+  const preview = previewPersonalCalendar([...records, foreign], {
+    schoolId: 'nthu', termKey: '115|1', start: '2026-11-16', end: '2026-11-16',
+  });
+  const expected = [
+    ['09:00', '09:50'], ['10:10', '13:00'],
+    ['13:20', '15:10'], ['15:30', '16:20'],
+  ];
+  const taipeiClock = timestamp => new Date(timestamp + 8 * 3600000).toISOString().slice(11, 16);
+  assert.deepEqual(preview.events.map(event => [
+    taipeiClock(event.startAt), taipeiClock(event.endAt),
+  ]), expected);
+  assert.equal(preview.skipped.length, 0);
+  assert.ok(preview.events.every(event =>
+    event.row.schoolId === 'nthu' && event.row.location === '教室甲'));
+  const ics = serializePersonalCalendar(preview, new Date('2026-11-13T00:00:00.000Z'));
+  const blocks = ics.match(/BEGIN:VEVENT\r\n[\s\S]*?END:VEVENT/g) ?? [];
+  const timestamps = blocks.map(block => [
+    block.match(/^DTSTART:(\S+)/m)?.[1],
+    block.match(/^DTEND:(\S+)/m)?.[1],
+  ]);
+  assert.deepEqual(timestamps, [
+    ['20261116T010000Z', '20261116T015000Z'],
+    ['20261116T021000Z', '20261116T050000Z'],
+    ['20261116T052000Z', '20261116T071000Z'],
+    ['20261116T073000Z', '20261116T082000Z'],
+  ]);
+  assert.equal(new Set(preview.events.map(event => event.uid)).size, 4);
+});
