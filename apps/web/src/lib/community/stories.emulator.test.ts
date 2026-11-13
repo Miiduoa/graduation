@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { collection, doc, getDocFromServer, getDocs, getDocsFromServer, limit, orderBy, query, where, type Firestore } from 'firebase/firestore';
+import { collection, doc, getDocFromServer, getDocs, getDocsFromServer, limit, orderBy, query, startAfter, where, type Firestore } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDb } from '@/lib/firebase';
 import { listActiveStoriesForSchool } from './firestore';
@@ -202,6 +202,60 @@ describeEmulator('story list client against the repository Firestore rules', () 
     });
     await expect(audience()).rejects.toMatchObject({ code: 'permission-denied' });
     await expect(receipt()).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
+
+  it('rechecks a second audience page after school membership changes and story expiry', async () => {
+    const path = 'campusStories/active-web/schools/pu/authors/alice/views';
+    // Use the same 21-receipt page size as the native service (20 visible + lookahead).
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all(Array.from({ length: 23 }, (_, index) => {
+        const uid = `viewer-${String(index).padStart(2, '0')}`;
+        return db.doc(`${path}/${uid}`).set({
+          viewerUid: uid,
+          viewedAt: new Date(now - index * 1_000),
+        });
+      }));
+    });
+
+    const pageQuery = (cursor?: Awaited<ReturnType<typeof getDocsFromServer>>['docs'][number]) =>
+      query(
+        collection(alice, path),
+        orderBy('viewedAt', 'desc'),
+        ...(cursor ? [startAfter(cursor)] : []),
+        limit(21),
+      );
+
+    const firstPage = await getDocsFromServer(pageQuery());
+    expect(firstPage.size).toBe(21);
+    expect(firstPage.docs[0].id).toBe('viewer-00');
+    const previousCursor = firstPage.docs[20];
+
+    // Reusing a cursor issued while authorized must not bypass later revocation.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await expect(getDocsFromServer(pageQuery(previousCursor))).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+
+    // After restoration, start with a new server first page and obtain the remaining two.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'active' });
+    });
+    const newFirstPage = await getDocsFromServer(pageQuery());
+    expect(newFirstPage.size).toBe(21);
+    const nextPage = await getDocsFromServer(pageQuery(newFirstPage.docs[20]));
+    expect(nextPage.docs.map((row) => row.id)).toEqual(['viewer-21', 'viewer-22']);
+
+    // A cursor must not retain read access when the underlying story expires.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('campusStories/active-web').update({ expiresAt: now - 1_000 });
+    });
+    await expect(getDocsFromServer(pageQuery(newFirstPage.docs[20]))).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
   });
 
   it('rejects a classmate from another school', async () => {
