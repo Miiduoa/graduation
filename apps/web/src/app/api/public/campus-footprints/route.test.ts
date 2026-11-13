@@ -241,6 +241,41 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { label: 'zero bytes', declared: '0', firstChunk: new TextEncoder().encode(osmPayload) },
+    { label: 'fewer bytes than the first chunk', declared: '1',
+      firstChunk: new TextEncoder().encode(osmPayload.slice(0, 20)) },
+  ])('rejects a stalled identity stream declaring $label without waiting for its 12s deadline',
+    async ({ declared, firstChunk }) => {
+      vi.useFakeTimers();
+      let cancelled = 0;
+      // The response sends data but never reaches EOF. A contradictory
+      // Content-Length must be rejected immediately, not after a 12s stall.
+      const stalled = new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(firstChunk); },
+        cancel() {
+          cancelled += 1;
+          return new Promise<void>(() => {});
+        },
+      });
+      const upstream = vi.fn().mockResolvedValue(new Response(stalled, {
+        status: 200, headers: { 'Content-Length': declared },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      let settled = false;
+      const pendingResponse = GET().then((result) => { settled = true; return result; });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(settled).toBe(true);
+      const response = await pendingResponse;
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(cancelled).toBe(1);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    });
+
   it('accepts an identity Overpass body when its declared length matches', async () => {
     const upstream = vi.fn().mockImplementation(async () =>
       new Response(osmPayload, {
