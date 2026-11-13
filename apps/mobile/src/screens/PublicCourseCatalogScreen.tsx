@@ -125,6 +125,7 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
     </Text>)}
     {!meetings && rawMeetings.length === 0 && <Text style={body}>上課時間未提供</Text>}
     <Text style={body}>{course.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期').replace(/^(\d{3})3$/, '$1 學年度暑期')}</Text>
+    {!csv && <Text style={body}>校方課號或上課節次尚無法安全匯入（可能缺漏或重複），請先開啟官方課程目錄核對。</Text>}
     {csv && <View style={{ gap: 8, marginTop: 8 }}>
       <Button text="帶入課表核對" kind="primary" onPress={() => { void review(course); }} />
       {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}

@@ -74,6 +74,17 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   const identity = nthuCourseIdentity(course.code);
   const meetings = nthuCourseMeetings(course.meetings ?? [], course.semester);
   if (!identity || !meetings || identity.semester !== course.semester || identity.section !== course.section) return null;
+  // Multiple official room/time pairs may describe one course. A repeated
+  // weekday/period would duplicate or overlap the student's imported timetable;
+  // require manual verification rather than silently importing both rooms.
+  const occupied = new Set<string>();
+  for (const meeting of course.meetings ?? []) {
+    for (const [, day, period] of meeting.time.matchAll(/([MTWRFSU])([1-9nabcd])/g)) {
+      const slot = `${day}:${period}`;
+      if (occupied.has(slot)) return null;
+      occupied.add(slot);
+    }
+  }
   return serializePersonalImportsCsv(meetings.map((meeting, index) => ({
     id: [course.semester, course.code, course.section, index].join('-'),
     kind: 'timetable',

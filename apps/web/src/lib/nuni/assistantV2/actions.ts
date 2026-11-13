@@ -57,7 +57,10 @@ export function routeOwner(token: unknown, binding: Binding, secret: string) {
   if (payload.binding !== hash(binding)) return fail('CONFIRMATION_REVOKED', 409);
   return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret);
 }
-const proposals = new Map<string, { seq: string; expires: number; revoked: Set<string> }>();
+const proposals = new Map<string, {
+  seq: string; expires: number; revoked: Set<string>;
+  issued: string[]; dispatched: Set<string>;
+}>();
 type CalendarOperation = {
   bindingKey: string;
   proposalSeq: string;
@@ -72,7 +75,7 @@ const calendarOperations = new Map<string, CalendarOperation>();
 export function beginProposal(binding: Binding, now: number) {
   for (const [key, value] of proposals) if (value.expires <= now) proposals.delete(key);
   const seq = randomUUID();
-  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set() });
+  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set(), issued: [], dispatched: new Set() });
   for (const [key, value] of calendarOperations)
     if (!value.pending && proposals.get(value.bindingKey)?.seq !== value.proposalSeq)
       calendarOperations.delete(key);
@@ -159,7 +162,7 @@ export function signCard(
     exp: now + 300000,
   };
   const body = Buffer.from(canonical(payload)).toString('base64url');
-  return {
+  const card: Card = {
     tool,
     args,
     token: body + '.' + mac(secret, body),
@@ -172,6 +175,9 @@ export function signCard(
           ? '個人行事曆（無推播提醒）'
           : pageHref(args, binding.schoolId),
   };
+  const current = proposals.get(hash(binding));
+  if (current?.seq === proposalSeq) current.issued.push(mutationId);
+  return card;
 }
 function signedPayload(raw: unknown, secret: string) {
   const v = object(raw, ['token', 'args']);
@@ -273,6 +279,37 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
   return authenticated.card;
 }
 
+/** Require the complete, untouched issuance order of a never-dispatched plan. */
+export function verifyRevokedCalendarPlan(
+  binding: Binding, raw: unknown, secret: string, now: number,
+) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 16)
+    return fail('INVALID_PLAN_REVISION');
+  const authenticated = raw.map(value => authenticatedCard(binding, value, secret, now));
+  const current = liveAuthorization(binding, authenticated[0].payload, now, true);
+  const cards = authenticated.map(value => value.card);
+  if (cards.length !== current.issued.length ||
+      cards.some((card, index) => card.tool !== 'propose_personal_event' ||
+        card.mutationId !== current.issued[index]) ||
+      new Set(cards.map(card => card.mutationId)).size !== cards.length)
+    return fail('INVALID_PLAN_REVISION');
+  for (const [index, value] of authenticated.entries()) {
+    if (liveAuthorization(binding, value.payload, now, true) !== current)
+      return fail('CONFIRMATION_REVOKED', 409);
+    const previous = cards[index - 1], card = value.card;
+    if (previous
+      ? card.revision !== previous.revision + 1 ||
+        card.previousEventHash !== hash(eventRecord(eventArgs(previous.args), binding.schoolId, previous.mutationId, previous.iat))
+      : card.previousEventHash !== undefined)
+      return fail('INVALID_PLAN_REVISION');
+    const operation = calendarOperations.get(hash(binding) + ':' + card.mutationId);
+    if (operation?.pending || operation?.uncertain) return fail('EXECUTION_UNKNOWN', 503);
+    if (!current.revoked.has(card.mutationId) || current.dispatched.has(card.mutationId))
+      return fail('PLAN_REVISION_UNRESOLVED', 409);
+  }
+  return cards;
+}
+
 async function calendarOperation<T>(
   binding: Binding,
   authenticated: AuthenticatedCard,
@@ -305,7 +342,7 @@ function elapsedClock(now: number, clock?: () => number) {
   return clock || (() => now + (Date.now() - started));
 }
 
-async function calendarLedger(binding: Binding, adapter: Adapter) {
+export async function calendarLedger(binding: Binding, adapter: Adapter) {
   operationSignal()?.throwIfAborted();
   const ledger = await adapter.ledger();
   operationSignal()?.throwIfAborted();
@@ -498,6 +535,9 @@ export async function confirm(
       return receipt;
     }
     if (match.conflict) return fail('CONFIRMATION_CONFLICT', 409);
+    // A dispatched write may still commit after its transport failed. An
+    // absent read is not proof of failure; only read back the original action.
+    if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
     if (
       ledger.revision !== p.revision ||
       (p.previousEventHash &&
@@ -520,6 +560,8 @@ export async function confirm(
       return fail('EVENT_START_PASSED', 409);
     operationSignal()?.throwIfAborted();
     state.uncertain = true;
+    const proposal = proposals.get(hash(binding));
+    if (proposal && proposal.seq === authenticated.payload.proposalSeq) proposal.dispatched.add(p.mutationId);
     await adapter.write({
       schoolId: binding.schoolId,
       expectedRevision: p.revision,

@@ -58,6 +58,17 @@ export function ncnuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   const meetings = ncnuCourseMeetings(course.time, course.semester);
   const term = /^(\d{3})([12])$/.exec(course.semester);
   if (!meetings || !term) return null;
+  // One course cannot safely import the same weekday/period twice, even when
+  // the provider splits it into separate day groups. Keep the raw public listing
+  // for manual verification instead of writing overlapping personal sessions.
+  const occupied = new Set<string>();
+  for (const [, day, periods] of course.time.matchAll(/([1-7])([a-mxyz]+)/g)) {
+    for (const period of periods) {
+      const slot = `${day}:${period}`;
+      if (occupied.has(slot)) return null;
+      occupied.add(slot);
+    }
+  }
   return serializePersonalImportsCsv(meetings.map((meeting, index) => ({
     id: [course.semester, course.code, course.section, index].join('-'),
     kind: 'timetable',

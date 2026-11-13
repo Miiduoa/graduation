@@ -361,6 +361,46 @@ it('serializes course clipboard writes and shows confirmation only for the lates
   expect(within(cards[1]).getByRole('link', { name: '前往課表匯入' })).toBeTruthy();
 });
 
+it.each(['edit', 'unmount'] as const)(
+  'does not write a queued old course to the clipboard after %s of the search page',
+  async (reason) => {
+    const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
+    let finishFirst!: () => void;
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }))
+      .mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const view = render(<PublicCourseSearch {...props} />);
+    try {
+      submit('課');
+      const cards = await screen.findAllByRole('listitem');
+      fireEvent.click(within(cards[0]).getByRole('button', { name: '複製課表匯入資料' }));
+      await act(async () => { await Promise.resolve(); });
+      expect(writeText).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(cards[1]).getByRole('button', { name: '複製課表匯入資料' }));
+      if (reason === 'edit') {
+        fireEvent.change(screen.getByRole('searchbox'), { target: { value: '下一筆課' } });
+      } else {
+        view.unmount();
+      }
+      await act(async () => { finishFirst(); await Promise.resolve(); });
+      // The first native/browser clipboard operation was already in flight;
+      // the queued second operation must never start after the user departs.
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
+      if (reason === 'edit') {
+        expect(screen.queryByText(/已複製/)).toBeNull();
+        expect(screen.queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+      }
+    } finally {
+      // Keep the module-level clipboard queue settled for subsequent tests.
+      await act(async () => { finishFirst?.(); });
+      view.unmount();
+    }
+  },
+);
+
 it('skips an obsolete queued copy before it reaches the clipboard, even across two classes', async () => {
   const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
@@ -635,5 +675,23 @@ it.each([
   expect(await screen.findByRole('alert')).toBeTruthy();
   expect(screen.queryByText(course.title)).toBeNull();
   expect(screen.queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it.each(['ncnu', 'nthu'] as const)('keeps a public %s course readable but blocks a duplicate weekday-period import', async (schoolId) => {
+  const original = schoolId === 'ncnu' ? course : nthuCourse;
+  const invalid = schoolId === 'ncnu'
+    ? { ...original, time: '5bc5cd', title: '重複節次測試課程' }
+    : { ...original, title: '重複節次測試課程', time: 'M3M4\nM4M5', room: '教室甲\n教室乙', meetings: [
+        { time: 'M3M4', room: '教室甲' }, { time: 'M4M5', room: '教室乙' },
+      ] };
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(filteredResponse([invalid], { weekday: schoolId === 'ncnu' ? 5 : 1 }, { schoolId }))));
+  render(<PublicCourseSearch {...(schoolId === 'ncnu' ? props : nthuProps)} weekdayParameters={[schoolId === 'ncnu' ? '5' : '1']} />);
+  submit('重複');
+  const heading = await screen.findByRole('heading', { name: '重複節次測試課程' });
+  const card = heading.closest('li')!;
+  expect(within(card).getByText(/上課節次尚無法安全匯入/)).toBeTruthy();
+  expect(within(card).queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(within(card).queryByRole('button', { name: '複製課表匯入資料' })).toBeNull();
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
 });
