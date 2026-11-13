@@ -167,6 +167,43 @@ it('includes courseware-only materials and deduplicates items shared by both fee
   );
 });
 
+it('does not treat filtered courseware entries as another announcement feed', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+    ok: true,
+    value: query === 'type=courseware_activity'
+      ? [LMS_FIXTURE_MATERIAL, {
+        id: 40099, title: '不應出現在公告列表', type: 'announcement',
+        content: '篩選教材端點不是公告來源',
+      }]
+      : [LMS_FIXTURE_MATERIAL],
+  }));
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.courseErrors).toEqual([]);
+});
+
+it('reports incomplete announcements when only the filtered courseware feed succeeds', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: true, value: [LMS_FIXTURE_MATERIAL] }
+      : { ok: false, status: 503 });
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 404 });
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.announcements).toEqual([]);
+  expect(body.result.courseErrors).toEqual([
+    expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 }),
+    expect.objectContaining({ courseId: 10001, area: 'announcements', status: 404 }),
+  ]);
+});
+
 it('does not cache partial materials when the filtered courseware feed rejects the session', async () => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
