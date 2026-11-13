@@ -96,7 +96,7 @@ describe('Providence OSM building outlines', () => {
 
   it('keeps credible OSM storey counts without inferring building height', () => {
     // Synthetic count annotations do not establish a surveyed height.
-    for (const levels of ['1', '5', '1.5', ' 2 ']) {
+    for (const levels of ['1', '5', '05', ' 2 ']) {
       const buildings = parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'school', 'building:levels': levels })],
       });
