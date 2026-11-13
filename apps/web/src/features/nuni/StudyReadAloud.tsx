@@ -27,6 +27,16 @@ function splitStudySpeech(text: string): string[] {
         if (!segment || !text.startsWith(segment, verifiedOffset)) {
           throw new Error('invalid on-device grapheme segmentation');
         }
+        // A damaged WebView can yield individual UTF-16 code units while
+        // still concatenating back to the full source. Never trust a segment
+        // that starts with a low surrogate or ends with a high surrogate:
+        // it would split an emoji in half at a mobile speech chunk boundary.
+        const firstUnit = segment.charCodeAt(0);
+        const lastUnit = segment.charCodeAt(segment.length - 1);
+        if ((firstUnit >= 0xdc00 && firstUnit <= 0xdfff) ||
+            (lastUnit >= 0xd800 && lastUnit <= 0xdbff)) {
+          throw new Error('broken surrogate pair in on-device grapheme segmentation');
+        }
         verifiedOffset += segment.length;
         if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
           units.push(segment);

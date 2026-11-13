@@ -565,3 +565,33 @@ it.each([
   expect(speak).toHaveBeenCalledTimes(chunks.length);
   expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
 });
+
+it('rejects a silent WebView grapheme iterator that splits an emoji into UTF-16 halves', () => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), {
+    Segmenter: class {
+      segment(text: string) {
+        // This iterator rejoins to the exact source but its boundaries are
+        // invalid: the surrogate halves are emitted as separate units.
+        return text.split('').map((segment) => ({ segment }));
+      }
+    },
+  }));
+  const prefix = '甲'.repeat(159);
+  const sourceText = prefix + '🧠' + '乙'.repeat(200);
+  render(<StudyReadAloud text={sourceText} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 12; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    expect(utterance.voice).toBe(local);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks.join('')).toBe(sourceText);
+  expect(chunks[0]).toBe(prefix);
+  expect(chunks[1].startsWith('🧠')).toBe(true);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
