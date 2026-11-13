@@ -1,5 +1,6 @@
 import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
+import { courseworkStudyGuard, verifyCourseworkStudyGuard } from './courseworkStudy';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
@@ -16,9 +17,11 @@ import {
   hash,
   id,
   object,
+  requireAssistantPermission,
   type Adapter,
   type Binding,
   type Card,
+  type CourseworkStudyGuard,
   type EventArgs,
   type Ledger,
   type Obj,
@@ -54,7 +57,10 @@ export function routeOwner(token: unknown, binding: Binding, secret: string) {
   if (payload.binding !== hash(binding)) return fail('CONFIRMATION_REVOKED', 409);
   return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret);
 }
-const proposals = new Map<string, { seq: string; expires: number; revoked: Set<string> }>();
+const proposals = new Map<string, {
+  seq: string; expires: number; revoked: Set<string>;
+  issued: string[]; dispatched: Set<string>;
+}>();
 type CalendarOperation = {
   bindingKey: string;
   proposalSeq: string;
@@ -69,7 +75,7 @@ const calendarOperations = new Map<string, CalendarOperation>();
 export function beginProposal(binding: Binding, now: number) {
   for (const [key, value] of proposals) if (value.expires <= now) proposals.delete(key);
   const seq = randomUUID();
-  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set() });
+  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set(), issued: [], dispatched: new Set() });
   for (const [key, value] of calendarOperations)
     if (!value.pending && proposals.get(value.bindingKey)?.seq !== value.proposalSeq)
       calendarOperations.delete(key);
@@ -125,6 +131,7 @@ export function signCard(
   now: number,
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
+  studyGuard?: CourseworkStudyGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
   const args =
@@ -143,6 +150,7 @@ export function signCard(
     binding: hash(binding),
     tool,
     argsHash: hash(args),
+    ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -154,7 +162,7 @@ export function signCard(
     exp: now + 300000,
   };
   const body = Buffer.from(canonical(payload)).toString('base64url');
-  return {
+  const card: Card = {
     tool,
     args,
     token: body + '.' + mac(secret, body),
@@ -167,6 +175,9 @@ export function signCard(
           ? '個人行事曆（無推播提醒）'
           : pageHref(args, binding.schoolId),
   };
+  const current = proposals.get(hash(binding));
+  if (current?.seq === proposalSeq) current.issued.push(mutationId);
+  return card;
 }
 function signedPayload(raw: unknown, secret: string) {
   const v = object(raw, ['token', 'args']);
@@ -220,6 +231,8 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   )
     return fail('CONFIRMATION_INVALID', 409);
   if (p.issuer !== undefined) machineId(p.issuer);
+  const studyGuard = p.studyGuard === undefined ? undefined : courseworkStudyGuard(p.studyGuard);
+  if (studyGuard && p.tool !== 'propose_personal_event') return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -237,6 +250,7 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
     card: {
       tool: p.tool as Card['tool'],
       args,
+      ...(studyGuard ? { studyGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -263,6 +277,37 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
   const authenticated = authenticatedCard(binding, raw, secret, now);
   liveAuthorization(binding, authenticated.payload, now);
   return authenticated.card;
+}
+
+/** Require the complete, untouched issuance order of a never-dispatched plan. */
+export function verifyRevokedCalendarPlan(
+  binding: Binding, raw: unknown, secret: string, now: number,
+) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 16)
+    return fail('INVALID_PLAN_REVISION');
+  const authenticated = raw.map(value => authenticatedCard(binding, value, secret, now));
+  const current = liveAuthorization(binding, authenticated[0].payload, now, true);
+  const cards = authenticated.map(value => value.card);
+  if (cards.length !== current.issued.length ||
+      cards.some((card, index) => card.tool !== 'propose_personal_event' ||
+        card.mutationId !== current.issued[index]) ||
+      new Set(cards.map(card => card.mutationId)).size !== cards.length)
+    return fail('INVALID_PLAN_REVISION');
+  for (const [index, value] of authenticated.entries()) {
+    if (liveAuthorization(binding, value.payload, now, true) !== current)
+      return fail('CONFIRMATION_REVOKED', 409);
+    const previous = cards[index - 1], card = value.card;
+    if (previous
+      ? card.revision !== previous.revision + 1 ||
+        card.previousEventHash !== hash(eventRecord(eventArgs(previous.args), binding.schoolId, previous.mutationId, previous.iat))
+      : card.previousEventHash !== undefined)
+      return fail('INVALID_PLAN_REVISION');
+    const operation = calendarOperations.get(hash(binding) + ':' + card.mutationId);
+    if (operation?.pending || operation?.uncertain) return fail('EXECUTION_UNKNOWN', 503);
+    if (!current.revoked.has(card.mutationId) || current.dispatched.has(card.mutationId))
+      return fail('PLAN_REVISION_UNRESOLVED', 409);
+  }
+  return cards;
 }
 
 async function calendarOperation<T>(
@@ -297,7 +342,7 @@ function elapsedClock(now: number, clock?: () => number) {
   return clock || (() => now + (Date.now() - started));
 }
 
-async function calendarLedger(binding: Binding, adapter: Adapter) {
+export async function calendarLedger(binding: Binding, adapter: Adapter) {
   operationSignal()?.throwIfAborted();
   const ledger = await adapter.ledger();
   operationSignal()?.throwIfAborted();
@@ -370,14 +415,23 @@ export async function reconcile(
   if (p.tool !== 'propose_personal_event') return fail('INVALID_INPUT', 422);
   const currentTime = elapsedClock(now, clock);
   return calendarOperation(binding, authenticated, async (state) => {
-    const ledger = await calendarLedger(binding, adapter), checkedAt = currentTime();
+    const ledger = await calendarLedger(binding, adapter);
+    let checkedAt = currentTime();
     const match = calendarMatch(binding, p, ledger);
     if (match.record) {
       const receipt = calendarReceipt(binding, p, ledger, checkedAt, true);
       state.uncertain = false;
       return receipt;
     }
-    const authorizationValid = hasAuthorization(binding, raw, secret, checkedAt);
+    let permissionGranted = false;
+    try {
+      await requireAssistantPermission(adapter, 'createPersonalEvent');
+      permissionGranted = true;
+    } catch {
+      // Receipt checks stay available even when the setting cannot be read.
+    }
+    checkedAt = currentTime();
+    const authorizationValid = permissionGranted && hasAuthorization(binding, raw, secret, checkedAt);
     if (match.conflict) return calendarCheck(binding, p, ledger, checkedAt, 'conflict', authorizationValid, false);
     if (knownRevoked(binding, authenticated)) {
       if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
@@ -443,6 +497,7 @@ export async function confirm(
   const currentTime = elapsedClock(now, clock);
   const p = verifyCard(binding, raw, secret, now);
   if (p.tool === 'propose_food_order') {
+    await requireAssistantPermission(adapter, 'prepareFoodOrder');
     const cart = cartArgs(p.args.cart);
     if (
       !(await adapter.realms()).some(
@@ -451,16 +506,22 @@ export async function confirm(
     )
       return fail('FORBIDDEN_SCOPE', 403);
     if (!adapter.food) return fail('ORDERING_DISABLED', 403);
-    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired)
+    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired) {
+      await requireAssistantPermission(adapter, 'prepareFoodOrder');
+      verifyCard(binding, raw, secret, currentTime());
+      operationSignal()?.throwIfAborted();
       return { href: String(p.args.href), reason: p.args.reason };
+    }
     const summary = priceCart(cart, await adapter.food.menu(cart.tenantId, cart.locationId));
     if (canonical(summary) !== canonical(p.args.summary)) return fail('PRICE_CHANGED', 409);
+    await requireAssistantPermission(adapter, 'prepareFoodOrder');
     verifyCard(binding, raw, secret, currentTime());
     operationSignal()?.throwIfAborted();
     return adapter.food.submit(cart, p.mutationId);
   }
   if (p.tool === 'propose_open_page') return { href: pageHref(p.args, binding.schoolId) };
   if (!writes) return fail('ASSISTANT_WRITE_UNAVAILABLE', 403);
+  await requireAssistantPermission(adapter, 'createPersonalEvent');
   const authenticated = authenticatedCard(binding, raw, secret, now);
   return calendarOperation(binding, authenticated, async (state) => {
     verifyCard(binding, raw, secret, currentTime());
@@ -474,6 +535,9 @@ export async function confirm(
       return receipt;
     }
     if (match.conflict) return fail('CONFIRMATION_CONFLICT', 409);
+    // A dispatched write may still commit after its transport failed. An
+    // absent read is not proof of failure; only read back the original action.
+    if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
     if (
       ledger.revision !== p.revision ||
       (p.previousEventHash &&
@@ -482,15 +546,22 @@ export async function confirm(
       return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
     }
     const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
+    if (p.studyGuard)
+      await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
+    await requireAssistantPermission(adapter, 'createPersonalEvent');
     const writeTime = currentTime();
     verifyCard(binding, raw, secret, writeTime);
     const [start] = eventInterval(event);
+    if (p.studyGuard?.policy === 'coursework-gap' && start <= writeTime)
+      return fail('STUDY_SLOT_CHANGED', 409);
     // An explicitly backdated entry can still be recorded. Recheck a prospective
     // timed card after reading the ledger and before its first write.
     if (!event.allDay && start >= p.iat && start < Math.floor(writeTime / 60000) * 60000)
       return fail('EVENT_START_PASSED', 409);
     operationSignal()?.throwIfAborted();
     state.uncertain = true;
+    const proposal = proposals.get(hash(binding));
+    if (proposal && proposal.seq === authenticated.payload.proposalSeq) proposal.dispatched.add(p.mutationId);
     await adapter.write({
       schoolId: binding.schoolId,
       expectedRevision: p.revision,

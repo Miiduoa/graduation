@@ -1,0 +1,113 @@
+name: Assistant Plan Revision Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/features/nuni/Assistant.tsx'
+      - 'apps/web/src/features/nuni/AssistantPlanRevisionFlow.test.tsx'
+      - 'apps/web/src/features/nuni/AssistantProtectedPlanFlow.test.tsx'
+      - 'apps/web/src/features/nuni/AssistantRevisionDraftFlow.test.tsx'
+      - 'apps/web/src/lib/nuni/assistantV2/**'
+      - 'apps/web/src/features/nuni/assistant/**'
+      - 'apps/web/src/lib/assistantCalendarExecution*'
+      - 'apps/web/src/lib/assistantPlanProtection*'
+      - 'apps/web/src/lib/assistantPlanShift*'
+      - 'apps/web/src/lib/assistantShiftPlanDraft*'
+      - 'apps/web/src/lib/assistantPlanDraftStorage*'
+      - 'apps/web/src/lib/assistantPlanRevisionDraft*'
+      - 'apps/web/src/lib/assistantPrecisePlanDraft*'
+      - 'apps/web/src/lib/assistantExecutionJournal*'
+      - 'apps/web/src/lib/personalImports*'
+      - 'apps/web/src/app/globals.css'
+      - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/imports/**'
+      - 'scripts/qa/assistant-plan-revision/**'
+      - 'apps/web/tsconfig.json'
+      - 'apps/web/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/assistant-plan-revision-browser.yml'
+  push:
+    branches: [feat/agent-confirmation-workflow-20261109]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assistant-plan-revision-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Revision preview and per-card confirmation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify in-process revision service contracts
+        run: |
+          mkdir -p artifacts/assistant-plan-revision
+          node scripts/build-functions-shared.cjs
+          pnpm --filter web exec vitest run \
+            src/lib/nuni/assistantV2/protectedPlanServiceFlow.test.ts \
+            src/lib/nuni/assistantV2/directPlanRevision.test.ts \
+            src/lib/nuni/assistantV2/selectPlanRevision.test.ts \
+            src/lib/nuni/assistantV2/shiftPlanRevision.test.ts \
+            src/lib/assistantPlanShift.test.ts \
+            src/features/nuni/assistant/shiftPlanRevision.test.ts \
+            src/features/nuni/assistant/AssistantPlanShift.test.tsx \
+            src/features/nuni/assistant/planSelection.test.ts \
+            src/features/nuni/assistant/AssistantPlanSelection.test.tsx \
+            src/features/nuni/assistant/AssistantCards.test.tsx \
+            src/lib/assistantPrecisePlanDraft.test.ts \
+            src/lib/assistantShiftPlanDraft.test.ts \
+            src/features/nuni/assistant/useShiftPlanDraft.test.tsx \
+            src/features/nuni/assistant/AssistantShiftPlanDraftRecovery.test.tsx \
+            src/features/nuni/assistant/usePrecisePlanDraft.test.tsx \
+            src/features/nuni/assistant/AssistantPrecisePlanDraftRecovery.test.tsx \
+            src/features/nuni/assistant/AssistantPrecisePlanRevision.test.tsx \
+            src/lib/nuni/assistantV2/protectedPlanRunner.test.ts \
+            src/lib/nuni/assistantV2/protectedPlan.test.ts \
+            src/lib/nuni/assistantV2/planRevision.test.ts \
+            src/lib/nuni/assistantV2/calendarExecution.test.ts \
+            --maxWorkers=4 --reporter=default --reporter=json \
+            --outputFile="$GITHUB_WORKSPACE/artifacts/assistant-plan-revision/service-results.json"
+      - name: Verify Assistant to service revision gates without sockets
+        run: |
+          pnpm --filter web exec vitest run \
+            --config src/lib/nuni/assistantV2/vitest.service-flow.config.mjs \
+            --reporter=default --reporter=json \
+            --outputFile="$GITHUB_WORKSPACE/artifacts/assistant-plan-revision/client-service-results.json"
+      - name: Install Chromium test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Bundle actual Assistant with fixed fake API
+        run: node scripts/qa/assistant-plan-revision/build.mjs
+      - name: Check revision, confirmation and controlled recovery
+        run: python scripts/qa/assistant-plan-revision/check.py
+      - name: Upload screenshots and request ledgers
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: assistant-plan-revision-browser
+          path: artifacts/assistant-plan-revision
+          retention-days: 7

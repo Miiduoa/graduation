@@ -144,6 +144,7 @@ test('shows every membership state without converting it into a global teacher o
   for (const label of ['待驗證', '已驗證', '未通過', '已撤銷'])
     expect(view.getByText(label)).toBeTruthy();
   expect(view.queryByText('開啟網頁管理工作台')).toBeNull();
+  expect(view.queryByRole('button', { name: '查閱操作紀錄' })).toBeNull();
   expect(mockAuth.request).toHaveBeenCalledWith('memberships', 'account-a');
 });
 
@@ -577,4 +578,21 @@ test.each([{}, { error: '無法確認帳號' }])('preserves merchant intent on b
   await act(async () => fireEvent.press(view.getByRole('button', { name: '開啟網頁版登入' })));
   expect(open).toHaveBeenCalledWith('https://nuni.tw/merchant');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
+
+test('opens the operator audit log directly and offers the same action after a browser failure', async () => {
+  mockAuth.session = { ...principal, isPlatformOperator: true };
+  const open = jest.spyOn(Linking, 'openURL')
+    .mockReset()
+    .mockRejectedValueOnce(new Error('browser unavailable'))
+    .mockResolvedValue(undefined);
+  const view = render(<NuniWorkspaceScreen />);
+  fireEvent.press(view.getByRole('tab', { name: '帳號' }));
+  await view.findByText(/目前沒有學校資格紀錄/);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查閱操作紀錄' })));
+  expect(open).toHaveBeenCalledWith('https://nuni.tw/admin#audit');
+  expect(view.getByText('無法開啟網頁，請稍後重試。')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查閱操作紀錄' })));
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(view.queryByText('無法開啟網頁，請稍後重試。')).toBeNull();
 });

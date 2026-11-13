@@ -668,3 +668,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補：直接 Firestore SDK create 不能自行標記 AI 或伺服器生成，且不可將發文者名稱設定為「助理回覆」；update 的 `isAI`、`generatedBy`、`assistantReply` 欄位保持伺服器專用，最終內容仍不能標示 AI 或冒充保留名稱。正常學生發文、學生與教師編輯、既有票數授權、Admin SDK 真實 AI 回覆路徑維持。新增 `backend/tests/security-rules.test.js` 的合成 Firebase Emulator 回歸，包含初始偽造／更新偽造、正常操作、跨校身分與撤權重放；**回歸結果仍須核對新精確 head 的 CI，未通過前不列為已驗證。**
 
 **仍未解決**：未發布父貼文 `get/list` 直接讀取、GCS/Supabase 已發 URL 撤權、真 GCS 隔離 bucket 競態、歷史附件可信引用、minimatch 雙鎖檔、正式發布與回復。父貼文 list 必須配合 Web/Mobile feed 和歷史資料轉換，避免直接收緊造成查詢失敗。本項只修改開發分支，無正式資料、憑證、token、migration、部署、E 校園或未授權 npm/pnpm audit；App 5504170 精確 head 審查通過前不得由此 PR 合併。
+
+
+### 2026-11-14：精確合併預覽 Web CI 失敗與週末測試日期（待新 head CI 驗證）
+
+- PR #577 精確父 head `4aabc336be2dcb0096a57111886fbd107583e8ce` 的主 CI [#43466697560](https://github.com/Miiduoa/graduation/actions/runs/43466697560) **completed/failure**。Web job #132027623409 顯示 4 個失敗、14,489 通過、63 略過，失敗全部來自 `TodayCampusEntry.test.tsx`，其餘 Functions／Rules／Security Gates／Mobile／建置／Lint 皆成功；同一 head CodeQL #43466697769 與 Course access #43466697555 均成功。不能把這個 CI 標為綠燈。
+- 這四個案例是 main `75bda317cdbac687ce14899736186eda07e9754a` 新增的案例，原 PR head 尚未包含，只有 GitHub 合併預覽 `63c20294d4b39e63669089bce6ec9197f4b2f895` 會執行。測試固定合成校園 `pu` 的課表，但 `saveTodayLesson()` 以 CI 真實日期產生星期六的課程。該校課表的 `periodProfileForSchool` 正確拒絕週末星期六／日資料，原本測試期待的「入口測試資料庫」因此無法讀取，UI 返回裝置資料不可用提示。此情境屬於**合成測試時間依賴**，不是應放寬正式資料驗證的理由。
+- 本次在整合 main 的 PR 開發分支，僅讓此四個案例共用的合成課表建立器固定在 2026-11-12（台灣星期四），只 fake `Date` 不假造 `setTimeout` 等 React 非同步時鐘，並於 `afterEach` 復原真實計時器，保留校籍／本機來源拒絕規則不變。這是解決既有 CI 失敗的最小測試修正，**尚待精確新 head 的 Web CI 證實**。PR branch 合併 main 不等於主線合併，仍保持 Draft。
+- 不涉及正式資料、GCS/Supabase token、migration、部署、E 校園或手動 npm/pnpm audit。未發布群組父貼文直接讀取、已發網址撤權、真隔離 GCS CAS、歷史可信附件、minimatch 雙鎖檔與發布驗收仍是待辦。沒有指定 App 5504170 對新精確 head 的「審查通過」，不得合併 main 或部署。

@@ -395,3 +395,42 @@ it.each(['canonical', 'legacy'])(
     expect(getDocFromServer).toHaveBeenCalledTimes(source === 'legacy' ? 2 : 1);
   },
 );
+
+it('a school notification link shows missing content instead of a legacy announcement with the same ID', async () => {
+  vi.mocked(getDocFromServer).mockImplementation(async (ref) =>
+    (ref as unknown as { path: string }).path.startsWith('schools/')
+      ? snapshot(null)
+      : snapshot({ title: '另一則同編號公告' }),
+  );
+  await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ schoolId: 'pu', source: 'school-announcement' }),
+  });
+  await screen.findByText('找不到這則公告');
+  expect(screen.queryByText('另一則同編號公告')).toBeNull();
+  expect(getDocFromServer).toHaveBeenCalledExactlyOnceWith({ path: 'schools/pu/announcements/notice-1' });
+});
+
+it('opens a school notification at its original document', async () => {
+  await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ schoolId: 'pu', source: 'school-announcement' }),
+  });
+  await screen.findByText('這是發布單位提供的全文。');
+  expect(getDocFromServer).toHaveBeenCalledExactlyOnceWith({ path: 'schools/pu/announcements/notice-1' });
+});
+
+it('keeps the exact school source when copying a notification destination', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  await mount({
+    params: Promise.resolve({ id: 'notice-1' }),
+    searchParams: Promise.resolve({ schoolId: 'pu', source: 'school-announcement' }),
+  });
+  fireEvent.click(await screen.findByRole('button', { name: '複製連結' }));
+  await screen.findByText('已複製公告連結。');
+  const copied = new URL(writeText.mock.calls[0][0]);
+  expect(copied.pathname).toBe('/announcements/notice-1');
+  expect(copied.searchParams.get('schoolId')).toBe('pu');
+  expect(copied.searchParams.get('source')).toBe('school-announcement');
+});

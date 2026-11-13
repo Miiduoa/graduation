@@ -13,6 +13,7 @@ it('explains that both services stay enabled without switches or save requests',
   expect(screen.getAllByText(/維持開啟，無法關閉/)).toHaveLength(2);
   expect(screen.queryByRole('switch')).toBeNull();
   expect(screen.queryByRole('button')).toBeNull();
+  expect(screen.getByRole('link', { name: '設定 AI 代辦權限' }).getAttribute('href')).toBe('/settings?section=assistant');
   expect(request).not.toHaveBeenCalled();
 });
 

@@ -78,6 +78,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   sessionStorage.clear();
+  vi.unstubAllGlobals();
 });
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
@@ -343,7 +344,7 @@ it('drops the previous campus conversation and cancels pending requests after a 
   expect(vi.mocked(callCampusAssistant).mock.calls[1][0].schoolId).toBe('nthu');
 });
 
-it('shows that the cloud assistant is not enabled instead of a retryable failure', () => {
+it('keeps public lookup input available while ordinary questions stay blocked without cloud functions', () => {
   state.functionsConfigured = false;
   render(<AssistantPage />);
   expect(screen.getByRole('heading', { name: '雲端助理尚未啟用' })).toBeTruthy();
@@ -352,8 +353,116 @@ it('shows that the cloud assistant is not enabled instead of a retryable failure
   expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
   expect(screen.queryByRole('button', { name: '重試' })).toBeNull();
-  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  ask('我的下一堂課');
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
   expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+function publicCatalogResponse(schoolId: 'ncnu' | 'nthu', changes: Record<string, unknown> = {}) {
+  return new Response(JSON.stringify({
+    schoolId,
+    sourceUrl: schoolId === 'ncnu'
+      ? 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall'
+      : 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-07T08:00:00.000Z',
+    operation: { id: `${schoolId}.courses.search`, version: 1, responseSchemaVersion: 1, access: 'anonymous-public' },
+    courses: [{
+      code: 'CS430000', section: '01', title: '公開資料庫課程', department: '資訊系',
+      teacher: '公開授課老師', credits: '3', time: '一34', room: '資電館101', semester: '1151',
+    }],
+    truncated: false,
+    ...changes,
+  }), { headers: { 'Content-Type': 'application/json' } });
+}
+
+it.each(['ncnu', 'nthu'] as const)('queries %s public courses through the real shared client with no cloud assistant', async (schoolId) => {
+  state.query = `campus=${schoolId}`;
+  state.functionsConfigured = false;
+  const fetcher = vi.fn().mockResolvedValue(publicCatalogResponse(schoolId));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AssistantPage />);
+  ask('幫我查資料庫課程');
+  expect(await screen.findByText('公開資料庫課程')).toBeTruthy();
+  const url = new URL(fetcher.mock.calls[0][0], 'https://nuni.tw');
+  expect(url.pathname).toBe('/api/public-course-catalog');
+  expect(url.searchParams.get('schoolId')).toBe(schoolId);
+  expect(url.searchParams.get('q')).toBe('資料庫');
+  expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'omit', redirect: 'error' });
+  const href = new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw');
+  expect(href.searchParams.get('schoolId')).toBe(schoolId);
+  expect(href.searchParams.get('q')).toBe('資料庫');
+  expect(screen.getByText(/115 學年度第 1 學期/)).toBeTruthy();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('can explicitly look up another public campus and does not change the current conversation school', async () => {
+  state.query = 'campus=pu';
+  const fetcher = vi.fn().mockResolvedValue(publicCatalogResponse('nthu'));
+  vi.stubGlobal('fetch', fetcher);
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '原校園私人回覆' });
+  render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await screen.findByText('公開資料庫課程');
+  expect(new URL(fetcher.mock.calls[0][0], 'https://nuni.tw').searchParams.get('schoolId')).toBe('nthu');
+  ask('我的下一堂課');
+  await screen.findByText('原校園私人回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0]).toMatchObject({
+    schoolId: 'pu', messages: [{ role: 'user', content: '我的下一堂課' }],
+  });
+});
+
+it('shows the public-source retry path for a forged response without falling back to the model', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publicCatalogResponse('nthu', { sourceUrl: 'https://example.test/catalog' })));
+  render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await screen.findByText(/暫時無法取得可核對/);
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.getByRole('link', { name: '查看課程與課表核對' })).toBeTruthy();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it.each(['clear', 'account', 'school'] as const)('discards a public lookup after %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockReturnValue(new Promise<Response>((resolve) => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  const signal = fetcher.mock.calls[0][1].signal as AbortSignal;
+  if (change === 'clear') fireEvent.click(screen.getByRole('button', { name: '清除對話' }));
+  else {
+    if (change === 'account') state.uid = 'bob';
+    else state.query = 'campus=ncnu';
+    view.rerender(<AssistantPage />);
+  }
+  expect(signal.aborted).toBe(true);
+  await act(async () => { finish(publicCatalogResponse('nthu')); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('keeps a pending signed write proposal available after a read-only public lookup', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '先核對報修草稿',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action', label: '確認送出報修', requiresConfirmation: true,
+      params: { toolName: 'createDormRepairRequest', agentRunId: runId,
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' } },
+    }],
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publicCatalogResponse('nthu')));
+  render(<AssistantPage />);
+  ask('A棟301冷氣不冷');
+  await screen.findByRole('button', { name: '檢視草稿' });
+  ask('幫我查清大資料庫課程');
+  await screen.findByText('公開資料庫課程');
+  expect(screen.getByRole('button', { name: '檢視草稿' })).toBeTruthy();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+  expect(callCampusAssistant).toHaveBeenCalledOnce();
 });
 
 it('keeps the composer enabled when Cloud Functions are configured', () => {

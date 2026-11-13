@@ -1,7 +1,10 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { informationKinds } from './information';
+import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
+import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -10,6 +13,7 @@ import { buildPersonalToday } from '@campus/shared/src/imports/today';
 import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './actions';
 import {
   addDays,
+  assistantPermissionRecovery,
   bounded,
   bytes,
   canonical,
@@ -19,11 +23,15 @@ import {
   fail,
   id,
   object,
+  proposalPermission,
+  requireAssistantPermission,
   taipeiDate,
   text,
   type Adapter,
+  type AssistantPermissionKey,
   type Binding,
   type Card,
+  type EventArgs,
   type Ledger,
   type Obj,
   type Task,
@@ -436,6 +444,7 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
     if (requested) domains.push([label, tool]);
   };
   add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(informationKinds(question).includes('orders'), '訂單進度', 'list_food_orders');
   add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
   add(/教材/.test(question), '教材', 'get_materials');
   add(/社團/.test(question), '社團', 'list_clubs');
@@ -480,6 +489,12 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  const information = informationKinds(question);
+  // A shortcut card cannot satisfy a request for facts already available to readers.
+  if (information.length || personalSlotSelect(question)) out.delete('propose_open_page');
+  if (information.includes('schedule')) add('get_schedule');
+  if (information.includes('work')) add('get_due_work');
+  if (information.includes('orders')) add('list_food_orders', 'get_food_order');
   // School grades stay on campus readers; imported records need an explicit local source.
   if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
   if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
@@ -516,6 +531,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
+  if (information.length && !foodOrderIntent(question) && !scheduleIntent(question) && !personalSlotSelect(question)) {
+    out.delete('propose_personal_event');
+    out.delete('propose_study_plan');
+  }
   // Prioritize the requested domain, retaining proposals for planning questions.
   if (foodOrderIntent(question)) {
     out.delete('get_today_context');
@@ -711,6 +730,28 @@ export function freeTime(ledger: Ledger, args: Obj, notBefore = -Infinity) {
   append(cursor, end);
   return { slots, source: 'personal-imports', coverage: '僅已同步資料，未同步裝置資料不包含在內' };
 }
+/** Shared interval policy for model proposals and exact form-based revisions. */
+export function validateEventProposal(
+  ledger: Ledger, raw: unknown, priorEvents: readonly EventArgs[], now: number, requireFuture: boolean,
+): EventArgs {
+  const event = eventArgs(raw), [start, end] = eventInterval(event);
+  if (requireFuture && (event.allDay ? end <= now : start < now))
+    return fail('EVENT_START_PASSED', 409);
+  const classes = schedule(ledger, event.date, event.endDate || event.date);
+  if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
+  if (
+    classes.classes.some(row => row.start < end && start < row.end) ||
+    priorEvents.some(previous => {
+      const [a, b] = eventInterval(previous);
+      return a < end && start < b;
+    }) ||
+    calendar(ledger, addDays(event.date, -31), event.endDate || event.date).some(row => {
+      const [a, b] = eventInterval(eventArgs(row));
+      return a < end && start < b;
+    })
+  ) return fail('EVENT_CONFLICT', 409);
+  return event;
+}
 export function createTools(
   adapter: Adapter,
   binding: Binding,
@@ -719,6 +760,7 @@ export function createTools(
   writes: boolean,
   reorder = false,
   question = '',
+  exactEventArguments = false,
 ) {
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
@@ -730,6 +772,22 @@ export function createTools(
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  async function requirePermission(key: AssistantPermissionKey) {
+    try {
+      await requireAssistantPermission(adapter, key);
+      operationSignal()?.throwIfAborted();
+    } catch (error) {
+      // Repeated calls cannot reuse an earlier card after its grant was revoked.
+      for (let i = cards.length - 1; i >= 0; i--) {
+        if (proposalPermission(cards[i].tool) === key) cards.splice(i, 1);
+      }
+      for (const cached of cache.keys()) {
+        const name = cached.slice(0, cached.indexOf('{'));
+        if (proposalPermission(name) === key) cache.delete(cached);
+      }
+      throw error;
+    }
+  }
   let proposalSeq: string | undefined;
   const sequence = () => (proposalSeq ||= beginProposal(binding, now));
   const diningIds = new Set<string>();
@@ -779,7 +837,7 @@ export function createTools(
     if (to < from || Date.parse(to) - Date.parse(from) > 30 * 86400000) return fail();
     const list = await getCourses();
     const unqueried: { id: string; title: string; reason: string }[] = [];
-    const found: Task[] = [];
+    const found: (Task & { courseTitle: string })[] = [];
     // Reserve whole assignment/quiz pairs before starting parallel work.
     let remaining = adapter.remainingApiCalls?.() ?? 12;
     const selected = list.filter((c) => {
@@ -799,7 +857,7 @@ export function createTools(
               (child) => withOperationSignal(child, () => work(c.id)),
               operationSignal() || new AbortController().signal,
               3000,
-            )),
+            )).map((task) => ({ ...task, courseTitle: c.title })),
           );
         } catch (e) {
           if ((e as { status?: number }).status === 401) throw e;
@@ -826,35 +884,20 @@ export function createTools(
       source: 'class-workspaces',
     };
   }
-  async function propose(raw: Obj) {
+  async function propose(raw: Obj, studyTask?: Task) {
     if (!writes)
       return {
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
-    if (typeof raw.title === 'string' && /^寫/.test(raw.title))
+    const explicit = parseAssistantCalendarIntent(question, now);
+    if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title) &&
+      !(explicit?.kind === 'draft' && raw.title === explicit.event.title))
       raw = { ...raw, title: studyTitle(raw.title) };
-    const l = await getLedger(),
-      e = eventArgs(raw),
-      [start, end] = eventInterval(e);
-    if (scheduleIntent(question) && (e.allDay ? end <= now : start < now))
-      return fail('EVENT_START_PASSED', 409);
-    const classes = schedule(l, e.date, e.endDate || e.date);
-    if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
-    if (
-      classes.classes.some((c) => c.start < end && start < c.end) ||
-      cards.some((c) => {
-        if (c.tool !== 'propose_personal_event') return false;
-        const [a, b] = eventInterval(eventArgs(c.args));
-        return a < end && start < b;
-      }) ||
-      calendar(l, addDays(e.date, -31), e.endDate || e.date).some((c) => {
-        const [a, b] = eventInterval(eventArgs(c));
-        return a < end && start < b;
-      })
-    )
-      return fail('EVENT_CONFLICT', 409);
+    const l = await getLedger();
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
+    validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(question));
+    await requirePermission('createPersonalEvent');
     const card = signCard(
       binding,
       'propose_personal_event',
@@ -864,6 +907,7 @@ export function createTools(
       now,
       sequence(),
       priorEvents.at(-1),
+      studyTask ? studyGuardForTask(studyTask, 'study') : undefined,
     );
     cards.push(card);
     return { proposed: true, ...raw, requiresConfirmation: true };
@@ -988,6 +1032,7 @@ export function createTools(
                 ? '此訂單需付款，請到點餐頁完成'
                 : '確認後下單，自取',
         };
+        await requirePermission('prepareFoodOrder');
         cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
         return { proposed: true, mode, reason: args.reason, summary, href: args.href, requiresConfirmation: true };
       }
@@ -1217,7 +1262,7 @@ export function createTools(
               startTime: slot.startTime,
               endTime,
               allDay: false,
-            }),
+            }, task),
           );
           slot.startTime = endTime;
           slot.minutes -= minutes;
@@ -1356,8 +1401,10 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
+      const permission = proposalPermission(name);
+      if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
-      if (name === 'propose_personal_event') {
+      if (!exactEventArguments && name === 'propose_personal_event') {
         const spoken = parseSpokenClock(question);
         if (spoken) {
           const window = studyWindow(question);
@@ -1484,6 +1531,7 @@ export function createTools(
       try {
         value = await cache.get(key);
       } catch (error) {
+        if (assistantPermissionRecovery(String((error as { code?: string }).code))) throw error;
         if (name !== 'reorder_last_food_order') throw error;
         const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
         const retryKey = name + canonical(filled);

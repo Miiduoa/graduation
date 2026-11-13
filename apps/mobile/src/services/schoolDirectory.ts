@@ -1,6 +1,8 @@
 import { collection, getDocs, limit, query } from 'firebase/firestore';
 
 import { type School } from '@campus/shared/src';
+import { getPublicSchoolInfo, publicSchoolInfoDirectory } from '@campus/shared/src/publicSchoolInfo';
+import { normalizeSchoolIntegrationStatus } from '@campus/shared/src/release';
 import { mockSchools, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { isPlaceholderAnnouncementSchool } from '@campus/shared/src/campusAnnouncements';
 
@@ -10,15 +12,12 @@ import { getSchoolIntegrationStatus, isSchoolVisibleInDirectory } from './releas
 const DIRECTORY_TIMEOUT_MS = 5000;
 
 type BrowsableSchool = School & { publicBrowsing?: boolean };
-const bundledOfficialSchoolIds = new Set(
-  mockSchools
-    .filter(
-      (school) =>
-        !isPlaceholderAnnouncementSchool({ schoolId: school.id }) &&
-        !school.name.includes('（示範）'),
-    )
-    .map((school) => school.id),
-);
+const legacyDirectoryIds = new Set(mockSchools.map((school) => getPublicSchoolInfo(school.id)?.id));
+const publicOnlySchools: School[] = Object.values(publicSchoolInfoDirectory)
+  .filter((record) => !legacyDirectoryIds.has(record.id))
+  .map(({ id, name }) => ({
+    id, name, code: id.toUpperCase(), integrationStatus: normalizeSchoolIntegrationStatus({ enabled: false }),
+  }));
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -79,7 +78,7 @@ function isBrowsable(school: BrowsableSchool): boolean {
     return isSchoolVisibleInDirectory(school.id, school.integrationStatus);
   }
   return (
-    bundledOfficialSchoolIds.has(school.id) ||
+    Boolean(getPublicSchoolInfo(school.id)) ||
     school.publicBrowsing === true ||
     isSchoolVisibleInDirectory(school.id, school.integrationStatus)
   );
@@ -93,15 +92,15 @@ export function mergeSchoolLists(primary: BrowsableSchool[], secondary: School[]
   }
   for (const school of primary) {
     if (!isBrowsable(school)) continue;
-    const bundled = merged.get(school.id);
-    if (bundled) {
-      // The built-in official school name/code must not be replaced by an
-      // unreviewed remote display name. The live integration status still wins.
-      merged.set(school.id, { ...school, ...bundled, integrationStatus: school.integrationStatus });
-    } else {
-      merged.set(school.id, school);
-    }
+    // The picker uses the remote tenant's ID. Keep its verified public identity
+    // separate from the integration status reported for that exact tenant.
+    const bundled = merged.get(school.id) ??
+      (school.id === 'nchu' ? merged.get('tw-nchu') : undefined);
+    merged.set(school.id, bundled
+      ? { ...bundled, id: school.id, integrationStatus: school.integrationStatus }
+      : school);
   }
+  if (merged.has('nchu')) merged.delete('tw-nchu');
 
   return [...merged.values()].sort((left, right) =>
     left.name.localeCompare(right.name, 'zh-Hant'),
@@ -109,6 +108,12 @@ export function mergeSchoolLists(primary: BrowsableSchool[], secondary: School[]
 }
 
 export async function fetchSchoolDirectory(): Promise<School[]> {
+  const bundled = [
+    ...mockSchools.map((school) => ({
+      ...school, integrationStatus: getSchoolIntegrationStatus(school.id, school.integrationStatus),
+    })),
+    ...publicOnlySchools,
+  ];
   try {
     const db = getDb();
     const snapshot = await withTimeout(
@@ -121,18 +126,9 @@ export async function fetchSchoolDirectory(): Promise<School[]> {
       normalizeSchoolFromFirestore(docSnap.id, docSnap.data() as Record<string, unknown>),
     );
 
-    return mergeSchoolLists(
-      remoteSchools,
-      mockSchools.map((school) => ({
-        ...school,
-        integrationStatus: getSchoolIntegrationStatus(school.id, school.integrationStatus),
-      })),
-    );
+    return mergeSchoolLists(remoteSchools, bundled);
   } catch (error) {
-    console.log('[schoolDirectory] Falling back to mock schools:', error);
-    return mergeSchoolLists([], mockSchools.map((school) => ({
-      ...school,
-      integrationStatus: getSchoolIntegrationStatus(school.id, school.integrationStatus),
-    })));
+    console.log('[schoolDirectory] Using bundled public directory:', error);
+    return mergeSchoolLists([], bundled);
   }
 }

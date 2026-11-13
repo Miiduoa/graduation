@@ -1,3 +1,7 @@
+import {
+  personalImportDeadlineSources,
+  type StudyDeadlineSource,
+} from '@campus/shared/src/studyDeadlineConflicts';
 import { StudyAssignmentAssistant } from './StudyAssignmentAssistant';
 import { StudyDeadlineExport } from './StudyDeadlineExport';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -14,6 +18,12 @@ import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { feedbackPredatesSubmission } from '@campus/shared/src/lmsReviewQueue';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
+import { usePersonalImportScope } from '../../state/personalImportScope';
+import {
+  loadPersonalImports,
+  subscribePersonalImports,
+  personalImportStorageKey,
+} from '../../services/personalImports';
 
 const FILTERS: [StudyAgendaFilter, string][] = [
   ['pending', '待完成'],
@@ -26,20 +36,58 @@ const FILTERS: [StudyAgendaFilter, string][] = [
 ];
 
 export function StudyAgenda({
+  conflictSources,
   data,
   loading,
   error,
   retry,
   open,
 }: {
+  conflictSources?: readonly StudyDeadlineSource[];
   data: NuniStudyAgenda | null;
   loading: boolean;
   error: string;
   retry(): void;
   open(courseId: string, activityId?: string): void;
 }) {
+  const scope = usePersonalImportScope();
+  const scopeKey = scope ? personalImportStorageKey(scope) : '';
+  const [imports, setImports] = useState<{ key: string; sources: StudyDeadlineSource[] } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!scope) return;
+    let active = true;
+    let revision = 0;
+    const refresh = async () => {
+      const request = ++revision;
+      setImports(null);
+      try {
+        const ledger = await loadPersonalImports(scope);
+        if (active && request === revision)
+          setImports({
+            key: scopeKey,
+            sources: personalImportDeadlineSources(ledger.records, scope.schoolId),
+          });
+      } catch {
+        if (active && request === revision) setImports(null);
+      }
+    };
+    void refresh();
+    const unsubscribe = subscribePersonalImports((change) => {
+      if (personalImportStorageKey(change.scope) === scopeKey) void refresh();
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [scope, scopeKey]);
+  const localConflictSources = scope && imports?.key === scopeKey ? imports.sources : [];
   const theme = useTheme();
-  const [filter, setFilter] = useNuniDraftState<StudyAgendaFilter>('courses:agenda-filter', 'pending');
+  const [filter, setFilter] = useNuniDraftState<StudyAgendaFilter>(
+    'courses:agenda-filter',
+    'pending',
+  );
   const [courseFilter, setCourseFilter] = useNuniDraftState<string>('courses:agenda-course', 'all');
   const [limit, setLimit] = useNuniDraftState('courses:agenda-limit', 8);
   const [now, setNow] = useState(() => Date.now());
@@ -266,7 +314,12 @@ export function StudyAgenda({
                 >
                   {nextUp && (
                     <Text
-                      style={{ ...copy, color: theme.colors.accent, fontSize: 13, fontWeight: '700' }}
+                      style={{
+                        ...copy,
+                        color: theme.colors.accent,
+                        fontSize: 13,
+                        fontWeight: '700',
+                      }}
                     >
                       {partial ? '已載入待辦中優先處理' : '優先處理'}
                     </Text>
@@ -279,7 +332,12 @@ export function StudyAgenda({
                       {task.title}
                     </Text>
                     <Text style={{ ...copy, color: theme.colors.accent, fontSize: 13 }}>
-                      {status === 'feedback' ? '看回饋' : status === 'submitted' ? '看紀錄' : '查看'} ›
+                      {status === 'feedback'
+                        ? '看回饋'
+                        : status === 'submitted'
+                          ? '看紀錄'
+                          : '查看'}{' '}
+                      ›
                     </Text>
                   </View>
                   <Text
@@ -355,6 +413,7 @@ export function StudyAgenda({
       ) : null}
       {data && !loading && !error && ['pending', 'overdue', 'soon', 'all'].includes(filter) ? (
         <StudyDeadlineExport
+          conflictSources={conflictSources ?? localConflictSources}
           key={JSON.stringify([selectedCourse, filter])}
           tasks={visible}
           partial={partial}

@@ -112,3 +112,4 @@ export * from './providenceCampus';
 export * from './puLmsReadonly';
 export * from './academicSections';
 export * from './privateFileAccess';
+export * from './oralExamDemo';
