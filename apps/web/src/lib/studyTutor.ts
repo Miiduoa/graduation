@@ -120,11 +120,25 @@ function keepStudyGraphemeTogether(text: string, start: number, end: number): nu
       (/\p{M}/u.test(String.fromCodePoint(nextPoint)) ||
         (nextPoint >= 0x1f3fb && nextPoint <= 0x1f3ff));
     const emojiJoiner = nextPoint === 0x200d || previousPoint === 0x200d;
-    const pairedFlags = previousPoint !== undefined && nextPoint !== undefined &&
-      previousPoint >= 0x1f1e6 && previousPoint <= 0x1f1ff &&
-      nextPoint >= 0x1f1e6 && nextPoint <= 0x1f1ff;
+    // Regional-indicator symbols form flags in pairs, not one giant cluster.
+    // Count the preceding consecutive symbols: only an odd count means this
+    // boundary would split a flag. The scan is bounded by the passage size.
+    let splitsFlag = false;
+    if (previousPoint !== undefined && nextPoint !== undefined &&
+        previousPoint >= 0x1f1e6 && previousPoint <= 0x1f1ff &&
+        nextPoint >= 0x1f1e6 && nextPoint <= 0x1f1ff) {
+      let precedingIndicators = 0;
+      for (let cursor = end; cursor > start;) {
+        const position = previousStudyCodePointStart(text, cursor);
+        const point = text.codePointAt(position);
+        if (point === undefined || point < 0x1f1e6 || point > 0x1f1ff) break;
+        precedingIndicators += 1;
+        cursor = position;
+      }
+      splitsFlag = precedingIndicators % 2 === 1;
+    }
     if (!((previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) ||
-      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner || pairedFlags)) break;
+      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner || splitsFlag)) break;
     end = previousStudyCodePointStart(text, end);
   }
   // Extremely long clusters cannot fit within the passage budget. Keep the

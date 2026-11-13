@@ -155,6 +155,22 @@ describe('readable Unicode passage boundaries', () => {
     expect(chunks.every((chunk) => chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
   });
 
+  it.each([
+    { prefix: '甲乙', firstFlagCount: 399 },
+    { prefix: '甲', firstFlagCount: 399 },
+    { prefix: '', firstFlagCount: 400 },
+  ])('keeps consecutive regional-indicator flags paired after prefix "$prefix"', ({ prefix, firstFlagCount }) => {
+    // 1,600 UTF-16 units can land between two regional indicators. The old
+    // fallback walked back across the entire run then split a flag anyway.
+    const original = prefix + '🇹🇼'.repeat(500);
+    const chunks = splitStudySection({ id: 'flags', label: '第 1 頁', text: original });
+    expect(chunks[0].text).toBe(prefix + '🇹🇼'.repeat(firstFlagCount));
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length > 0 &&
+      chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+    expect(chunks.slice(1).every((chunk) => chunk.text.startsWith('🇹🇼'))).toBe(true);
+  });
+
   it('does not stall on a combining-mark run longer than the passage limit', () => {
     const original = 'e' + '\u0301'.repeat(2_000) + '甲';
     const chunks = splitStudySection({ id: 'unicode', label: '第 1 頁', text: original });
