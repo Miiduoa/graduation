@@ -180,7 +180,7 @@ async def track_lifecycle(page, result, label, baseline):
         assert fresh['source']['submitted'] == (status == 'submitted'), fresh
         if status == 'source_changed':
             assert fresh['source']['dueAt'] == '2026-11-13T13:45:00+08:00', fresh
-            await expect(tracked(page)).to_contain_text('13:45')
+            await expect(tracked(page)).to_contain_text('目前期限：2026/11/13 下午1:45')
         if status == 'in_progress':
             assert fresh['checkedAt'] == '2026-11-13T06:15:00.000Z', fresh
         if status == 'elapsed':
