@@ -159,6 +159,15 @@ function hasHiddenHtmlAttribute(token: string): boolean {
   return false;
 }
 
+// An odd number of backslashes escapes Markdown punctuation; an even
+// number leaves a real HTML tag behind the literal backslashes.
+function isEscapedMarkdownTag(text: string, offset: number): boolean {
+  let slashCount = 0;
+  for (let index = offset - 1; index >= 0 && text[index] === '\\'; index -= 1)
+    slashCount += 1;
+  return slashCount % 2 === 1;
+}
+
 function parseSimplePipeRow(line: string): string[] | null {
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
@@ -173,6 +182,7 @@ function parseSimplePipeRow(line: string): string[] | null {
     // visible lesson text (for example, a syntax table). Real comments
     // still fail the marker check at their opening token.
     if (marker[0] === '-->' || marker[0] === '--!>') continue;
+    if (isEscapedMarkdownTag(trimmed, marker.index ?? 0)) continue;
     if (!isInsideInlineCode(trimmed, marker.index ?? 0)) return null;
   }
   // Only unescaped pipes outside paired inline-code spans separate columns.
@@ -287,7 +297,9 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
   // unchanged; never rewrite or export the student's original source.
   const scanSource = source.replace(
     /<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gu,
-    (token, tag: string) => {
+    (token, tag: string, offset: number) => {
+      // Do not fold a Markdown-escaped example into an active HTML tag.
+      if (isEscapedMarkdownTag(source, offset)) return token;
       if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !token.includes('\n')) return token;
       const newlines = token.match(/\r?\n/gu) ?? [];
       return token.replace(/\r?\n/gu, ' ') + '\n'.repeat(newlines.length);
@@ -322,6 +334,10 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
     for (const match of line.matchAll(/<!--|--!?>|<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/giu)) {
       const token = match[0];
+      // A Markdown escape outside HTML/comment blocks is visible syntax,
+      // not a hidden element or an opening comment.
+      if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
+          isEscapedMarkdownTag(line, match.index ?? 0)) continue;
       // In a disclosure or hidden container, a paired inline-code example
       // such as `</details>` is not an actual closing tag. Otherwise it
       // prematurely exposes the still-hidden answer beneath the example.

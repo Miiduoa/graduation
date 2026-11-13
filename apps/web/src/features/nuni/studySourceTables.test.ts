@@ -1099,3 +1099,42 @@ describe('legacy HTML raw text cannot leak hidden lesson answers into source tab
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+describe('Markdown backslash escapes do not create hidden HTML lesson blocks', () => {
+  const slash = String.fromCharCode(92);
+
+  it('retains visible course syntax tables with escaped HTML in a cell', () => {
+    const tag = slash + '<span hidden>';
+    const source = [
+      '| HTML 寫法 | 意義 |',
+      '| --- | --- |',
+      '| ' + tag + ' | 可見的語法教學文字 |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['HTML 寫法', '意義'],
+      rows: [[tag, '可見的語法教學文字']],
+    }]);
+  });
+
+  it('preserves a public table following an escaped opening tag', () => {
+    const source = ['範例：' + slash + '<div hidden>', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+
+  it('does not start a hidden comment from an escaped HTML comment opener', () => {
+    const source = ['註解示例：' + slash + '<!-- 未公開資訊？', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+
+  it('does not fold an escaped multiline tag into an active hidden wrapper', () => {
+    const source = [slash + '<section', ' hidden>', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(3));
+  });
+
+  it('still suppresses active hidden HTML after an even number of slashes', () => {
+    // Paired Markdown slashes produce one visible slash and an active tag.
+    const source = [slash.repeat(2) + '<div hidden>', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([]);
+  });
+});
