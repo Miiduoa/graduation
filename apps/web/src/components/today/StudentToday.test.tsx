@@ -495,3 +495,19 @@ it('keeps one welcome area without duplicate login copy when the guest campus ch
     warning.mockRestore();
   }
 });
+
+it.each(['pending', 'empty', 'error'] as const)('keeps the calendar reachable from %s coursework', (state) => {
+  view({
+    todos: state === 'pending' ? [todo()] : [],
+    todosError: state === 'error' ? '作業暫時讀不到' : '',
+  });
+  const work = within(screen.getByTestId('today-work'));
+  const calendar = work.getByRole('link', { name: '查看行事曆' });
+  expect(calendar.getAttribute('href')).toBe('/calendar');
+  calendar.focus();
+  expect(document.activeElement).toBe(calendar);
+  if (state === 'pending') {
+    expect(work.getByRole('link', { name: /作業三 繳交/ }).getAttribute('href'))
+      .toBe('/course/cs-db#assignment-hw-3');
+  }
+});
