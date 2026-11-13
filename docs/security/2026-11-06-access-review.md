@@ -619,3 +619,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 本次最小修補將 `canReadPostComments()` 共同套至留言 update/delete，且在父貼文非公開狀態集合加入 `deleted`；原本的作者草稿預覽及已發布貼文留言編輯、管理者正常管理功能保留。合成 Firebase emulator 測試在既有安全案例中補上 `status:'deleted'`、留言作者與管理者對隱藏內容的 update/delete 拒絕、作者草稿編輯、重新發布後恢復、重度撤回後重放、學籍撤銷及父貼文刪除後拒絕。
 
 這些檢查只封鎖**新的 Firestore 操作**，沒有解決父貼文 documents 集合仍允許會員 list/read 的獨立暴露，也無法讓已簽發 GCS／Supabase URL 失效。真隔離 Storage CAS、可信歷史附件清單、minimatch 雙鎖檔、最新主線合併前整合、正式發布及回復仍待完成。此輪僅更新開發分支；不觸及正式資料、金鑰、token、migration、部署、E 校園連線及受限 pnpm/npm audit。**新 head 的實際 CI／CodeQL 必須重新驗收**，不得沿用本段父 head 成功結果；未取得指定 App 對精確 head 的「審查通過」前不得合併。
+
+
+## 2026-11-13：群組留言客戶端欄位偽造與輸入資源界線（PR #577）
+
+延續 `485b5205457a1b48cd14d4fcd3eba6cca5c78117`，以最小 Rules 守門限制 `groups/{groupId}/posts/{postId}/comments` 的直接 SDK 建立：`body` 必須為 1–5000 字元字串；新留言不得預填非零 `likeCount`、任意 `likedBy` 或 `isAnswer:true`。既有留言如修改 `body` 也驗證型別及長度；`isAnswer` 的狀態改動限有效群組管理者，避免留言本人單獨將回覆標為已採納答案。貼文正式發布、正常留言建立／文字修改、教師標記及校籍／群組撤權的原授權保留；後端 Admin SDK 助理回覆不經此直接客戶端規則。
+
+隔離合成回歸新增於 `backend/tests/security-rules.test.js`：無效 body、超長 body、偽造答案／投票初始化拒絕；正常留言、教師標記、一般修改通過；撤權後重放拒絕。本變更針對資料完整性／資源界線，**不能宣稱修補父貼文集合本身的讀取洩露**。其他待處理項目：父貼文 get/list 與 Web/Mobile 查詢相容改造、真隔離 GCS/Supabase 已簽網址撤銷及 CAS 競態、可信舊附件引用、minimatch 雙鎖檔、主線整合、發布及回復驗證。
+
+此段記錄提交的測試設計；CI／CodeQL 結果必須以**新精確 head** 核對，不能借用 `485b5205457a1b48cd14d4fcd3eba6cca5c78117` 成功。未接觸正式資料／金鑰／token、migration、部署、E 校園或受限 npm/pnpm audit。沒有取得指定 nuni-merge-gate App 5504170 對精確 head 的核可前，不合併 main。

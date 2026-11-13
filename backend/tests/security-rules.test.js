@@ -1016,6 +1016,36 @@ describe('firestore security rules', () => {
       await assertFails(peerComment.delete());
     });
 
+    test('group comment clients cannot pre-mark answers, forge votes or store oversized bodies', async () => {
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      const teacher = testEnv.authenticatedContext('teacher').firestore();
+      const path = 'groups/course/posts/first/comments/new-comment';
+      const comment = alice.doc(path);
+      const normal = { authorId: 'alice', body: 'Page three', likedBy: [], likeCount: 0 };
+
+      for (const invalid of [
+        { ...normal, body: '' },
+        { ...normal, body: 42 },
+        { ...normal, body: 'x'.repeat(5001) },
+        { ...normal, isAnswer: true },
+        { ...normal, likeCount: 10 },
+        { ...normal, likedBy: ['teacher'] },
+      ]) {
+        await assertFails(comment.set(invalid));
+      }
+      await assertSucceeds(comment.set(normal));
+      await assertFails(comment.update({ isAnswer: true }));
+      await assertFails(comment.update({ body: 'x'.repeat(5001) }));
+      await assertFails(comment.update({ body: 42 }));
+      await assertSucceeds(comment.update({ body: 'Edited ordinary reply' }));
+      await assertSucceeds(teacher.doc(path).update({ isAnswer: true }));
+      await assertSucceeds(comment.update({ body: 'Edited after instructor approval' }));
+
+      // An old signed-in user loses the same editing privileges on revocation.
+      await seedFirestore((admin) => admin.doc('groups/course/members/alice').update({ status: 'removed' }));
+      await assertFails(comment.update({ body: 'Replay after revocation' }));
+    });
+
     test('editing cannot transfer authorship', async () => {
       const post = testEnv.authenticatedContext('alice').firestore().doc(postPath);
       await assertFails(post.update({ authorId: 'teacher' }));
