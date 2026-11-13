@@ -305,3 +305,9 @@ OSM 可能同時保有 `building=yes` 與 `building:condition=*`；完整建築�
 3D 空間導覽除了原有的 Google 步行導航，新增使用者可選的 Apple 地圖步行連結，使用同一已選地點標記的經緯度，不新增或推斷校舍入口、樓層、校園步道或無障礙路線。Apple 連結採相容舊版 iOS 的 `maps.apple.com/?daddr=...&dirflg=w`，由外部地圖服務自行計算路線。兩個外部導航均關聯同一份 `aria-describedby` 安全提醒，WebGL 失敗時仍可選地點並使用連結。適用跨校共用 UI，不改來源、權限、建築輪廓、OSM 署名。參考 [Apple Map Links](https://developer.apple.com/library/archive/featuredarticles/iPhoneURLScheme_Reference/MapLinks/MapLinks.html)。
 
 新增 URL 參數及 React 選擇／外部導航／WebGL 降級回歸。此項驗證**僅檢查連結格式與標記座標**，不表示 Apple／Google 真正算路成功，更不證明實際可通行、教室入口或競品優勢。仍需 iPhone Safari、Android 以及靜宜同機同任務現地驗收。
+
+## OSM relation 與 way 的來源修訂標籤（2026-11-14）
+
+已核對希嘉學苑 relation/9246899 的 outer 與 inner 輪廓。若 Overpass 提供合法 version／UTC timestamp，保留該 relation 自身修訂資訊，畫面明確標為「OSM relation 版本」；一般建築 way 標為「OSM way 版本」，不混用。
+
+relation 修訂時間反映自身標籤／成員列表的編輯，**不是成員 way 或節點幾何更新時間**；即使 relation 版本不變，內外環的成員外框仍可能被另外編輯。way 版本同樣不涵蓋單獨修改的節點。前後端核對版本及 UTC 日期、來源與資料庫快照時效；不合法的修訂標籤不顯示，不影響其他已核驗的幾何。這些是合成解析器及 UI 回歸，不是線上 Overpass 或現地查證證據，亦不代表確認樓高、入口或道路。

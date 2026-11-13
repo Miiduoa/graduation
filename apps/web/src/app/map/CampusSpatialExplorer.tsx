@@ -563,8 +563,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 )}
                 {sourceFootprint?.osmVersion && sourceFootprint.osmEditedAt && (
                   <p className={styles.note}>
-                    OSM way 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
-                    此日期不代表現場查證，節點座標可能另有更新。
+                    OSM {sourceFootprint.sourceUrl.includes('/relation/') ? 'relation' : 'way'} 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
+                    此日期不代表現場查證；{sourceFootprint.sourceUrl.includes('/relation/')
+                      ? 'relation 成員 way 與節點座標可能另有更新。'
+                      : '節點座標可能另有更新。'}
                   </p>
                 )}
                 {school === 'pu' && place.id === 'pu-zhugu' && (

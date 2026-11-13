@@ -16,7 +16,7 @@ export type ProvidenceFootprint = {
   holes?: Array<Array<[number, number]>>;
   heightMeters: number;
   heightBasis: 'osm-tag' | 'illustrative';
-  /** Optional OSM way revision; not a site-survey or geometry-freshness guarantee. */
+  /** Optional revision of this exact OSM way/relation; not a geometry-freshness guarantee. */
   osmVersion?: number;
   osmEditedAt?: string;
 };
@@ -497,10 +497,11 @@ function isStandingBuilding(value: unknown): boolean {
   });
 }
 
-/** Only copy audited OSM way revision fields, never editor names or account IDs.
- * Node positions may change without updating the parent way's revision.
+/** Only copy valid OSM way/relation revisions, never editor identities.
+ * Relation edits do not date member-way geometry; way edits do not date
+ * separately modified node positions.
  */
-function osmWayRevision(value: Record<string, unknown>): Pick<ProvidenceFootprint, 'osmVersion' | 'osmEditedAt'> {
+function osmFeatureRevision(value: Record<string, unknown>): Pick<ProvidenceFootprint, 'osmVersion' | 'osmEditedAt'> {
   const version = value.version;
   const timestamp = value.timestamp;
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1 ||
@@ -580,9 +581,8 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
       outline: geometry.outline,
       ...(geometry.holes.length ? { holes: geometry.holes } : {}),
       ...height,
-      // Relation revisions describe the relation, not its member-way geometry.
-      // The existing UI labels revisions as "OSM way", so never mislabel them.
-      ...(element.type === 'way' ? osmWayRevision(element) : {}),
+      // Revision refers only to the element itself, not member-way geometry.
+      ...osmFeatureRevision(element),
     });
   }
   // 與共用靜宜地點名錄保持同順序，而非依伺服器回傳順序。
@@ -636,16 +636,14 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
       ...(hole ? { holes: [hole] } : {}),
       heightMeters: item.heightMeters, heightBasis: item.heightBasis,
-      // A relation's revision does not date the geometry of its member way.
-      // Never trust relation metadata as the UI's "OSM way" revision.
-      ...(place.sourceUrl.startsWith('https://www.openstreetmap.org/way/')
-        ? osmWayRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }) : {}),
+      // The source URL determines whether the UI labels this as way or relation.
+      ...osmFeatureRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }),
     });
   }
   return accepted;
 }
 
-/** OSM way edit metadata cannot postdate the source database snapshot.
+/** OSM way/relation edit metadata cannot postdate the source database snapshot.
  * Retain otherwise verified outlines, but never show a contradictory revision
  * as provenance. Allow five minutes for upstream clock skew.
  */
@@ -696,7 +694,7 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
   // the older Overpass replication state. A CDN must not extend either one.
   if (ageMs >= 7 * day || ageMs < -5 * 60 * 1000 ||
       (typeof osmBaseAt === 'string' && now - Date.parse(osmBaseAt) >= 7 * day)) return null;
-  // A revised OSM way must not appear newer than the map database that
+  // A revised OSM way/relation must not appear newer than the map database that
   // supplied it. Without replication metadata, fall back to HTTP fetch time.
   // Inconsistent revision labels are removed; separately validated geometry
   // remains available, with its existing illustrative/sourced height caveats.

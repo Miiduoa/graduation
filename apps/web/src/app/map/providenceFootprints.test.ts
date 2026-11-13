@@ -195,7 +195,8 @@ describe('Providence OSM building outlines', () => {
     const innerMember = { type: 'way', ref: 665651134, role: 'inner', geometry: inner };
     const relation = (members: unknown, tags: unknown = {
       type: 'multipolygon', building: 'dormitory', height: '16',
-    }) => ({ type: 'relation', id: 9246899, tags, members });
+    }) => ({ type: 'relation', id: 9246899, tags, members,
+      version: 5, timestamp: '2026-10-15T08:09:10Z' });
     const parsed = parseProvidenceOsmFootprints({ elements: [relation([outerMember, innerMember])] });
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({
@@ -205,7 +206,8 @@ describe('Providence OSM building outlines', () => {
     });
     expect(parsed[0].outline).toHaveLength(4);
     expect(parsed[0].holes).toHaveLength(1);
-    expect(parsed[0]).not.toHaveProperty('osmVersion');
+    // A relation revision does not certify its outer/inner way geometry.
+    expect(parsed[0]).toMatchObject({ osmVersion: 5, osmEditedAt: '2026-10-15T08:09:10Z' });
     expect(parseProvidenceFootprintResponse({
       schoolId: 'pu', buildings: parsed,
     })).toEqual(parsed);
@@ -214,12 +216,15 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceFootprintResponse({
       schoolId: 'pu', buildings: [{ ...parsed[0], holes: undefined }],
     })).toEqual([]);
-    // Never let a stale/forged API attach a way revision label to a relation.
+    // Invalid relation revision timestamps never become provenance labels.
+    const withoutRevision = { ...parsed[0] };
+    delete withoutRevision.osmVersion;
+    delete withoutRevision.osmEditedAt;
     expect(parseProvidenceFootprintResponse({
       schoolId: 'pu', buildings: [{
-        ...parsed[0], osmVersion: 99, osmEditedAt: '2026-10-15T08:09:10Z',
+        ...parsed[0], osmVersion: 99, osmEditedAt: 'not-a-date',
       }],
-    })).toEqual(parsed);
+    })).toEqual([withoutRevision]);
 
     // An old/partial relation must not resurrect a deleted outer/inner way,
     // even if its cached coordinates still form a valid polygon.

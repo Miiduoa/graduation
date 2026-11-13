@@ -382,6 +382,44 @@ it('adds source-checked Providence building shapes without changing navigation o
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+
+it('labels a selected OSM relation revision without mistaking it for member geometry freshness', async () => {
+  const xijia = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  const outer = [
+    { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+    { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+    { lat: 24.22785, lon: 120.58045 },
+  ];
+  const inner = [
+    { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+    { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+    { lat: 24.22799, lon: 120.58063 },
+  ];
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'relation', id: 9246899,
+    tags: { type: 'multipolygon', building: 'dormitory' },
+    members: [
+      { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+      { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+    ],
+    version: 5, timestamp: '2026-10-15T08:09:10Z',
+  }] });
+  expect(buildings).toMatchObject([{ poiId: 'pu-xijia', osmVersion: 5 }]);
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true, status: 200, headers: new Headers(),
+    json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+    }),
+  })));
+  render(<CampusSpatialExplorer school="pu" locations={[xijia]} selected={xijia} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/OSM relation 版本 v5.*2026-10-15/)).toBeTruthy();
+  expect(within(dialog).getByText(/relation 成員 way 與節點座標可能另有更新/)).toBeTruthy();
+  expect(within(dialog).queryByText(/OSM way 版本 v5/)).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
+});
+
 it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores late success', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let signal: AbortSignal | undefined;
