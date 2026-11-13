@@ -21,6 +21,7 @@ let mockAuth = {
 };
 const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
+let mockPersonalizationScope: { owner: string; schoolId: string } | null = null;
 const mockTimetable = {
   status: 'ready' as 'loading' | 'ready' | 'error' | 'empty',
   classes: [] as TodayClass[],
@@ -39,7 +40,10 @@ jest.mock('../services/tronClassClient', () => ({ hasTCSession: jest.fn(async ()
 jest.mock('../hooks/useTodayTimetableData', () => ({
   useTodayTimetableData: () => mockTimetable,
 }));
+// The scoped preference UI has its own account/school lifecycle coverage.
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockPersonalizationScope }));
 jest.mock('@react-navigation/native', () => ({
+  NavigationContext: require('react').createContext(null),
   useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
@@ -101,6 +105,7 @@ beforeEach(() => {
   jest.setSystemTime(new Date('2026-11-03T08:00:00+08:00'));
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' } };
+  mockPersonalizationScope = null;
   mockTimetable.status = 'ready';
   mockTimetable.classes = [];
   mockTimetable.termKey = '115-1';
@@ -705,6 +710,19 @@ test('distinguishes a class in progress and shows the timetable before non-urgen
   expect(view.getAllByText('08:40')).toHaveLength(1);
   const headings = view.getAllByRole('header').map(node => node.props.children);
   expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('待處理'));
+});
+
+test('the personalization entry stays after urgent work and the timetable', async () => {
+  mockPersonalizationScope = { owner: 'firebase:student-a', schoolId: 'school-a' };
+  mockTimetable.classes = [todayClass()];
+  const data = result();
+  data.tasks[0].dueAt = new Date(Date.now() + 60 * 60 * 1000);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findByText('讓今天更適合你');
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
+  expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('讓今天更適合你'));
 });
 
 test.each(['pending', 'empty', 'error'])('opens the calendar from %s coursework', async (state) => {
