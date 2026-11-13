@@ -1048,6 +1048,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'indented blank line and numbered key', question: '解答：\n  \n  1. 主鍵', answer: '主鍵' },
     { label: 'quoted Markdown bullet', question: 'Answer:\n> - SQL', answer: 'SQL' },
     { label: 'CRLF blank lines and nested quote', question: '答案：\r\n\r\n>> * 主鍵', answer: '主鍵' },
+    { label: 'literal HTML strong answer', question: 'What? Answer: <strong>SQL</strong>', answer: 'SQL' },
+    { label: 'literal HTML nested answer', question: '參考答案：<strong><code>主鍵</code></strong>', answer: '主鍵' },
+    { label: 'literal HTML code and Markdown', question: 'What? Solution: **<code>SQL</code>**', answer: 'SQL' },
+    { label: 'literal HTML span on a numeric answer', question: '解答：<span>1.2</span>', answer: '1.2' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1099,6 +1103,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: 'Answer:\n\n- SQLServer', answer: 'SQL' },
     { question: '答案：\n> - 12', answer: '1' },
     { question: 'Answer:\n> - SQL_joins', answer: 'SQL' },
+    { question: 'Answer: <strong>SQLServer</strong> 有何用途？', answer: 'SQL' },
+    { question: '正解：<code>B2</code> 在程式中指什麼？', answer: 'B' },
+    { question: '答案：<span>12</span> 是不是太大？', answer: '1' },
+    { question: 'Answer: <strong>外鍵</strong>，請比較主鍵', answer: '主鍵' },
     { question: 'Answer is what?', answer: 'SQL' },
     { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {

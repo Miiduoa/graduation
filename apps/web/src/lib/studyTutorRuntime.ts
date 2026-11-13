@@ -149,8 +149,14 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     );
     // An opening _ or __ is presentation markup, not part of a leaked answer.
     // Remember its length so a closing underscore is not mistaken for an identifier.
-    const emphasisPrefix = revealedItem.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
-    const disclosed = revealedItem
+    // Local models sometimes print a literal HTML-formatted answer key.
+    // Remove only simple, attribute-free presentation wrappers from the
+    // comparison copy; never interpret HTML or rewrite the rendered question.
+    const answerPresentation = revealedItem.replace(
+      /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)>[\s]*){1,3}/iu, '$1',
+    );
+    const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const disclosed = answerPresentation
       .replace(/^[\s"'“”‘’「『（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
     // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
