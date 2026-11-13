@@ -2871,9 +2871,9 @@ export async function tcPostDiscussionReply(
 
 /** 繳交作業 */
 export async function tcSubmitHomework(
-  courseId: number,
-  hwId: number,
-  input: {
+  _courseId: number,
+  _hwId: number,
+  _input: {
     content?: string;
     /** 附件 URI 列表，會分別上傳 */
     attachments?: Array<{ uri: string; name: string; type?: string }>;
@@ -2882,57 +2882,13 @@ export async function tcSubmitHomework(
   if (!isTronClassDataFetchEnabled()) {
     return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
   }
-  await ensureBackendSessionLoaded();
-  if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCWriteResult>('submitHomework', {
-      courseId,
-      hwId,
-      input,
-    });
-  }
-  try {
-    // 1. 先把附件上傳（multipart）
-    const uploadedKeys: string[] = [];
-    for (const att of input.attachments ?? []) {
-      const form = new FormData();
-      form.append('file', {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        uri: att.uri,
-        name: att.name,
-        type: att.type ?? 'application/octet-stream',
-      } as any);
-      const upRes = await fetch(`${TC_BASE}/api/uploads`, {
-        method: 'POST',
-        credentials: 'include',
-        body: form as unknown as BodyInit,
-      });
-      if (upRes.ok) {
-        const upData = (await upRes.json().catch(() => ({}))) as Record<string, unknown>;
-        const key = String(upData.key ?? upData.id ?? '');
-        if (key) uploadedKeys.push(key);
-      }
-    }
-    // 2. 建立繳交紀錄
-    const res = await fetch(
-      `${TC_BASE}/api/courses/${courseId}/homework/${hwId}/submissions`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: input.content ?? '',
-          upload_keys: uploadedKeys,
-        }),
-      },
-    );
-    if (res.ok) {
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      return { success: true, id: (data.id as number | string | undefined) };
-    }
-    return { success: false, error: `送出失敗 (${res.status})` };
-  } catch (e) {
-    return { success: false, error: String((e as Error)?.message ?? e) };
-  }
+  // This legacy path has no implemented backend writer and its direct POST
+  // never verified a school receipt. Do not revive it by enabling the read
+  // switch: native submission must use the scoped server operation workflow.
+  return {
+    success: false,
+    error: '此學校目前尚未開放站內作業繳交，請至 TronClass 作業頁完成繳交並確認紀錄。',
+  };
 }
 
 /** 取得課程問卷列表（TronClass survey endpoint，可能未公開；回傳空陣列代表沒有） */
