@@ -425,6 +425,7 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 lifecycle={location.schoolLifecycle}
                 onSelect={(schoolId) => go({ section: 'schools', schoolId })}
                 onPeople={(schoolId) => go({ section: 'people', schoolId })}
+                onAudit={(auditQuery) => go({ section: 'audit', auditQuery })}
                 onDraftChange={onSchoolDraftChange}
                 onSearch={(schoolQuery) =>
                   go({ section: 'schools', schoolQuery, schoolId: null }, 'replace')
