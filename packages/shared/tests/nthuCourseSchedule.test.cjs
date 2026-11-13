@@ -163,3 +163,6 @@ test('duplicate weekday-periods across official room/time pairs require manual r
     kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
   }).rows.length, 3);
 });
+
+// Keep the exhaustive clock/CSV matrix in the existing fixed CI test selection.
+require('./nthuCourseBreaks.cjs');
