@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { callCampusAssistant } from '@/lib/campusAssistantClient';
-import { personalImportsStorageKey } from '@/lib/personalImports';
+import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
 import { currentSemesterStartUtc, rocSchoolYear } from '@campus/shared/src/campusAnnouncementQuality';
 import { AssistantEnabledProvider } from './AssistantEnabledProvider';
 import { TodayCampusEntry } from './TodayCampusEntry';
@@ -94,8 +94,7 @@ function reply(answer: string) {
   return Response.json({ answer, steps: [], cards: [] });
 }
 
-function saveTodayLesson(): string {
-  const now = new Date();
+function saveTodayLesson(now = new Date()): string {
   // PU's verified timetable profile accepts Monday–Friday. At Taiwan midnight
   // on weekends, a same-day test lesson would be rejected as damaged storage.
   // Keep the fixture valid and ask for the next teaching day instead.
@@ -131,6 +130,22 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  ['Friday', '2026-11-13T17:30:00+08:00', '今天有哪些課？', 5],
+  ['Saturday after midnight', '2026-11-14T00:02:00+08:00', '後天有哪些課？', 1],
+  ['Sunday before midnight', '2026-11-15T23:59:00+08:00', '明天有哪些課？', 1],
+])('keeps %s PU Today lesson fixture readable and correctly dated', (_day, instant, question, weekday) => {
+  expect(saveTodayLesson(new Date(instant))).toBe(question);
+  // Use the production storage reader/validator: an invalid weekend PU
+  // fixture must never be mistaken for a broken logged-in user's storage.
+  const rows = readPersonalImports({ owner: 'platform:' + state.context, schoolId: state.school });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    schoolId: 'pu', academicYear: '115', semester: '1',
+    dayOfWeek: weekday, title: '入口測試資料庫', startTime: '10:10', endTime: '11:00',
+  });
+});
 
 it.each([
   ['explanation', '資料庫索引', '請解釋什麼是資料庫索引？', '索引能加快資料查找。', '可以舉個例子嗎？', '例如先依學號找到資料。'],
