@@ -139,10 +139,16 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // Generated Markdown may wrap a disclosed key in inline code or emphasis.
     // Strip only opening presentation marks for comparison, never displayed text.
     const rawDisclosed = question.slice(label.index + label[0].length);
+    // A multiline Markdown answer key may use a bullet or numbered item.
+    // Only remove a marker on a NEW line: "- 1" on the same line could be
+    // negative numeric notation, not an answer-list bullet.
+    const revealedItem = rawDisclosed.replace(
+      /^[ \t]*\r?\n[ \t]*(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)/u, '',
+    );
     // An opening _ or __ is presentation markup, not part of a leaked answer.
     // Remember its length so a closing underscore is not mistaken for an identifier.
-    const emphasisPrefix = rawDisclosed.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
-    const disclosed = rawDisclosed
+    const emphasisPrefix = revealedItem.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const disclosed = revealedItem
       .replace(/^[\s"'“”‘’「『（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
     // For numeric reference answers, 1 is not the same answer as 12 or 1.2.

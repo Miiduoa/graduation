@@ -1038,6 +1038,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'double underscore emphasis', question: 'What? Solution: __SQL__', answer: 'SQL' },
     { label: 'underscore emphasis inside Chinese quotes', question: '參考答案：「_SQL_」', answer: 'SQL' },
     { label: 'Markdown emphasis on decimal', question: '解答：*1.2*', answer: '1.2' },
+    { label: 'Markdown unordered answer list', question: 'Answer:\n- SQL', answer: 'SQL' },
+    { label: 'Chinese bullet answer list', question: '答案：\n• 主鍵', answer: '主鍵' },
+    { label: 'Numbered answer item with inline code', question: '解答：\n1. `SQL`', answer: 'SQL' },
+    { label: 'Markdown list plus bold answer', question: 'Correct answer:\n* **SQL**', answer: 'SQL' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1080,6 +1084,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: 'What? Solution: _SQL_joins?', answer: 'SQL' },
     { question: 'What? Solution: __SQL__Server?', answer: 'SQL' },
     { question: 'What? Solution: SQL_', answer: 'SQL' },
+    { question: '答案：- 1', answer: '1' },
+    { question: 'Answer:\n- SQL_joins', answer: 'SQL' },
+    { question: '答案：\n- 12', answer: '1' },
+    { question: 'Answer:\n- SQLServer', answer: 'SQL' },
     { question: 'Answer is what?', answer: 'SQL' },
     { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
