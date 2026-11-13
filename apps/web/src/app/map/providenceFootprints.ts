@@ -345,7 +345,7 @@ function outlineNearPoi(
 // A matching way ID alone must not turn explicit negative tags into a campus block.
 const NON_BUILDING_VOLUMES = new Set([
   'no', 'false', '0', 'none', 'unknown', 'maybe',
-  'proposed', 'planned', 'construction', 'demolished', 'destroyed',
+  'proposed', 'planned', 'construction', 'demolition', 'demolishing', 'demolished', 'destroyed',
   // OSM also contains singular ruin and damaged building classifications.
   // Neither proves an intact roof, so keep only the verified campus POI marker.
   'ruins', 'ruined', 'ruin', 'damaged', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
@@ -357,6 +357,8 @@ const LIFECYCLE_BUILDING_TAGS = [
   'abandoned:building', 'disused:building', 'demolished:building',
   'destroyed:building', 'removed:building', 'razed:building',
   'construction:building', 'proposed:building', 'planned:building',
+  // A building can be explicitly in the process of being taken down.
+  'demolition:building', 'demolishing:building',
   'ruins:building', 'ruined:building',
 ] as const;
 // Older tagging also puts the lifecycle state directly on the building,
@@ -364,7 +366,7 @@ const LIFECYCLE_BUILDING_TAGS = [
 // original full-height campus volume still exists.
 const LIFECYCLE_STATUS_TAGS = [
   'abandoned', 'disused', 'demolished', 'destroyed', 'removed',
-  'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
+  'razed', 'ruins', 'ruined', 'construction', 'demolition', 'demolishing', 'proposed', 'planned',
 ] as const;
 
 // building:condition is a separate OSM key. A polygon can still have
