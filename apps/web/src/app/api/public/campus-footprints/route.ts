@@ -65,7 +65,13 @@ function overpassRetryAfterMs(header: string | null, now: number): number {
   const value = header.trim();
   let requestedMs: number;
   if (/^\d+$/.test(value)) {
-    requestedMs = Number(value) * 1000;
+    // HTTP delta-seconds may be arbitrarily long. Number(value) * 1000 can
+    // overflow to Infinity, which previously fell back to just ten minutes
+    // instead of respecting a public Overpass operator's longer pause.
+    // Strip leading zeros, then cap *before* numeric conversion.
+    const digits = value.replace(/^0+/, '') || '0';
+    requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
+      ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
     const dateMs = Date.parse(value);
     requestedMs = Number.isFinite(dateMs) ? dateMs - now : NaN;
