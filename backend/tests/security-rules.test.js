@@ -956,6 +956,47 @@ describe('firestore security rules', () => {
       await assertFails(post.delete());
     });
 
+    test('group post client writes cannot impersonate server AI provenance', async () => {
+      const postFor = (uid) =>
+        testEnv.authenticatedContext(uid).firestore().doc('groups/course/posts/ai-provenance');
+      const author = postFor('alice');
+      const teacher = postFor('teacher');
+      const outsider = postFor('mallory');
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+      });
+      const ordinary = { authorId: 'alice', kind: 'question', title: 'Real student question' };
+      for (const forged of [
+        { ...ordinary, assistantReply: { status: 'done' } },
+        { ...ordinary, isAI: true },
+        { ...ordinary, isAI: 'true' },
+        { ...ordinary, generatedBy: 'server' },
+        { ...ordinary, authorName: '助理回覆' },
+      ]) {
+        await assertFails(author.set(forged));
+      }
+      await assertSucceeds(author.set({ ...ordinary, authorName: 'Alice', isAI: false }));
+      for (const forged of [
+        { isAI: true },
+        { isAI: 'true' },
+        { generatedBy: 'server' },
+        { authorName: '助理回覆' },
+        { assistantReply: { status: 'done' } },
+      ]) {
+        await assertFails(author.update(forged));
+      }
+      await assertFails(teacher.update({ generatedBy: 'server' }));
+      await assertFails(teacher.update({ authorName: '助理回覆' }));
+      await assertFails(outsider.update({ title: 'Cross-school' }));
+      await assertSucceeds(author.update({ title: 'Student edit' }));
+      await assertSucceeds(teacher.update({ title: 'Instructor moderation' }));
+      // Replaying old grants must not restore access after group revocation.
+      await seedFirestore((admin) =>
+        admin.doc('groups/course/members/alice').update({ status: 'removed' }));
+      await assertFails(author.update({ title: 'After revocation' }));
+    });
+
     test('group post votes cannot forge other members and reject withdrawn or revoked users', async () => {
       const postFor = (uid) => testEnv.authenticatedContext(uid).firestore().doc(postPath);
       await seedFirestore(async (admin) => {

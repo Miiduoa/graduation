@@ -1025,6 +1025,10 @@ service cloud.firestore {
         allow create: if isActiveGroupMember(groupId)
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
+          // AI origin fields are server-owned, including legacy/alternate SDK writes.
+          && request.resource.data.get('isAI', false) == false
+          && !('generatedBy' in request.resource.data)
+          && request.resource.data.get('authorName', '') != '助理回覆'
           // No member may mint votes while creating a post.
           && request.resource.data.get('likedBy', []) == []
           && request.resource.data.get('likes', 0) == 0
@@ -1051,7 +1055,11 @@ service cloud.firestore {
             && resource.data.get('deletedAt', null) == null;
         }
 
-        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'assistantReply'])
+        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'authorId', 'assistantReply', 'isAI', 'generatedBy'
+        ])
+          && request.resource.data.get('isAI', false) == false
+          && request.resource.data.get('authorName', '') != '助理回覆'
           && (
             (isActiveGroupMember(groupId) && isVisiblePostForReactions() && ownPostVoteOnly())
             || (

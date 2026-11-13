@@ -660,3 +660,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 在 `backend/tests/security-rules.test.js` 新增 Firebase emulator 合成回歸，驗證作者與教師偽造票數拒絕、同組會員合法投票／取消、跨帳號票數和正文竄改拒絕、跨校拒絕、撤回後重放、重新發布、群組資格及學校資格撤銷。**這裡的原始碼／回歸提交不等於 GitHub CI 已完成或正式環境已部署**；必須依新精確 head 工作流結果另記。未發布父貼文本身的 Firestore `get/list` 仍是**未修補、較高資料保密風險**，需要連 Web/Mobile feed 查詢與歷史資料相容性改造。GCS/Supabase 已簽 URL 撤銷、真隔離 Storage CAS／競態、歷史附件引用、minimatch 雙鎖檔與正式發布／回復也仍待驗收。
 
 本次只觸及開發分支、Rules、合成測試與同一安全紀錄；不操作正式資料、憑證、token、migration、部署、E 校園或被拒絕的 npm/pnpm audit。缺少指定 App 5504170 對精確 head 的「審查通過」，不自行合併。
+
+## 2026-11-14：群組貼文的 AI 來源標記不可由一般 SDK 偽造（PR #577）
+
+在精確父 head `745b1b23e1e69a27d636eed1b50274b1d611152e` 檢查到：雖然 `assistantReply` 原本只供伺服器建立／修改，但有效群組成員仍能建立 `isAI:true`、`generatedBy:'server'` 或 `authorName:'助理回覆'` 的假 AI 貼文，或在既有普通貼文中竄改這些來源標記。本項是依 Rules 推導、可用合成資料重現的身分來源偽造，並非正式資料已被冒用的證據。
+
+最小修補：直接 Firestore SDK create 不能自行標記 AI 或伺服器生成，且不可將發文者名稱設定為「助理回覆」；update 的 `isAI`、`generatedBy`、`assistantReply` 欄位保持伺服器專用，最終內容仍不能標示 AI 或冒充保留名稱。正常學生發文、學生與教師編輯、既有票數授權、Admin SDK 真實 AI 回覆路徑維持。新增 `backend/tests/security-rules.test.js` 的合成 Firebase Emulator 回歸，包含初始偽造／更新偽造、正常操作、跨校身分與撤權重放；**回歸結果仍須核對新精確 head 的 CI，未通過前不列為已驗證。**
+
+**仍未解決**：未發布父貼文 `get/list` 直接讀取、GCS/Supabase 已發 URL 撤權、真 GCS 隔離 bucket 競態、歷史附件可信引用、minimatch 雙鎖檔、正式發布與回復。父貼文 list 必須配合 Web/Mobile feed 和歷史資料轉換，避免直接收緊造成查詢失敗。本項只修改開發分支，無正式資料、憑證、token、migration、部署、E 校園或未授權 npm/pnpm audit；App 5504170 精確 head 審查通過前不得由此 PR 合併。
