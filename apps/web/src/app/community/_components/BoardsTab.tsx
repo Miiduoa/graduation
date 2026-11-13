@@ -59,7 +59,6 @@ function BoardsContent(props: {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [pendingSubscriptionIds, setPendingSubscriptionIds] = useState<Set<string>>(new Set());
-  const subscriptionRequests = useRef<Set<string>>(new Set());
   const [filter, setFilter] = useState('');
   const [composeEpoch, setComposeEpoch] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -181,9 +180,8 @@ function BoardsContent(props: {
       alert('請先登入');
       return;
     }
-    // React state is asynchronous; a ref also blocks a second click before rerender.
-    if (subscriptionRequests.current.has(b.id)) return;
-    subscriptionRequests.current.add(b.id);
+    // Keep the action disabled while its write is unresolved, including repeated clicks.
+    if (pendingSubscriptionIds.has(b.id)) return;
     setPendingSubscriptionIds((previous) => new Set(previous).add(b.id));
     const uid = user.uid;
     const wasSub = subscribed.has(b.id);
@@ -209,7 +207,6 @@ function BoardsContent(props: {
         alert(wasSub ? '這次未能取消訂閱，請稍後再試。' : '這次未能訂閱，請稍後再試。');
       }
     } finally {
-      subscriptionRequests.current.delete(b.id);
       if (mounted.current) {
         setPendingSubscriptionIds((previous) => {
           const next = new Set(previous);
