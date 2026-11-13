@@ -130,18 +130,19 @@
 }
 
 .taskContent {
+  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.taskContent h3 {
+.taskContent > h3 {
   margin: 0;
   font-size: var(--font-body-size);
   line-height: 1.5;
   font-weight: 600;
 }
 
-.taskContent p {
+.taskContent > p {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
@@ -249,6 +250,117 @@
 .source {
   margin-top: 16px;
   font-size: 0.75rem;
+}
+
+.followup {
+  margin-top: 9px;
+  min-width: 0;
+}
+
+.followupStatus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 10px;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.followupStatus strong {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.followup[data-attention] .followupStatus strong,
+.needsAttention {
+  color: var(--warning);
+}
+
+.followupNote {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.followupActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 16px;
+}
+
+.followupActions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  text-underline-offset: 3px;
+}
+
+.followupChecked {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.recent {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.recentSummary {
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+}
+
+.recentSummary span + span {
+  margin-inline-start: 12px;
+}
+
+.recentSummary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.recentList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recentList > li {
+  padding: 10px 0;
+}
+
+.recentList > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.trackingFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
+  margin-top: 8px;
+}
+
+.compactReceipt {
+  margin: 8px 0 0;
+  color: var(--success);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
 }
 
 @media (max-width: 540px) {

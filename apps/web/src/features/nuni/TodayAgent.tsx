@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
+import { parseAssistantCourseworkFollowup, type AssistantCourseworkFollowup } from '@campus/shared/src/assistantCourseworkFollowup';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { TodayAgentPanel, todayAgentTaskKey } from '@/components/today/TodayAgentPanel';
 import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
@@ -14,6 +15,8 @@ import {
   removeAssistantExecutionJournal,
   type AssistantExecutionJournalEntry,
 } from '@/lib/assistantExecutionJournal';
+import { readTodayAgentFollowups, saveTodayAgentFollowup, removeTodayAgentFollowup, assertTodayAgentFollowupCapacity,
+  todayAgentFollowupStorageKey, type TodayAgentFollowupEntry } from '@/lib/todayAgentFollowups';
 import { calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import type { V2ActionState, V2ActionStates, V2Card, V2Reply } from './assistant/types';
 
@@ -27,7 +30,7 @@ type Props = {
   error?: string;
   onRetry?: () => void;
 };
-type Pending = 'plan' | 'confirm' | 'reconcile' | 'cancel' | null;
+type Pending = 'plan' | 'confirm' | 'reconcile' | 'cancel' | 'followup' | null;
 type State = {
   ready: boolean;
   reply: V2Reply | null;
@@ -36,11 +39,16 @@ type State = {
   pending: Pending;
   error: string;
   previewExpiresAt: number | null;
+  followups: AssistantCourseworkFollowup[];
+  trackingReady: boolean;
+  trackingError: string;
 };
 type Lifetime = { controller: AbortController; busy: boolean };
-const initialState = (): State => ({ ready: false, reply: null, states: {}, pending: null, error: '', previewExpiresAt: null });
+const initialState = (): State => ({ ready: false, reply: null, states: {}, pending: null, error: '', previewExpiresAt: null,
+  followups: [], trackingReady: false, trackingError: '' });
 const AUTOMATIC_COOLDOWN = 15 * 60_000;
 const CONFIRMATION_MARGIN = 15_000;
+const FOLLOWUP_COOLDOWN = 60_000;
 function claimAutomaticPreview(scope: Scope): boolean {
   const key = 'campus.today-agent-auto.v1:' + [scope.context, scope.accountId, scope.schoolId].map(encodeURIComponent).join(':');
   try {
@@ -111,6 +119,9 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   const autoPrepared = useRef(false);
   const dispatched = useRef(new Set<string>());
   const route = useRef<{ conversationId: string; token: string } | null>(null);
+  const trackingSnapshot = useRef('');
+  const lastFollowup = useRef(0);
+  const followupQueued = useRef(false);
   const localScope = { owner: 'platform:' + scope.accountId, schoolId: scope.schoolId };
   const journalScope = { ...localScope, context: scope.context };
   const active = (run: Lifetime) => lifetime.current === run && !run.controller.signal.aborted;
@@ -131,6 +142,10 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   const finish = (run: Lifetime) => {
     run.busy = false;
     update(run, { pending: null });
+    if (active(run) && followupQueued.current) {
+      followupQueued.current = false;
+      void Promise.resolve().then(() => { if (active(run)) void refreshFollowups(); });
+    }
   };
   async function send(run: Lifetime, action: Exclude<Pending, null>, input: Record<string, unknown>) {
     return withAssistantRequestDeadline(run.controller.signal, action === 'plan' ? 25000 : 15000, async (signal) => {
@@ -147,6 +162,72 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   }
   const sendCard = (run: Lifetime, action: 'confirm' | 'cancel' | 'reconcile', card: V2Card) =>
     send(run, action, { conversationId: card.conversationId, token: card.token, args: card.args });
+  const trackedTask = (task: HomeTask) => stateRef.current.followups.some(item => item.task &&
+    item.task.workspaceId === task.courseId && item.task.taskId === task.id && item.task.kind === (task.kind ?? 'assignment'));
+  function trackingCurrent(run: Lifetime): boolean {
+    const entries = readTodayAgentFollowups(localScope);
+    if (!stateRef.current.trackingReady || JSON.stringify(entries) !== trackingSnapshot.current) {
+      update(run, { trackingReady: false, trackingError: '已有安排需要重新核對，確認後再準備新的時段。' });
+      followupQueued.current = true;
+      return false;
+    }
+    return true;
+  }
+  /** A stored proof selects only a read. The server authenticates its original task association each time. */
+  async function refreshTracking(run: Lifetime, only?: TodayAgentFollowupEntry[]) {
+    const entries = readTodayAgentFollowups(localScope);
+    const selected = only ?? entries;
+    const results = new Map(stateRef.current.followups.map(item => [item.mutationId, item]));
+    const failed: string[] = [];
+    let index = 0;
+    update(run, { pending: 'followup', trackingError: '' });
+    await Promise.all(Array.from({ length: Math.min(3, selected.length) }, async () => {
+      while (active(run)) {
+        const entry = selected[index++];
+        if (!entry) return;
+        try {
+          const raw = await send(run, 'followup', { conversationId: entry.conversationId,
+            issuedContext: entry.issuedContext, token: entry.card.token, args: entry.card.args });
+          if (!active(run)) return;
+          const result = parseAssistantCourseworkFollowup(raw, { schoolId: scope.schoolId,
+            mutationId: entry.card.mutationId, event: entry.card.args });
+          if (result.status === 'not_coursework') {
+            await removeTodayAgentFollowup(localScope, entry.card.mutationId, () => active(run));
+            results.delete(entry.card.mutationId);
+          } else {
+            results.set(result.mutationId, result);
+            const ended = parseTaipeiInstant(`${result.event.endDate || result.event.date}T${result.event.allDay ? '23:59' : result.event.endTime}:00+08:00`);
+            // A fresh completed source can retire old tracking; the original calendar event remains untouched.
+            if (['submitted', 'closed'].includes(result.status) && result.calendar === 'matching' && ended !== null &&
+                Date.parse(result.checkedAt) - ended > 7 * 86400000)
+              await removeTodayAgentFollowup(localScope, entry.card.mutationId, () => active(run));
+          }
+        } catch {
+          if (!active(run)) return;
+          failed.push(entry.card.mutationId);
+          const previous = results.get(entry.card.mutationId);
+          if (previous) results.set(entry.card.mutationId, { ...previous, status: 'unavailable', source: null, calendar: 'unavailable' });
+        }
+      }
+    }));
+    if (!active(run)) return;
+    const after = readTodayAgentFollowups(localScope);
+    const retainedIds = new Set(after.map(entry => entry.card.mutationId));
+    for (const id of results.keys()) if (!retainedIds.has(id)) results.delete(id);
+    const selectedIds = new Set(selected.map(entry => entry.card.mutationId));
+    const beforeEntries = new Map(entries.map(entry => [entry.card.mutationId, JSON.stringify(entry)]));
+    // Another tab may have added a proof while reads were running; do not call that unseen result checked.
+    const unseen = after.some(entry => beforeEntries.get(entry.card.mutationId) !== JSON.stringify(entry) ||
+      !selectedIds.has(entry.card.mutationId) && !results.has(entry.card.mutationId));
+    const ready = !failed.length && !unseen;
+    trackingSnapshot.current = JSON.stringify(after);
+    lastFollowup.current = Date.now();
+    update(run, { followups: [...results.values()], trackingReady: ready,
+      trackingError: ready ? '' : '部分已安排事項暫時無法核對，原紀錄仍保留。請重新核對後再安排，避免重複新增。' });
+    const selectedTask = props.tasks.find(task => todayAgentTaskKey(task) === stateRef.current.selectedTaskId);
+    if (selectedTask && trackedTask(selectedTask))
+      discardUnsentPreview(run, '這件課務已有安排，已撤下尚未送出的預覽。請查看原安排的最新狀態。');
+  }
   function remember(run: Lifetime, card: V2Card) {
     saveAssistantExecutionJournal(journalScope, { conversationId: card.conversationId!, card }, () => active(run));
   }
@@ -210,9 +291,26 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
       try { await mirrorAssistantCalendarReceipt(result, localScope, () => active(run)); }
       catch (error) { localMessage = error instanceof Error ? error.message : '此裝置尚未更新，請重新核對。'; }
       if (!active(run)) return false;
+      if (!localMessage) {
+        try {
+          await saveTodayAgentFollowup(localScope, { issuedContext: scope.context, conversationId: card.conversationId!,
+            card: { tool: 'propose_personal_event', token: card.token, args: parseAssistantCalendarEvent(card.args),
+              mutationId: card.mutationId, schoolId: card.schoolId, destination: card.destination } }, result, () => active(run));
+        } catch (error) {
+          localMessage = error instanceof Error ? error.message : '這部裝置尚未保留安排追蹤紀錄，請重新核對。';
+          update(run, { trackingReady: false, trackingError: localMessage });
+        }
+      }
       setAction(run, card, { status: 'verified', receipt: result,
         local: localMessage ? 'unavailable' : 'ready', ...(localMessage ? { localMessage } : {}) });
-      if (!localMessage) forget(run, card);
+      if (!localMessage) {
+        forget(run, card);
+        try {
+          await refreshTracking(run, readTodayAgentFollowups(localScope).filter(entry => entry.card.mutationId === card.mutationId));
+        } catch {
+          update(run, { trackingReady: false, trackingError: '行程已加入，但後續追蹤暫時無法核對，請重新確認資料。' });
+        }
+      }
       return !localMessage;
     }
     if (result.status === 'revoked') {
@@ -242,14 +340,17 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   async function initialize(run: Lifetime) {
     try {
       const cards = recoveryCards(readAssistantExecutionJournal(journalScope));
-      update(run, { ready: true });
-      if (!cards.length) return;
-      adoptRecovery(run, cards);
-      for (const card of cards) {
-        if (!active(run)) break;
-        await checkCard(run, card);
-        if (stateRef.current.states[card.mutationId]?.status === 'unknown') break;
+      if (cards.length) {
+        adoptRecovery(run, cards);
+        for (const card of cards) {
+          if (!active(run)) break;
+          await checkCard(run, card);
+          if (stateRef.current.states[card.mutationId]?.status === 'unknown') break;
+        }
       }
+      if (!active(run)) return;
+      await refreshTracking(run);
+      update(run, { ready: true });
     } catch (error) {
       update(run, { ready: false, error: error instanceof Error ? error.message : '先前安排紀錄暫時讀不到，請重試。' });
     } finally { finish(run); }
@@ -274,6 +375,8 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     autoPrepared.current = true;
     try {
       if (!checkJournal(run, true)) return;
+      if (!trackingCurrent(run) || trackedTask(task)) return;
+      assertTodayAgentFollowupCapacity(localScope);
       update(run, { selectedTaskId: todayAgentTaskKey(task), reply: null, states: {}, previewExpiresAt: null });
       const target = { workspaceId: task.courseId, taskId: task.id, kind: task.kind ?? 'assignment' };
       let binding = route.current;
@@ -303,12 +406,12 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     } finally { finish(run); }
   }
   useEffect(() => {
-    if (!state.ready || state.pending || state.error || state.reply || autoPrepared.current || props.loading || props.error || !props.now) return;
+    if (!state.ready || !state.trackingReady || state.pending || state.error || state.trackingError || state.reply || autoPrepared.current || props.loading || props.error || !props.now) return;
     const now = props.now.getTime();
     if (!Number.isFinite(now)) return;
     const candidate = props.tasks
       .map((task) => ({ task, due: task.dueAt ? parseTaipeiInstant(task.dueAt) : null }))
-      .filter((row): row is { task: HomeTask; due: number } => row.due !== null && row.due > now && row.due - now <= 7 * 86400000)
+      .filter((row): row is { task: HomeTask; due: number } => row.due !== null && row.due > now && row.due - now <= 7 * 86400000 && !trackedTask(row.task))
       .sort((left, right) => left.due - right.due || todayAgentTaskKey(left.task).localeCompare(todayAgentTaskKey(right.task)))[0];
     if (candidate) {
       autoPrepared.current = true;
@@ -316,7 +419,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     }
     // Re-entering Today shares a short cooldown; it cannot consume the chat request budget on every navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.ready, state.pending, state.error, state.reply, props.loading, props.error, props.tasks, props.now]);
+  }, [state.ready, state.trackingReady, state.pending, state.error, state.trackingError, state.reply, props.loading, props.error, props.tasks, props.now]);
 
   useEffect(() => {
     const run = lifetime.current;
@@ -336,6 +439,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     if (!run) return;
     try {
       if (!checkJournal(run, false)) return;
+      if (!trackingCurrent(run)) return;
       if (retireExpiredPreview(run)) return;
       for (const card of cards) {
         if (!active(run)) break;
@@ -345,10 +449,13 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
             !canConfirmAction(stateRef.current.states[card.mutationId]) ||
             !priorCalendarActionsVerified(currentCards, index, stateRef.current.states)) break;
         try {
+          assertTodayAgentFollowupCapacity(localScope, card.mutationId);
           await assertAssistantCalendarLocalReady(card.args, localScope, () => active(run));
           if (!active(run)) break;
           if (!checkJournal(run, false)) break;
+          if (!trackingCurrent(run)) break;
           if (retireExpiredPreview(run)) break;
+          assertTodayAgentFollowupCapacity(localScope, card.mutationId);
           remember(run, card);
         } catch (error) {
           setAction(run, card, { status: 'blocked', message: error instanceof Error ? error.message : '尚未送出，請先確認裝置的行事曆。' });
@@ -409,14 +516,47 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
       const run = begin('reconcile', false);
       if (run) void initialize(run);
     } else {
-      const run = lifetime.current;
-      if (run && !run.busy) update(run, { error: '' });
+      void refreshFollowups();
     }
     props.onRetry?.();
   }
+  async function refreshFollowups(automatic = false) {
+    if (automatic && (document.visibilityState === 'hidden' || Date.now() - lastFollowup.current < FOLLOWUP_COOLDOWN)) return;
+    const run = begin('followup');
+    if (!run) {
+      if (lifetime.current?.busy) followupQueued.current = true;
+      return;
+    }
+    try { await refreshTracking(run); }
+    catch (error) {
+      update(run, { trackingReady: false, trackingError: error instanceof Error ? error.message : '安排追蹤暫時無法讀取，請重新核對。' });
+    } finally { finish(run); }
+  }
+  useEffect(() => {
+    const foreground = () => { void refreshFollowups(true); };
+    const changed = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== todayAgentFollowupStorageKey(localScope)) return;
+      const run = lifetime.current;
+      if (!run || !active(run)) return;
+      update(run, { trackingReady: false });
+      void refreshFollowups();
+    };
+    window.addEventListener('focus', foreground);
+    document.addEventListener('visibilitychange', foreground);
+    window.addEventListener('storage', changed);
+    return () => {
+      window.removeEventListener('focus', foreground);
+      document.removeEventListener('visibilitychange', foreground);
+      window.removeEventListener('storage', changed);
+    };
+    // The component lifetime is fixed to one account and campus. Reads use stateRef and never dispatch a write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return <TodayAgentPanel tasks={state.ready ? props.tasks : []} now={props.now}
-    loading={props.loading || (!state.ready && !state.error)} error={state.error || props.error}
+    loading={props.loading || (!state.ready && !state.error)} error={state.error || state.trackingError || props.error}
     selectedTaskId={state.selectedTaskId} reply={state.reply} states={state.states} pending={state.pending}
+    followups={state.followups} tracking={state.pending === 'followup'} planningBlocked={!state.trackingReady}
+    onRefreshFollowups={() => void refreshFollowups()}
     onPlan={(task) => void plan(task)} onConfirm={(cards) => void confirm(cards)}
     onCancel={(index) => void cancel(index)} onReconcile={(card) => void reconcile(card)} onRetry={retry} />;
 }

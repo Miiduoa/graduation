@@ -11,10 +11,13 @@ on:
       - 'apps/web/src/lib/nuni/assistantV2/**'
       - 'apps/web/src/lib/assistantCalendarExecution*'
       - 'apps/web/src/lib/assistantExecutionJournal*'
+      - 'apps/web/src/lib/todayAgentFollowups*'
+      - 'apps/web/src/lib/assistantCourseworkFollowup*'
       - 'apps/web/src/lib/personalImports*'
       - 'apps/web/src/lib/homeOverview*'
       - 'apps/web/src/app/globals.css'
       - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/assistantCourseworkFollowup*'
       - 'packages/shared/src/taipeiTime*'
       - 'packages/shared/src/imports/**'
       - 'scripts/qa/today-agent/**'
@@ -66,6 +69,10 @@ jobs:
           pnpm --filter web exec vitest run \
             src/features/nuni/TodayAgent.test.tsx \
             src/components/today/TodayAgentPanel.test.tsx \
+            src/lib/todayAgentFollowups.test.ts \
+            src/lib/assistantCourseworkFollowupContract.test.ts \
+            src/lib/nuni/assistantV2/courseworkFollowup.test.ts \
+            src/lib/nuni/assistantV2/courseworkFollowupHandler.test.ts \
             src/lib/nuni/assistantV2/planningHandler.test.ts \
             src/lib/nuni/assistantV2/courseworkStudyHandler.test.ts \
             src/lib/nuni/assistantV2/calendarExecution.test.ts \
@@ -78,7 +85,7 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Bundle actual TodayAgent with synthetic API
         run: node scripts/qa/today-agent/build.mjs
-      - name: Check preview, keyboard confirmation and lost response recovery
+      - name: Check planning, recovery and continued coursework tracking
         run: python scripts/qa/today-agent/check.py
       - name: Upload screenshots and request ledgers
         if: always()

@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
+import { createAssistantCalendarReceipt, parseAssistantCalendarEvent } from '@campus/shared/src/assistantExecution';
+import type { AssistantCourseworkFollowup } from '@campus/shared/src/assistantCourseworkFollowup';
 import type { HomeTask } from '@/lib/homeOverview';
 import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
+import { readTodayAgentFollowups, saveTodayAgentFollowup, todayAgentFollowupStorageKey } from '@/lib/todayAgentFollowups';
 import { TodayAgent } from './TodayAgent';
 import type { V2Card } from './assistant/types';
 
@@ -55,6 +57,14 @@ const replyFor = (card: V2Card) => ({
     { name: 'find_coursework_study_time', status: 'ok', summary: '已核對課間空堂與個人行程' },
   ],
 });
+const followupFor = (card: V2Card, change: Partial<AssistantCourseworkFollowup> = {}): AssistantCourseworkFollowup => ({
+  version: 1, operation: 'coursework.followup', schoolId: card.schoolId, mutationId: card.mutationId,
+  checkedAt: new Date(Date.now()).toISOString(), status: 'scheduled', calendar: 'matching',
+  task: { workspaceId: urgent.courseId, taskId: urgent.id, kind: 'assignment' },
+  source: { title: urgent.title, courseName: urgent.courseName, dueAt: urgent.dueAt!, state: 'open', submitted: false },
+  event: { title: String(card.args.title), date: String(card.args.date), allDay: false, startTime: '14:00', endTime: '14:30' },
+  ...change,
+});
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
@@ -72,6 +82,7 @@ function api(card = cardFor(), handler?: Handler) {
     if (call.action === 'plan') return call.body.routeToken
       ? json(replyFor(card))
       : json({ bootstrap: true, conversationId: 'home-conversation', routeToken: 'signed-route-token' });
+    if (call.action === 'followup') return json(followupFor(card));
     throw new Error('Unexpected request: ' + call.action);
   });
   vi.stubGlobal('fetch', fetcher);
@@ -79,6 +90,11 @@ function api(card = cardFor(), handler?: Handler) {
 }
 function saveRecovery(card: V2Card, conversationId = 'prior-conversation') {
   saveAssistantExecutionJournal(journalScope, { conversationId, card }, () => true);
+}
+async function saveTracking(card = cardFor(), issuedContext = context, conversationId = 'home-conversation') {
+  await saveTodayAgentFollowup(localScope, { issuedContext, conversationId,
+    card: { tool: 'propose_personal_event', token: card.token, mutationId: card.mutationId, schoolId: card.schoolId,
+      destination: card.destination, args: parseAssistantCalendarEvent(card.args) } }, receiptFor(card), () => true);
 }
 const localStorageMethods = (): Storage => Object.hasOwn(localStorage, 'setItem') ? localStorage : Object.getPrototypeOf(localStorage);
 
@@ -162,11 +178,11 @@ it('saves recovery evidence before a single confirmed write, then mirrors the ve
   } });
   expect(readPersonalImports(localScope)).toEqual([]);
   await act(async () => pending.resolve(json(receiptFor(card))));
-  const opened = await screen.findByRole('link', { name: '開啟這筆行程' });
+  const opened = await screen.findByRole('link', { name: `查看「${urgent.title}」的行程` });
   expect(opened.getAttribute('href')).toContain('eventId=' + card.mutationId);
   expect(readPersonalImports(localScope)).toEqual([receiptFor(card).record]);
   expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
-  expect(actions()).toEqual(['plan', 'plan', 'confirm']);
+  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'followup']);
 });
 
 it('does not accept a different action receipt and reconciles only the original confirmation', async () => {
@@ -178,9 +194,9 @@ it('does not accept a different action receipt and reconciles only the original 
   });
   render(<TodayAgent {...props} />);
   fireEvent.click(await screen.findByRole('button', { name: '確認' }));
-  await screen.findByRole('link', { name: '開啟這筆行程' });
-  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'reconcile']);
-  expect(calls.at(-1)?.body).toEqual(calls[2].body);
+  await screen.findByRole('link', { name: `查看「${urgent.title}」的行程` });
+  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'reconcile', 'followup']);
+  expect(calls.findLast(call => call.action === 'reconcile')?.body).toEqual(calls[2].body);
   expect(readPersonalImports(localScope).map(row => row.id)).toEqual([card.mutationId]);
   expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
 });
@@ -217,8 +233,8 @@ it('restores an interrupted operation after reload with one read and no repeated
   first.unmount();
   expect(calls[2].signal?.aborted).toBe(true);
   render(<TodayAgent {...props} />);
-  await screen.findByRole('link', { name: '開啟這筆行程' });
-  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'reconcile']);
+  await screen.findByRole('link', { name: `查看「${urgent.title}」的行程` });
+  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'reconcile', 'followup', 'followup']);
   expect(calls[3].body).toEqual(calls[2].body);
   expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
   expect(readPersonalImports(localScope)).toHaveLength(1);
@@ -260,8 +276,8 @@ it('keeps the verified action in recovery when local storage fails and later rep
   expect(actions()).toEqual(['plan', 'plan', 'confirm']);
   failure.mockRestore();
   fireEvent.click(retry);
-  await screen.findByRole('link', { name: '開啟這筆行程' });
-  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'reconcile']);
+  await screen.findByRole('link', { name: `查看「${urgent.title}」的行程` });
+  expect(actions()).toEqual(['plan', 'plan', 'confirm', 'reconcile', 'followup']);
   expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
   expect(readPersonalImports(localScope)).toHaveLength(1);
 });
@@ -400,4 +416,240 @@ it('allows an explicit plan for a loaded task while other task sources are unava
   expect(screen.getByRole('alert').textContent).toContain('部分課程資料尚未讀到');
   expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
   expect(readPersonalImports(localScope)).toEqual([]);
+});
+
+it('remembers a verified task after remount and a new login without preparing or writing it again', async () => {
+  const card = cardFor();
+  const { calls, actions } = api(card, call => call.action === 'confirm' ? json(receiptFor(card)) : undefined);
+  const first = render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: '確認' }));
+  await screen.findByRole('link', { name: `查看「${urgent.title}」的行程` });
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  first.unmount();
+  sessionStorage.clear();
+  vi.mocked(Date.now).mockReturnValue(now.getTime() + 20 * 60000);
+  render(<TodayAgent {...props} context={'b'.repeat(43)} now={new Date(Date.now())} />);
+  await screen.findByRole('link', { name: `查看「${urgent.title}」的行程` });
+  expect(screen.queryByRole('button', { name: `替「${urgent.title}」找 30 分鐘準備時間` })).toBeNull();
+  expect(actions().filter(action => action === 'plan')).toHaveLength(2);
+  expect(actions().filter(action => action === 'confirm')).toHaveLength(1);
+  expect(calls.at(-1)?.body).toMatchObject({ issuedContext: context, conversationId: 'home-conversation', token: card.token });
+});
+
+it('checks existing arrangements before automatically preparing the next unarranged task', async () => {
+  const original = cardFor();
+  await saveTracking(original);
+  const next = cardFor('second-calendar-002', 'pu', '複習測驗：英文測驗');
+  const { calls, actions } = api(next, call => call.action === 'followup' ? json(followupFor(original)) : undefined);
+  render(<TodayAgent {...props} tasks={[urgent, later]} />);
+  await screen.findByRole('button', { name: '確認' });
+  expect(actions()).toEqual(['followup', 'plan', 'plan']);
+  expect(calls[1].body.task).toEqual({ workspaceId: later.courseId, taskId: later.id, kind: later.kind });
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(readPersonalImports(localScope)).toEqual([]);
+});
+
+it('keeps an authenticated but unavailable task tracked while allowing a different task to be planned', async () => {
+  const original = cardFor();
+  await saveTracking(original);
+  const next = cardFor('second-calendar-002', 'pu', '複習測驗：英文測驗');
+  const { calls, actions } = api(next, call => call.action === 'followup'
+    ? json(followupFor(original, { status: 'unavailable', source: null })) : undefined);
+  render(<TodayAgent {...props} tasks={[urgent, later]} />);
+  await screen.findByRole('button', { name: '確認' });
+  expect(screen.getByText('最新狀態尚未確認')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: `替「${urgent.title}」找 30 分鐘準備時間` })).toBeNull();
+  expect(actions()).toEqual(['followup', 'plan', 'plan']);
+  expect(calls[1].body.task).toEqual({ workspaceId: later.courseId, taskId: later.id, kind: later.kind });
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(readPersonalImports(localScope)).toEqual([]);
+});
+
+it('removes stale display rows after another tab retires the corresponding tracking proof', async () => {
+  const card = cardFor();
+  await saveTracking(card);
+  const { actions } = api(card);
+  render(<TodayAgent {...props} error="部分課程資料尚未讀到，請重試。" />);
+  await screen.findByText('已安排');
+  localStorage.removeItem(todayAgentFollowupStorageKey(localScope));
+  fireEvent(window, new StorageEvent('storage', { key: todayAgentFollowupStorageKey(localScope), storageArea: localStorage }));
+  const button = await screen.findByRole('button', { name: `替「${urgent.title}」找 30 分鐘準備時間` });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByText('已安排')).toBeNull();
+  expect(actions()).toEqual(['followup']);
+  expect(readTodayAgentFollowups(localScope)).toEqual([]);
+});
+
+it('stops before requesting a new plan when tracking is already at capacity', async () => {
+  const stored = Array.from({ length: 24 }, (_, index) => cardFor('stored-calendar-' + index));
+  await Promise.all(stored.map(card => saveTracking(card)));
+  const { actions } = api(cardFor(), call => call.action === 'followup'
+    ? json(followupFor(stored.find(card => card.token === call.body.token)!)) : undefined);
+  render(<TodayAgent {...props} tasks={[later]} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('24 筆');
+  expect(actions()).toEqual(Array.from({ length: 24 }, () => 'followup'));
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readPersonalImports(localScope)).toEqual([]);
+});
+
+it('rechecks tracking capacity before dispatching a preview that was already prepared', async () => {
+  const stored = Array.from({ length: 24 }, (_, index) => cardFor('stored-calendar-' + index));
+  await Promise.all(stored.slice(0, 23).map(card => saveTracking(card)));
+  const { actions } = api(cardFor(), call => call.action === 'followup'
+    ? json(followupFor(stored.find(card => card.token === call.body.token)!, {
+      task: { workspaceId: later.courseId, taskId: later.id, kind: 'quiz' },
+      source: { title: later.title, courseName: later.courseName, dueAt: later.dueAt!, state: 'open', submitted: false },
+    })) : undefined);
+  render(<TodayAgent {...props} />);
+  await screen.findByRole('button', { name: '確認' });
+  await saveTracking(stored[23]);
+  fireEvent(window, new StorageEvent('storage', { key: todayAgentFollowupStorageKey(localScope), storageArea: localStorage }));
+  await waitFor(() => expect(actions().filter(action => action === 'followup')).toHaveLength(47));
+  await waitFor(() => expect((screen.getByRole('button', { name: '確認' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '確認' }));
+  await screen.findByText(/這部裝置已保留 24 筆安排追蹤/);
+  expect(actions().filter(action => action === 'confirm')).toEqual([]);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readPersonalImports(localScope)).toEqual([]);
+});
+
+it.each([
+  ['source_changed', '作業內容或期限有變更'],
+  ['submitted', '作業已繳交'],
+  ['conflict', '準備時間與最新安排重疊'],
+  ['elapsed', '準備時間已結束'],
+] as const)('reads %s on return to the foreground without any write', async (status, text) => {
+  const card = cardFor();
+  await saveTracking(card);
+  let changed = false;
+  const { actions } = api(card, call => {
+    if (call.action !== 'followup') return;
+    const source = followupFor(card).source!;
+    return json(changed ? followupFor(card, { status,
+      source: { ...source, ...(status === 'submitted' ? { submitted: true } : {}),
+        ...(status === 'source_changed' ? { dueAt: '2026-11-13T13:30:00+08:00' } : {}) },
+      ...(status === 'elapsed' ? { checkedAt: '2026-11-13T07:00:00.000Z' } : {}) }) : followupFor(card));
+  });
+  render(<TodayAgent {...props} />);
+  await screen.findByText('已安排');
+  changed = true;
+  vi.mocked(Date.now).mockReturnValue(now.getTime() + 60001);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  fireEvent.focus(window);
+  await screen.findByText(text);
+  expect(actions()).toEqual(['followup', 'followup']);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(readPersonalImports(localScope)).toEqual([]);
+  if (status === 'elapsed') expect(screen.queryByText('作業已繳交')).toBeNull();
+  fireEvent.focus(window);
+  await act(async () => {});
+  expect(actions()).toEqual(['followup', 'followup']);
+});
+
+it('keeps unread tracking evidence and permits an explicit read retry without starting a new plan', async () => {
+  const card = cardFor();
+  await saveTracking(card);
+  let unavailable = true;
+  const { actions } = api(card, call => call.action === 'followup' && unavailable
+    ? Promise.reject(new TypeError('Source read disconnected')) : undefined);
+  render(<TodayAgent {...props} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('部分已安排事項暫時無法核對');
+  const find = screen.getByRole('button', { name: `替「${urgent.title}」找 30 分鐘準備時間` }) as HTMLButtonElement;
+  expect(find.disabled).toBe(true);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  unavailable = false;
+  fireEvent.click(screen.getByRole('button', { name: '重新確認資料' }));
+  await screen.findByText('已安排');
+  expect(actions()).toEqual(['followup', 'followup']);
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+});
+
+it('does not clear recovery until the verified arrangement has durable follow-up evidence', async () => {
+  const card = cardFor();
+  const { actions } = api(card, call => ['confirm', 'reconcile'].includes(call.action) ? json(receiptFor(card)) : undefined);
+  render(<TodayAgent {...props} />);
+  const confirm = await screen.findByRole('button', { name: '確認' });
+  const original = localStorage.setItem;
+  const failure = vi.spyOn(localStorageMethods(), 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (this === localStorage && key === todayAgentFollowupStorageKey(localScope)) throw new Error('Tracking storage full');
+    return original.call(this, key, value);
+  });
+  fireEvent.click(confirm);
+  const retry = await screen.findByRole('button', { name: '重新核對並更新此裝置' });
+  expect(readPersonalImports(localScope)).toHaveLength(1);
+  expect(readAssistantExecutionJournal(journalScope)).toHaveLength(1);
+  expect(readTodayAgentFollowups(localScope)).toEqual([]);
+  failure.mockRestore();
+  fireEvent.click(retry);
+  await screen.findByText('已安排');
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(actions().filter(action => action === 'confirm')).toHaveLength(1);
+});
+
+it.each(['account', 'school'] as const)('ignores a late follow-up after switching %s', async changed => {
+  const card = cardFor();
+  await saveTracking(card);
+  const delayed = deferred<Response>();
+  const { calls, actions } = api(card, call => call.action === 'followup' ? delayed.promise : undefined);
+  const view = render(<TodayAgent {...props} />);
+  await waitFor(() => expect(actions()).toEqual(['followup']));
+  if (changed === 'school') environment.schoolId = 'nthu';
+  view.rerender(<TodayAgent {...props} accountId={changed === 'account' ? 'bob' : accountId} tasks={[]} />);
+  expect(calls[0].signal?.aborted).toBe(true);
+  await act(async () => delayed.resolve(json(followupFor(card))));
+  expect(screen.queryByText(urgent.title)).toBeNull();
+  expect(screen.queryByText('已安排')).toBeNull();
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(readTodayAgentFollowups({ owner: changed === 'account' ? 'platform:bob' : localScope.owner,
+    schoolId: changed === 'school' ? 'nthu' : 'pu' })).toEqual([]);
+});
+
+it('withdraws an unsent duplicate preview when another tab finishes the same task', async () => {
+  const current = cardFor(), completed = cardFor('other-tab-calendar-002');
+  const { actions } = api(current, call => call.action === 'followup' ? json(followupFor(completed)) : undefined);
+  render(<TodayAgent {...props} />);
+  await screen.findByRole('button', { name: '確認' });
+  await saveTracking(completed);
+  fireEvent(window, new StorageEvent('storage', { key: todayAgentFollowupStorageKey(localScope), storageArea: localStorage }));
+  await screen.findByText('已安排');
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(actions()).toEqual(['plan', 'plan', 'followup']);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+});
+
+it('queues proofs added by another tab while the initial follow-up is still loading', async () => {
+  const original = cardFor(), additional = cardFor('other-tab-calendar-002');
+  await saveTracking(original);
+  const delayed = deferred<Response>();
+  let initial = true;
+  const { actions } = api(original, call => {
+    if (call.action !== 'followup') return;
+    if (initial) { initial = false; return delayed.promise; }
+    return json(call.body.token === original.token ? followupFor(original) : followupFor(additional, {
+      task: { workspaceId: later.courseId, taskId: later.id, kind: 'quiz' },
+      source: { title: later.title, courseName: later.courseName, dueAt: later.dueAt!, state: 'open', submitted: false },
+    }));
+  });
+  render(<TodayAgent {...props} tasks={[urgent, later]} />);
+  await waitFor(() => expect(actions()).toEqual(['followup']));
+  await saveTracking(additional);
+  fireEvent(window, new StorageEvent('storage', { key: todayAgentFollowupStorageKey(localScope), storageArea: localStorage }));
+  await act(async () => delayed.resolve(json(followupFor(original))));
+  await screen.findByRole('link', { name: `查看「${later.title}」的行程` });
+  expect(actions()).toEqual(['followup', 'followup', 'followup']);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(2);
+});
+
+it('retains a damaged tracking history and never treats it as no previous arrangements', async () => {
+  const key = todayAgentFollowupStorageKey(localScope);
+  localStorage.setItem(key, '{damaged');
+  const { actions } = api();
+  render(<TodayAgent {...props} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('安排追蹤紀錄無法核對');
+  expect(actions()).toEqual([]);
+  expect(localStorage.getItem(key)).toBe('{damaged');
 });

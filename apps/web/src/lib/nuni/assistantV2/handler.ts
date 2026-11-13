@@ -18,9 +18,29 @@ import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUse
 import { run, safeCode } from './runner';
 import { courseworkStudyTarget } from './courseworkStudy';
 import { COURSEWORK_STUDY_MESSAGES, prepareCourseworkStudyRequest } from './courseworkStudyRequest';
-const ACTIONS = ['capability', 'ask', 'plan', 'revise', 'confirm', 'cancel', 'reconcile'];
+import { readCourseworkFollowup } from './courseworkFollowup';
+const ACTIONS = ['capability', 'ask', 'plan', 'followup', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
+const followupHits = new Map<string, number[]>();
+const followupActive = new Map<string, number>();
+/** Read-only followups never consume a chat/model or planning allowance. */
+function claimFollowupRead(account: string, now: number) {
+  const key = hash(account);
+  for (const [owner, times] of followupHits)
+    if (!times.some(time => time > now - 3600000)) followupHits.delete(owner);
+  const recent = (followupHits.get(key) || []).filter(time => time > now - 3600000);
+  if (recent.length >= 600 || recent.filter(time => time > now - 60000).length >= 60)
+    throw new V2Error(429, 'FOLLOWUP_READ_LIMIT', 60);
+  if ((followupActive.get(key) || 0) >= 3) throw new V2Error(429, 'FOLLOWUP_BUSY', 5);
+  followupHits.set(key, [...recent, now]);
+  followupActive.set(key, (followupActive.get(key) || 0) + 1);
+  return () => {
+    const remaining = (followupActive.get(key) || 1) - 1;
+    if (remaining) followupActive.set(key, remaining);
+    else followupActive.delete(key);
+  };
+}
 let minute = 0,
   requests = 0,
   tokens = 0,
@@ -107,9 +127,11 @@ export async function handleV2(request: NextRequest, action: string) {
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget']
         : action === 'plan'
           ? ['schoolId', 'conversationId', 'routeToken', 'task']
-          : action === 'revise'
-            ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
-            : ['schoolId', 'conversationId', 'token', 'args'],
+          : action === 'followup'
+            ? ['schoolId', 'conversationId', 'issuedContext', 'token', 'args']
+            : action === 'revise'
+              ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
+              : ['schoolId', 'conversationId', 'token', 'args'],
     );
     const studyTarget = action === 'plan'
       ? courseworkStudyTarget(raw.task)
@@ -119,9 +141,11 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
+    if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
+        !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
     const preparing = action === 'ask' || action === 'plan';
-    const target = action === 'reconcile' ? undefined : preparing || action === 'revise'
+    const target = action === 'reconcile' || action === 'followup' ? undefined : preparing || action === 'revise'
       ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
@@ -138,6 +162,15 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId,
       schoolId,
     };
+    if (action === 'followup') {
+      const release = claimFollowupRead(principal.platformAccountId, Date.now());
+      try {
+        return jsonResponse(await bounded(child => withOperationSignal(child, () => readCourseworkFollowup({
+          binding: { ...binding, session: raw.issuedContext as string },
+          proof: { token: raw.token, args: raw.args }, secret, now: Date.now(), adapter: source.adapter,
+        })), signal, 12000));
+      } finally { release(); }
+    }
     if (action === 'revise') routeOwner(raw.routeToken, binding, secret);
     let protection: PlanProtection | undefined;
     if (preparing) {

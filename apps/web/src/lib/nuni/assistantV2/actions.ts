@@ -261,6 +261,18 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
 type AuthenticatedCard = ReturnType<typeof authenticatedCard>;
 type VerifiedCard = AuthenticatedCard['card'];
 
+/**
+ * Authenticate only provenance for a read. Expiry, issuer restart and a new
+ * login never turn this proof into permission to confirm, revoke or revise.
+ * Callers derive account/school from the current authenticated principal.
+ */
+export function authenticateCourseworkFollowup(binding: Binding, raw: unknown, secret: string, now: number) {
+  const { card } = authenticatedCard(binding, raw, secret, now);
+  if (card.tool !== 'propose_personal_event') return fail('INVALID_INPUT', 422);
+  return { mutationId: card.mutationId, iat: card.iat, event: eventArgs(card.args),
+    studyGuard: card.studyGuard ? { ...card.studyGuard } : null };
+}
+
 function liveAuthorization(binding: Binding, p: Obj, now: number, allowRevoked = false) {
   if (p.issuer !== undefined && p.issuer !== process.env.FLY_MACHINE_ID)
     return fail('CONFIRMATION_REVOKED', 409);
