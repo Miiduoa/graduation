@@ -499,3 +499,37 @@ it('keeps the same local narration when the parent replaces the status callback'
   expect(firstListener).toHaveBeenCalledTimes(1);
   expect(cancel).not.toHaveBeenCalled();
 });
+
+it.each(['construction', 'iteration'])(
+  'still reads every original character if Intl.Segmenter fails during %s',
+  (failure) => {
+    const nativeIntl = Intl;
+    vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), {
+      Segmenter: class {
+        constructor() {
+          if (failure === 'construction') throw new Error('locale data unavailable');
+        }
+        *segment(text: string) {
+          // Simulate a browser yielding a valid first cluster and then failing.
+          // The fallback must discard that partial buffer, not repeat it.
+          yield { segment: text[0] };
+          throw new Error('segmentation iterator failed');
+        }
+      },
+    }));
+    const sourceText = '甲'.repeat(159) + '👩‍💻' + '乙'.repeat(200);
+    render(<StudyReadAloud text={sourceText} />);
+    expect(() => fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }))).not.toThrow();
+    const chunks: string[] = [];
+    for (let index = 0; index < speak.mock.calls.length && index < 12; index += 1) {
+      const utterance = speak.mock.calls[index][0] as Utterance;
+      chunks.push(utterance.text);
+      expect(utterance.voice).toBe(local);
+      act(() => utterance.onend?.());
+    }
+    expect(chunks.join('')).toBe(sourceText);
+    expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+    expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+    expect(speak).toHaveBeenCalledTimes(chunks.length);
+  },
+);

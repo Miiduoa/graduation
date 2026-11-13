@@ -990,3 +990,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - 原本語音朗讀將課文每 160 個 Unicode code point 切成一段，雖不會切開 UTF-16 surrogate pair，仍可能在重音組合、韓文 Jamo 音節、Emoji 膚色／ZWJ、國旗配對之間斷開，讓手機語音唸出不完整的字形。現在在支援的瀏覽器使用**裝置內建** `Intl.Segmenter` 依 grapheme 邊界選取語音片段，仍以每段最多 160 UTF-16 code units 控制長度並優先在標點分段；極長的單一組合序列才退回 code point 安全切分，舊瀏覽器保留原本 code point 行為。
 - 新增五種字形邊界與一項極長組合序列的模擬瀏覽器回歸，檢查語音片段逐字拼回原文、沒有空段且每段不超過 160 UTF-16 長度。沒有上傳教材、使用雲端語音或新增套件。這只改善文字切段及模擬 speechSynthesis，不表示已驗證 Safari／Chrome 真機中文發音、耳機中斷、WebGPU 回答品質或 Ahaboard 同機比較。所有 CI/CodeQL、指定 App 5504170、Maestro/真機仍應依新 SHA 逐項驗收；PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-14：行動 WebView 的字素分段服務故障仍能讀完整教材
+
+- 若瀏覽器宣稱支援 `Intl.Segmenter`，但建立中文分段器時擲出錯誤，或迭代字素時已吐出部分字元後突然失敗，先前朗讀按鈕可能直接中斷。現在會**清空未完成的分段結果**，改用舊有按 Unicode code point 切分的離線備援，保留原文字元順序、避免重複朗讀或漏字；每一段仍至多 160 個 UTF-16 單位。
+- 新增建構失敗與迭代中途失敗兩組模擬瀏覽器回歸。正常支援 `Intl.Segmenter` 的瀏覽器仍優先保留完整字素；退路可能把組合 Emoji 拆在不同段落，但不切破 UTF-16 surrogate pair，不會因此選用遠端語音。
+- 不變動教材、筆記、閱讀 v1/v2 或逐題 checkpoint，不加套件、付費 API 或教材外傳。這是 DOM／模擬語音引擎測試，不代表 iOS／Android 真機、WebGPU 教學品質或 Ahaboard 同條件比較；PR 仍為 Draft、未合併／部署。

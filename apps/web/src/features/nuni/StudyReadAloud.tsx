@@ -11,29 +11,38 @@ function splitStudySpeech(text: string): string[] {
   // character, Korean Jamo syllable or emoji ZWJ/flag in mid-utterance.
   // Intl.Segmenter is built into current browsers and runs on the device.
   const units: string[] = [];
-  const segmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
-    ? new Intl.Segmenter('zh-TW', { granularity: 'grapheme' })
-    : null;
-  if (segmenter) {
-    for (const { segment } of segmenter.segment(text)) {
-      if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
-        units.push(segment);
-        continue;
-      }
-      // Pathological combining-mark runs cannot fit one mobile utterance.
-      // Bound those rare cases by full code points, never by UTF-16 halves.
-      let part = '';
-      for (const character of segment) {
-        if (part && part.length + character.length > STUDY_SPEECH_CHUNK_LENGTH) {
-          units.push(part);
-          part = '';
+  // A WebView can expose Intl.Segmenter but throw during construction or
+  // iteration (for example while its locale data is unavailable). Never lose
+  // a student's original text or crash the reading button in that case.
+  // Discard partial segments before falling back so speech cannot repeat text.
+  let segmented = false;
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    try {
+      const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
+      for (const { segment } of segmenter.segment(text)) {
+        if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
+          units.push(segment);
+          continue;
         }
-        part += character;
+        // A pathological grapheme must still fit the mobile utterance cap.
+        // Never split a UTF-16 surrogate pair in this bounded fallback.
+        let part = '';
+        for (const character of segment) {
+          if (part && part.length + character.length > STUDY_SPEECH_CHUNK_LENGTH) {
+            units.push(part);
+            part = '';
+          }
+          part += character;
+        }
+        if (part) units.push(part);
       }
-      if (part) units.push(part);
+      segmented = true;
+    } catch {
+      units.length = 0;
     }
-  } else {
-    // Older browsers retain the previous code-point-safe behavior.
+  }
+  if (!segmented) {
+    // Older or partially broken engines use the previous code-point-safe path.
     for (const character of text) units.push(character);
   }
 
