@@ -171,6 +171,38 @@ describe('readable Unicode passage boundaries', () => {
     expect(chunks.slice(1).every((chunk) => chunk.text.startsWith('🇹🇼'))).toBe(true);
   });
 
+  it.each([
+    { label: 'after black flag', prefixLength: 1_598 },
+    { label: 'between tag letters', prefixLength: 1_596 },
+    { label: 'inside final cancel tag', prefixLength: 1_587 },
+  ])('keeps a subdivision flag together when cutting $label', ({ prefixLength }) => {
+    // The letter tags are Cf characters, not combining marks or ZWJ.
+    const subdivisionFlag = '🏴\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}';
+    const prefix = '甲'.repeat(prefixLength);
+    const original = prefix + subdivisionFlag + '乙'.repeat(1_700);
+    const chunks = splitStudySection({ id: 'tag-flag', label: '第 1 頁', text: original });
+    expect(chunks[0].text).toBe(prefix);
+    expect(chunks[1].text.startsWith(subdivisionFlag)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length > 0 &&
+      chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+
+  it('does not move a completed subdivision flag or split a series of flags', () => {
+    const flag = '🏴\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}';
+    const prefix = '甲'.repeat(1_586);
+    const complete = splitStudySection({ id: 'tag-complete', label: '第 1 頁', text: prefix + flag + '乙'.repeat(1_700) });
+    expect(complete[0].text).toBe(prefix + flag);
+
+    const original = '甲' + flag.repeat(140);
+    const chunks = splitStudySection({ id: 'tag-series', label: '第 1 頁', text: original });
+    expect(chunks[0].text).toBe('甲' + flag.repeat(114));
+    expect(chunks.slice(1).every((chunk) => chunk.text.startsWith(flag))).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length > 0 &&
+      chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+
   it('does not stall on a combining-mark run longer than the passage limit', () => {
     const original = 'e' + '\u0301'.repeat(2_000) + '甲';
     const chunks = splitStudySection({ id: 'unicode', label: '第 1 頁', text: original });

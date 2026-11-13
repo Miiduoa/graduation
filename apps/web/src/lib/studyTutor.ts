@@ -120,6 +120,14 @@ function keepStudyGraphemeTogether(text: string, start: number, end: number): nu
       (/\p{M}/u.test(String.fromCodePoint(nextPoint)) ||
         (nextPoint >= 0x1f3fb && nextPoint <= 0x1f3ff));
     const emojiJoiner = nextPoint === 0x200d || previousPoint === 0x200d;
+    // Emoji subdivision flags (e.g. Scotland) encode a black flag followed
+    // by invisible tag letters and a cancel tag. Keep the tag sequence
+    // together when a passage boundary lands inside it. This does not
+    // attempt to implement every Unicode grapheme-boundary rule.
+    const isEmojiTag = (point: number | undefined) =>
+      point !== undefined && point >= 0xe0020 && point <= 0xe007f;
+    const splitsEmojiTagFlag = isEmojiTag(nextPoint) &&
+      (previousPoint === 0x1f3f4 || isEmojiTag(previousPoint));
     // Regional-indicator symbols form flags in pairs, not one giant cluster.
     // Count the preceding consecutive symbols: only an odd count means this
     // boundary would split a flag. The scan is bounded by the passage size.
@@ -138,7 +146,7 @@ function keepStudyGraphemeTogether(text: string, start: number, end: number): nu
       splitsFlag = precedingIndicators % 2 === 1;
     }
     if (!((previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) ||
-      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner || splitsFlag)) break;
+      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner || splitsFlag || splitsEmojiTagFlag)) break;
     end = previousStudyCodePointStart(text, end);
   }
   // Extremely long clusters cannot fit within the passage budget. Keep the
