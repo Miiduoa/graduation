@@ -23,6 +23,7 @@ const ACTIONS = ['capability', 'ask', 'plan', 'followup', 'revise', 'confirm', '
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 const followupHits = new Map<string, number[]>();
+const planHits = new Map<string, number[]>();
 const followupActive = new Map<string, number>();
 /** Read-only followups never consume a chat/model or planning allowance. */
 function claimFollowupRead(account: string, now: number) {
@@ -239,14 +240,16 @@ export async function handleV2(request: NextRequest, action: string) {
     const key = hash(principal.platformAccountId),
       sessionKey = hash(session.sessionHandle);
     const now = Date.now();
-    for (const [k, times] of hits) {
-      if (!times.some((t) => t > now - 3600000)) hits.delete(k);
+    // Structured previews have their own allowance; chat quota belongs to chat.
+    const allowance = action === 'plan' ? planHits : hits;
+    for (const [k, times] of allowance) {
+      if (!times.some((t) => t > now - 3600000)) allowance.delete(k);
     }
-    const recent = (hits.get(key) || []).filter((t) => t > now - 3600000);
+    const recent = (allowance.get(key) || []).filter((t) => t > now - 3600000);
     if (active.has(sessionKey)) throw new V2Error(429, 'ASSISTANT_BUSY', 5);
     if (recent.length >= 10 || recent.filter((t) => t > now - 60000).length >= 3)
       throw new V2Error(429, 'LOCAL_ACCOUNT_LIMIT', 60);
-    hits.set(key, [...recent, now]);
+    allowance.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
       if (action === 'plan') {

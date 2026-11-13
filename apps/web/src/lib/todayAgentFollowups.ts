@@ -70,7 +70,7 @@ function readRaw(store: Storage, key: string): string | null {
   try { return store.getItem(key); }
   catch { throw new Error('這部裝置的安排紀錄暫時讀不到，請重新核對後再安排。'); }
 }
-function read(store: Storage, key: string, target: TodayAgentFollowupScope) {
+function read(store: Storage, key: string, target: TodayAgentFollowupScope, displayOnly = false) {
   const raw = readRaw(store, key);
   if (raw === null) return { raw, entries: [] as TodayAgentFollowupEntry[] };
   try {
@@ -78,8 +78,18 @@ function read(store: Storage, key: string, target: TodayAgentFollowupScope) {
     const data = object(JSON.parse(raw), ['version', 'owner', 'schoolId', 'entries']);
     if (data.version !== 1 || data.owner !== target.owner || data.schoolId !== target.schoolId ||
         !Array.isArray(data.entries) || data.entries.length > LIMIT) return invalid();
-    const entries = data.entries.map(item => parse(item, target));
-    if (new Set(entries.map(item => item.card.mutationId)).size !== entries.length) return invalid();
+    const entries: TodayAgentFollowupEntry[] = [];
+    for (const item of data.entries) {
+      try {
+        const entry = parse(item, target);
+        if (entries.some(previous => previous.card.mutationId === entry.card.mutationId)) {
+          if (!displayOnly) return invalid();
+          continue;
+        }
+        entries.push(entry);
+      }
+      catch (error) { if (!displayOnly) throw error; }
+    }
     return { raw, entries };
   } catch { return invalid(); }
 }
@@ -116,6 +126,11 @@ function write(store: Storage, key: string, target: TodayAgentFollowupScope, pre
 export function readTodayAgentFollowups(raw: TodayAgentFollowupScope): TodayAgentFollowupEntry[] {
   const target = scope(raw), store = storage();
   return read(store, todayAgentFollowupStorageKey(target), target).entries;
+}
+/** Display only: skip malformed evidence without changing stored proofs or write preflights. */
+export function readTodayAgentFollowupsForDisplay(raw: TodayAgentFollowupScope): TodayAgentFollowupEntry[] {
+  const target = scope(raw), store = storage();
+  return read(store, todayAgentFollowupStorageKey(target), target, true).entries;
 }
 /** A preflight, never a reservation; save rechecks capacity under the cross-tab lock. */
 export function assertTodayAgentFollowupCapacity(raw: TodayAgentFollowupScope, mutationId?: string): void {

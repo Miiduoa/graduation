@@ -653,3 +653,43 @@ it('retains a damaged tracking history and never treats it as no previous arrang
   expect(actions()).toEqual([]);
   expect(localStorage.getItem(key)).toBe('{damaged');
 });
+
+it.each([false, undefined])('shows the task agent with an old or missing assistant setting (%s)', async enabled => {
+  environment.enabled = enabled as boolean;
+  const { actions } = api();
+  render(<TodayAgent {...props} />);
+  await screen.findByRole('button', { name: '確認' });
+  expect(actions()).toEqual(['plan', 'plan']);
+});
+
+it.each(['malformed', 'duplicate'])('shows valid tracking beside %s evidence without removing proofs or enabling writes', async kind => {
+  const card = cardFor();
+  await saveTracking(card);
+  const key = todayAgentFollowupStorageKey(localScope);
+  const stored = JSON.parse(localStorage.getItem(key)!);
+  stored.entries.unshift({ ...stored.entries[0], ...(kind === 'malformed' ? { issuedContext: 'invalid-old-context' } : {}) });
+  const original = JSON.stringify(stored);
+  localStorage.setItem(key, original);
+  const { actions } = api(card);
+  render(<TodayAgent {...props} tasks={[urgent, later]} />);
+  await screen.findByText('已安排');
+  expect(screen.getByText(later.title)).toBeTruthy();
+  expect((screen.getByRole('button', { name: `替「${later.title}」找 30 分鐘準備時間` }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('alert').textContent).toContain('部分已安排事項暫時無法核對');
+  expect(actions()).toEqual(['followup']);
+  expect(localStorage.getItem(key)).toBe(original);
+});
+
+it('keeps a healthy arrangement visible when another proof is rejected by the server', async () => {
+  const bad = cardFor('old-proof-001');
+  const good = cardFor('valid-proof-002');
+  await saveTracking(bad);
+  await saveTracking(good);
+  const { actions } = api(good, call => call.action === 'followup' && call.body.token === bad.token
+    ? json({ error: 'CONFIRMATION_INVALID' }, 409) : undefined);
+  render(<TodayAgent {...props} />);
+  await screen.findByText('已安排');
+  expect(screen.getByRole('alert').textContent).toContain('部分已安排事項暫時無法核對');
+  expect(actions()).toEqual(['followup', 'followup']);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(2);
+});

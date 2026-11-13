@@ -5,7 +5,6 @@ import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } fr
 import { parseAssistantCourseworkFollowup, type AssistantCourseworkFollowup } from '@campus/shared/src/assistantCourseworkFollowup';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { TodayAgentPanel, todayAgentTaskKey } from '@/components/today/TodayAgentPanel';
-import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import type { HomeTask } from '@/lib/homeOverview';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
@@ -15,7 +14,7 @@ import {
   removeAssistantExecutionJournal,
   type AssistantExecutionJournalEntry,
 } from '@/lib/assistantExecutionJournal';
-import { readTodayAgentFollowups, saveTodayAgentFollowup, removeTodayAgentFollowup, assertTodayAgentFollowupCapacity,
+import { readTodayAgentFollowupsForDisplay, readTodayAgentFollowups, saveTodayAgentFollowup, removeTodayAgentFollowup, assertTodayAgentFollowupCapacity,
   todayAgentFollowupStorageKey, type TodayAgentFollowupEntry } from '@/lib/todayAgentFollowups';
 import { calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import type { V2ActionState, V2ActionStates, V2Card, V2Reply } from './assistant/types';
@@ -175,7 +174,9 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
   }
   /** A stored proof selects only a read. The server authenticates its original task association each time. */
   async function refreshTracking(run: Lifetime, only?: TodayAgentFollowupEntry[]) {
-    const entries = readTodayAgentFollowups(localScope);
+    const entries = readTodayAgentFollowupsForDisplay(localScope);
+    let invalidEvidence = false;
+    try { readTodayAgentFollowups(localScope); } catch { invalidEvidence = true; }
     const selected = only ?? entries;
     const results = new Map(stateRef.current.followups.map(item => [item.mutationId, item]));
     const failed: string[] = [];
@@ -211,7 +212,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
       }
     }));
     if (!active(run)) return;
-    const after = readTodayAgentFollowups(localScope);
+    const after = readTodayAgentFollowupsForDisplay(localScope);
     const retainedIds = new Set(after.map(entry => entry.card.mutationId));
     for (const id of results.keys()) if (!retainedIds.has(id)) results.delete(id);
     const selectedIds = new Set(selected.map(entry => entry.card.mutationId));
@@ -219,7 +220,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     // Another tab may have added a proof while reads were running; do not call that unseen result checked.
     const unseen = after.some(entry => beforeEntries.get(entry.card.mutationId) !== JSON.stringify(entry) ||
       !selectedIds.has(entry.card.mutationId) && !results.has(entry.card.mutationId));
-    const ready = !failed.length && !unseen;
+    const ready = !invalidEvidence && !failed.length && !unseen;
     trackingSnapshot.current = JSON.stringify(after);
     lastFollowup.current = Date.now();
     update(run, { followups: [...results.values()], trackingReady: ready,
@@ -562,9 +563,8 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
 }
 
 export function TodayAgent(props: Props) {
-  const enabled = useAssistantEnabled();
   const campus = useCampusBrowseContext();
-  if (!enabled || campus.status !== 'ready' || !campus.schoolId ||
+  if (campus.status !== 'ready' || !campus.schoolId ||
       !/^[A-Za-z0-9_-]{43}$/.test(props.context) || !/^[A-Za-z0-9_-]{1,128}$/.test(props.accountId)) return null;
   const scope = { context: props.context, accountId: props.accountId, schoolId: campus.schoolId };
   return <ScopedTodayAgent key={JSON.stringify(scope)} scope={scope} {...props} />;

@@ -433,3 +433,24 @@ it('capability reports fallback as a boolean without settings', async () => {
   expect(on.fallback).toBe(true);
   expect(JSON.stringify(on)).not.toMatch(/acct_fallback_1|synthetic-fallback-token/);
 });
+
+it('keeps automatic previews separate from the full chat allowance and bounds each independently', async () => {
+  const localAccount = 'preview-chat-allowance';
+  const f = fixtureAdapter();
+  vi.mocked(createAdapter).mockReturnValue({ adapter: f.adapter,
+    principal: async () => ({ platformAccountId: localAccount, isPlatformOperator: false }), apiCalls: () => 0 });
+  const binding = { account: localAccount, session: sessionContext(session),
+    conversationId: 'preview-chat-conversation', schoolId: 'fixture-school' };
+  const base = { schoolId: binding.schoolId, conversationId: binding.conversationId,
+    routeToken: issueRoute(binding, FIXTURE_SECRET) };
+  const preview = { ...base, task: { workspaceId: 'course-a', taskId: 'task-urgent', kind: 'assignment' } };
+  const question = { ...base, consent: true, question: '你好', history: [] };
+  for (let index = 0; index < 3; index++)
+    expect((await handleNuni(request('plan', preview), ['assistant', 'plan'])).status).toBe(200);
+  expect((await handleNuni(request('plan', preview), ['assistant', 'plan'])).status).toBe(429);
+  expect(providerCall).not.toHaveBeenCalled();
+  for (let index = 0; index < 3; index++)
+    expect((await handleNuni(request('ask', question), ['assistant', 'ask'])).status).toBe(200);
+  expect((await handleNuni(request('ask', question), ['assistant', 'ask'])).status).toBe(429);
+  expect(f.writes).toHaveLength(0);
+});
