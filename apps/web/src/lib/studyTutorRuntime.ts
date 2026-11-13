@@ -87,10 +87,12 @@ function hasBoundedGeneratedEvidence(explanation: TutorExplanation): boolean {
 // Normalize only a temporary comparison copy: never rewrite source quotes,
 // displayed explanations or existing offline backups. Keep ZWJ/ZWNJ because
 // they can carry meaning in other scripts and emoji.
-function comparableGeneratedTeaching(text: string): string {
+function comparableGeneratedTeaching(text: string, preserveLineBreaks = false): string {
   return text.normalize('NFC')
     .replace(/[\u00ad\u034f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, '')
-    .replace(/\s+/gu, ' ').trim();
+    // Answer-key list markers must remain on their own line for validation.
+    // Other comparisons deliberately retain the existing collapsed whitespace.
+    .replace(preserveLineBreaks ? /[^\S\r\n]+/gu : /\s+/gu, ' ').trim();
 }
 
 // A valid source quote is not enough if the model leaves the explanation itself
@@ -128,7 +130,7 @@ function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
 // technical terms or mathematical givens without revealing the answer.
 // Validate NEW local generation only; saved v1/v2 lessons remain readable.
 function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
-  const question = comparableGeneratedTeaching(explanation.question).toLowerCase();
+  const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase();
   const answer = comparableGeneratedTeaching(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
   // Generated answer keys also use 是／為, 就是, equals signs, or English labels.

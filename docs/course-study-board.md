@@ -1,3 +1,9 @@
+## 2026-11-13：修復多行答案清單在 Web Tests 漏檢
+
+- 精確前版 head `94e293835fb969074841291a1b2f744a54c54db7` 的 [CI #43359197516](https://github.com/Miiduoa/graduation/actions/runs/43359197516) 確認 Web Tests 有 3 項失敗：`Answer:\n- SQL`、`答案：\n• 主鍵`、`解答：\n1. \`SQL\`` 沒被拒收；其他 Build Web／Mobile、Lint／TypeCheck、Security Gates、CodeQL、Course access review 均在該 SHA 通過。失敗不是模型輸出不穩，而是比對共用正規化器先把所有換行摺成空白，導致新的清單偵測永遠看不到真正換行。
+- 現在只在**新生成複習題的答案洩漏檢查**保留 CR／LF，其他摘要、引句、步驟、既有備份仍使用原先的空白正規化方式。加入 CRLF 與縮排、兩位數編號、長識別字與數字前綴的正反回歸，避免修正時過度拒收。沒有修改使用者教材、筆記、儲存格式或外部傳輸。
+- 這是對 3 項失敗測試原因的針對性修補；新 SHA 的 Vitest、CI、CodeQL 需另行驗證。指定 App 5504170 APPROVED、Maestro、iOS／Android 真機和 Ahaboard 同教材同題同機比較仍未完成；PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-13：多行 Markdown 複習題答案清單不再提前洩漏參考回答
 
 - 裝置端模型偶爾把答案放在題目中的下一行清單，例如 `Answer:\n- SQL`、`答案：\n• 主鍵`、`解答：\n1. \`SQL\``。原先只剝除引號／粗體／行內程式碼開頭標記，漏掉清單項目符號，學生作答前就看到答案。現在**僅對新生成的題目驗證副本**，辨識答題標籤後新行的 Markdown 項目符號與 1–2 位數的編號，保留原始題目、教材與筆記。
