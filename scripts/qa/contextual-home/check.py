@@ -46,7 +46,7 @@ async def scenario(browser, origin, width, theme):
     await page.get_by_label('你目前的階段').select_option('year-4')
     await page.get_by_label('生活優先', exact=True).check()
     await page.get_by_text('更多安排（選填）', exact=True).click()
-    await page.get_by_label('平常怎麼到學校').select_option('commute')
+    await page.get_by_label('通勤或住宿方式', exact=True).select_option('commute')
     await page.get_by_label('準備升學', exact=True).check()
     await page.get_by_label('這段時間的重點').select_option('finals')
     await page.get_by_label('開始日期', exact=True).fill('2026-11-13')
