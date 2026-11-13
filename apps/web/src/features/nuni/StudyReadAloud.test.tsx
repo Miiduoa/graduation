@@ -533,3 +533,35 @@ it.each(['construction', 'iteration'])(
     expect(speak).toHaveBeenCalledTimes(chunks.length);
   },
 );
+
+it.each([
+  { label: 'silently omits the final character', corrupt: (text: string) => [text.slice(0, -1)] },
+  { label: 'silently duplicates the first character', corrupt: (text: string) => [text[0] + text] },
+  { label: 'silently substitutes a source character', corrupt: (text: string) => [text.replace('乙', '丙')] },
+  { label: 'returns no segments for nonempty text', corrupt: (_text: string) => [] },
+])('reads the full original lesson when Intl.Segmenter $label', ({ corrupt }) => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), {
+    Segmenter: class {
+      segment(text: string) {
+        // A WebView iterator can stop or return wrong data without throwing.
+        return corrupt(text).map((segment) => ({ segment }));
+      }
+    },
+  }));
+  const sourceText = '甲'.repeat(159) + '👩‍💻' + '乙'.repeat(200);
+  render(<StudyReadAloud text={sourceText} />);
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }))).not.toThrow();
+
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 12; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    expect(utterance.voice).toBe(local);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks.join('')).toBe(sourceText);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+  expect(speak).toHaveBeenCalledTimes(chunks.length);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});

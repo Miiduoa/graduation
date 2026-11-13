@@ -19,7 +19,15 @@ function splitStudySpeech(text: string): string[] {
   if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
     try {
       const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
+      let verifiedOffset = 0;
       for (const { segment } of segmenter.segment(text)) {
+        // Some WebViews return a partial, duplicated or corrupted iterator
+        // without throwing. Verify every unit against the original text so
+        // fallback never silently skips or repeats private lesson content.
+        if (!segment || !text.startsWith(segment, verifiedOffset)) {
+          throw new Error('invalid on-device grapheme segmentation');
+        }
+        verifiedOffset += segment.length;
         if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
           units.push(segment);
           continue;
@@ -35,6 +43,9 @@ function splitStudySpeech(text: string): string[] {
           part += character;
         }
         if (part) units.push(part);
+      }
+      if (verifiedOffset !== text.length) {
+        throw new Error('incomplete on-device grapheme segmentation');
       }
       segmented = true;
     } catch {
