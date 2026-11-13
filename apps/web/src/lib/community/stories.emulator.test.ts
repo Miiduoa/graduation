@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { collection, getDocs, getDocsFromServer, limit, orderBy, query, where, type Firestore } from 'firebase/firestore';
+import { collection, doc, getDocFromServer, getDocs, getDocsFromServer, limit, orderBy, query, where, type Firestore } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDb } from '@/lib/firebase';
 import { listActiveStoriesForSchool } from './firestore';
@@ -162,6 +162,46 @@ describeEmulator('story list client against the repository Firestore rules', () 
       query(collection(currentOwner, currentPath), orderBy('viewedAt', 'desc'), limit(21)),
     );
     expect(newAudience.empty).toBe(true);
+  });
+
+  it('rechecks the author membership and story expiry before revealing a previously readable audience', async () => {
+    const receiptPath = 'campusStories/active-web/schools/pu/authors/alice/views/viewer-pu';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(receiptPath).set({
+        viewerUid: 'viewer-pu',
+        viewedAt: new Date(now - 1_000),
+      });
+    });
+
+    // The author could read this audience while the school and story were valid.
+    const audience = () => getDocsFromServer(query(
+      collection(alice, 'campusStories/active-web/schools/pu/authors/alice/views'),
+      orderBy('viewedAt', 'desc'),
+      limit(21),
+    ));
+    const receipt = () => getDocFromServer(doc(alice, receiptPath));
+    expect((await audience()).docs.map((row) => row.id)).toEqual(['viewer-pu']);
+    expect((await receipt()).exists()).toBe(true);
+
+    // A stale local member record cannot continue authorizing the private list.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await expect(audience()).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(receipt()).rejects.toMatchObject({ code: 'permission-denied' });
+
+    // Restoring the same verified school membership restores valid server reads.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'active' });
+    });
+    expect((await audience()).docs.map((row) => row.id)).toEqual(['viewer-pu']);
+
+    // Even the author must lose receipt access once the story expires.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('campusStories/active-web').update({ expiresAt: now - 1_000 });
+    });
+    await expect(audience()).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(receipt()).rejects.toMatchObject({ code: 'permission-denied' });
   });
 
   it('rejects a classmate from another school', async () => {
