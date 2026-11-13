@@ -201,6 +201,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
+  const [placeSearch, setPlaceSearch] = useState('');
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
@@ -225,9 +226,30 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
   const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
+  // Search only narrows the destination list. The current selection remains
+  // visible and unchanged even when it does not match the typed query.
+  const searchTerm = placeSearch.trim().normalize('NFKC').toLocaleLowerCase('zh-TW');
+  const matchingPoints = useMemo(() => {
+    if (!searchTerm) return model.points;
+    return model.points.filter((point) => {
+      const location = point.location;
+      const searchable = [
+        point.name, location.category, location.description,
+        location.building, location.floor, ...(location.facilities ?? []),
+      ].filter((part): part is string => typeof part === 'string')
+        .join(' ').normalize('NFKC').toLocaleLowerCase('zh-TW');
+      return searchable.includes(searchTerm);
+    });
+  }, [model.points, searchTerm]);
+  const selectionOutsideSearch = Boolean(
+    selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id),
+  );
+  const listedPoints = selectionOutsideSearch && selectedPoint
+    ? [selectedPoint, ...matchingPoints] : matchingPoints;
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
+  const searchId = useId();
   const selectId = useId();
   const progressId = useId();
   const directionsNoteId = useId();
@@ -522,10 +544,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           </div>
             <div className={styles.details}>
               <div className={styles.selectField}>
+                <label htmlFor={searchId}>搜尋地點</label>
+                <input
+                  id={searchId}
+                  type="search"
+                  value={placeSearch}
+                  onChange={(event) => setPlaceSearch(event.target.value)}
+                  aria-controls={selectId}
+                  autoComplete="off"
+                  placeholder="建築、教室、設施或地點名稱"
+                />
+                {searchTerm && <small className={styles.searchCount} role="status">
+                  找到 {matchingPoints.length} / {model.points.length} 個地點；目前選擇不會因搜尋改變。
+                </small>}
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}{outlinedPoiIds.has(point.id) ? (footprintStale ? '（舊快照 OSM 外框）' : '（有 OSM 外框）') : ''}</option>)}
+                  {listedPoints.map((point) => <option key={point.id} value={point.id}>{point.name}{selectionOutsideSearch && point.id === selectedPoint?.id ? '（目前選擇）' : ''}{outlinedPoiIds.has(point.id) ? (footprintStale ? '（舊快照 OSM 外框）' : '（有 OSM 外框）') : ''}</option>)}
                 </select>
               </div>
               {place ? <>

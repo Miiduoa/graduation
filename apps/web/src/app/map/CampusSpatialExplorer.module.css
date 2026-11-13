@@ -133,7 +133,7 @@
 .details { display: grid; gap: 24px; }
 .selectField { display: grid; gap: 8px; }
 .selectField label, .progress label { font-size: 0.8125rem; color: var(--muted); }
-.selectField select {
+.selectField select, .selectField input[type='search'] {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -147,6 +147,8 @@
   color: var(--text);
   background: var(--surface, var(--bg));
 }
+.selectField input[type='search'] { font-weight: 400; }
+.selectField .searchCount { color: var(--muted); font-size: 0.75rem; line-height: 1.6; }
 .progress label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .progress label span { font-variant-numeric: tabular-nums; }
 .progress input {

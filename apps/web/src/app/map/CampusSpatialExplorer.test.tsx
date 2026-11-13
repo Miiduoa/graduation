@@ -87,6 +87,38 @@ it('opens graphics only on request, uses the current places, and leaves selectio
   expect(document.activeElement).toBe(opener);
 });
 
+it('searches existing campus place metadata without losing a selection or restarting WebGL', async () => {
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const search = within(dialog).getByRole('searchbox', { name: '搜尋地點' });
+  const destinations = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+
+  // Search matches place descriptions as well as names and categories.
+  fireEvent.change(search, { target: { value: '自習' } });
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: '本校宿舍' })).toBeNull();
+  fireEvent.change(destinations, { target: { value: 'library' } });
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+
+  // A new search does not silently change the selected destination.
+  fireEvent.change(search, { target: { value: '住宿' } });
+  expect(within(dialog).getByRole('option', { name: '本校圖書館（目前選擇）' })).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '本校宿舍' })).toBeTruthy();
+  expect((destinations as HTMLSelectElement).value).toBe('library');
+  fireEvent.change(search, { target: { value: '沒有這個地點' } });
+  expect(within(dialog).getByText('找到 0 / 2 個地點；目前選擇不會因搜尋改變。')).toBeTruthy();
+  expect((destinations as HTMLSelectElement).value).toBe('library');
+  expect(within(dialog).getByRole('option', { name: '本校圖書館（目前選擇）' })).toBeTruthy();
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library' }));
+
+  fireEvent.change(search, { target: { value: '' } });
+  expect(within(dialog).getByRole('option', { name: '本校宿舍' })).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
 it('connects scene markers, the progress control, directions and the original map selection', async () => {
   const onSelect = vi.fn();
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={onSelect} />);
