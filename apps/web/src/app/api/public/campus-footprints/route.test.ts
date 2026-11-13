@@ -576,6 +576,25 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps POI-only fallback when OSM says a listed building is under demolition', async () => {
+    // Synthetic conflicting tags, not a report of demolition at Providence.
+    const inconsistent = JSON.stringify({
+      elements: [{
+        type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', 'demolition:building': 'yes' },
+      }],
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(inconsistent, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect((await result.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts documented OSM feet heights as sourced values rather than a 12m illustration', async () => {
     const feetPayload = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
