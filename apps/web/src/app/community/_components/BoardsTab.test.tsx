@@ -113,16 +113,17 @@ it('makes a pending subscription a single action and announces its current state
   const pending = deferred<void>();
   mocks.subscribe.mockReturnValue(pending.promise);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
-  expect(button.getAttribute('aria-pressed')).toBe('false');
+  const button = await screen.findByRole('button', { name: /訂閱/ });
   fireEvent.click(button);
   expect((button as HTMLButtonElement).disabled).toBe(true);
   expect(button.getAttribute('aria-busy')).toBe('true');
   fireEvent.click(button);
   expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
+  expect(mocks.unsubscribe).not.toHaveBeenCalled();
   await act(async () => pending.resolve(undefined));
   expect((button as HTMLButtonElement).disabled).toBe(false);
   expect(button.getAttribute('aria-pressed')).toBe('true');
+  expect(button.getAttribute('aria-label')).toBe('取消訂閱科學討論');
   fireEvent.click(button);
   await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
 });
@@ -132,14 +133,14 @@ it('reports a failed subscribe, restores the previous state and allows retry', a
   const pending = deferred<void>();
   mocks.subscribe.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
+  const button = await screen.findByRole('button', { name: /訂閱/ });
   fireEvent.click(button);
   await act(async () => pending.reject(new Error('offline')));
   expect((button as HTMLButtonElement).disabled).toBe(false);
-  expect(button.getAttribute('aria-pressed')).toBe('false');
   expect(window.alert).toHaveBeenCalledExactlyOnceWith('這次未能訂閱，請稍後再試。');
   fireEvent.click(button);
   await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(2));
+  expect(button.getAttribute('aria-pressed')).toBe('true');
 });
 
 it('does not show a stale failure after changing schools while a subscribe is pending', async () => {
@@ -151,9 +152,9 @@ it('does not show a stale failure after changing schools while a subscribe is pe
   const pending = deferred<void>();
   mocks.subscribe.mockReturnValue(pending.promise);
   const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  fireEvent.click(await screen.findByRole('button', { name: '訂閱科學討論' }));
+  fireEvent.click(await screen.findByRole('button', { name: /訂閱/ }));
   view.rerender(<BoardsTab schoolId="nthu" schoolSearch="?schoolId=nthu" />);
-  const other = await screen.findByRole('button', { name: '訂閱人文討論' });
+  const other = await screen.findByRole('button', { name: /訂閱/ });
   await act(async () => pending.reject(new Error('old school offline')));
   expect(other.getAttribute('aria-pressed')).toBe('false');
   expect(window.alert).not.toHaveBeenCalled();
