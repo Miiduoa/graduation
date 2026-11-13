@@ -256,6 +256,13 @@ test('restored campus summaries with damaged fields never crash or enter the pri
     { ...authorized, announcements: { ...authorized.announcements, items: '私人公告' } },
     { ...authorized, announcements: { ...authorized.announcements, items: [null] } },
     { ...authorized, announcements: { ...authorized.announcements, status: 'unavailable' } },
+    { ...authorized, assignments: { ...authorized.assignments, count: 0 } },
+    { ...authorized, assignments: { ...authorized.assignments, items: [{
+      ...authorized.assignments.items[0], dueAt: 'not-a-date',
+    }] } },
+    { ...authorized, assignments: { ...authorized.assignments, items: [{
+      ...authorized.assignments.items[0], source: { kind: 'group-assignment', groupId: '../alice', assignmentId: 'a1' },
+    }] } },
   ];
   for (const snapshot of damaged) {
     const prompt = formatOnDeviceSchoolPrompt(local, snapshot as CampusSenseSnapshot, 'alice');
@@ -265,6 +272,24 @@ test('restored campus summaries with damaged fields never crash or enter the pri
     // A damaged campus response must not suppress independently verified local classes.
     expect(prompt).toContain('資料庫概論');
   }
+
+  // Extra JSON fields are not part of the trusted campus evidence projection;
+  // only validated source IDs can be passed to the on-device model.
+  const withExtras: CampusSenseSnapshot = {
+    ...authorized, assignments: {
+      ...authorized.assignments,
+      items: [{
+        ...authorized.assignments.items[0],
+        source: { kind: 'group-assignment', groupId: 'course-1', assignmentId: 'task-1', secret: 'hidden-source-field' },
+        internalNote: 'never-send-to-model',
+      } as unknown as CampusSenseSnapshot['assignments']['items'][number]],
+    },
+  };
+  const projected = formatOnDeviceSchoolPrompt(local, withExtras, 'alice');
+  expect(projected).toContain('"assignmentId":"task-1"');
+  expect(projected).toContain('Alice 私人作業');
+  expect(projected).not.toContain('hidden-source-field');
+  expect(projected).not.toContain('never-send-to-model');
 });
 
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
