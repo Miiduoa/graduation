@@ -224,6 +224,49 @@ test('impossible restored source dates cannot authorize offline course and assig
   }
 });
 
+test('restored campus summaries with damaged fields never crash or enter the private offline prompt', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const authorized: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 私人作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: {
+      status: 'available', items: [{ title: '私人公告', publishedAt: null }],
+    },
+  };
+  expect(formatOnDeviceSchoolPrompt(local, authorized, 'alice')).toContain('Alice 私人作業');
+  expect(formatOnDeviceSchoolPrompt(local, authorized, 'alice')).toContain('私人公告');
+
+  // A saved, same-account snapshot is not necessarily the validated response
+  // originally returned by the network parser. Fail closed as a unit.
+  const damaged: unknown[] = [
+    { ...authorized, schedule: null },
+    { ...authorized, schedule: { status: 'available', count: 'one' } },
+    { ...authorized, assignments: null },
+    { ...authorized, assignments: { ...authorized.assignments, items: null } },
+    { ...authorized, assignments: { ...authorized.assignments, items: [null] } },
+    { ...authorized, assignments: { ...authorized.assignments, items: [{ title: {}, groupName: '', dueAt: null }] } },
+    { ...authorized, assignments: { ...authorized.assignments, items: Array(401).fill(authorized.assignments.items[0]) } },
+    { ...authorized, assignments: { ...authorized.assignments, status: 'unavailable' } },
+    { ...authorized, announcements: null },
+    { ...authorized, announcements: { ...authorized.announcements, items: '私人公告' } },
+    { ...authorized, announcements: { ...authorized.announcements, items: [null] } },
+    { ...authorized, announcements: { ...authorized.announcements, status: 'unavailable' } },
+  ];
+  for (const snapshot of damaged) {
+    const prompt = formatOnDeviceSchoolPrompt(local, snapshot as CampusSenseSnapshot, 'alice');
+    expect(prompt).toContain('此回合沒有主動同步且有效的校園資料');
+    expect(prompt).not.toContain('Alice 私人作業');
+    expect(prompt).not.toContain('私人公告');
+    // A damaged campus response must not suppress independently verified local classes.
+    expect(prompt).toContain('資料庫概論');
+  }
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
