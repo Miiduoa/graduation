@@ -59,6 +59,9 @@ function BoardsContent(props: {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [pendingSubscriptionIds, setPendingSubscriptionIds] = useState<Set<string>>(new Set());
+  // Lifecycle-only signal: do not cancel a Firestore write or report it as cancelled.
+  const [subscriptionLifetime] = useState(() => new AbortController());
+  useEffect(() => () => subscriptionLifetime.abort(), [subscriptionLifetime]);
   const [filter, setFilter] = useState('');
   const [composeEpoch, setComposeEpoch] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -197,7 +200,7 @@ function BoardsContent(props: {
     } catch {
       // Parent remounts on account/school change. Late failures must never alert
       // or change the new school's subscription state.
-      if (mounted.current) {
+      if (!subscriptionLifetime.signal.aborted) {
         setSubscribed((previous) => {
           const next = new Set(previous);
           if (wasSub) next.add(b.id);
@@ -207,7 +210,7 @@ function BoardsContent(props: {
         alert(wasSub ? '這次未能取消訂閱，請稍後再試。' : '這次未能訂閱，請稍後再試。');
       }
     } finally {
-      if (mounted.current) {
+      if (!subscriptionLifetime.signal.aborted) {
         setPendingSubscriptionIds((previous) => {
           const next = new Set(previous);
           next.delete(b.id);
