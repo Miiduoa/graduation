@@ -112,6 +112,34 @@ function isRealTimestamp(value: unknown): value is string {
     sourceClock.getUTCMilliseconds() === Number((match[7] || '').padEnd(3, '0') || 0);
 }
 
+// In-memory campus summaries normally come from a validated API parser, but a
+// JSON-restored or caller-supplied snapshot may bypass that parser. Re-check
+// every field the prompt serializes before exposing any personal evidence.
+function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
+  const schedule = value?.schedule;
+  const assignments = value?.assignments;
+  const announcements = value?.announcements;
+  const status = (candidate: unknown) => candidate === 'available' || candidate === 'unavailable';
+  const count = (candidate: unknown) => candidate === null ||
+    (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0);
+  if (!schedule || !assignments || !announcements ||
+      !status(schedule.status) || !status(assignments.status) || !status(announcements.status) ||
+      !count(schedule.count) || !count(assignments.count) ||
+      (schedule.status === 'available' && schedule.count === null) ||
+      (assignments.status === 'available' && assignments.count === null) ||
+      !Array.isArray(assignments.items) || assignments.items.length > 400 ||
+      !Array.isArray(announcements.items) || announcements.items.length > 12 ||
+      (assignments.status === 'unavailable' && assignments.items.length > 0) ||
+      (announcements.status === 'unavailable' && announcements.items.length > 0)) return false;
+  return assignments.items.every((item) => !!item &&
+    typeof item.title === 'string' && item.title.length <= 140 &&
+    typeof item.groupName === 'string' && item.groupName.length <= 100 &&
+    (item.dueAt === null || typeof item.dueAt === 'string')) &&
+    announcements.items.every((item) => !!item &&
+      typeof item.title === 'string' && item.title.length <= 140 &&
+      (item.publishedAt === null || typeof item.publishedAt === 'string'));
+}
+
 export function formatOnDeviceSchoolPrompt(
   snapshot: OnDeviceSchoolContext,
   senseSnapshot: CampusSenseSnapshot | null | undefined,
@@ -179,9 +207,10 @@ export function formatOnDeviceSchoolPrompt(
     : '目前沒有可確認的本機個人課表，因此無法回答正式課程安排。';
   // A matching campus alone is not permission to disclose another student's data.
   // Recheck ownership and freshness at prompt construction, after async model loading.
-  const verifiedSense = owned
+  const candidateSense = owned
     ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId: snapshot.schoolId })
     : null;
+  const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
   // Source text is untrusted content. It is evidence for the answer, not a new instruction.
   const sense = verifiedSense
     ? [
