@@ -100,6 +100,38 @@ export function studySourceFromDocument(document: PersonalImportDocument): Study
   return { id: `document:${source.name}`, title: source.name, sections, warnings };
 }
 
+// Do not split a base character from its diacritics or an emoji sequence.
+// This is a bounded, offline-safe adjustment rather than full grapheme parsing.
+function previousStudyCodePointStart(text: string, end: number): number {
+  const last = text.charCodeAt(end - 1);
+  const before = text.charCodeAt(end - 2);
+  return last >= 0xdc00 && last <= 0xdfff && before >= 0xd800 && before <= 0xdbff
+    ? end - 2 : end - 1;
+}
+
+function keepStudyGraphemeTogether(text: string, start: number, end: number): number {
+  const originalEnd = end;
+  while (end > start && end < text.length) {
+    const previous = text.charCodeAt(end - 1);
+    const next = text.charCodeAt(end);
+    const previousPoint = text.codePointAt(previousStudyCodePointStart(text, end));
+    const nextPoint = text.codePointAt(end);
+    const joinsPrevious = nextPoint !== undefined &&
+      (/\p{M}/u.test(String.fromCodePoint(nextPoint)) ||
+        (nextPoint >= 0x1f3fb && nextPoint <= 0x1f3ff));
+    const emojiJoiner = nextPoint === 0x200d || previousPoint === 0x200d;
+    const pairedFlags = previousPoint !== undefined && nextPoint !== undefined &&
+      previousPoint >= 0x1f1e6 && previousPoint <= 0x1f1ff &&
+      nextPoint >= 0x1f1e6 && nextPoint <= 0x1f1ff;
+    if (!((previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) ||
+      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner || pairedFlags)) break;
+    end = previousStudyCodePointStart(text, end);
+  }
+  // Extremely long clusters cannot fit within the passage budget. Keep the
+  // original bounded cut instead of producing an empty chunk or looping.
+  return end > start ? end : originalEnd;
+}
+
 /** Every character belongs to exactly one passage, including whitespace at boundaries. */
 export function splitStudySection(section: StudySection): StudyPassage[] {
   validateSourceText(section.text);
@@ -119,11 +151,8 @@ export function splitStudySection(section: StudySection): StudyPassage[] {
         }));
       const boundary = newline >= window.length / 2 ? newline : punctuation;
       if (boundary >= window.length / 2) end = offset + boundary;
-      // Keep a surrogate pair or CRLF together when no natural boundary fits.
-      const previous = section.text.charCodeAt(end - 1);
-      const next = section.text.charCodeAt(end);
-      if ((previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) ||
-        (previous === 13 && next === 10)) end -= 1;
+      // Keep common Unicode grapheme sequences together, as well as CRLF.
+      end = keepStudyGraphemeTogether(section.text, offset, end);
     }
     const number = result.length + 1;
     result.push({

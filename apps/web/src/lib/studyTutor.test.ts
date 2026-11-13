@@ -138,6 +138,32 @@ describe('lossless study passages', () => {
   });
 });
 
+describe('readable Unicode passage boundaries', () => {
+  it.each([
+    { label: 'combining accent', prefixLength: 1_599, cluster: 'e\u0301' },
+    { label: 'emoji ZWJ sequence', prefixLength: 1_598, cluster: '👩‍💻' },
+    { label: 'emoji skin tone', prefixLength: 1_598, cluster: '👍🏽' },
+    { label: 'emoji variation selector', prefixLength: 1_599, cluster: '☀️' },
+    { label: 'regional flag pair', prefixLength: 1_598, cluster: '🇹🇼' },
+  ])('keeps a $label in one original-source passage', ({ prefixLength, cluster }) => {
+    const prefix = '甲'.repeat(prefixLength);
+    const original = prefix + cluster + '乙'.repeat(1_700);
+    const chunks = splitStudySection({ id: 'unicode', label: '第 1 頁', text: original });
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks[0].text).toBe(prefix);
+    expect(chunks[1].text.startsWith(cluster)).toBe(true);
+    expect(chunks.every((chunk) => chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+
+  it('does not stall on a combining-mark run longer than the passage limit', () => {
+    const original = 'e' + '\u0301'.repeat(2_000) + '甲';
+    const chunks = splitStudySection({ id: 'unicode', label: '第 1 頁', text: original });
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length > 0 &&
+      chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+});
+
 describe('study explanation contract', () => {
   it('accepts an exact source quotation in a complete JSON response', () => {
     expect(parseTutorExplanation(JSON.stringify(explanation()), passage)).toEqual(explanation());
