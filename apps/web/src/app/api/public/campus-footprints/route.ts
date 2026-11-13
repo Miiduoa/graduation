@@ -90,7 +90,12 @@ function freshCacheControl(validUntil: number): string {
   const secondsRemaining = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
   return `public, max-age=0, s-maxage=${Math.min(3600, secondsRemaining)}`;
 }
-const query = '[out:json][timeout:12];(way(id:' +
+// This is a small, fixed list of audited OSM IDs. The default Overpass
+// 512 MiB reservation is unnecessary and can make the public dispatcher
+// reject our request under load. Keep the server's 8s query budget below
+// our independent 12s network/body deadline, leaving room to send JSON.
+// Neither setting guarantees availability; stale/POI-only fallback remains.
+const query = '[out:json][timeout:8][maxsize:67108864];(way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');relation(id:' +
   PROVIDENCE_OSM_BUILDING_RELATION_IDS.join(',') + '););out meta geom;';
 
