@@ -346,7 +346,9 @@ function outlineNearPoi(
 const NON_BUILDING_VOLUMES = new Set([
   'no', 'false', '0', 'none', 'unknown', 'maybe',
   'proposed', 'planned', 'construction', 'demolished', 'destroyed',
-  'ruins', 'ruined', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
+  // OSM also contains singular ruin and damaged building classifications.
+  // Neither proves an intact roof, so keep only the verified campus POI marker.
+  'ruins', 'ruined', 'ruin', 'damaged', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
 ]);
 // A way can retain building=yes while carrying a lifecycle tag for a removed,
 // abandoned or unfinished building. Treat contradictory tags as needing review:
