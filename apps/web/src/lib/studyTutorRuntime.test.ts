@@ -1023,6 +1023,13 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'a plain English key', question: 'Expected answer: SQL', answer: 'SQL' },
     { label: 'an equal-sign answer key', question: '結果為何？答案＝1.2', answer: '1.2' },
     { label: 'a numerical answer without punctuation', question: '複習：答案為 2', answer: '2' },
+    { label: 'a Chinese reference solution', question: '考試提示：參考解答：主鍵', answer: '主鍵' },
+    { label: 'a multiple-choice answer key', question: '請寫出結果。正確選項：B', answer: 'B' },
+    { label: 'a Chinese 就是 answer key', question: '請回答？答案就是資料表', answer: '資料表' },
+    { label: 'an English is answer key', question: 'How? Answer is SQL', answer: 'SQL' },
+    { label: 'an English correct answer key', question: 'What? Correct answer: SQL', answer: 'SQL' },
+    { label: 'an English solution key', question: 'What? Solution = SQL', answer: 'SQL' },
+    { label: 'an English reference answer', question: 'What? Reference answer is SQL', answer: 'SQL' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1055,6 +1062,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '答案：1.23 是否合理？', answer: '1.2' },
     { question: '答案：SQL 和 NoSQL 有何不同？', answer: '外鍵' },
     { question: 'Answer: SQL 這個提示代表什麼？', answer: '主鍵' },
+    { question: '答案：SQLServer 的語法用途？', answer: 'SQL' },
+    { question: '正確選項：B2 如何處理？', answer: 'B' },
+    { question: 'Answer is what?', answer: 'SQL' },
+    { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
     const valid = { ...lesson(), question, answer };
     const pending = runStudyTutor({

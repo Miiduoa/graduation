@@ -131,9 +131,9 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   const question = comparableGeneratedTeaching(explanation.question).toLowerCase();
   const answer = comparableGeneratedTeaching(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
-  // Generated answer keys also use 是／為, equals signs, or English labels.
+  // Generated answer keys also use 是／為, 就是, equals signs, or English labels.
   // This is only a conservative disclosure check, not a semantic answer judge.
-  const labels = /(?:正確答案|標準答案|參考答案|參考回答|正解|解答|答案)\s*(?:[:：=＝]|[是為]\s*[:：=＝]?)|\b(?:answer|ans\.?)\s*[:：=＝]/giu;
+  const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer|ans\.?|solution)\s*(?:[:：=＝]|\bis\b\s*[:：=＝]?)/giu;
   let label: RegExpExecArray | null;
   while ((label = labels.exec(question)) !== null) {
     const disclosed = question.slice(label.index + label[0].length)
@@ -144,6 +144,10 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     const finalAnswerCharacter = Array.from(answer).at(-1) ?? '';
     const followingCharacter = disclosed.slice(answer.length).charAt(0);
     if (/[\p{N}]/u.test(finalAnswerCharacter) && /[\p{N}.]/u.test(followingCharacter))
+      continue;
+    // SQL is not SQLServer; likewise, option B is not option B2.
+    // Avoid rejecting a genuine question for a longer Latin identifier.
+    if (/[a-z]/u.test(finalAnswerCharacter) && /[a-z0-9_]/u.test(followingCharacter))
       continue;
     return false;
   }
