@@ -74,6 +74,13 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
     setRequest({ cursor });
   }
 
+  function refresh() {
+    // A fresh server read must not paint previously fetched private names
+    // while membership or story visibility may have changed.
+    setPage({ viewers: [], nextCursor: null });
+    load(null);
+  }
+
   const count = page.viewers.length;
   return (
     <View style={styles.panel}>
@@ -92,6 +99,17 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
           </Text>
           <Text style={styles.subtitle}>只有你可以查看這份名單</Text>
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="重新整理觀看名單"
+          accessibilityHint="重新向伺服器確認觀看者及目前權限"
+          accessibilityState={{ disabled: status === 'loading' }}
+          disabled={status === 'loading'}
+          onPress={refresh}
+          style={styles.refresh}
+        >
+          <Ionicons name="refresh" color="#d6f4e7" size={20} />
+        </Pressable>
       </View>
       {count > 0 && (
         <Text accessibilityLiveRegion="polite" style={styles.summary}>
@@ -170,6 +188,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#242928',
   },
   titleBlock: { flex: 1, gap: 3 },
+  refresh: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: '#20342d',
+  },
   title: { fontSize: 23, fontWeight: '700', color: '#fff' },
   subtitle: { fontSize: 14, color: '#c2cbc8' },
   summary: { fontSize: 14, color: '#c2cbc8', marginVertical: 10 },
