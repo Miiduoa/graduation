@@ -120,8 +120,16 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // length header, so comparing those lengths would reject valid compressed
   // responses. Keep the decoded 500 KB cap for every encoding.
   const contentEncoding = response.headers.get('content-encoding');
-  const identityEncoded = contentEncoding === null ||
-    contentEncoding.trim().toLowerCase() === 'identity';
+  const coding = contentEncoding?.trim().toLowerCase() ?? 'identity';
+  // Node Fetch transparently decodes these single HTTP content codings.
+  // A blank, unknown or stacked/mixed coding cannot safely tell us whether
+  // Content-Length measures the decoded bytes. Do not silently classify an
+  // ambiguous identity response as compressed and skip its length check.
+  if (!['identity', 'gzip', 'br', 'deflate'].includes(coding)) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('Unsupported OSM content encoding');
+  }
+  const identityEncoded = coding === 'identity';
   const verifyIdentityLength = lengthHeader !== null && identityEncoded;
   // Fetch delivers decoded bytes, while Content-Length for gzip/br describes
   // compressed wire bytes. A valid compressed response can exceed the decoded
