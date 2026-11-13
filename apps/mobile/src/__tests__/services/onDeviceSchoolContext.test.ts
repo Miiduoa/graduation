@@ -186,6 +186,43 @@ test('a damaged restored timetable fails closed even with a valid clock and matc
   expect(formatOnDeviceSchoolPrompt(noPeriod, saved, 'alice')).toContain('Alice 私人作業');
 });
 
+test('restored timetable excerpts project only verified fields, not extra private metadata', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const authorized: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 私人作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  // A saved JSON object can have extra properties even when the five expected
+  // course fields are valid. Those properties are not task evidence.
+  const restored = {
+    ...local,
+    timetable: {
+      ...local.timetable,
+      courses: [{
+        ...local.timetable.courses[0],
+        hiddenStudentToken: 'must-not-reach-local-model',
+        originMetadata: { debug: 'do-not-expose-cached-metadata' },
+      }],
+    },
+  };
+  const prompt = formatOnDeviceSchoolPrompt(restored, authorized, 'alice');
+  expect(prompt).toContain('資料庫概論');
+  expect(prompt).toContain('"day":1');
+  expect(prompt).toContain('"start":2');
+  expect(prompt).toContain('"room":""');
+  expect(prompt).toContain('Alice 私人作業');
+  expect(prompt).not.toContain('hiddenStudentToken');
+  expect(prompt).not.toContain('must-not-reach-local-model');
+  expect(prompt).not.toContain('originMetadata');
+  expect(prompt).not.toContain('do-not-expose-cached-metadata');
+});
+
 test('impossible restored source dates cannot authorize offline course and assignment excerpts', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });

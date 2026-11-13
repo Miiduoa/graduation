@@ -202,7 +202,13 @@ export function formatOnDeviceSchoolPrompt(
         (typeof course.room === 'string' && course.room.length <= 40)));
   const owned = verifiedClock && validTimetable &&
     !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
-  const sampleCourses = owned && timetable ? timetable.courses.slice(0, 8) : [];
+  // An otherwise valid JSON-restored course can carry arbitrary extra fields.
+// Never serialize the caller's object verbatim into the local model prompt.
+const sampleCourses = owned && timetable
+  ? timetable.courses.slice(0, 8).map(({ name, day, start, end, room }) => ({
+      name, day, start, end, ...(room === undefined ? {} : { room }),
+    }))
+  : [];
   const omitted = owned && timetable ? timetable.courses.length - sampleCourses.length : 0;
   const note = owned && timetable?.source === 'saved-device-copy'
     ? [
