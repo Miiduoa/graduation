@@ -92,7 +92,7 @@ def assert_verified(value, mode):
     assert proof['issuedContext'] == ORIGINAL_CONTEXT, proof
     assert proof['conversationId'] == 'qa-home-conversation', proof
     assert proof['card']['mutationId'] == MUTATION, proof
-    assert value['journalRemovals'], value
+    assert value['journalRemovals'], 'The real sessionStorage journal removal was not observed'
     for removal in value['journalRemovals']:
         assert removal['proofs'] == value['proofs'], removal
     assert not value['otherSchoolProofs'], value

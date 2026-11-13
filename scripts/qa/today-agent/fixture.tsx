@@ -90,7 +90,7 @@ const target = { workspaceId: urgent.courseId, taskId: urgent.id, kind: urgent.k
 // assertions require a matching durable proof to exist before recovery is cleared.
 const nativeRemoveItem = Storage.prototype.removeItem;
 Storage.prototype.removeItem = function (key: string) {
-  if (this === window.localStorage && key.startsWith('campus.assistant-execution.v1:')) {
+  if (this === window.sessionStorage && key.startsWith('campus.assistant-execution.v1:')) {
     server.journalRemovals.push({ key, proofs: readTodayAgentFollowups(currentScope()) });
     persist();
   }
