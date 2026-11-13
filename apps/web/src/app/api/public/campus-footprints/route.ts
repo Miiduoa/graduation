@@ -144,13 +144,13 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
     if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response too large');
   }
-  // A non-identity transfer needs at least one encoded byte to represent a
-  // gzip/br/deflate stream. A claimed zero-byte wire body cannot decode into
-  // the non-empty JSON provided by Fetch; do not cache such a contradictory
-  // representation, or wait on a body stream that may never finish.
-  if (!identityEncoded && lengthHeader !== null && declared === 0) {
+  // Any HTTP 200 Overpass JSON snapshot requires a non-empty body. A declared
+  // zero-byte identity *or* compressed response cannot contain verified map
+  // data. Reject it before reading: even a stalled stream must not consume the
+  // full 12-second deadline when its header already contradicts the payload.
+  if (lengthHeader !== null && declared === 0) {
     if (response.body) void response.body.cancel().catch(() => {});
-    throw new Error('OSM compressed response declares an empty body');
+    throw new Error('OSM response declares an empty body');
   }
   if (!response.body) {
     // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
@@ -182,6 +182,12 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
       size += value.byteLength;
+      // On identity responses, the first byte beyond Content-Length already
+      // proves truncation/overdelivery. Do not wait for EOF from an upstream
+      // stream that could stall indefinitely after sending too many bytes.
+      if (verifyIdentityLength && size > declared) {
+        throw new Error('OSM response length mismatch');
+      }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
     }
