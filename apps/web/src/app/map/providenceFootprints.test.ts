@@ -596,6 +596,8 @@ describe('Providence OSM building outlines', () => {
       { building: '0' }, { building: 'none' }, { building: 'unknown' },
       { building: 'construction' }, { building: 'proposed' },
       { building: 'demolished' }, { building: 'roof' }, { building: 'ruins' },
+      // Historical/ambiguous OSM values cannot certify an intact roof.
+      { building: 'ruin' }, { building: 'damaged' },
       { building: 'maybe' }, { building: '   ' }, { building: 1 },
     ]) {
       expect(parseProvidenceOsmFootprints({
