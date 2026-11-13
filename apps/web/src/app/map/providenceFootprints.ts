@@ -465,6 +465,17 @@ function isStandingBuilding(value: unknown): boolean {
     if (marker !== undefined && (typeof marker !== 'string' ||
         !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
   }
+  // building:levels is the count of above-ground storeys, not a measured
+  // height. A zero, negative, composite or implausibly huge count contradicts
+  // the intact above-ground 3D volume we draw (even when its 12m height is
+  // explicitly marked illustrative). Preserve the POI instead of accepting
+  // unreviewed level metadata; never multiply storeys into metres.
+  const storeysTag = tags?.['building:levels'];
+  if (storeysTag !== undefined) {
+    if (typeof storeysTag !== 'string' || !/^\\d+(?:\\.\\d+)?$/.test(storeysTag.trim())) return false;
+    const storeys = Number(storeysTag.trim());
+    if (!Number.isFinite(storeys) || storeys <= 0 || storeys > 100) return false;
+  }
   const condition = tags?.['building:condition'];
   if (condition !== undefined) {
     if (typeof condition !== 'string') return false;
