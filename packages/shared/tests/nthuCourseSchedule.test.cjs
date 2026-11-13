@@ -213,3 +213,34 @@ test('115-1 NTHU CSV imports keep all three free breaks in a one-day ICS snapsho
   ]);
   assert.equal(new Set(preview.events.map(event => event.uid)).size, 4);
 });
+
+test('unverified NTHU semester remains review-only and never creates an invented ICS event', () => {
+  const course = {
+    ...chemistry,
+    code: '11520AES 520300',
+    semester: '1152',
+    time: 'M2M3M4MnM5M6M7',
+    meetings: [{ room: '教室甲', time: 'M2M3M4MnM5M6M7' }],
+  };
+  const csv = nthuTimetableImportCsv(course);
+  assert.ok(csv);
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  });
+  assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0].periodLabel, '234n567');
+  assert.equal(parsed.rows[0].startTime, undefined);
+  assert.equal(parsed.rows[0].endTime, undefined);
+  const records = parsed.rows.map(row => ({
+    ...row, id: 'confirmed-unverified', batchId: 'course-import',
+    importedAt: '2026-11-13T00:00:00.000Z',
+  }));
+  const preview = previewPersonalCalendar(records, {
+    schoolId: 'nthu', termKey: '115|2', start: '2027-04-05', end: '2027-04-05',
+  });
+  assert.equal(preview.events.length, 0);
+  assert.equal(preview.skipped.length, 1);
+  assert.equal(preview.skipped[0].schoolId, 'nthu');
+  assert.equal(serializePersonalCalendar(preview).includes('BEGIN:VEVENT'), false);
+});

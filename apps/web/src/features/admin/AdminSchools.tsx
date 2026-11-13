@@ -43,6 +43,7 @@ export function AdminSchools({
   lifecycle,
   onSelect,
   onPeople,
+  onAudit,
   onDraftChange,
   onSearch,
   onLifecycle,
@@ -54,6 +55,7 @@ export function AdminSchools({
   lifecycle: SchoolLifecycleFilter;
   onSelect: (tenantId: string | null) => void;
   onPeople?: (tenantId: string) => void;
+  onAudit?: (tenantId: string, schoolName: string) => void;
   onDraftChange?: (tenantId: string, dirty: boolean) => void;
   onSearch: (query: string) => void;
   onLifecycle: (value: SchoolLifecycleFilter) => void;
@@ -97,6 +99,7 @@ export function AdminSchools({
             onChanged={resource.reload}
             onClose={() => onSelect(null)}
             onPeople={onPeople}
+            onAudit={onAudit}
             onDraftChange={onDraftChange}
           />
         </>
@@ -220,6 +223,7 @@ function SchoolDetail({
   onChanged,
   onClose,
   onPeople,
+  onAudit,
   onDraftChange,
 }: {
   school: AdminSchool;
@@ -228,6 +232,7 @@ function SchoolDetail({
   onChanged: () => void;
   onClose: () => void;
   onPeople?: (tenantId: string) => void;
+  onAudit?: (tenantId: string, schoolName: string) => void;
   onDraftChange?: (tenantId: string, dirty: boolean) => void;
 }) {
   const tenantId = school.tenantId!;
@@ -383,6 +388,14 @@ function SchoolDetail({
               {onPeople && (
                 <Button disabled={mutation.busy} onClick={() => onPeople(tenantId)}>
                   查看校方授權
+                </Button>
+              )}
+              {onAudit && (
+                <Button
+                  disabled={mutation.busy}
+                  onClick={() => onAudit(tenantId, savedProfile.displayName)}
+                >
+                  查閱此校操作紀錄
                 </Button>
               )}
               <Button onClick={onClose} disabled={mutation.busy}>
