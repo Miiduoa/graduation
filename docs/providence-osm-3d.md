@@ -77,6 +77,10 @@ OSM 外框與中庭是平面幾何，不是量測過的屋頂可達區域。對�
 
 - **非地面 OSM 圖徵不擠出為地面校舍**：即使 way ID 已在校園白名單內，後續編輯仍可能帶入 `location=underground/underwater/roof/overhead`、非零 `layer`、`bridge=yes` 或 `tunnel=yes`。目前立體化只支援從地面開始的整棟外框；沒有可靠的基底高程、上下層幾何時，這些圖徵必須被排除，而不是把地下空間或懸空建物繪成從地面延伸的牆。沒有定位標籤、明示 `location=surface`／`layer=0` 與 `bridge=no` 等否定旗標時，仍須通過原有 way 白名單、座標、外框及樓高檢查。新增加 OSM parser 的正反例及 API 503／`no-store`／冷卻回歸，使用**合成標註**，不代表已發現靜宜真有地下或橋上校舍，也未完成實際 Overpass 抽樣。參考 [OSM location 語意](https://wiki.openstreetmap.org/wiki/Key:location) 和 [建築局部／基底高度](https://wiki.openstreetmap.org/wiki/Key:building:part)。
 
+## 固定校舍 ID 查詢的公開服務資源預算（2026-11-13）
+
+固定白名單的 Overpass QL 使用 `[timeout:8][maxsize:67108864]`：將查詢計算時間設為最多 8 秒、宣告記憶體上限 64 MiB，不要求公開服務為這個小型校舍 ID 集合預留預設 512 MiB。服務端另有**完整 fetch／回應主體 12 秒**的獨立 deadline，因此即使查詢接近上限，仍預留網路與 JSON 傳送時間；前端原有 15 秒逾時與 POI／導航備援維持不變。參考 [Overpass 官方資源預算說明](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html)。這是降低不必要的排程資源宣告，**不是**已證實真實 Overpass 在 64 MiB／8 秒內完成，也不是已驗證靜宜逐棟輪廓；若公開服務出現 timeout、remark 或資源限制，仍應保守拒絕不完整快照，不自動擴大無上限的請求。
+
 ## Overpass HTTP 200 主體長度完整性
 
 本版額外核對 **identity（未壓縮）** 的 HTTP 回應 `Content-Length` 與實際讀取的 UTF-8 位元組數。如果雖為 HTTP 200、JSON 格式也正確，但完成串流後位元組數少於／多於標頭宣告，一律視為不可信的 Overpass 快照；不建立 24 小時新鮮快取，改用既有 503／冷卻／有日期舊快照備援。對沒有 `Content-Length` 的 chunked 回應，仍採既有 500 KB 解碼位元組上限與 12 秒 deadline。
