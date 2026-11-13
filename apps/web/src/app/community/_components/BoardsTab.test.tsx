@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   access: { status: 'denied' as 'loading' | 'allowed' | 'denied' | 'error', authorizationEpoch: 1, isAuthorized: vi.fn(), retry: vi.fn() },
   create: vi.fn(),
   subscribe: vi.fn(),
+  unsubscribe: vi.fn(),
   list: vi.fn(),
   subscriptions: vi.fn(),
 }));
@@ -18,7 +19,7 @@ vi.mock('@/lib/community/firestore', () => ({
   groupBoardsByType: (boards: unknown[]) => ({ topic: boards }),
   CAMPUS_BOARD_TYPE_LABEL: { topic: '主題', department: '系所', course: '課程', anon: '匿名' },
   subscribeToBoard: mocks.subscribe,
-  unsubscribeFromBoard: vi.fn(),
+  unsubscribeFromBoard: mocks.unsubscribe,
   createBoard: mocks.create,
 }));
 const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
@@ -45,6 +46,7 @@ beforeEach(() => {
   mocks.access = { status: 'denied', authorizationEpoch: 1, isAuthorized: vi.fn(() => false), retry: vi.fn() };
   mocks.create.mockReset().mockResolvedValue('new-board');
   mocks.subscribe.mockReset().mockResolvedValue(undefined);
+  mocks.unsubscribe.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('alert', vi.fn());
   mocks.list.mockReset().mockResolvedValue([]);
   mocks.subscriptions.mockReset().mockResolvedValue([]);
@@ -103,6 +105,59 @@ it('keeps existing board subscriptions available to ordinary members', async () 
   await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
   expect(screen.queryByRole('button', { name: /建立看板/ })).toBeNull();
   expect(screen.getByRole('link', { name: /科學討論/ }).getAttribute('href')).toBe('/community/board/science?schoolId=pu');
+});
+
+
+it('makes a pending subscription a single action and announces its current state to assistive tech', async () => {
+  mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  const pending = deferred<void>();
+  mocks.subscribe.mockReturnValue(pending.promise);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
+  expect(button.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(button);
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(button.getAttribute('aria-busy')).toBe('true');
+  fireEvent.click(button);
+  expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
+  await act(async () => pending.resolve(undefined));
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(button);
+  await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
+});
+
+it('reports a failed subscribe, restores the previous state and allows retry', async () => {
+  mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  const pending = deferred<void>();
+  mocks.subscribe.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
+  fireEvent.click(button);
+  await act(async () => pending.reject(new Error('offline')));
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(button.getAttribute('aria-pressed')).toBe('false');
+  expect(window.alert).toHaveBeenCalledExactlyOnceWith('這次未能訂閱，請稍後再試。');
+  fireEvent.click(button);
+  await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(2));
+});
+
+it('does not show a stale failure after changing schools while a subscribe is pending', async () => {
+  mocks.list.mockImplementation(async (schoolId: string) =>
+    schoolId === 'pu'
+      ? [{ id: 'science', name: '科學討論', type: 'topic' }]
+      : [{ id: 'arts', name: '人文討論', type: 'topic' }],
+  );
+  const pending = deferred<void>();
+  mocks.subscribe.mockReturnValue(pending.promise);
+  const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '訂閱科學討論' }));
+  view.rerender(<BoardsTab schoolId="nthu" schoolSearch="?schoolId=nthu" />);
+  const other = await screen.findByRole('button', { name: '訂閱人文討論' });
+  await act(async () => pending.reject(new Error('old school offline')));
+  expect(other.getAttribute('aria-pressed')).toBe('false');
+  expect(window.alert).not.toHaveBeenCalled();
+  expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
 });
 
 it('shows permission loading and a separate retry without hiding the readable boards', async () => {
