@@ -596,3 +596,19 @@ test('filter switches retain the scroll container and read state without reloadi
   expect(mockNotifs.reload).not.toHaveBeenCalled();
   expect(mockNotifs.markAsRead).not.toHaveBeenCalled();
 });
+
+test('opening a school announcement notification passes its original school and source to detail', async () => {
+  mockNotifs.notifications = [{
+    id: 'school-notice', type: 'announcement', title: '校園公告', body: '停課公告', read: false,
+    data: { announcementId: 'a1', schoolId: 'pu' },
+  }];
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('校園公告'));
+  await waitFor(() => expect(applyNotificationDestination).toHaveBeenCalledWith(
+    expect.objectContaining({
+      screen: '公告詳情', params: { id: 'a1', schoolId: 'pu', sourceKind: 'school-announcement' },
+    }),
+    expect.any(Object),
+  ));
+  expect(mockNotifs.markAsRead).toHaveBeenCalledWith('school-notice');
+});

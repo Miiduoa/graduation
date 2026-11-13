@@ -1,3 +1,4 @@
+import { resolveNotificationDestination } from '../utils/notificationDestination';
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import {
@@ -1153,4 +1154,18 @@ test('invalid event dates disable calendar export instead of leaving a silent ac
   expect(exportButton.props.accessibilityState.disabled).toBe(true);
   fireEvent.press(exportButton);
   expect(exportAndShareICalFile).not.toHaveBeenCalled();
+});
+
+test('opening a school announcement notification shows its original content and does not follow a school switch', async () => {
+  const destination = resolveNotificationDestination({ type: 'announcement', data: { announcementId: 'a1', schoolId: 'pu' } });
+  if (!destination.ok || destination.mode !== 'nested') throw new Error('Expected announcement route');
+  const route = { params: destination.params };
+  const view = render(<AnnouncementScreen route={route} />);
+  await view.findByText('公告全文');
+  expect(loadCampusAnnouncement).toHaveBeenCalledWith('pu', 'a1', 'school-announcement');
+  mockSchool = { id: 'ntu' };
+  view.rerender(<AnnouncementScreen route={route} />);
+  await view.findByText('找不到這則公告，可能已移除或不屬於目前學校。');
+  expect(view.queryByText('公告全文')).toBeNull();
+  expect(loadCampusAnnouncement).toHaveBeenCalledTimes(1);
 });
