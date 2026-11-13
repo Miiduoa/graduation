@@ -7,19 +7,54 @@ import styles from './CourseStudyPanel.module.css';
 // Split on natural punctuation where possible, preserving every source character.
 const STUDY_SPEECH_CHUNK_LENGTH = 160;
 function splitStudySpeech(text: string): string[] {
-  const chars = Array.from(text);
+  // Code-point slicing keeps surrogate pairs but can split a Chinese combining
+  // character, Korean Jamo syllable or emoji ZWJ/flag in mid-utterance.
+  // Intl.Segmenter is built into current browsers and runs on the device.
+  const units: string[] = [];
+  const segmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter('zh-TW', { granularity: 'grapheme' })
+    : null;
+  if (segmenter) {
+    for (const { segment } of segmenter.segment(text)) {
+      if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
+        units.push(segment);
+        continue;
+      }
+      // Pathological combining-mark runs cannot fit one mobile utterance.
+      // Bound those rare cases by full code points, never by UTF-16 halves.
+      let part = '';
+      for (const character of segment) {
+        if (part && part.length + character.length > STUDY_SPEECH_CHUNK_LENGTH) {
+          units.push(part);
+          part = '';
+        }
+        part += character;
+      }
+      if (part) units.push(part);
+    }
+  } else {
+    // Older browsers retain the previous code-point-safe behavior.
+    for (const character of text) units.push(character);
+  }
+
   const chunks: string[] = [];
-  for (let offset = 0; offset < chars.length;) {
-    let end = Math.min(offset + STUDY_SPEECH_CHUNK_LENGTH, chars.length);
-    if (end < chars.length) {
+  for (let offset = 0; offset < units.length;) {
+    let end = offset;
+    let length = 0;
+    while (end < units.length && length + units[end].length <= STUDY_SPEECH_CHUNK_LENGTH) {
+      length += units[end].length;
+      end += 1;
+    }
+    if (end === offset) end = offset + 1;
+    if (end < units.length) {
       for (let index = end - 1; index >= offset + 80; index -= 1) {
-        if (/[。！？；，、\n.!?;:：]/u.test(chars[index])) {
+        if (/[。！？；，、\n.!?;:：]/u.test(units[index])) {
           end = index + 1;
           break;
         }
       }
     }
-    chunks.push(chars.slice(offset, end).join(''));
+    chunks.push(units.slice(offset, end).join(''));
     offset = end;
   }
   return chunks;

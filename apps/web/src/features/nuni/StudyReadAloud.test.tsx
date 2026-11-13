@@ -420,6 +420,45 @@ it('abandons later chunks after Stop is rejected, even if the active chunk finis
   expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
 });
 
+it.each([
+  { label: 'combining accent', prefixLength: 159, cluster: 'e\u0301' },
+  { label: 'emoji ZWJ sequence', prefixLength: 159, cluster: '👩‍💻' },
+  { label: 'emoji skin modifier', prefixLength: 158, cluster: '👍🏽' },
+  { label: 'regional flag pair', prefixLength: 158, cluster: '🇹🇼' },
+  { label: 'Hangul Jamo syllable', prefixLength: 159, cluster: '각' },
+])('reads a $label intact at a mobile utterance boundary', ({ prefixLength, cluster }) => {
+  const prefix = '甲'.repeat(prefixLength);
+  const original = prefix + cluster + '乙'.repeat(180);
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 10; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks.join('')).toBe(original);
+  expect(chunks[0]).toBe(prefix);
+  expect(chunks[1].startsWith(cluster)).toBe(true);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
+
+it('bounds an exceptionally long combining sequence without truncating speech text', () => {
+  const original = 'e' + '\u0301'.repeat(450) + '乙'.repeat(40);
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 10; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks.join('')).toBe(original);
+  expect(chunks.length).toBeGreaterThan(2);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+});
+
 it('drains thousands of immediately finished speech chunks without recursion or missing source text', () => {
   // A few mobile engines can fire onend synchronously inside speak().
   // Previously each callback nested another speakNext and could overflow the stack.
