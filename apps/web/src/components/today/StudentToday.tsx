@@ -30,11 +30,13 @@ import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
 import { TodayWelcome } from './TodayWelcome';
+import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
   assistant?: ReactNode;
+  personalization?: ReactNode;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
@@ -174,6 +176,7 @@ export function StudentToday(props: Props) {
           <TodayUnreadNotifications unsigned={props.unsigned} />
         </div>
       )}
+      {props.personalization}
       {props.assistant}
       {props.updatedAt || props.refreshing ? (
         <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
@@ -440,6 +443,17 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      personalization={!scope.loading && props.now ? (
+        <CampusPersonalizationSection
+          key={scope.scopeKey}
+          scope={scope.scope}
+          now={props.now}
+          events={records.imported.records}
+          eventsReady={records.imported.ready}
+          eventsError={records.imported.error}
+          schoolName={scope.schoolName}
+        />
+      ) : null}
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
       now={props.now}
