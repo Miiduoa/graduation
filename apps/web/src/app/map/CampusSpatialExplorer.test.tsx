@@ -213,10 +213,34 @@ it('offers up to five mobile-friendly search shortcuts while keeping all matches
     .toBe('sample-1');
   expect(onSelect).not.toHaveBeenCalled();
   expect(scene.create).toHaveBeenCalledTimes(1);
+  // Selected room 2 must no longer consume one of the five available shortcuts.
+  expect(within(shortcuts).getAllByRole('button', { name: /在空間圖查看/ })).toHaveLength(5);
+  expect(within(shortcuts).queryByRole('button', { name: '在空間圖查看「示意教室 2」' })).toBeNull();
+  expect(within(shortcuts).getByRole('button', { name: '在空間圖查看「示意教室 6」' })).toBeTruthy();
   // If the user changes the search, the chosen destination remains selected.
   fireEvent.change(search, { target: { value: '不會有結果' } });
   expect(within(dialog).queryByRole('group', { name: '搜尋結果捷徑' })).toBeNull();
   expect(within(dialog).getByRole('option', { name: '示意教室 2（目前選擇）' })).toBeTruthy();
+});
+
+it('does not claim hidden results when all six matches include the already selected destination', async () => {
+  const onSelect = vi.fn();
+  const rooms: MapLocation[] = Array.from({ length: 6 }, (_, i) => ({
+    id: `sample-${i}`, name: `示意教室 ${i + 1}`, category: '教學空間',
+    description: '純測試地點', lat: 24.226 + i * 0.0001, lng: 120.58 + i * 0.0001,
+  }));
+  render(<CampusSpatialExplorer school="other-school" locations={rooms} selected={rooms[0]} onSelect={onSelect} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜尋地點' }),
+    { target: { value: '教學空間' } });
+  const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
+  expect(within(shortcuts).getAllByRole('button', { name: /在空間圖查看/ })).toHaveLength(5);
+  expect(within(shortcuts).queryByText(/僅顯示前 5 筆搜尋捷徑/)).toBeNull();
+  expect(within(shortcuts).getByRole('button', { name: '在空間圖查看「示意教室 6」' })).toBeTruthy();
+  expect(within(dialog).getAllByRole('option')).toHaveLength(6);
+  expect(within(dialog).getByRole('heading', { name: '示意教室 1' })).toBeTruthy();
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
 it('connects scene markers, the progress control, directions and the original map selection', async () => {

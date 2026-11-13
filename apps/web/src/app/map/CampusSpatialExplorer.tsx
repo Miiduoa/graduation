@@ -254,6 +254,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const selectionOutsideSearch = Boolean(
     selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id),
   );
+  // Exclude the active destination *before* limiting shortcuts, so an already
+  // selected match cannot consume one of the five mobile quick-pick slots.
+  const shortcutPoints = searchTerm
+    ? matchingPoints.filter((point) => point.id !== selectedPoint?.id) : [];
   const listedPoints = selectionOutsideSearch && selectedPoint
     ? [selectedPoint, ...matchingPoints] : matchingPoints;
   const showOverview = overview || !selectedPoint;
@@ -575,16 +579,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {searchTerm && <small className={styles.searchCount} role="status">
                   找到 {matchingPoints.length} / {model.points.length} 個地點；目前選擇不會因搜尋改變。
                 </small>}
-                {searchTerm && matchingPoints.some((point) => point.id !== selectedPoint?.id) && (
+                {shortcutPoints.length > 0 && (
                   <div className={styles.searchMatches} role="group" aria-label="搜尋結果捷徑">
-                    {matchingPoints.slice(0, 5).filter((point) => point.id !== selectedPoint?.id)
-                      .map((point) => (
+                    {shortcutPoints.slice(0, 5).map((point) => (
                         <button key={point.id} className={styles.searchMatch} type="button"
                           onClick={() => selectPlace(point.id)}>
                           在空間圖查看「{point.name}」
                         </button>
                       ))}
-                    {matchingPoints.length > 5 && <small>
+                    {shortcutPoints.length > 5 && <small>
                       僅顯示前 5 筆搜尋捷徑；可由下方地點選單選取所有符合地點。
                     </small>}
                   </div>
