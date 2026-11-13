@@ -144,6 +144,14 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
     if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response too large');
   }
+  // A non-identity transfer needs at least one encoded byte to represent a
+  // gzip/br/deflate stream. A claimed zero-byte wire body cannot decode into
+  // the non-empty JSON provided by Fetch; do not cache such a contradictory
+  // representation, or wait on a body stream that may never finish.
+  if (!identityEncoded && lengthHeader !== null && declared === 0) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('OSM compressed response declares an empty body');
+  }
   if (!response.body) {
     // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
     const raw = await response.text();
