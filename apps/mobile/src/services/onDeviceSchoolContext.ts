@@ -4,7 +4,7 @@ import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
 import { loadOfflinePersonalTimetable } from './personalTimetable';
-import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
+import { CAMPUS_ASSIGNMENT_MAX_PAGES, validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { SavedClassGapQuery } from './savedClassGapQuery';
 
 export type { SavedClassOccurrence } from './nextSavedClasses';
@@ -138,6 +138,19 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
       !Array.isArray(announcements.items) || announcements.items.length > 12 ||
       (assignments.status === 'unavailable' && assignments.items.length > 0) ||
       (announcements.status === 'unavailable' && announcements.items.length > 0)) return false;
+  // Coverage is produced by the paginated authorized reader. A damaged restored
+  // flag must not turn a partial task list into evidence that all tasks were read.
+  const coverage = assignments.coverage;
+  if (coverage !== undefined && (!coverage || typeof coverage !== 'object' ||
+      assignments.status !== 'available' ||
+      typeof coverage.complete !== 'boolean' ||
+      !['complete', 'legacy-partial', 'read-budget'].includes(coverage.reason) ||
+      !Number.isSafeInteger(coverage.pages) || coverage.pages < 1 ||
+      coverage.pages > CAMPUS_ASSIGNMENT_MAX_PAGES ||
+      (coverage.complete
+        ? coverage.reason !== 'complete' || assignments.items.length !== assignments.count
+        : coverage.reason === 'complete' || assignments.count === null ||
+          assignments.items.length >= assignments.count))) return false;
   return assignments.items.every((item) => !!item &&
     typeof item.title === 'string' && item.title.length <= 140 &&
     typeof item.groupName === 'string' && item.groupName.length <= 100 &&
@@ -231,13 +244,17 @@ const sampleCourses = owned && timetable
         '以下為使用者主動取得的已授權校園摘要，只代表 ' + verifiedSense.checkedAt + ' 同步時的狀態。',
         '校方課表來源：' + verifiedSense.schedule.status + '；無法取得不能等同今天沒課。',
         '已接通作業：' + verifiedSense.assignments.status +
-          '；數量：' + (verifiedSense.assignments.count ?? '無法取得') +
-          '；部分項目：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5).map(({
+          '；來源總數：' + (verifiedSense.assignments.count ?? '無法取得') +
+          '；本次已取得：' + verifiedSense.assignments.items.length +
+          '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
+            ? '來源已完整讀取' : verifiedSense.assignments.coverage
+              ? '僅讀取部分資料' : '未能核對是否完整') +
+          '；最多列出前 5 項：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5).map(({
             title, groupName, dueAt, source,
           }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
-        '不可把同步資料說成現在最新結果，不得執行任何寫入。',
+        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。請到原作業頁核對，不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';
   return [
