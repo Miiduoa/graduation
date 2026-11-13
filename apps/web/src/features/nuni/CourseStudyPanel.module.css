@@ -153,3 +153,13 @@
 .manualCopy { margin: 16px 0; padding: 16px; border: 1px solid var(--border-strong); background: var(--surface); }
 .manualCopy textarea { min-height: 144px; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 520px) { .manualCopy { padding: 14px; } }
+
+
+/* Original-source numeric comparison uses native accessible meters, not inferred charts. */
+.sourceValueComparison { margin-top: 12px; padding: 8px 12px; border: 1px solid var(--border); }
+.sourceValueComparison summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 14px; line-height: 1.6; }
+.sourceValueComparison summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.sourceValueList { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.sourceValueList li { min-width: 0; }
+.sourceValueRow { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.sourceValueList meter { display: block; width: 100%; height: 18px; margin-top: 4px; }

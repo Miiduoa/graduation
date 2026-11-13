@@ -579,3 +579,52 @@ it('does not invent a row label for an empty first source cell', () => {
   expect(within(rows[2]).getAllByRole('cell').map((cell) => cell.textContent))
     .toEqual(['', '尚未填寫']);
 });
+
+
+it('offers an opt-in comparison with only exact, positive source table values', () => {
+  const material = [
+    '| 科目 | 學分 |',
+    '| --- | ---: |',
+    '| 資料庫 | 3 |',
+    '| 網路 | 2.5 |',
+    '| 程式設計 | 0 |',
+  ].join('\\n');
+  const { container, rerender } = render(<StudySourceTables text={material} />);
+  const details = container.querySelector('details');
+  expect(details?.open).toBe(false);
+  expect(screen.getByText('展開第 2 欄「學分」的原文數值比較')).toBeTruthy();
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
+    min: bar.getAttribute('min'),
+    max: bar.getAttribute('max'),
+    value: bar.getAttribute('value'),
+    label: bar.getAttribute('aria-label'),
+  }))).toEqual([
+    { min: '0', max: '3', value: '3', label: '資料庫：3' },
+    { min: '0', max: '3', value: '2.5', label: '網路：2.5' },
+    { min: '0', max: '3', value: '0', label: '程式設計：0' },
+  ]);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['3', '2.5', '0']);
+  // Switching source must drop the old comparison, not show stale measurements.
+  rerender(<StudySourceTables text="這段沒有公開的數字表格。" />);
+  expect(container.querySelector('meter')).toBeNull();
+});
+
+it('does not draw misleading bars for formulas, dates, percentages, units or ambiguous rows', () => {
+  for (const secondColumn of [
+    ['2+3', '4'], ['12%', '25%'], ['2026-11-14', '2026-11-15'],
+    ['3 公斤', '5 公斤'], ['-1', '2'], ['.5', '1'], ['0', '0'],
+    ['1,000', '200'], ['Infinity', '2'],
+  ]) {
+    const source = ['| 項目 | 值 |', '| --- | --- |',
+      '| A | ' + secondColumn[0] + ' |', '| B | ' + secondColumn[1] + ' |'].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={source} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+  const repeated = ['| 項目 | 分數 |', '| --- | --- |',
+    '| A | 10 |', '| A | 20 |'].join('\\n');
+  const { container } = render(<StudySourceTables text={repeated} />);
+  expect(container.querySelector('meter')).toBeNull();
+});
