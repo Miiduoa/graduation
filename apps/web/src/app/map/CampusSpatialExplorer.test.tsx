@@ -76,6 +76,8 @@ it('opens graphics only on request, uses the current places, and leaves selectio
   expect(screen.queryByText('主顧樓')).toBeNull();
   expect(within(dialog).getByText(/不代表建築外觀或室內動線/)).toBeTruthy();
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: /有 OSM 外框/ })).toBeNull();
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(scene.setView).toHaveBeenLastCalledWith({ selectedId: null, overhead: false, motion: true, dark: false, bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
@@ -351,6 +353,8 @@ it('adds source-checked Providence building shapes without changing navigation o
   const dialog = await open();
   expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints', expect.objectContaining({ signal: expect.anything() }));
   expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: /有 OSM 外框/ })).toBeNull();
   const outline = [
     { lat: 24.22624, lon: 120.58131 },
     { lat: 24.22624, lon: 120.58143 },
@@ -373,6 +377,7 @@ it('adds source-checked Providence building shapes without changing navigation o
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（有 OSM 外框）' })).toBeTruthy();
   // Both provenance labels can show the same calendar day; anchor by meaning.
   expect(within(dialog).getByText(new RegExp(`^資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
   expect(within(dialog).getByText(new RegExp(`OSM 資料庫同步：${osmBaseAt.slice(0, 10)}.*非現地查證`))).toBeTruthy();
@@ -517,6 +522,8 @@ it('keeps the spatial map usable when Providence building geometry is unavailabl
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: /有 OSM 外框/ })).toBeNull();
   expect(within(dialog).getByRole('button', { name: '在平面地圖查看' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
