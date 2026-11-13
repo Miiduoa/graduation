@@ -259,7 +259,8 @@ function MerchantAccount({ context }: { context: string }) {
 
   const selected = overview?.programs.find((program) => program.tenantId === draft.tenantId);
   const locked = busy || Boolean(pending);
-  const hasMerchantRecords = overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
+  const hasMerchantRecords =
+    overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       <Text accessibilityRole="header" style={styles.heading}>
@@ -310,7 +311,9 @@ function MerchantAccount({ context }: { context: string }) {
                 </View>
               ))
             ) : (
-              <Text style={styles.text}>這個帳號目前沒有可管理的門市。已送件可在下方查看審核進度。</Text>
+              <Text style={styles.text}>
+                這個帳號目前沒有可管理的門市。已送件可在下方查看審核進度。
+              </Text>
             )}
             <Text accessibilityRole="header" style={styles.title}>
               我的申請
@@ -326,6 +329,30 @@ function MerchantAccount({ context }: { context: string }) {
                   </Text>
                   {application.reviewerNote ? (
                     <Text style={styles.text}>審核說明：{application.reviewerNote}</Text>
+                  ) : null}
+                  {application.state === 'approved' ? (
+                    <>
+                      <Text style={styles.text}>
+                        店家已核准。選擇這個場域的已授權門市，繼續設定菜單與營運資訊。
+                      </Text>
+                      {overview.workspaces.some(
+                        (workspace) => workspace.tenantId === application.tenantId,
+                      ) ? (
+                        overview.workspaces
+                          .filter((workspace) => workspace.tenantId === application.tenantId)
+                          .map((workspace) => (
+                            <Action
+                              key={workspace.locationId}
+                              disabled={busy}
+                              onPress={() => setSelectedWorkspace(workspace)}
+                            >{`前往管理門市：${workspace.locationName}`}</Action>
+                          ))
+                      ) : (
+                        <Text style={styles.text}>
+                          這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。
+                        </Text>
+                      )}
+                    </>
                   ) : null}
                 </View>
               ))
