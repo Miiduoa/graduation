@@ -17,7 +17,8 @@ import { bounded, hash, history, id, object, text, V2Error, type Obj } from './c
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
 import { run, safeCode } from './runner';
 import { courseworkStudyTarget } from './courseworkStudy';
-import { COURSEWORK_STUDY_MESSAGES } from './courseworkStudyRequest';
+import { COURSEWORK_STUDY_MESSAGES, prepareCourseworkStudyRequest } from './courseworkStudyRequest';
+const ACTIONS = ['capability', 'ask', 'plan', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 let minute = 0,
@@ -66,7 +67,7 @@ function quota(now: number, amount: number) {
 }
 export async function handleV2(request: NextRequest, action: string) {
   const requestId = randomUUID();
-  const stage = ['capability', 'ask', 'revise', 'confirm', 'cancel', 'reconcile'].includes(action) ? action : 'unknown';
+  const stage = ACTIONS.includes(action) ? action : 'unknown';
   const started = Date.now();
   let logged = false;
   const log = (r: Obj) => {
@@ -80,7 +81,7 @@ export async function handleV2(request: NextRequest, action: string) {
       process.env.CAMPUS_ASSISTANT_V2_ENABLED !== 'true'
     )
       throw new V2Error(404, 'NOT_FOUND');
-    if (!['capability', 'ask', 'revise', 'confirm', 'cancel', 'reconcile'].includes(action))
+    if (!ACTIONS.includes(action))
       throw new V2Error(404, 'NOT_FOUND');
     if (request.method !== (action === 'capability' ? 'GET' : 'POST'))
       throw new V2Error(405, 'METHOD_NOT_ALLOWED');
@@ -94,6 +95,8 @@ export async function handleV2(request: NextRequest, action: string) {
         enabled: true,
         version: 2,
         ready: Boolean(process.env.GROQ_API_KEY || fallbackReady()),
+        planning: true,
+        writesEnabled: process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true',
         fallback: fallbackReady(),
         simulation: false,
       });
@@ -102,19 +105,24 @@ export async function handleV2(request: NextRequest, action: string) {
       await boundedJson(request, 16384),
       action === 'ask'
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget']
-        : action === 'revise'
-          ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
-          : ['schoolId', 'conversationId', 'token', 'args'],
+        : action === 'plan'
+          ? ['schoolId', 'conversationId', 'routeToken', 'task']
+          : action === 'revise'
+            ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
+            : ['schoolId', 'conversationId', 'token', 'args'],
     );
-    const studyTarget = action === 'ask' && raw.studyTarget !== undefined
-      ? courseworkStudyTarget(raw.studyTarget) : undefined;
+    const studyTarget = action === 'plan'
+      ? courseworkStudyTarget(raw.task)
+      : action === 'ask' && raw.studyTarget !== undefined
+        ? courseworkStudyTarget(raw.studyTarget) : undefined;
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const target = action === 'reconcile' ? undefined : action === 'ask' || action === 'revise'
-      ? raw.routeToken === undefined && action === 'ask' ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
+    const preparing = action === 'ask' || action === 'plan';
+    const target = action === 'reconcile' ? undefined : preparing || action === 'revise'
+      ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
       if (request.headers.has('fly-replay-failed')) throw new V2Error(409, 'CONFIRMATION_REVOKED');
@@ -132,7 +140,7 @@ export async function handleV2(request: NextRequest, action: string) {
     };
     if (action === 'revise') routeOwner(raw.routeToken, binding, secret);
     let protection: PlanProtection | undefined;
-    if (action === 'ask') {
+    if (preparing) {
       if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret);
       if (raw.planProtection !== undefined) {
         try {
@@ -147,9 +155,11 @@ export async function handleV2(request: NextRequest, action: string) {
       // Missing credentials can only bootstrap a fresh server-generated binding.
       // They can never issue a replacement for a client-selected old binding.
       if (raw.routeToken === undefined) {
-        if (raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
-        text(raw.question, 1000);
-        history(raw.history);
+        if (action === 'ask') {
+          if (raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
+          text(raw.question, 1000);
+          history(raw.history);
+        }
         const fresh = { ...binding, conversationId: randomUUID() };
         return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret) });
       }
@@ -206,6 +216,19 @@ export async function handleV2(request: NextRequest, action: string) {
     hits.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
+      if (action === 'plan') {
+        // An in-app task selection is a source hint, never a chat prompt or
+        // execution authority. Re-read it through the existing guarded planner.
+        const result = await prepareCourseworkStudyRequest({
+          target: studyTarget!, adapter: source.adapter, binding, secret, writes, now, signal,
+        });
+        signal.throwIfAborted();
+        return jsonResponse({
+          version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,
+          ...(result.cards.length ? { expiresAt: now + 300000 } : {}),
+          ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
+        });
+      }
       if (action === 'revise') {
         const selecting = Object.hasOwn(raw, 'keepMutationIds'), shifting = Object.hasOwn(raw, 'shift');
         if (['keepMutationIds', 'change', 'shift'].filter(key => Object.hasOwn(raw, key)).length !== 1)

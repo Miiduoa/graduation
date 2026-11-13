@@ -1,0 +1,89 @@
+name: Today Agent Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/app/page*'
+      - 'apps/web/src/components/today/**'
+      - 'apps/web/src/features/nuni/TodayAgent*'
+      - 'apps/web/src/features/nuni/assistant/**'
+      - 'apps/web/src/lib/nuni/assistantV2/**'
+      - 'apps/web/src/lib/assistantCalendarExecution*'
+      - 'apps/web/src/lib/assistantExecutionJournal*'
+      - 'apps/web/src/lib/personalImports*'
+      - 'apps/web/src/lib/homeOverview*'
+      - 'apps/web/src/app/globals.css'
+      - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/taipeiTime*'
+      - 'packages/shared/src/imports/**'
+      - 'scripts/qa/today-agent/**'
+      - 'apps/web/tsconfig.json'
+      - 'apps/web/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/today-agent-browser.yml'
+  push:
+    branches: [feat/agent-action-home-20261113]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: today-agent-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Today planning, confirmation and receipt recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify planning and recovery contracts
+        run: |
+          mkdir -p artifacts/today-agent
+          node scripts/build-functions-shared.cjs
+          pnpm --filter web exec vitest run \
+            src/features/nuni/TodayAgent.test.tsx \
+            src/components/today/TodayAgentPanel.test.tsx \
+            src/lib/nuni/assistantV2/planningHandler.test.ts \
+            src/lib/nuni/assistantV2/courseworkStudyHandler.test.ts \
+            src/lib/nuni/assistantV2/calendarExecution.test.ts \
+            src/lib/nuni/assistantV2/expiredPreviewCancellation.test.ts \
+            --maxWorkers=4 --reporter=default --reporter=json \
+            --outputFile="$GITHUB_WORKSPACE/artifacts/today-agent/service-results.json"
+      - name: Install Chromium test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Bundle actual TodayAgent with synthetic API
+        run: node scripts/qa/today-agent/build.mjs
+      - name: Check preview, keyboard confirmation and lost response recovery
+        run: python scripts/qa/today-agent/check.py
+      - name: Upload screenshots and request ledgers
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: today-agent-browser
+          path: artifacts/today-agent
+          retention-days: 7

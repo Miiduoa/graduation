@@ -273,6 +273,32 @@ function liveAuthorization(binding: Binding, p: Obj, now: number, allowRevoked =
   return current;
 }
 
+/**
+ * Expiry removes write authority, but this process can still retire a preview
+ * it knows it issued and never dispatched. The caller holds the operation
+ * queue and has just established that the exact record is absent.
+ */
+function expiredRevocationAuthorization(
+  binding: Binding,
+  authenticated: AuthenticatedCard,
+  state: CalendarOperation,
+) {
+  const { payload, card } = authenticated;
+  const bindingKey = hash(binding);
+  const current = proposals.get(bindingKey);
+  if (
+    payload.epoch !== routeEpoch ||
+    (payload.issuer ?? 'local') !== (process.env.FLY_MACHINE_ID || 'local') ||
+    !current || current.seq !== payload.proposalSeq ||
+    state.bindingKey !== bindingKey || state.proposalSeq !== payload.proposalSeq ||
+    !current.issued.includes(card.mutationId)
+  )
+    return fail('CONFIRMATION_REVOKED', 409);
+  if (state.uncertain || current.dispatched.has(card.mutationId))
+    return fail('EXECUTION_UNKNOWN', 503);
+  return current;
+}
+
 export function verifyCard(binding: Binding, raw: unknown, secret: string, now: number) {
   const authenticated = authenticatedCard(binding, raw, secret, now);
   liveAuthorization(binding, authenticated.payload, now);
@@ -463,9 +489,11 @@ export async function revoke(
     }
     if (match.conflict) return calendarCheck(binding, p, ledger, checkedAt, 'conflict',
       hasAuthorization(binding, raw, secret, checkedAt), false);
-    // Repeated cancellation may acknowledge this registry's revocation. Expired
-    // or old-process authorization is never used to assert that work was stopped.
-    const current = liveAuthorization(binding, authenticated.payload, checkedAt, true);
+    // Only the still-present issuer registry can retire an expired preview that
+    // never reached write dispatch. Absence alone cannot cancel uncertain work.
+    const current = Number(authenticated.payload.exp) <= checkedAt
+      ? expiredRevocationAuthorization(binding, authenticated, state)
+      : liveAuthorization(binding, authenticated.payload, checkedAt, true);
     const alreadyRevoked = current.revoked.has(p.mutationId);
     current.revoked.add(p.mutationId);
     if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
