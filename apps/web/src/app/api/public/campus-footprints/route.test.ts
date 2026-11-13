@@ -683,6 +683,27 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1); // Retain the existing upstream cooldown.
   });
 
+  it.each(['ruin', 'damaged'])(
+    'does not cache an audited way relabeled building=%s as an intact campus roof',
+    async (classification) => {
+      // Synthetic OSM edit on a formerly verified way; the POI remains available.
+      const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        elements: [{
+          type: 'way', id: 255784049, geometry: libraryOutline,
+          tags: { building: classification, height: '20' },
+        }],
+      }), { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(503);
+      expect(first.headers.get('Cache-Control')).toBe('no-store');
+      expect((await first.json()).error).toMatch(/temporarily unavailable/);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('uses recent Overpass database replication metadata without confusing it with a way edit', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000).toISOString()
       .replace('.000Z', 'Z');
