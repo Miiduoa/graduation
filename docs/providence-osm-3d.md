@@ -281,3 +281,9 @@ OSM 可能同時保有 `building=yes` 與 `building:condition=*`；完整建築�
 公開 Overpass 回應若宣告 `Content-Length: 0`，即使是 identity（未壓縮）傳輸，也不可能包含完整的建築 JSON。原本已攔截壓縮編碼的零位元組宣告，但 identity 仍要等到串流結束才核對長度。另一種情況是 identity 宣告只含 1 個位元組、實際首批已收到更多資料，若上游此後不結束串流，也會耗盡 12 秒期限。
 
 現在將**任何編碼的零長度宣告**於讀取前拒絕，並對 identity 每批串流即時核對已讀位元組是否超出宣告；明顯不一致時不再等待 EOF。延續 503／`no-store`／冷卻及已核實、未逾期快照備援，best-effort 取消不等待可能永不完成的上游 `cancel()`。正常長度一致的 identity、非零壓縮傳輸與沒有 `Content-Length` 的分塊回應保留既有驗證流程。新增兩組會停滯的**合成串流**回歸（identity 的零長度與首批超長），需以當前 head 的 Web Tests／CI 結果驗收；不代表真實 Overpass 曾回覆這些異常，也不是現地導航或競品比較證據。
+
+### 2026-11-13：排除單數廢墟與受損建築分類
+
+即使校舍的 OSM way ID 已在經對位的白名單內，若來源後續將 `building=*` 改為 `ruin` 或 `damaged`，不應再依舊有 POI 身分畫出完整屋頂及立面。這兩種含糊／毀損分類現在比照既有的 `ruins`、`ruined`、`collapsed` 排除 3D 量體，保留原有地點標記、平面圖與外部導航，不能反過來判定現場建物受損或可進入。相關 OSM 參考：[building=ruins 與可能誤標類型](https://wiki.openstreetmap.org/wiki/Tag:building%3Druins)。
+
+驗證包含解析器的拒絕測試，以及 API 對兩種來源分類都不得寫入新快照、必須回傳 503／`no-store` 並遵守冷卻的合成回歸。這些不是靜宜現行 OSM 已變更、公共 Overpass 真實傳輸或校園實測的證據。仍須通過此 head 的正式 CI、Campus Spatial Browser、CodeQL 與指定 App 審查；未完成前不合併或部署。
