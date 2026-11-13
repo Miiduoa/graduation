@@ -357,6 +357,72 @@ test('restored campus summaries with damaged fields never crash or enter the pri
   expect(projected).not.toContain('never-send-to-model');
 });
 
+test('partial or inconsistent assignment coverage never becomes a complete task-list claim', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const partial: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 3,
+      items: [{ title: '期中報告', groupName: '資料庫', dueAt: null }],
+      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const format = (value: CampusSenseSnapshot) => formatOnDeviceSchoolPrompt(local, value, 'alice');
+  const result = format(partial);
+  expect(result).toContain('來源總數：3；本次已取得：1；完整性：僅讀取部分資料');
+  expect(result).toContain('期中報告');
+  expect(result).toContain('未列出不代表沒有其他作業');
+  expect(result).toContain('沒有繳交回條也不能斷言未交');
+  expect(result).toContain('請到原作業頁核對');
+
+  // Legacy snapshots do not prove completeness, even if their item count matches.
+  expect(format({
+    ...partial, assignments: { ...partial.assignments, count: 1, coverage: undefined },
+  })).toContain('完整性：未能核對是否完整');
+  expect(format({
+    ...partial, assignments: {
+      ...partial.assignments, count: 1,
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+  })).toContain('完整性：來源已完整讀取');
+
+  // Restored JSON must not forge complete coverage, invalid page counts or a
+  // page-limited snapshot with no missing records.
+  const badCoverage: unknown[] = [
+    { complete: true, reason: 'complete', pages: 1 },
+    { complete: false, reason: 'complete', pages: 1 },
+    { complete: true, reason: 'read-budget', pages: 1 },
+    { complete: false, reason: 'read-budget', pages: 0 },
+    { complete: false, reason: 'read-budget', pages: 9 },
+    { complete: 'false', reason: 'read-budget', pages: 1 },
+    null,
+  ];
+  for (const coverage of badCoverage) {
+    const damaged: CampusSenseSnapshot = {
+      ...partial,
+      assignments: {
+        ...partial.assignments,
+        coverage: coverage as CampusSenseSnapshot['assignments']['coverage'],
+      },
+    };
+    const text = format(damaged);
+    expect(text).toContain('此回合沒有主動同步且有效的校園資料');
+    expect(text).not.toContain('期中報告');
+    expect(text).toContain('資料庫概論'); // The independent device timetable remains valid.
+  }
+  const unsupported = format({
+    ...partial,
+    assignments: {
+      ...partial.assignments, count: 1,
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
+    },
+  });
+  expect(unsupported).not.toContain('期中報告');
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
