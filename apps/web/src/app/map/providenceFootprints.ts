@@ -472,7 +472,7 @@ function isStandingBuilding(value: unknown): boolean {
   // unreviewed level metadata; never multiply storeys into metres.
   const storeysTag = tags?.['building:levels'];
   if (storeysTag !== undefined) {
-    if (typeof storeysTag !== 'string' || !/^\\d+(?:\\.\\d+)?$/.test(storeysTag.trim())) return false;
+    if (typeof storeysTag !== 'string' || !/^\d+(?:\.\d+)?$/.test(storeysTag.trim())) return false;
     const storeys = Number(storeysTag.trim());
     if (!Number.isFinite(storeys) || storeys <= 0 || storeys > 100) return false;
   }
