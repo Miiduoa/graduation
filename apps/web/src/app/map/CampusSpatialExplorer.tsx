@@ -247,6 +247,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     const matching = footprints.filter((footprint) => pointIds.has(footprint.poiId));
     return matching.length ? matching : NO_VISIBLE_FOOTPRINTS;
   }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
+  // Help visitors distinguish an OSM-backed 3D outline from a location pin.
+  // Only advertise geometry that survived the same source checks as the scene;
+  // when the upstream is unavailable every location stays an ordinary pin.
+  const outlinedPoiIds = useMemo(() =>
+    new Set(visibleFootprints.map((footprint) => footprint.poiId)), [visibleFootprints]);
   const sourceFootprint = place
     ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
 
@@ -520,7 +525,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}
+                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}{outlinedPoiIds.has(point.id) ? '（有 OSM 外框）' : ''}</option>)}
                 </select>
               </div>
               {place ? <>
