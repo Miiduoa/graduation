@@ -694,6 +694,8 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     const dialog = await open();
     expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（舊快照 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).getByText(/使用舊快照，非最新現場資訊/)).toBeTruthy();
     const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
     expect(within(dialog).getByText(/約 10 分鐘冷卻/)).toBeTruthy();
@@ -709,11 +711,15 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（舊快照 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).getByText(/使用舊快照，非最新現場資訊/)).toBeTruthy();
     expect(retry.hasAttribute('disabled')).toBe(true);
 
     await act(async () => { rejectRefresh(new Error('offline during refresh')); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
     expect(within(dialog).getByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（舊快照 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).getByText(/使用舊快照，非最新現場資訊/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     fireEvent.click(retry);
@@ -723,6 +729,8 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
     expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（有 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).queryByText(/使用舊快照，非最新現場資訊/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
   }

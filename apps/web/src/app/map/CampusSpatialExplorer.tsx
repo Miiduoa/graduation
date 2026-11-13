@@ -525,7 +525,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}{outlinedPoiIds.has(point.id) ? '（有 OSM 外框）' : ''}</option>)}
+                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}{outlinedPoiIds.has(point.id) ? (footprintStale ? '（舊快照 OSM 外框）' : '（有 OSM 外框）') : ''}</option>)}
                 </select>
               </div>
               {place ? <>
@@ -558,7 +558,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {school === 'pu' && footprintStatus === 'ready' && (
                   <p className={styles.note}>
                     {sourceFootprint ? <>
-                      建築外框：OpenStreetMap 來源，經校園地點與外框對位檢查。
+                      建築外框：OpenStreetMap 來源，經校園地點與外框對位檢查。{footprintStale && '（使用舊快照，非最新現場資訊）'}
                       {' '}
                       {sourceFootprint.heightBasis === 'osm-tag'
                         ? `高度：${Number(sourceFootprint.heightMeters.toFixed(2))} 公尺（OSM 使用者標註，非校方實測）。`
