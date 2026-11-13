@@ -1052,6 +1052,11 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'literal HTML nested answer', question: '參考答案：<strong><code>主鍵</code></strong>', answer: '主鍵' },
     { label: 'literal HTML code and Markdown', question: 'What? Solution: **<code>SQL</code>**', answer: 'SQL' },
     { label: 'literal HTML span on a numeric answer', question: '解答：<span>1.2</span>', answer: '1.2' },
+    { label: 'HTML strong with a class attribute', question: 'What? Answer: <strong class="key">SQL</strong>', answer: 'SQL' },
+    { label: 'HTML code language attribute', question: '參考答案：<code lang="zh-TW">主鍵</code>', answer: '主鍵' },
+    { label: 'nested HTML tags with attributes', question: 'What? Answer: <span class="hint"><em data-key=answer>SQL</em></span>', answer: 'SQL' },
+    { label: 'single-quoted HTML title attribute', question: "參考答案：<span title='要複習'>主鍵</span>", answer: '主鍵' },
+    { label: 'numeric answer with HTML attributes', question: "解答：<span class='value'>1.2</span>", answer: '1.2' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1104,6 +1109,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '答案：\n> - 12', answer: '1' },
     { question: 'Answer:\n> - SQL_joins', answer: 'SQL' },
     { question: 'Answer: <strong>SQLServer</strong> 有何用途？', answer: 'SQL' },
+    { question: 'Answer: <strong class="name">SQLServer</strong> 有何用途？', answer: 'SQL' },
+    { question: '正解：<code lang="en">B2</code> 是哪個選項？', answer: 'B' },
+    { question: "答案：<span class='number'>12</span> 是否正確？", answer: '1' },
+    { question: 'Answer: <span title="shown">SQL</span> 代表什麼？', answer: '主鍵' },
     { question: '正解：<code>B2</code> 在程式中指什麼？', answer: 'B' },
     { question: '答案：<span>12</span> 是不是太大？', answer: '1' },
     { question: 'Answer: <strong>外鍵</strong>，請比較主鍵', answer: '主鍵' },

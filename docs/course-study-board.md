@@ -1016,3 +1016,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 當裝置端模型在複習題的明示答案標籤後輸出字面上的 `<strong>SQL</strong>`、`<code>主鍵</code>` 或巢狀簡單樣式標記，先前比較副本無法辨識標記後的參考答案，學生可能在作答前直接看到答案。現在只在**新生成題目的比對副本**略過最多三層不含屬性的簡單呈現標籤（strong/em/b/i/code/span），並與真實參考回答核對；不解譯、不執行 HTML，也不改寫題目原文。
 - 加入四項答案洩漏拒收及四項合法較長識別字／不同回答的保留測試；保留 `SQLServer` 與 `SQL`、`B2` 與 `B`、`12` 與 `1` 的界線。已儲存的閱讀 v1/v2、練習 v1 checkpoint 和個人筆記不變。不加套件、付費 API，也不傳出私人教材。
 - 這是模擬 Worker 的文字品質防線，**不代表**中文 WebGPU 生成正確、iOS/Android 真機、Maestro、指定 App 5504170 或 Ahaboard 同教材同題同機驗收。PR 保留 Draft，不合併、不部署。
+
+
+### 2026-11-14：新生成複習題可辨識帶屬性的 HTML 答案格式
+
+- 若裝置端模型把答案寫成 `Answer: <strong class="key">SQL</strong>`、`參考答案：<code lang="zh-TW">主鍵</code>`，舊的明示答案檢查只跳過無屬性的 HTML 呈現標記，會讓學生在作答前看到答案。現在只在**新生成內容的檢查副本**允許最多三層短的 strong/em/b/i/code/span 開始標記（含有上限的字面屬性）；不執行 HTML、不改寫顯示題目或私人教材。
+- 增加五組明示答案拒收、四組較長識別字／不同答案保留的模擬 Worker 回歸。保留 SQL 與 SQLServer、選項 B 與 B2、數字 1 與 12 的區別；超長、跨行、不完整與非列舉標籤不作 HTML 解析宣稱。已保存 v1/v2 講解、閱讀進度、逐題 checkpoint 與個人筆記不變，不新增依賴、付費 API 或私有教材外傳。
+- 本輪仍需依精確 SHA 重新驗證 Web Tests、Build Web/Mobile、Lint/TypeCheck、Security Gates、CodeQL、指定 App 5504170、Maestro、iOS/Android 真機與 Ahaboard 同教材同題同裝置對照。PR 維持 Draft，不合併、不部署。

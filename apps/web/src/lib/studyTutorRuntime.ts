@@ -150,10 +150,10 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // An opening _ or __ is presentation markup, not part of a leaked answer.
     // Remember its length so a closing underscore is not mistaken for an identifier.
     // Local models sometimes print a literal HTML-formatted answer key.
-    // Remove only simple, attribute-free presentation wrappers from the
-    // comparison copy; never interpret HTML or rewrite the rendered question.
+    // Match up to three short literal style tags with bounded attributes in
+    // the comparison copy. Never parse/execute HTML or rewrite displayed text.
     const answerPresentation = revealedItem.replace(
-      /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)>[\s]*){1,3}/iu, '$1',
+      /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
     );
     const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
     const disclosed = answerPresentation
