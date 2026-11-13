@@ -628,3 +628,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 隔離合成回歸新增於 `backend/tests/security-rules.test.js`：無效 body、超長 body、偽造答案／投票初始化拒絕；正常留言、教師標記、一般修改通過；撤權後重放拒絕。本變更針對資料完整性／資源界線，**不能宣稱修補父貼文集合本身的讀取洩露**。其他待處理項目：父貼文 get/list 與 Web/Mobile 查詢相容改造、真隔離 GCS/Supabase 已簽網址撤銷及 CAS 競態、可信舊附件引用、minimatch 雙鎖檔、主線整合、發布及回復驗證。
 
 此段記錄提交的測試設計；CI／CodeQL 結果必須以**新精確 head** 核對，不能借用 `485b5205457a1b48cd14d4fcd3eba6cca5c78117` 成功。未接觸正式資料／金鑰／token、migration、部署、E 校園或受限 npm/pnpm audit。沒有取得指定 nuni-merge-gate App 5504170 對精確 head 的核可前，不合併 main。
+
+
+## 2026-11-13：群組留言已建立後仍可偽造他人按讚與採納標記（PR #577）
+
+精確父 head `1e3f848d1430a7e851d1e90c0db48ca0b3add6ef` 的 [主 CI #43339348653](https://github.com/Miiduoa/graduation/actions/runs/43339348653)、[CodeQL #43339348667](https://github.com/Miiduoa/graduation/actions/runs/43339348667)、[Course access #43339348683](https://github.com/Miiduoa/graduation/actions/runs/43339348683) 均 completed/success（包含 Web、Mobile、Functions、Rules、Security Gates 與建置）。對此父 head 的 15 個 check runs 未找到指定 nuni-merge-gate App 5504170 的 APPROVED review；reviews／threads 均為空。main 核對為 `f61b5192c699c3dc8d43a933581a9222c50a2498`，分支 15 ahead／29 behind，仍為 Draft。Supabase／Python／Mobile Agent／Maestro 未於此精確 head 獨立觸發，不能沿用較早版本的成功結果。
+
+新增的最小資料完整性守門：舊規則只限制新留言的 `likedBy:[]`、`likeCount:0`、`isAnswer:false`，但留言作者或有效群組管理員在已存在留言的 `update` 可直接寫入任意他人 UID 與票數，甚至建立／更改 `isBestAnswer:true`。現改為普通編輯必須保留反應欄位；若變更票數，僅限當次使用者自己的 UID 加入／移除且票數精確 ±1；`isBestAnswer` 採納標記新增時不得預填 true、後續只能由有效群組管理員切換。維持原本 `isAnswer` 保護與既有角色限制，對助理回覆的伺服器寫入無影響。
+
+可重跑的 Firebase Rules emulator 案例加入 `backend/tests/security-rules.test.js` 既有 assistant reply 測試：作者與管理員偽造他人投票、偽造採納、500 票重放均拒絕；正常建立、本人投票／取消、本文編輯及管理員採納仍通過。**本段是原始碼與測試設計紀錄，提交後新 head 的 CI／CodeQL 成功與否必須另行核對，不代表正式發布驗收。**
+
+父貼文 documents 的 Firestore read/list 權限仍會對有效會員放行未發布資訊；其 Mobile／Web 查詢與歷史相容要獨立改造。GCS／Supabase 已發 URL 撤銷、真隔離 Storage 競態、歷史檔案引用、minimatch 雙鎖檔、主線整合及正式發布／回復也未解除。未操作正式資料、金鑰、token、migration、部署、E 校園或重跑未授權 npm/pnpm audit。

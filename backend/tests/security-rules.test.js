@@ -4227,6 +4227,24 @@ test('assistant replies can only be written by the server, never by a student', 
   await assertFails(own.update({ isAI: true }));
   await assertFails(own.update({ authorName: '助理回覆' }));
   await assertFails(own.update({ generatedBy: 'server' }));
+  // A valid comment's author or group manager cannot grant fake peer reactions,
+  // including a forged accepted-answer alias on a newly created comment.
+  await assertFails(alice.collection('groups/g1/posts/q1/comments').add({
+    body: '偽造採納答案', authorId: 'alice', isBestAnswer: true,
+  }));
+  await assertFails(own.update({ isBestAnswer: true }));
+  await assertFails(own.update({ likeCount: 500 }));
+  await assertFails(own.update({ likedBy: ['bob'], likeCount: 1 }));
+  await assertFails(tina.doc(own.path).update({ likedBy: ['bob'], likeCount: 1 }));
+  // Only the actor's own vote can move both fields by one, and ordinary text
+  // edits must keep the reaction state unchanged.
+  await assertSucceeds(own.update({ likedBy: ['alice'], likeCount: 1 }));
+  await assertFails(own.update({ likedBy: ['alice', 'bob'], likeCount: 2 }));
+  await assertSucceeds(own.update({ body: '我補充更多資訊' }));
+  await assertSucceeds(own.update({ likedBy: [], likeCount: 0 }));
+  await assertSucceeds(tina.doc(own.path).update({ isBestAnswer: true }));
+  await assertFails(own.update({ isBestAnswer: false }));
+  await assertSucceeds(own.update({ body: '修正說明' }));
   // 提問上的助理回覆狀態只有伺服器能寫
   await assertFails(alice.doc('groups/g1/posts/q1').update({ assistantReply: { status: 'unavailable' } }));
   await assertFails(tina.doc('groups/g1/posts/q1').update({ assistantReply: null }));
