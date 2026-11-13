@@ -650,3 +650,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增 `backend/tests/security-rules.test.js` 的 Firebase Emulator 合成測試，驗證貼文作者無法冒名修改／刪除 Bob 留言、Bob 可編輯及刪除自己的留言、Charlie 不能改寫、跨校 Mallory 拒絕、教師可以管理、Bob 對 Alice 留言合法按讚／取消但不能以投票改正文，以及移除群組資格後重放與父貼文封存後的拒絕。這是**開發分支的可重跑隔離回歸**，必須在新精確 head 的 CI 執行通過後才標示已驗證；不等於已合併、部署或正式資料驗收。
 
 其他高風險保留：父貼文 Firestore get/list 對未發布內容的曝光、舊 GCS／Supabase URL 撤銷、真正隔離 Storage CAS／競態、歷史可信附件引用、minimatch 雙鎖檔、與最新主線整合和正式回復測試。指定 App 5504170 對精確 head 審查通過前不合併。無正式資料／金鑰／token、migration、部署、E 校園或未獲授權 npm/pnpm audit 操作。
+
+## 2026-11-13：群組父貼文按讚防偽與會員合法反應（PR #577）
+
+隔離檢查發現 `groups/{groupId}/posts/{postId}` 的直接 SDK `update` 僅允許貼文作者或群組管理員，卻未限制 `likedBy`／`likes` 的差異：作者／管理員可以任意製造其他 UID 的票數，普通有效成員則無法依 Mobile 既有互動流程正常按讚。這與先前修補的 **留言** 投票為兩個不同路徑。
+
+最小 Rules 修補：已發布、未撤回且未刪除貼文允許有效群組成員僅用自己的 UID 精確加減一票；一般文字／置頂／管理員修改不可同筆改寫反應欄位。對撤回、草稿、封存等狀態的新反應 fail closed，保留原本作者修改正文及管理員管理功能。原先欠缺 `likedBy`／`likes` 的合法歷史貼文，以空陣列／零票進行第一次正規反應，不執行正式資料修復。
+
+在 `backend/tests/security-rules.test.js` 新增 Firebase emulator 合成回歸，驗證作者與教師偽造票數拒絕、同組會員合法投票／取消、跨帳號票數和正文竄改拒絕、跨校拒絕、撤回後重放、重新發布、群組資格及學校資格撤銷。**這裡的原始碼／回歸提交不等於 GitHub CI 已完成或正式環境已部署**；必須依新精確 head 工作流結果另記。未發布父貼文本身的 Firestore `get/list` 仍是**未修補、較高資料保密風險**，需要連 Web/Mobile feed 查詢與歷史資料相容性改造。GCS/Supabase 已簽 URL 撤銷、真隔離 Storage CAS／競態、歷史附件引用、minimatch 雙鎖檔與正式發布／回復也仍待驗收。
+
+本次只觸及開發分支、Rules、合成測試與同一安全紀錄；不操作正式資料、憑證、token、migration、部署、E 校園或被拒絕的 npm/pnpm audit。缺少指定 App 5504170 對精確 head 的「審查通過」，不自行合併。

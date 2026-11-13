@@ -956,6 +956,51 @@ describe('firestore security rules', () => {
       await assertFails(post.delete());
     });
 
+    test('group post votes cannot forge other members and reject withdrawn or revoked users', async () => {
+      const postFor = (uid) => testEnv.authenticatedContext(uid).firestore().doc(postPath);
+      await seedFirestore(async (admin) => {
+        for (const uid of ['bob', 'charlie']) {
+          await admin.doc('groups/course/members/' + uid).set({ status: 'active', role: 'member' });
+          await admin.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        }
+        // An active group receipt from another school cannot grant campus access.
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+      });
+      const author = postFor('alice');
+      const teacher = postFor('teacher');
+      const member = postFor('bob');
+      const peer = postFor('charlie');
+      const outsider = postFor('mallory');
+
+      // Old rules permitted post authors/managers to set arbitrary likedBy/count
+      // while rejecting an ordinary member's legitimate vote.
+      await assertFails(author.update({ likedBy: ['charlie'], likes: 500 }));
+      await assertFails(teacher.update({ likedBy: ['bob'], likes: 1 }));
+      await assertFails(outsider.update({ likedBy: ['mallory'], likes: 1 }));
+      await assertSucceeds(member.update({ likedBy: ['bob'], likes: 1 }));
+      await assertFails(member.update({ likedBy: ['bob', 'charlie'], likes: 2 }));
+      await assertFails(peer.update({ likedBy: ['alice'], likes: 10 }));
+      await assertFails(member.update({ title: 'Peer rewrote the post' }));
+      await assertFails(member.update({ title: 'Vote hides an edit', likedBy: [], likes: 0 }));
+      await assertSucceeds(author.update({ title: 'Author content edit' }));
+      await assertSucceeds(teacher.update({ title: 'Moderator content edit' }));
+      await assertSucceeds(peer.update({ likedBy: ['bob', 'charlie'], likes: 2 }));
+      await assertFails(author.update({ title: 'Vote forged in content edit', likedBy: [], likes: 0 }));
+      await assertSucceeds(member.update({ likedBy: ['charlie'], likes: 1 }));
+
+      // No new reactions are accepted after withdrawal, even with a known ID.
+      await seedFirestore((admin) => admin.doc(postPath).update({ published: false, status: 'draft' }));
+      await assertFails(member.update({ likedBy: ['charlie', 'bob'], likes: 2 }));
+      await seedFirestore((admin) => admin.doc(postPath).update({ published: true, status: 'published' }));
+      await assertSucceeds(member.update({ likedBy: ['charlie', 'bob'], likes: 2 }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(member.update({ likedBy: ['charlie'], likes: 1 }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'active' }));
+      await seedFirestore((admin) => admin.doc('schools/pu/members/bob').update({ status: 'removed' }));
+      await assertFails(member.update({ likedBy: ['charlie'], likes: 1 }));
+    });
+
     test('unpublished, withdrawn and deleted group posts do not expose nested comments', async () => {
       const alice = testEnv.authenticatedContext('alice').firestore();
       const teacher = testEnv.authenticatedContext('teacher').firestore();

@@ -1026,9 +1026,38 @@ service cloud.firestore {
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
           && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
+        // Ordinary members may react to a published post, but only with their
+        // own single vote. Content editors cannot forge other members' votes.
+        function ownPostVoteOnly() {
+          let before = resource.data;
+          let after = request.resource.data;
+          return after.diff(before).affectedKeys().hasOnly(['likes', 'likedBy', 'updatedAt'])
+            && changesOnlyOwnVote(
+              before.get('likedBy', []), after.get('likedBy', []),
+              before.get('likes', 0), after.get('likes', 0)
+            );
+        }
+
+        function isVisiblePostForReactions() {
+          return resource.data.get('published', true) != false
+            && !(resource.data.get('status', '') in [
+              'draft', 'scheduled', 'pending', 'unpublished',
+              'archived', 'cancelled', 'canceled', 'deleted'
+            ])
+            && resource.data.get('deleted', false) != true
+            && resource.data.get('deletedAt', null) == null;
+        }
+
         allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'assistantReply'])
-          && (canManageGroup(groupId)
-            || (ownsOrdinaryPost() && request.resource.data.get('kind', 'post') != 'announcement'));
+          && (
+            (isActiveGroupMember(groupId) && isVisiblePostForReactions() && ownPostVoteOnly())
+            || (
+              (canManageGroup(groupId)
+                || (ownsOrdinaryPost() && request.resource.data.get('kind', 'post') != 'announcement'))
+              && request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
+              && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
+            )
+          );
         allow delete: if canManageGroup(groupId) || ownsOrdinaryPost();
 
         match /comments/{commentId} {
