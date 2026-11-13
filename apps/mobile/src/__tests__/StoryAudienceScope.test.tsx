@@ -119,4 +119,92 @@ describe('story audience scope transitions', () => {
     expect(view.queryByText('上一校觀看者')).toBeNull();
     view.unmount();
   });
+  test('a stalled first page offers an explicit retry and ignores its late response', async () => {
+    jest.useFakeTimers();
+    const stale = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'fresh-student', displayName: '重試後的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+    await act(async () => {
+      jest.advanceTimersByTime(14_999);
+      await Promise.resolve();
+    });
+    expect(view.queryByText('再試一次')).toBeNull();
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(view.getByText('暫時無法載入觀看名單')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(view.getByText('再試一次'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null]);
+    expect(view.getByText('重試後的同學')).toBeTruthy();
+
+    await act(async () => {
+      stale.resolve({
+        viewers: [{ uid: 'stale-student', displayName: '過期的舊回應' }],
+        nextCursor: null,
+      });
+      await stale.promise;
+    });
+    expect(view.getByText('重試後的同學')).toBeTruthy();
+    expect(view.queryByText('過期的舊回應')).toBeNull();
+    view.unmount();
+    jest.useRealTimers();
+  });
+
+  test('a stalled next page keeps the first page and retries its exact cursor', async () => {
+    jest.useFakeTimers();
+    const cursor = { id: 'first-page-cursor' } as Cursor;
+    const stale = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'first-student', displayName: '第一頁同學' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'next-student', displayName: '下一頁同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText('暫時無法載入觀看名單')).toBeTruthy();
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(view.getByText('再試一次'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, cursor]);
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    expect(view.getByText('下一頁同學')).toBeTruthy();
+
+    await act(async () => {
+      stale.reject({ code: 'permission-denied' });
+      await stale.promise.catch(() => {});
+    });
+    expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    expect(view.getByText('下一頁同學')).toBeTruthy();
+    view.unmount();
+    jest.useRealTimers();
+  });
+
 });
