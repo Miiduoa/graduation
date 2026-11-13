@@ -117,7 +117,10 @@ function isRealTimestamp(value: unknown): value is string {
 // JSON-restored or caller-supplied snapshot may bypass that parser. Re-check
 // every field the prompt serializes before exposing any personal evidence.
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
-  const schedule = value?.schedule;
+  // The scope/freshness check alone uses Date.parse and can normalize invalid
+  // calendar dates. A restored campus timestamp must still be unambiguous.
+  if (!value || !isRealTimestamp(value.checkedAt)) return false;
+  const schedule = value.schedule;
   const assignments = value?.assignments;
   const announcements = value?.announcements;
   const status = (candidate: unknown) => candidate === 'available' || candidate === 'unavailable';
@@ -138,12 +141,11 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
   return assignments.items.every((item) => !!item &&
     typeof item.title === 'string' && item.title.length <= 140 &&
     typeof item.groupName === 'string' && item.groupName.length <= 100 &&
-    (item.dueAt === null || (typeof item.dueAt === 'string' && item.dueAt.length <= 48 && Number.isFinite(Date.parse(item.dueAt)))) &&
+    (item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48)) &&
     (item.source === undefined || !!parseCampusAssignmentSource(item.source))) &&
     announcements.items.every((item) => !!item &&
       typeof item.title === 'string' && item.title.length <= 140 &&
-      (item.publishedAt === null || (typeof item.publishedAt === 'string' &&
-        item.publishedAt.length <= 48 && Number.isFinite(Date.parse(item.publishedAt)))));
+      (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
 
 export function formatOnDeviceSchoolPrompt(
