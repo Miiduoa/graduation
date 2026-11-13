@@ -388,12 +388,22 @@ function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
   if (!record) return false;
   const primary = record.name;
   if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
-  const chinese = record['name:zh'];
-  if (chinese !== undefined) {
-    if (typeof chinese !== 'string' || chinese.trim() !== expectedName) return false;
-    // A bilingual English primary name may differ from the audited Chinese
-    // label, but an explicitly different Chinese primary name contradicts it.
-    // Do not let name:zh override an unrelated Han-script building identity.
+  // OSM may supply a traditional/Taiwanese name without the generic
+  // name:zh key. All present Chinese identity claims must agree with the
+  // audited campus POI: a matching generic label cannot override an explicit
+  // name:zh-TW/name:zh-Hant for a different building after an OSM edit.
+  const chineseKeys = ['name:zh', 'name:zh-TW', 'name:zh-Hant'] as const;
+  let hasMatchingChineseName = false;
+  for (const key of chineseKeys) {
+    const label = record[key];
+    if (label === undefined) continue;
+    if (typeof label !== 'string' || label.trim() !== expectedName) return false;
+    hasMatchingChineseName = true;
+  }
+  if (hasMatchingChineseName) {
+    // English primary names are permitted when a verified Chinese label
+    // anchors identity. An explicitly different Han-script primary still
+    // contradicts that identity, regardless of which locale supplied it.
     if (typeof primary === 'string' && /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(primary) &&
         primary.trim() !== expectedName) return false;
     return true;
