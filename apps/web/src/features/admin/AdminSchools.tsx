@@ -55,7 +55,7 @@ export function AdminSchools({
   lifecycle: SchoolLifecycleFilter;
   onSelect: (tenantId: string | null) => void;
   onPeople?: (tenantId: string) => void;
-  onAudit?: (schoolName: string) => void;
+  onAudit?: (tenantId: string, schoolName: string) => void;
   onDraftChange?: (tenantId: string, dirty: boolean) => void;
   onSearch: (query: string) => void;
   onLifecycle: (value: SchoolLifecycleFilter) => void;
@@ -232,7 +232,7 @@ function SchoolDetail({
   onChanged: () => void;
   onClose: () => void;
   onPeople?: (tenantId: string) => void;
-  onAudit?: (schoolName: string) => void;
+  onAudit?: (tenantId: string, schoolName: string) => void;
   onDraftChange?: (tenantId: string, dirty: boolean) => void;
 }) {
   const tenantId = school.tenantId!;
@@ -391,8 +391,11 @@ function SchoolDetail({
                 </Button>
               )}
               {onAudit && (
-                <Button disabled={mutation.busy} onClick={() => onAudit(savedProfile.displayName)}>
-                  以校名查閱操作紀錄
+                <Button
+                  disabled={mutation.busy}
+                  onClick={() => onAudit(tenantId, savedProfile.displayName)}
+                >
+                  查閱此校操作紀錄
                 </Button>
               )}
               <Button onClick={onClose} disabled={mutation.busy}>

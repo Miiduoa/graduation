@@ -425,7 +425,9 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 lifecycle={location.schoolLifecycle}
                 onSelect={(schoolId) => go({ section: 'schools', schoolId })}
                 onPeople={(schoolId) => go({ section: 'people', schoolId })}
-                onAudit={(auditQuery) => go({ section: 'audit', auditQuery })}
+                onAudit={(auditTenantId, auditSchoolName) =>
+                  go({ section: 'audit', auditTenantId, auditSchoolName, auditQuery: '' })
+                }
                 onDraftChange={onSchoolDraftChange}
                 onSearch={(schoolQuery) =>
                   go({ section: 'schools', schoolQuery, schoolId: null }, 'replace')
@@ -492,6 +494,9 @@ function Workspace({ context, suspended }: { context: string; suspended: boolean
                 context={context}
                 suspended={suspended}
                 query={location.auditQuery}
+                tenantId={location.auditTenantId}
+                schoolName={location.auditSchoolName}
+                onClearSchool={() => go({ auditTenantId: '', auditSchoolName: '' }, 'replace')}
                 onQuery={(auditQuery) => go({ section: 'audit', auditQuery }, 'replace')}
               />
             )}
