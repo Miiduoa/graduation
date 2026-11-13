@@ -257,6 +257,19 @@ test('restored campus summaries with damaged fields never crash or enter the pri
     { ...authorized, announcements: { ...authorized.announcements, items: [null] } },
     { ...authorized, announcements: { ...authorized.announcements, status: 'unavailable' } },
     { ...authorized, assignments: { ...authorized.assignments, count: 0 } },
+    { ...authorized, checkedAt: new Date().toISOString().replace(/Z$/, '') },
+    { ...authorized, assignments: { ...authorized.assignments, items: [{
+      ...authorized.assignments.items[0], dueAt: '2026-02-30T10:00:00.000Z',
+    }] } },
+    { ...authorized, assignments: { ...authorized.assignments, items: [{
+      ...authorized.assignments.items[0], dueAt: '2026-04-31T16:00:00+08:00',
+    }] } },
+    { ...authorized, announcements: { ...authorized.announcements, items: [{
+      ...authorized.announcements.items[0], publishedAt: '2026-11-31T09:00:00.000Z',
+    }] } },
+    { ...authorized, assignments: { ...authorized.assignments, items: [{
+      ...authorized.assignments.items[0], dueAt: '2026-11-13T10:00:00',
+    }] } },
     { ...authorized, assignments: { ...authorized.assignments, items: [{
       ...authorized.assignments.items[0], dueAt: 'not-a-date',
     }] } },
@@ -272,6 +285,21 @@ test('restored campus summaries with damaged fields never crash or enter the pri
     // A damaged campus response must not suppress independently verified local classes.
     expect(prompt).toContain('資料庫概論');
   }
+
+  // Explicit-zone, real calendar dates remain usable, including leap days.
+  const validDates: CampusSenseSnapshot = {
+    ...authorized,
+    assignments: { ...authorized.assignments, items: [{
+      ...authorized.assignments.items[0], dueAt: '2024-02-29T17:00:00+08:00',
+    }] },
+    announcements: { ...authorized.announcements, items: [{
+      ...authorized.announcements.items[0], publishedAt: '2026-10-25T09:00:00.000Z',
+    }] },
+  };
+  const validPrompt = formatOnDeviceSchoolPrompt(local, validDates, 'alice');
+  expect(validPrompt).toContain('Alice 私人作業');
+  expect(validPrompt).toContain('私人公告');
+  expect(validPrompt).toContain('2024-02-29T17:00:00+08:00');
 
   // Extra JSON fields are not part of the trusted campus evidence projection;
   // only validated source IDs can be passed to the on-device model.
