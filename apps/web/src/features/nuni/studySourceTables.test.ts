@@ -1051,3 +1051,51 @@ describe('hidden inline and list wrappers never become extra public source table
     ]);
   });
 });
+
+describe('legacy HTML raw text cannot leak hidden lesson answers into source tables', () => {
+  it.each(['xmp', 'iframe', 'noembed', 'noframes', 'title'])(
+    'keeps ancestor closing tags inside <%s> as literal text',
+    (tag) => {
+      const source = [
+        '<div hidden>',
+        `<${tag}>`,
+        '</div>', // Not a real end tag while parsing raw text / RCDATA.
+        `</${tag}>`,
+        '| 教師未公布解答 | 分數 |',
+        '| --- | --- |',
+        '| 不得提前揭露 | 99 |',
+        '</div>',
+        ...visibleTable,
+      ].join('\n');
+      expect(extractStudySourceTables(source)).toEqual(realTable(9));
+    },
+  );
+
+  it('treats plaintext as consuming source to EOF, ignoring even a closing-looking tag', () => {
+    const source = [
+      '<div hidden>',
+      '<plaintext>',
+      '</plaintext>',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([]);
+  });
+
+  it('resumes public source tables after a correctly closed raw text example', () => {
+    const source = [
+      '<xmp>',
+      '| 示範資料 | 分數 |',
+      '| --- | --- |',
+      '| 非正式表格 | 99 |',
+      '</xmp>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('does not treat a paired Markdown inline-code xmp example as active HTML', () => {
+    const source = ['這裡示範 `<xmp>` 的寫法。', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});

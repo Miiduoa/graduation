@@ -34,12 +34,17 @@ const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dia
 // Raw-text/RCDATA children can contain a literal closing tag for their parent.
 // Track them even inside a hidden wrapper: </div> in a script string must not
 // release unpublished answer rows. This is source-boundary tracking, not an HTML parser.
-const RAW_HTML_TEXT_BLOCKS = new Set(['script', 'style', 'textarea']);
+const RAW_HTML_TEXT_BLOCKS = new Set([
+  'script', 'style', 'textarea',
+  // In these raw-text/RCDATA elements, a literal </div> is not an HTML tag.
+  'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
+]);
 // Scan every syntactically complete tag so quoted attributes on other HTML
 // elements cannot smuggle fake opening/closing tags into the block tracker.
 const TABLE_SUPPRESSED_HTML_TAGS = new Set([
   ...NESTABLE_HTML_BLOCKS, 'pre', 'code', 'script', 'style', 'textarea',
   'template', 'noscript', 'svg', 'math', 'table',
+  'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);
 
 /** Split CSS declarations without treating semicolons in strings, URLs or comments as separators. */
@@ -356,7 +361,9 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       const selfClosing = /\/>$/u.test(token) && (tag === 'svg' || tag === 'math');
       if (htmlCodeBlocks.length > 0) {
         const current = htmlCodeBlocks[htmlCodeBlocks.length - 1];
-        if (closing && current === tag) htmlCodeBlocks.pop();
+        // HTML <plaintext> consumes everything to EOF; even a literal
+        // </plaintext> must not expose a teacher-only table below it.
+        if (closing && current === tag && current !== 'plaintext') htmlCodeBlocks.pop();
         else if (!closing && !selfClosing && !RAW_HTML_TEXT_BLOCKS.has(current) &&
             ((current === tag && NESTABLE_HTML_BLOCKS.has(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
           htmlCodeBlocks.push(tag);
