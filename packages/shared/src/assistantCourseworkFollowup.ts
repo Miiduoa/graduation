@@ -51,6 +51,7 @@ function object(raw: unknown, fields: readonly string[]): Record<string, unknown
 }
 function text(raw: unknown, max: number): string {
   if (typeof raw !== 'string' || !raw.trim() || raw !== raw.trim() || raw.length > max ||
+      // eslint-disable-next-line no-control-regex -- Reject control characters in source text while retaining tabs and line breaks.
       /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(raw)) return invalid();
   return raw;
 }
