@@ -1035,6 +1035,8 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'Markdown bold English answer', question: 'What? Correct answer: **SQL**', answer: 'SQL' },
     { label: 'nested quote and code marker', question: '參考答案：「`SQL`」', answer: 'SQL' },
     { label: 'single underscore emphasis', question: 'What? Solution: _SQL_', answer: 'SQL' },
+    { label: 'double underscore emphasis', question: 'What? Solution: __SQL__', answer: 'SQL' },
+    { label: 'underscore emphasis inside Chinese quotes', question: '參考答案：「_SQL_」', answer: 'SQL' },
     { label: 'Markdown emphasis on decimal', question: '解答：*1.2*', answer: '1.2' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
@@ -1074,6 +1076,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '答案：`B2` 這個符號代表什麼？', answer: 'B' },
     { question: '答案：**12** 是否合理？', answer: '1' },
     { question: '答案：`SQL` 為何要使用？', answer: '外鍵' },
+    { question: 'What? Solution: SQL_joins?', answer: 'SQL' },
+    { question: 'What? Solution: _SQL_joins?', answer: 'SQL' },
+    { question: 'What? Solution: __SQL__Server?', answer: 'SQL' },
+    { question: 'What? Solution: SQL_', answer: 'SQL' },
     { question: 'Answer is what?', answer: 'SQL' },
     { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {

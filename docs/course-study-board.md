@@ -898,3 +898,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 ### 2026-11-13：複習題的 Markdown 格式不再藏住明示答案
 
 裝置端 AI 若把參考回答用行內程式碼、粗體或斜體呈現，例如 `Answer: \`SQL\``、`答案：**主鍵**`、`解答：*1.2*`，舊的明示答案防線只剝除一般引號，可能讓學生在作答前看到答案。現在只在**新生成題目的檢查副本**略過標籤後的 Markdown 開頭裝飾符號，不改寫顯示內容；仍檢查實際參考答案與後接字元，避免將 `SQLServer` 誤當 `SQL`、`B2` 誤當 `B`、`12` 誤當 `1`。新增六項拒收與四項非洩漏保留的模擬 Worker 回歸案例。原教材、v1/v2 進度、練習 checkpoint、個人筆記與端側模型資料界線不變；不增套件或外部 API。CI、CodeQL、App 5504170、iOS/Android、Maestro 和 Ahaboard 同教材同裝置對照仍須依精確 head 分別核對；保持 Draft、不合併、不部署。
+
+
+### 2026-11-13：修復 Markdown 底線強調的答案外洩回歸
+
+- 根據精確 head `1058f8fd5d16ad685772367c457032a34e8c5135` 的 CI #43345113824，Web Tests job 131622496914 失敗（`single underscore emphasis`）：`Solution: _SQL_` 的結尾 `_` 被當成英文識別字延續，未拒收明示答案。其餘已執行檢查包含 Build Web/Mobile、Lint/TypeCheck、Security Gates 與 CodeQL 均通過，但不能拿來取代失敗的 Web Tests。
+- 新生成複習題現在辨識與開頭配對的 `_`／`__` 結尾；只有明確強調符號結束且後面不接字母／數字／底線才視為揭露。`SQL_joins`、`_SQL_joins`、`__SQL__Server` 及沒有開頭底線的 `SQL_` 仍保留，避免攔截較長識別字。補足兩項拒收與四項保留的模擬 Worker 回歸。已儲存的教材、閱讀進度 v1/v2 和練習 checkpoint 不變。
+- 這只修正失敗 CI 指出的新生成文字檢查；沒有新套件、付費 API 或私人教材傳輸。仍需依新精確 SHA 的 Web Tests／全套 CI、CodeQL、指定 App 5504170 APPROVED、Maestro、iOS/Android 真機及 Ahaboard 同教材同題同裝置對照逐一驗收。PR 保持 Draft、不合併、不部署。

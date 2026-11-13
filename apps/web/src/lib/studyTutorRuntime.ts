@@ -138,7 +138,11 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   while ((label = labels.exec(question)) !== null) {
     // Generated Markdown may wrap a disclosed key in inline code or emphasis.
     // Strip only opening presentation marks for comparison, never displayed text.
-    const disclosed = question.slice(label.index + label[0].length)
+    const rawDisclosed = question.slice(label.index + label[0].length);
+    // An opening _ or __ is presentation markup, not part of a leaked answer.
+    // Remember its length so a closing underscore is not mistaken for an identifier.
+    const emphasisPrefix = rawDisclosed.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const disclosed = rawDisclosed
       .replace(/^[\s"'“”‘’「『（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
     // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
@@ -149,8 +153,13 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
       continue;
     // SQL is not SQLServer; likewise, option B is not option B2.
     // Avoid rejecting a genuine question for a longer Latin identifier.
-    if (/[a-z]/u.test(finalAnswerCharacter) && /[a-z0-9_]/u.test(followingCharacter))
-      continue;
+    const remaining = disclosed.slice(answer.length);
+    const closesEmphasis = emphasisPrefix.length > 0 &&
+      remaining.startsWith(emphasisPrefix) &&
+      !/^[\p{L}\p{N}_]/u.test(remaining.slice(emphasisPrefix.length));
+    // SQL_joins remains distinct from SQL, but _SQL_ and __SQL__ reveal SQL.
+    if (/[a-z]/u.test(finalAnswerCharacter) && /[a-z0-9_]/u.test(followingCharacter) &&
+      !(followingCharacter === '_' && closesEmphasis)) continue;
     return false;
   }
   return true;
