@@ -47,6 +47,12 @@ describe('public Providence building geometry route', () => {
     const called = new URL(mockedFetch.mock.calls[0][0]);
     expect(called.hostname).toBe('overpass-api.de');
     const query = called.searchParams.get('data')!;
+    // This fixed-ID query should request a modest Overpass scheduling budget,
+    // rather than the 512 MiB default, and leave transport time after execution.
+    // This checks our request contract, not live public-API availability.
+    expect(query).toContain('[timeout:8]');
+    expect(query).toContain('[maxsize:67108864]');
+    expect(query).not.toContain('[timeout:12]');
     expect(query).toContain('way(id:');
     expect(query).toContain('relation(id:9246899)');
     expect(query).toContain('255784049');
