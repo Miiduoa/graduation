@@ -267,8 +267,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         current?.until === footprintRetryAfter.until && current.minutes !== minutes
           ? { ...current, minutes } : current);
     };
-    const timer = window.setTimeout(() => setFootprintRetryAfter(null),
-      Math.max(0, footprintRetryAfter.until - Date.now()));
+    // A previously queued timeout can run after a later 503 replaces this
+    // cooldown. Only release the exact deadline that scheduled the callback;
+    // otherwise an old timer can re-enable Retry during a new server pause.
+    const timer = window.setTimeout(() => {
+      setFootprintRetryAfter((current) =>
+        current?.until === footprintRetryAfter.until ? null : current);
+    }, Math.max(0, footprintRetryAfter.until - Date.now()));
     const interval = window.setInterval(synchronizeCooldown, 60_000);
     document.addEventListener('visibilitychange', synchronizeCooldown);
     window.addEventListener('pageshow', synchronizeCooldown);
