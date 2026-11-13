@@ -94,6 +94,31 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('keeps credible OSM storey counts without inferring building height', () => {
+    // Synthetic count annotations do not establish a surveyed height.
+    for (const levels of ['1', '5', '1.5', ' 2 ']) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', 'building:levels': levels })],
+      });
+      expect(buildings, levels).toMatchObject([
+        { poiId: 'pu-library', heightMeters: 12, heightBasis: 'illustrative' },
+      ]);
+    }
+  });
+
+  it('rejects contradictory or ambiguous OSM storey counts instead of drawing a full roof', () => {
+    // These are deliberately synthetic source edits, not findings at Providence.
+    for (const levels of ['0', '-1', '0.0', '1;2', '1,5', '', 'unknown', '101', null, 2]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', 'building:levels': levels })],
+      }), String(levels)).toEqual([]);
+    }
+    // Missing levels remains permitted; its volume is expressly illustrative.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library)],
+    })).toHaveLength(1);
+  });
+
   it('does not render explicitly invisible or deleted OSM ways as current buildings', () => {
     // Synthetic Overpass-like metadata: a geometry/tag match alone is not
     // proof that an explicitly invisible element is still a visible building.
