@@ -348,26 +348,28 @@ async def camera_controls(page, _requests, _resources):
         await assert_same_scene(page, canvas, context, selected)
         states[key] = state
 
-    # Check the actual displayed bounds and disabled controls, including a key
-    # that attempts to exceed each bound while the scene itself is focused.
+    # Check native-disabled controls at both zoom bounds. Disabled buttons
+    # must not be focused or activated: real HTML disabled removes them from
+    # keyboard navigation, unlike the previous aria-disabled-only controls.
     for name, bound, key in [("放大空間圖", 250, "Shift+Equal"), ("縮小空間圖", 65, "Minus")]:
         button = dialog.get_by_role("button", name=name, exact=True)
         for _ in range(12):
-            if await button.get_attribute("aria-disabled") == "true":
+            if await button.is_disabled():
                 break
             await button.click()
-        await expect(button).to_have_attribute("aria-disabled", "true")
         await expect(button).to_be_disabled()
         await expect(dialog.get_by_text(f"縮放 {bound}%", exact=True)).to_be_visible()
-        await expect(button).to_be_focused()
-        await page.keyboard.press("Enter")
-        assert (await camera_readout(page))["zoomPercent"] == bound
-        await expect(button).to_be_focused()
-        states[f"limit{bound}"] = {"zoomPercent": bound, "focusRetainedAfterEnter": True}
+        # The scene keeps its keyboard shortcut, even when the matching
+        # button has reached its native disabled bound.
         await host.focus()
+        await expect(host).to_be_focused()
         await page.keyboard.press(key)
         assert (await camera_readout(page))["zoomPercent"] == bound
+        await expect(button).to_be_disabled()
+        await expect(host).to_be_focused()
         await assert_same_scene(page, canvas, context, selected)
+        states[f"limit{bound}"] = {"zoomPercent": bound, "nativeDisabled": True,
+                                   "keyboardLimitGuard": True}
 
     # Home resets both a rotated view and a non-default zoom.
     await page.keyboard.press("ArrowLeft")
