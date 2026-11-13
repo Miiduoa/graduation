@@ -254,6 +254,7 @@ export default function StudentTodayScreen() {
       now={now}
       styles={s}
       onOpen={openTodo}
+      onOpenCalendar={() => safeNavigate(navigation, 'SmartCalendarScreen')}
       onToggleExpanded={() =>
         setExpandedTodoScope((previous) => (previous === scope ? null : scope))
       }
@@ -447,6 +448,7 @@ function TodoList({
   onOpen,
   onToggleExpanded,
   onRetry,
+  onOpenCalendar,
 }: {
   todos: TodoRow[];
   expanded: boolean;
@@ -457,6 +459,7 @@ function TodoList({
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpen: (todo: TodoRow, scrollToSubmit?: boolean) => void;
+  onOpenCalendar: () => void;
   onToggleExpanded: () => void;
   onRetry: () => void;
 }) {
@@ -465,9 +468,16 @@ function TodoList({
   const leaving = new Set(leavingIds);
   return (
     <View style={s.section}>
-      <Text accessibilityRole="header" style={s.sectionTitle}>
-        待處理
-      </Text>
+      <View style={s.sectionHeader}>
+        <Text accessibilityRole="header" style={s.sectionTitle}>
+          待處理
+        </Text>
+        {!unsigned && (
+          <Pressable accessibilityRole="button" onPress={onOpenCalendar} style={s.textButton}>
+            <Text style={s.link}>查看行事曆</Text>
+          </Pressable>
+        )}
+      </View>
       {unsigned ? (
         <Text style={s.empty}>{TODAY_COPY.unsigned}</Text>
       ) : error ? (
