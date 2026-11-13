@@ -706,3 +706,16 @@ test('distinguishes a class in progress and shows the timetable before non-urgen
   const headings = view.getAllByRole('header').map(node => node.props.children);
   expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('待處理'));
 });
+
+test.each(['pending', 'empty', 'error'])('opens the calendar from %s coursework', async (state) => {
+  if (state === 'empty') jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  if (state === 'error') jest.mocked(loadStudentHome).mockRejectedValue(new Error('offline'));
+  const view = render(<StudentTodayScreen />);
+  const calendar = await view.findByRole('button', { name: '查看行事曆' });
+  fireEvent.press(calendar);
+  expect(mockNavigate).toHaveBeenLastCalledWith('Today', {
+    screen: 'SmartCalendarScreen',
+    params: undefined,
+  });
+  if (state === 'pending') expect(await view.findByText('繳交期末報告')).toBeTruthy();
+});
