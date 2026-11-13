@@ -37,6 +37,28 @@ function engagementLine(p: CampusPostDoc) {
 }
 
 export function BoardDetailScreen(props: any) {
+  const auth = useAuth();
+  const { school } = useSchool();
+
+  // A change of account, school or board must discard the previous board's state.
+  if (auth.loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <ActivityIndicator color={theme.colors.accent} />
+        <Text style={{ color: theme.colors.textSecondary }}>正在確認登入狀態…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <BoardDetailContent
+      key={JSON.stringify([auth.user?.uid ?? null, school?.id ?? null, props?.route?.params?.boardId ?? null])}
+      {...props}
+    />
+  );
+}
+
+function BoardDetailContent(props: any) {
   const styles = useThemeStyleSheet(createStyles);
   const injected = useCampusSocialStackNav();
   const fb = useNavigation<any>();
@@ -51,43 +73,61 @@ export function BoardDetailScreen(props: any) {
   const [loading, setLoading] = useState(true);
   const [subBusy, setSubBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const loadVersion = React.useRef(0);
 
   const load = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id || !boardId || !auth.user?.uid) {
-      setPosts([]);
-      return;
+    const version = ++loadVersion.current;
+    setLoadError('');
+    try {
+      if (isFirebaseMockMode() || !school?.id || !boardId || !auth.user?.uid) {
+        setPosts([]);
+        setMeta(null);
+        setSubscribed(false);
+        return;
+      }
+
+      // Only publish a complete result for the current school/board.
+      const [rows, board, subscription] = await Promise.all([
+        fetchRecentCampusPosts(school.id, boardId, 45),
+        getBoardById(school.id, boardId),
+        isSubscribedToBoard(auth.user.uid, school.id, boardId),
+      ]);
+      if (loadVersion.current !== version) return;
+      setPosts(rankFeedPosts(rows, 50));
+      setMeta(board);
+      setSubscribed(subscription);
+    } catch (cause) {
+      if (loadVersion.current !== version) return;
+      const code = (cause as { code?: string })?.code ?? '';
+      // Temporary network errors must not silently turn a populated board into an empty board.
+      // A revoked session/school membership must not keep displaying previously read content.
+      if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
+        setPosts([]);
+        setMeta(null);
+        setSubscribed(false);
+      }
+      setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
+    } finally {
+      if (loadVersion.current === version) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-    const rows = await fetchRecentCampusPosts(school.id, boardId, 45);
-    setPosts(rankFeedPosts(rows, 50));
   }, [school?.id, boardId, auth.user?.uid]);
 
-  const loadMetaAndSub = useCallback(async () => {
-    if (!school?.id || !boardId || !auth.user?.uid) return;
-    const [b, sub] = await Promise.all([
-      getBoardById(school.id, boardId),
-      isSubscribedToBoard(auth.user.uid, school.id, boardId),
-    ]);
-    setMeta(b);
-    setSubscribed(sub);
-  }, [school?.id, boardId, auth.user?.uid]);
-
-  const reloadAll = useCallback(async () => {
-    await Promise.all([load(), loadMetaAndSub()]);
-  }, [load, loadMetaAndSub]);
-
-  const onRefresh = useCallback(async () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    await reloadAll();
-    setRefreshing(false);
-  }, [reloadAll]);
+    void load();
+  }, [load]);
 
   React.useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await reloadAll();
-      setLoading(false);
-    })();
-  }, [reloadAll]);
+    setLoading(true);
+    void load();
+    return () => {
+      loadVersion.current += 1;
+    };
+  }, [load]);
 
   React.useEffect(() => {
     props?.navigation?.setOptions?.({ title: meta?.name ?? boardName });
@@ -165,6 +205,24 @@ export function BoardDetailScreen(props: any) {
         )}
       </View>
 
+      {!!loadError && (
+        <View style={{ padding: 16, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary }}>
+            {loadError}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="重新讀取看板"
+            onPress={() => {
+              if (posts.length === 0) setLoading(true);
+              void load();
+            }}
+            style={{ paddingVertical: 10 }}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '600' }}>重新讀取看板</Text>
+          </Pressable>
+        </View>
+      )}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator />
@@ -176,7 +234,7 @@ export function BoardDetailScreen(props: any) {
           keyExtractor={(p) => p.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
-            <Text style={{ color: theme.colors.textSecondary, padding: 20, textAlign: 'center' }}>
+            loadError ? null : <Text style={{ color: theme.colors.textSecondary, padding: 20, textAlign: 'center' }}>
               此看板尚未有貼文，成為第一篇吧。
             </Text>
           }
