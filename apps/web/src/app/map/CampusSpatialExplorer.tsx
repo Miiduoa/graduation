@@ -225,7 +225,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
-  const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
+  // The external map may replace its filtered POIs while this dialog stays open.
+  // An explicit in-dialog pick wins only while it still exists in this campus
+  // model; otherwise use the map's current selection (never the first result).
+  const selectedPoint = model.points.find((point) => point.id === selection)
+    ?? model.points.find((point) => point.id === selected?.id);
   // Search only narrows the destination list. The current selection remains
   // visible and unchanged even when it does not match the typed query.
   const searchTerm = placeSearch.trim().normalize('NFKC').toLocaleLowerCase('zh-TW');
