@@ -304,6 +304,50 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['gzip', 'br', 'deflate'])(
+    'rejects impossible zero-byte %s transfer without caching valid-looking decoded JSON',
+    async (encoding) => {
+      // A compressed wire body with Content-Length: 000 has no bytes from
+      // which Fetch could have decoded this JSON. This is a synthetic
+      // contradictory header/body pair, not a recorded Overpass incident.
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': encoding, 'Content-Length': '000' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect((await response.json()).error).toMatch(/temporarily unavailable/);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('cancels a stalled encoded body when the wire length falsely claims zero bytes', async () => {
+    let cancelled = 0;
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() {
+        cancelled += 1;
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stalled, {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '0' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    // Non-settling stream cancellation must not delay the response.
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect(cancelled).toBe(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['gzip', 'BR', 'deflate', 'identity'])(
     'accepts recognized Overpass single Content-Encoding %s',
     async (encoding) => {
