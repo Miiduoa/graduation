@@ -164,6 +164,10 @@ function parseSimplePipeRow(line: string): string[] | null {
   for (const marker of trimmed.matchAll(
     /<\/?[A-Za-z][\w:-]*(?=[\s/>])[^>]*>|<!--|--!?>/gu,
   )) {
+    // A closing HTML-comment marker without a preceding <!-- is ordinary
+    // visible lesson text (for example, a syntax table). Real comments
+    // still fail the marker check at their opening token.
+    if (marker[0] === '-->' || marker[0] === '--!>') continue;
     if (!isInsideInlineCode(trimmed, marker.index ?? 0)) return null;
   }
   // Only unescaped pipes outside paired inline-code spans separate columns.
@@ -335,8 +339,9 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         hiddenLine = true;
         continue;
       }
-      if (token === '-->') {
-        hiddenLine = true;
+      if (token === '-->' || token === '--!>') {
+        // No opening comment is active. A lone terminator is plain text;
+        // only the inHtmlComment branch above suppresses comment content.
         continue;
       }
       const tag = match[1]?.toLowerCase();

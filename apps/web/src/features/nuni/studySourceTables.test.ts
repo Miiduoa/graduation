@@ -936,7 +936,7 @@ describe('visible Markdown inline-code examples in course source tables', () => 
     const source = [
       '| 名稱 | 內容 |',
       '| --- | --- |',
-      '| 範例 | `<span hidden>尚未公開 |',
+      '| 範例 | `<span hidden>尚未公開</span> |',
       ...visibleTable,
     ].join('\n');
     expect(extractStudySourceTables(source)).toEqual(realTable(4));
@@ -947,10 +947,51 @@ describe('visible Markdown inline-code examples in course source tables', () => 
     const source = [
       '| 名稱 | 內容 |',
       '| --- | --- |',
-      '| 範例 | \\' + tick + '<span hidden>' + tick + ' 不是程式碼開頭 |',
+      '| 範例 | \\' + tick + '<span hidden>' + tick + ' 不是程式碼開頭 </span> |',
       ...visibleTable,
     ].join('\n');
     expect(extractStudySourceTables(source)).toEqual(realTable(4));
+  });
+});
+
+describe('ambiguous inline HTML and literal comment terminators', () => {
+  it('does not release a later table from an unclosed hidden span in malformed inline code', () => {
+    const source = [
+      '| 名稱 | 內容 |',
+      '| --- | --- |',
+      '| 範例 | `<span hidden>尚未公開 |',
+      ...visibleTable,
+    ].join('\n');
+    // Fail closed: this is not an isolated, valid source-table boundary.
+    expect(extractStudySourceTables(source)).toEqual([]);
+  });
+
+  it('does not let an escaped tick make an unclosed hidden span safe', () => {
+    const tick = String.fromCharCode(96);
+    const source = [
+      '| 名稱 | 內容 |',
+      '| --- | --- |',
+      '| 範例 | \\' + tick + '<span hidden>' + tick + ' 尚未公開 |',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([]);
+  });
+
+  it('keeps standalone HTML comment terminators as visible course syntax', () => {
+    const source = [
+      '| 記號 | 用法 |',
+      '| --- | --- |',
+      '| --> | HTML 註解結束符號 |',
+      '| --!> | 另一種合法的結束符號 |',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([{
+      startLine: 1,
+      headers: ['記號', '用法'],
+      rows: [
+        ['-->', 'HTML 註解結束符號'],
+        ['--!>', '另一種合法的結束符號'],
+      ],
+    }]);
   });
 });
 
