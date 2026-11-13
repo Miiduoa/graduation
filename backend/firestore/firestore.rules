@@ -1025,6 +1025,9 @@ service cloud.firestore {
         allow create: if isActiveGroupMember(groupId)
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
+          // No member may mint votes while creating a post.
+          && request.resource.data.get('likedBy', []) == []
+          && request.resource.data.get('likes', 0) == 0
           && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
         // Ordinary members may react to a published post, but only with their
         // own single vote. Content editors cannot forge other members' votes.

@@ -973,6 +973,18 @@ describe('firestore security rules', () => {
       const peer = postFor('charlie');
       const outsider = postFor('mallory');
 
+      const fresh = (id) => testEnv.authenticatedContext(id).firestore().doc('groups/course/posts/forged');
+      await assertFails(fresh('alice').set({
+        authorId: 'alice', kind: 'post', title: 'Minted at creation', likedBy: ['bob'], likes: 300,
+      }));
+      await assertFails(fresh('teacher').set({
+        authorId: 'teacher', kind: 'announcement', title: 'Minted by manager',
+        likedBy: ['alice'], likes: 1,
+      }));
+      await assertSucceeds(fresh('alice').set({
+        authorId: 'alice', kind: 'post', title: 'Legitimate new post', likedBy: [], likes: 0,
+      }));
+
       // Old rules permitted post authors/managers to set arbitrary likedBy/count
       // while rejecting an ordinary member's legitimate vote.
       await assertFails(author.update({ likedBy: ['charlie'], likes: 500 }));
