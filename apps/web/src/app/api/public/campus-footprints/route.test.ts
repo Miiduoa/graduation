@@ -1151,6 +1151,54 @@ describe('public Providence building geometry route', () => {
       }
     });
 
+  it.each([
+    {
+      label: 'overflowed delta-seconds',
+      header: '9'.repeat(350),
+      expectedSeconds: 86_400,
+      status: 503,
+    },
+    {
+      label: 'zero-padded delta-seconds',
+      header: '0'.repeat(350) + '1800',
+      expectedSeconds: 1_800,
+      status: 502,
+    },
+  ])('honours $label Retry-After without retrying a busy Overpass service early',
+    async ({ header, expectedSeconds, status }) => {
+      // Synthetic upstream headers. In particular, converting 350 digits
+      // with Number() would overflow and accidentally impose only 600 sec.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('busy', {
+            status, headers: { 'Retry-After': header },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Retry-After')).toBe(String(expectedSeconds));
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+
+        clock.mockReturnValue(start + (expectedSeconds - 1) * 1000);
+        const blocked = await GET();
+        expect(blocked.status).toBe(503);
+        expect(blocked.headers.get('Retry-After')).toBe('1');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + (expectedSeconds + 1) * 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
   it.each([502, 504])('preserves an explicitly stale dated footprint during gateway HTTP %i overload', async (status) => {
     const start = Date.now();
     const day = 24 * 60 * 60 * 1000;
