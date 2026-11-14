@@ -29,13 +29,21 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
       /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
       /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
       /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return null;
+  // Repeated "學分" is an explicit source unit, not a value to infer.
+  // Accept it only in a credit column and when ALL rows use the same format.
+  const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
+  const creditNumber = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
+  const creditsColumn = /(?:學分|credits?)/iu.test(column);
+  let rowFormat: 'plain' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {
-    if (!label?.trim() || !original ||
-        !/^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u.test(original) ||
-        labels.has(label.trim())) return null;
-    const amount = Number(original);
+    if (!label?.trim() || !original || labels.has(label.trim())) return null;
+    const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
+    const format = plainNumber.test(original) ? 'plain' : creditMatch ? 'credits' : null;
+    if (!format || (rowFormat !== null && format !== rowFormat)) return null;
+    rowFormat = format;
+    const amount = Number(creditMatch?.[1] ?? original);
     if (!Number.isFinite(amount)) return null;
     labels.add(label.trim());
     rows.push({ label, original, amount });
@@ -102,8 +110,8 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
     <details className={styles.sourceValueComparison}>
       <summary>展開第 2 欄「{table.headers[1]}」的原文數值比較</summary>
       <p className={styles.note}>
-        只比較這張文字表格中明確寫出的非負數；以本欄最大值為滿格，不補值、不解讀單位，
-        不比較日期或編號，也不是圖片圖表辨識。數字請核對上方原文。
+        只比較明確的非負純數字，或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
+        不換算單位、不混用純數字與附單位數值，也不比較日期或編號；請核對上方原文。
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (

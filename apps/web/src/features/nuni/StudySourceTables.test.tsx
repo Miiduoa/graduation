@@ -657,6 +657,50 @@ it('still compares actual amounts when an English header mentions a year or cour
   }
 });
 
+it('compares exact credit values with repeated units and keeps the original cells', () => {
+  const material = [
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 學分 |',
+    '| 網路 | 2.50學分 |',
+    '| 體育 | 0 學分 |',
+  ].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
+    max: bar.getAttribute('max'),
+    value: bar.getAttribute('value'),
+    label: bar.getAttribute('aria-label'),
+    valueText: bar.getAttribute('aria-valuetext'),
+  }))).toEqual([
+    { max: '3', value: '3', label: '資料庫：3 學分', valueText: '3 學分；本欄最大值 3 學分' },
+    { max: '3', value: '2.5', label: '網路：2.50學分', valueText: '2.50學分；本欄最大值 3 學分' },
+    { max: '3', value: '0', label: '體育：0 學分', valueText: '0 學分；本欄最大值 3 學分' },
+  ]);
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['3 學分', '2.50學分', '0 學分']);
+});
+
+it('refuses to guess credits or mix explicit units and plain numbers', () => {
+  const cases = [
+    { heading: '數值', values: ['3 學分', '2 學分'] },
+    { heading: '學分', values: ['3 學分', '2'] },
+    { heading: '學分', values: ['3 學分', '2 小時'] },
+    { heading: '學分', values: ['3 credits', '2 credits'] },
+    { heading: '學分', values: ['3 學分', '2.123 學分'] },
+    { heading: '學分', values: ['0 學分', '0 學分'] },
+  ];
+  for (const { heading, values } of cases) {
+    const material = [
+      '| 課程 | ' + heading + ' |', '| --- | --- |',
+      '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    unmount();
+  }
+});
+
 it('does not turn numeric years or identifiers into misleading comparison bars', () => {
   for (const header of ['年份', '學年度', '學號', '課程編號', '帳號', '郵遞區號', '年度', 'year', 'ID']) {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
