@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppState, Pressable, Text, View } from 'react-native';
+import { AppState, Pressable, Text, View, type AppStateStatus } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusStoryViewer, useCampusStories } from '../screens/social/CampusStoryViewer';
 import { listStoryViewers, markStoryViewed, type CampusStoryDoc } from '../services/stories';
@@ -163,6 +163,15 @@ test('ignores a response arriving after the owner switches account', async () =>
 });
 
 test('checking a video audience pauses the same native player and ignores a queued end event', async () => {
+  // Deliver OS app-state events to all *active* subscribers, not merely the
+  // last one (the audience panel also subscribes while it is open).
+  const listeners = new Set<(state: AppStateStatus) => void>();
+  const appStateSpy = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+    if (event !== 'change') return { remove: jest.fn() };
+    const callback = listener as (state: AppStateStatus) => void;
+    listeners.add(callback);
+    return { remove: () => { listeners.delete(callback); } };
+  });
   const clip = {
     ...power,
     kind: 'video' as const,
@@ -199,8 +208,9 @@ test('checking a video audience pauses the same native player and ignores a queu
   expect(view.getByText('5 / 12 秒')).toBeTruthy();
   fireEvent.press(view.getByLabelText('播放影片'));
   await act(async () => fireEvent.press(view.getByText('誰看過')));
-  const subscription = jest.mocked(AppState.addEventListener).mock.calls.at(-1)![1];
-  act(() => subscription('background'));
+  expect(listeners.size).toBeGreaterThan(0);
+  act(() => { for (const listener of [...listeners]) listener('background'); });
   fireEvent.press(view.getByLabelText('返回限時動態'));
   expect(player.props.shouldPlay).toBe(false);
+  appStateSpy.mockRestore();
 });

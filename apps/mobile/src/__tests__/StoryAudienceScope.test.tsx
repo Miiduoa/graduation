@@ -33,6 +33,11 @@ const otherStory: CampusStoryDoc = { ...puStory, schoolId: 'nchu' };
 describe('story audience scope transitions', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    // React Native's Jest AppState mock must return a removable subscription.
+    // resetAllMocks() clears its default implementation; restore the real API shape.
+    jest.mocked(AppState.addEventListener).mockImplementation(() => ({
+      remove: jest.fn(),
+    }));
   });
 
   test('switching school with the same story ID immediately hides old viewers, resets the cursor, and ignores late pages', async () => {
