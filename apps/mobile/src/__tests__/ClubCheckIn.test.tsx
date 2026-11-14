@@ -311,10 +311,13 @@ test('暫存讀取完成前停用新增、相機與重送，完成後保留新�
   ]);
 });
 
-test('暫存讀取失敗時保留原紀錄且停用寫入', async () => {
+test.each(['read', 'parse', 'shape'])('暫存讀取失敗時保留原紀錄且停用寫入（%s）', async (failure) => {
   const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
-  mockStorage.set(key, '["old-code"]');
-  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage unavailable'));
+  const stored = failure === 'parse' ? '{invalid' : failure === 'shape' ? '{}' : '["old-code"]';
+  mockStorage.set(key, stored);
+  if (failure === 'read') {
+    jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage unavailable'));
+  }
   render(
     <ClubCheckIn
       uid="one"
@@ -328,7 +331,34 @@ test('暫存讀取失敗時保留原紀錄且停用寫入', async () => {
   fireEvent.press(screen.getByText('開始簽到'));
   await screen.findByText('無法讀取暫存，請關閉後重新開啟此頁');
   expect(screen.getByText('確認簽到碼')).toBeDisabled();
+  expect(screen.getByText('相機掃描 QR')).toBeDisabled();
+  expect(screen.getByText('重送待送出簽到')).toBeDisabled();
+  expect(screen.getByText('清除待送出紀錄')).toBeDisabled();
   fireEvent.press(screen.getByText('確認簽到碼'));
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(mockStorage.get(key)).toBe(stored);
+});
+
+test('暫存寫入失敗時顯示錯誤並保留原佇列', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  mockStorage.set(key, '["old-code"]');
+  jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('storage full'));
+  render(
+    <ClubCheckIn
+      uid="one"
+      schoolId="pu"
+      groupId="club"
+      eventId="event"
+      officer
+      onConfirmed={jest.fn()}
+    />,
+  );
+  fireEvent.press(screen.getByText('開始簽到'));
+  await screen.findByText('1 筆待送出');
+  fireEvent.changeText(screen.getByLabelText('學號後四碼或簽到碼'), 'new-code');
+  fireEvent.press(screen.getByText('確認簽到碼'));
+  await screen.findByText('無法暫存，請確認裝置儲存空間');
   expect(mockStorage.get(key)).toBe('["old-code"]');
+  expect(screen.getByText('1 筆待送出')).toBeTruthy();
+  expect(callClubPortal).not.toHaveBeenCalled();
 });

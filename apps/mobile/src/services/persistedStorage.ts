@@ -4,6 +4,11 @@ import { getFirstStorageValue } from './scopedStorage';
 type Deserialize<T> = (raw: string) => T;
 type Serialize<T> = (value: T) => string;
 
+// Preserve null for missing keys and propagate read errors to callers that must block writes.
+export async function loadPersistedRawValue(storageKey: string): Promise<string | null> {
+  return AsyncStorage.getItem(storageKey);
+}
+
 export async function loadPersistedValue<T>(params: {
   storageKey: string;
   legacyKeys?: string[];

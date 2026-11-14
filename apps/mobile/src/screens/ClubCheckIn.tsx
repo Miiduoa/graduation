@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, TextInput, View, Alert } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { Button } from '../ui/components';
 import { callClubPortal } from '../services/clubPortal';
+import { loadPersistedRawValue, savePersistedValue } from '../services/persistedStorage';
 export function ClubCheckIn({
   uid,
   schoolId,
@@ -48,7 +48,7 @@ export function ClubCheckIn({
   const save = (change: (current: string[]) => string[]) => {
     const write = writes.current.then(async () => {
       const next = change(pending.current);
-      await AsyncStorage.setItem(key, JSON.stringify(next));
+      await savePersistedValue(key, next);
       pending.current = next;
       if (mounted.current) setQueue(next);
     });
@@ -105,7 +105,7 @@ export function ClubCheckIn({
     // Initial hydration shares the durable-write sequence, so it cannot overwrite an enqueue.
     const load = writes.current.then(async () => {
       try {
-        const raw = await AsyncStorage.getItem(key);
+        const raw = await loadPersistedRawValue(key);
         if (cancelled) return;
         const parsed = JSON.parse(raw || '[]');
         if (!Array.isArray(parsed)) throw new Error('Invalid queue');
