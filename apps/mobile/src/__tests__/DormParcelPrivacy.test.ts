@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { act, waitFor } from '@testing-library/react-native';
 
 const mockState = {
   configured: 'https://synthetic.invalid' as string | null,
@@ -68,9 +68,58 @@ it('uses opaque parcel IDs from the endpoint for an enabled school', async () =>
     stop();
   }
 });
-it('uses only Firestore when the school workflow is disabled', () => {
+it('reads private parcels even when the school workflow is disabled', async () => {
   mockState.enabled = false;
-  const stop = subscribeDormCloud('tw-pu', 'student', jest.fn());
-  expect(mockState.invoke).not.toHaveBeenCalled();
-  stop();
+  mockState.invoke.mockResolvedValue({
+    data: { rows: [{ id: 'dw_disabled', data: { description: '關閉工作台前登錄的包裹' } }] },
+  });
+  const update = jest.fn();
+  const stop = subscribeDormCloud('tw-pu', 'student', update);
+  try {
+    await waitFor(() => expect(update.mock.calls.at(-1)?.[0].packages[0].id).toBe('dw_disabled'));
+  } finally {
+    stop();
+  }
+});
+it('retains the last private projection on polling failure and recovers on retry', async () => {
+  jest.useFakeTimers();
+  mockState.invoke
+    .mockResolvedValueOnce({
+      data: { rows: [{ id: 'dw_cached', data: { description: '待領包裹' } }] },
+    })
+    .mockRejectedValueOnce(new Error('unavailable'))
+    .mockResolvedValue({
+      data: { rows: [{ id: 'dw_cached', data: { status: 'picked_up' } }] },
+    });
+  const update = jest.fn();
+  const stop = subscribeDormCloud('tw-pu', 'student', update);
+  try {
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(update.mock.calls.at(-1)?.[0]).toMatchObject({
+      packagesState: 'ready',
+      packages: [expect.objectContaining({ id: 'dw_cached', status: 'waiting' })],
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60000);
+    });
+    expect(update.mock.calls.at(-1)?.[0]).toMatchObject({
+      packagesState: 'error',
+      packages: [expect.objectContaining({ id: 'dw_cached', status: 'waiting' })],
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60000);
+    });
+    expect(update.mock.calls.at(-1)?.[0]).toMatchObject({
+      packagesState: 'ready',
+      packages: [expect.objectContaining({ id: 'dw_cached', status: 'collected' })],
+    });
+    stop();
+    await jest.advanceTimersByTimeAsync(60000);
+    expect(mockState.invoke).toHaveBeenCalledTimes(3);
+  } finally {
+    stop();
+    jest.useRealTimers();
+  }
 });

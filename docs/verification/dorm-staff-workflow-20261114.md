@@ -177,3 +177,11 @@
 - 回歸測試涵蓋完整學號查詢、遮罩及白名單回應、他棟與非住宿生排除、一般學生拒絕、零筆／全跳過／部分成功與併發狀態改變，以及兩端查詢選人後登錄和零筆核銷提示。
 - 權限範圍標註：依審查建議新增隔離的宿舍查詢 action，沿用既有驗證，未修改登入、sessions、共用 ACL、Firestore／Storage rules 或 migration。原 PR 的 `setStaff` 與 `dormStaffRoles` 權限變更仍保留、仍需原核准；本輪不部署、不合併、不操作正式資料。
 - 驗證結果：後端 2 檔 83 項、網頁 1 檔 16 項、手機 1 檔 15 項全部通過；web／mobile 全專案 typecheck、以 backend/functions 設定執行的 ESLint、`git diff --check` 通過。型別增量檔、測試設定與 Jest 快取均置於 `/tmp/dorm-review-fix`，完成後清除。未安裝或新增依賴，未更換 node_modules symlink。
+
+## review-dorm-r2.out：本人包裹降級讀取修正
+
+- 指定審查無確定 P0／P1；本輪修正 P2：網頁與手機只以 Functions 是否設定決定是否輪詢本人 `parcels`，不再依賴 `dormWorkflowEnabled`。關閉職員工作流程後，已登錄在私有集合的本人包裹仍可讀取。
+- 尚未成功取得本人投影時，保留既有 Firestore 讀取與失敗備援。取得投影後若更新失敗，保留最近成功資料並透過既有錯誤狀態提示讀取失敗；後續舊集合快照不會覆蓋完整投影。下一次輪詢成功即恢復正常狀態。
+- 兩端回歸測試涵蓋無 Functions、首次失敗備援、關閉工作流程、成功後失敗保留待領包裹、恢復後顯示已領取，以及取消訂閱停止輪詢；另驗證後續舊集合快照與端點不可用不會覆蓋投影。
+- 本輪無登入權限migration變更：未修改後端、登入、auth、sessions、ACL、Firestore／Storage rules 或 migration；原 PR 的 `dormStaffRoles`／`setStaff` 授權變更仍保留原核准要求。本輪不部署、不合併、不操作正式資料。
+- 驗證：網頁 3 檔 22 項、手機 1 檔 5 項通過；web／mobile／shared 全專案 typecheck 通過；`git diff --check` 通過。型別增量檔與 Jest 快取置於 `/tmp/dorm-r2-fix`，完成後清除。未安裝依賴或更換 node_modules symlink；執行環境 Node 24，工具提示專案要求 Node 20／22。

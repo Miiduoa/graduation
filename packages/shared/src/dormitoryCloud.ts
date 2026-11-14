@@ -178,9 +178,9 @@ export function watchDormCloud(
               .map((r) => projectDormParcel(r.id, r.data))
               .sort((a, b) => (a.arrivedAt ?? Infinity) - (b.arrivedAt ?? Infinity)),
           }),
-        () => change({ packagesState: 'error', packages: [] }),
+        () => change({ packagesState: 'error' }),
       ),
-    () => change({ packagesState: 'error', packages: [] }),
+    () => change({ packagesState: 'error' }),
   );
   register(
     () =>
@@ -214,7 +214,7 @@ export function watchDormCloud(
   };
 }
 
-/** Poll the private workflow projection when the school supports it. */
+/** Poll the recipient projection independently of staff workflow enablement. */
 export function pollDormParcels(
   load: () => Promise<{ rows: Array<{ id: string; data: Record<string, unknown> }> }>,
   rows: (value: Array<{ id: string; data: Record<string, unknown> }>) => void,
@@ -245,7 +245,7 @@ export function pollDormParcels(
 /** Keep the legacy subscription available even when the optional endpoint is unavailable. */
 export function watchDormParcels(
   legacy: (rows: (value: ParcelRows) => void, error: () => void) => () => void,
-  enabled: (change: (value: boolean) => void) => () => void,
+  available: (change: (value: boolean) => void) => () => void,
   load: () => Promise<{ rows: ParcelRows }>,
   rows: (value: ParcelRows) => void,
   error: () => void,
@@ -254,8 +254,9 @@ export function watchDormParcels(
   let projected = false;
   let stopPoll: (() => void) | undefined;
   const fallback = () => {
-    projected = false;
-    if (cached) rows(cached);
+    if (projected) {
+      error();
+    } else if (cached) rows(cached);
     else error();
   };
   const stopLegacy = legacy(
@@ -267,12 +268,12 @@ export function watchDormParcels(
       if (!projected) error();
     },
   );
-  const stopEnabled = enabled((value) => {
+  const stopAvailable = available((value) => {
     if (!value) {
       stopPoll?.();
       stopPoll = undefined;
-      projected = false;
-      if (cached) rows(cached);
+      if (projected) error();
+      else if (cached) rows(cached);
     } else if (!stopPoll) {
       stopPoll = pollDormParcels(
         load,
@@ -286,7 +287,7 @@ export function watchDormParcels(
   });
   return () => {
     stopPoll?.();
-    stopEnabled();
+    stopAvailable();
     stopLegacy();
   };
 }

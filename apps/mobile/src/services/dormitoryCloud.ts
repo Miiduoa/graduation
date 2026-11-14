@@ -35,11 +35,8 @@ export function subscribeDormCloud(
                   )
                 )
                   return () => {};
-                return onSnapshot(
-                  doc(db, 'schools', canonicalSchoolId),
-                  (snap) => change(snap.data()?.dormWorkflowEnabled === true),
-                  () => change(false),
-                );
+                change(true);
+                return () => {};
               },
               async () =>
                 (

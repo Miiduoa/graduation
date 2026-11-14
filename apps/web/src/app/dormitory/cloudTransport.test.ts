@@ -41,3 +41,40 @@ it('does not fallback to another school or root collections for an empty school 
   expect(calls.paths.every((path) => path[2] === 'nthu')).toBe(true);
   expect(calls.paths).toHaveLength(2);
 });
+
+it('does not overwrite the last private projection with later legacy snapshots or loss of availability', async () => {
+  const { watchDormParcels } = await import('@campus/shared/src/dormitoryCloud');
+  type Rows = Array<{ id: string; data: Record<string, unknown> }>;
+  let legacyRows!: (value: Rows) => void;
+  let availability!: (value: boolean) => void;
+  const rows = vi.fn();
+  const error = vi.fn();
+  const privateRows = [{ id: 'dw_private', data: { description: '待領包裹' } }];
+  const stop = watchDormParcels(
+    (next) => {
+      legacyRows = next;
+      next([]);
+      return () => {};
+    },
+    (next) => {
+      availability = next;
+      next(true);
+      return () => {};
+    },
+    async () => ({ rows: privateRows }),
+    rows,
+    error,
+  );
+  try {
+    await Promise.resolve();
+    expect(rows).toHaveBeenLastCalledWith(privateRows);
+    rows.mockClear();
+    legacyRows([{ id: 'legacy', data: {} }]);
+    availability(false);
+    legacyRows([]);
+    expect(rows).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledTimes(1);
+  } finally {
+    stop();
+  }
+});
