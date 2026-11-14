@@ -1,7 +1,7 @@
 import { NuniError } from '@campus/shared/src/nuni';
 import { WAKE_REQUEST_TIMEOUT_MS } from '@campus/shared/src/wakeAwareRequest';
 
-export async function boundedBytes(source: Request, limit: number): Promise<Buffer<ArrayBuffer>> {
+export async function boundedBytes(source: Pick<Request, 'headers' | 'body'>, limit: number): Promise<Buffer<ArrayBuffer>> {
   const declared = source.headers.get('content-length');
   if (declared && Number(declared) > limit) {
     void source.body?.cancel().catch(() => {});

@@ -37,7 +37,11 @@ function detailForRequest(state: LoadState, schoolId: string, id: string): LoadS
     : { status: 'loading', schoolId, id };
 }
 
-function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) {
+function AnnouncementDetail({ schoolId, id, schoolOnly }: {
+  schoolId: string;
+  id: string;
+  schoolOnly: boolean;
+}) {
   const [state, setState] = useState<LoadState>({ status: 'loading', schoolId, id });
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -47,7 +51,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
   const view = detailForRequest(state, schoolId, id);
   const load = useCallback(() => {
     const request = ++generation.current;
-    return loadAnnouncement(schoolId, id)
+    return loadAnnouncement(schoolId, id, schoolOnly)
       .then(
         (announcement) => {
           if (mounted.current && request === generation.current) {
@@ -79,7 +83,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
           setRefreshing(false);
         }
       });
-  }, [schoolId, id]);
+  }, [schoolId, id, schoolOnly]);
 
   useEffect(() => {
     mounted.current = true;
@@ -110,6 +114,7 @@ function AnnouncementDetail({ schoolId, id }: { schoolId: string; id: string }) 
     const request = generation.current;
     const url = new URL(`/announcements/${encodeURIComponent(id)}`, window.location.origin);
     url.searchParams.set('schoolId', schoolId);
+    if (schoolOnly) url.searchParams.set('source', 'school-announcement');
     setNotice('');
     try {
       await navigator.clipboard.writeText(url.href);
@@ -211,6 +216,7 @@ export default function AnnouncementDetailPage(props: {
 }) {
   const { id } = use(props.params);
   const params = props.searchParams ? use(props.searchParams) : undefined;
+  const schoolOnly = params?.source === 'school-announcement';
   const context = useCampusBrowseContext(params);
   const schoolId = context.schoolId;
   const visible =
@@ -250,9 +256,10 @@ export default function AnnouncementDetailPage(props: {
           </p>
         ) : (
           <AnnouncementDetail
-            key={JSON.stringify([schoolId, id, user?.uid ?? null])}
+            key={JSON.stringify([schoolId, id, schoolOnly, user?.uid ?? null])}
             schoolId={schoolId!}
             id={id}
+            schoolOnly={schoolOnly}
           />
         )}
       </div>

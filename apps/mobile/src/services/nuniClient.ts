@@ -137,7 +137,7 @@ export async function nuniPublicRequest(path: string, signal?: AbortSignal): Pro
 function nuniBffFailure(value: unknown, status: number): never {
   const record = nuniRecord(value);
   const failure = typeof record.error === 'object' && record.error ? record.error : record;
-  const code = nuniRecord(failure).code;
+  const code = typeof record.error === 'string' ? record.error : nuniRecord(failure).code;
   throw new NuniError(
     status,
     typeof code === 'string' && /^[A-Z0-9_]{1,100}$/.test(code) ? code : 'REQUEST_FAILED',
@@ -187,7 +187,12 @@ export async function nuniBffRequest(
         throw new NuniError(0, signal?.aborted ? 'REQUEST_CANCELLED' : 'NETWORK_ERROR');
       }
     },
-    { timeoutMs: Math.max(12000, WAKE_REQUEST_TIMEOUT_MS), externalSignal: signal },
+    {
+      timeoutMs: Math.max(12000, WAKE_REQUEST_TIMEOUT_MS),
+      externalSignal: signal,
+      // A permission save may have committed before a timeout. Read back before another edit.
+      retry: path !== 'assistant-permissions' || !input,
+    },
   );
 }
 

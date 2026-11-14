@@ -524,6 +524,43 @@ describe('Providence footprint API snapshot freshness', () => {
       .toMatchObject({ stale: true, osmBaseAt: null });
   });
 
+  it('does not display OSM edits newer than the database or fetch snapshot', () => {
+    // Synthetic conflicting source dates: the shape may still be valid, but
+    // a way revision cannot originate in a database from before that edit.
+    const revision = {
+      ...footprint, osmVersion: 13, osmEditedAt: '2026-11-09T08:36:00Z',
+    };
+    const snapshot = parseProvidenceFootprintSnapshot({
+      ...response, osmBaseAt: '2026-11-09T08:30:00Z', buildings: [revision],
+    }, now);
+    expect(snapshot?.buildings).toHaveLength(1);
+    expect(snapshot?.buildings[0].outline).toEqual(footprint.outline);
+    expect(snapshot?.buildings[0]).not.toHaveProperty('osmVersion');
+    expect(snapshot?.buildings[0]).not.toHaveProperty('osmEditedAt');
+
+    // A revision at the replication cutoff remains a sourced label.
+    const consistent = {
+      ...revision, osmEditedAt: '2026-11-09T08:34:00Z',
+    };
+    expect(parseProvidenceFootprintSnapshot({
+      ...response, osmBaseAt: '2026-11-09T08:30:00Z', buildings: [consistent],
+    }, now)?.buildings[0]).toMatchObject({
+      osmVersion: 13, osmEditedAt: '2026-11-09T08:34:00Z',
+    });
+
+    // Older Overpass replies have no osm3s field: the HTTP fetch timestamp
+    // is the only available upper bound, not the device clock 1 hour later.
+    const legacy = parseProvidenceFootprintSnapshot({
+      ...response, buildings: [{ ...revision, osmEditedAt: '2026-11-09T09:06:00Z' }],
+    }, now);
+    expect(legacy?.buildings[0]).not.toHaveProperty('osmEditedAt');
+    expect(parseProvidenceFootprintSnapshot({
+      ...response, buildings: [{ ...revision, osmEditedAt: '2026-11-09T09:04:00Z' }],
+    }, now)?.buildings[0]).toMatchObject({
+      osmVersion: 13, osmEditedAt: '2026-11-09T09:04:00Z',
+    });
+  });
+
   it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {
     for (const osmBaseAt of [
       '2099-01-01T00:00:00Z',

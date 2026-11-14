@@ -22,7 +22,13 @@ export function AdminAudit({
   suspended,
   query,
   onQuery,
+  tenantId = '',
+  schoolName = '',
+  onClearSchool,
 }: {
+  tenantId?: string;
+  schoolName?: string;
+  onClearSchool?: () => void;
   context: string;
   suspended: boolean;
   query: string;
@@ -33,7 +39,9 @@ export function AdminAudit({
   const draft = input.applied === query ? input.draft : query;
   const resource = useAdminResource('audit', context, parseAudit, !suspended);
   const filtered = useMemo(() => {
-    const rows = resource.value ?? [];
+    const rows = (resource.value ?? []).filter(
+      (row) => !tenantId || row.targetTenantId === tenantId,
+    );
     const needle = query.trim().toLowerCase();
     if (!needle) return rows;
     return rows.filter((row) =>
@@ -42,7 +50,7 @@ export function AdminAudit({
         .toLowerCase()
         .includes(needle),
     );
-  }, [resource.value, query]);
+  }, [resource.value, query, tenantId]);
 
   return (
     <section className={styles.panel} aria-labelledby="audit-heading">
@@ -59,6 +67,15 @@ export function AdminAudit({
             重新讀取紀錄
           </Button>
         </div>
+        {tenantId && (
+          <div className={styles.filterRow}>
+            <p>
+              學校篩選：{schoolName || tenantId}
+              {schoolName ? `（${tenantId}）` : ''}
+            </p>
+            <Button onClick={onClearSchool}>清除學校篩選</Button>
+          </div>
+        )}
         <form
           className={styles.filterRow}
           onSubmit={(event) => {
@@ -85,7 +102,7 @@ export function AdminAudit({
         )}
         {resource.value?.length === 0 && <p className={styles.muted}>目前沒有操作紀錄。</p>}
         {!!resource.value?.length && filtered.length === 0 && (
-          <p className={styles.muted}>本次載入紀錄中沒有符合「{query}」的項目。</p>
+          <p className={styles.muted}>本次載入紀錄中沒有符合目前篩選條件的項目。</p>
         )}
         <ol className={styles.audit}>
           {filtered.map((row) => (
