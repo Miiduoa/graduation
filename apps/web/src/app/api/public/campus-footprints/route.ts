@@ -192,10 +192,10 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // We only need status/Retry-After. Release the unused body immediately,
     // without awaiting cancellation from an uncooperative upstream.
     if (response.body) void response.body.cancel().catch(() => {});
-    // HTTP 406 may mean the public Overpass server has blocked this client.
-    // Repeating the same request every ten minutes can prolong that block.
-    // Pause for a full day rather than treating access denial as congestion.
-    if (response.status === 406) {
+    // A malformed fixed query (400) or blocked/forbidden client (403/406)
+    // cannot recover by hammering public Overpass every ten minutes.
+    // Allow a full-day cooldown; do not treat these as transient congestion.
+    if (response.status === 400 || response.status === 403 || response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
     // Public Overpass and intermediaries may request an extended cooldown for
@@ -222,14 +222,26 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     ));
   }
   const raw = await readBoundedResponse(response, signal);
-  const payload = JSON.parse(raw) as unknown;
-  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
-  // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
-  // on timeout or memory exhaustion. Never promote that partial result to a
-  // fresh 24-hour snapshot or replace a previously verified fallback.
-  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
-    throw new Error('Overpass returned an incomplete result');
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw) as unknown;
+  } catch {
+    // Some overloaded public proxies return an incomplete HTTP 200 body
+    // with Retry-After. Never cache truncated JSON or shorten their pause.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(retryAfter, Date.now()));
+    }
+    throw new Error('Invalid Overpass JSON');
   }
+  // Check a partial-result remark before replication metadata, since an
+  // incomplete OSM response may also have an incomplete osm3s header.
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(),
+    ));
+  }
+  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   const now = Date.now();
   // A way's edit timestamp cannot be newer than the Overpass replication
   // snapshot that contains it. Preserve checked geometry, but drop any
