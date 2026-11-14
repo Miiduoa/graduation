@@ -44,10 +44,12 @@ def _number(value: str, label: str, *, integer: bool = False) -> float | int | N
     return int(number) if integer else number
 
 
-def _date(value: str, label: str) -> None:
+def _date(value: str, label: str) -> date:
     try:
-        if date.fromisoformat(value).isoformat() != value:
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() != value:
             raise ValueError
+        return parsed
     except ValueError as error:
         raise ValueError(f"{label}: expected YYYY-MM-DD") from error
 
@@ -81,8 +83,10 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             errors.append(f"{label}: ground truth needs an explicit source URL")
             continue
         try:
-            _date(row["ground_truth_date"], f"{label} ground_truth_date")
-            _date(row["tested_on"], f"{label} tested_on")
+            source_date = _date(row["ground_truth_date"], f"{label} ground_truth_date")
+            trial_date = _date(row["tested_on"], f"{label} tested_on")
+            if source_date > trial_date:
+                raise ValueError(f"{label}: ground truth cannot postdate the trial")
             repetition = _number(row["repeat"], f"{label} repeat", integer=True)
             if repetition is None or repetition < 1:
                 raise ValueError(f"{label} repeat: must be at least 1")
@@ -120,6 +124,8 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             reasons.append("missing products: " + ", ".join(missing))
         if any(tuple(record[field] for field in COHORT_FIELDS) != values for record in records):
             reasons.append("device/scenario/conditions/ground truth are not identical")
+        if len({record["tested_on"] for record in records}) != 1:
+            reasons.append("paired products were tested on different dates")
         for record in records:
             if (record["result"] == "unverified" or record["verified_target"] == "not-verified"
                     or not record["evidence_ref"].strip()):

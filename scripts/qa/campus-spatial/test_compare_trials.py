@@ -42,6 +42,23 @@ class AuditTrialsTests(unittest.TestCase):
         records[0]["device_id"] = "other-iphone"
         self.assertTrue(any("not identical" in repr(item) for item in audit_rows(records)["pending"]))
 
+    def test_ground_truth_dated_after_trial_cannot_verify_result(self):
+        records = complete()
+        records[0]["tested_on"] = "2026-11-13"
+        result = audit_rows(records)
+        self.assertTrue(any("ground truth cannot postdate" in err for err in result["errors"]))
+        self.assertEqual(result["ready"], [])
+
+    def test_different_test_dates_are_not_a_paired_repeat(self):
+        records = complete()
+        for entry in records:
+            entry["ground_truth_date"] = "2026-11-09"
+        records[0]["tested_on"] = "2026-11-10"
+        result = audit_rows(records)
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["ready"], [])
+        self.assertTrue(any("different dates" in str(item) for item in result["pending"]))
+
     def test_pending_when_only_two_repeats(self):
         result = audit_rows(complete(2))
         self.assertEqual(result["ready"], [])
