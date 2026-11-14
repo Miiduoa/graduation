@@ -266,9 +266,9 @@ it('disambiguates identical POI names for screen readers and mobile destinations
 it('groups equivalent full-width and standard Unicode POI names without merging their identities', async () => {
   const rooms: MapLocation[] = [
     { id: 'full-width', name: 'Ａ館教室', category: '教室', building: '示意甲館',
-      floor: '1F', lat: 24.2261, lng: 120.5801 },
+      description: '僅用於 Unicode 同名辨識的合成地點', floor: '1F', lat: 24.2261, lng: 120.5801 },
     { id: 'standard', name: 'A館教室', category: '教室', building: '示意乙館',
-      floor: '2F', lat: 24.2262, lng: 120.5802 },
+      description: '僅用於 Unicode 同名辨識的合成地點', floor: '2F', lat: 24.2262, lng: 120.5802 },
   ];
   render(<CampusSpatialExplorer school="other-school" locations={rooms}
     selected={null} onSelect={vi.fn()} />);
