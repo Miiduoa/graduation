@@ -204,6 +204,24 @@ it('reports incomplete announcements when only the filtered courseware feed succ
   ]);
 });
 
+it('marks announcements incomplete when the general feed fails despite dedicated notices succeeding', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: true, value: [LMS_FIXTURE_MATERIAL] }
+      : { ok: false, status: 503 });
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.courseErrors).toEqual([
+    expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 }),
+    expect.objectContaining({ courseId: 10001, area: 'announcements', status: 503 }),
+  ]);
+});
+
 it('does not cache partial materials when the filtered courseware feed rejects the session', async () => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
