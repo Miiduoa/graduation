@@ -17,10 +17,12 @@ it('keeps new permissions, SDK listeners and write handlers out of all productio
   ]) {
     const code = readFileSync(resolve(root, file), 'utf8');
     expect(code, file).not.toMatch(
-      /careerWorkstudy|CareerWorkstudy|careerSourceFeed|firestore\.rules\.fragment/,
+      /careerInternship|CareerInternship|careerWorkstudy|CareerWorkstudy|careerSourceFeed|firestore\.rules\.fragment/,
     );
   }
   const rules = readFileSync(resolve(root, 'backend/firestore/firestore.rules'), 'utf8');
+  expect(rules).not.toContain('internshipRecords');
+  expect(rules).not.toContain('internshipRules');
   expect(rules).not.toContain('careerApplications');
   expect(rules).not.toContain('careerOpportunities');
 });
