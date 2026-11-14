@@ -630,6 +630,33 @@ it('does not draw misleading bars for formulas, dates, percentages, units or amb
   expect(container.querySelector('meter')).toBeNull();
 });
 
+it('does not compare numeric ordinals, class levels or pages as quantities', () => {
+  for (const header of [
+    '學年', '學年（民國）', '學期', '年級', '班級', '頁碼（PDF）', '頁次',
+    '週次', '樓層', '排名', '名次', '月份', '民國年', '西元年',
+    'Academic Year', 'Academic Term', 'Semester', 'Student ID',
+    'Student Number', 'Course Code', 'Course Number', 'Postal Code',
+    'ZIP code', 'Page Number', 'Sequence Number', 'Floor Number',
+  ]) {
+    const material = ['| 名稱 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 1 |', '| 乙 | 2 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares actual amounts when an English header mentions a year or course', () => {
+  for (const header of ['Annual Budget', 'Yearly Budget', 'Course Credits', '學期學分']) {
+    const material = ['| 名稱 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2.50 |', '| 乙 | 3 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(container.querySelectorAll('meter')).toHaveLength(2);
+    unmount();
+  }
+});
+
 it('does not turn numeric years or identifiers into misleading comparison bars', () => {
   for (const header of ['年份', '學年度', '學號', '課程編號', '帳號', '郵遞區號', '年度', 'year', 'ID']) {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',

@@ -18,7 +18,13 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // them as bars would imply a magnitude that the source does not support.
   const column = table.headers[1].trim();
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
-      /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column)) return null;
+      /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
+      // A number identifying a term, page, floor or class is an ordinal or
+      // category, not a comparable measure. Parenthetical source qualifiers
+      // (e.g. 學年（民國）) must not turn it into a bar.
+      /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
+      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
+      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {
