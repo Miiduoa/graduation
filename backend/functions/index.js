@@ -2308,6 +2308,8 @@ exports.verifySSOCallback = onRequest(
       const schoolRole = await writeSchoolLoginProfile({
         uid,
         schoolId,
+        // Only verified adapter claims establish the dorm roster identity.
+        membershipFields: require('./dormSsoIdentity').dormSsoMembershipFields(userInfo),
         profile: {
           email:
             userInfo.email ||

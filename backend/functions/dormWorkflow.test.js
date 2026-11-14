@@ -654,3 +654,48 @@ test('parcel transaction retry notifies only the committed recipient and keeps r
   await call('staff', request);
   expect(sendPushToUser).toHaveBeenCalledTimes(1);
 });
+
+test.each([false, true])(
+  'verified general SSO identity supports roster import (existing=%s)',
+  async (existing) => {
+    const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
+    const { dormSsoMembershipFields } = require('./dormSsoIdentity');
+    const { call, data, db } = fixture();
+    data.delete('schools/pu/members/student');
+    if (existing) data.set('schools/pu/members/student', { role: 'member', status: 'active' });
+    data.set('users/student', { studentId: 'forged', displayName: '自行修改' });
+    const input = {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+    };
+    await expect(call('staff', input)).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(data.has('schools/pu/dormResidents/123')).toBe(false);
+    const writer = createSchoolLoginProfileWriter({ db });
+    await writer({
+      uid: 'student',
+      schoolId: 'pu',
+      profile: { role: 'student', displayName: '校方姓名' },
+      membershipFields: dormSsoMembershipFields({ studentId: '123' }),
+    });
+    expect(data.get('schools/pu/members/student')).toMatchObject({
+      studentId: '123',
+      role: 'member',
+    });
+    await call('staff', input);
+    expect(data.get('schools/pu/dormResidents/123')).toMatchObject({ userId: 'student' });
+    await call('student', {
+      action: 'requestLeave',
+      date: '2099-01-01',
+      reason: '返家',
+      key: 'sso-leave',
+    });
+    expect([...data.keys()].some((k) => k.startsWith('schools/pu/dormLeaves/'))).toBe(true);
+  },
+);
+
+test('SSO mapping ignores missing or malformed claims and supports the verified employee ID', () => {
+  const { dormSsoMembershipFields } = require('./dormSsoIdentity');
+  expect(dormSsoMembershipFields({})).toEqual({});
+  expect(dormSsoMembershipFields({ studentId: '../forged' })).toEqual({});
+  expect(dormSsoMembershipFields({ employee_id: ' E123 ' })).toEqual({ studentId: 'E123' });
+});

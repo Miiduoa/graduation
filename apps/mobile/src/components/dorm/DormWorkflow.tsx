@@ -200,6 +200,7 @@ export function DormWorkflow({
     packages: [],
     residents: [],
   });
+  const [ownLeaves, setOwnLeaves] = useState<DormLeave[]>([]);
   const [staffMode, setStaffMode] = useState(false);
   const [tab, setTab] = useState('repairs');
   const [values, setValues] = useState<Record<string, string>>({});
@@ -225,11 +226,14 @@ export function DormWorkflow({
     async (staff = staffMode) => {
       const token = generation.current;
       const rowToken = rowGeneration.current;
-      const result = await call<Partial<DormWorkflowRows>>({
-        action: staff ? 'workspace' : 'mine',
-      });
-      if (token === generation.current && rowToken === rowGeneration.current)
+      const [result, mine] = await Promise.all([
+        call<Partial<DormWorkflowRows>>({ action: staff ? 'workspace' : 'mine' }),
+        staff ? call<Partial<DormWorkflowRows>>({ action: 'mine' }) : Promise.resolve(null),
+      ]);
+      if (token === generation.current && rowToken === rowGeneration.current) {
         setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
+        setOwnLeaves((mine ?? result).leaves ?? []);
+      }
     },
     [call, staffMode],
   );
@@ -237,6 +241,7 @@ export function DormWorkflow({
     generation.current++;
     const token = generation.current;
     setCapability(null);
+    setOwnLeaves([]);
     selectedStudentId.current = '';
     setRows({ repairs: [], leaves: [], packages: [], residents: [] });
     setValues({});
@@ -279,8 +284,8 @@ export function DormWorkflow({
   }, [capability, capabilityKey, refresh, submitOnly]);
   useEffect(() => {
     const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
-    onTonightLeaveChange?.(rows.leaves.some((r) => r.date === today && r.status === 'approved'));
-  }, [rows.leaves, onTonightLeaveChange]);
+    onTonightLeaveChange?.(ownLeaves.some((r) => r.date === today && r.status === 'approved'));
+  }, [ownLeaves, onTonightLeaveChange]);
   useEffect(() => {
     if (!staffMode)
       onOwnRepairsChange?.(
@@ -684,7 +689,10 @@ export function DormWorkflow({
           )}
           {tab === 'residents' && config.packages && (
             <>
-              <Label>CSV：學號、棟、房、床。每批最多 400 位；學號必須對應本校已啟用帳號。</Label>
+              <Label>
+                CSV：學號、棟、房、床。每批最多 400 位；學號必須對應本校已啟用帳號；一般 SSO
+                帳號請先重新登入以同步校方學號。
+              </Label>
               {f('csv', '貼上住宿生 CSV', '', true)}
               <Btn
                 label="驗證並匯入住宿生"

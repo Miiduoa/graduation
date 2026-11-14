@@ -95,3 +95,11 @@
 - 本輪涉及審查要求的狹義身分綁定修正，隔離在宿舍 handler；未改登入、sessions、共用 authz、ACL、Firestore／Storage rules 或 migration，未新增集合、依賴或部署。既有 PR 的宿舍授權部署範圍仍須依原流程核准。
 - 新增 5 項回歸案例，涵蓋個人資料偽造／重複學號、重複伺服器映射、並行停用／移棟，以及 transaction 重試更換收件人與冪等通知。
 - 驗證：dormWorkflow.test.js、authz.test.js 共 41 項通過；shared typecheck、兩個變更 JS 檔案 ESLint、handler 語法檢查及 git diff --check 通過。只修改後端 JS 與本驗證文件，未變更前端型別。使用既有 Node 24（套件引擎為 20／22，工具有警告）；未安裝依賴、更換 node_modules symlink或建立暫存檔。
+
+## PR #629 指定 R1 修正（一般 SSO 映射與本人外宿摘要）
+
+- P2：一般 SSO 回呼只將已驗證 adapter 回傳的學號（或 employee_id）傳入既有 membershipFields 寫入，不採用 users.studentId 或請求端資料。欄位投影隔離在 dormSsoIdentity.js；不更動既有登入角色與授權判斷。新帳號與既有帳號重新登入均可建立可信映射，不需 migration 或批次更新正式資料。
+- 開通前置驗證：名冊匯入仍先驗證整批學號是否對應唯一且啟用的本校成員，驗證失敗不寫入名冊；一般 SSO 舊帳號須先重新登入同步校方學號。兩端匯入說明與後端錯誤訊息均標明此步驟。沒有校方學號或學號重複時，不得以自行修改個人資料繞過。
+- P2：Web／Mobile 本人今晚外宿摘要獨立儲存 mine 回傳的 leaves；進入職員工作台後仍另外取得 mine，不以整棟 workspace 外宿資料更新本人摘要。換帳號／學校時清除摘要，沿用既有請求世代檢查避免舊回應寫入。
+- 有登入權限migration變更：本輪依審查要求，窄幅修改 index.js 一般 SSO 回呼的 membershipFields 參數，僅同步可信學號；隔離的登入整合與既有宿舍授權部署皆列入「需晉瑋說『上』」。未改 sessions、ACL 判斷、Firestore／Storage rules 或 migration，未部署或寫入正式資料。
+- 驗證：後端 dormWorkflow／schoolLoginProfile／authz 共 69 項、Web DormWorkflow 10 項、Mobile DormWorkflow／DormStaffHome 12 項通過；Web 與 Mobile 全專案 typecheck 通過。新增一般 SSO 新建／既有帳號登入後匯入名冊及外宿申請整合案例，以及兩端職員切換與本人核可／未核可摘要回歸案例。測試使用合成資料，Jest 快取與型別檢查暫存置於 /tmp，完成後刪除。沿用 Node 24（工具提示專案要求 Node 20／22），未安裝依賴或更換 node_modules symlink。

@@ -157,3 +157,47 @@ test('unknown capabilities keep the mobile workflow visible', async () => {
   expect(await view.findByText('宿舍服務暫時無法連線。')).toBeTruthy();
   expect(view.getByText('宿舍輔導員服務')).toBeTruthy();
 });
+
+test.each([false, true])(
+  'mobile tonight summary uses own leaves in staff mode (own approved=%s)',
+  async (approved) => {
+    const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    mockCall.mockImplementation(async (data) =>
+      data.action === 'config'
+        ? { enabled: true, repairs: true }
+        : data.action === 'mine'
+          ? {
+              repairs: [],
+              leaves: approved
+                ? [{ id: 'own', date: today, status: 'approved', history: [], reason: '本人返家' }]
+                : [],
+            }
+          : {
+              repairs: [],
+              leaves: [
+                {
+                  id: 'other',
+                  date: today,
+                  status: 'approved',
+                  history: [],
+                  reason: '其他住宿生返家',
+                },
+              ],
+            },
+    );
+    const onTonight = jest.fn();
+    const view = render(
+      <DormWorkflow schoolId="pu" uid="staff" onTonightLeaveChange={onTonight} />,
+    );
+    await waitFor(() => expect(onTonight).toHaveBeenLastCalledWith(approved));
+    fireEvent.press(await view.findByText('開啟輔導員工作台'));
+    await waitFor(() =>
+      expect(mockCall).toHaveBeenCalledWith({ action: 'workspace', schoolId: 'pu' }),
+    );
+    expect(await view.findByText('其他住宿生返家')).toBeTruthy();
+    expect(onTonight).toHaveBeenLastCalledWith(approved);
+    fireEvent.press(view.getByText('回學生服務'));
+    expect(await view.findByText('開啟輔導員工作台')).toBeTruthy();
+    expect(onTonight).toHaveBeenLastCalledWith(approved);
+  },
+);

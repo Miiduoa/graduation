@@ -386,7 +386,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         if (matches.length !== 1)
           throw new HttpsError(
             'failed-precondition',
-            '學號需對應唯一的本校已啟用帳號：' + studentId,
+            '學號需對應唯一的本校已啟用帳號，請先以校方 SSO 重新登入同步學號：' + studentId,
           );
         rows.push({
           ...row,

@@ -227,3 +227,46 @@ it('re-evaluates capabilities on account and school changes and ignores old resp
   );
   expect(screen.getByText('宿舍輔導員服務')).toBeTruthy();
 });
+
+it.each([false, true])(
+  'tonight summary uses own leaves across staff switches (own approved=%s)',
+  async (approved) => {
+    const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const own = {
+      repairs: [],
+      leaves: approved
+        ? [{ id: 'own', date: today, status: 'approved', history: [], reason: '本人返家' }]
+        : [],
+    };
+    api.call.mockImplementation(async (data) =>
+      data.action === 'config'
+        ? { enabled: true, repairs: true }
+        : data.action === 'mine'
+          ? own
+          : {
+              repairs: [],
+              leaves: [
+                {
+                  id: 'other',
+                  date: today,
+                  status: 'approved',
+                  history: [],
+                  reason: '其他住宿生返家',
+                },
+              ],
+            },
+    );
+    const onTonight = vi.fn();
+    render(<DormWorkflow schoolId="pu" uid="staff" onTonightLeaveChange={onTonight} />);
+    await waitFor(() => expect(onTonight).toHaveBeenLastCalledWith(approved));
+    fireEvent.click(await screen.findByText('開啟輔導員工作台'));
+    await waitFor(() =>
+      expect(api.call).toHaveBeenCalledWith({ action: 'workspace', schoolId: 'pu' }),
+    );
+    expect(await screen.findByText('其他住宿生返家')).toBeTruthy();
+    expect(onTonight).toHaveBeenLastCalledWith(approved);
+    fireEvent.click(screen.getByText('回學生服務'));
+    await waitFor(() => expect(screen.getByText('開啟輔導員工作台')).toBeTruthy());
+    expect(onTonight).toHaveBeenLastCalledWith(approved);
+  },
+);
