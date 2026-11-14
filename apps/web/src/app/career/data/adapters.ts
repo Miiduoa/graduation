@@ -47,12 +47,9 @@ export function parseCareerHtml(
       const url = careerSafeUrl(attr(link, 'href'), new URL(source.url).hostname, source.url);
       // Inspect the complete decoded title before truncation so sensitive fields
       // cannot slip into the public feed (including its timeline and cache).
+      // Reject grade-related titles regardless of punctuation, names or score format.
       const fullTitle = text(link).normalize('NFKC');
-      if (
-        /學號|学生学号|學生成績|個人成績|成績\s*[:：=\d]|student\s*(?:id|number)|(?:grade|score)\s*[:=]/i.test(
-          fullTitle,
-        )
-      )
+      if (/學號|学生学号|成[績绩]|student\s*(?:id|number)|\b(?:grades?|scores?)\b/i.test(fullTitle))
         return [];
       const title = fullTitle.slice(0, 300);
       if (!url || !title || seen.has(url)) return [];

@@ -14,7 +14,10 @@ import {
   parseTaiwanJobs,
 } from './adapters';
 import { GET } from './route';
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 const html = `<div class="d-txt"><div class="mtitle"><i class="mdate before">2026-11-12</i><a href="/p/406-1102-1.php">實習申請2026/12/8截止</a></div></div>`;
 it('adapts HTML list metadata only and rejects nonofficial and unsafe links', () => {
   const records = parseCareerHtml(
@@ -72,10 +75,20 @@ it.each([
   expect(careerTitleDate(title)).toBe(date);
 });
 it('public API excludes sensitive titles from announcements and calendar items for both sources', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
   const sensitiveTitles = [
     '2026/12/8 實習錄取 學號：TEST-STUDENT-ID 成績：TEST-GRADE',
     '2026/12/8 實習成績：TEST-GRADE',
     '2026/12/8 實習成績 95 分',
+    '2026/12/8 實習申請 成績為 95 分',
+    '2026/12/8 實習成績 王測試 95 分',
+    '2026/12/8 实习成绩为 95 分',
+    '2026/12/8 實習 Score 95',
+    '2026/12/8 實習 score for Test Student is 95',
+    '2026/12/8 實習 Grades Test Student 95',
+    '2026/12/8 實習 ＳＣＯＲＥ 95',
+    '2026/12/8 實習' + '說明'.repeat(160) + '成績為 95 分',
     '2026/12/8 實習 Student ID: TEST-STUDENT-ID',
     '2026/12/8 實習 Grade: TEST-GRADE',
     '2026/12/8 實習 Ｓｔｕｄｅｎｔ ＩＤ：TEST-STUDENT-ID',
@@ -97,8 +110,17 @@ it('public API excludes sensitive titles from announcements and calendar items f
   expect(
     feed.announcements.every((item: { title: string }) => item.title === '實習申請2026/12/8截止'),
   ).toBe(true);
+  expect(feed.timeline).toHaveLength(2);
+  expect(
+    feed.timeline.every(
+      (item: { title: string; date: string }) =>
+        item.title === '實習申請2026/12/8截止' && item.date === '2026-12-08',
+    ),
+  ).toBe(true);
   expect(feed.announcementsUnavailable).toBe(false);
-  expect(JSON.stringify(feed)).not.toMatch(/TEST-STUDENT-ID|TEST-GRADE|成績|Student|Grade|學號/i);
+  expect(JSON.stringify(feed)).not.toMatch(
+    /TEST-STUDENT-ID|TEST-GRADE|成績|成绩|Student|Grades?|Scores?|學號/i,
+  );
 });
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
   const records = Array.from({ length: 8 }, (_, i) => ({
