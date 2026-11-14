@@ -1699,6 +1699,41 @@ it.each(['clipboard', 'writeText'] as const)(
   },
 );
 
+it.each([
+  ['no promise', undefined],
+  ['synchronous false', false],
+  ['resolved false', 'resolve-false'],
+] as const)(
+  'does not claim TXT or JSON was copied when a WebView clipboard bridge returns %s',
+  async (_label, result) => {
+    const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+    const writeText = vi.fn(() => result === 'resolve-false' ? Promise.resolve(false) : result);
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+    try {
+      render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+      fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '需要確實備份的手機筆記' } });
+      fireEvent.click(screen.getByRole('button', { name: '複製本次筆記' }));
+      const notes = await screen.findByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+      expect(notes.value).toContain('需要確實備份的手機筆記');
+      expect(notes.value).toContain(material.body);
+      expect(screen.queryByText(/已複製本次筆記到剪貼簿/)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+      expect(await screen.findByText(/仍無法直接複製/)).toBeTruthy();
+      expect(notes.isConnected).toBe(true);
+
+      fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+      const json = await screen.findByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+      expect(parseCourseStudyProgress(json.value, scope).passages['0:0'].note).toBe('需要確實備份的手機筆記');
+      expect(screen.queryByText(/已複製完整進度 JSON/)).toBeNull();
+      expect(writeText).toHaveBeenCalledTimes(3);
+      expect(mocks.run).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+      else Reflect.deleteProperty(window.navigator, 'clipboard');
+    }
+  },
+);
+
 it('copies a restorable reading-progress JSON with selectable fallback when download or clipboard is blocked', () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });

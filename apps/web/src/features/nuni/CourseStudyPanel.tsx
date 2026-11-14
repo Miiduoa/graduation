@@ -63,9 +63,19 @@ const MANUAL_COPY_LABELS: Record<ManualCopyKind, { region: string; field: string
 function studyClipboardWriter(): ((text: string) => Promise<void>) | null {
   try {
     const clipboard = navigator.clipboard;
-    return typeof clipboard?.writeText === 'function'
-      ? (text: string) => clipboard.writeText(text)
-      : null;
+    if (typeof clipboard?.writeText !== 'function') return null;
+    return (text: string): Promise<void> => {
+      // Broken WebView clipboard bridges may return undefined, false or even
+      // resolve to false without writing anything. Awaiting a non-Promise
+      // would otherwise announce a successful private-notes export.
+      const result: unknown = clipboard.writeText(text);
+      if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+        return Promise.reject(new Error('clipboard write was not confirmed'));
+      }
+      return Promise.resolve(result as PromiseLike<unknown>).then((acknowledged) => {
+        if (acknowledged === false) throw new Error('clipboard write was rejected');
+      });
+    };
   } catch {
     return null;
   }
