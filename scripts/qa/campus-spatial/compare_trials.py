@@ -12,6 +12,7 @@ from collections import defaultdict
 from datetime import date
 import json
 import math
+import re
 from pathlib import Path
 from statistics import median
 
@@ -33,15 +34,31 @@ MIN_REPEATS = 3
 
 
 def _number(value: str, label: str, *, integer: bool = False) -> float | int | None:
-    if not value.strip():
+    token = value.strip()
+    if not token:
         return None
+    if integer:
+        # float() rounds distinct large repeat IDs and can silently merge trials.
+        # Accept decimal integer tokens exactly; do not accept 1.0 or 1e0.
+        if not re.fullmatch(r"[0-9]+", token):
+            raise ValueError(f"{label}: expected a nonnegative integer")
+        try:
+            return int(token)
+        except ValueError as error:
+            raise ValueError(f"{label}: invalid integer") from error
     try:
-        number = float(value)
+        number = float(token)
     except ValueError as error:
         raise ValueError(f"{label}: invalid number") from error
-    if not math.isfinite(number) or number < 0 or (integer and not number.is_integer()):
-        raise ValueError(f"{label}: expected a nonnegative finite {'integer' if integer else 'number'}")
-    return int(number) if integer else number
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"{label}: expected a nonnegative finite number")
+    return number
+
+
+def _valid_headers(fieldnames: list[str] | None) -> bool:
+    # DictReader silently overwrites duplicate names and stores surplus values
+    # under a None key. Both can conceal corrupted or shifted evidence columns.
+    return fieldnames is not None and len(fieldnames) == len(FIELDS) and set(fieldnames) == set(FIELDS)
 
 
 def _date(value: str, label: str) -> date:
@@ -71,6 +88,9 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
         label = f"line {line}"
         if any(field not in row for field in FIELDS):
             reject(row, f"{label}: missing required CSV columns")
+            continue
+        if any(field not in FIELDS for field in row):
+            reject(row, f"{label}: unexpected CSV fields or surplus cells")
             continue
         # csv.DictReader uses None for a truncated record; reject rather than crash.
         row = {field: row[field] or "" for field in FIELDS}
@@ -193,8 +213,8 @@ def main() -> int:
     args = parser.parse_args()
     with args.csv.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        if not reader.fieldnames or not set(FIELDS).issubset(reader.fieldnames):
-            parser.error("CSV is missing required headers: " + ", ".join(FIELDS))
+        if not _valid_headers(reader.fieldnames):
+            parser.error("CSV requires each header exactly once: " + ", ".join(FIELDS))
         report = audit_rows(list(reader))
     payload = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output:
