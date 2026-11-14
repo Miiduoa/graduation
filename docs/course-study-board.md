@@ -1,3 +1,9 @@
+## 2026-11-15：舊版手機 WebView 缺少 File.text() 時仍可安全載入講義與進度
+
+- 一些內嵌 WebView 支援本機 `File.arrayBuffer()`，卻沒有 `File.text()`；原本選取有效 UTF-8 Markdown／TXT 或 JSON 備份會直接拋錯，學生無法讀課或恢復練習。現在僅在 `File.text` 不可用時，改由本機 `TextDecoder('utf-8', { fatal: true })` 解碼 `arrayBuffer()`，不傳輸教材，不把損壞位元組默默變成 U+FFFD。若兩種讀取方式都不可用，顯示明確錯誤並保留現有學習內容。
+- 新增三項模擬 DOM 回歸：可匯入繁中 Markdown、先預覽再確認還原合法 JSON（原筆記在確認前不變），以及拒絕損壞 UTF-8 JSON 且不清除未備份的筆記。既有 `File.text()`、Big5 及 v1/v2 閱讀／v1 練習備份行為不變。
+- 這是程式及模擬瀏覽器改進，正式 Vitest／CI／CodeQL、指定 App 5504170 審查、Maestro、iOS Safari／Android Chrome 真機與 Ahaboard 同題同機對照仍須對新 SHA 驗證。PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-15：長教材離線朗讀不在 HTTP(S) 網址查詢與路徑參數中優先斷句
 
 - 修正來源教材包含 `https://nuni.tw/course?tab=review`、`https://nuni.tw/lesson;v=2` 或 `https://nuni.tw/lesson:part2` 時，160 UTF-16 單位離線語音切段會將 `?`／`;`／路徑內冒號視為句末，讓學生聽到網址被優先切斷的問題。現在只在有明確 HTTP(S) 前綴、連續網址字元且後方仍為網址字元時略過這類優先停頓；一般提問、解釋用標點與真正句末仍保留自然停頓，遇 160 單位硬上限仍可能不得不斷開網址。

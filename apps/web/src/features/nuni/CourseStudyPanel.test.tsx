@@ -491,6 +491,68 @@ it('imports .markdown handouts through the existing local-only reader, including
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('imports an authorized UTF-8 handout on a mobile WebView without File.text()', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '外鍵用來連結兩個資料表，且可對照主鍵。';
+  const encoded = new TextEncoder().encode(content);
+  const file = new File([encoded], '課程教材.markdown', { type: 'text/markdown' });
+  const readBytes = vi.fn().mockResolvedValue(encoded.buffer);
+  Object.defineProperty(file, 'text', { value: undefined });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('restores an exact UTF-8 reading checkpoint on a WebView without File.text()', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '離線備份中的主鍵筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const saved = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    fireEvent.change(note, { target: { value: '目前的新筆記，不可先覆蓋' } });
+    const encoded = new TextEncoder().encode(saved);
+    const file = new File([encoded], '上次進度.campus-study.json', { type: 'application/json' });
+    const readBytes = vi.fn().mockResolvedValue(encoded.buffer);
+    Object.defineProperty(file, 'text', { value: undefined });
+    Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    expect(await screen.findByRole('region', { name: '閱讀進度預覽' })).toBeTruthy();
+    expect(note.value).toBe('目前的新筆記，不可先覆蓋');
+    expect(readBytes).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+    expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+      .toBe('離線備份中的主鍵筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('rejects corrupt UTF-8 backup on a WebView without File.text() without touching unsaved notes', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '這是尚未備份的原始筆記' } });
+  const invalidBytes = Uint8Array.from([0x7b, 0x22, 0xff, 0x22, 0x7d]);
+  const file = new File([invalidBytes], '損壞進度.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: undefined });
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(invalidBytes.buffer) });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent',
+    expect.stringContaining('進度備份含有無法解碼的 UTF-8 位元組'));
+  expect(note.value).toBe('這是尚未備份的原始筆記');
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('still refuses unrelated file extensions without replacing an authorized lesson', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   const file = new File(['無關內容'], '其他檔案.html', { type: 'text/html' });

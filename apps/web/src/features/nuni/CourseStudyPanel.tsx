@@ -116,6 +116,22 @@ type StudyTextEncoding = 'utf-8' | 'big5';
 // Recheck the original bytes only when the decoded text contains U+FFFD:
 // a genuinely authored replacement glyph is still valid UTF-8 and must work.
 async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+  // Some embedded mobile WebViews expose Blob.arrayBuffer() but not Blob.text().
+  // Use a strict local UTF-8 decoder instead of failing an otherwise valid
+  // handout or checkpoint, or silently replacing malformed private text.
+  if (typeof file.text !== 'function') {
+    let raw: ArrayBuffer;
+    try {
+      raw = await file.arrayBuffer();
+    } catch {
+      throw new Error(`這個瀏覽器無法讀取${purpose}，目前教材與筆記仍保留。請改用支援檔案讀取的瀏覽器。`);
+    }
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(raw);
+    } catch {
+      throw new Error(`這份${purpose}含有無法解碼的 UTF-8 位元組，尚未載入。請確認文字編碼；原教材與筆記仍保留。`);
+    }
+  }
   const text = await file.text();
   if (text.includes('\uFFFD')) {
     try {
