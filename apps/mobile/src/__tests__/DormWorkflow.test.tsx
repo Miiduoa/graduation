@@ -370,3 +370,36 @@ test('mobile sends the selected opaque resident handle with masked display', asy
     ),
   );
 });
+
+it('完整學號查詢與零筆核銷提示', async () => {
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true, packages: true }
+      : data.action === 'findResident'
+        ? {
+            residents: [
+              { id: 'dw_found', studentId: '***456', name: '查詢同學', building: 'A', room: '101' },
+            ],
+          }
+        : data.action === 'collectPackages'
+          ? { success: false, updated: 0, skipped: 1 }
+          : { repairs: [], leaves: [], packages: [], residents: [] },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  fireEvent.changeText(
+    await view.findByLabelText('學號末三碼或姓名（本棟住宿生）'),
+    'SYNTHETIC123456',
+  );
+  fireEvent.press(view.getByText('以完整學號查詢'));
+  fireEvent.press(await view.findByText('***456 查詢同學 A 101'));
+  fireEvent.press(view.getByText('登錄並通知學生'));
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_found' }),
+    ),
+  );
+  await view.findByText('紀錄已更新。');
+  fireEvent.changeText(view.getByLabelText('核對學生領取碼上的學號'), 'wrong');
+  fireEvent.press(view.getByText('已核對姓名與學號・全部核銷'));
+  expect(await view.findByText('未核銷任何包裹，跳過 1 件。')).toBeTruthy();
+});

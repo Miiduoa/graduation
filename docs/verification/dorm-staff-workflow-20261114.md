@@ -168,3 +168,12 @@
 - 隔離範圍：只調整既有宿舍 handler、包裹領取 helper 與宿舍刪帳清理模組；收件人驗證條件保持不變。未修改登入、session、ACL、Firestore／Storage 規則、migration，也未操作正式資料。新增欄位僅在新上傳紀錄產生，舊照片紀錄仍可清理。
 - 回歸案例涵蓋含合成學號 UID 的私有包裹、跨收件人拒絕、本人投影及領取、舊包裹與鏡像相容、上傳前停用帳號、上傳途中刪帳、Storage 部分寫入失敗、Firestore 完成交易失敗、補償刪除失敗保留紀錄及租期後重試清理。
 - 驗證：後端 5 檔 135 項、網頁 3 檔 30 項、手機 3 檔 18 項通過；web／mobile／shared 全專案 typecheck、變更後端檔案 ESLint、git diff --check 通過。型別及 Jest 暫存設定／快取均置於 `/tmp` 並於完成後清除；沿用既有依賴與 node_modules symlink。環境 Node 24，工具仍提示專案要求 Node 20／22。
+
+## 本輪審查修正：完整學號查詢與核銷回報
+
+- 指定 `review-dorm-r1.out` 最終結論無 P0／P1；本輪修正兩項 P2。
+- 新增 `findResident` 精確學號查詢，沿用現有宿舍開通、包裹服務及棟別檢查，只回傳在住宿生的隨機代碼、遮罩學號與必要名冊欄位。網頁／手機可在尚未載入完整分頁名冊時查詢並選人登錄包裹；查詢結果獨立於分頁與統計資料。
+- 核銷／退件交易回傳實際更新與跳過件數；零筆更新回傳 `success: false`，兩端明確顯示「未核銷任何包裹」及跳過件數。併發導致已領／已退狀態改變時不誤算更新，郵局／掛號／收發室仍跳過。
+- 回歸測試涵蓋完整學號查詢、遮罩及白名單回應、他棟與非住宿生排除、一般學生拒絕、零筆／全跳過／部分成功與併發狀態改變，以及兩端查詢選人後登錄和零筆核銷提示。
+- 權限範圍標註：依審查建議新增隔離的宿舍查詢 action，沿用既有驗證，未修改登入、sessions、共用 ACL、Firestore／Storage rules 或 migration。原 PR 的 `setStaff` 與 `dormStaffRoles` 權限變更仍保留、仍需原核准；本輪不部署、不合併、不操作正式資料。
+- 驗證結果：後端 2 檔 83 項、網頁 1 檔 16 項、手機 1 檔 15 項全部通過；web／mobile 全專案 typecheck、以 backend/functions 設定執行的 ESLint、`git diff --check` 通過。型別增量檔、測試設定與 Jest 快取均置於 `/tmp/dorm-review-fix`，完成後清除。未安裝或新增依賴，未更換 node_modules symlink。

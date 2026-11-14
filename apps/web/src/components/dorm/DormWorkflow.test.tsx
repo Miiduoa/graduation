@@ -414,3 +414,40 @@ it('resolves ticket photos through the authorized backend only on request', asyn
     'https://signed.invalid/random',
   );
 });
+
+it('完整學號查詢可選取遮罩住宿生，並顯示零筆核銷結果', async () => {
+  api.config.packages = true;
+  api.call.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? api.config
+      : data.action === 'findResident'
+        ? {
+            residents: [
+              { id: 'dw_found', studentId: '***456', name: '查詢同學', building: 'A', room: '101' },
+            ],
+          }
+        : data.action === 'collectPackages'
+          ? { success: false, updated: 0, skipped: 1 }
+          : ['mine', 'workspace'].includes(data.action)
+            ? api.rows
+            : { success: true },
+  );
+  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  fireEvent.change(await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）'), {
+    target: { value: 'SYNTHETIC123456' },
+  });
+  fireEvent.click(screen.getByText('以完整學號查詢'));
+  fireEvent.click(await screen.findByText('***456 查詢同學 A 101'));
+  fireEvent.click(screen.getByText('登錄並通知學生'));
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_found' }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getByText('已核對姓名與學號・全部核銷').closest('button')?.disabled).toBe(false),
+  );
+  fireEvent.change(screen.getByLabelText('核對學生領取碼上的學號'), { target: { value: 'wrong' } });
+  fireEvent.click(screen.getByText('已核對姓名與學號・全部核銷'));
+  expect(await screen.findByText('未核銷任何包裹，跳過 1 件。')).toBeTruthy();
+});

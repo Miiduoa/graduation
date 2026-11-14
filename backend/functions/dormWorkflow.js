@@ -812,6 +812,30 @@ function createDormWorkflowHandler({
       });
       return { success: true };
     }
+    if (action === 'findResident') {
+      staff('packages');
+      const studentId = required(input.studentId, 50);
+      if (!/^[a-zA-Z0-9_-]+$/.test(studentId))
+        throw new HttpsError('invalid-argument', '學號格式錯誤');
+      const matches = await school
+        .collection('dormResidents')
+        .where('studentId', '==', studentId)
+        .get();
+      const residents = [];
+      for (const doc of matches.docs) {
+        const row = doc.data();
+        if (row.active === false || !canAccessBuilding(row)) continue;
+        residents.push({
+          id: await ensureHandle('dormResidents', doc),
+          studentId: '***' + studentId.slice(-3),
+          name: row.name || '',
+          building: row.building || '',
+          room: row.room || '',
+          bed: row.bed || '',
+        });
+      }
+      return { residents };
+    }
     if (action === 'registerPackage') {
       staff('packages');
       const selectedResidentRef = await residentRef(input.studentId);
@@ -883,7 +907,9 @@ function createDormWorkflowHandler({
             ).docs
               .filter((d) => d.data().status === 'waiting' && canAccessBuilding(d.data()))
               .map((d) => d.ref);
-      await db.runTransaction(async (tx) => {
+      const counts = await db.runTransaction(async (tx) => {
+        let updated = 0;
+        let skipped = 0;
         const snaps = await Promise.all(refs.map((r) => tx.get(r)));
         const mirrors = await Promise.all(
           snaps.map((snap) => tx.get(school.collection('packages').doc(snap.id))),
@@ -891,10 +917,21 @@ function createDormWorkflowHandler({
         for (const [index, snap] of snaps.entries()) {
           if (!snap.exists) continue;
           const row = snap.data();
-          if (action === 'collectPackages' && row.status !== 'waiting') continue;
+          if (action === 'collectPackages' && row.status !== 'waiting') {
+            skipped++;
+            continue;
+          }
           inBuilding(row);
-          if (/郵局|掛號|收發室/.test(row.location || '')) continue;
+          if (row.status !== 'waiting') {
+            skipped++;
+            continue;
+          }
+          if (/郵局|掛號|收發室/.test(row.location || '')) {
+            skipped++;
+            continue;
+          }
           if (row.status === 'waiting') {
+            updated++;
             tx.update(snap.ref, {
               status: action === 'returnPackage' ? 'returned' : 'picked_up',
               handledBy: uid,
@@ -906,8 +943,9 @@ function createDormWorkflowHandler({
               });
           }
         }
+        return { updated, skipped };
       });
-      return { success: true };
+      return { success: counts.updated > 0, ...counts };
     }
     throw new HttpsError('invalid-argument', '未知操作');
   };

@@ -241,12 +241,20 @@ export function DormWorkflow({
     packages: [],
     residents: [],
   });
+  const [residentSearch, setResidentSearch] = useState<{
+    query: string;
+    residents: DormWorkflowRows['residents'];
+  } | null>(null);
   const [rowsLoaded, setRowsLoaded] = useState(false);
   const summaryReady = rowsLoaded && !Object.values(rows.nextCursors || {}).some(Boolean);
   const [ownLeaves, setOwnLeaves] = useState<DormLeave[]>([]);
   const [staffMode, setStaffMode] = useState(false);
   const [tab, setTab] = useState('repairs');
   const [values, setValues] = useState<Record<string, string>>({});
+  const residentCandidates =
+    residentSearch && residentSearch.query === values.search
+      ? residentSearch.residents
+      : rows.residents;
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [includeHistory, setIncludeHistory] = useState(false);
@@ -324,6 +332,7 @@ export function DormWorkflow({
     selectedStudentId.current = '';
     setRows({ repairs: [], leaves: [], packages: [], residents: [] });
     setValues({});
+    setResidentSearch(null);
     setImages([]);
     setRequestKey(dormRequestKey());
     setStaffMode(false);
@@ -379,20 +388,27 @@ export function DormWorkflow({
       data.action === 'registerPackage' &&
       (!selectedStudentId.current ||
         data.studentId !== selectedStudentId.current ||
-        !rows.residents.some((r) => r.id === selectedStudentId.current))
+        !residentCandidates.some((r) => r.id === selectedStudentId.current))
     )
       return;
     setBusy(true);
     setNotice('');
     const token = generation.current;
     try {
-      const result = await call<{ delivered?: number; recipients?: number }>(data);
+      const result = await call<{
+        delivered?: number;
+        recipients?: number;
+        updated?: number;
+        skipped?: number;
+      }>(data);
       if (token !== generation.current) return;
       done?.();
       setNotice(
-        result.recipients !== undefined
-          ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
-          : '紀錄已更新。',
+        result.updated !== undefined
+          ? `${result.updated ? `已更新 ${result.updated} 件包裹` : '未核銷任何包裹'}，跳過 ${result.skipped ?? 0} 件。`
+          : result.recipients !== undefined
+            ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
+            : '紀錄已更新。',
       );
       await refresh();
     } catch (error) {
@@ -418,7 +434,8 @@ export function DormWorkflow({
       label={title}
       disabled={
         busy ||
-        (data.action === 'registerPackage' && !rows.residents.some((r) => r.id === data.studentId))
+        (data.action === 'registerPackage' &&
+          !residentCandidates.some((r) => r.id === data.studentId))
       }
       onPress={() => void act(data, done)}
     />
@@ -720,10 +737,37 @@ export function DormWorkflow({
                   setPreview(false);
                 }}
               />
+              <Btn
+                label="以完整學號查詢"
+                disabled={busy || !get('search').trim()}
+                onPress={async () => {
+                  const query = get('search');
+                  const token = generation.current;
+                  setBusy(true);
+                  setNotice('');
+                  try {
+                    const result = await call<{ residents: DormWorkflowRows['residents'] }>({
+                      action: 'findResident',
+                      studentId: query,
+                    });
+                    if (token !== generation.current) return;
+                    setResidentSearch({ query, residents: result.residents });
+                    if (!result.residents.length) setNotice('找不到本棟符合學號的住宿生。');
+                  } catch (error) {
+                    if (token === generation.current)
+                      setNotice(error instanceof Error ? error.message : '查詢失敗，請重試。');
+                  } finally {
+                    if (token === generation.current) setBusy(false);
+                  }
+                }}
+              />
               {!!get('search') &&
-                rows.residents
+                residentCandidates
                   .filter(
-                    (r) => r.studentId.includes(get('search')) || r.name.includes(get('search')),
+                    (r) =>
+                      residentSearch?.query === get('search') ||
+                      r.studentId.includes(get('search')) ||
+                      r.name.includes(get('search')),
                   )
                   .slice(0, 8)
                   .map((r) => (
@@ -735,14 +779,15 @@ export function DormWorkflow({
                         setValues((old) => ({
                           ...old,
                           studentId: r.id,
-                          search: r.studentId,
+                          search: residentSearch?.query === old.search ? old.search : r.studentId,
                         }));
                         setPreview(false);
                       }}
                     />
                   ))}
               <Label>
-                已選住宿生：{rows.residents.find((r) => r.id === get('studentId'))?.studentId || ''}
+                已選住宿生：
+                {residentCandidates.find((r) => r.id === get('studentId'))?.studentId || ''}
               </Label>
               {f('item', '品名（可使用鍵盤語音輸入）')}
               {f('location', '領取地點')}

@@ -205,6 +205,8 @@ test('batch pickup selects only waiting parcels in authorized buildings after a 
     );
   await expect(call('staff', { action: 'collectPackages', studentId: '123' })).resolves.toEqual({
     success: true,
+    updated: 1,
+    skipped: 0,
   });
   expect(read.mock.calls).toEqual([
     ['schools/pu/dormPackages/current'],
@@ -236,7 +238,7 @@ test.each([
     };
     const result = call('staff', { action: 'collectPackages', studentId: '123' });
     if (code) await expect(result).rejects.toMatchObject({ code });
-    else await expect(result).resolves.toEqual({ success: true });
+    else await expect(result).resolves.toEqual({ success: false, updated: 0, skipped: 1 });
     expect(update).not.toHaveBeenCalled();
     expect(data.get(path)).toMatchObject(change);
     expect(data.get('schools/pu/packages/current').status).toBe('waiting');
@@ -1691,3 +1693,71 @@ test.each([false, true])(
     if (deleteFails) expect(journals[0]).toMatchObject({ userId: 'student', state: 'uploading' });
   },
 );
+
+it('精確學號查詢只回傳有權限的在住宿生及遮罩資料', async () => {
+  const { call, data, queries } = fixture();
+  for (const [id, building, active] of [
+    ['one', 'A', true],
+    ['other', 'B', true],
+    ['inactive', 'A', false],
+  ]) {
+    data.set(`schools/pu/dormResidents/${id}`, {
+      studentId: 'SYNTHETIC123456',
+      userId: 'private-user',
+      name: '測試同學',
+      building,
+      room: '101',
+      active,
+      grade: 99,
+    });
+  }
+  const result = await call('staff', { action: 'findResident', studentId: 'SYNTHETIC123456' });
+  expect(result.residents).toHaveLength(1);
+  expect(result.residents[0]).toMatchObject({
+    id: expect.stringMatching(/^dw_/),
+    studentId: '***456',
+    building: 'A',
+  });
+  expect(JSON.stringify(result)).not.toMatch(/SYNTHETIC|private-user|grade/);
+  expect(queries).toContainEqual(
+    expect.objectContaining({ filters: [['studentId', '==', 'SYNTHETIC123456']] }),
+  );
+  await expect(
+    call('student', { action: 'findResident', studentId: 'SYNTHETIC123456' }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(await call('staff', { action: 'findResident', studentId: 'missing' })).toEqual({
+    residents: [],
+  });
+});
+
+it('核銷回傳實際更新及跳過件數，零筆不回報成功', async () => {
+  const { call, data } = fixture();
+  expect(await call('staff', { action: 'collectPackages', studentId: 'missing' })).toEqual({
+    success: false,
+    updated: 0,
+    skipped: 0,
+  });
+  data.set('schools/pu/dormPackages/post', {
+    studentId: '123',
+    building: 'A',
+    status: 'waiting',
+    location: '郵局',
+  });
+  expect(await call('staff', { action: 'collectPackages', studentId: '123' })).toEqual({
+    success: false,
+    updated: 0,
+    skipped: 1,
+  });
+  data.set('schools/pu/dormPackages/desk', {
+    studentId: '123',
+    building: 'A',
+    status: 'waiting',
+    location: '值班台',
+  });
+  expect(await call('staff', { action: 'collectPackages', studentId: '123' })).toEqual({
+    success: true,
+    updated: 1,
+    skipped: 1,
+  });
+  expect(data.get('schools/pu/dormPackages/post').status).toBe('waiting');
+});
