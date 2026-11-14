@@ -120,6 +120,8 @@ export function HomeStack() {
         options={{ title: '校園漫步' }}
       />
       <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
+      {/* Separate route keeps the general anonymous draft mounted and untouched. */}
+      <Stack.Screen name="CreatorPostCompose" component={PostComposeScreen} options={{ title: '發表貼文' }} />
       <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
       <Stack.Screen
         name="StoryCompose"

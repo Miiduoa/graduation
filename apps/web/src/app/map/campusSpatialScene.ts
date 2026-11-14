@@ -425,9 +425,11 @@ export function createCampusSpatialScene(
       Math.sqrt(MAX_BUFFER_PIXELS / (width * height)));
     const bufferWidth = Math.max(1, Math.floor(width * ratio));
     const bufferHeight = Math.max(1, Math.floor(height * ratio));
-    if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
-      renderer.setSize(bufferWidth, bufferHeight, false);
-    }
+    const bufferChanged = canvas.width !== bufferWidth || canvas.height !== bufferHeight;
+    // ResizeObserver can fire repeatedly without a size/DPR change. Avoid
+    // waking WebGL for an identical frame, especially on mobile browsers.
+    if (!changed && !bufferChanged) return;
+    if (bufferChanged) renderer.setSize(bufferWidth, bufferHeight, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     if (changed) {
@@ -581,7 +583,10 @@ export function createCampusSpatialScene(
       cancelDrag();
       finishTransition();
     } else {
+      // A backgrounded tab still needs one frame on return, even if its
+      // CSS bounds and devicePixelRatio stayed exactly the same.
       resize();
+      requestFrame();
     }
   }
 
