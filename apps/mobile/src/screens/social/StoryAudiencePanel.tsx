@@ -47,10 +47,20 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       .then((next) => {
         if (!active) return;
         clearTimeout(timeout);
-        setPage((previous) => ({
-          viewers: request.cursor ? [...previous.viewers, ...next.viewers] : next.viewers,
-          nextCursor: next.nextCursor,
-        }));
+        setPage((previous) => {
+          // A live audience can change between cursor reads. Keep one visible
+          // row per viewer even if a later server page overlaps an earlier one.
+          const candidates = request.cursor
+            ? [...previous.viewers, ...next.viewers]
+            : next.viewers;
+          const seen = new Set<string>();
+          const viewers = candidates.filter((viewer) => {
+            if (seen.has(viewer.uid)) return false;
+            seen.add(viewer.uid);
+            return true;
+          });
+          return { viewers, nextCursor: next.nextCursor };
+        });
         setStatus('ready');
       })
       .catch((error: unknown) => {

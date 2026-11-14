@@ -308,6 +308,59 @@ describe('story audience scope transitions', () => {
     view.unmount();
   });
 
+  test('overlapping audience cursor pages display each student once and continue to the next cursor', async () => {
+    const firstCursor = { id: 'first-cursor' } as Cursor;
+    const secondCursor = { id: 'second-cursor' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [
+          { uid: 'student-a', displayName: '甲同學' },
+          { uid: 'student-b', displayName: '乙同學' },
+        ],
+        nextCursor: firstCursor,
+      })
+      .mockResolvedValueOnce({
+        viewers: [
+          { uid: 'student-b', displayName: '乙同學' },
+          { uid: 'student-c', displayName: '丙同學' },
+        ],
+        nextCursor: secondCursor,
+      })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'student-d', displayName: '丁同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('已顯示 2 位 · 最近觀看優先')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, firstCursor);
+    expect(view.getAllByText('乙同學')).toHaveLength(1);
+    expect(view.getByText('已顯示 3 位 · 最近觀看優先')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenNthCalledWith(3, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, secondCursor);
+    expect(view.getAllByText('乙同學')).toHaveLength(1);
+    expect(view.getByText('丙同學')).toBeTruthy();
+    expect(view.getByText('丁同學')).toBeTruthy();
+    expect(view.getByText('已顯示 4 位 · 最近觀看優先')).toBeTruthy();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+    view.unmount();
+  });
+
   test('pagination permission denial removes already-rendered viewer names and rechecks a restored author from page one', async () => {
     const cursor = { id: 'previously-authorized-cursor' } as Cursor;
     const fetchViewers = jest.mocked(listStoryViewers);
