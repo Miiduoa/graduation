@@ -65,7 +65,7 @@ export function PostComposeScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const routeBoardId = props?.route?.params?.boardId as string | undefined;
-  const fromCreatorProfile = props?.route?.params?.profileCompose === true;
+  const fromCreatorProfile = props?.route?.name === 'CreatorPostCompose';
   const routeDefaultAnon =
     props?.route?.params?.defaultAnonymous === true || props?.route?.params?.defaultAnonymous === false
       ? (props.route.params.defaultAnonymous as boolean)
