@@ -1068,7 +1068,13 @@ service cloud.firestore {
             (isActiveGroupMember(groupId) && isVisiblePostForReactions() && ownPostVoteOnly())
             || (
               (canManageGroup(groupId)
-                || (ownsOrdinaryPost() && request.resource.data.get('kind', 'post') != 'announcement'))
+                || (ownsOrdinaryPost()
+                  && request.resource.data.get('kind', 'post') != 'announcement'
+                  // A moderator's soft deletion cannot be undone by the post author.
+                  // Ordinary author edits of active posts remain allowed.
+                  && resource.data.get('deleted', false) != true
+                  && resource.data.get('deletedAt', null) == null
+                  && !(resource.data.get('status', '') in ['deleted', 'cancelled', 'canceled'])))
               && request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
               && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
             )

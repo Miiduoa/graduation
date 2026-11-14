@@ -686,3 +686,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 擴充 `backend/tests/security-rules.test.js` 的作業與測驗非開放狀態矩陣，加入 `allowLateSubmission:true` 仍拒絕撤回／封存的案例，以及沿用同一登入 context 檢驗「封存→開放、校籍撤銷→恢復、首次提交→重放」。原跨帳號／跨校與正常繳交案例保留。此為開發分支程式碼與可重跑回歸，**新精確 head 的 Rules、完整 CI、CodeQL 仍須以 GitHub 實際結果驗證，不沿用父 head 通過結果**。
 
 未發布群組父貼文 get/list、GCS／Supabase 已發網址撤銷、真隔離 Storage CAS／競態、舊附件可信引用、minimatch 雙鎖檔與正式發布／回復仍待。新直接寫入拒絕不撤銷既有簽發 URL。保持 Draft，未取得 nuni-merge-gate App 5504170 對精確 head 的 APPROVED 不合併／部署；不觸碰正式資料、金鑰、token、migration、E 校園或重跑受限 npm/pnpm audit。
+
+## 2026-11-14：群組貼文遭管理員撤回後，原作者不可用 SDK 自行復活（PR #577）
+
+基於精確父 head `612ea1bdfd787c490988f0c4e548c1b43d0a2f1e` 的 Rules 檢查發現：`groups/{groupId}/posts/{postId}` 的一般作者 `update` 只限制 `kind` 與身分欄位，**並未檢查既有貼文已被軟刪除／取消**。當教師透過伺服器或 SDK 將 `deleted:true`、`deletedAt` 或 `status:deleted/cancelled/canceled` 設定為撤回，仍在校籍內的原作者可能直接使用 Firestore SDK 清空這些欄位並重新公開。這是合成規則下可推導的撤銷繞過，尚無正式資料遭利用的證據。
+
+最小修改只在**一般作者**的內容修改分支，拒絕既有資料帶軟刪除或取消狀態的後續寫入；具有當前有效群組管理權限的教師／管理員仍可明確恢復，正常公開貼文仍可由本人編輯，按讚專用分支本就要求貼文可見。本次測試新增合成 Firebase Emulator 矩陣：不同撤回標記、作者直接復原／一般編輯拒絕、跨校拒絕、教師明確恢復、恢復後作者正常編輯、撤銷群組資格後同一登入 context 重放。**此新精確 head 的實際 CI／CodeQL 須獨立確認，暫不列為已通過。**
+
+父 head 的 [主 CI #43536293392](https://github.com/Miiduoa/graduation/actions/runs/43536293392)、[CodeQL #43536293459](https://github.com/Miiduoa/graduation/actions/runs/43536293459)、[Course access #43536293391](https://github.com/Miiduoa/graduation/actions/runs/43536293391) 均已 completed/success，且 Web／Mobile／Build Web／Build Mobile 全部成功。新補丁不代表正式發布。**未發布群組父貼文 get/list 曝光仍未解決**，需要配套 Web/Mobile 查詢與舊資料改造；此外 GCS／Supabase 已簽 URL 撤權、真隔離 Storage 競態、歷史可信附件、minimatch 雙圖相容與正式發布回復仍待驗收。Supabase permissions、Python security、Mobile Agent Regression、Maestro 沒有這個新 head 的獨立結果。PR 保留 Draft、未取得 App 5504170 對精確 head 的 APPROVED 審查前不合併。不操作正式資料、token、憑證、migration、部署、E 校園，也不重跑受限 npm／pnpm audit。

@@ -978,6 +978,44 @@ describe('firestore security rules', () => {
       await assertFails(post.delete());
     });
 
+    test('manager-withdrawn group posts cannot be resurrected by authors through SDK', async () => {
+      const author = testEnv.authenticatedContext('alice').firestore().doc(postPath);
+      const teacher = testEnv.authenticatedContext('teacher').firestore().doc(postPath);
+      const crossSchool = testEnv.authenticatedContext('mallory').firestore().doc(postPath);
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/mallory').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/other/members/mallory').set({ status: 'active' });
+      });
+      // A server/manager can withdraw an existing post. The author must not
+      // use a stale SDK session to clear deletion markers or rewrite it.
+      for (const withdrawn of [
+        { deleted: true, deletedAt: new Date('2026-11-06T12:00:00Z') },
+        { status: 'deleted' },
+        { status: 'cancelled' },
+        { status: 'canceled' },
+      ]) {
+        await seedFirestore((admin) => admin.doc(postPath).set({
+          authorId: 'alice', kind: 'post', title: 'Removed by moderator',
+          published: true, deleted: false, deletedAt: null, status: 'published',
+          ...withdrawn,
+        }));
+        await assertFails(author.update({ title: 'Quietly restored' }));
+        await assertFails(author.update({
+          deleted: false, deletedAt: null, status: 'published', title: 'Replayed restore',
+        }));
+        await assertFails(crossSchool.update({ title: 'Cross-school restore' }));
+        // An active instructor can explicitly review and restore the post.
+        await assertSucceeds(teacher.update({
+          deleted: false, deletedAt: null, status: 'published', title: 'Teacher restored',
+        }));
+        await assertSucceeds(author.update({ title: 'Ordinary author edit after restoration' }));
+      }
+      // Reusing the same authenticated context after a group revocation must fail.
+      await seedFirestore((admin) =>
+        admin.doc('groups/course/members/alice').update({ status: 'removed' }));
+      await assertFails(author.update({ title: 'Revoked author replay' }));
+    });
+
     test('group post client writes cannot impersonate server AI provenance', async () => {
       const postFor = (uid) =>
         testEnv.authenticatedContext(uid).firestore().doc('groups/course/posts/ai-provenance');
