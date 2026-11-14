@@ -1284,6 +1284,36 @@ test('repair photos use identity-free paths, validate upload ownership, and sign
   });
 });
 
+test('disabled schools allow only owners to read historical repair photos and keep writes disabled', async () => {
+  const bucket = photoBucket();
+  const { call, data } = fixture({ getBucket: () => bucket });
+  const upload = await call('student', {
+    action: 'uploadPhoto',
+    contentType: 'image/jpeg',
+    base64: Buffer.from('synthetic image').toString('base64'),
+  });
+  const { id } = await call('student', { ...repair, images: [upload.path] });
+  const staffId = (await call('staff', { action: 'workspace' })).repairs[0].id;
+  data.set('schools/pu/members/other', { role: 'student' });
+  data.set('schools/pu', { dormWorkflowEnabled: false });
+  const history = await call('student', { action: 'mine' });
+  expect(history.repairs[0]).toMatchObject({ id, images: ['0'] });
+  expect(await call('student', { action: 'repairPhoto', id, index: 0 })).toHaveProperty('url');
+  for (const uid of ['other', 'staff', 'admin']) {
+    await expect(
+      call(uid, { action: 'repairPhoto', id: uid === 'staff' ? staffId : id, index: 0 }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+  }
+  expect(bucket.signed).toHaveBeenCalledTimes(1);
+  for (const input of [
+    repair,
+    { action: 'uploadPhoto', contentType: 'image/jpeg', base64: 'YQ==' },
+    { action: 'repairStatus', id, status: 'closed' },
+  ]) {
+    await expect(call('student', input)).rejects.toMatchObject({ code: 'failed-precondition' });
+  }
+});
+
 test('legacy repair photo URL is privately copied, public token revoked, and never returned', async () => {
   const bucket = photoBucket();
   const { call, data } = fixture({ getBucket: () => bucket });

@@ -143,7 +143,7 @@ function createDormWorkflowHandler({
         admin,
         role: repairs || packages ? 'dorm_staff' : 'student',
       };
-    if (!enabled && !['mine', 'parcels'].includes(input.action))
+    if (!enabled && !['mine', 'parcels', 'repairPhoto'].includes(input.action))
       throw new HttpsError('failed-precondition', '這所學校尚未開通宿舍工作流程');
     const staff = (domain) => {
       if (!(domain === 'packages' ? packages : repairs))
@@ -212,6 +212,7 @@ function createDormWorkflowHandler({
       if (!ticket.exists) throw new HttpsError('not-found', '找不到工單');
       const row = ticket.data();
       if (row.userId !== uid) {
+        if (!enabled) throw new HttpsError('permission-denied', '僅能查看本人的歷史報修照片');
         staff('repairs');
         inBuilding(row);
       }
