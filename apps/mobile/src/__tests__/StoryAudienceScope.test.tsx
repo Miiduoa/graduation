@@ -276,4 +276,43 @@ describe('story audience scope transitions', () => {
     view.unmount();
   });
 
+  test('pagination permission denial removes already-rendered viewer names and rechecks a restored author from page one', async () => {
+    const cursor = { id: 'previously-authorized-cursor' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '撤權前可見的同學' }],
+        nextCursor: cursor,
+      })
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '重新授權後的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('撤權前可見的同學')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, cursor);
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('撤權前可見的同學')).toBeNull();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('重新授權後的同學')).toBeTruthy();
+    expect(view.queryByText('撤權前可見的同學')).toBeNull();
+    view.unmount();
+  });
+
 });
