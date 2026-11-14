@@ -404,7 +404,7 @@ export function GroupDirectory({
           </Link>
         </section>
       ) : mode === 'clubs' ? (
-        <ClubDirectory key={JSON.stringify([user.uid, school.id])}>
+        <ClubDirectory uid={user.uid} schoolId={school.id} key={JSON.stringify([user.uid, school.id])}>
           <MemberDirectory uid={user.uid} schoolId={school.id} mode="clubs" />
         </ClubDirectory>
       ) : (

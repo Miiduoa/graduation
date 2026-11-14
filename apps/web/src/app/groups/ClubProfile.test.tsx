@@ -1,93 +1,104 @@
-import { clubEnabled } from './clubService';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { ClubProfile } from './ClubProfile';
-import { loadClubProfile } from './clubProfileService';
-
-vi.mock('./clubProfileService', () => ({ loadClubProfile: vi.fn() }));
-vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
-const profile = {
-  id: 'club',
-  schoolId: 'pu',
-  type: 'club' as const,
-  role: 'member',
-  name: '攝影社',
-  description: '週三社課',
-  memberCount: 3,
-  announcements: [
-    {
-      id: 'post',
-      title: '社課通知',
-      body: '帶相機',
-      groupId: 'club',
-      kind: 'announcement' as const,
-      authorId: 'one',
-      authorName: null,
-      schoolId: 'pu',
-      createdAt: null,
-    },
-  ],
+import { callClubPortal } from './clubPortalService';
+import { leaveMemberGroup } from './groupService';
+import type { ClubPortalView } from '@campus/shared/src/clubPortal';
+vi.mock('./clubPortalService', () => ({ callClubPortal: vi.fn() }));
+vi.mock('./groupService', () => ({ leaveMemberGroup: vi.fn() }));
+const profile: ClubPortalView = {
+  success: true,
+  office: false,
+  club: {
+    id: 'club',
+    name: '攝影社',
+    description: '週三社課',
+    category: '學藝',
+    meetingTime: '週三',
+    recruiting: true,
+    approval: 'approved',
+    joinPolicy: 'open',
+    memberCount: 3,
+    instagram: '',
+    line: '',
+  },
+  role: 'visitor',
+  status: 'none',
+  events: [],
+  announcements: [],
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(clubEnabled).mockReturnValue(false);
-  vi.mocked(loadClubProfile).mockResolvedValue(profile);
+  vi.mocked(callClubPortal).mockResolvedValue(profile);
 });
-test('依規格呈現唯讀社團、真實公告與活動尚未串接的界線', async () => {
+test('開放社團一鍵加入，伺服器確認後才呈現已加入', async () => {
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   await screen.findByRole('heading', { name: '攝影社' });
-  expect(screen.getByRole('button', { name: '已加入' }).hasAttribute('disabled')).toBe(true);
-  expect(screen.getByText('社課通知')).toBeTruthy();
-  expect(screen.getByText('週三社課')).toBeTruthy();
-  expect(screen.getByText('目前沒有排定的活動。')).toBeTruthy();
-  expect(screen.getByText(/此頁尚未接入社團內部活動/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: '申請加入' })).toBeNull();
-  expect(screen.getByRole('link', { name: '查看社團討論與更多公告' }).getAttribute('href')).toBe(
-    '/groups/club?schoolId=pu',
+  vi.mocked(callClubPortal).mockResolvedValue({ ...profile, status: 'active', role: 'member' });
+  fireEvent.click(screen.getByRole('button', { name: '加入' }));
+  await screen.findByRole('button', { name: '已加入' });
+  expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', { action: 'join', groupId: 'club' });
+});
+test('需審核社團送出後顯示鎖定文案，未核可不冒充正式社團', async () => {
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    club: { ...profile.club!, joinPolicy: 'review' },
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('申請加入');
+  vi.mocked(callClubPortal).mockResolvedValue({ ...profile, status: 'pending' });
+  fireEvent.click(screen.getByRole('button', { name: '申請加入' }));
+  await waitFor(() =>
+    expect(screen.getAllByText('已送出申請，等幹部回覆').length).toBeGreaterThan(0),
   );
 });
-test('讀取失敗可重試，幹部只看見鎖定管理說明', async () => {
-  vi.mocked(loadClubProfile).mockRejectedValueOnce(new Error('network'));
+test('幹部可審核、編輯、建立活動；學生看不到管理與電話', async () => {
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    role: 'admin',
+    status: 'active',
+    requests: [{ id: 'applicant', name: '申請人' }],
+    members: [
+      { id: 'one', name: '社員', role: 'member', phone: '', studentId: '', duesPaid: false },
+    ],
+  });
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
-  await screen.findByRole('alert');
-  vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role: 'owner' });
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
-  await screen.findByText('這所學校還沒開放社團管理。');
-  expect(screen.queryByRole('button', { name: '管理' })).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: '管理' }));
+  expect(screen.getByText('編輯社團介紹')).toBeTruthy();
+  expect(screen.getByText('新增活動')).toBeTruthy();
+  expect(screen.getByText(/電話 未提供/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '通過' }));
+  await waitFor(() =>
+    expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+      groupId: 'club',
+      action: 'review',
+      targetUid: 'applicant',
+      decision: 'approved',
+    }),
+  );
 });
-test('切換社團時不顯示先前尚未完成的讀取結果', async () => {
-  let finish!: (data: typeof profile) => void;
-  vi.mocked(loadClubProfile).mockReturnValueOnce(
+test('退出需確認並沿用既有 API', async () => {
+  vi.mocked(callClubPortal).mockResolvedValue({ ...profile, status: 'active', role: 'member' });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('已加入');
+  fireEvent.click(screen.getByRole('button', { name: '退出社團' }));
+  expect(leaveMemberGroup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '確認退出社團' }));
+  await waitFor(() =>
+    expect(leaveMemberGroup).toHaveBeenCalledWith('one', 'pu', 'club', expect.any(Function)),
+  );
+});
+test('切換社團或帳號忽略延遲回應；可重試錯誤', async () => {
+  let finish!: (value: ClubPortalView) => void;
+  vi.mocked(callClubPortal).mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;
     }),
   );
   const view = render(<ClubProfile uid="one" schoolId="pu" groupId="old" />);
-  view.rerender(<ClubProfile uid="one" schoolId="pu" groupId="new" />);
+  view.rerender(<ClubProfile uid="two" schoolId="pu" groupId="new" />);
   await screen.findByText('週三社課');
-  await act(async () => finish({ ...profile, name: '舊社團' }));
+  await act(async () => finish({ ...profile, club: { ...profile.club!, name: '舊社團' } }));
   expect(screen.queryByText('舊社團')).toBeNull();
-});
-
-test.each(['owner', 'admin'])('管理已啟用時，%s 不顯示未開放說明', async (role) => {
-  vi.mocked(clubEnabled).mockReturnValue(true);
-  vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role });
-  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
-  await screen.findByText('週三社課');
-  expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
-});
-
-test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async () => {
-  let fail!: (error: Error) => void;
-  vi.mocked(loadClubProfile).mockReturnValueOnce(
-    new Promise((_, reject) => {
-      fail = reject;
-    }),
-  );
-  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
-  await screen.findByRole('heading', { name: '攝影社' });
-  await act(async () => fail(new Error('network')));
-  expect(screen.queryByRole('alert')).toBeNull();
-  expect(screen.getByText('社課通知')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '管理' })).toBeNull();
 });

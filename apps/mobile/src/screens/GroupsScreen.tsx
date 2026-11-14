@@ -356,6 +356,7 @@ export function GroupsScreen(props: any) {
           contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         >
           <ClubDirectory
+            uid={auth.user?.uid} schoolId={school.id} onRefresh={reload}
             key={JSON.stringify([auth.user?.uid, school.id])}
             clubs={isFirebaseMockMode() ? [] : myGroups.filter((group) => group.type === 'club')}
             onOpen={(groupId) => nav?.navigate?.('GroupDetail', { groupId })}
