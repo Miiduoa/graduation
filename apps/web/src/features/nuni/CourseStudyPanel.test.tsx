@@ -506,6 +506,62 @@ it('imports an authorized UTF-8 handout on a mobile WebView without File.text()'
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+it('imports a private UTF-8 handout with the legacy FileReader-only mobile path', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '主鍵與外鍵都要能回到原文逐句核對。';
+  const file = new File([new TextEncoder().encode(content)], '課堂講義.markdown', { type: 'text/markdown' });
+  Object.defineProperty(file, 'text', { value: undefined });
+  Object.defineProperty(file, 'arrayBuffer', { value: undefined });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('restores a reading checkpoint from legacy FileReader without replacing notes before confirmation', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '原始離線筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const saved = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    fireEvent.change(note, { target: { value: '現在還沒備份的筆記' } });
+    const file = new File([new TextEncoder().encode(saved)], '我的閱讀進度.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: undefined });
+    Object.defineProperty(file, 'arrayBuffer', { value: undefined });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    expect(await screen.findByRole('region', { name: '閱讀進度預覽' })).toBeTruthy();
+    expect(note.value).toBe('現在還沒備份的筆記');
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+    expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+      .toBe('原始離線筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('rejects corrupt legacy FileReader backup bytes and preserves the current private note', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '保留尚未匯出的筆記' } });
+  const file = new File([Uint8Array.from([0x7b, 0x22, 0xff, 0x22, 0x7d])],
+    '損壞閱讀進度.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: undefined });
+  Object.defineProperty(file, 'arrayBuffer', { value: undefined });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent',
+    expect.stringContaining('進度備份含有無法解碼的 UTF-8 位元組'));
+  expect(note.value).toBe('保留尚未匯出的筆記');
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('restores an exact UTF-8 reading checkpoint on a WebView without File.text()', async () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
