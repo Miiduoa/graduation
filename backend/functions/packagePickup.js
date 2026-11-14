@@ -3,8 +3,17 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 async function confirmPackagePickup({ db, schoolId, packageId, uid }) {
   const school = db.collection('schools').doc(schoolId);
-  const packageRef = school.collection('packages').doc(packageId);
-  const dormRef = school.collection('dormPackages').doc(packageId);
+  let packageRef;
+  if (packageId.startsWith('dw_')) {
+    const matches = await school
+      .collection('packages')
+      .where('publicId', '==', packageId)
+      .limit(1)
+      .get();
+    if (!matches.docs.length) throw new HttpsError('not-found', 'Package not found');
+    packageRef = matches.docs[0].ref;
+  } else packageRef = school.collection('packages').doc(packageId);
+  const dormRef = school.collection('dormPackages').doc(packageRef.id);
   await db.runTransaction(async (tx) => {
     const parcel = await tx.get(packageRef);
     if (!parcel.exists) throw new HttpsError('not-found', 'Package not found');

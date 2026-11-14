@@ -185,7 +185,12 @@ it('does not relabel a preexisting server-side personal memo as delivered to a c
 it('shows cancellation time and excludes cancelled repairs from tonight tasks', () => {
   render(<DormitoryPage />);
   const cancelledAt = Date.UTC(2026, 10, 14, 8);
-  const repair = projectDormRepair('cancelled', { description: '已取消的冷氣報修', status: 'cancelled', cancelledAt, reference: 'STAFF-ONLY' });
+  const repair = projectDormRepair('cancelled', {
+    description: '已取消的冷氣報修',
+    status: 'cancelled',
+    cancelledAt,
+    reference: 'STAFF-ONLY',
+  });
   expect(repair.status).toBe('cancelled');
   expect(repair.steps).toContainEqual({ status: 'cancelled', at: cancelledAt });
   act(() => mock.listeners[0]({ ...state(), repairs: [repair] }));
@@ -196,25 +201,65 @@ it('shows cancellation time and excludes cancelled repairs from tonight tasks', 
   expect(screen.queryByText(/尚未確認輔導員接手|STAFF-ONLY/)).toBeNull();
 });
 
-it.each(['pending', 'assigned', 'in_progress', 'completed', 'closed', 'cancelled'])('presents %s as a memo even with status timestamps', (status) => {
-  render(<DormitoryPage />);
-  act(() => mock.listeners[0]({ ...state(), repairs: [projectDormRepair('memo', {
-    status, createdAt: 1700000000000, [status + 'At']: 1700000060000,
-  })] }));
-  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
-  expect(screen.getByText(/此應用沒有將備忘送到學校/)).toBeTruthy();
-  expect(document.body.textContent).toContain('備忘');
-  expect(document.body.textContent).not.toMatch(/已送給輔導員|輔導員已收到|已安排維修|已修好/);
-});
+it.each(['pending', 'assigned', 'in_progress', 'completed', 'closed', 'cancelled'])(
+  'presents %s as a memo even with status timestamps',
+  (status) => {
+    render(<DormitoryPage />);
+    act(() =>
+      mock.listeners[0]({
+        ...state(),
+        repairs: [
+          projectDormRepair('memo', {
+            status,
+            createdAt: 1700000000000,
+            [status + 'At']: 1700000060000,
+          }),
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+    expect(screen.getByText(/此應用沒有將備忘送到學校/)).toBeTruthy();
+    expect(document.body.textContent).toContain('備忘');
+    expect(document.body.textContent).not.toMatch(/已送給輔導員|輔導員已收到|已安排維修|已修好/);
+  },
+);
 
 it('projects formal tickets distinctly and retains every reopen timestamp', () => {
   const ticket = projectDormRepair('formal', {
-    workflow: 'dorm_staff', status: 'pending', dormStatus: 'sent', title: '燈不亮',
-    history: [{ status: 'sent', at: 1000 }, { status: 'fixed', at: 2000 }, { status: 'sent', at: 3000 }],
-    schoolReference: 'A123', vendor: '維修人員',
+    workflow: 'dorm_staff',
+    status: 'pending',
+    dormStatus: 'sent',
+    title: '燈不亮',
+    history: [
+      { status: 'sent', at: 1000 },
+      { status: 'fixed', at: 2000 },
+      { status: 'sent', at: 3000 },
+    ],
+    schoolReference: 'A123',
+    vendor: '維修人員',
   });
   expect(ticket.official).toBe(true);
   expect(ticket.status).toBe('sent');
-  expect(ticket.steps.map(h => h.at)).toEqual([1000, 2000, 3000]);
+  expect(ticket.steps.map((h) => h.at)).toEqual([1000, 2000, 3000]);
   expect(ticket).not.toHaveProperty('vendor');
+});
+
+it('polls the backend parcel projection and ignores late results after unsubscribe', async () => {
+  const { pollDormParcels } = await import('@campus/shared/src/dormitoryCloud');
+  let resolve!: (value: { rows: Array<{ id: string; data: Record<string, unknown> }> }) => void;
+  const load = vi.fn(
+    () =>
+      new Promise<{ rows: Array<{ id: string; data: Record<string, unknown> }> }>((done) => {
+        resolve = done;
+      }),
+  );
+  const rows = vi.fn(),
+    error = vi.fn();
+  const stop = pollDormParcels(load, rows, error);
+  expect(load).toHaveBeenCalledTimes(1);
+  stop();
+  resolve({ rows: [{ id: 'dw_synthetic', data: { description: '合成包裹' } }] });
+  await Promise.resolve();
+  expect(rows).not.toHaveBeenCalled();
+  expect(error).not.toHaveBeenCalled();
 });

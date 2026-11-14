@@ -213,3 +213,31 @@ export function watchDormCloud(
     });
   };
 }
+
+/** Packages must be projected by the backend: legacy document IDs may contain another user's ID. */
+export function pollDormParcels(
+  load: () => Promise<{ rows: Array<{ id: string; data: Record<string, unknown> }> }>,
+  rows: (value: Array<{ id: string; data: Record<string, unknown> }>) => void,
+  error: () => void,
+): () => void {
+  let active = true;
+  let pending = false;
+  const refresh = async () => {
+    if (pending) return;
+    pending = true;
+    try {
+      const result = await load();
+      if (active) rows(result.rows);
+    } catch {
+      if (active) error();
+    } finally {
+      pending = false;
+    }
+  };
+  void refresh();
+  const timer = setInterval(() => void refresh(), 60000);
+  return () => {
+    active = false;
+    clearInterval(timer);
+  };
+}

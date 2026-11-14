@@ -55,7 +55,7 @@ async function resolveDormSsoIdentity({ db, schoolId, studentId }) {
 }
 module.exports.resolveDormSsoIdentity = resolveDormSsoIdentity;
 
-// Called only after verified SSO login. Disabled schools retain their existing path.
+// Explicit trusted dorm identity refresh helper; never called from the login callback.
 async function refreshDormSsoIdentity(args) {
   const school = await args.db.collection('schools').doc(args.schoolId).get();
   if (school.data()?.dormWorkflowEnabled !== true) return;

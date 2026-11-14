@@ -30,6 +30,7 @@ export type DormTicket = {
   vendor?: string;
   expectedDate?: string;
   history: Array<{ status: DormTicketStatus; at: number }>;
+  /** Photo indices only; resolve via the authorized repairPhoto callable. */
   images?: string[];
 };
 export type DormLeave = {
@@ -45,6 +46,7 @@ export type DormLeave = {
 };
 export type DormResident = {
   id: string;
+  /** Masked for display; use id for resident selection. */
   studentId: string;
   name: string;
   building: string;
@@ -53,6 +55,7 @@ export type DormResident = {
 };
 export type DormStaffParcel = {
   id: string;
+  /** Masked for display. */
   studentId: string;
   building: string;
   description: string;

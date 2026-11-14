@@ -16,12 +16,21 @@ import {
   type DormLeave,
   type DormTicketStatus,
 } from '@campus/shared/src/dormWorkflow';
-import { getFunctionsInstance, getDb } from '@/lib/firebase';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getFunctionsInstance } from '@/lib/firebase';
 type FocusTarget = HTMLInputElement;
 const invoke = async <T,>(data: Record<string, unknown>) =>
-  (await httpsCallable<Record<string, unknown>, T>(getFunctionsInstance(), 'dormWorkflow')(data))
-    .data;
+  (
+    await httpsCallable<Record<string, unknown>, T>(
+      getFunctionsInstance(),
+      'dormWorkflow',
+    )({
+      ...data,
+      schoolId:
+        typeof data.schoolId === 'string'
+          ? (toPublicSchoolId(data.schoolId) ?? data.schoolId)
+          : data.schoolId,
+    })
+  ).data;
 function Box({ children }: { children: React.ReactNode }) {
   return (
     <section
@@ -128,6 +137,26 @@ function Photo({ url, label }: { url: string; label: string }) {
     </a>
   );
 }
+function TicketPhoto({ schoolId, id, index }: { schoolId: string; id: string; index: number }) {
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
+  const open = async () => {
+    try {
+      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index })).url);
+    } catch {
+      setError('無法讀取照片，請重新整理確認權限');
+    }
+  };
+  return (
+    <div>
+      <button type="button" onClick={() => void open()}>
+        查看報修照片 {index + 1}
+      </button>
+      {error && <span>{error}</span>}
+      {url && <Photo url={url} label={'報修照片 ' + (index + 1)} />}
+    </div>
+  );
+}
 async function exportSummary(text: string) {
   const url = URL.createObjectURL(new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8' }));
   const a = document.createElement('a');
@@ -136,7 +165,7 @@ async function exportSummary(text: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
-async function pickPhotos(uid: string, remaining: number): Promise<string[]> {
+async function pickPhotos(schoolId: string, remaining: number): Promise<string[]> {
   const files = await new Promise<File[]>((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -148,14 +177,25 @@ async function pickPhotos(uid: string, remaining: number): Promise<string[]> {
   });
   if (
     files.length > remaining ||
-    files.some((f) => !f.type.startsWith('image/') || f.size > 10 * 1024 * 1024)
+    files.some((f) => !f.type.startsWith('image/') || f.size > 6 * 1024 * 1024)
   )
-    throw new Error('照片最多三張，每張 10MB');
+    throw new Error('照片最多三張，每張 6MB');
   return Promise.all(
     files.map(async (file) => {
-      const target = ref(getStorage(getDb().app), `temp/${uid}/dorm_${dormRequestKey()}`);
-      await uploadBytes(target, file, { contentType: file.type });
-      return getDownloadURL(target);
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = () => reject(new Error('無法讀取照片'));
+        reader.readAsDataURL(file);
+      });
+      return (
+        await invoke<{ path: string }>({
+          schoolId,
+          action: 'uploadPhoto',
+          base64,
+          contentType: file.type,
+        })
+      ).path;
     }),
   );
 }
@@ -339,7 +379,7 @@ export function DormWorkflow({
       data.action === 'registerPackage' &&
       (!selectedStudentId.current ||
         data.studentId !== selectedStudentId.current ||
-        !rows.residents.some((r) => r.studentId === selectedStudentId.current))
+        !rows.residents.some((r) => r.id === selectedStudentId.current))
     )
       return;
     setBusy(true);
@@ -378,8 +418,7 @@ export function DormWorkflow({
       label={title}
       disabled={
         busy ||
-        (data.action === 'registerPackage' &&
-          !rows.residents.some((r) => r.studentId === data.studentId))
+        (data.action === 'registerPackage' && !rows.residents.some((r) => r.id === data.studentId))
       }
       onPress={() => void act(data, done)}
     />
@@ -406,7 +445,7 @@ export function DormWorkflow({
       {!!r.vendor && staff && <Label>廠商：{r.vendor}</Label>}
       {!!r.expectedDate && <Label>預計日期：{r.expectedDate}</Label>}
       {r.images?.map((url, i) => (
-        <Photo key={url} url={url} label={'報修照片 ' + (i + 1)} />
+        <TicketPhoto key={url} schoolId={schoolId} id={r.id} index={i} />
       ))}
       {staff ? (
         <>
@@ -525,7 +564,7 @@ export function DormWorkflow({
               <Label>請先確認問題名稱、位置及描述。漏水、斷電、受困請直接打服務台。</Label>
               {images.map((url, i) => (
                 <Box key={url}>
-                  <Photo url={url} label={'待送照片 ' + (i + 1)} />
+                  <Label>照片 {i + 1} 已上傳</Label>
                   <Btn
                     label={'移除照片 ' + (i + 1)}
                     disabled={busy}
@@ -539,7 +578,7 @@ export function DormWorkflow({
                 onPress={() => {
                   const photoGeneration = generation.current;
                   setBusy(true);
-                  void pickPhotos(uid, 3 - images.length)
+                  void pickPhotos(schoolId, 3 - images.length)
                     .then((photos) => {
                       if (photoGeneration === generation.current)
                         setImages((old) => [...old, ...photos].slice(0, 3));
@@ -673,7 +712,7 @@ export function DormWorkflow({
               <Label strong>連續登錄包裹</Label>
               <Field
                 focusRef={inputRef}
-                label="學號或姓名（本棟住宿生）"
+                label="學號末三碼或姓名（本棟住宿生）"
                 value={get('search')}
                 onChange={(value) => {
                   selectedStudentId.current = '';
@@ -692,17 +731,19 @@ export function DormWorkflow({
                       key={r.id}
                       label={`${r.studentId} ${r.name} ${r.building} ${r.room}`}
                       onPress={() => {
-                        selectedStudentId.current = r.studentId;
+                        selectedStudentId.current = r.id;
                         setValues((old) => ({
                           ...old,
-                          studentId: r.studentId,
+                          studentId: r.id,
                           search: r.studentId,
                         }));
                         setPreview(false);
                       }}
                     />
                   ))}
-              <Label>已選學號：{get('studentId')}</Label>
+              <Label>
+                已選住宿生：{rows.residents.find((r) => r.id === get('studentId'))?.studentId || ''}
+              </Label>
               {f('item', '品名（可使用鍵盤語音輸入）')}
               {f('location', '領取地點')}
               {button(
@@ -723,8 +764,14 @@ export function DormWorkflow({
                 },
               )}
               {f('collectStudent', '核對學生領取碼上的學號')}
+              <Label>以下僅列末三碼相符的包裹；核銷以輸入的完整學號為準。</Label>
               {rows.packages
-                .filter((p) => p.studentId === get('collectStudent') && p.status === 'waiting')
+                .filter(
+                  (p) =>
+                    get('collectStudent').length >= 3 &&
+                    String(p.studentId || '').endsWith(get('collectStudent').slice(-3)) &&
+                    p.status === 'waiting',
+                )
                 .map((p) => (
                   <Label key={p.id}>
                     {p.description} · {p.location}
@@ -776,7 +823,7 @@ export function DormWorkflow({
                   <Label>
                     {r.studentId} {r.name} · {r.building} {r.room} {r.bed}
                   </Label>
-                  {button('移出住宿名冊', { action: 'deactivateResident', studentId: r.studentId })}
+                  {button('移出住宿名冊', { action: 'deactivateResident', studentId: r.id })}
                 </Box>
               ))}
               <Label strong>本棟公告</Label>

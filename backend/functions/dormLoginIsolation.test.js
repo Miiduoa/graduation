@@ -39,7 +39,8 @@ test.each([false, true])(
         },
       },
     });
-    expect(requireDorm).toHaveBeenCalledWith('./dormSsoIdentity');
+    expect(requireDorm).not.toHaveBeenCalled();
+    expect(callback).not.toMatch(/dormSsoIdentity|refreshDormSsoIdentity/);
     expect(createCustomToken).toHaveBeenCalledWith(
       'student',
       expect.objectContaining({ schoolId: 'pu' }),

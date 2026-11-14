@@ -2344,14 +2344,6 @@ exports.verifySSOCallback = onRequest(
         schoolId,
       });
 
-      // Isolated dorm identity refresh from verified adapter claims only.
-      // Failure must never prevent an otherwise successful login.
-      try {
-        await require('./dormSsoIdentity').refreshDormSsoIdentity({ db, uid, schoolId, userInfo });
-      } catch {
-        // No profile data or provider errors in logs.
-      }
-
       res.json({
         success: true,
         customToken,

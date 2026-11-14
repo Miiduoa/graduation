@@ -1,7 +1,12 @@
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
-import { getDb } from '@/lib/firebase';
-import { watchDormCloud, type DormCloudState } from '@campus/shared/src/dormitoryCloud';
+import { httpsCallable } from 'firebase/functions';
+import { getDb, getFunctionsInstance } from '@/lib/firebase';
+import {
+  watchDormCloud,
+  pollDormParcels,
+  type DormCloudState,
+} from '@campus/shared/src/dormitoryCloud';
 
 export function subscribeDormCloud(
   schoolId: string,
@@ -13,11 +18,26 @@ export function subscribeDormCloud(
   return watchDormCloud(
     {
       watch: (name, field, rows, error) =>
-        onSnapshot(
-          query(collection(db, 'schools', canonicalSchoolId, name), where(field, '==', uid)),
-          (snap) => rows(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
-          error,
-        ),
+        name === 'packages'
+          ? pollDormParcels(
+              async () =>
+                (
+                  await httpsCallable<
+                    Record<string, unknown>,
+                    { rows: Array<{ id: string; data: Record<string, unknown> }> }
+                  >(
+                    getFunctionsInstance(),
+                    'dormWorkflow',
+                  )({ schoolId: canonicalSchoolId, action: 'parcels' })
+                ).data,
+              rows,
+              error,
+            )
+          : onSnapshot(
+              query(collection(db, 'schools', canonicalSchoolId, name), where(field, '==', uid)),
+              (snap) => rows(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+              error,
+            ),
       identity: (callback) =>
         onSnapshot(
           doc(db, 'users', uid),

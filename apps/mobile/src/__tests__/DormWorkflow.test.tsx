@@ -111,16 +111,18 @@ test('changing parcel search clears the previously selected resident', async () 
           repairs: [],
           leaves: [],
           packages: [],
-          residents: [{ id: '123', studentId: '123', name: '小明', building: 'A', room: '101' }],
+          residents: [
+            { id: 'dw_roster', studentId: '***123', name: '小明', building: 'A', room: '101' },
+          ],
         },
   );
   const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
-  const search = await view.findByLabelText('學號或姓名（本棟住宿生）');
+  const search = await view.findByLabelText('學號末三碼或姓名（本棟住宿生）');
   await waitFor(() =>
     expect(mockCall).toHaveBeenCalledWith(expect.objectContaining({ action: 'workspace' })),
   );
   fireEvent.changeText(search, '123');
-  fireEvent.press(await view.findByText('123 小明 A 101'));
+  fireEvent.press(await view.findByText('***123 小明 A 101'));
   const staleSubmit = view.UNSAFE_root.findAll(
     (node) =>
       typeof node.type === 'function' &&
@@ -303,4 +305,68 @@ test('mobile blocks partial statistics until all 51 records have loaded', async 
     false,
   );
   polling.mockRestore();
+});
+
+test('mobile resolves repair photos through the authorized backend', async () => {
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true }
+      : data.action === 'repairPhoto'
+        ? { url: 'https://signed.invalid/random' }
+        : {
+            repairs: [
+              {
+                id: 'dw_photo',
+                title: '合成報修',
+                dormitory: 'A',
+                room: '101',
+                dormStatus: 'sent',
+                history: [],
+                images: ['0'],
+              },
+            ],
+            leaves: [],
+          },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="student" />);
+  fireEvent.press(await view.findByText('查看報修照片 1'));
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith({
+      schoolId: 'pu',
+      action: 'repairPhoto',
+      id: 'dw_photo',
+      index: 0,
+    }),
+  );
+  expect((await view.findAllByLabelText('報修照片 1')).length).toBeGreaterThan(0);
+});
+
+test('mobile sends the selected opaque resident handle with masked display', async () => {
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true, packages: true }
+      : {
+          repairs: [],
+          leaves: [],
+          packages: [],
+          residents: [
+            {
+              id: 'dw_resident',
+              studentId: '***456',
+              name: '合成同學',
+              building: 'A',
+              room: '101',
+            },
+          ],
+        },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  fireEvent.changeText(await view.findByLabelText('學號末三碼或姓名（本棟住宿生）'), '456');
+  fireEvent.press(await view.findByText('***456 合成同學 A 101'));
+  fireEvent.press(view.getByText('登錄並通知學生'));
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_resident' }),
+    ),
+  );
 });

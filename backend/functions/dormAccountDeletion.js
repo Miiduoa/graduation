@@ -12,6 +12,7 @@ async function clearDormAccountData({ db, uid, scanPages }) {
     ['dormResidents', 'userId'],
     ['dormLeaves', 'userId'],
     ['dormRepairs', 'userId'],
+    ['dormPhotoUploads', 'userId'],
     ['dormPackages', 'recipientId'],
   ]) {
     // Scan by document path so cleanup needs no new collection-group indexes.

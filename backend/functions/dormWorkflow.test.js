@@ -1,6 +1,6 @@
 const { hasServiceDomainAccess } = require('./authz');
 const { createDormWorkflowHandler, transition } = require('./dormWorkflow');
-function fixture() {
+function fixture(options = {}) {
   const data = new Map([
     ['schools/pu', { dormWorkflowEnabled: true }],
     ['schools/pu/members/student', { role: 'student' }],
@@ -72,7 +72,7 @@ function fixture() {
   });
   const db = { collection, runTransaction: async (fn) => fn(writer()), batch: writer };
   const sendPushToUser = jest.fn().mockResolvedValue({});
-  const handler = createDormWorkflowHandler({ db, sendPushToUser });
+  const handler = createDormWorkflowHandler({ db, sendPushToUser, ...options });
   const call = (uid, input) => handler({ auth: { uid }, data: { schoolId: 'pu', ...input } });
   return { call, data, sendPushToUser, db, queries };
 }
@@ -953,7 +953,10 @@ test('legacy PU login data can import a resident without ssoLinks or login chang
     description: '包裹',
     location: '管理室',
   });
-  expect(data.get('schools/pu/dormPackages/staff_parcel').recipientId).toBe('pu-123');
+  expect(
+    [...data.entries()].find(([path]) => path.startsWith('schools/pu/dormPackages/'))[1]
+      .recipientId,
+  ).toBe('pu-123');
 });
 
 test.each(['deleted', 'deleting'])(
@@ -1052,22 +1055,17 @@ test('repair-only workspace omits identity metadata from rows, history and curso
 });
 
 test.each([undefined, 'old123'])(
-  'verified callback claims repair legacy SSO link studentId=%s',
+  'explicit dorm identity refresh repairs legacy SSO link studentId=%s',
   async (oldId) => {
-    const fs = require('node:fs');
-    const vm = require('node:vm');
     const { call, data, db } = fixture();
     data.delete('schools/pu/dormSsoIdentities/student');
     data.set('ssoLinks/pu_verified', { schoolId: 'pu', firebaseUid: 'student', studentId: oldId });
-    const source = fs.readFileSync(require.resolve('./index'), 'utf8');
-    const start = source.indexOf('      // Isolated dorm identity refresh');
-    const end = source.indexOf('      res.json({', start);
-    await vm.runInNewContext(`(async () => { ${source.slice(start, end)} })()`, {
+    // Explicit dorm identity operation, never executed by the login callback.
+    await require('./dormSsoIdentity').refreshDormSsoIdentity({
       db,
       uid: 'student',
       schoolId: 'pu',
       userInfo: { studentId: 'new123', name: '校方姓名' },
-      require,
     });
     await call('staff', {
       action: 'importResidents',
@@ -1094,4 +1092,283 @@ test('opaque workspace repair handles keep staff transitions and student history
   expect(data.get(`schools/pu/dormRepairs/${original.id}`).dormStatus).toBe('received');
   expect((await call('student', { action: 'mine' })).repairs[0].id).toBe(original.id);
   expect((await call('staff', { action: 'workspace' })).repairs[0].id).toBe(handle);
+});
+
+test('whole workspace and roster cursors contain masked identities only, scoped to authorized buildings', async () => {
+  const { call, data } = fixture();
+  for (let n = 0; n < 51; n++) {
+    const studentId = 'SYNTHETIC' + String(100000 + n);
+    data.set('schools/pu/dormResidents/' + studentId, {
+      studentId,
+      userId: 'pu-' + studentId,
+      name: '合成同學',
+      building: 'A',
+      room: '101',
+      bed: '1',
+      grade: 'SECRET_GRADE',
+      updatedAt: n,
+    });
+  }
+  data.set('schools/pu/dormResidents/OTHER999999', {
+    studentId: 'OTHER999999',
+    name: '別棟同學',
+    building: 'B',
+    updatedAt: 100,
+  });
+  data.set('schools/pu/dormPackages/pu-SYNTHETIC100000_legacy', {
+    studentId: 'SYNTHETIC100000',
+    recipientId: 'pu-SYNTHETIC100000',
+    building: 'A',
+    status: 'waiting',
+    arrivedAt: 1,
+    grade: 'SECRET_GRADE',
+  });
+  const first = await call('staff', { action: 'workspace' });
+  const second = await call('staff', { action: 'workspace', cursors: first.nextCursors });
+  expect(first.residents).toHaveLength(50);
+  expect(second.residents).toHaveLength(1);
+  expect(JSON.stringify([first, second])).not.toMatch(
+    /SYNTHETIC|OTHER999999|SECRET_GRADE|別棟同學/,
+  );
+  expect(
+    first.residents.every((r) => r.id.startsWith('dw_') && /^\*\*\*\d{3}$/.test(r.studentId)),
+  ).toBe(true);
+  await call('staff', { action: 'deactivateResident', studentId: second.residents[0].id });
+  expect([...data.values()].filter((r) => r.active === false)).toHaveLength(1);
+  await expect(call('student', { action: 'workspace' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+});
+
+test('student mine never returns staff identity, another student, grade or storage URL', async () => {
+  const { call, data } = fixture();
+  data.set('schools/pu/dormRepairs/own', {
+    userId: 'student',
+    workflow: 'dorm_staff',
+    building: 'A',
+    images: ['https://example.invalid/pu-OTHER123456/photo'],
+    grade: 'PRIVATE_GRADE',
+    updatedBy: 'pu-STAFF654321',
+    history: [{ status: 'sent', at: 1, actor: 'pu-STAFF654321' }],
+  });
+  data.set('schools/pu/dormRepairs/other', {
+    userId: 'other',
+    workflow: 'dorm_staff',
+    title: 'PRIVATE_OTHER',
+    grade: 'PRIVATE_GRADE',
+  });
+  data.set('schools/pu/dormLeaves/own', {
+    userId: 'student',
+    reviewedBy: 'pu-STAFF654321',
+    history: [{ status: 'approved', at: 1, actor: 'pu-STAFF654321' }],
+  });
+  data.set('schools/pu/dormResidents/123', { userId: 'student', building: 'A' });
+  data.set('schools/pu/dormAnnouncements/a', {
+    building: 'A',
+    title: '公告',
+    body: '內容',
+    createdBy: 'pu-STAFF654321',
+    grade: 'PRIVATE_GRADE',
+  });
+  const result = await call('student', { action: 'mine' });
+  expect(result.repairs).toHaveLength(1);
+  expect(result.repairs[0].images).toEqual(['0']);
+  expect(JSON.stringify(result)).not.toMatch(
+    /OTHER|STAFF|PRIVATE|https|reviewedBy|actor|createdBy/,
+  );
+});
+
+test('random parcel documents and legacy parcel documents both remain operable', async () => {
+  const { call, data, queries } = fixture();
+  data.set('schools/pu/dormResidents/SYNTHETIC123456', {
+    studentId: 'SYNTHETIC123456',
+    userId: 'student',
+    building: 'A',
+    active: true,
+  });
+  const input = {
+    action: 'registerPackage',
+    key: 'parcel',
+    studentId: 'SYNTHETIC123456',
+    description: '合成包裹',
+    location: '服務台',
+  };
+  const result = await call('staff', input);
+  expect(result.id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(await call('staff', input)).toEqual(result);
+  expect([...data.keys()].filter((k) => k.includes('/dormPackages/'))).toHaveLength(1);
+  const legacy = 'pu-SYNTHETIC987654_old';
+  data.set('schools/pu/dormPackages/' + legacy, {
+    studentId: 'SYNTHETIC123456',
+    recipientId: 'student',
+    building: 'A',
+    status: 'waiting',
+    location: '服務台',
+    arrivedAt: 0,
+  });
+  data.set('schools/pu/packages/' + legacy, { recipientId: 'student', status: 'waiting' });
+  const workspace = await call('staff', { action: 'workspace' });
+  expect(workspace.packages).toHaveLength(2);
+  expect(JSON.stringify(workspace)).not.toMatch(/SYNTHETIC/);
+  await call('staff', { action: 'collectPackages', studentId: 'SYNTHETIC123456' });
+  expect(data.get('schools/pu/dormPackages/' + legacy).status).toBe('picked_up');
+  expect(queries.some((q) => q.filters.some(([f]) => f === 'studentId'))).toBe(true);
+});
+
+function photoBucket() {
+  const objects = new Map();
+  const signed = jest.fn(async () => ['https://signed.invalid/random']);
+  const file = (path) => ({
+    save: jest.fn(async (bytes, opts) => objects.set(path, { bytes, ...opts.metadata })),
+    getMetadata: jest.fn(async () => [objects.get(path)]),
+    setMetadata: jest.fn(async (patch) => objects.set(path, { ...objects.get(path), ...patch })),
+    copy: jest.fn(async (target) =>
+      target.save(Buffer.from('legacy'), { metadata: { contentType: 'image/jpeg' } }),
+    ),
+    getSignedUrl: signed,
+  });
+  return { name: 'synthetic-bucket', file, objects, signed };
+}
+
+test('repair photos use identity-free paths, validate upload ownership, and sign only for owner or authorized building staff', async () => {
+  const bucket = photoBucket();
+  const { call, data } = fixture({ getBucket: () => bucket });
+  const upload = await call('student', {
+    action: 'uploadPhoto',
+    contentType: 'image/jpeg',
+    base64: Buffer.from('synthetic image').toString('base64'),
+  });
+  expect(upload.path).toMatch(/^dorm-private\/[0-9a-f-]{36}$/);
+  expect(upload.path).not.toMatch(/student|pu-/);
+  expect(JSON.stringify(bucket.objects.get(upload.path))).not.toMatch(/student|userId|owner/);
+  expect(data.get('schools/pu/dormPhotoUploads/' + upload.path.split('/')[1]).userId).toBe(
+    'student',
+  );
+  const { id } = await call('student', { ...repair, images: [upload.path] });
+  const staffId = (await call('staff', { action: 'workspace' })).repairs[0].id;
+  expect((await call('staff', { action: 'repairPhoto', id: staffId, index: 0 })).url).toContain(
+    'signed.invalid',
+  );
+  expect(bucket.signed).toHaveBeenLastCalledWith({ action: 'read', expires: expect.any(Number) });
+  const expires = bucket.signed.mock.calls.at(-1)[0].expires;
+  expect(expires - Date.now()).toBeLessThanOrEqual(60000);
+  data.set('schools/pu/members/other', { role: 'student' });
+  await expect(call('other', { action: 'repairPhoto', id, index: 0 })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  await expect(call('other', { ...repair, images: [upload.path] })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  await expect(
+    call('student', { ...repair, images: ['https://example.invalid/public'] }),
+  ).rejects.toMatchObject({ code: 'invalid-argument' });
+  data.set('schools/pu/dormStaffRoles/staff', {
+    status: 'active',
+    repairs: true,
+    buildings: ['B'],
+  });
+  const before = bucket.signed.mock.calls.length;
+  await expect(
+    call('staff', { action: 'repairPhoto', id: staffId, index: 0 }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(bucket.signed).toHaveBeenCalledTimes(before);
+  expect(await call('student', { action: 'repairPhoto', id, index: 0 })).toHaveProperty('url');
+  await expect(call('student', { action: 'repairPhoto', id, index: -1 })).rejects.toMatchObject({
+    code: 'not-found',
+  });
+});
+
+test('legacy repair photo URL is privately copied, public token revoked, and never returned', async () => {
+  const bucket = photoBucket();
+  const { call, data } = fixture({ getBucket: () => bucket });
+  const oldPath = 'temp/pu-SYNTHETIC123456/dorm_old';
+  data.set('schools/pu/dormRepairs/legacy', {
+    workflow: 'dorm_staff',
+    userId: 'pu-SYNTHETIC123456',
+    building: 'A',
+    status: 'pending',
+    createdAt: 1,
+    images: [
+      'https://firebasestorage.googleapis.com/v0/b/synthetic-bucket/o/' +
+        encodeURIComponent(oldPath) +
+        '?alt=media&token=synthetic',
+    ],
+  });
+  const workspace = await call('staff', { action: 'workspace' });
+  expect(JSON.stringify(workspace)).not.toMatch(/SYNTHETIC|token=|firebasestorage|temp\//);
+  await call('staff', { action: 'repairPhoto', id: workspace.repairs[0].id, index: 0 });
+  expect(data.get('schools/pu/dormRepairs/legacy').images[0]).toMatch(/^dorm-private\//);
+  expect(bucket.objects.get(oldPath).metadata.firebaseStorageDownloadTokens).toBeNull();
+});
+
+test('student legacy parcel feed returns only own parcels with opaque IDs and supports pickup without migration', async () => {
+  const { call, data, db } = fixture();
+  data.set('schools/pu/packages/pu-REGISTRANT654321_old', {
+    recipientId: 'student',
+    description: '合成舊包裹',
+    status: 'waiting',
+    registeredBy: 'pu-REGISTRANT654321',
+    studentId: 'OWN123456',
+    grade: 'PRIVATE_GRADE',
+  });
+  data.set('schools/pu/packages/other', { recipientId: 'other', description: 'PRIVATE_OTHER' });
+  data.set('schools/pu', { dormWorkflowEnabled: false });
+  const result = await call('student', { action: 'parcels' });
+  expect(result.rows).toHaveLength(1);
+  expect(result.rows[0].id).toMatch(/^dw_/);
+  expect(JSON.stringify(result)).not.toMatch(
+    /REGISTRANT|OWN123456|PRIVATE|recipientId|studentId|grade/,
+  );
+  await require('./packagePickup').confirmPackagePickup({
+    db,
+    schoolId: 'pu',
+    packageId: result.rows[0].id,
+    uid: 'student',
+  });
+  expect(data.get('schools/pu/packages/pu-REGISTRANT654321_old').status).toBe('picked_up');
+  await expect(
+    require('./packagePickup').confirmPackagePickup({
+      db,
+      schoolId: 'pu',
+      packageId: result.rows[0].id,
+      uid: 'staff',
+    }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test('stored applicant IDs are masked again and unauthorized photo sources fail closed', async () => {
+  const bucket = photoBucket();
+  const { call, data } = fixture({ getBucket: () => bucket });
+  data.set('schools/pu/dormLeaves/legacy', {
+    userId: 'other',
+    building: 'A',
+    applicantName: '合成同學',
+    maskedStudentId: 'SYNTHETIC123456',
+    status: 'pending',
+    createdAt: 1,
+  });
+  const leaves = (await call('staff', { action: 'workspace' })).leaves;
+  expect(leaves[0].maskedStudentId).toBe('***456');
+  for (const url of [
+    'https://example.invalid/private',
+    'https://firebasestorage.googleapis.com/v0/b/synthetic-bucket/o/temp%2Fother%2Fdorm_old',
+  ]) {
+    data.set('schools/pu/dormRepairs/source', {
+      userId: 'student',
+      building: 'A',
+      workflow: 'dorm_staff',
+      images: [url],
+    });
+    await expect(
+      call('student', { action: 'repairPhoto', id: 'source', index: 0 }),
+    ).rejects.toBeDefined();
+  }
+  expect(bucket.signed).not.toHaveBeenCalled();
+  await expect(
+    call('student', {
+      action: 'uploadPhoto',
+      contentType: 'image/svg+xml',
+      base64: 'c3ludGhldGlj',
+    }),
+  ).rejects.toMatchObject({ code: 'invalid-argument' });
 });

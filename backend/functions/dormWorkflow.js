@@ -25,7 +25,11 @@ function serialize(row) {
     JSON.stringify(row, (_k, v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : v)),
   );
 }
-function createDormWorkflowHandler({ db, sendPushToUser }) {
+function createDormWorkflowHandler({
+  db,
+  sendPushToUser,
+  getBucket = () => require('firebase-admin/storage').getStorage().bucket(),
+}) {
   const authz = createAuthzHelpers(db);
   return async (request) => {
     const uid = request.auth?.uid;
@@ -54,7 +58,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         admin,
         role: repairs || packages ? 'dorm_staff' : 'student',
       };
-    if (!enabled && input.action !== 'mine')
+    if (!enabled && !['mine', 'parcels'].includes(input.action))
       throw new HttpsError('failed-precondition', '這所學校尚未開通宿舍工作流程');
     const action = input.action;
     const staff = (domain) => {
@@ -75,6 +79,156 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       if (!matches.docs.length) throw new HttpsError('not-found', '找不到紀錄');
       return matches.docs[0].ref;
     };
+    const ensureHandle = async (name, d) => {
+      const handle = await db.runTransaction(async (tx) => {
+        const current = await tx.get(d.ref);
+        const value = current.data()?.publicId || 'dw_' + randomUUID();
+        if (current.exists && !current.data().publicId) tx.update(d.ref, { publicId: value });
+        return value;
+      });
+      handles.set(name + '/' + d.id, handle);
+      return handle;
+    };
+    const residentRef = async (value) => resolveRef('dormResidents', required(value, 200));
+    const ownRow = (row) => {
+      const allowed = [
+        'id',
+        'title',
+        'description',
+        'dormitory',
+        'building',
+        'room',
+        'category',
+        'workflow',
+        'status',
+        'dormStatus',
+        'schoolReference',
+        'expectedDate',
+        'date',
+        'reason',
+        'applicantName',
+        'maskedStudentId',
+        'createdAt',
+        'updatedAt',
+      ];
+      return {
+        ...Object.fromEntries(
+          allowed.filter((key) => row[key] !== undefined).map((key) => [key, row[key]]),
+        ),
+        images: (row.images || []).map((_, i) => String(i)),
+        history: (row.history || []).map(({ status, at }) => ({ status, at })),
+      };
+    };
+    if (action === 'parcels') {
+      const snap = await school.collection('packages').where('recipientId', '==', uid).get();
+      const rows = [];
+      const allowed = [
+        'description',
+        'sender',
+        'item',
+        'itemName',
+        'courier',
+        'carrier',
+        'location',
+        'status',
+        'arrivedAt',
+        'createdAt',
+      ];
+      for (const d of snap.docs) {
+        const row = serialize(d.data());
+        rows.push({
+          id: await ensureHandle('packages', d),
+          data: Object.fromEntries(
+            allowed.filter((key) => row[key] !== undefined).map((key) => [key, row[key]]),
+          ),
+        });
+      }
+      return { rows };
+    }
+    if (action === 'uploadPhoto') {
+      const contentType = required(input.contentType, 40);
+      if (
+        !['image/jpeg', 'image/png', 'image/webp'].includes(contentType) ||
+        typeof input.base64 !== 'string' ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64) ||
+        input.base64.length > 8 * 1024 * 1024
+      )
+        throw new HttpsError('invalid-argument', '請使用 6MB 以內的 JPG、PNG 或 WebP 照片');
+      const bytes = Buffer.from(input.base64, 'base64');
+      if (!bytes.length || bytes.length > 6 * 1024 * 1024)
+        throw new HttpsError('invalid-argument', '照片過大');
+      const photoId = randomUUID();
+      const path = 'dorm-private/' + photoId;
+      await getBucket().file(path).save(bytes, {
+        resumable: false,
+        metadata: {
+          contentType,
+        },
+      });
+      await db.runTransaction(async (tx) => {
+        const account = await tx.get(db.collection('users').doc(uid));
+        if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
+          throw new HttpsError('failed-precondition', '帳號已停用');
+        tx.create(school.collection('dormPhotoUploads').doc(photoId), {
+          userId: uid,
+          path,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      });
+      return { path };
+    }
+    if (action === 'repairPhoto') {
+      const ticket = await (await resolveRef('dormRepairs', required(input.id, 200))).get();
+      if (!ticket.exists) throw new HttpsError('not-found', '找不到工單');
+      const row = ticket.data();
+      if (row.userId !== uid) {
+        staff('repairs');
+        inBuilding(row);
+      }
+      if (row.workflow !== 'dorm_staff') throw new HttpsError('permission-denied', '不是宿舍工單');
+      if (!Number.isInteger(input.index) || input.index < 0 || !row.images?.[input.index])
+        throw new HttpsError('not-found', '找不到照片');
+      const bucket = getBucket();
+      let path = row.images[input.index];
+      if (!/^dorm-private\/[0-9a-f-]{36}$/.test(path)) {
+        // Read legacy Firebase URLs only from this bucket; never fetch arbitrary remote URLs.
+        let url;
+        try {
+          url = new URL(path);
+        } catch {
+          throw new HttpsError('not-found', '照片格式錯誤');
+        }
+        const prefix = '/v0/b/' + bucket.name + '/o/';
+        if (
+          url.origin !== 'https://firebasestorage.googleapis.com' ||
+          !url.pathname.startsWith(prefix)
+        )
+          throw new HttpsError('not-found', '照片來源錯誤');
+        const oldPath = decodeURIComponent(url.pathname.slice(prefix.length));
+        if (!oldPath.startsWith('temp/' + row.userId + '/dorm_'))
+          throw new HttpsError('permission-denied', '照片不屬於工單');
+        const source = bucket.file(oldPath);
+        path = 'dorm-private/' + randomUUID();
+        await source.copy(bucket.file(path));
+        // Do not copy legacy public download tokens to the private object.
+        await bucket
+          .file(path)
+          .setMetadata({ metadata: null, cacheControl: 'private, no-store, max-age=0' });
+        await source.setMetadata({ metadata: { firebaseStorageDownloadTokens: null } });
+        await db.runTransaction(async (tx) => {
+          const current = await tx.get(ticket.ref);
+          if (current.data()?.images?.[input.index] === row.images[input.index]) {
+            const images = [...current.data().images];
+            images[input.index] = path;
+            tx.update(ticket.ref, { images });
+          }
+        });
+      }
+      const [url] = await bucket
+        .file(path)
+        .getSignedUrl({ action: 'read', expires: Date.now() + 60000 });
+      return { url };
+    }
     const list = async (name, own = false) => {
       let q = school.collection(name);
       if (own) q = q.where('userId', '==', uid);
@@ -95,11 +249,18 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           .collection('dormAnnouncements')
           .where('building', '==', building)
           .get();
-        announcements.push(...snap.docs.map((d) => ({ id: d.id, ...serialize(d.data()) })));
+        announcements.push(
+          ...snap.docs.map((d) => {
+            const { building, title, body } = d.data();
+            return { id: d.id, building, title, body };
+          }),
+        );
       }
       return {
-        leaves: await list('dormLeaves', true),
-        repairs: (await list('dormRepairs', true)).filter((r) => r.workflow === 'dorm_staff'),
+        leaves: (await list('dormLeaves', true)).map(ownRow),
+        repairs: (await list('dormRepairs', true))
+          .filter((r) => r.workflow === 'dorm_staff')
+          .map(ownRow),
         announcements,
       };
     }
@@ -207,25 +368,8 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           }
           const snap = await q.limit(pageSize + 1).get();
           const docs = snap.docs.slice(0, pageSize);
-          for (const d of docs) {
-            if (name === 'dormResidents') continue;
-            const handle =
-              d.data().publicId ||
-              (await db.runTransaction(async (tx) => {
-                const current = await tx.get(d.ref);
-                const value = current.data()?.publicId || 'dw_' + randomUUID();
-                if (current.exists && !current.data().publicId)
-                  tx.update(d.ref, { publicId: value });
-                return value;
-              }));
-            handles.set(name + '/' + d.id, handle);
-          }
-          nextCursors[key] =
-            snap.docs.length > pageSize
-              ? name === 'dormResidents'
-                ? docs.at(-1).id
-                : publicId(name, docs.at(-1).id)
-              : null;
+          for (const d of docs) await ensureHandle(name, d);
+          nextCursors[key] = snap.docs.length > pageSize ? publicId(name, docs.at(-1).id) : null;
           rows.push(...docs.map((d) => ({ id: d.id, ...serialize(d.data()) })));
         }
         return rows.filter((row) => name !== 'dormResidents' || row.active !== false);
@@ -326,9 +470,18 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       };
       for (const [kind, allowed] of Object.entries(fields)) {
         result[kind] = result[kind].map((row) => ({
-          id: kind === 'residents' ? row.id : publicId(collections[kind], row.id),
+          id: publicId(kind === 'residents' ? 'dormResidents' : collections[kind], row.id),
           ...Object.fromEntries(
-            allowed.filter((key) => row[key] !== undefined).map((key) => [key, row[key]]),
+            allowed
+              .filter((key) => row[key] !== undefined)
+              .map((key) => [
+                key,
+                ['studentId', 'maskedStudentId'].includes(key)
+                  ? '***' + String(row[key]).slice(-3)
+                  : key === 'images'
+                    ? (row.images || []).map((_, i) => String(i))
+                    : row[key],
+              ]),
           ),
           ...(['repairs', 'leaves'].includes(kind)
             ? { history: (row.history || []).map(({ status, at }) => ({ status, at })) }
@@ -363,9 +516,14 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         if (
           !Array.isArray(images) ||
           images.length > 3 ||
-          images.some((x) => typeof x !== 'string' || x.length > 2048 || !/^https:\/\//.test(x))
+          images.some((x) => typeof x !== 'string' || !/^dorm-private\/[0-9a-f-]{36}$/.test(x))
         )
-          throw new HttpsError('invalid-argument', '照片最多三張，請使用已上傳照片網址');
+          throw new HttpsError('invalid-argument', '照片最多三張，請先上傳本人照片');
+        for (const path of images) {
+          const photo = await school.collection('dormPhotoUploads').doc(path.split('/')[1]).get();
+          if (!photo.exists || photo.data().userId !== uid || photo.data().path !== path)
+            throw new HttpsError('permission-denied', '照片不屬於本人');
+        }
         row = {
           workflow: 'dorm_staff',
           userId: uid,
@@ -502,7 +660,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
     }
     if (action === 'deactivateResident') {
       staff('packages');
-      const ref = school.collection('dormResidents').doc(required(input.studentId, 50));
+      const ref = await residentRef(input.studentId);
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         if (!snap.exists) throw new HttpsError('not-found', '找不到住宿生');
@@ -577,16 +735,27 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
     }
     if (action === 'registerPackage') {
       staff('packages');
-      const residentRef = school.collection('dormResidents').doc(required(input.studentId, 50));
+      const selectedResidentRef = await residentRef(input.studentId);
       const packageKey = required(input.key, 100);
       if (!/^[a-zA-Z0-9_-]+$/.test(packageKey))
         throw new HttpsError('invalid-argument', '重試代碼錯誤');
-      const ref = school.collection('dormPackages').doc(uid + '_' + packageKey);
+      const ref = school.collection('dormPackages').doc(randomUUID());
       const description = required(input.description, 120);
       const location = required(input.location, 120);
       const parcel = await db.runTransaction(async (tx) => {
-        const [old, resident] = await tx.getAll(ref, residentRef);
-        if (old.exists) return null;
+        const duplicates = await tx.get(
+          school
+            .collection('dormPackages')
+            .where('registeredBy', '==', uid)
+            .where('requestKey', '==', packageKey)
+            .limit(1),
+        );
+        if (duplicates.docs.length) {
+          inBuilding(duplicates.docs[0].data());
+          return { existingId: duplicates.docs[0].id };
+        }
+        const [old, resident] = await tx.getAll(ref, selectedResidentRef);
+        if (old.exists) return { existingId: ref.id };
         if (!resident.exists || resident.data().active === false)
           throw new HttpsError('failed-precondition', '學號不在住宿生名單');
         const r = resident.data();
@@ -595,6 +764,8 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           throw new HttpsError('failed-precondition', '住宿生帳號已停用');
         inBuilding(r);
         const parcel = {
+          registeredBy: uid,
+          requestKey: packageKey,
           recipientId: r.userId,
           studentId: r.studentId,
           building: r.building,
@@ -614,7 +785,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         });
         return parcel;
       });
-      if (!parcel) return { success: true, id: ref.id };
+      if (parcel.existingId) return { success: true, id: parcel.existingId };
       try {
         await sendPushToUser(
           parcel.recipientId,

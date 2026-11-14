@@ -191,11 +191,13 @@ it('keeps history read-only after school disables the workflow', async () => {
 });
 it('requires a fresh resident selection after changing parcel search', async () => {
   api.config.packages = true;
-  api.rows.residents = [{ id: '123', studentId: '123', name: '小明', building: 'A', room: '101' }];
+  api.rows.residents = [
+    { id: 'dw_roster', studentId: '***123', name: '小明', building: 'A', room: '101' },
+  ];
   render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
-  const search = await screen.findByLabelText('學號或姓名（本棟住宿生）');
+  const search = await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）');
   fireEvent.change(search, { target: { value: '123' } });
-  fireEvent.click(await screen.findByText('123 小明 A 101'));
+  fireEvent.click(await screen.findByText('***123 小明 A 101'));
   expect((screen.getByText('登錄並通知學生') as HTMLButtonElement).disabled).toBe(false);
   fireEvent.change(search, { target: { value: '456' } });
   expect((screen.getByText('登錄並通知學生') as HTMLButtonElement).disabled).toBe(true);
@@ -354,4 +356,61 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
   expect(api.call.mock.calls.length).toBe(count);
   expect(screen.getByText(/"A","51","0","0"/)).toBeTruthy();
   polling.mockRestore();
+});
+
+it('selects a masked resident using the opaque handle for package registration', async () => {
+  api.config.packages = true;
+  api.rows.residents = [
+    {
+      id: 'dw_synthetic_resident',
+      studentId: '***456',
+      name: '合成同學',
+      building: 'A',
+      room: '101',
+    },
+  ];
+  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  fireEvent.change(await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）'), {
+    target: { value: '456' },
+  });
+  fireEvent.click(await screen.findByText('***456 合成同學 A 101'));
+  fireEvent.click(screen.getByText('登錄並通知學生'));
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_synthetic_resident' }),
+    ),
+  );
+});
+
+it('resolves ticket photos through the authorized backend only on request', async () => {
+  api.rows.repairs = [
+    {
+      id: 'dw_photo',
+      title: '合成報修',
+      dormitory: 'A',
+      room: '101',
+      dormStatus: 'sent',
+      history: [],
+      images: ['0'],
+    },
+  ];
+  const original = api.call.getMockImplementation()!;
+  api.call.mockImplementation(async (data) =>
+    data.action === 'repairPhoto' ? { url: 'https://signed.invalid/random' } : original(data),
+  );
+  render(<DormWorkflow schoolId="pu" uid="student" />);
+  const button = await screen.findByText('查看報修照片 1');
+  expect(screen.queryByRole('img')).toBeNull();
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith({
+      schoolId: 'pu',
+      action: 'repairPhoto',
+      id: 'dw_photo',
+      index: 0,
+    }),
+  );
+  expect((await screen.findByRole('img')).getAttribute('src')).toBe(
+    'https://signed.invalid/random',
+  );
 });

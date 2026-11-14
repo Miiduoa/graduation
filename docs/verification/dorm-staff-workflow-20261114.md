@@ -130,3 +130,25 @@
 - P2：網頁及手機開始載入後續分頁時暫停每分鐘輪詢，並使先前未完成的第一頁請求失效；保留已載入範圍直到使用者手動重新整理、切換模式或篩選。50＋1 筆案例跨輪詢週期仍保留完整統計。
 - 有登入權限migration變更：本輪依審查要求，窄幅修改 index.js 一般 SSO callback，加入上述隔離同步呼叫；屬「需晉瑋說『上』」範圍。未修改 sessions、共用 authz、ACL、Firestore／Storage rules 或 migration，未部署或操作正式資料；未修改其他 lane 檔案。
 - 驗證：後端 dormWorkflow／dormLoginIsolation／accountDeletion、網頁 DormWorkflow、手機 DormWorkflow／DormStaffHome 通過；web、mobile、shared 全專案 typecheck、後端變更模組 ESLint、index.js 語法與 git diff --check 通過。快取、型別增量檔及輸出置於 /tmp，完成後清除；未安裝依賴或更換 node_modules symlink。
+
+## 本輪 P1 隱私審查修正（2026-11-14，取代前述相衝突的登入／照片說明）
+
+- P1-1：名冊、包裹學號一律只顯示末三碼；名冊文件 ID 與分頁游標也改成隨機 publicId。兩端選取／移出住宿生使用代碼，由後端查索引解析並驗證棟別，不將完整名冊學號下載到前端。人工核銷及 CSV 匯入仍接受值班人員當下核對的完整學號，但不由 API 回傳整份學號。既有外宿申請人姓名與遮罩學號保留，既存 maskedStudentId 也重新遮罩，避免舊欄位帶入完整學號。
+- 本人 mine 使用欄位白名單，剔除 reviewedBy、updatedBy、history actor、未知 grade 等欄位；公告也不再回傳 createdBy UID。學生不能取得他人的外宿、報修、包裹，職員仍只取得授權棟別。工作台棟別查詢、每頁 50 筆、全頁載入後才統計／匯出及分頁期間不被輪詢覆蓋的既有修正保留。
+- P1-2：新 dormPackages 及 packages 鏡像文件 ID 為 randomUUID，不含登錄者／收件者 UID 或學號。冪等以後端交易查詢 registeredBy＋requestKey 索引欄位，並重新驗證棟別。舊包裹原文件不搬移、不刪除；新本人 parcels API 以 recipientId 查詢，只回傳白名單與隨機別名，既有鏡像仍能查看與核銷。兩端不再直讀包裹 Firestore 文件；含學號的舊 ID 不會到達新客戶端。confirmPackagePickup 支援別名，交易內仍驗證本人與退件狀態。
+- P1-3：新照片由後端寫入 dorm-private/{randomUUID}，不建立永久下載 token，且不在可公開讀取的物件 metadata 放 UID。擁有者存於 backend-only dormPhotoUploads，送單時驗證本人與學校；刪帳一併清除該授權紀錄。列表只提供照片序號，兩端要求 repairPhoto 後才顯示照片；每次驗證工單、有效校內 membership、本人或職員 repairs 棟別，再簽發 60 秒網址，物件禁用快取。舊照片僅接受相同 bucket／工單擁有者的 temp 路徑；授權讀取時複製為私有隨機路徑，清除新物件全部 custom metadata、撤銷原物件 download token，保留原工單照片可讀。拒絕任意遠端網址與他人照片。單張上限改為 6MB，確保 base64 包裝後仍小於既有 HTTP 10MB 請求限制。
+- 登入隔離：移除 PR 中殘留的 verifySSOCallback 宿舍同步區塊，merge-base 對照下登入 callback 沒有本 PR 修改；新／舊帳號登入測試確認完全不載入宿舍模組，宿舍不可用仍正常發 token。可信映射仍由宿舍端既有按需解析使用，不新增登入、session 或共用 ACL 流程。
+- 已以 merge-base 全 PR diff 搜尋 studentId、grade、images、publicId、createdBy、reviewedBy 等出口，並檢查識別碼、分頁、照片物件 metadata 及既有包裹 feed；未發現其他新增的跨使用者成績出口。完整 API 回應測試使用 SYNTHETIC 字樣與合成學號，涵蓋名冊 50＋1 分頁、他棟隔離、未知 grade 欄位、原始 URL／UID、舊包裹相容及照片越權。
+
+### 需晉瑋說「上」
+
+- [待核准權限片段](../approval/dorm-privacy-20261114.md)：既有 packages Firestore 直讀會外露舊文件 ID，必須在核准後以文件片段取代舊 allow；不能只新增 deny match。其他包裹客戶端需協調切換，不能在未封閉直讀前宣稱舊資料已完全封閉。Storage 私有路徑沿用現有預設拒絕，不需修改 Storage rules。
+- 新 callable actions：parcels、uploadPhoto、repairPhoto；新增 backend-only dormPhotoUploads 欄位紀錄，及包裹 registeredBy／requestKey、隨機 publicId。無批次 migration、無離線回填；未修改 Firestore／Storage rules 檔。照片簽署能力與真實 bucket 權限須在核准開通時以合成資料驗證。舊照片已散布的永久網址在該照片第一次經後端讀取撤銷 token 前仍可能有效，詳見核准文件。
+- 本輪沒有部署、開通學校、遷移或操作正式資料；不合併 PR。
+
+### 驗證
+
+- Backend 完整 Jest：141 檔、2,275 項通過，使用 `--runInBand --cacheDirectory=/tmp/jest-dorm`；最後局部變更另重跑 dormWorkflow／dormLoginIsolation／accountDeletion／authz。
+- Web：DormWorkflow、cloud、cloudPrivacy、dormitory 工具，40 項通過。
+- Mobile：DormWorkflow、DormStaffHome、DormParcelPrivacy、dormitoryWorkspace，22 項通過。
+- Web／Mobile／shared 全專案 typecheck、變更後端模組 ESLint、index.js 語法及 git diff --check 通過。沿用外部 node_modules symlink，以既有 /tmp 設定指向本工作樹 shared；沒有安裝依賴、更換 symlink、排除檢查檔案或新增依賴。Node 24 仍有專案 Node 20／22 引擎提示。

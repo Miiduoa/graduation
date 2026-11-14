@@ -562,7 +562,13 @@ test('account deletion drains dorm identities, authority, private records and pa
       seed.push([`groups/g/${collection}/alice`, { keep: true }]);
     }
     for (let i = 0; i < 205; i++) {
-      for (const collection of ['dormResidents', 'dormLeaves', 'dormRepairs', 'dormPackages']) {
+      for (const collection of [
+        'dormResidents',
+        'dormLeaves',
+        'dormRepairs',
+        'dormPackages',
+        'dormPhotoUploads',
+      ]) {
         const ownerField = collection === 'dormPackages' ? 'recipientId' : 'userId';
         seed.push([
           `schools/${school}/${collection}/${i}`,
