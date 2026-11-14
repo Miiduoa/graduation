@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { AppState, type AppStateStatus } from 'react-native';
 import { StoryAudiencePanel } from '../screens/social/StoryAudiencePanel';
 import { listStoryViewers, type CampusStoryDoc } from '../services/stories';
 
@@ -398,6 +399,96 @@ describe('story audience scope transitions', () => {
     expect(view.getByText('重新授權後的同學')).toBeTruthy();
     expect(view.queryByText('撤權前可見的同學')).toBeNull();
     view.unmount();
+  });
+
+  test('background removes old viewers, discards late pages, and foreground rechecks from first page', async () => {
+    let notifyState: ((state: AppStateStatus) => void) | undefined;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      if (event === 'change') notifyState = listener as (state: AppStateStatus) => void;
+      return { remove: jest.fn() } as ReturnType<typeof AppState.addEventListener>;
+    });
+    const cursor = { id: 'old-page' } as Cursor;
+    const delayedPage = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '背景前的觀看者' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => delayedPage.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '重新確認後的觀看者' }],
+        nextCursor: null,
+      });
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('背景前的觀看者')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor]);
+    expect(notifyState).toBeDefined();
+    act(() => { notifyState?.('background'); });
+    expect(view.queryByText('背景前的觀看者')).toBeNull();
+    expect(fetchViewers).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      delayedPage.resolve({
+        viewers: [{ uid: 'late', displayName: '背景晚到的觀看者' }],
+        nextCursor: null,
+      });
+      await delayedPage.promise;
+    });
+    expect(view.queryByText('背景晚到的觀看者')).toBeNull();
+    expect(fetchViewers).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      notifyState?.('active');
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('重新確認後的觀看者')).toBeTruthy();
+    expect(view.queryByText('背景前的觀看者')).toBeNull();
+    view.unmount();
+    subscription.mockRestore();
+  });
+
+  test('foreground denial never restores old names and recovered access explicitly rechecks', async () => {
+    let notifyState: ((state: AppStateStatus) => void) | undefined;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      if (event === 'change') notifyState = listener as (state: AppStateStatus) => void;
+      return { remove: jest.fn() } as ReturnType<typeof AppState.addEventListener>;
+    });
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '撤權前觀看者' }],
+        nextCursor: null,
+      })
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '恢復權限後觀看者' }],
+        nextCursor: null,
+      });
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('撤權前觀看者')).toBeTruthy();
+    expect(notifyState).toBeDefined();
+    act(() => { notifyState?.('inactive'); });
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+    await act(async () => {
+      notifyState?.('active');
+      await Promise.resolve();
+    });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新檢查存取權限'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null, null]);
+    expect(view.getByText('恢復權限後觀看者')).toBeTruthy();
+    view.unmount();
+    subscription.mockRestore();
   });
 
 });
