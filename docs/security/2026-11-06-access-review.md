@@ -694,3 +694,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修改只在**一般作者**的內容修改分支，拒絕既有資料帶軟刪除或取消狀態的後續寫入；具有當前有效群組管理權限的教師／管理員仍可明確恢復，正常公開貼文仍可由本人編輯，按讚專用分支本就要求貼文可見。本次測試新增合成 Firebase Emulator 矩陣：不同撤回標記、作者直接復原／一般編輯拒絕、跨校拒絕、教師明確恢復、恢復後作者正常編輯、撤銷群組資格後同一登入 context 重放。**此新精確 head 的實際 CI／CodeQL 須獨立確認，暫不列為已通過。**
 
 父 head 的 [主 CI #43536293392](https://github.com/Miiduoa/graduation/actions/runs/43536293392)、[CodeQL #43536293459](https://github.com/Miiduoa/graduation/actions/runs/43536293459)、[Course access #43536293391](https://github.com/Miiduoa/graduation/actions/runs/43536293391) 均已 completed/success，且 Web／Mobile／Build Web／Build Mobile 全部成功。新補丁不代表正式發布。**未發布群組父貼文 get/list 曝光仍未解決**，需要配套 Web/Mobile 查詢與舊資料改造；此外 GCS／Supabase 已簽 URL 撤權、真隔離 Storage 競態、歷史可信附件、minimatch 雙圖相容與正式發布回復仍待驗收。Supabase permissions、Python security、Mobile Agent Regression、Maestro 沒有這個新 head 的獨立結果。PR 保留 Draft、未取得 App 5504170 對精確 head 的 APPROVED 審查前不合併。不操作正式資料、token、憑證、migration、部署、E 校園，也不重跑受限 npm／pnpm audit。
+
+## 2026-11-14：封鎖根目錄 postLikes 的跨校身分枚舉（PR #577）
+
+精確父 head `129162e38daa23b72acdf8fa1c496c26568586ea` 的主 CI #43558304404、CodeQL #43558304415 與 Course access 均 completed/success；該 head 的主 CI 包括 Web、Mobile、Firestore Rules、Functions、Security Gates、Lint/Type、PostgreSQL policy、Build Web/Mobile 全通過。Supabase permissions、Python security、Mobile Agent Regression 與 Maestro 無該 head 的獨立證據。當時 main `5b9f93602a057df52a884eadf002bb9e71f50231`，PR ahead 24、behind 4；主線新增檔案未與 PR 八個修改檔重疊。Reviews 0、未解決 threads 0，App 5504170 沒有精確 head APPROVED。
+
+本輪另查到根目錄 `postLikes/{docId}` 的 `allow read: if isSignedIn()` 允許任何有效登入者對全域投票集合 list／get（含其他學校的 `userId` 與 `postId`）。這不同於之前已收緊的 `groups/{groupId}/posts/{postId}` 內嵌按讚欄位；目前未取得正式資料遭枚舉的證據。最小 fail-closed 修補將直接 GET 綁定現存 `groupPosts/{postId}` 的現時有效群組、校籍，完全禁止全域 list；既有本人建立／刪除票的規則不變。若舊客戶端依賴全域 list，須遷往限群組的伺服器索引後才能恢復，絕不為相容性重新開放全域枚舉。
+
+新增合成 Firebase Emulator 回歸：同組合法讀票、跨帳號與跨校直接 GET 拒絕、匿名拒絕、缺失 parent 拒絕、無條件或過濾後全域 list 拒絕、合法建立／刪除、冒刪拒絕、跨校建立拒絕，以及同登入 context 在群組與校籍撤銷後的重放拒絕和恢復成功。**本輪程式碼及測試已提交的狀態不代表新精確 head CI 已通過；以 GitHub 新工作流驗證為準。**
+
+本變更不處理 `groups/{groupId}/posts/{postId}` 未發布父貼文的 get/list 曝光；該高優先項仍需 Web/Mobile feed 查詢、歷史欄位與索引配套改造。GCS/Supabase 已發網址撤權、真隔離 Storage CAS 競態、歷史可信附件引用、minimatch 雙鎖檔與正式發布/回復驗收仍未完成。PR 維持 Draft，指定 nuni-merge-gate App 5504170 核可前不合併或部署；沒有操作正式資料、金鑰、token、migration、E 校園或執行受限制的 npm/pnpm audit。

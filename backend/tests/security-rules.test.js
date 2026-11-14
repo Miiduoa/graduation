@@ -97,6 +97,72 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('global postLikes cannot enumerate identities or cross a campus/group boundary', async () => {
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`groups/pu-group/members/${uid}`).set({ status: 'active', role: 'member' });
+      }
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'ncku' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active', role: 'student' });
+      await db.doc('groups/ncku-group/members/mallory').set({ status: 'active', role: 'member' });
+      await db.doc('groups/pu-group').set({ schoolId: 'pu' });
+      await db.doc('groups/ncku-group').set({ schoolId: 'ncku' });
+      await db.doc('groupPosts/pu-post').set({ groupId: 'pu-group' });
+      await db.doc('groupPosts/ncku-post').set({ groupId: 'ncku-group' });
+      await db.doc('postLikes/pu-like').set({ postId: 'pu-post', userId: 'alice' });
+      await db.doc('postLikes/ncku-like').set({ postId: 'ncku-post', userId: 'mallory' });
+      // Legacy malformed votes must not authorize a read without a parent.
+      await db.doc('postLikes/no-parent').set({ userId: 'alice' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(alice.doc('postLikes/pu-like').get());
+    await assertSucceeds(bob.doc('postLikes/pu-like').get());
+    await assertSucceeds(mallory.doc('postLikes/ncku-like').get());
+    await assertFails(alice.doc('postLikes/ncku-like').get());
+    await assertFails(mallory.doc('postLikes/pu-like').get());
+    await assertFails(guest.doc('postLikes/pu-like').get());
+    await assertFails(alice.doc('postLikes/no-parent').get());
+
+    // Even a filtered global query can enumerate unrelated groups if new
+    // records are added while the query is open. Only exact GET is public.
+    await assertFails(alice.collection('postLikes').get());
+    await assertFails(alice.collection('postLikes').where('postId', '==', 'pu-post').get());
+    await assertFails(mallory.collection('postLikes').get());
+
+    // Existing exact-vote lifecycle stays available to the member; a voter
+    // cannot delete someone else's vote or create one in another school.
+    await assertSucceeds(bob.doc('postLikes/bob-pu').set({ postId: 'pu-post', userId: 'bob' }));
+    await assertFails(bob.doc('postLikes/pu-like').delete());
+    await assertFails(alice.doc('postLikes/cross-school').set({ postId: 'ncku-post', userId: 'alice' }));
+
+    // Reuse the same signed-in context after group and school revocation:
+    // no cached token or known ID should replay an earlier vote operation.
+    await seedFirestore(async (db) => {
+      await db.doc('groups/pu-group/members/alice').update({ status: 'removed' });
+    });
+    await assertFails(alice.doc('postLikes/pu-like').get());
+    await assertFails(alice.doc('postLikes/pu-like').delete());
+    await seedFirestore(async (db) => {
+      await db.doc('groups/pu-group/members/alice').update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await assertFails(alice.doc('postLikes/pu-like').get());
+    await assertFails(alice.doc('postLikes/pu-like').delete());
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+    });
+    await assertSucceeds(alice.doc('postLikes/pu-like').get());
+    await assertSucceeds(alice.doc('postLikes/pu-like').delete());
+    await assertSucceeds(bob.doc('postLikes/bob-pu').delete());
+  });
+
   for (const accountState of [
     { accountDeletionInProgress: true },
     ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),

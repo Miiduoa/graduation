@@ -2165,7 +2165,13 @@ service cloud.firestore {
     }
 
     match /postLikes/{docId} {
-      allow read: if isSignedIn();
+      // A global list of votes exposes campus members' identities across
+      // groups. Keep exact-document reads to members of the parent post;
+      // enumeration is server-only until consumers use a school-scoped index.
+      allow get: if isSignedIn()
+        && resource.data.get('postId', null) is string
+        && canReadGroupPost(resource.data.postId);
+      allow list: if false;
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && canReadGroupPost(request.resource.data.postId);
