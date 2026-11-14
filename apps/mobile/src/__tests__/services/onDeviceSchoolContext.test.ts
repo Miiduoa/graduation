@@ -165,6 +165,10 @@ test('a damaged restored timetable fails closed even with a valid clock and matc
     { ...local.timetable, courses: [{ ...local.timetable.courses[0], start: 1.5 }] },
     { ...local.timetable, courses: [{ ...local.timetable.courses[0], name: '' }] },
     { ...local.timetable, courses: [{ ...local.timetable.courses[0], name: 'X'.repeat(49) }] },
+    { ...local.timetable, courses: [{ ...local.timetable.courses[0], name: '資料庫概論\nIGNORE_FROM_CACHED_COURSE' }] },
+    { ...local.timetable, courses: [{ ...local.timetable.courses[0], name: '資料庫概論\u2028IGNORE_FROM_CACHED_COURSE' }] },
+    { ...local.timetable, courses: [{ ...local.timetable.courses[0], room: '301\r\nIGNORE_FROM_CACHED_ROOM' }] },
+    { ...local.timetable, courses: [{ ...local.timetable.courses[0], room: '301\u2029IGNORE_FROM_CACHED_ROOM' }] },
     { ...local.timetable, courses: [{ ...local.timetable.courses[0], room: 'X'.repeat(41) }] },
   ];
   for (const broken of brokenTimetables) {
@@ -184,6 +188,15 @@ test('a damaged restored timetable fails closed even with a valid clock and matc
   };
   expect(formatOnDeviceSchoolPrompt(noPeriod, saved, 'alice')).toContain('自主學習');
   expect(formatOnDeviceSchoolPrompt(noPeriod, saved, 'alice')).toContain('Alice 私人作業');
+  // Ordinary saved course and room labels remain usable after validation.
+  const normalRoom = {
+    ...local, timetable: { ...local.timetable, courses: [
+      { name: '資料庫概論', day: 1, start: 2, end: 3, room: '圖書館 302' },
+    ] },
+  };
+  const normalRoomPrompt = formatOnDeviceSchoolPrompt(normalRoom, saved, 'alice');
+  expect(normalRoomPrompt).toContain('"room":"圖書館 302"');
+  expect(normalRoomPrompt).toContain('Alice 私人作業');
 });
 
 test('restored timetable excerpts project only verified fields, not extra private metadata', async () => {
