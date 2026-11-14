@@ -94,6 +94,10 @@ it.each([
   '發布：2026/11/15 實習申請資訊',
   '公告日期：2026/11/15 實習申請資訊',
   '2026/11/15 更新：實習申請資訊',
+  '2026/12/8、9日徵才博覽會',
+  '2026年12月8日及9日徵才博覽會',
+  '2026年12月8日與9日徵才博覽會',
+  '2026/12/8、12/9徵才博覽會',
   '2026/12/8 講座取消',
   '2026/12/8 講座延期',
   '2026/12/8 講座日期待定',
@@ -123,6 +127,44 @@ it.each([
 ])('accepts an explicit single event/deadline date: %s', (title, date) => {
   expect(careerTitleDate(title)).toBe(date);
 });
+it.each(['取消', '延期', '延 後', '停辦', '改期', '取消通知'])(
+  'suppresses the exact original event for a separate %s notice, regardless of input order',
+  (status) => {
+    const original = {
+      title: '2026/12/8 實習說明會',
+      date: '2026-11-01',
+      url: 'https://cdif.pu.edu.tw/p/406-1102-1.php',
+      source: '職產處',
+    };
+    const notice = {
+      ...original,
+      title:
+        status === '取消通知'
+          ? `2026/12/8 實習說明會取消`
+          : `【${status}通知】2026年12月8日 實習說明會`,
+      date: '2026-11-14',
+      url: 'https://cdif.pu.edu.tw/p/406-1102-2.php',
+    };
+    const unrelated = [
+      { ...original, source: '系所', url: original.url + '?other-source' },
+      { ...original, title: '2026/12/9 實習說明會', url: original.url + '?other-date' },
+      { ...original, title: '2026/12/8 海外實習說明會', url: original.url + '?other-event' },
+    ];
+    for (const records of [
+      [original, notice],
+      [notice, original],
+    ]) {
+      const input = [...records, ...unrelated];
+      expect(
+        careerTimeline(input, '2026-11-14')
+          .map((item) => item.url)
+          .sort(),
+      ).toEqual(unrelated.map((item) => item.url).sort());
+      expect(input).toContain(notice);
+      expect(input).toHaveLength(5);
+    }
+  },
+);
 it('public API excludes sensitive titles from announcements and calendar items for both sources', async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
