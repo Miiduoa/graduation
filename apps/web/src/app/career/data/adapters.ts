@@ -50,7 +50,7 @@ function hasPersonalAcademicData(title: string): boolean {
     .replace(/[^\p{L}\p{N}]/gu, '');
   // Conservatively omit the whole announcement, never publish a partially redacted title.
   if (
-    /學號|成績|評分|評量|分數|績點|名單|名冊|錄取|榜單|student(?:id|number)|grades?|scores?/.test(
+    /學號|成績|評分|評量|分數|績點|平均|均分|總分|總評|名單|名冊|錄取|榜單|student(?:id|number)|grades?|scores?|gpa|gradepointaverage|academicaverage|weightedaverage|average\d/.test(
       normalized,
     )
   )

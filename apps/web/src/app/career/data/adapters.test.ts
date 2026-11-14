@@ -195,6 +195,48 @@ it('public API excludes sensitive titles from announcements and calendar items f
     /TEST-0001|TEST-STUDENT-ID|TEST-GRADE|成績|成绩|Student|Grades?|Scores?|學號/i,
   );
 });
+it.each([
+  'GPA 3.95',
+  'CGPA 3.95',
+  'ＧＰＡ：３．９５',
+  'G. P. A.：3.95',
+  'G<span>P</span>A 3.95',
+  'G&#80;A 3.95',
+  'grade point average 3.95',
+  'academic average 95',
+  'weighted average 95',
+  'Average: 95',
+  '平均 95',
+  '平\u200b均：９５',
+  '加權平均 95',
+  '均分 95',
+  '總分 95',
+  '總評 A+',
+  '說明'.repeat(160) + 'GPA 3.95',
+])('public API omits the entire academic-result title from both sources: %s', async (result) => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+  const sensitive = `<div class="d-txt"><a href="/p/406-1102-2.php">2026/12/8 實習申請 王測試 ${result}</a></div>`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : sensitive + html),
+    })),
+  );
+  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+  const feed = await response.json();
+  expect(feed.announcements.map((item: { title: string }) => item.title)).toEqual([
+    '實習申請2026/12/8截止',
+    '實習申請2026/12/8截止',
+  ]);
+  expect(feed.timeline.map((item: { title: string }) => item.title)).toEqual([
+    '實習申請2026/12/8截止',
+    '實習申請2026/12/8截止',
+  ]);
+  expect(JSON.stringify(feed)).not.toContain('王測試');
+  expect(feed.announcementsUnavailable).toBe(false);
+});
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
   const records = Array.from({ length: 8 }, (_, i) => ({
     title: `2026/11/${15 + i} ${i === 1 ? '校園徵才' : '實習申請截止'}`,
