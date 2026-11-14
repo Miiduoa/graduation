@@ -1,3 +1,4 @@
+const { dormName } = require('./dormName');
 const { randomUUID } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
@@ -343,8 +344,16 @@ function createDormWorkflowHandler({
           }),
         );
       }
+      const identity = await school.collection('dormSsoIdentities').doc(uid).get();
+      const studentIds = roster.docs.flatMap((d) => [d.id, d.data().studentId]);
+      studentIds.push(identity.data()?.studentId);
       return {
-        leaves: (await list('dormLeaves', true)).map(ownRow),
+        leaves: (await list('dormLeaves', true)).map((row) =>
+          ownRow({
+            ...row,
+            applicantName: dormName(row.applicantName, row.studentId, ...studentIds),
+          }),
+        ),
         repairs: (await list('dormRepairs', true))
           .filter((r) => r.workflow === 'dorm_staff')
           .map(ownRow),
@@ -493,7 +502,6 @@ function createDormWorkflowHandler({
       // Older applications resolve their applicant from the authorized building's roster too.
       const applicants = new Map();
       for (const row of result.leaves) {
-        if (row.applicantName && row.maskedStudentId) continue;
         const applicantKey = JSON.stringify([row.userId, row.building]);
         if (!applicants.has(applicantKey)) {
           const roster = await school
@@ -510,7 +518,13 @@ function createDormWorkflowHandler({
           );
         }
         const applicant = applicants.get(applicantKey);
-        row.applicantName = applicant?.name || row.applicantName || '姓名待確認';
+        const identity = await school.collection('dormSsoIdentities').doc(row.userId).get();
+        row.applicantName = dormName(
+          row.applicantName || applicant?.name,
+          applicant?.studentId,
+          row.studentId,
+          identity.data()?.studentId,
+        );
         row.maskedStudentId = applicant?.studentId
           ? '***' + applicant.studentId.slice(-3)
           : row.maskedStudentId || '待確認';
@@ -567,9 +581,11 @@ function createDormWorkflowHandler({
                 key,
                 ['studentId', 'maskedStudentId'].includes(key)
                   ? '***' + String(row[key]).slice(-3)
-                  : key === 'images'
-                    ? (row.images || []).map((_, i) => String(i))
-                    : row[key],
+                  : key === 'name'
+                    ? dormName(row.name, row.studentId, row.id)
+                    : key === 'images'
+                      ? (row.images || []).map((_, i) => String(i))
+                      : row[key],
               ]),
           ),
           ...(['repairs', 'leaves'].includes(kind)
@@ -590,7 +606,7 @@ function createDormWorkflowHandler({
       return {
         building: required(active[0].building, 70),
         room: required(active[0].room, 50),
-        applicantName: active[0].name || '姓名待確認',
+        applicantName: dormName(active[0].name, active[0].studentId),
         maskedStudentId: '***' + String(active[0].studentId).slice(-3),
       };
     };
@@ -795,7 +811,7 @@ function createDormWorkflowHandler({
           ...row,
           active: true,
           userId: matches[0].id,
-          name: matches[0].data().displayName || '',
+          name: dormName(matches[0].data().displayName, studentId),
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
@@ -843,7 +859,7 @@ function createDormWorkflowHandler({
         residents.push({
           id: await ensureHandle('dormResidents', doc),
           studentId: '***' + studentId.slice(-3),
-          name: row.name || '',
+          name: dormName(row.name, studentId),
           building: row.building || '',
           room: row.room || '',
           bed: row.bed || '',

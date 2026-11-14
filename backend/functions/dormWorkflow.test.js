@@ -917,52 +917,59 @@ test('workspace defaults to actionable statuses and keeps history available expl
 });
 
 // Execute the real legacy PU profile wrapper and profile writer before importing.
-test('legacy PU login data can import a resident without ssoLinks or login changes', async () => {
-  const fs = require('node:fs');
-  const vm = require('node:vm');
-  const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
-  const { call, data, db } = fixture();
-  data.delete('schools/pu/dormSsoIdentities/student');
-  const source = fs.readFileSync(require.resolve('./index'), 'utf8');
-  const start = source.indexOf('async function upsertPuStudentProfile(');
-  const end = source.indexOf('async function provisionUniversalDevAccount(', start);
-  const upsert = vm.runInNewContext(source.slice(start, end) + '; upsertPuStudentProfile', {
-    writeSchoolLoginProfile: createSchoolLoginProfileWriter({ db }),
-    PROVIDENCE_UNIVERSITY_SCHOOL_ID: 'pu',
-  });
-  await upsert({
-    uid: 'pu-123',
-    studentId: '123',
-    displayName: '校方姓名',
-    email: '123@pu.edu.tw',
-  });
-  await call('staff', {
-    action: 'importResidents',
-    rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
-  });
-  expect(data.get('schools/pu/dormResidents/123')).toMatchObject({
-    userId: 'pu-123',
-    name: '校方姓名',
-  });
-  const result = await call('pu-123', {
-    action: 'requestLeave',
-    key: 'leave',
-    date: '2099-01-01',
-    reason: '返家',
-  });
-  expect(result.success).toBe(true);
-  await call('staff', {
-    action: 'registerPackage',
-    key: 'parcel',
-    studentId: '123',
-    description: '包裹',
-    location: '管理室',
-  });
-  expect(
-    [...data.entries()].find(([path]) => path.startsWith('schools/pu/dormPackages/'))[1]
-      .recipientId,
-  ).toBe('pu-123');
-});
+test.each([
+  ['校方姓名', '校方姓名'],
+  ['123 同學', '姓名待確認'],
+])(
+  'legacy PU login imports a resident safely without login changes: %s',
+  async (displayName, expectedName) => {
+    const fs = require('node:fs');
+    const vm = require('node:vm');
+    const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
+    const { call, data, db } = fixture();
+    data.delete('schools/pu/dormSsoIdentities/student');
+    const source = fs.readFileSync(require.resolve('./index'), 'utf8');
+    const start = source.indexOf('async function upsertPuStudentProfile(');
+    const end = source.indexOf('async function provisionUniversalDevAccount(', start);
+    const upsert = vm.runInNewContext(source.slice(start, end) + '; upsertPuStudentProfile', {
+      writeSchoolLoginProfile: createSchoolLoginProfileWriter({ db }),
+      PROVIDENCE_UNIVERSITY_SCHOOL_ID: 'pu',
+    });
+    await upsert({
+      uid: 'pu-123',
+      studentId: '123',
+      displayName,
+      email: '123@pu.edu.tw',
+    });
+    await call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+    });
+    expect(data.get('schools/pu/dormResidents/123')).toMatchObject({
+      userId: 'pu-123',
+      name: expectedName,
+    });
+    const result = await call('pu-123', {
+      action: 'requestLeave',
+      key: 'leave',
+      date: '2099-01-01',
+      reason: '返家',
+    });
+    expect(result.success).toBe(true);
+    expect(data.get('schools/pu/dormLeaves/' + result.id).applicantName).toBe(expectedName);
+    await call('staff', {
+      action: 'registerPackage',
+      key: 'parcel',
+      studentId: '123',
+      description: '包裹',
+      location: '管理室',
+    });
+    expect(
+      [...data.entries()].find(([path]) => path.startsWith('schools/pu/dormPackages/'))[1]
+        .recipientId,
+    ).toBe('pu-123');
+  },
+);
 
 test.each(['deleted', 'deleting'])(
   'closing accounts cannot recreate verified mappings or accept parcels (%s)',
@@ -2011,5 +2018,67 @@ test.each(['inactive', 'missing'])(
         buildings: ['A'],
       }),
     ).rejects.toMatchObject({ code: 'permission-denied' });
+  },
+);
+
+test('PU login student-ID fallback is not a real dorm identity name', async () => {
+  const { call, data } = fixture();
+  data.delete('schools/pu/dormSsoIdentities/student');
+  data.set('schools/pu/members/pu-s123456789', {
+    role: 'student',
+    status: 'active',
+    studentId: 'S123456789',
+    displayName: 'S123456789 同學',
+    lastLoginAt: 1,
+  });
+  await call('staff', {
+    action: 'importResidents',
+    rows: [{ studentId: 'S123456789', building: 'A', room: '101', bed: '1' }],
+  });
+  expect(data.get('schools/pu/dormSsoIdentities/pu-s123456789').displayName).toBe('姓名待確認');
+  expect(data.get('schools/pu/dormResidents/S123456789').name).toBe('姓名待確認');
+});
+
+test.each(['S123456789 同學', '姓名 S123456789', 'OLD987654 同學'])(
+  'legacy roster and leave names are sanitized on every read: %s',
+  async (name) => {
+    const { call, data } = fixture();
+    const studentId = 'S123456789';
+    data.set('schools/pu/dormResidents/' + studentId, {
+      studentId,
+      userId: 'student',
+      name,
+      building: 'A',
+      room: '101',
+      bed: '1',
+      active: true,
+      updatedAt: 1,
+    });
+    data.set('schools/pu/dormLeaves/legacy', {
+      userId: 'student',
+      building: 'A',
+      room: '101',
+      status: 'pending',
+      createdAt: 1,
+      applicantName: name,
+      maskedStudentId: '***789',
+    });
+    const workspace = await call('staff', { action: 'workspace' });
+    expect(workspace.residents[0].name).toBe('姓名待確認');
+    expect(workspace.leaves[0].applicantName).toBe('姓名待確認');
+    expect((await call('staff', { action: 'findResident', studentId })).residents[0].name).toBe(
+      '姓名待確認',
+    );
+    expect((await call('student', { action: 'mine' })).leaves[0].applicantName).toBe('姓名待確認');
+    const { id } = await call('student', {
+      action: 'requestLeave',
+      key: 'safe-name',
+      date: '2099-01-01',
+      reason: '返家',
+    });
+    expect(data.get('schools/pu/dormLeaves/' + id).applicantName).toBe('姓名待確認');
+    // Existing records are protected by projection, without rewriting stored personal data.
+    expect(data.get('schools/pu/dormLeaves/legacy').applicantName).toBe(name);
+    expect(data.get('schools/pu/dormResidents/' + studentId).name).toBe(name);
   },
 );
