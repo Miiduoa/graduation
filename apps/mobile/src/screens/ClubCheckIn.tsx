@@ -36,9 +36,11 @@ export function ClubCheckIn({
     [scanning, setScanning] = useState(false),
     [failures, setFailures] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(''),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions(),
     lock = useRef(false),
+    ready = useRef<string | null>(null),
     mounted = useRef(true),
     pending = useRef<string[]>([]),
     writes = useRef<Promise<void>>(Promise.resolve());
@@ -54,7 +56,7 @@ export function ClubCheckIn({
     return write;
   };
   async function send() {
-    if (lock.current) return;
+    if (ready.current !== key || lock.current) return;
     lock.current = true;
     setBusy(true);
     let confirmedMessage = '';
@@ -95,31 +97,45 @@ export function ClubCheckIn({
   }
   useEffect(() => {
     mounted.current = true;
-    void AsyncStorage.getItem(key).then((raw) => {
-      if (mounted.current) {
-        try {
-          const parsed = JSON.parse(raw || '[]');
-          if (Array.isArray(parsed)) {
-            pending.current = parsed.filter((s) => typeof s === 'string');
-            setQueue(pending.current);
-            if (pending.current.length)
-              void NetInfo.fetch().then((state) => {
-                if (mounted.current && state.isConnected) void send();
-              });
-          }
-        } catch {}
+    let cancelled = false;
+    ready.current = null;
+    setLoadedKey(null);
+    pending.current = [];
+    setQueue([]);
+    // Initial hydration shares the durable-write sequence, so it cannot overwrite an enqueue.
+    const load = writes.current.then(async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (cancelled) return;
+        const parsed = JSON.parse(raw || '[]');
+        if (!Array.isArray(parsed)) throw new Error('Invalid queue');
+        pending.current = parsed.filter((entry) => typeof entry === 'string');
+        setQueue(pending.current);
+        ready.current = key;
+        setLoadedKey(key);
+      } catch {
+        if (!cancelled) setMessage('無法讀取暫存，請關閉後重新開啟此頁');
       }
     });
+    writes.current = load;
+    void load
+      .then(async () => {
+        if (cancelled || ready.current !== key || !pending.current.length) return;
+        const state = await NetInfo.fetch();
+        if (!cancelled && state.isConnected) void send();
+      })
+      .catch(() => {});
     const stop = NetInfo.addEventListener((state) => {
       if (state.isConnected && pending.current.length) void send();
     });
     return () => {
+      cancelled = true;
       mounted.current = false;
       stop();
     };
   }, [key]);
   async function enqueue(value: string) {
-    if (!acceptingCheckIns || !value.trim() || lock.current) return;
+    if (ready.current !== key || !acceptingCheckIns || !value.trim() || lock.current) return;
     try {
       await save((current) => [...new Set([...current, value.trim()])]);
       setCode('');
@@ -156,6 +172,7 @@ export function ClubCheckIn({
                 <>
                   <Button
                     text="相機掃描 QR"
+                    disabled={loadedKey !== key}
                     onPress={async () => {
                       const result = permission?.granted ? permission : await requestPermission();
                       if (result.granted) setScanning(!scanning);
@@ -175,12 +192,18 @@ export function ClubCheckIn({
                   <TextInput
                     accessibilityLabel="學號後四碼或簽到碼"
                     placeholder="學號後四碼或簽到碼"
+                    editable={loadedKey === key}
                     value={code}
                     onChangeText={setCode}
                   />
-                  <Button text="確認簽到碼" disabled={busy} onPress={() => void enqueue(code)} />
+                  <Button
+                    text="確認簽到碼"
+                    disabled={busy || loadedKey !== key}
+                    onPress={() => void enqueue(code)}
+                  />
                 </>
               ) : null}
+              {loadedKey !== key ? <Text>正在載入待送出紀錄…</Text> : null}
               <Text>{queue.length} 筆待送出</Text>
               {queue.map((entry, index) =>
                 failures[entry] ? (
@@ -190,7 +213,7 @@ export function ClubCheckIn({
                     </Text>
                     <Button
                       text={`刪除第 ${index + 1} 筆失敗簽到`}
-                      disabled={busy}
+                      disabled={busy || loadedKey !== key}
                       onPress={() => {
                         void save((current) => current.filter((value) => value !== entry)).catch(
                           () => setMessage('無法更新暫存，請重試'),
@@ -202,12 +225,12 @@ export function ClubCheckIn({
               )}
               <Button
                 text="重送待送出簽到"
-                disabled={busy || !queue.length}
+                disabled={busy || loadedKey !== key || !queue.length}
                 onPress={() => void send()}
               />
               <Button
                 text="清除待送出紀錄"
-                disabled={busy || !queue.length}
+                disabled={busy || loadedKey !== key || !queue.length}
                 onPress={() =>
                   Alert.alert('清除待送出紀錄？', '尚未送出的簽到將會移除。', [
                     { text: '取消' },

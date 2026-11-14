@@ -9,7 +9,7 @@ let mockOnline = false,
   mockNetworkListener: (value: { isConnected: boolean }) => void;
 jest.mock('../services/clubPortal', () => ({ callClubPortal: jest.fn() }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
-  getItem: async (key: string) => mockStorage.get(key) || null,
+  getItem: jest.fn(async (key: string) => mockStorage.get(key) || null),
   setItem: jest.fn(async (key: string, value: string) => {
     mockStorage.set(key, value);
   }),
@@ -43,6 +43,10 @@ jest.mock('../ui/components', () => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockStorage.clear();
+  jest
+    .mocked(AsyncStorage.getItem)
+    .mockReset()
+    .mockImplementation(async (key) => mockStorage.get(key) || null);
   mockOnline = false;
   jest
     .mocked(callClubPortal)
@@ -257,4 +261,74 @@ test('活動結束時關閉新增與相機，重載仍可重送、查看拒絕�
   alert.mockRestore();
   await screen.findByText('0 筆待送出');
   expect(mockStorage.get(key)).toBe('[]');
+});
+
+test('暫存讀取完成前停用新增、相機與重送，完成後保留新舊紀錄', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  mockStorage.set(key, '["old-code"]');
+  let finish!: (value: string) => void;
+  jest.mocked(AsyncStorage.getItem).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(
+    <ClubCheckIn
+      uid="one"
+      schoolId="pu"
+      groupId="club"
+      eventId="event"
+      officer
+      onConfirmed={jest.fn()}
+    />,
+  );
+  fireEvent.press(screen.getByText('開始簽到'));
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(screen.getByText('確認簽到碼')).toBeDisabled();
+  expect(screen.getByText('相機掃描 QR')).toBeDisabled();
+  expect(screen.getByText('重送待送出簽到')).toBeDisabled();
+  fireEvent.changeText(screen.getByLabelText('學號後四碼或簽到碼'), 'new-code');
+  fireEvent.press(screen.getByText('確認簽到碼'));
+  await act(async () => mockNetworkListener({ isConnected: true }));
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(callClubPortal).not.toHaveBeenCalled();
+  await act(async () => finish('["old-code"]'));
+  await screen.findByText('1 筆待送出');
+  expect(screen.getByText('確認簽到碼')).toBeEnabled();
+  fireEvent.changeText(screen.getByLabelText('學號後四碼或簽到碼'), 'new-code');
+  fireEvent.press(screen.getByText('確認簽到碼'));
+  await screen.findByText('2 筆待送出');
+  expect(mockStorage.get(key)).toBe('["old-code","new-code"]');
+  await act(async () => {
+    mockOnline = true;
+    mockNetworkListener({ isConnected: true });
+  });
+  await screen.findByText('0 筆待送出');
+  expect(jest.mocked(callClubPortal).mock.calls.map((args) => args[2]?.checkInCode)).toEqual([
+    'old-code',
+    'new-code',
+  ]);
+});
+
+test('暫存讀取失敗時保留原紀錄且停用寫入', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  mockStorage.set(key, '["old-code"]');
+  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage unavailable'));
+  render(
+    <ClubCheckIn
+      uid="one"
+      schoolId="pu"
+      groupId="club"
+      eventId="event"
+      officer
+      onConfirmed={jest.fn()}
+    />,
+  );
+  fireEvent.press(screen.getByText('開始簽到'));
+  await screen.findByText('無法讀取暫存，請關閉後重新開啟此頁');
+  expect(screen.getByText('確認簽到碼')).toBeDisabled();
+  fireEvent.press(screen.getByText('確認簽到碼'));
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(mockStorage.get(key)).toBe('["old-code"]');
 });
