@@ -81,5 +81,22 @@ class AuditTrialsTests(unittest.TestCase):
         self.assertTrue(any("cannot exceed" in err for err in audit_rows(records)["errors"]))
 
 
+    def test_failed_classroom_with_only_building_evidence_cannot_penalize_competitor(self):
+        records = complete()
+        records[0].update(task="classroom", result="failure", verified_target="building")
+        self.assertTrue(any("cannot exceed" in err for err in audit_rows(records)["errors"]))
+
+    def test_ui_task_uses_separate_evidence_level(self):
+        records = complete()
+        for entry in records:
+            entry.update(task="accessibility", verified_target="ui")
+        self.assertEqual(len(audit_rows(records)["ready"]), 1)
+
+    def test_visual_success_cannot_use_building_verification_instead(self):
+        records = complete()
+        records[0].update(task="visual", verified_target="building")
+        self.assertTrue(any("cannot exceed" in err for err in audit_rows(records)["errors"]))
+
+
 if __name__ == "__main__":
     unittest.main()
