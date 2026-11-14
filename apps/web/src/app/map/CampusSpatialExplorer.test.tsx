@@ -223,6 +223,36 @@ it('offers up to five mobile-friendly search shortcuts while keeping all matches
   expect(within(dialog).getByRole('option', { name: '示意教室 2（目前選擇）' })).toBeTruthy();
 });
 
+it('disambiguates identical POI names for screen readers and mobile destinations', async () => {
+  // Both entries are explicitly synthetic; building/floor labels come from
+  // the supplied marker metadata, not assumed entrances or indoor routes.
+  const rooms: MapLocation[] = [
+    { id: 'sample-east', name: '共用空間', category: '教學空間',
+      description: '示意地點', building: '示意甲館', floor: '2F', lat: 24.2261, lng: 120.5801 },
+    { id: 'sample-west', name: '共用空間', category: '教學空間',
+      description: '示意地點', building: '示意乙館', floor: '3F', lat: 24.2262, lng: 120.5802 },
+  ];
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={rooms} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜尋地點' }),
+    { target: { value: '共用空間' } });
+  const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
+  const labelEast = '共用空間（建築：示意甲館 · 樓層：2F · 類別：教學空間 · 同名地點 1／2）';
+  const labelWest = '共用空間（建築：示意乙館 · 樓層：3F · 類別：教學空間 · 同名地點 2／2）';
+  expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
+  const second = within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelWest}」` });
+  expect(within(dialog).getByRole('option', { name: labelEast })).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: labelWest })).toBeTruthy();
+  fireEvent.click(second);
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-west');
+  expect(within(dialog).getByRole('heading', { name: '共用空間' })).toBeTruthy();
+  expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
 it('does not claim hidden results when all six matches include the already selected destination', async () => {
   const onSelect = vi.fn();
   const rooms: MapLocation[] = Array.from({ length: 6 }, (_, i) => ({

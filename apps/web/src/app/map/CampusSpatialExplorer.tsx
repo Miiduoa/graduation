@@ -251,6 +251,28 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       .filter(({ searchable }) => searchTokens.every((token) => searchable.includes(token)))
       .map(({ point }) => point);
   }, [model.points, searchIndex, searchTokens]);
+  // Duplicate names are common for classrooms, entrances and facilities.
+  // A plain name in the native select or a quick-pick button can send visitors
+  // to the wrong POI. Distinguish only duplicates using *existing* metadata;
+  // the ordinal is a list identifier, never a claimed physical entrance.
+  const pointDisplayLabels = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const point of model.points) counts.set(point.name, (counts.get(point.name) ?? 0) + 1);
+    const ordinals = new Map<string, number>();
+    return new Map(model.points.map((point) => {
+      const count = counts.get(point.name) ?? 1;
+      if (count === 1) return [point.id, point.name] as const;
+      const ordinal = (ordinals.get(point.name) ?? 0) + 1;
+      ordinals.set(point.name, ordinal);
+      const details = [
+        point.location.building?.trim() ? `建築：${point.location.building.trim()}` : null,
+        point.location.floor?.trim() ? `樓層：${point.location.floor.trim()}` : null,
+        point.category.trim() ? `類別：${point.category.trim()}` : null,
+        `同名地點 ${ordinal}／${count}`,
+      ].filter(Boolean).join(' · ');
+      return [point.id, `${point.name}（${details}）`] as const;
+    }));
+  }, [model.points]);
   const selectionOutsideSearch = Boolean(
     selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id),
   );
@@ -584,7 +606,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     {shortcutPoints.slice(0, 5).map((point) => (
                         <button key={point.id} className={styles.searchMatch} type="button"
                           onClick={() => selectPlace(point.id)}>
-                          在空間圖查看「{point.name}」
+                          在空間圖查看「{pointDisplayLabels.get(point.id) ?? point.name}」
                         </button>
                       ))}
                     {shortcutPoints.length > 5 && <small>
@@ -595,7 +617,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {listedPoints.map((point) => <option key={point.id} value={point.id}>{point.name}{selectionOutsideSearch && point.id === selectedPoint?.id ? '（目前選擇）' : ''}{outlinedPoiIds.has(point.id) ? (footprintStale ? '（舊快照 OSM 外框）' : '（有 OSM 外框）') : ''}</option>)}
+                  {listedPoints.map((point) => <option key={point.id} value={point.id}>{pointDisplayLabels.get(point.id) ?? point.name}{selectionOutsideSearch && point.id === selectedPoint?.id ? '（目前選擇）' : ''}{outlinedPoiIds.has(point.id) ? (footprintStale ? '（舊快照 OSM 外框）' : '（有 OSM 外框）') : ''}</option>)}
                 </select>
               </div>
               {place ? <>
