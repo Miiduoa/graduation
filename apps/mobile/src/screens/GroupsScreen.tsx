@@ -10,6 +10,7 @@ import {
   LoadingState,
   ErrorState,
 } from '../ui/components';
+import { ClubDirectory } from './ClubDirectory';
 import { normalizeJoinCode, formatJoinCode, isValidJoinCode } from '../utils/joinCode';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, getThemeVersion, subscribeToTheme } from '../ui/theme';
@@ -354,6 +355,11 @@ export function GroupsScreen(props: any) {
           style={{ flex: 1 }}
           contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         >
+          <ClubDirectory
+            key={JSON.stringify([auth.user?.uid, school.id])}
+            clubs={isFirebaseMockMode() ? [] : myGroups.filter((group) => group.type === 'club')}
+            onOpen={(groupId) => nav?.navigate?.('GroupDetail', { groupId })}
+          />
           <Card title="加入群組" subtitle="輸入加入碼（8 碼英數）。">
             {err ? <Pill text={err} /> : null}
 

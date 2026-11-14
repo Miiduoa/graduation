@@ -116,6 +116,15 @@ function isRealTimestamp(value: unknown): value is string {
 // In-memory campus summaries normally come from a validated API parser, but a
 // JSON-restored or caller-supplied snapshot may bypass that parser. Re-check
 // every field the prompt serializes before exposing any personal evidence.
+// The server parser trims required titles and strips ASCII controls. A
+// JSON-restored snapshot may bypass it; do not let an empty title or control
+// separator become model evidence or impersonate a new prompt line.
+function safePromptEvidenceText(value: unknown, maxLength: number, optional = false): value is string {
+  return typeof value === 'string' && value.length <= maxLength &&
+    (optional || !!value.trim()) &&
+    !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value);
+}
+
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
@@ -152,12 +161,12 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
         : coverage.reason === 'complete' || assignments.count === null ||
           assignments.items.length >= assignments.count))) return false;
   return assignments.items.every((item) => !!item &&
-    typeof item.title === 'string' && item.title.length <= 140 &&
-    typeof item.groupName === 'string' && item.groupName.length <= 100 &&
+    safePromptEvidenceText(item.title, 140) &&
+    safePromptEvidenceText(item.groupName, 100, true) &&
     (item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48)) &&
     (item.source === undefined || !!parseCampusAssignmentSource(item.source))) &&
     announcements.items.every((item) => !!item &&
-      typeof item.title === 'string' && item.title.length <= 140 &&
+      safePromptEvidenceText(item.title, 140) &&
       (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
 
