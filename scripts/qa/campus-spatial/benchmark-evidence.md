@@ -13,7 +13,7 @@ CSV 欄位（**只有欄名，沒有實測數據**）：
 - product：nuni、google-maps、apple-maps、providence-official、unitable。
 - task：building、classroom、route、accessibility、visual。
 - result：success、failure、unverified。教室未核對門口前不得把建築辨識成功算作教室成功。
-- verified_target：building、classroom、route、not-verified。必須經人工核對；此工具無法證明來源真實。
+- verified_target：building、classroom、route、ui、not-verified。地點結果須有對應層級的合法來源／現地核對，visual 與 accessibility 需以 ui 表示已完成該任務的實機操作驗證；這項工具只能查完整性，無法替證據背書。
 - steps、seconds：實際操作步數與秒數（包含失敗紀錄）；未知時可空白，但不可進入可比較結果。
 - fps、visual_rating：選填，評分 1–5 須先定義共同標準；沒有量測不能宣稱效能優勢。
 - evidence_ref：錄影、截圖或證據檔的可查位置，勿存放學生個資。ground_truth_ref 為合法來源 URL，並提供 ground_truth_date；來源本身不能代替現地查證。
