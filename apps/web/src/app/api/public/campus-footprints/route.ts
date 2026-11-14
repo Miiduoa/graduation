@@ -269,7 +269,13 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // on timeout or memory exhaustion. Never promote that partial result to a
   // fresh 24-hour snapshot or replace a previously verified fallback.
   if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
-    throw new Error('Overpass returned an incomplete result');
+    // Overpass may return partial JSON with a timeout/memory remark while
+    // still sending HTTP 200. Its Retry-After must be honoured just like
+    // a 429/503 response; otherwise every map visitor may retry too early.
+    // Without the header, keep the existing bounded ten-minute backoff.
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(),
+    ));
   }
   const now = Date.now();
   // A way's edit timestamp cannot be newer than the Overpass replication
