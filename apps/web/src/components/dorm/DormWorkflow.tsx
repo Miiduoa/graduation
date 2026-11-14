@@ -261,6 +261,11 @@ export function DormWorkflow({
   const [images, setImages] = useState<string[]>([]);
   const [requestKey, setRequestKey] = useState(dormRequestKey);
   const [preview, setPreview] = useState(false);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const generation = useRef(0);
   const rowGeneration = useRef(0);
   const paginationStarted = useRef(false);
@@ -418,6 +423,13 @@ export function DormWorkflow({
       setBusy(false);
     }
   }
+  const finishPackageRegistration = () => {
+    setRequestKey(dormRequestKey());
+    selectedStudentId.current = '';
+    setValues((old) => ({ ...old, search: '', studentId: '', item: '' }));
+    setPreview(false);
+    inputRef.current?.focus();
+  };
   if (!uid || !config || (!config.enabled && submitOnly)) return null;
   const f = (key: string, label: string, initial = '', multiline = false) => (
     <Field
@@ -447,7 +459,7 @@ export function DormWorkflow({
       </Label>
       <Label>{r.description}</Label>
       <Label strong>{DORM_TICKET_LABELS[r.dormStatus]}</Label>
-      {dormTicketOverdue(r) && (
+      {dormTicketOverdue(r, now) && (
         <Label strong accent>
           超過 3 天
         </Label>
@@ -791,23 +803,22 @@ export function DormWorkflow({
               </Label>
               {f('item', '品名（可使用鍵盤語音輸入）')}
               {f('location', '領取地點')}
-              {button(
-                '登錄並通知學生',
-                {
-                  action: 'registerPackage',
-                  key: requestKey,
-                  studentId: get('studentId'),
-                  description: get('item'),
-                  location: get('location'),
-                },
-                () => {
-                  setRequestKey(dormRequestKey());
-                  selectedStudentId.current = '';
-                  setValues((old) => ({ ...old, search: '', studentId: '' }));
-                  set('item', '');
-                  inputRef.current?.focus();
-                },
-              )}
+              <Btn
+                label="登錄並通知學生"
+                disabled={busy || !residentCandidates.some((r) => r.id === get('studentId'))}
+                onPress={() =>
+                  void act(
+                    {
+                      action: 'registerPackage',
+                      key: requestKey,
+                      studentId: get('studentId'),
+                      description: get('item'),
+                      location: get('location'),
+                    },
+                    finishPackageRegistration,
+                  )
+                }
+              />
               {f('collectStudent', '核對學生領取碼上的學號')}
               <Label>以下僅列末三碼相符的包裹；核銷以輸入的完整學號為準。</Label>
               {rows.packages
@@ -829,8 +840,7 @@ export function DormWorkflow({
               <Label strong>逾期清單（每日 21:00 值班檢查）</Label>
               {rows.packages
                 .filter(
-                  (p) =>
-                    p.status === 'waiting' && Date.now() - parcelTime(p.arrivedAt) >= 3 * 86400000,
+                  (p) => p.status === 'waiting' && now - parcelTime(p.arrivedAt) >= 3 * 86400000,
                 )
                 .map((p) => (
                   <Box key={p.id}>

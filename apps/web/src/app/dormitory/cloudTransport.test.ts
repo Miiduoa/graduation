@@ -80,3 +80,20 @@ it('does not overwrite the last private projection with later legacy snapshots o
     stop();
   }
 });
+
+it.each([undefined, null, {}])(
+  'cleans up when the legacy unsubscribe is %s',
+  async (unsubscribe) => {
+    const { watchDormParcels } = await import('@campus/shared/src/dormitoryCloud');
+    const stopAvailable = vi.fn();
+    const stop = watchDormParcels(
+      () => unsubscribe as unknown as () => void,
+      () => stopAvailable,
+      async () => ({ rows: [] }),
+      vi.fn(),
+      vi.fn(),
+    );
+    expect(() => stop()).not.toThrow();
+    expect(stopAvailable).toHaveBeenCalledTimes(1);
+  },
+);

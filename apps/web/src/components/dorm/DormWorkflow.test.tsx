@@ -349,9 +349,10 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   expect(screen.getByText(/"A","51","0","0"/)).toBeTruthy();
   const count = api.call.mock.calls.length;
-  const tick = polling.mock.calls.find(([, ms]) => ms === 60000)?.[0] as () => void;
   await act(async () => {
-    tick();
+    for (const [tick, ms] of polling.mock.calls) {
+      if (ms === 60000 && typeof tick === 'function') tick();
+    }
   });
   expect(api.call.mock.calls.length).toBe(count);
   expect(screen.getByText(/"A","51","0","0"/)).toBeTruthy();
@@ -450,4 +451,45 @@ it('完整學號查詢可選取遮罩住宿生，並顯示零筆核銷結果', a
   fireEvent.change(screen.getByLabelText('核對學生領取碼上的學號'), { target: { value: 'wrong' } });
   fireEvent.click(screen.getByText('已核對姓名與學號・全部核銷'));
   expect(await screen.findByText('未核銷任何包裹，跳過 1 件。')).toBeTruthy();
+});
+
+it('updates the overdue parcel list when a waiting parcel reaches three days', async () => {
+  const arrivedAt = Date.UTC(2026, 10, 12);
+  let now = arrivedAt + 3 * 86400000 - 30000;
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const polling = vi.spyOn(globalThis, 'setInterval');
+  api.config.packages = true;
+  api.call.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? api.config
+      : {
+          ...api.rows,
+          packages: [
+            {
+              id: 'p1',
+              studentId: 's1',
+              status: 'waiting',
+              arrivedAt,
+              description: '門檻測試包裹',
+              location: '管理室',
+            },
+          ],
+        },
+  );
+  try {
+    const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+    await screen.findByText('逾期清單（每日 21:00 值班檢查）');
+    expect(screen.queryByRole('button', { name: '標記退件' })).toBeNull();
+    now += 60000;
+    await act(async () => {
+      for (const [tick, ms] of polling.mock.calls) {
+        if (ms === 60000 && typeof tick === 'function') tick();
+      }
+    });
+    expect(screen.getByRole('button', { name: '標記退件' })).toBeTruthy();
+    view.unmount();
+  } finally {
+    clock.mockRestore();
+    polling.mockRestore();
+  }
 });

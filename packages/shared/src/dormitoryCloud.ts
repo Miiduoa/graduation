@@ -303,7 +303,7 @@ export function watchDormParcels(
   return () => {
     stopPoll?.();
     stopAvailable();
-    stopLegacy();
+    if (typeof stopLegacy === 'function') stopLegacy();
   };
 }
 type ParcelRows = Array<{ id: string; data: Record<string, unknown> }>;
