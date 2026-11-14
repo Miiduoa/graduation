@@ -1,36 +1,96 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { listStoryViewers, type CampusStoryDoc } from '../../services/stories';
 
 type ViewerPage = Awaited<ReturnType<typeof listStoryViewers>>;
 type Cursor = ViewerPage['nextCursor'];
+const AUDIENCE_READ_TIMEOUT_MS = 15_000;
 
-export function StoryAudiencePanel({
-  story,
-  onBack,
-}: {
+type StoryAudiencePanelProps = {
   story: CampusStoryDoc;
   onBack: () => void;
-}) {
+};
+
+/**
+ * The viewer list is private to a story, school, and author. Keep its
+ * pagination cursor and pending SDK reads inside that exact scope.
+ * A new scope remounts the list before stale viewers can be painted.
+ */
+export function StoryAudiencePanel(props: StoryAudiencePanelProps) {
+  const { id, schoolId, authorUid } = props.story;
+  return (
+    <StoryAudienceContents
+      key={JSON.stringify([schoolId, authorUid, id])}
+      {...props}
+    />
+  );
+}
+
+function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   const [page, setPage] = useState<ViewerPage>({ viewers: [], nextCursor: null });
   const [request, setRequest] = useState<{ cursor: Cursor }>({ cursor: null });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'denied'>('loading');
+  const [inForeground, setInForeground] = useState(
+    () => AppState.currentState !== 'background' && AppState.currentState !== 'inactive',
+  );
+  const foregroundRef = useRef(inForeground);
+  const readEpoch = useRef(0);
+
+  // Returning from the app switcher cannot replay private viewer names from
+  // a prior authorization. Stop reads while backgrounded and start at page one.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      const foreground = state === 'active';
+      if (foreground === foregroundRef.current) return;
+      foregroundRef.current = foreground;
+      readEpoch.current += 1; // Invalidate promises before their effect cleanup.
+      setPage({ viewers: [], nextCursor: null });
+      setStatus('loading');
+      setRequest({ cursor: null });
+      setInForeground(foreground);
+    });
+    return () => subscription.remove();
+  }, []);
 
   const { id, schoolId, authorUid } = story;
   useEffect(() => {
+    if (!inForeground) return;
+    const epoch = readEpoch.current;
     let active = true;
+    // Firestore's server read may remain pending after a network interruption.
+    // Release the UI after a bounded wait. This does not cancel the SDK read:
+    // the inactive guard also excludes a late denial or successful result.
+    const timeout = setTimeout(() => {
+      if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
+      active = false;
+      setStatus('error');
+    }, AUDIENCE_READ_TIMEOUT_MS);
     void listStoryViewers({ id, schoolId, authorUid }, request.cursor)
       .then((next) => {
-        if (!active) return;
-        setPage((previous) => ({
-          viewers: request.cursor ? [...previous.viewers, ...next.viewers] : next.viewers,
-          nextCursor: next.nextCursor,
-        }));
+        // AppState events invalidate reads before React runs passive cleanup.
+        if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
+        clearTimeout(timeout);
+        setPage((previous) => {
+          // A live audience can change between cursor reads. Keep one visible
+          // row per viewer even if a later server page overlaps an earlier one.
+          const candidates = request.cursor
+            ? [...previous.viewers, ...next.viewers]
+            : next.viewers;
+          const seen = new Set<string>();
+          const viewers = candidates.filter((viewer) => {
+            if (seen.has(viewer.uid)) return false;
+            seen.add(viewer.uid);
+            return true;
+          });
+          return { viewers, nextCursor: next.nextCursor };
+        });
         setStatus('ready');
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        // AppState events invalidate reads before React runs passive cleanup.
+        if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
+        clearTimeout(timeout);
         if ((error as { code?: string } | null)?.code === 'permission-denied') {
           setPage({ viewers: [], nextCursor: null });
           setStatus('denied');
@@ -40,12 +100,22 @@ export function StoryAudiencePanel({
       });
     return () => {
       active = false;
+      clearTimeout(timeout);
     };
-  }, [id, schoolId, authorUid, request]);
+  }, [id, schoolId, authorUid, request, inForeground]);
 
   function load(cursor: Cursor) {
+    if (!foregroundRef.current) return;
+    readEpoch.current += 1;
     setStatus('loading');
     setRequest({ cursor });
+  }
+
+  function refresh() {
+    // A fresh server read must not paint previously fetched private names
+    // while membership or story visibility may have changed.
+    setPage({ viewers: [], nextCursor: null });
+    load(null);
   }
 
   const count = page.viewers.length;
@@ -66,6 +136,17 @@ export function StoryAudiencePanel({
           </Text>
           <Text style={styles.subtitle}>只有你可以查看這份名單</Text>
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="重新整理觀看名單"
+          accessibilityHint="重新向伺服器確認觀看者及目前權限"
+          accessibilityState={{ disabled: status === 'loading' }}
+          disabled={status === 'loading'}
+          onPress={refresh}
+          style={styles.refresh}
+        >
+          <Ionicons name="refresh" color="#d6f4e7" size={20} />
+        </Pressable>
       </View>
       {count > 0 && (
         <Text accessibilityLiveRegion="polite" style={styles.summary}>
@@ -98,9 +179,20 @@ export function StoryAudiencePanel({
                 <Text style={styles.status}>正在載入觀看名單…</Text>
               </View>
             ) : status === 'denied' ? (
-              <Text accessibilityLiveRegion="polite" style={styles.status}>
-                目前無法存取這則限時動態的觀看名單
-              </Text>
+              <>
+                <Text accessibilityLiveRegion="polite" style={styles.status}>
+                  目前無法存取這則限時動態的觀看名單
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新檢查存取權限"
+                  accessibilityHint="校籍資格恢復後，重新從第一頁向伺服器確認"
+                  style={styles.action}
+                  onPress={refresh}
+                >
+                  <Text style={styles.actionText}>重新檢查權限</Text>
+                </Pressable>
+              </>
             ) : status === 'error' ? (
               <>
                 <Text accessibilityLiveRegion="polite" style={styles.status}>
@@ -144,6 +236,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#242928',
   },
   titleBlock: { flex: 1, gap: 3 },
+  refresh: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: '#20342d',
+  },
   title: { fontSize: 23, fontWeight: '700', color: '#fff' },
   subtitle: { fontSize: 14, color: '#c2cbc8' },
   summary: { fontSize: 14, color: '#c2cbc8', marginVertical: 10 },
