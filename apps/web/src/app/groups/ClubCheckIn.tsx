@@ -26,6 +26,7 @@ export function ClubCheckIn({
     [expanded, setExpanded] = useState(false),
     [code, setCode] = useState(''),
     [queue, setQueue] = useState<string[]>([]),
+    [failures, setFailures] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false);
   const key = JSON.stringify(['club-check-in', uid, schoolId, groupId, eventId]);
@@ -53,19 +54,30 @@ export function ClubCheckIn({
     let remaining = entries;
     let confirmedMessage = '';
     try {
+      const failed: Record<string, string> = {};
       for (const checkInCode of entries) {
-        const result = await callClubPortal(uid, schoolId, {
-          action: 'checkIn',
-          groupId,
-          eventId,
-          checkInCode,
-        });
+        let result;
+        try {
+          result = await callClubPortal(uid, schoolId, {
+            action: 'checkIn',
+            groupId,
+            eventId,
+            checkInCode,
+          });
+        } catch (err) {
+          failed[checkInCode] = err instanceof Error ? err.message : '尚未送出，請重試';
+          setFailures({ ...failed });
+          continue;
+        }
         confirmedMessage = result.message || '簽到已由伺服器確認';
-        remaining = remaining.slice(1);
+        remaining = remaining.filter((entry) => entry !== checkInCode);
         save(remaining);
       }
-      setMessage(confirmedMessage);
-      onConfirmed();
+      setFailures(failed);
+      setMessage(
+        Object.keys(failed).length ? '部分簽到未完成，請重試或刪除失敗紀錄' : confirmedMessage,
+      );
+      if (confirmedMessage) onConfirmed();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '尚未送出');
     } finally {
@@ -124,12 +136,30 @@ export function ClubCheckIn({
             </button>
           </form>
           <p>{queue.length} 筆待送出</p>
+          {queue.map(
+            (entry, index) =>
+              failures[entry] && (
+                <div key={entry}>
+                  <span>
+                    第 {index + 1} 筆：{failures[entry]}
+                  </span>
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    onClick={() => save(queue.filter((value) => value !== entry))}
+                  >
+                    刪除第 {index + 1} 筆失敗簽到
+                  </button>
+                </div>
+              ),
+          )}
           <button className="btn" disabled={busy || !queue.length} onClick={() => void send(queue)}>
             重送待送出簽到
           </button>
           {queue.length > 0 && (
             <button
               className="btn"
+              disabled={busy}
               onClick={() => {
                 if (window.confirm('確定清除尚未送出的簽到？')) save([]);
               }}

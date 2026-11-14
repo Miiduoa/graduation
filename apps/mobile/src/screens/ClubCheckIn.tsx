@@ -32,6 +32,7 @@ export function ClubCheckIn({
     [expanded, setExpanded] = useState(false),
     [started, setStarted] = useState(false),
     [scanning, setScanning] = useState(false),
+    [failures, setFailures] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false);
   const [permission, requestPermission] = useCameraPermissions(),
@@ -56,20 +57,32 @@ export function ClubCheckIn({
     setBusy(true);
     let confirmedMessage = '';
     try {
-      while (pending.current.length) {
-        const result = await callClubPortal(uid, schoolId, {
-          action: 'checkIn',
-          groupId,
-          eventId,
-          checkInCode: pending.current[0],
-        });
+      const failed: Record<string, string> = {};
+      // Visit each entry once so retained failures cannot block later entries.
+      for (const checkInCode of [...pending.current]) {
+        let result;
+        try {
+          result = await callClubPortal(uid, schoolId, {
+            action: 'checkIn',
+            groupId,
+            eventId,
+            checkInCode,
+          });
+        } catch (err) {
+          failed[checkInCode] = err instanceof Error ? err.message : '尚未送出，請重試';
+          if (mounted.current) setFailures({ ...failed });
+          continue;
+        }
         confirmedMessage = result.message || '簽到已由伺服器確認';
-        await save((current) => current.slice(1));
+        await save((current) => current.filter((entry) => entry !== checkInCode));
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
       if (mounted.current) {
-        setMessage(confirmedMessage);
-        onConfirmed();
+        setFailures(failed);
+        setMessage(
+          Object.keys(failed).length ? '部分簽到未完成，請重試或刪除失敗紀錄' : confirmedMessage,
+        );
+        if (confirmedMessage) onConfirmed();
       }
     } catch (err) {
       if (mounted.current) setMessage(err instanceof Error ? err.message : '尚未送出');
@@ -160,6 +173,24 @@ export function ClubCheckIn({
               />
               <Button text="確認簽到碼" disabled={busy} onPress={() => void enqueue(code)} />
               <Text>{queue.length} 筆待送出</Text>
+              {queue.map((entry, index) =>
+                failures[entry] ? (
+                  <View key={entry}>
+                    <Text>
+                      第 {index + 1} 筆：{failures[entry]}
+                    </Text>
+                    <Button
+                      text={`刪除第 ${index + 1} 筆失敗簽到`}
+                      disabled={busy}
+                      onPress={() => {
+                        void save((current) => current.filter((value) => value !== entry)).catch(
+                          () => setMessage('無法更新暫存，請重試'),
+                        );
+                      }}
+                    />
+                  </View>
+                ) : null,
+              )}
               <Button
                 text="重送待送出簽到"
                 disabled={busy || !queue.length}

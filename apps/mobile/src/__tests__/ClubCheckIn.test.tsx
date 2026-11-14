@@ -93,7 +93,7 @@ test('伺服器拒絕時保留待送出，其他帳號不讀取該佇列', async
   fireEvent.press(screen.getByText('開始簽到'));
   await screen.findByText('1 筆待送出');
   fireEvent.press(screen.getByText('重送待送出簽到'));
-  await screen.findByText('沒有社團管理權限');
+  await screen.findByText(/沒有社團管理權限/);
   expect(confirmed).not.toHaveBeenCalled();
   view.unmount();
   render(
@@ -152,8 +152,67 @@ test('連續輸入在暫存尚未完成時依序保留所有簽到碼', async ()
     mockNetworkListener({ isConnected: true });
   });
   await screen.findByText('0 筆待送出');
-  expect(jest.mocked(callClubPortal).mock.calls.map((args) => args[2].checkInCode)).toEqual([
+  expect(jest.mocked(callClubPortal).mock.calls.map((args) => args[2]?.checkInCode)).toEqual([
     '1234',
     '5678',
   ]);
+});
+
+test.each(['簽到碼無效', '網路暫時中斷'])(
+  '%s 保留失敗項目，後續仍送出並可個別刪除',
+  async (message) => {
+    const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+    mockStorage.set(key, JSON.stringify(['bad', 'good']));
+    jest.mocked(callClubPortal).mockRejectedValueOnce(new Error(message));
+    const confirmed = jest.fn();
+    render(
+      <ClubCheckIn
+        uid="one"
+        schoolId="pu"
+        groupId="club"
+        eventId="event"
+        officer
+        onConfirmed={confirmed}
+      />,
+    );
+    fireEvent.press(screen.getByText('開始簽到'));
+    await screen.findByText('2 筆待送出');
+    fireEvent.press(screen.getByText('重送待送出簽到'));
+    await waitFor(() => expect(confirmed).toHaveBeenCalledTimes(1));
+    expect(jest.mocked(callClubPortal).mock.calls.map((args) => args[2]?.checkInCode)).toEqual([
+      'bad',
+      'good',
+    ]);
+    expect(mockStorage.get(key)).toBe('["bad"]');
+    expect(screen.getByText(new RegExp(message))).toBeTruthy();
+    fireEvent.press(screen.getByText('刪除第 1 筆失敗簽到'));
+    await screen.findByText('0 筆待送出');
+    expect(mockStorage.get(key)).toBe('[]');
+  },
+);
+
+test('暫時失敗紀錄可在重載後重送成功', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  mockStorage.set(key, '["1234"]');
+  jest.mocked(callClubPortal).mockRejectedValueOnce(new Error('網路暫時中斷'));
+  const props = {
+    uid: 'one',
+    schoolId: 'pu',
+    groupId: 'club',
+    eventId: 'event',
+    officer: true,
+    onConfirmed: jest.fn(),
+  };
+  const view = render(<ClubCheckIn {...props} />);
+  fireEvent.press(screen.getByText('開始簽到'));
+  await screen.findByText('1 筆待送出');
+  fireEvent.press(screen.getByText('重送待送出簽到'));
+  await screen.findByText(/網路暫時中斷/);
+  view.unmount();
+  render(<ClubCheckIn {...props} />);
+  fireEvent.press(screen.getByText('開始簽到'));
+  await screen.findByText('1 筆待送出');
+  fireEvent.press(screen.getByText('重送待送出簽到'));
+  await waitFor(() => expect(props.onConfirmed).toHaveBeenCalledTimes(1));
+  expect(mockStorage.get(key)).toBe('[]');
 });

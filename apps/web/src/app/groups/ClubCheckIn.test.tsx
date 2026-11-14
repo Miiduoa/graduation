@@ -62,7 +62,64 @@ test('伺服器拒絕或撤權時保留待送出，不顯示假成功', async ()
   );
   await screen.findByText('1 筆待送出');
   fireEvent.click(screen.getByRole('button', { name: '重送待送出簽到' }));
-  await screen.findByText('沒有社團管理權限');
+  await screen.findByText(/沒有社團管理權限/);
   expect(confirmed).not.toHaveBeenCalled();
   expect(screen.getByText('1 筆待送出')).toBeTruthy();
+});
+
+test.each(['簽到碼無效', '網路暫時中斷'])(
+  '%s 保留失敗項目，後續仍送出並可個別刪除',
+  async (message) => {
+    const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+    localStorage.setItem(key, JSON.stringify(['bad', 'good']));
+    vi.mocked(callClubPortal)
+      .mockRejectedValueOnce(new Error(message))
+      .mockResolvedValue({ success: true, office: false });
+    const confirmed = vi.fn();
+    render(
+      <ClubCheckIn
+        uid="one"
+        schoolId="pu"
+        groupId="club"
+        eventId="event"
+        officer
+        onConfirmed={confirmed}
+      />,
+    );
+    await screen.findByText('2 筆待送出');
+    fireEvent.click(screen.getByRole('button', { name: '重送待送出簽到' }));
+    await waitFor(() => expect(confirmed).toHaveBeenCalledOnce());
+    expect(vi.mocked(callClubPortal).mock.calls.map((args) => args[2]?.checkInCode)).toEqual([
+      'bad',
+      'good',
+    ]);
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual(['bad']);
+    expect(screen.getByText(new RegExp(message))).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '刪除第 1 筆失敗簽到' }));
+    expect(localStorage.getItem(key)).toBe('[]');
+  },
+);
+
+test('暫時失敗紀錄可在重載後重送成功', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  localStorage.setItem(key, '["1234"]');
+  vi.mocked(callClubPortal)
+    .mockRejectedValueOnce(new Error('網路暫時中斷'))
+    .mockResolvedValue({ success: true, office: false });
+  const props = {
+    uid: 'one',
+    schoolId: 'pu',
+    groupId: 'club',
+    eventId: 'event',
+    officer: true,
+    onConfirmed: vi.fn(),
+  };
+  const view = render(<ClubCheckIn {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '重送待送出簽到' }));
+  await screen.findByText(/網路暫時中斷/);
+  view.unmount();
+  render(<ClubCheckIn {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '重送待送出簽到' }));
+  await waitFor(() => expect(props.onConfirmed).toHaveBeenCalledOnce());
+  expect(localStorage.getItem(key)).toBe('[]');
 });
