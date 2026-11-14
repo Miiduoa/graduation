@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { listStoryViewers, type CampusStoryDoc } from '../../services/stories';
 
@@ -31,15 +31,38 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   const [page, setPage] = useState<ViewerPage>({ viewers: [], nextCursor: null });
   const [request, setRequest] = useState<{ cursor: Cursor }>({ cursor: null });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'denied'>('loading');
+  const [inForeground, setInForeground] = useState(
+    () => AppState.currentState !== 'background' && AppState.currentState !== 'inactive',
+  );
+  const foregroundRef = useRef(inForeground);
+  const readEpoch = useRef(0);
+
+  // Returning from the app switcher cannot replay private viewer names from
+  // a prior authorization. Stop reads while backgrounded and start at page one.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      const foreground = state === 'active';
+      if (foreground === foregroundRef.current) return;
+      foregroundRef.current = foreground;
+      readEpoch.current += 1; // Invalidate promises before their effect cleanup.
+      setPage({ viewers: [], nextCursor: null });
+      setStatus('loading');
+      setRequest({ cursor: null });
+      setInForeground(foreground);
+    });
+    return () => subscription.remove();
+  }, []);
 
   const { id, schoolId, authorUid } = story;
   useEffect(() => {
+    if (!inForeground) return;
+    const epoch = readEpoch.current;
     let active = true;
     // Firestore's server read may remain pending after a network interruption.
     // Release the UI after a bounded wait. This does not cancel the SDK read:
     // the inactive guard also excludes a late denial or successful result.
     const timeout = setTimeout(() => {
-      if (!active) return;
+      if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
       active = false;
       setStatus('error');
     }, AUDIENCE_READ_TIMEOUT_MS);
@@ -77,9 +100,11 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       active = false;
       clearTimeout(timeout);
     };
-  }, [id, schoolId, authorUid, request]);
+  }, [id, schoolId, authorUid, request, inForeground]);
 
   function load(cursor: Cursor) {
+    if (!foregroundRef.current) return;
+    readEpoch.current += 1;
     setStatus('loading');
     setRequest({ cursor });
   }
