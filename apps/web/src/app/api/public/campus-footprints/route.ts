@@ -3,6 +3,7 @@ import {
   parseProvidenceOsmFootprints,
   stripOsmRevisionsAfter,
   PROVIDENCE_OSM_BUILDING_WAY_IDS,
+  PROVIDENCE_OSM_BUILDING_RELATION_IDS,
   type ProvidenceFootprint,
 } from '@/app/map/providenceFootprints';
 
@@ -64,7 +65,13 @@ function overpassRetryAfterMs(header: string | null, now: number): number {
   const value = header.trim();
   let requestedMs: number;
   if (/^\d+$/.test(value)) {
-    requestedMs = Number(value) * 1000;
+    // HTTP delta-seconds may be arbitrarily long. Number(value) * 1000 can
+    // overflow to Infinity, which previously fell back to just ten minutes
+    // instead of respecting a public Overpass operator's longer pause.
+    // Strip leading zeros, then cap *before* numeric conversion.
+    const digits = value.replace(/^0+/, '') || '0';
+    requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
+      ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
     const dateMs = Date.parse(value);
     requestedMs = Number.isFinite(dateMs) ? dateMs - now : NaN;
@@ -83,13 +90,24 @@ function freshCacheControl(validUntil: number): string {
   const secondsRemaining = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
   return `public, max-age=0, s-maxage=${Math.min(3600, secondsRemaining)}`;
 }
-const query = '[out:json][timeout:12];way(id:' +
-  PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
+// This is a small, fixed list of audited OSM IDs. The default Overpass
+// 512 MiB reservation is unnecessary and can make the public dispatcher
+// reject our request under load. Keep the server's 8s query budget below
+// our independent 12s network/body deadline, leaving room to send JSON.
+// Neither setting guarantees availability; stale/POI-only fallback remains.
+const query = '[out:json][timeout:8][maxsize:67108864];(way(id:' +
+  PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');relation(id:' +
+  PROVIDENCE_OSM_BUILDING_RELATION_IDS.join(',') + '););out meta geom;';
 
 type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; osmBaseAt: string | null; validUntil: number; discardAfter: number };
 let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
+// Repeated errors from an overloaded public Overpass instance must not cause
+// 144 retries/day (a fixed ten-minute retry loop) on one server worker.
+// This is per process only; a multi-instance deployment also needs a shared
+// cooldown/cache before it can promise fleet-wide upstream request limits.
+let consecutiveUpstreamFailures = 0;
 
 // Overpass can omit Content-Length or serve compressed responses. Stop reading at the
 // decoded byte limit; checking .text().length afterwards would still buffer an
@@ -107,14 +125,37 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // length header, so comparing those lengths would reject valid compressed
   // responses. Keep the decoded 500 KB cap for every encoding.
   const contentEncoding = response.headers.get('content-encoding');
-  const verifyIdentityLength = lengthHeader !== null &&
-    (contentEncoding === null || contentEncoding.trim().toLowerCase() === 'identity');
-  if (!Number.isSafeInteger(declared) || declared > MAX_RESPONSE_BYTES) {
+  const coding = contentEncoding?.trim().toLowerCase() ?? 'identity';
+  // Node Fetch transparently decodes these single HTTP content codings.
+  // A blank, unknown or stacked/mixed coding cannot safely tell us whether
+  // Content-Length measures the decoded bytes. Do not silently classify an
+  // ambiguous identity response as compressed and skip its length check.
+  if (!['identity', 'gzip', 'br', 'deflate'].includes(coding)) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('Unsupported OSM content encoding');
+  }
+  const identityEncoded = coding === 'identity';
+  const verifyIdentityLength = lengthHeader !== null && identityEncoded;
+  // Fetch delivers decoded bytes, while Content-Length for gzip/br describes
+  // compressed wire bytes. A valid compressed response can exceed the decoded
+  // cap on the wire (compression adds framing overhead), so do not reject it
+  // as if the header measured the decoded body. Still bound both the declared
+  // encoded transport (2x) and the streamed decoded payload (500 KB).
+  const declaredLimit = identityEncoded ? MAX_RESPONSE_BYTES : MAX_RESPONSE_BYTES * 2;
+  if (!Number.isSafeInteger(declared) || declared > declaredLimit) {
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
     if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response too large');
+  }
+  // Any HTTP 200 Overpass JSON snapshot requires a non-empty body. A declared
+  // zero-byte identity *or* compressed response cannot contain verified map
+  // data. Reject it before reading: even a stalled stream must not consume the
+  // full 12-second deadline when its header already contradicts the payload.
+  if (lengthHeader !== null && declared === 0) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('OSM response declares an empty body');
   }
   if (!response.body) {
     // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
@@ -146,6 +187,12 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
       size += value.byteLength;
+      // On identity responses, the first byte beyond Content-Length already
+      // proves truncation/overdelivery. Do not wait for EOF from an upstream
+      // stream that could stall indefinitely after sending too many bytes.
+      if (verifyIdentityLength && size > declared) {
+        throw new Error('OSM response length mismatch');
+      }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
     }
@@ -190,15 +237,18 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // We only need status/Retry-After. Release the unused body immediately,
     // without awaiting cancellation from an uncooperative upstream.
     if (response.body) void response.body.cancel().catch(() => {});
-    // HTTP 406 may mean the public Overpass server has blocked this client.
-    // Repeating the same request every ten minutes can prolong that block.
-    // Pause for a full day rather than treating access denial as congestion.
-    if (response.status === 406) {
+    // The public Overpass operator may penalize clients that repeatedly send
+    // malformed queries (400) or retry while denied (403/406). A fixed query
+    // bug will not repair itself after ten minutes: back off for a full day,
+    // while leaving a dated stale snapshot / POI-only fallback available.
+    // Retain the separate Retry-After handling for congestion (429/503).
+    if (response.status === 400 || response.status === 403 || response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
-    // 429 and 503 can contain a server-provided cooldown. Do not retry against
-    // the public endpoint every ten minutes when it explicitly requests longer.
-    if (response.status === 429 || response.status === 503) {
+    // Public Overpass gateways also report overload through 502/504.
+    // Honour Retry-After for these transient gateway failures as for 429/503;
+    // otherwise a ten-minute backoff may violate the operator's requested pause.
+    if ([429, 502, 503, 504].includes(response.status)) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
         response.headers.get('retry-after'), Date.now(),
       ));
@@ -285,11 +335,41 @@ export async function GET() {
   } else {
     try {
       if (!pending) pending = readOsmWithDeadline().finally(() => { pending = null; });
-      cache = await pending;
+      const candidate = await pending;
+      // A later HTTP fetch can reach an older Overpass replica. Do not replace
+      // a previously dated snapshot with older (or undated) OSM database state
+      // and falsely present the regression as the newest campus geometry.
+      // Preserve the last trusted snapshot as dated, no-store stale fallback.
+      // The same database replication timestamp should describe the same
+      // audited geometry and heights. A replica serving different buildings
+      // under that exact timestamp may be partial/inconsistent, even though
+      // both copies pass the independent 48-hour freshness check.
+      // Parser output is in stable POI order, so this also compares holes,
+      // sourced height labels and revisions without depending on OSM order.
+      if (cache?.osmBaseAt && (!candidate.osmBaseAt ||
+          Date.parse(candidate.osmBaseAt) < Date.parse(cache.osmBaseAt) ||
+          (candidate.osmBaseAt === cache.osmBaseAt &&
+            JSON.stringify(candidate.buildings) !== JSON.stringify(cache.buildings)))) {
+        throw new Error('Overpass replication snapshot inconsistent');
+      }
+      cache = candidate;
       unavailableUntil = 0;
+      consecutiveUpstreamFailures = 0;
     } catch (error) {
-      unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError
-        ? error.cooldownMs : ERROR_COOLDOWN_MS);
+      // All callers awaiting the same pending fetch can enter this catch. Count
+      // the failed upstream attempt once, not once per simultaneous visitor:
+      // otherwise one transient outage could incorrectly impose 24 hours of
+      // cooldown on a popular campus map.
+      if (unavailableUntil <= Date.now()) {
+        // A fixed ten-minute retry loop would send 144 requests per day from
+        // one worker during an outage. Back off, capped at 24 hours; never
+        // shorten the public service's Retry-After or a denied-query pause.
+        const backoffMs = Math.min(MAX_RETRY_AFTER_MS,
+          ERROR_COOLDOWN_MS * 2 ** Math.min(consecutiveUpstreamFailures, 8));
+        consecutiveUpstreamFailures += 1;
+        unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError
+          ? Math.max(error.cooldownMs, backoffMs) : backoffMs);
+      }
     }
   }
   // Stale is an outage fallback, not an unlimited-lived source of campus geometry.

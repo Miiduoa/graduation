@@ -14,7 +14,7 @@ import {
   type CampusSpatialCamera,
 } from './campusSpatialCamera';
 import type { CampusSpatialScene } from './campusSpatialScene';
-import { walkingDirectionsUrl, type MapLocation } from './mapService';
+import { appleWalkingDirectionsUrl, walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
@@ -173,13 +173,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       <div className={styles.cameraTools} role="group" aria-label="調整空間視角">
         <button className="btn" type="button" aria-label="向左旋轉" title="向左旋轉" onClick={() => onCameraChange({ ...camera, bearing: camera.bearing - SPATIAL_ROTATION_STEP })}>↶</button>
         <button className="btn" type="button" aria-label="向右旋轉" title="向右旋轉" onClick={() => onCameraChange({ ...camera, bearing: camera.bearing + SPATIAL_ROTATION_STEP })}>↷</button>
-        <button className="btn" type="button" aria-label="縮小空間圖" title="縮小空間圖" aria-disabled={camera.zoom <= MIN_SPATIAL_ZOOM} onClick={() => {
+        <button className="btn" type="button" aria-label="縮小空間圖" title="縮小空間圖" disabled={camera.zoom <= MIN_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom > MIN_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom / SPATIAL_ZOOM_FACTOR });
         }}>−</button>
-        <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" aria-disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
+        <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom < MAX_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom * SPATIAL_ZOOM_FACTOR });
         }}>＋</button>
-        <button className="btn" type="button" onClick={() => onCameraChange({ bearing: 0, zoom: 1 })}>回到北向</button>
+        <button className="btn" type="button" onClick={() => onCameraChange({ ...camera, bearing: 0 })}>回到北向</button>
         <span>縮放 {Math.round(camera.zoom * 100)}%</span>
         <span className={styles.compass}>
           <svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
@@ -201,6 +201,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
+  const [placeSearch, setPlaceSearch] = useState('');
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
@@ -224,10 +225,78 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
-  const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
+  // The external map may replace its filtered POIs while this dialog stays open.
+  // An explicit in-dialog pick wins only while it still exists in this campus
+  // model; otherwise use the map's current selection (never the first result).
+  const selectedPoint = model.points.find((point) => point.id === selection)
+    ?? model.points.find((point) => point.id === selected?.id);
+  // Search only narrows the destination list. The current selection remains
+  // visible and unchanged even when it does not match the typed query.
+  const searchTerm = placeSearch.trim().normalize('NFKC').toLocaleLowerCase('zh-TW');
+  // Build a normalized index once per campus model, not per mobile keystroke.
+  // All whitespace-separated terms must match, regardless of their order.
+  const searchIndex = useMemo(() => model.points.map((point) => {
+    const location = point.location;
+    const searchable = [
+      point.name, location.category, location.description,
+      location.building, location.floor, ...(location.facilities ?? []),
+    ].filter((part): part is string => typeof part === 'string')
+      .join(' ').normalize('NFKC').toLocaleLowerCase('zh-TW');
+    return { point, searchable };
+  }), [model.points]);
+  const searchTokens = useMemo(() => searchTerm.split(/\s+/u).filter(Boolean), [searchTerm]);
+  const matchingPoints = useMemo(() => {
+    if (searchTokens.length === 0) return model.points;
+    return searchIndex
+      .filter(({ searchable }) => searchTokens.every((token) => searchable.includes(token)))
+      .map(({ point }) => point);
+  }, [model.points, searchIndex, searchTokens]);
+  // Duplicate names are common for classrooms, entrances and facilities.
+  // A plain name in the native select or a quick-pick button can send visitors
+  // to the wrong POI. Distinguish only duplicates using *existing* metadata;
+  // the ordinal is a list identifier, never a claimed physical entrance.
+  const pointDisplayLabels = useMemo(() => {
+    // Visually equivalent Unicode and full-width names must also be
+    // disambiguated. This groups labels only; it never rewrites the POI ID,
+    // coordinate, audited name or building metadata.
+    const nameKey = (name: string) =>
+      name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('zh-TW');
+    const counts = new Map<string, number>();
+    for (const point of model.points) {
+      const key = nameKey(point.name);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const ordinals = new Map<string, number>();
+    return new Map(model.points.map((point) => {
+      const key = nameKey(point.name);
+      const count = counts.get(key) ?? 1;
+      if (count === 1) return [point.id, point.name] as const;
+      const ordinal = (ordinals.get(key) ?? 0) + 1;
+      ordinals.set(key, ordinal);
+      const details = [
+        point.location.building?.trim() ? `建築：${point.location.building.trim()}` : null,
+        point.location.floor?.trim() ? `樓層：${point.location.floor.trim()}` : null,
+        point.category.trim() ? `類別：${point.category.trim()}` : null,
+        `同名地點 ${ordinal}／${count}`,
+      ].filter(Boolean).join(' · ');
+      return [point.id, `${point.name}（${details}）`] as const;
+    }));
+  }, [model.points]);
+  const selectionOutsideSearch = Boolean(
+    selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id),
+  );
+  // Exclude the active destination *before* limiting shortcuts, so an already
+  // selected match cannot consume one of the five mobile quick-pick slots.
+  const shortcutPoints = searchTerm
+    ? matchingPoints.filter((point) => point.id !== selectedPoint?.id) : [];
+  const listedPoints = selectionOutsideSearch && selectedPoint
+    ? [selectedPoint, ...matchingPoints] : matchingPoints;
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
+  const previousPoint = index > 0 ? model.points[index - 1] : null;
+  const nextPoint = index >= 0 && index < model.points.length - 1 ? model.points[index + 1] : null;
+  const searchId = useId();
   const selectId = useId();
   const progressId = useId();
   const directionsNoteId = useId();
@@ -247,6 +316,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     const matching = footprints.filter((footprint) => pointIds.has(footprint.poiId));
     return matching.length ? matching : NO_VISIBLE_FOOTPRINTS;
   }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
+  // Help visitors distinguish an OSM-backed 3D outline from a location pin.
+  // Only advertise geometry that survived the same source checks as the scene;
+  // when the upstream is unavailable every location stays an ordinary pin.
+  const outlinedPoiIds = useMemo(() =>
+    new Set(visibleFootprints.map((footprint) => footprint.poiId)), [visibleFootprints]);
   const sourceFootprint = place
     ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
 
@@ -267,8 +341,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         current?.until === footprintRetryAfter.until && current.minutes !== minutes
           ? { ...current, minutes } : current);
     };
-    const timer = window.setTimeout(() => setFootprintRetryAfter(null),
-      Math.max(0, footprintRetryAfter.until - Date.now()));
+    // A previously queued timeout can run after a later 503 replaces this
+    // cooldown. Only release the exact deadline that scheduled the callback;
+    // otherwise an old timer can re-enable Retry during a new server pause.
+    const timer = window.setTimeout(() => {
+      setFootprintRetryAfter((current) =>
+        current?.until === footprintRetryAfter.until ? null : current);
+    }, Math.max(0, footprintRetryAfter.until - Date.now()));
     const interval = window.setInterval(synchronizeCooldown, 60_000);
     document.addEventListener('visibilitychange', synchronizeCooldown);
     window.addEventListener('pageshow', synchronizeCooldown);
@@ -286,12 +365,19 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
       if (now >= footprintClock.expiresAt) {
-        // Refresh once at the deadline, retaining the verified geometry and dates.
-        // A pending refresh already serves this purpose; do not restart it on resume.
+        // Seven days is a hard expiry, not just a prompt to refresh. A long-lived
+        // browser tab must not keep showing buildings after the server would
+        // discard them, even if an in-flight refresh stalls or fails.
         footprintExpiresAtRef.current = null;
-        staleSnapshotRef.current = true;
+        staleSnapshotRef.current = false;
         setFootprintClock(null);
-        setFootprintStale(true);
+        setFootprints([]);
+        setFootprintDate(null);
+        setFootprintBaseDate(null);
+        setFootprintStale(false);
+        setFootprintRefreshing(false);
+        setFootprintRefreshFailed(false);
+        setFootprintStatus('unavailable');
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
@@ -318,8 +404,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
-    // A local age deadline must not discard a previously verified outline.
-    const preserveStale = staleSnapshotRef.current;
+    // Within the seven-day retention boundary, a dated stale outline may
+    // survive a refresh failure. Once expired, even a pending request must not
+    // restore that outline on failure or timeout.
+    const preserveStale = staleSnapshotRef.current &&
+      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
     footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
@@ -333,7 +422,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale;
+      const keepStale = preserveStale &&
+        footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
@@ -386,7 +476,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Keep the previously verified snapshot even after its refresh deadline.
         // Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale;
+        const keepStale = preserveStale &&
+        footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
@@ -500,10 +591,44 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           </div>
             <div className={styles.details}>
               <div className={styles.selectField}>
+                <label htmlFor={searchId}>搜尋地點</label>
+                <input
+                  id={searchId}
+                  type="search"
+                  value={placeSearch}
+                  onChange={(event) => setPlaceSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    // IME Enter commits Chinese input; it must never select a POI.
+                    if (event.key !== 'Enter' || event.nativeEvent.isComposing ||
+                        event.keyCode === 229 || matchingPoints.length !== 1 ||
+                        matchingPoints[0].id === selectedPoint?.id) return;
+                    event.preventDefault();
+                    selectPlace(matchingPoints[0].id);
+                  }}
+                  aria-controls={selectId}
+                  autoComplete="off"
+                  placeholder="建築、教室、設施或地點名稱"
+                />
+                {searchTerm && <small className={styles.searchCount} role="status">
+                  找到 {matchingPoints.length} / {model.points.length} 個地點；目前選擇不會因搜尋改變。
+                </small>}
+                {shortcutPoints.length > 0 && (
+                  <div className={styles.searchMatches} role="group" aria-label="搜尋結果捷徑">
+                    {shortcutPoints.slice(0, 5).map((point) => (
+                        <button key={point.id} className={styles.searchMatch} type="button"
+                          onClick={() => selectPlace(point.id)}>
+                          在空間圖查看「{pointDisplayLabels.get(point.id) ?? point.name}」
+                        </button>
+                      ))}
+                    {shortcutPoints.length > 5 && <small>
+                      僅顯示前 5 筆搜尋捷徑；可由下方地點選單選取所有符合地點。
+                    </small>}
+                  </div>
+                )}
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}
+                  {listedPoints.map((point) => <option key={point.id} value={point.id}>{pointDisplayLabels.get(point.id) ?? point.name}{selectionOutsideSearch && point.id === selectedPoint?.id ? '（目前選擇）' : ''}{outlinedPoiIds.has(point.id) ? (footprintStale ? '（舊快照 OSM 外框）' : '（有 OSM 外框）') : ''}</option>)}
                 </select>
               </div>
               {place ? <>
@@ -516,15 +641,19 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   max={Math.max(0, model.points.length - 1)}
                   value={Math.max(0, index)}
                   disabled={model.points.length < 2}
-                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${place.name}`}
+                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${pointDisplayLabels.get(place.id) ?? place.name}`}
                   onChange={(event) => {
                     const point = model.points[Number(event.target.value)];
                     if (point) selectPlace(point.id);
                   }}
                 />
                 <div className={styles.steps}>
-                  <button className="btn" type="button" disabled={index <= 0} onClick={() => selectPlace(model.points[index - 1].id)}>上一個地點</button>
-                  <button className="btn" type="button" disabled={index >= model.points.length - 1} onClick={() => selectPlace(model.points[index + 1].id)}>下一個地點</button>
+                  <button className="btn" type="button" disabled={!previousPoint}
+                    aria-label={previousPoint ? `上一個地點：${pointDisplayLabels.get(previousPoint.id) ?? previousPoint.name}` : '上一個地點'}
+                    onClick={() => { if (previousPoint) selectPlace(previousPoint.id); }}>上一個地點</button>
+                  <button className="btn" type="button" disabled={!nextPoint}
+                    aria-label={nextPoint ? `下一個地點：${pointDisplayLabels.get(nextPoint.id) ?? nextPoint.name}` : '下一個地點'}
+                    onClick={() => { if (nextPoint) selectPlace(nextPoint.id); }}>下一個地點</button>
                 </div>
               </div>
               <section className={styles.place} aria-label="導覽地點資訊">
@@ -536,7 +665,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {school === 'pu' && footprintStatus === 'ready' && (
                   <p className={styles.note}>
                     {sourceFootprint ? <>
-                      建築外框：OpenStreetMap 來源，經校園地點與外框對位檢查。
+                      建築外框：OpenStreetMap 來源，經校園地點與外框對位檢查。{footprintStale && '（使用舊快照，非最新現場資訊）'}
                       {' '}
                       {sourceFootprint.heightBasis === 'osm-tag'
                         ? `高度：${Number(sourceFootprint.heightMeters.toFixed(2))} 公尺（OSM 使用者標註，非校方實測）。`
@@ -546,8 +675,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 )}
                 {sourceFootprint?.osmVersion && sourceFootprint.osmEditedAt && (
                   <p className={styles.note}>
-                    OSM way 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
-                    此日期不代表現場查證，節點座標可能另有更新。
+                    OSM {sourceFootprint.sourceUrl.includes('/relation/') ? 'relation' : 'way'} 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
+                    此日期不代表現場查證；{sourceFootprint.sourceUrl.includes('/relation/')
+                      ? 'relation 成員 way 與節點座標可能另有更新。'
+                      : '節點座標可能另有更新。'}
                   </p>
                 )}
                 {school === 'pu' && place.id === 'pu-zhugu' && (
@@ -569,6 +700,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   在平面地圖查看
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
+                <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>Apple 地圖步行導航</a>
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}

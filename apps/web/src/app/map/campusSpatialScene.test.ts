@@ -580,7 +580,9 @@ describe('controlled spatial camera input', () => {
     for (let index = 0; index < 20; index += 1) keyboard(container, '-');
     expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(MIN_SPATIAL_ZOOM);
     keyboard(container, 'Home');
-    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: 1 });
+    // Keyboard and toolbar north-up must preserve an accessible user's
+    // chosen zoom, including the clamped minimum zoom.
+    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: MIN_SPATIAL_ZOOM });
     drawFrame();
     expect(frames.size).toBe(0);
     expect(document.activeElement).toBe(container);
@@ -749,6 +751,139 @@ describe('controlled spatial camera input', () => {
     expect(onCameraChange).not.toHaveBeenCalled();
     expect(frames.size).toBe(0);
   });
+});
+
+it('keeps an OSM relation courtyard open in Three.js and leaves its POI on the ground', () => {
+  // Synthetic ring coordinates; the real source has 1 outer + 1 inner way.
+  const xijia = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  const campus = buildCampusSpatialModel([xijia]);
+  const outer = [
+    { lon: 120.58045, lat: 24.22785 }, { lon: 120.58090, lat: 24.22785 },
+    { lon: 120.58090, lat: 24.22818 }, { lon: 120.58045, lat: 24.22818 },
+    { lon: 120.58045, lat: 24.22785 },
+  ];
+  const inner = [
+    { lon: 120.58063, lat: 24.22799 }, { lon: 120.58071, lat: 24.22799 },
+    { lon: 120.58071, lat: 24.22805 }, { lon: 120.58063, lat: 24.22805 },
+    { lon: 120.58063, lat: 24.22799 },
+  ];
+  const [footprint] = parseProvidenceOsmFootprints({ elements: [{
+    type: 'relation', id: 9246899,
+    tags: { type: 'multipolygon', building: 'dormitory', height: '18 m' },
+    members: [
+      { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+      { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+    ],
+  }] });
+  expect(footprint?.holes).toHaveLength(1);
+  const withHole = setup(campus, undefined, [footprint]);
+  const filled = setup(campus, undefined, [{ ...footprint, holes: undefined }]);
+  drawFrame();
+  const graph = withHole.renderer.render.mock.calls.at(-1)![0] as Scene;
+  let extruded: Mesh | null = null;
+  graph.traverse((node) => {
+    if (node instanceof Mesh && node.geometry instanceof ExtrudeGeometry) extruded = node;
+  });
+  expect(extruded).not.toBeNull();
+  const shapes = (extruded!.geometry as ExtrudeGeometry).parameters.shapes;
+  expect(Array.isArray(shapes) ? shapes[0].holes.length : shapes.holes.length).toBe(1);
+  const capHeight = (renderer: typeof withHole.renderer) => {
+    const scene = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = scene.children.find((node): node is InstancedMesh =>
+      node instanceof InstancedMesh && node.geometry.type === 'SphereGeometry')!;
+    const matrix = new Matrix4();
+    caps.getMatrixAt(0, matrix);
+    return new Vector3().setFromMatrixPosition(matrix).y;
+  };
+  expect(capHeight(filled.renderer)).toBeGreaterThan(capHeight(withHole.renderer) + 10);
+});
+
+it('keeps a POI on the ground when it falls on a courtyard or outer-ring boundary', () => {
+  // Synthetic geometry, not measured building walls or an entrance. The known
+  // Xijia POI is intentionally placed exactly on a rectangle's right edge.
+  const xijia = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  const campus = buildCampusSpatialModel([xijia]);
+  const footprint: ProvidenceFootprint = {
+    poiId: 'pu-xijia', name: xijia.name, sourceUrl: xijia.sourceUrl,
+    outline: [[120.58045, 24.22785], [120.58090, 24.22785],
+      [120.58090, 24.22818], [120.58045, 24.22818]],
+    heightMeters: 18, heightBasis: 'osm-tag',
+  };
+  const height = (item: ProvidenceFootprint) => {
+    const { renderer } = setup(campus, undefined, [item]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = graph.children.find((node): node is InstancedMesh =>
+      node instanceof InstancedMesh && node.geometry.type === 'SphereGeometry')!;
+    const matrix = new Matrix4();
+    caps.getMatrixAt(0, matrix);
+    return new Vector3().setFromMatrixPosition(matrix).y;
+  };
+  const onRoof = height(footprint);
+  const inCourtyard = height({
+    ...footprint,
+    holes: [[[120.58059, 24.22799], [120.58072, 24.22799],
+      [120.58072, 24.22805], [120.58059, 24.22805]]],
+  });
+  const onCourtyardEdge = height({
+    ...footprint,
+    holes: [[[120.58059, 24.22799], [xijia.lng, 24.22799],
+      [xijia.lng, 24.22805], [120.58059, 24.22805]]],
+  });
+  const onOuterEdge = height({
+    ...footprint,
+    outline: [[120.58045, 24.22785], [xijia.lng, 24.22785],
+      [xijia.lng, 24.22818], [120.58045, 24.22818]],
+  });
+  expect(onRoof).toBeGreaterThan(footprint.heightMeters);
+  expect(inCourtyard).toBeLessThan(footprint.heightMeters);
+  expect(onCourtyardEdge).toBeCloseTo(inCourtyard, 6);
+  expect(onOuterEdge).toBeCloseTo(inCourtyard, 6);
+});
+
+
+it('keeps unsourced 12 m volumes translucent while OSM-tagged heights remain opaque', () => {
+  // Synthetic ring/height fixtures, not a survey of the real library.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const ring: Array<[number, number]> = [
+    [120.58131, 24.22624], [120.58143, 24.22624],
+    [120.58143, 24.22634], [120.58131, 24.22634],
+  ];
+  const base: ProvidenceFootprint = {
+    poiId: library.id, name: library.name, sourceUrl: library.sourceUrl,
+    outline: ring, heightMeters: 12, heightBasis: 'illustrative',
+  };
+  const materialFor = (footprint: ProvidenceFootprint) => {
+    const view = setup(campus, undefined, [footprint]);
+    drawFrame();
+    const graph = view.renderer.render.mock.calls.at(-1)![0] as Scene;
+    const volume = graph.children.find((node): node is Mesh =>
+      node instanceof Mesh && node.geometry instanceof ExtrudeGeometry)!;
+    return { ...view, material: volume.material as import('three').MeshStandardMaterial };
+  };
+  const illustrative = materialFor(base);
+  const tagged = materialFor({ ...base, heightMeters: 18, heightBasis: 'osm-tag' });
+  expect(illustrative.material.transparent).toBe(true);
+  expect(illustrative.material.opacity).toBeCloseTo(0.58);
+  expect(illustrative.material.depthWrite).toBe(false);
+  expect(tagged.material.transparent).toBe(false);
+  expect(tagged.material.opacity).toBe(1);
+  expect(tagged.material.depthWrite).toBe(true);
+
+  for (const view of [
+    { selectedId: library.id, overhead: false, motion: false, dark: false },
+    { selectedId: library.id, overhead: false, motion: false, dark: true },
+    { selectedId: null, overhead: true, motion: false, dark: true },
+  ]) {
+    illustrative.scene.setView(view);
+    tagged.scene.setView(view);
+    drawFrame();
+    expect(illustrative.material.transparent).toBe(true);
+    expect(illustrative.material.opacity).toBeCloseTo(0.58);
+    expect(tagged.material.transparent).toBe(false);
+    expect(tagged.material.opacity).toBe(1);
+  }
 });
 
 it('extrudes OSM footprints in geographically aligned meters only for known spatial points', () => {

@@ -12,9 +12,11 @@ export type ProvidenceFootprint = {
   name: string;
   sourceUrl: string;
   outline: Array<[number, number]>; // GeoJSON 順序：[經度、緯度]
+  /** Validated OSM relation courtyards; never extrude these as solid roof/floor. */
+  holes?: Array<Array<[number, number]>>;
   heightMeters: number;
   heightBasis: 'osm-tag' | 'illustrative';
-  /** Optional OSM way revision; not a site-survey or geometry-freshness guarantee. */
+  /** Optional revision of this exact OSM way/relation; not a geometry-freshness guarantee. */
   osmVersion?: number;
   osmEditedAt?: string;
 };
@@ -22,7 +24,7 @@ export type ProvidenceFootprint = {
 const EARTH_RADIUS = 6_371_008.8;
 const DEG = Math.PI / 180;
 const ALLOWANCE = 0.0004;
-const MAX_WAYS = 128;
+const MAX_OSM_ELEMENTS = 128;
 const MAX_VERTICES = 160;
 const MAX_POI_OFFSET_METERS = 30;
 const ILLUSTRATIVE_HEIGHT = 12;
@@ -34,9 +36,41 @@ const knownWays = new Map(
     return match ? [[Number(match[1]), place] as const] : [];
   }),
 );
+const knownRelations = new Map(
+  PROVIDENCE_CAMPUS_PLACES.flatMap((place) => {
+    if (place.verification !== 'cross-checked') return [];
+    const match = /^https:\/\/www\.openstreetmap\.org\/relation\/(\d+)$/.exec(place.sourceUrl);
+    return match ? [[Number(match[1]), place] as const] : [];
+  }),
+);
+const knownBuildingsByPoi = new Map(
+  [...knownWays.values(), ...knownRelations.values()].map((place) => [place.id, place] as const),
+);
 
-/** 只向 OSM 查詢已在本專案與官方地圖交叉核對的建築 way。 */
+/** Fixed audited OSM IDs only, never user-supplied queries or arbitrary relations. */
 export const PROVIDENCE_OSM_BUILDING_WAY_IDS = [...knownWays.keys()];
+export const PROVIDENCE_OSM_BUILDING_RELATION_IDS = [...knownRelations.keys()];
+
+// Verified on 2026-11-12 against the OSM relation's full member list.
+// Until a changed member list is reviewed, do not replace Xijia's mapped
+// courtyard with an apparently solid building roof.
+const VERIFIED_RELATION_MEMBERS = new Map([
+  [9246899, { outer: 255783593, inner: 665651134 }],
+]);
+
+/** Overpass normally omits visibility. A source explicitly marking a way or
+ * relation member invisible/deleted is not evidence of a standing building.
+ * Treat malformed visibility metadata as unverified rather than guessing.
+ */
+function isVisibleOsmElement(element: Record<string, unknown>): boolean {
+  return element.visible === undefined || element.visible === true;
+}
+
+function knownBuildingForElement(element: Record<string, unknown>) {
+  if (typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) return undefined;
+  return element.type === 'way' ? knownWays.get(element.id)
+    : element.type === 'relation' ? knownRelations.get(element.id) : undefined;
+}
 
 const object = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -51,6 +85,38 @@ function safeCoordinate(value: unknown): [number, number] | null {
   if (lat < bounds.south - ALLOWANCE || lat > bounds.north + ALLOWANCE ||
       lon < bounds.west - ALLOWANCE || lon > bounds.east + ALLOWANCE) return null;
   return [lon, lat];
+}
+
+/** An OSM node ID denotes one global coordinate, even when several audited
+ * building ways share it. Each individual ring can be simple while two rings
+ * in the *same* Overpass response assign contradictory positions to one ID.
+ * Reject that snapshot instead of displaying impossible campus geometry.
+ * Geometry-only responses cannot be identity-checked and keep the usual
+ * outline/POI validation; this does not invent missing node references.
+ */
+function hasConsistentOsmNodeGeometry(elements: unknown[]): boolean {
+  const positions = new Map<number, [number, number]>();
+  for (const candidate of elements) {
+    const element = object(candidate);
+    if (!element || !knownBuildingForElement(element)) continue;
+    const ways = element.type === 'way' ? [element]
+      : Array.isArray(element.members) ? element.members.map(object) : [];
+    for (const way of ways) {
+      if (!way || way.nodes === undefined) continue;
+      if (!Array.isArray(way.nodes) || !Array.isArray(way.geometry) ||
+          way.nodes.length !== way.geometry.length) return false;
+      for (let index = 0; index < way.nodes.length; index += 1) {
+        const nodeId = way.nodes[index];
+        const point = safeCoordinate(way.geometry[index]);
+        if (typeof nodeId !== 'number' || !Number.isSafeInteger(nodeId) ||
+            nodeId <= 0 || !point) return false;
+        const existing = positions.get(nodeId);
+        if (existing && (existing[0] !== point[0] || existing[1] !== point[1])) return false;
+        positions.set(nodeId, point);
+      }
+    }
+  }
+  return true;
 }
 
 function polygonAreaMeters(points: readonly [number, number][]): number {
@@ -89,6 +155,35 @@ function intersects(a: [number, number], b: [number, number],
     (cdB === 0 && onSegment(b, c, d));
 }
 
+/** A closed OSM way repeats the *same node ID* at both ends. Coordinates can
+ * happen to coincide for different nodes even when the source is an open line.
+ * When Overpass supplies node refs, verify they describe the same geometry
+ * before treating the coordinate ring as a building. Legacy geometry-only
+ * fixtures remain supported, but malformed/mismatched refs fail closed.
+ */
+function hasConsistentOsmWayNodes(way: Record<string, unknown>): boolean {
+  const nodes = way.nodes;
+  if (nodes === undefined) return true;
+  if (!Array.isArray(nodes) || !Array.isArray(way.geometry) ||
+      nodes.length !== way.geometry.length || nodes.length < 4) return false;
+  // The same closing node ID must resolve to exactly the same coordinate.
+  // safeOutline intentionally tolerates tiny coordinate-rounding gaps for
+  // geometry-only payloads, but a supplied OSM node identity is stronger
+  // evidence: contradictory endpoint positions cannot describe one node.
+  const first = object(way.geometry[0]);
+  const last = object(way.geometry[way.geometry.length - 1]);
+  if (!first || !last || first.lon !== last.lon || first.lat !== last.lat) return false;
+  // Every intermediate OSM node must be distinct. Repeating an ID inside
+  // the ring (rather than only to close it) is not a simple building loop,
+  // even when an upstream geometry array assigns that ID two different
+  // coordinates. Those contradictory node/geometry pairs must fail closed.
+  const interior = nodes.slice(0, -1);
+  return nodes.every((id) => typeof id === 'number' &&
+    Number.isSafeInteger(id) && id > 0) &&
+    nodes[0] === nodes[nodes.length - 1] &&
+    new Set(interior).size === interior.length;
+}
+
 function safeOutline(value: unknown): Array<[number, number]> | null {
   if (!Array.isArray(value) || value.length < 4 || value.length > MAX_VERTICES + 1) return null;
   const points: Array<[number, number]> = [];
@@ -117,32 +212,130 @@ function safeOutline(value: unknown): Array<[number, number]> | null {
   return area >= 20 && area <= 100_000 ? points : null;
 }
 
-/** Ensure a verified OSM way still covers (or is very close to) its named POI.
+/** A one-outer OSM multipolygon may enclose one courtyard. The source-verified
+ * inner ring must remain empty in both the API payload and Three.js scene.
+ * Reject fragmented, intersecting, nested or unknown members rather than
+ * manufacturing closed walls from disconnected ways.
+ */
+function pointStrictlyInsideRing(point: [number, number], ring: readonly [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, prev = ring.length - 1; i < ring.length; prev = i, i += 1) {
+    const a = ring[prev];
+    const b = ring[i];
+    if ((a[1] > point[1]) !== (b[1] > point[1]) &&
+        point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function holeStrictlyInsideOuter(
+  hole: readonly [number, number][], outline: readonly [number, number][],
+): boolean {
+  // No hole point or edge may touch/cross the outer ring. Testing all hole
+  // vertices + all edge pairs also covers concave outer footprints.
+  if (!hole.every((point) => pointStrictlyInsideRing(point, outline))) return false;
+  for (let i = 0; i < hole.length; i += 1) {
+    for (let j = 0; j < outline.length; j += 1) {
+      if (intersects(hole[i], hole[(i + 1) % hole.length],
+        outline[j], outline[(j + 1) % outline.length])) return false;
+    }
+  }
+  return polygonAreaMeters(outline) - polygonAreaMeters(hole) >= 20;
+}
+
+function safeSimpleRelationGeometry(element: Record<string, unknown>):
+  { outline: Array<[number, number]>; holes: Array<Array<[number, number]>> } | null {
+  if (object(element.tags)?.type !== 'multipolygon') return null;
+  const members = element.members;
+  // Only one closed outer ring and at most one closed inner ring are currently
+  // supported. Real OSM relation 9246899 has outer 255783593 / inner 665651134.
+  if (!Array.isArray(members) || members.length < 1 || members.length > 2) return null;
+  const ways = members.map(object);
+  if (ways.some((way) => !way || !isVisibleOsmElement(way) || way.type !== 'way' ||
+      typeof way.ref !== 'number' || !Number.isSafeInteger(way.ref))) return null;
+  const outerMembers = ways.filter((way) => way?.role === 'outer');
+  const innerMembers = ways.filter((way) => way?.role === 'inner');
+  if (outerMembers.length !== 1 || outerMembers.length + innerMembers.length !== ways.length ||
+      innerMembers.length > 1) return null;
+  if (innerMembers.length && innerMembers[0]?.ref === outerMembers[0]?.ref) return null;
+  const audited = VERIFIED_RELATION_MEMBERS.get(element.id as number);
+  if (audited && (outerMembers[0]?.ref !== audited.outer ||
+      innerMembers.length !== 1 || innerMembers[0]?.ref !== audited.inner)) {
+    // In particular, a truncated/changed Xijia relation must not fill its
+    // previously verified courtyard with an invented roof.
+    return null;
+  }
+  if (!outerMembers[0] || !hasConsistentOsmWayNodes(outerMembers[0]) ||
+      (innerMembers.length > 0 && (!innerMembers[0] ||
+        !hasConsistentOsmWayNodes(innerMembers[0])))) return null;
+  // A node ID identifies one OSM coordinate globally, not once per ring.
+  // When both member ways expose node refs, a shared ID would mean the
+  // courtyard touches the outer wall or the source assigns one node to two
+  // different coordinates. Either case must not become a 3D building.
+  if (innerMembers.length) {
+    const outerNodes = outerMembers[0].nodes;
+    const innerNodes = innerMembers[0]?.nodes;
+    if (Array.isArray(outerNodes) && Array.isArray(innerNodes)) {
+      const outerIds = new Set(outerNodes.slice(0, -1));
+      if (innerNodes.slice(0, -1).some((id) => outerIds.has(id))) return null;
+    }
+  }
+  const outline = safeOutline(outerMembers[0].geometry);
+  if (!outline) return null;
+  if (!innerMembers.length) return { outline, holes: [] };
+  const hole = safeOutline(innerMembers[0]?.geometry);
+  if (!hole || !holeStrictlyInsideOuter(hole, outline)) return null;
+  return { outline, holes: [hole] };
+}
+
+/** Safe client-side revalidation of already-open rings serialized by the API. */
+function safeClientRing(value: unknown): Array<[number, number]> | null {
+  if (!Array.isArray(value) || value.length < 3 || value.length > MAX_VERTICES) return null;
+  const points = value.map((pair: unknown) =>
+    Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number'
+      ? { lon: pair[0], lat: pair[1] } : null);
+  if (points.some((entry) => entry === null)) return null;
+  return safeOutline([...points, points[0]]);
+}
+
+/** Ensure a verified OSM way/relation still covers (or is very close to) its named POI.
  * A moved or re-tagged way elsewhere on campus must not inherit the old POI's name.
  * The 30 m slack covers map alignment errors; it is not a room/entrance coordinate.
  */
-function outlineNearPoi(outline: readonly [number, number][], place: { lat: number; lng: number }): boolean {
+function outlineNearPoi(
+  outline: readonly [number, number][], place: { lat: number; lng: number },
+  holes: readonly (readonly [number, number][])[] = [],
+): boolean {
   const lonScale = EARTH_RADIUS * DEG * Math.cos(place.lat * DEG);
   const latScale = EARTH_RADIUS * DEG;
-  const vertices = outline.map(([lon, lat]) => [
-    (lon - place.lng) * lonScale, (lat - place.lat) * latScale,
-  ] as const);
-  let inside = false;
-  for (let i = 0; i < vertices.length; i += 1) {
-    const [ax, ay] = vertices[i];
-    const [bx, by] = vertices[(i + 1) % vertices.length];
-    const dx = bx - ax;
-    const dy = by - ay;
-    const lengthSquared = dx * dx + dy * dy;
-    const position = lengthSquared > 0
-      ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared))
-      : 0;
-    const nearestX = ax + position * dx;
-    const nearestY = ay + position * dy;
-    if (nearestX * nearestX + nearestY * nearestY <= MAX_POI_OFFSET_METERS ** 2) return true;
-    if ((ay > 0) !== (by > 0) && ax + (-ay * dx) / dy > 0) inside = !inside;
-  }
-  return inside;
+  // A courtyard is empty space, not part of the building surface. An audited
+  // POI deep inside a large courtyard must not match a surrounding building
+  // merely because it lies inside the *outer* polygon.
+  const nearRing = (ring: readonly [number, number][]): boolean => {
+    const vertices = ring.map(([lon, lat]) => [
+      (lon - place.lng) * lonScale, (lat - place.lat) * latScale,
+    ] as const);
+    for (let i = 0; i < vertices.length; i += 1) {
+      const [ax, ay] = vertices[i];
+      const [bx, by] = vertices[(i + 1) % vertices.length];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lengthSquared = dx * dx + dy * dy;
+      const position = lengthSquared > 0
+        ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared))
+        : 0;
+      const nearestX = ax + position * dx;
+      const nearestY = ay + position * dy;
+      if (nearestX * nearestX + nearestY * nearestY <= MAX_POI_OFFSET_METERS ** 2) return true;
+    }
+    return false;
+  };
+  if (nearRing(outline) || holes.some(nearRing)) return true;
+  const poi: [number, number] = [place.lng, place.lat];
+  return pointStrictlyInsideRing(poi, outline) &&
+    !holes.some((hole) => pointStrictlyInsideRing(poi, hole));
 }
 
 /** Whitelisted IDs can be edited in OSM. A former building or roof-only way must
@@ -152,8 +345,10 @@ function outlineNearPoi(outline: readonly [number, number][], place: { lat: numb
 // A matching way ID alone must not turn explicit negative tags into a campus block.
 const NON_BUILDING_VOLUMES = new Set([
   'no', 'false', '0', 'none', 'unknown', 'maybe',
-  'proposed', 'planned', 'construction', 'demolished', 'destroyed',
-  'ruins', 'ruined', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
+  'proposed', 'planned', 'construction', 'demolition', 'demolishing', 'demolished', 'destroyed',
+  // OSM also contains singular ruin and damaged building classifications.
+  // Neither proves an intact roof, so keep only the verified campus POI marker.
+  'ruins', 'ruined', 'ruin', 'damaged', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
 ]);
 // A way can retain building=yes while carrying a lifecycle tag for a removed,
 // abandoned or unfinished building. Treat contradictory tags as needing review:
@@ -162,6 +357,8 @@ const LIFECYCLE_BUILDING_TAGS = [
   'abandoned:building', 'disused:building', 'demolished:building',
   'destroyed:building', 'removed:building', 'razed:building',
   'construction:building', 'proposed:building', 'planned:building',
+  // A building can be explicitly in the process of being taken down.
+  'demolition:building', 'demolishing:building',
   'ruins:building', 'ruined:building',
 ] as const;
 // Older tagging also puts the lifecycle state directly on the building,
@@ -169,15 +366,70 @@ const LIFECYCLE_BUILDING_TAGS = [
 // original full-height campus volume still exists.
 const LIFECYCLE_STATUS_TAGS = [
   'abandoned', 'disused', 'demolished', 'destroyed', 'removed',
-  'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
+  'razed', 'ruins', 'ruined', 'construction', 'demolition', 'demolishing', 'proposed', 'planned',
 ] as const;
+
+// building:condition is a separate OSM key. A polygon can still have
+// building=yes while the mapped structure is partly or wholly ruined.
+// This simplified renderer draws a full-height, intact volume, so those
+// explicit conditions cannot safely be presented as a normal campus block.
+// https://wiki.openstreetmap.org/wiki/Key:building:condition
+const VERIFIED_STANDING_BUILDING_CONDITIONS = new Set([
+  // Only these condition values have been explicitly reviewed as describing
+  // an intact/renovated volume. Unknown values may describe damage or an
+  // unmapped state: keep the POI instead of guessing a solid 3D roof.
+  'good', 'preserved', 'renovated', 'reconstructed',
+]);
+
+/** An audited OSM ID is not enough to inherit a campus building's old name.
+ * If a mapper explicitly names a different building, do not attach the verified
+ * POI identity to its volume until that name/source change is reviewed. A
+ * matching Chinese name can validate a bilingual primary name. Missing name
+ * tags remain valid because many real OSM building polygons are unnamed.
+ */
+function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
+  const record = object(tags);
+  if (!record) return false;
+  const primary = record.name;
+  if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
+  // OSM may supply a traditional/Taiwanese name without the generic
+  // name:zh key. All present Chinese identity claims must agree with the
+  // audited campus POI: a matching generic label cannot override an explicit
+  // name:zh-TW/name:zh-Hant for a different building after an OSM edit.
+  const chineseKeys = ['name:zh', 'name:zh-TW', 'name:zh-Hant'] as const;
+  let hasMatchingChineseName = false;
+  for (const key of chineseKeys) {
+    const label = record[key];
+    if (label === undefined) continue;
+    if (typeof label !== 'string' || label.trim() !== expectedName) return false;
+    hasMatchingChineseName = true;
+  }
+  if (hasMatchingChineseName) {
+    // English primary names are permitted when a verified Chinese label
+    // anchors identity. An explicitly different Han-script primary still
+    // contradicts that identity, regardless of which locale supplied it.
+    if (typeof primary === 'string' && /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(primary) &&
+        primary.trim() !== expectedName) return false;
+    return true;
+  }
+  return primary === undefined || primary.trim() === expectedName;
+}
 
 function isStandingBuilding(value: unknown): boolean {
   const tags = object(value);
   const classification = tags?.building;
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
-  if (!kind || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A semicolon/comma/pipe-separated building type can mix standing and
+  // demolished or proposed classifications. Do not interpret one token as
+  // evidence of a complete building without a source review.
+  if (!kind || /[;,|]/.test(kind) || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A closed OSM way tagged area=no is a line, not a polygon, even if an
+  // old building=* tag remains. Never extrude its enclosed space into walls.
+  // Unknown/invalid area markers are ambiguous and require source review.
+  const area = tags?.area;
+  if (area !== undefined && (typeof area !== 'string' ||
+      !['yes', 'true', '1'].includes(area.trim().toLowerCase()))) return false;
   // OSM building:part marks an individual section of a larger building. This
   // renderer only extrudes audited whole-building ways from the ground and
   // cannot reconstruct a part's neighbouring volumes or real base elevation.
@@ -213,6 +465,27 @@ function isStandingBuilding(value: unknown): boolean {
     if (marker !== undefined && (typeof marker !== 'string' ||
         !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
   }
+  // building:levels is the count of above-ground storeys, not a measured
+  // height. A zero, negative, composite or implausibly huge count contradicts
+  // the intact above-ground 3D volume we draw (even when its 12m height is
+  // explicitly marked illustrative). Preserve the POI instead of accepting
+  // unreviewed level metadata; never multiply storeys into metres.
+  const storeysTag = tags?.['building:levels'];
+  if (storeysTag !== undefined) {
+    if (typeof storeysTag !== 'string' || !/^\d+$/.test(storeysTag.trim())) return false;
+    const storeys = Number(storeysTag.trim());
+    if (!Number.isFinite(storeys) || storeys <= 0 || storeys > 100) return false;
+  }
+  const condition = tags?.['building:condition'];
+  if (condition !== undefined) {
+    if (typeof condition !== 'string') return false;
+    const state = condition.trim().toLowerCase();
+    // Multiple condition claims may contradict one another (e.g. good;ruinous).
+    // This scene draws one intact roof, not a partly damaged volume; do not
+    // certify any composite/ambiguous condition without a source review.
+    if (!state || /[;,|]/.test(state) ||
+        !VERIFIED_STANDING_BUILDING_CONDITIONS.has(state)) return false;
+  }
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
     // OSM lifecycle flags are usually strings. A present but unrecognized
@@ -224,10 +497,11 @@ function isStandingBuilding(value: unknown): boolean {
   });
 }
 
-/** Only copy audited OSM way revision fields, never editor names or account IDs.
- * Node positions may change without updating the parent way's revision.
+/** Only copy valid OSM way/relation revisions, never editor identities.
+ * Relation edits do not date member-way geometry; way edits do not date
+ * separately modified node positions.
  */
-function osmWayRevision(value: Record<string, unknown>): Pick<ProvidenceFootprint, 'osmVersion' | 'osmEditedAt'> {
+function osmFeatureRevision(value: Record<string, unknown>): Pick<ProvidenceFootprint, 'osmVersion' | 'osmEditedAt'> {
   const version = value.version;
   const timestamp = value.timestamp;
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1 ||
@@ -270,36 +544,48 @@ function heightFromOsmTags(value: unknown):
 /** Overpass JSON：不接收動態 way ID、不猜位置、不補無來源的建築。 */
 export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
-  if (!Array.isArray(data?.elements) || data.elements.length > MAX_WAYS) return [];
-  // A single OSM way cannot have two simultaneous outlines in one Overpass reply.
-  // Failing closed avoids a forged/partial first entry winning merely by order,
-  // even when its duplicate is missing tags or has invalid geometry.
-  const returnedKnownIds = new Set<number>();
+  if (!Array.isArray(data?.elements) || data.elements.length > MAX_OSM_ELEMENTS) return [];
+  // A known way/relation cannot appear twice in one Overpass reply. Fail closed
+  // even if the second copy lacks valid geometry or tags.
+  const returnedKnownIds = new Set<string>();
   for (const candidate of data.elements) {
     const item = object(candidate);
-    if (item?.type !== 'way' || typeof item.id !== 'number' || !knownWays.has(item.id)) continue;
-    if (returnedKnownIds.has(item.id)) return [];
-    returnedKnownIds.add(item.id);
+    if (!item || !knownBuildingForElement(item)) continue;
+    const identity = `${item.type}:${item.id}`;
+    if (returnedKnownIds.has(identity)) return [];
+    returnedKnownIds.add(identity);
   }
-  const seen = new Set<number>();
+  if (!hasConsistentOsmNodeGeometry(data.elements)) return [];
+  const seen = new Set<string>();
   const buildings: ProvidenceFootprint[] = [];
   for (const value of data.elements) {
     const element = object(value);
-    if (element?.type !== 'way' || typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) continue;
-    const place = knownWays.get(element.id);
-    if (!place || seen.has(element.id) || !isStandingBuilding(element.tags)) continue;
-    const outline = safeOutline(element.geometry);
-    if (!outline || !outlineNearPoi(outline, place)) continue;
+    if (!element) continue;
+    const place = knownBuildingForElement(element);
+    const identity = `${element.type}:${element.id}`;
+    if (!place || seen.has(identity) || !isVisibleOsmElement(element) ||
+        !isStandingBuilding(element.tags) ||
+        !matchesAuditedOsmName(element.tags, place.name)) continue;
+    const geometry = element.type === 'way'
+      ? (() => {
+          if (!hasConsistentOsmWayNodes(element)) return null;
+          const outline = safeOutline(element.geometry);
+          return outline ? { outline, holes: [] } : null;
+        })()
+      : safeSimpleRelationGeometry(element);
+    if (!geometry || !outlineNearPoi(geometry.outline, place, geometry.holes)) continue;
     const height = heightFromOsmTags(element.tags);
     if (!height) continue;
-    seen.add(element.id);
+    seen.add(identity);
     buildings.push({
       poiId: place.id,
       name: place.name,
       sourceUrl: place.sourceUrl,
-      outline,
+      outline: geometry.outline,
+      ...(geometry.holes.length ? { holes: geometry.holes } : {}),
       ...height,
-      ...osmWayRevision(element),
+      // Revision refers only to the element itself, not member-way geometry.
+      ...osmFeatureRevision(element),
     });
   }
   // 與共用靜宜地點名錄保持同順序，而非依伺服器回傳順序。
@@ -310,11 +596,12 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
 /** 將已篩過的資料再於使用端核對，不信任外來 JSON 的名稱與 URL。 */
 export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
-  if (data?.schoolId !== 'pu' || !Array.isArray(data.buildings) || data.buildings.length > knownWays.size) return [];
+  if (data?.schoolId !== 'pu' || !Array.isArray(data.buildings) ||
+      data.buildings.length > knownBuildingsByPoi.size) return [];
   // A trusted POI cannot have two different footprints in one API snapshot.
   // Reject the entire inconsistent payload, even if the second record has an
   // invalid name/shape. Never pick whichever duplicate arrived first.
-  const knownPoiIds = new Set([...knownWays.values()].map((place) => place.id));
+  const knownPoiIds = new Set(knownBuildingsByPoi.keys());
   const returnedPoiIds = new Set<string>();
   for (const candidate of data.buildings) {
     const id = object(candidate)?.poiId;
@@ -327,32 +614,39 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
   for (const value of data.buildings) {
     const item = object(value);
     if (typeof item?.poiId !== 'string' || seen.has(item.poiId)) continue;
-    const place = PROVIDENCE_CAMPUS_PLACES.find((p) => p.id === item.poiId && p.verification === 'cross-checked' &&
-      knownWays.has(Number(p.sourceUrl.split('/').at(-1))));
+    const place = knownBuildingsByPoi.get(item.poiId);
     if (!place || item.name !== place.name || item.sourceUrl !== place.sourceUrl) continue;
     if (typeof item.heightMeters !== 'number' || !Number.isFinite(item.heightMeters) ||
       item.heightMeters < 2.5 || item.heightMeters > 100 ||
       (item.heightBasis !== 'illustrative' && item.heightBasis !== 'osm-tag') ||
       (item.heightBasis === 'illustrative' && item.heightMeters !== ILLUSTRATIVE_HEIGHT)) continue;
-    if (!Array.isArray(item.outline) || item.outline.length < 3 || item.outline.length > MAX_VERTICES) continue;
-    const geometry = item.outline.map((pair: unknown) =>
-      Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number'
-        ? { lon: pair[0], lat: pair[1] } : null);
-    if (geometry.some((entry: unknown) => entry === null)) continue;
-    const closed = [...geometry, geometry[0]];
-    const outline = safeOutline(closed);
-    if (!outline || !outlineNearPoi(outline, place)) continue;
+    const outline = safeClientRing(item.outline);
+    if (!outline) continue;
+    // Missing the audited courtyard is not equivalent to a solid roof,
+    // including when an older cached/API response omits its holes field.
+    if (item.sourceUrl === 'https://www.openstreetmap.org/relation/9246899' &&
+        item.holes === undefined) continue;
+    // The client must revalidate ring containment and reject forged holes on
+    // ordinary ways. Missing/invalid holes must never become a solid courtyard.
+    if (item.holes !== undefined && !place.sourceUrl.includes('/relation/')) continue;
+    if (item.holes !== undefined &&
+        (!Array.isArray(item.holes) || item.holes.length !== 1)) continue;
+    const hole = Array.isArray(item.holes) ? safeClientRing(item.holes[0]) : null;
+    if (item.holes !== undefined && (!hole || !holeStrictlyInsideOuter(hole, outline))) continue;
+    if (!outlineNearPoi(outline, place, hole ? [hole] : [])) continue;
     seen.add(item.poiId);
     accepted.push({
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
+      ...(hole ? { holes: [hole] } : {}),
       heightMeters: item.heightMeters, heightBasis: item.heightBasis,
-      ...osmWayRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }),
+      // The source URL determines whether the UI labels this as way or relation.
+      ...osmFeatureRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }),
     });
   }
   return accepted;
 }
 
-/** OSM way edit metadata cannot postdate the source database snapshot.
+/** OSM way/relation edit metadata cannot postdate the source database snapshot.
  * Retain otherwise verified outlines, but never show a contradictory revision
  * as provenance. Allow five minutes for upstream clock skew.
  */
@@ -403,7 +697,7 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
   // the older Overpass replication state. A CDN must not extend either one.
   if (ageMs >= 7 * day || ageMs < -5 * 60 * 1000 ||
       (typeof osmBaseAt === 'string' && now - Date.parse(osmBaseAt) >= 7 * day)) return null;
-  // A revised OSM way must not appear newer than the map database that
+  // A revised OSM way/relation must not appear newer than the map database that
   // supplied it. Without replication metadata, fall back to HTTP fetch time.
   // Inconsistent revision labels are removed; separately validated geometry
   // remains available, with its existing illustrative/sourced height caveats.

@@ -31,6 +31,434 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
+  it('does not attach an audited campus POI name to a renamed OSM building', () => {
+    // Synthetic source drift: the way ID and geometry remain valid, but OSM
+    // now explicitly names a different place. Keep the point marker; omit
+    // the misleading 3D volume until the new source/name is verified.
+    for (const tags of [
+      { building: 'school' },
+      { building: 'school', name: '蓋夏圖書館' },
+      { building: 'school', name: 'Guixa Library', 'name:zh': '蓋夏圖書館' },
+      { building: 'school', 'name:zh': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+    for (const tags of [
+      { building: 'school', name: '希嘉學苑' },
+      { building: 'school', name: '  ' },
+      { building: 'school', name: 99 },
+      { building: 'school', name: null },
+      { building: 'school', name: '蓋夏圖書館', 'name:zh': '希嘉學苑' },
+      { building: 'school', name: 'Guixa Library', 'name:zh': ' ' },
+      // A conflicting Chinese primary label must not be silently overridden
+      // by a matching name:zh (a real bilingual label remains accepted above).
+      { building: 'school', name: '希嘉學苑', 'name:zh': '蓋夏圖書館' },
+      { building: 'school', name: '主顧樓', 'name:zh': '蓋夏圖書館' },
+      { building: 'school', name: '蓋夏圖書館／希嘉學苑', 'name:zh': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+  });
+
+  it('uses localized traditional Chinese OSM names without allowing conflicting POI identities', () => {
+    // Synthetic OSM tag drift: a matching name:zh is not enough when an
+    // explicit Taiwanese/traditional name identifies a different building.
+    // This does not claim any actual campus OSM way currently has a mismatch.
+    const checked = { building: 'school', name: 'Guixa Library' };
+    for (const tags of [
+      { ...checked, 'name:zh-TW': '蓋夏圖書館' },
+      { ...checked, 'name:zh-Hant': '蓋夏圖書館' },
+      { ...checked, 'name:zh': '蓋夏圖書館', 'name:zh-TW': '蓋夏圖書館',
+        'name:zh-Hant': '蓋夏圖書館' },
+      { building: 'school', 'name:zh-TW': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+    for (const tags of [
+      { ...checked, 'name:zh': '蓋夏圖書館', 'name:zh-TW': '希嘉學苑' },
+      { ...checked, 'name:zh': '蓋夏圖書館', 'name:zh-Hant': '主顧樓' },
+      { ...checked, 'name:zh-TW': '蓋夏圖書館', 'name:zh-Hant': '希嘉學苑' },
+      { ...checked, 'name:zh-TW': '' },
+      { ...checked, 'name:zh-Hant': null },
+      { building: 'school', name: '主顧樓', 'name:zh-TW': '蓋夏圖書館' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+  });
+
+  it('keeps credible OSM storey counts without inferring building height', () => {
+    // Synthetic count annotations do not establish a surveyed height.
+    for (const levels of ['1', '5', '05', ' 2 ']) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', 'building:levels': levels })],
+      });
+      expect(buildings, levels).toMatchObject([
+        { poiId: 'pu-library', heightMeters: 12, heightBasis: 'illustrative' },
+      ]);
+    }
+  });
+
+  it('rejects contradictory or ambiguous OSM storey counts instead of drawing a full roof', () => {
+    // These are deliberately synthetic source edits, not findings at Providence.
+    for (const levels of ['0', '-1', '0.0', '1;2', '1,5', '', 'unknown', '101', null, 2]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', 'building:levels': levels })],
+      }), String(levels)).toEqual([]);
+    }
+    // Missing levels remains permitted; its volume is expressly illustrative.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library)],
+    })).toHaveLength(1);
+  });
+
+  it('does not render explicitly invisible or deleted OSM ways as current buildings', () => {
+    // Synthetic Overpass-like metadata: a geometry/tag match alone is not
+    // proof that an explicitly invisible element is still a visible building.
+    const building = way(255784049, library, { building: 'school', height: '18 m' });
+    expect(parseProvidenceOsmFootprints({ elements: [building] })).toHaveLength(1);
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...building, visible: true }],
+    })).toHaveLength(1);
+    for (const visible of [false, null, 'false', 0]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [{ ...building, visible }],
+      }), String(visible)).toEqual([]);
+    }
+  });
+
+  it('does not extrude a coordinate-closed but OSM-node-open way', () => {
+    // These IDs are synthetic. Real OSM way closure requires first/last
+    // node IDs to match; two different nodes may share the same coordinates.
+    const closedIds = [101, 102, 103, 104, 101];
+    const withNodes = (nodes: unknown) => ({
+      ...way(255784049, library, { building: 'school' }), nodes,
+    });
+    expect(parseProvidenceOsmFootprints({
+      elements: [withNodes(closedIds)],
+    })).toMatchObject([{ poiId: 'pu-library' }]);
+    for (const nodes of [
+      [101, 102, 103, 104, 105], // same first/last coordinates, different OSM node
+      // An internally repeated ID with two different geometry coordinates is
+      // contradictory even though the coordinate ring itself is valid.
+      [101, 102, 103, 102, 101],
+      [101, 101, 103, 104, 101],
+      [101, 102, 103, 101], // missing geometry reference
+      [101, 102, 103, 104, 101, 101], // extra reference
+      [101, 102, -3, 104, 101],
+      [101, 102, '103', 104, 101],
+      null,
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [withNodes(nodes)],
+      }), JSON.stringify(nodes)).toEqual([]);
+    }
+    // A repeated OSM node ID identifies exactly one coordinate. This fixture
+    // differs by only 5e-10 degrees: safeOutline's geometry-only tolerance
+    // would accept it, but its explicit OSM node identity is contradictory.
+    const conflictingClosure = library.map((point) => ({ ...point }));
+    conflictingClosure[conflictingClosure.length - 1].lon += 5e-10;
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...withNodes(closedIds), geometry: conflictingClosure }],
+    })).toEqual([]);
+    // Preserve existing geometry-only compatibility when no node IDs exist.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, conflictingClosure, { building: 'school' })],
+    })).toHaveLength(1);
+    // Synthetic fixtures without node references preserve legacy parsing.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'school' })],
+    })).toHaveLength(1);
+  });
+
+  it('requires the reviewed Xijia outer and inner OSM members before publishing a 3D roof', () => {
+    // All coordinates and height here are synthetic; member IDs and roles are
+    // from OSM relation/9246899 checked on 2026-11-12.
+    const outer = [
+      { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+      { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+      { lat: 24.22785, lon: 120.58045 },
+    ];
+    const inner = [
+      { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+      { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+      { lat: 24.22799, lon: 120.58063 },
+    ];
+    const outerMember = { type: 'way', ref: 255783593, role: 'outer', geometry: outer };
+    const innerMember = { type: 'way', ref: 665651134, role: 'inner', geometry: inner };
+    const relation = (members: unknown, tags: unknown = {
+      type: 'multipolygon', building: 'dormitory', height: '16',
+    }) => ({ type: 'relation', id: 9246899, tags, members,
+      version: 5, timestamp: '2026-10-15T08:09:10Z' });
+    const parsed = parseProvidenceOsmFootprints({ elements: [relation([outerMember, innerMember])] });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      poiId: 'pu-xijia', name: '希嘉學苑',
+      sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+      heightMeters: 16, heightBasis: 'osm-tag',
+    });
+    expect(parsed[0].outline).toHaveLength(4);
+    expect(parsed[0].holes).toHaveLength(1);
+    // A relation revision does not certify its outer/inner way geometry.
+    expect(parsed[0]).toMatchObject({ osmVersion: 5, osmEditedAt: '2026-10-15T08:09:10Z' });
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: parsed,
+    })).toEqual(parsed);
+    // A client receiving an older payload with no courtyard must also fail
+    // closed, instead of drawing a misleading solid roof.
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{ ...parsed[0], holes: undefined }],
+    })).toEqual([]);
+    // Invalid relation revision timestamps never become provenance labels.
+    const withoutRevision = { ...parsed[0] };
+    delete withoutRevision.osmVersion;
+    delete withoutRevision.osmEditedAt;
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{
+        ...parsed[0], osmVersion: 99, osmEditedAt: 'not-a-date',
+      }],
+    })).toEqual([withoutRevision]);
+
+    // An old/partial relation must not resurrect a deleted outer/inner way,
+    // even if its cached coordinates still form a valid polygon.
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...relation([outerMember, innerMember]), visible: false }],
+    })).toEqual([]);
+    for (const member of [
+      { ...outerMember, visible: false },
+      { ...innerMember, visible: false },
+      { ...outerMember, visible: null },
+    ]) {
+      const members = member.role === 'outer'
+        ? [member, innerMember] : [outerMember, member];
+      expect(parseProvidenceOsmFootprints({
+        elements: [relation(members)],
+      })).toEqual([]);
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [relation([
+        { ...outerMember, visible: true },
+        { ...innerMember, visible: true },
+      ])],
+    })).toHaveLength(1);
+
+    const withNodes = (member: typeof outerMember, refs: unknown) => ({
+      ...member, nodes: refs,
+    });
+    expect(parseProvidenceOsmFootprints({
+      elements: [relation([
+        withNodes(outerMember, [301, 302, 303, 304, 301]),
+        withNodes(innerMember, [401, 402, 403, 404, 401]),
+      ])],
+    })).toHaveLength(1);
+    // Both audited member ways must agree on the position of their closing
+    // OSM node, not merely close to within a rounding tolerance.
+    for (const member of [outerMember, innerMember]) {
+      const almostClosed = member.geometry.map((point) => ({ ...point }));
+      almostClosed[almostClosed.length - 1].lat += 5e-10;
+      const changed = {
+        ...member,
+        nodes: member.role === 'outer'
+          ? [301, 302, 303, 304, 301] : [401, 402, 403, 404, 401],
+        geometry: almostClosed,
+      };
+      expect(parseProvidenceOsmFootprints({ elements: [relation([
+        member.role === 'outer' ? changed : withNodes(outerMember, [301, 302, 303, 304, 301]),
+        member.role === 'inner' ? changed : withNodes(innerMember, [401, 402, 403, 404, 401]),
+      ])] })).toEqual([]);
+    }
+    // An OSM node ID is global across way members. These otherwise valid,
+    // disjoint-looking coordinate rings must not share the same node ID:
+    // that would place node 303 at two different positions.
+    expect(parseProvidenceOsmFootprints({ elements: [relation([
+      withNodes(outerMember, [301, 302, 303, 304, 301]),
+      withNodes(innerMember, [401, 402, 303, 404, 401]),
+    ])] })).toEqual([]);
+    const invalidMembers: unknown[] = [
+      [], [outerMember], [outerMember, outerMember],
+      [withNodes(outerMember, [301, 302, 303, 304, 305]), innerMember],
+      [outerMember, withNodes(innerMember, [401, 402, 403, 404, 405])],
+      // Invalid interior node identity can distort either ring independently.
+      [withNodes(outerMember, [301, 302, 303, 302, 301]), innerMember],
+      [outerMember, withNodes(innerMember, [401, 402, 403, 402, 401])],
+      [withNodes(outerMember, [301, 302, 303]), innerMember],
+      [outerMember, { ...innerMember, ref: 123457 }],
+      [{ ...outerMember, ref: 123456 }, innerMember],
+      [outerMember, { ...innerMember, role: 'outer' }],
+      [{ ...outerMember, role: 'inner' }, innerMember],
+      [{ ...outerMember, geometry: outer.slice(0, -1) }, innerMember],
+      [{ ...outerMember, geometry: [outer[0], outer[2], outer[1], outer[3], outer[0]] }, innerMember],
+      [outerMember, { ...innerMember, geometry: inner.slice(0, -1) }],
+    ];
+    for (const members of invalidMembers) {
+      expect(parseProvidenceOsmFootprints({ elements: [relation(members)] })).toEqual([]);
+    }
+    for (const tags of [
+      { type: 'site', building: 'dormitory' },
+      { type: 'multipolygon', building: 'no' },
+      { type: 'multipolygon', building: 'roof' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [relation([outerMember, innerMember], tags)],
+      })).toEqual([]);
+    }
+    expect(parseProvidenceOsmFootprints({ elements: [
+      relation([outerMember, innerMember]),
+      relation([outerMember, innerMember], { type: 'multipolygon', building: 'yes' }),
+    ] })).toEqual([]);
+    expect(parseProvidenceOsmFootprints({ elements: [
+      { ...relation([outerMember, innerMember]), id: 1111111 },
+    ] })).toEqual([]);
+  });
+
+  it('keeps the real two-member relation topology: courtyard is empty and geometry is revalidated', () => {
+    // Geometry is deliberately synthetic, but member IDs/roles were checked
+    // against OSM relation 9246899 on 2026-11-12 (not a field survey).
+    const outer = [
+      { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+      { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+      { lat: 24.22785, lon: 120.58045 },
+    ];
+    const inner = [
+      { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+      { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+      { lat: 24.22799, lon: 120.58063 },
+    ];
+    const outerMember = { type: 'way', ref: 255783593, role: 'outer', geometry: outer };
+    const innerMember = { type: 'way', ref: 665651134, role: 'inner', geometry: inner };
+    const relation = (members: unknown) => ({
+      type: 'relation', id: 9246899,
+      tags: { type: 'multipolygon', building: 'dormitory', 'building:levels': '5' },
+      members,
+    });
+    const [building] = parseProvidenceOsmFootprints({ elements: [relation([outerMember, innerMember])] });
+    expect(building).toMatchObject({
+      poiId: 'pu-xijia', heightMeters: 12, heightBasis: 'illustrative',
+      holes: [[[120.58063, 24.22799], [120.58072, 24.22799],
+        [120.58072, 24.22805], [120.58063, 24.22805]]],
+    });
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [building] }))
+      .toEqual([building]);
+
+    const variants = [
+      [outerMember, { ...innerMember, geometry: inner.slice(0, -1) }],
+      [outerMember, { ...innerMember, geometry: inner.map((p) => ({ ...p, lon: p.lon - 0.00019 })) }],
+      [outerMember, { ...innerMember, geometry: inner.map((p) => ({ ...p, lon: p.lon - 0.00018 })) }],
+      [outerMember, innerMember, { ...innerMember, ref: 55555 }],
+      [innerMember],
+      [outerMember, { ...innerMember, ref: 255783593 }],
+    ];
+    for (const members of variants) {
+      expect(parseProvidenceOsmFootprints({ elements: [relation(members)] })).toEqual([]);
+    }
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{
+        ...building, holes: [[[120.58043, 24.22799], [120.58052, 24.22799],
+          [120.58052, 24.22805], [120.58043, 24.22805]]],
+      }],
+    })).toEqual([]);
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{ ...building, holes: [] }],
+    })).toEqual([]);
+    const [wayFootprint] = parseProvidenceOsmFootprints({ elements: [way(255784049)] });
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [{ ...wayFootprint, holes: building.holes }],
+    })).toEqual([]);
+  });
+
+  it('measures an audited POI against actual building surface, not empty courtyard', () => {
+    // Synthetic geometry centred on the existing audited Xijia POI. None of
+    // these square outlines is claimed to describe the real dormitory.
+    const center = { lon: 120.58067, lat: 24.228017 };
+    const ring = (lonRadius: number, latRadius: number) => [
+      { lon: center.lon - lonRadius, lat: center.lat - latRadius },
+      { lon: center.lon + lonRadius, lat: center.lat - latRadius },
+      { lon: center.lon + lonRadius, lat: center.lat + latRadius },
+      { lon: center.lon - lonRadius, lat: center.lat + latRadius },
+      { lon: center.lon - lonRadius, lat: center.lat - latRadius },
+    ];
+    const outer = ring(0.00065, 0.00065);
+    const relation = (inner: ReturnType<typeof ring>) => ({
+      type: 'relation', id: 9246899,
+      tags: { type: 'multipolygon', building: 'dormitory', name: '希嘉學苑' },
+      members: [
+        { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+        { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+      ],
+    });
+    // A POI only 12-13 m from the courtyard wall still belongs to the
+    // building's 30 m alignment allowance, even if it is in the open air.
+    const nearCourtyard = parseProvidenceOsmFootprints({
+      elements: [relation(ring(0.00012, 0.00012))],
+    });
+    expect(nearCourtyard).toMatchObject([{ poiId: 'pu-xijia' }]);
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: nearCourtyard,
+    })).toEqual(nearCourtyard);
+
+    // The POI is more than 40 m from the nearest *building wall* when
+    // the courtyard is wider. Outer-polygon containment alone used to
+    // incorrectly accept this unrelated volume on both API and client.
+    const wideCourtyard = ring(0.0004, 0.0004);
+    expect(parseProvidenceOsmFootprints({
+      elements: [relation(wideCourtyard)],
+    })).toEqual([]);
+    const forged = {
+      ...nearCourtyard[0],
+      holes: [wideCourtyard.slice(0, -1).map(({ lon, lat }) => [lon, lat] as [number, number])],
+    };
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [forged],
+    })).toEqual([]);
+  });
+
+  it('parses the audited 2026-11-12 OSM snapshot of Xijia with its real inner courtyard', () => {
+    // Source: https://api.openstreetmap.org/api/0.6/relation/9246899/full
+    // These coordinates are from an OSM snapshot, NOT a survey of current
+    // physical elevations, entrances or rooms; © OpenStreetMap contributors.
+    const coordinates = (pairs: Array<[number, number]>) =>
+      pairs.map(([lon, lat]) => ({ lon, lat }));
+    const outer = coordinates([
+      [120.5805085, 24.2287119], [120.5800933, 24.2274031],
+      [120.5802612, 24.2273588], [120.5803186, 24.2275397],
+      [120.5804542, 24.2275039], [120.5803975, 24.2273252],
+      [120.5805624, 24.2272817], [120.5809769, 24.2285882],
+      [120.5807994, 24.2286350], [120.5807446, 24.2284623],
+      [120.5806209, 24.2284949], [120.5806757, 24.2286678],
+      [120.5805085, 24.2287119],
+    ]);
+    const inner = coordinates([
+      [120.5803075, 24.2277138], [120.5805060, 24.2283547],
+      [120.5806389, 24.2283204], [120.5804404, 24.2276796],
+      [120.5803075, 24.2277138],
+    ]);
+    const parsed = parseProvidenceOsmFootprints({ elements: [{
+      type: 'relation', id: 9246899,
+      tags: { type: 'multipolygon', building: 'dormitory', 'building:levels': '5',
+        name: '希嘉學苑' },
+      members: [
+        { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+        { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+      ],
+    }] });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      poiId: 'pu-xijia', sourceUrl: 'https://www.openstreetmap.org/relation/9246899',
+      heightBasis: 'illustrative', heightMeters: 12,
+    });
+    expect(parsed[0].outline).toHaveLength(12);
+    expect(parsed[0].holes?.[0]).toHaveLength(4);
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: parsed }))
+      .toEqual(parsed);
+  });
+
   it('uses an illustrative height only when height is absent, never for an explicit unknown unit', () => {
     const levelsOnly = parseProvidenceOsmFootprints({
       elements: [way(255784049, library, { building: 'yes', 'building:levels': '8' })],
@@ -116,6 +544,101 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('does not extrude a closed way explicitly marked as a line instead of a building area', () => {
+    // area=no overrides the usual polygon interpretation of building=* in OSM.
+    // A whitelisted ID and a visually closed ring are not enough to claim walls.
+    for (const area of ['no', 'NO', 'false', '0', 'unknown', '', null, true]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', area })],
+      }), String(area)).toEqual([]);
+    }
+    // Missing area is normal for OSM buildings; an explicit positive marker
+    // should not regress ordinary, verified closed building footprints.
+    for (const tags of [
+      { building: 'school' },
+      { building: 'school', area: 'yes' },
+      { building: 'school', area: 'YES' },
+      { building: 'school', area: 'true' },
+      { building: 'school', area: '1' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
+  it('rejects conflicting or multi-valued OSM building types without inventing a full building', () => {
+    // Synthetic tag drift: even if one token says "school" or "yes",
+    // another token can mark the volume as unfinished or removed.
+    for (const building of [
+      'school;construction', 'yes;no', 'roof;school',
+      'school,demolished', 'yes|proposed', 'school;dormitory',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building })],
+      }), building).toEqual([]);
+    }
+    // Unambiguous OSM classifications still work.
+    for (const building of ['yes', 'school', 'dormitory']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building })],
+      }), building).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+  });
+
+  it('rejects explicitly ruinous OSM building conditions rather than drawing intact campus roofs', () => {
+    // Synthetic tagging regression, not an observation about Providence buildings.
+    // building=yes can coexist with building:condition=ruinous in OSM; this
+    // renderer has no measured walls to model a partly demolished structure.
+    for (const condition of [
+      'partly_ruinous', 'mainly_ruinous', 'completely_ruinous',
+      'recognizable_remains', 'ruinous', ' RUINOUS ', '', '  ', null, 42,
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:condition': condition,
+        })],
+      }), String(condition)).toEqual([]);
+    }
+    // A condition not on the reviewed standing-building allowlist cannot
+    // certify an intact roof. This includes explicit damage, unknown values
+    // and unusual delimiters, not observations of the real campus.
+    for (const condition of [
+      'collapsed', 'destroyed', 'unsafe', 'badly_damaged',
+      'unknown', 'good/ruinous', 'good\nruinous', 'preserved:ruinous',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:condition': condition,
+        })],
+      }), condition).toEqual([]);
+    }
+    // Multi-valued states cannot prove a single intact building, even when
+    // one token is valid. These are synthetic conflicts, not real campus data.
+    for (const condition of [
+      'good;ruinous', 'ruinous;good', 'renovated,mainly_ruinous',
+      'preserved|partly_ruinous', 'good;preserved', '  ;  ',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:condition': condition,
+        })],
+      }), condition).toEqual([]);
+    }
+    // Normal upkeep, a documented renovation, and no condition tag do not
+    // invalidate a standing building that independently passed all checks.
+    for (const condition of ['good', 'preserved', 'renovated', 'reconstructed', ' GOOD ']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'school', 'building:condition': condition,
+        })],
+      }), condition).toMatchObject([{ poiId: 'pu-library' }]);
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'school' })],
+    })).toHaveLength(1);
+  });
+
   it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [{ ...way(255784049), tags: undefined }],
@@ -126,6 +649,8 @@ describe('Providence OSM building outlines', () => {
       { building: '0' }, { building: 'none' }, { building: 'unknown' },
       { building: 'construction' }, { building: 'proposed' },
       { building: 'demolished' }, { building: 'roof' }, { building: 'ruins' },
+      // Historical/ambiguous OSM values cannot certify an intact roof.
+      { building: 'ruin' }, { building: 'damaged' },
       { building: 'maybe' }, { building: '   ' }, { building: 1 },
     ]) {
       expect(parseProvidenceOsmFootprints({
@@ -136,6 +661,30 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [way(255784049, library, { building: 'school', height: '18' })],
     })[0]).toMatchObject({ poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag' });
+  });
+
+  it('does not depict active demolition tags as an intact campus building', () => {
+    // Synthetic cases only: these tags are not claims about buildings at PU.
+    // The mapped ID alone cannot prove that a roof is intact during demolition.
+    for (const kind of ['demolition', 'demolishing', ' DEMOLITION ']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: kind })],
+      }), kind).toEqual([]);
+    }
+    for (const marker of [
+      'demolition', 'demolishing', 'demolition:building', 'demolishing:building',
+    ]) {
+      for (const value of ['yes', 'in_progress', '  ', null]) {
+        expect(parseProvidenceOsmFootprints({
+          elements: [way(255784049, library, { building: 'yes', [marker]: value })],
+        }), `${marker}=${value}`).toEqual([]);
+      }
+      // An explicitly negative historical flag must not hide an otherwise
+      // independently verified standing outline.
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', [marker]: 'no' })],
+      }), marker).toMatchObject([{ poiId: 'pu-library' }]);
+    }
   });
 
   it('fails closed on contradictory lifecycle tags even when building=yes remains', () => {

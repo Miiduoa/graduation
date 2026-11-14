@@ -165,3 +165,15 @@ export function walkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoo
   if (origin) parameters.set('origin', `${origin.lat},${origin.lng}`);
   return `https://www.google.com/maps/dir/?${parameters.toString()}`;
 }
+
+/** Apple Maps walking route to the same POI marker, not an audited entrance.
+ * Legacy Map Links syntax works across older Apple OS versions.
+ */
+export function appleWalkingDirectionsUrl(destination: MapCoordinate, origin?: MapCoordinate): string {
+  const parameters = new URLSearchParams({
+    daddr: `${destination.lat},${destination.lng}`,
+    dirflg: 'w',
+  });
+  if (origin) parameters.set('saddr', `${origin.lat},${origin.lng}`);
+  return `https://maps.apple.com/?${parameters.toString()}`;
+}

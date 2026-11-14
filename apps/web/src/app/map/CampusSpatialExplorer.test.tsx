@@ -76,6 +76,8 @@ it('opens graphics only on request, uses the current places, and leaves selectio
   expect(screen.queryByText('主顧樓')).toBeNull();
   expect(within(dialog).getByText(/不代表建築外觀或室內動線/)).toBeTruthy();
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: /有 OSM 外框/ })).toBeNull();
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(scene.setView).toHaveBeenLastCalledWith({ selectedId: null, overhead: false, motion: true, dark: false, bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
@@ -83,6 +85,226 @@ it('opens graphics only on request, uses the current places, and leaves selectio
   expect(scene.dispose).toHaveBeenCalledTimes(1);
   expect(disconnect).toHaveBeenCalledTimes(1);
   expect(document.activeElement).toBe(opener);
+});
+
+it('searches existing campus place metadata without losing a selection or restarting WebGL', async () => {
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const search = within(dialog).getByRole('searchbox', { name: '搜尋地點' });
+  const destinations = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+
+  // Search matches place descriptions as well as names and categories.
+  fireEvent.change(search, { target: { value: '自習' } });
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: '本校宿舍' })).toBeNull();
+  fireEvent.change(destinations, { target: { value: 'library' } });
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+
+  // A new search does not silently change the selected destination.
+  fireEvent.change(search, { target: { value: '住宿' } });
+  expect(within(dialog).getByRole('option', { name: '本校圖書館（目前選擇）' })).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '本校宿舍' })).toBeTruthy();
+  expect((destinations as HTMLSelectElement).value).toBe('library');
+  fireEvent.change(search, { target: { value: '沒有這個地點' } });
+  expect(within(dialog).getByText('找到 0 / 2 個地點；目前選擇不會因搜尋改變。')).toBeTruthy();
+  expect((destinations as HTMLSelectElement).value).toBe('library');
+  expect(within(dialog).getByRole('option', { name: '本校圖書館（目前選擇）' })).toBeTruthy();
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library' }));
+
+  fireEvent.change(search, { target: { value: '' } });
+  expect(within(dialog).getByRole('option', { name: '本校宿舍' })).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+it('keeps a valid map destination after the selected POI is removed by live filtering', async () => {
+  const onSelect = vi.fn();
+  const view = render(
+    <CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={onSelect} />,
+  );
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }), {
+    target: { value: 'dorm' },
+  });
+  expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
+
+  // The parent map narrows its list while the modal is still mounted. The old
+  // in-dialog ID has disappeared; keep the still-valid external selection.
+  view.rerender(
+    <CampusSpatialExplorer school="other-school" locations={[places[0]]} selected={places[0]} onSelect={onSelect} />,
+  );
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value).toBe('library');
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe('24.226,120.58');
+  await waitFor(() => expect(scene.setView).toHaveBeenLastCalledWith(
+    expect.objectContaining({ selectedId: 'library' }),
+  ));
+  expect(onSelect).not.toHaveBeenCalled();
+
+  // Without an external selection there is no reason to guess a replacement.
+  view.rerender(
+    <CampusSpatialExplorer school="other-school" locations={[places[0]]} selected={null} onSelect={onSelect} />,
+  );
+  expect(within(dialog).queryByRole('heading', { name: '本校圖書館' })).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  await waitFor(() => expect(scene.setView).toHaveBeenLastCalledWith(
+    expect.objectContaining({ selectedId: null }),
+  ));
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+it('matches multi-keyword and full-width POI metadata without unexpected destination changes', async () => {
+  const onSelect = vi.fn();
+  const synthetic: MapLocation[] = [
+    ...places,
+    { id: 'sample-room', name: '樣本教室', category: '教學', description: '合成測試資料',
+      lat: 24.227, lng: 120.581, building: 'Ａ棟', floor: '２Ｆ', facilities: ['影印'] },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={synthetic} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const search = within(dialog).getByRole('searchbox', { name: '搜尋地點' });
+
+  fireEvent.change(search, { target: { value: '2f　a棟' } });
+  expect(within(dialog).getByRole('option', { name: '樣本教室' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: '本校圖書館' })).toBeNull();
+  const choose = within(dialog).getByRole('button', { name: '在空間圖查看「樣本教室」' });
+  // An Enter key used by a Chinese/Japanese IME is not a selection.
+  fireEvent.keyDown(search, { key: 'Enter', isComposing: true });
+  expect(within(dialog).queryByRole('heading', { name: '樣本教室' })).toBeNull();
+  fireEvent.click(choose);
+  expect(within(dialog).getByRole('heading', { name: '樣本教室' })).toBeTruthy();
+
+  fireEvent.change(search, { target: { value: '本校' } });
+  expect(within(dialog).getByRole('button', { name: '在空間圖查看「本校圖書館」' })).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: '在空間圖查看「本校宿舍」' })).toBeTruthy();
+  // Multiple matches must never be auto-selected by Enter.
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(within(dialog).getByRole('heading', { name: '樣本教室' })).toBeTruthy();
+  fireEvent.change(search, { target: { value: '自習　本校' } });
+  expect(within(dialog).getByRole('option', { name: '本校圖書館' })).toBeTruthy();
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('offers up to five mobile-friendly search shortcuts while keeping all matches in the select', async () => {
+  const onSelect = vi.fn();
+  // Synthetic same-campus places: this checks interaction, not real school geometry.
+  const rooms: MapLocation[] = Array.from({ length: 7 }, (_, i) => ({
+    id: `sample-${i}`, name: `示意教室 ${i + 1}`, category: '教學空間',
+    description: '純測試地點', lat: 24.226 + i * 0.0001, lng: 120.58 + i * 0.0001,
+  }));
+  render(<CampusSpatialExplorer school="other-school" locations={rooms} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const search = within(dialog).getByRole('searchbox', { name: '搜尋地點' });
+  fireEvent.change(search, { target: { value: '教學空間' } });
+  const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
+  expect(within(shortcuts).getAllByRole('button', { name: /在空間圖查看/ })).toHaveLength(5);
+  expect(within(shortcuts).getByText(/僅顯示前 5 筆搜尋捷徑/)).toBeTruthy();
+  expect(within(dialog).getAllByRole('option')).toHaveLength(8); // Placeholder + all seven.
+  expect(within(dialog).getByText('找到 7 / 7 個地點；目前選擇不會因搜尋改變。')).toBeTruthy();
+  fireEvent.click(within(shortcuts).getByRole('button', { name: '在空間圖查看「示意教室 2」' }));
+  expect(within(dialog).getByRole('heading', { name: '示意教室 2' })).toBeTruthy();
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-1');
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  // Selected room 2 must no longer consume one of the five available shortcuts.
+  expect(within(shortcuts).getAllByRole('button', { name: /在空間圖查看/ })).toHaveLength(5);
+  expect(within(shortcuts).queryByRole('button', { name: '在空間圖查看「示意教室 2」' })).toBeNull();
+  expect(within(shortcuts).getByRole('button', { name: '在空間圖查看「示意教室 6」' })).toBeTruthy();
+  // If the user changes the search, the chosen destination remains selected.
+  fireEvent.change(search, { target: { value: '不會有結果' } });
+  expect(within(dialog).queryByRole('group', { name: '搜尋結果捷徑' })).toBeNull();
+  expect(within(dialog).getByRole('option', { name: '示意教室 2（目前選擇）' })).toBeTruthy();
+});
+
+it('disambiguates identical POI names for screen readers and mobile destinations', async () => {
+  // Both entries are explicitly synthetic; building/floor labels come from
+  // the supplied marker metadata, not assumed entrances or indoor routes.
+  const rooms: MapLocation[] = [
+    { id: 'sample-east', name: '共用空間', category: '教學空間',
+      description: '示意地點', building: '示意甲館', floor: '2F', lat: 24.2261, lng: 120.5801 },
+    { id: 'sample-west', name: '共用空間', category: '教學空間',
+      description: '示意地點', building: '示意乙館', floor: '3F', lat: 24.2262, lng: 120.5802 },
+  ];
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={rooms} selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜尋地點' }),
+    { target: { value: '共用空間' } });
+  const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
+  const labelEast = '共用空間（建築：示意甲館 · 樓層：2F · 類別：教學空間 · 同名地點 1／2）';
+  const labelWest = '共用空間（建築：示意乙館 · 樓層：3F · 類別：教學空間 · 同名地點 2／2）';
+  expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
+  const second = within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelWest}」` });
+  expect(within(dialog).getByRole('option', { name: labelEast })).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: labelWest })).toBeTruthy();
+  fireEvent.click(second);
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-west');
+  expect(within(dialog).getByRole('heading', { name: '共用空間' })).toBeTruthy();
+  expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
+  // The range and next/previous accessible names must identify a *specific*
+  // destination, not two indistinguishable "共用空間" markers.
+  expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain(labelWest);
+  fireEvent.click(within(dialog).getByRole('button', { name: `上一個地點：${labelEast}` }));
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-east');
+  expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain(labelEast);
+  fireEvent.click(within(dialog).getByRole('button', { name: `下一個地點：${labelWest}` }));
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-west');
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('groups equivalent full-width and standard Unicode POI names without merging their identities', async () => {
+  const rooms: MapLocation[] = [
+    { id: 'full-width', name: 'Ａ館教室', category: '教室', building: '示意甲館',
+      description: '僅用於 Unicode 同名辨識的合成地點', floor: '1F', lat: 24.2261, lng: 120.5801 },
+    { id: 'standard', name: 'A館教室', category: '教室', building: '示意乙館',
+      description: '僅用於 Unicode 同名辨識的合成地點', floor: '2F', lat: 24.2262, lng: 120.5802 },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={rooms}
+    selected={null} onSelect={vi.fn()} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜尋地點' }),
+    { target: { value: 'A館教室' } });
+  const options = within(dialog).getAllByRole('option');
+  expect(options).toHaveLength(3); // Placeholder and two independent POIs.
+  expect(options[1].textContent).toContain('同名地點 1／2');
+  expect(options[2].textContent).toContain('同名地點 2／2');
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
+    { target: { value: 'standard' } });
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('standard');
+  expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain('同名地點 2／2');
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('does not claim hidden results when all six matches include the already selected destination', async () => {
+  const onSelect = vi.fn();
+  const rooms: MapLocation[] = Array.from({ length: 6 }, (_, i) => ({
+    id: `sample-${i}`, name: `示意教室 ${i + 1}`, category: '教學空間',
+    description: '純測試地點', lat: 24.226 + i * 0.0001, lng: 120.58 + i * 0.0001,
+  }));
+  render(<CampusSpatialExplorer school="other-school" locations={rooms} selected={rooms[0]} onSelect={onSelect} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜尋地點' }),
+    { target: { value: '教學空間' } });
+  const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
+  expect(within(shortcuts).getAllByRole('button', { name: /在空間圖查看/ })).toHaveLength(5);
+  expect(within(shortcuts).queryByText(/僅顯示前 5 筆搜尋捷徑/)).toBeNull();
+  expect(within(shortcuts).getByRole('button', { name: '在空間圖查看「示意教室 6」' })).toBeTruthy();
+  expect(within(dialog).getAllByRole('option')).toHaveLength(6);
+  expect(within(dialog).getByRole('heading', { name: '示意教室 1' })).toBeTruthy();
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
 it('connects scene markers, the progress control, directions and the original map selection', async () => {
@@ -102,10 +324,17 @@ it('connects scene markers, the progress control, directions and the original ma
   const warning = within(dialog).getByText(/導航僅以目前地點標記為目的地.*並非已核實的校舍入口/);
   expect(directionLink.getAttribute('aria-describedby')).toBe(warning.id);
   expect(warning.textContent).toContain('無障礙動線');
-  expect(within(dialog).getByRole('button', { name: '下一個地點' }).hasAttribute('disabled')).toBe(true);
+  const appleLink = within(dialog).getByRole('link', { name: 'Apple 地圖步行導航' });
+  const appleDirections = new URL(appleLink.getAttribute('href')!);
+  expect(appleDirections.origin).toBe('https://maps.apple.com');
+  expect(appleDirections.searchParams.get('daddr')).toBe('24.228,120.582');
+  expect(appleDirections.searchParams.get('dirflg')).toBe('w');
+  expect(appleLink.getAttribute('aria-describedby')).toBe(warning.id);
+  expect(appleLink.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(within(dialog).getByRole('button', { name: /^下一個地點/ }).hasAttribute('disabled')).toBe(true);
   fireEvent.change(within(dialog).getByRole('slider'), { target: { value: '0' } });
   expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain('本校圖書館');
-  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^下一個地點/ }));
   fireEvent.click(within(dialog).getByRole('button', { name: '俯視' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', overhead: true }));
   fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
@@ -122,13 +351,18 @@ it('controls camera without changing the place or recreating its context and res
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^下一個地點/ }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '看全部地點' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
+  // North-up is an orientation command, not an unexpected loss of the user's
+  // zoomed-in building view. The overview and destination actions reset framing.
+  fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '回到北向' }));
-  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1 }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: 0, zoom: 1.25 }));
+  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
   expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
@@ -139,13 +373,17 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   const changed = scene.create.mock.calls[0][2].onCameraChange;
   act(() => changed({ bearing: 420, zoom: 9 }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 60, zoom: MAX_SPATIAL_ZOOM }));
-  expect(within(dialog).getByRole('button', { name: '放大空間圖' }).getAttribute('aria-disabled')).toBe('true');
+  // Native disabled prevents redundant taps and removes the limit control from
+  // keyboard focus order; aria-disabled alone still allowed clicks/focus.
+  expect((within(dialog).getByRole('button', { name: '放大空間圖' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(dialog).getByRole('button', { name: '縮小空間圖' }) as HTMLButtonElement).disabled).toBe(false);
   expect(within(dialog).getByText('縮放 250%')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '向左旋轉' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 30, zoom: MAX_SPATIAL_ZOOM }));
   act(() => changed({ bearing: -60, zoom: 0 }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 300, zoom: MIN_SPATIAL_ZOOM }));
-  expect(within(dialog).getByRole('button', { name: '縮小空間圖' }).getAttribute('aria-disabled')).toBe('true');
+  expect((within(dialog).getByRole('button', { name: '縮小空間圖' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(dialog).getByRole('button', { name: '放大空間圖' }) as HTMLButtonElement).disabled).toBe(false);
   expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
@@ -160,6 +398,7 @@ it('keeps real place information and navigation available after WebGL failure an
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
   expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: 'Apple 地圖步行導航' })).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '重試立體畫面' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm' }));
@@ -196,7 +435,7 @@ it('applies live system and site motion preferences without recreating the graph
     reduced.matches = true;
     reduced.listeners.forEach((notify) => notify());
   });
-  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^下一個地點/ }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', motion: false }));
   await act(async () => { document.documentElement.dataset.theme = 'dark'; });
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ dark: true, motion: false }));
@@ -229,7 +468,7 @@ it('preserves single-source warnings and their exact source links', async () => 
   expect(within(dialog).getByText(/僅有單一資料來源/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '查看地點資料來源 ↗' }).getAttribute('href')).toBe(parking.sourceUrl);
   expect(within(dialog).getByRole('slider').hasAttribute('disabled')).toBe(true);
-  expect(within(dialog).getByRole('button', { name: '上一個地點' }).hasAttribute('disabled')).toBe(true);
+  expect(within(dialog).getByRole('button', { name: /^上一個地點/ }).hasAttribute('disabled')).toBe(true);
 });
 
 it('does not offer an empty tour and rejects points spread across distant campuses', async () => {
@@ -339,6 +578,8 @@ it('adds source-checked Providence building shapes without changing navigation o
   const dialog = await open();
   expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints', expect.objectContaining({ signal: expect.anything() }));
   expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: /有 OSM 外框/ })).toBeNull();
   const outline = [
     { lat: 24.22624, lon: 120.58131 },
     { lat: 24.22624, lon: 120.58143 },
@@ -361,6 +602,7 @@ it('adds source-checked Providence building shapes without changing navigation o
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（有 OSM 外框）' })).toBeTruthy();
   // Both provenance labels can show the same calendar day; anchor by meaning.
   expect(within(dialog).getByText(new RegExp(`^資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
   expect(within(dialog).getByText(new RegExp(`OSM 資料庫同步：${osmBaseAt.slice(0, 10)}.*非現地查證`))).toBeTruthy();
@@ -368,6 +610,44 @@ it('adds source-checked Providence building shapes without changing navigation o
   expect(within(dialog).getByText(/OSM way 版本 v7.*2026-10-15/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+
+it('labels a selected OSM relation revision without mistaking it for member geometry freshness', async () => {
+  const xijia = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  const outer = [
+    { lat: 24.22785, lon: 120.58045 }, { lat: 24.22785, lon: 120.58090 },
+    { lat: 24.22818, lon: 120.58090 }, { lat: 24.22818, lon: 120.58045 },
+    { lat: 24.22785, lon: 120.58045 },
+  ];
+  const inner = [
+    { lat: 24.22799, lon: 120.58063 }, { lat: 24.22799, lon: 120.58072 },
+    { lat: 24.22805, lon: 120.58072 }, { lat: 24.22805, lon: 120.58063 },
+    { lat: 24.22799, lon: 120.58063 },
+  ];
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'relation', id: 9246899,
+    tags: { type: 'multipolygon', building: 'dormitory' },
+    members: [
+      { type: 'way', ref: 255783593, role: 'outer', geometry: outer },
+      { type: 'way', ref: 665651134, role: 'inner', geometry: inner },
+    ],
+    version: 5, timestamp: '2026-10-15T08:09:10Z',
+  }] });
+  expect(buildings).toMatchObject([{ poiId: 'pu-xijia', osmVersion: 5 }]);
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true, status: 200, headers: new Headers(),
+    json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+    }),
+  })));
+  render(<CampusSpatialExplorer school="pu" locations={[xijia]} selected={xijia} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/OSM relation 版本 v5.*2026-10-15/)).toBeTruthy();
+  expect(within(dialog).getByText(/relation 成員 way 與節點座標可能另有更新/)).toBeTruthy();
+  expect(within(dialog).queryByText(/OSM way 版本 v5/)).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
 });
 
 it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores late success', async () => {
@@ -467,6 +747,8 @@ it('keeps the spatial map usable when Providence building geometry is unavailabl
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).getByRole('option', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).queryByRole('option', { name: /有 OSM 外框/ })).toBeNull();
   expect(within(dialog).getByRole('button', { name: '在平面地圖查看' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
@@ -551,6 +833,51 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
   }
 });
 
+it('ignores an old queued cooldown timeout after a newer Overpass Retry-After', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: false, status: 503,
+      headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+    })
+    .mockResolvedValueOnce({
+      ok: false, status: 503,
+      headers: { get: (name: string) => name === 'retry-after' ? '3600' : null },
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    const oldRelease = timeoutSpy.mock.calls.find(([, delay]) =>
+      typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
+    expect(typeof oldRelease).toBe('function');
+
+    // Simulate the old pause expiring, then a second 503 with a longer pause.
+    await act(async () => { (oldRelease as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // A retry moves through loading, which unmounts the previous button.
+    // Inspect the mounted control; a detached node can never become disabled.
+    const currentRetry = () => within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(currentRetry().hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 60 分鐘冷卻，到期後可再試/)).toBeTruthy();
+
+    // A callback already queued by the browser may run after React clears
+    // its timer. It must not release the NEW 60-minute server cooldown.
+    await act(async () => { (oldRelease as () => void)(); });
+    expect(currentRetry().hasAttribute('disabled')).toBe(true);
+    fireEvent.click(currentRetry());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
 it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
@@ -592,6 +919,8 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     const dialog = await open();
     expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（舊快照 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).getByText(/使用舊快照，非最新現場資訊/)).toBeTruthy();
     const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
     expect(within(dialog).getByText(/約 10 分鐘冷卻/)).toBeTruthy();
@@ -607,11 +936,15 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（舊快照 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).getByText(/使用舊快照，非最新現場資訊/)).toBeTruthy();
     expect(retry.hasAttribute('disabled')).toBe(true);
 
     await act(async () => { rejectRefresh(new Error('offline during refresh')); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
     expect(within(dialog).getByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（舊快照 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).getByText(/使用舊快照，非最新現場資訊/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     fireEvent.click(retry);
@@ -621,6 +954,8 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
     expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
+    expect(within(dialog).getByRole('option', { name: '蓋夏圖書館（有 OSM 外框）' })).toBeTruthy();
+    expect(within(dialog).queryByText(/使用舊快照，非最新現場資訊/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
   }
@@ -745,7 +1080,7 @@ it('retries Providence building data after a temporary outage without closing th
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('refreshes an expired snapshot on tab resume and replaces it only after success', async () => {
+it('removes a seven-day-expired snapshot on tab resume and restores only verified new geometry', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -785,10 +1120,11 @@ it('refreshes an expired snapshot on tab resume and replaces it only after succe
     // A suspended device can pass the seven-day deadline before timers fire.
     clock += 6 * day;
     fireEvent(window, new Event('pageshow'));
-    expect(await within(dialog).findByText(/正在檢查更新/)).toBeTruthy();
+    expect(await within(dialog).findByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     const previousSceneCount = scene.create.mock.calls.length;
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+    expect(within(dialog).queryByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeNull();
     fireEvent(document, new Event('visibilitychange'));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const updatedBuildings = buildings.map((building) => ({ ...building, heightMeters: building.heightMeters + 1, heightBasis: 'osm-tag' as const }));
@@ -809,7 +1145,7 @@ it('refreshes an expired snapshot on tab resume and replaces it only after succe
   }
 });
 
-it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication deadline via %s and retains geometry when the response is expired', async (trigger) => {
+it.each(['visibilitychange', 'timer'])('withdraws geometry at the earlier OSM replication expiry via %s when refresh is invalid', async (trigger) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -847,10 +1183,10 @@ it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication
     } else {
       fireEvent(document, new Event('visibilitychange'));
     }
-    expect(await within(dialog).findByText(/更新未成功，仍顯示先前/)).toBeTruthy();
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
-    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    expect(within(dialog).queryByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeNull();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   } finally {
@@ -859,7 +1195,7 @@ it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication
   }
 });
 
-it.each(['failure', 'timeout'])('retains an expired stale outline after refresh %s', async (outcome) => {
+it.each(['failure', 'timeout'])('does not revive seven-day-expired outlines after refresh %s', async (outcome) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -897,7 +1233,8 @@ it.each(['failure', 'timeout'])('retains an expired stale outline after refresh 
 
     clock += 2 * 60_000;
     fireEvent(window, new Event('pageshow'));
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     if (outcome === 'timeout') {
       const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
@@ -905,9 +1242,9 @@ it.each(['failure', 'timeout'])('retains an expired stale outline after refresh 
       act(() => { (requestTimer![0] as () => void)(); });
     }
     await act(async () => { rejectRefresh(new Error('offline after snapshot expiry')); });
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(within(dialog).getByText(/更新未成功，仍顯示先前/)).toBeTruthy();
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
     timerSpy.mockRestore();

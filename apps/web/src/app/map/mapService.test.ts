@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import {
+  appleWalkingDirectionsUrl,
   distanceMeters,
   formatDistance,
   loadMapFavorites,
@@ -258,4 +259,18 @@ it('fails a stuck map source after the timeout instead of loading forever', asyn
 it('passes through a source answer that arrives before the timeout', async () => {
   await expect(withTimeout(Promise.resolve(['ok']), 1000)).resolves.toEqual(['ok']);
   await expect(withTimeout(Promise.reject(new Error('denied')), 1000)).rejects.toThrow('denied');
+});
+
+it('creates Apple Maps walking links to the exact POI, without inventing an entrance', () => {
+  const destination = { lat: 24.228017, lng: 120.58067 };
+  const direct = new URL(appleWalkingDirectionsUrl(destination));
+  expect(direct.origin).toBe('https://maps.apple.com');
+  expect(direct.searchParams.get('daddr')).toBe('24.228017,120.58067');
+  expect(direct.searchParams.get('dirflg')).toBe('w');
+  expect(direct.searchParams.has('saddr')).toBe(false);
+
+  const withStart = new URL(appleWalkingDirectionsUrl(destination, { lat: 24.226939, lng: 120.583587 }));
+  expect(withStart.searchParams.get('daddr')).toBe('24.228017,120.58067');
+  expect(withStart.searchParams.get('saddr')).toBe('24.226939,120.583587');
+  expect(withStart.searchParams.get('dirflg')).toBe('w');
 });

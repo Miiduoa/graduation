@@ -13,6 +13,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Path,
   PlaneGeometry,
   RingGeometry,
   Scene,
@@ -93,22 +94,39 @@ function overlaps(first: Rectangle, second: Rectangle) {
 }
 
 /** The audited POI can be near (but outside) an OSM building by up to 30m.
- * Never place its marker on an invented rooftop when the POI is off the outline.
- * Its original map position remains a ground POI, not an inferred entrance.
+ * Never place its marker on an invented rooftop when the POI is off the outline,
+ * inside a courtyard, or exactly on a roof/courtyard boundary. A boundary does
+ * not establish which side of the wall the real entrance or marker belongs on.
  */
 function poiWithinOutline(point: CampusSpatialPoint, footprint: ProvidenceFootprint): boolean {
   const { lat, lng } = point.location;
-  let inside = false;
-  const ring = footprint.outline;
-  for (let i = 0, previous = ring.length - 1; i < ring.length; previous = i, i += 1) {
-    const [lon, latitude] = ring[i];
-    const [previousLon, previousLat] = ring[previous];
-    if ((latitude > lat) !== (previousLat > lat) &&
-        lng < lon + (lat - latitude) * (previousLon - lon) / (previousLat - latitude)) {
-      inside = !inside;
+  const insideRing = (ring: readonly [number, number][]) => {
+    let inside = false;
+    for (let i = 0, previous = ring.length - 1; i < ring.length; previous = i, i += 1) {
+      const [lon, latitude] = ring[i];
+      const [previousLon, previousLat] = ring[previous];
+      if ((latitude > lat) !== (previousLat > lat) &&
+          lng < lon + (lat - latitude) * (previousLon - lon) / (previousLat - latitude)) {
+        inside = !inside;
+      }
     }
-  }
-  return inside;
+    return inside;
+  };
+  // Ray casting alone inconsistently classifies a point exactly on a polygon
+  // edge (especially the right edge of a hole). Treat all such positions as
+  // ground POIs, not evidence of an elevated, surveyed rooftop. Use a tiny
+  // coordinate-rounding tolerance, not a guessed building-wall thickness.
+  const onBoundary = (ring: readonly [number, number][]) => ring.some(([x, y], i) => {
+    const [nextX, nextY] = ring[(i + 1) % ring.length];
+    const dx = nextX - x;
+    const dy = nextY - y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared === 0) return false;
+    const t = Math.max(0, Math.min(1, ((lng - x) * dx + (lat - y) * dy) / lengthSquared));
+    return Math.hypot(lng - (x + t * dx), lat - (y + t * dy)) <= 1e-11;
+  });
+  if (onBoundary(footprint.outline) || !insideRing(footprint.outline)) return false;
+  return !(footprint.holes?.some((hole) => onBoundary(hole) || insideRing(hole)) ?? false);
 }
 
 /** This owns a single, optional canvas. No render loop runs while the view is still. */
@@ -244,7 +262,7 @@ export function createCampusSpatialScene(
       case '=': next = { ...requestedCamera, zoom: requestedCamera.zoom * SPATIAL_ZOOM_FACTOR }; break;
       case '-':
       case '_': next = { ...requestedCamera, zoom: requestedCamera.zoom / SPATIAL_ZOOM_FACTOR }; break;
-      case 'Home': next = { bearing: 0, zoom: 1 }; break;
+      case 'Home': next = { ...requestedCamera, bearing: 0 }; break;
       default: return;
     }
     event.preventDefault();
@@ -606,7 +624,7 @@ export function createCampusSpatialScene(
     ground.position.y = -0.1;
     scene.add(ground);
 
-    // Only published OSM way outlines that passed the Providence source whitelist are extruded.
+    // Only source-checked OSM way/relation outlines are extruded; courtyards stay open.
     // The shape is geographic; without a recorded OSM height the 12 m volume is illustrative.
     for (const footprint of visibleFootprints) {
       const shape = new Shape();
@@ -617,8 +635,25 @@ export function createCampusSpatialScene(
         else shape.lineTo(x, -z);
       });
       shape.closePath();
+      for (const courtyard of footprint.holes ?? []) {
+        const hole = new Path();
+        courtyard.forEach(([longitude, latitude], index) => {
+          const x = anchor.x + (longitude - anchor.location.lng) * longitudeScale;
+          const z = anchor.z - (latitude - anchor.location.lat) * latitudeScale;
+          if (index === 0) hole.moveTo(x, -z);
+          else hole.lineTo(x, -z);
+        });
+        hole.closePath();
+        shape.holes.push(hole);
+      }
+      // OSM-tagged height and an arbitrary illustrative 12 m extrusion are
+      // not equivalent evidence. Translucency keeps this difference visible
+      // in both themes and when the building is selected.
+      const illustrative = footprint.heightBasis === 'illustrative';
       const material = ownMaterial(new MeshStandardMaterial({
         color: '#abbab2', roughness: 0.93, metalness: 0,
+        transparent: illustrative, opacity: illustrative ? 0.58 : 1,
+        depthWrite: !illustrative,
       }));
       const geometry = ownGeometry(new ExtrudeGeometry(shape, {
         depth: footprint.heightMeters, bevelEnabled: false, steps: 1, curveSegments: 1,
