@@ -139,7 +139,8 @@ it('keeps a visitor with school and author query values outside the private comp
   mocks.auth.user = null;
   mocks.search = new URLSearchParams('schoolId=ncku&uid=student&boardId=science');
   render(<PostComposePage />);
-  expect(screen.getByRole('link', { name: '登入帳號' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '連線學校帳號' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往公開交流' }).getAttribute('href')).toBe('/social?schoolId=ncku');
   expect(screen.queryByRole('button', { name: '發布' })).toBeNull();
   expect(mocks.list).not.toHaveBeenCalled();
   expect(mocks.publish).not.toHaveBeenCalled();

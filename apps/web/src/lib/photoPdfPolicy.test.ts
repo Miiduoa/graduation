@@ -35,7 +35,7 @@ it('keeps camera permission gated and blob previews scoped to classroom routes',
         expect(effective.get('Content-Security-Policy')?.includes('object-src blob:')).toBe(classroom);
         const scanPage = ['/merchant', '/course/c1/attendance', '/teacher/course/c1/attendance'].includes(pathname);
         expect(effective.get('Permissions-Policy')?.includes('camera=(self)')).toBe(scanPage || (classroom && flag === 'true'));
-        expect(effective.get('Permissions-Policy')).toContain('microphone=()');
+        expect(effective.get('Permissions-Policy')?.includes('microphone=(self)')).toBe(pathname === '/');
       }
     }
   } finally {

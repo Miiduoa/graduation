@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -43,7 +43,11 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
+vi.mock('@/components/AppHeader', () => ({
+  AppHeader: ({ onOpenVoice }: { onOpenVoice: () => void }) => (
+    <header><button type="button" onClick={onOpenVoice}>頁首語音</button></header>
+  ),
+}));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
 vi.mock('@/lib/usePersonalTodayRecords', () => ({
   usePersonalTodayRecords: () => state.timetable,
@@ -250,7 +254,7 @@ it('keeps teaching courses on today and no longer lists studying courses as a gr
   expect(screen.queryByRole('heading', { name: /修習課程/ })).toBeNull();
 });
 
-it('does not tell a teacher they have no homework and opens the teaching course list', async () => {
+it('does not tell a teacher they have no homework and opens the teacher course workspace', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };
   vi.mocked(loadNuniHomeSections).mockResolvedValue({
     courses: [{ id: 'teach', name: '教學實習', role: 'owner-teacher', unreadCount: 0 }],
@@ -260,9 +264,10 @@ it('does not tell a teacher they have no homework and opens the teaching course 
   render(<HomePage />);
   const teacherToday = await screen.findByTestId('teacher-today');
   expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
+  // The teacher workspace manages assignments; /course/teach remains the content page.
   expect(
     within(teacherToday).getByRole('link', { name: /教學實習/ }).getAttribute('href'),
-  ).toBe('/course/teach');
+  ).toBe('/teacher/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
   expect(screen.queryByTestId('student-today')).toBeNull();
 });
@@ -937,3 +942,52 @@ it.each([
     expect(state.refresh).not.toHaveBeenCalled();
   },
 );
+
+it('starts Today dictation from the header and keeps an active recording running', async () => {
+  state.uid = null;
+  const start = vi.fn();
+  vi.stubGlobal('SpeechRecognition', class { start = start; abort = vi.fn(); });
+  try {
+    render(<HomePage />);
+    const panel = screen.getByText('打字或語音詢問').closest('details')!;
+    expect(panel.open).toBe(false);
+    const shortcut = screen.getByRole('button', { name: '頁首語音' });
+    fireEvent.click(shortcut);
+    expect(panel.open).toBe(true);
+    const mic = await screen.findByRole('button', { name: '停止語音輸入' });
+    expect(start).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(mic);
+    fireEvent.click(shortcut);
+    expect(start).toHaveBeenCalledOnce();
+    expect(mic.getAttribute('aria-pressed')).toBe('true');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('focuses the Today input from the header when the browser lacks speech recognition', async () => {
+  state.uid = null;
+  render(<HomePage />);
+  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  const input = await screen.findByRole('searchbox');
+  expect(document.activeElement).toBe(input);
+});
+
+it('keeps the active question on screen while a late course load resolves the teacher view', async () => {
+  let finish!: (result: HomeData) => void;
+  vi.mocked(loadHomeData).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  render(<HomePage />);
+  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  const question = await screen.findByRole('searchbox');
+  fireEvent.change(question, { target: { value: '我今天要去哪間教室？' } });
+  await act(async () => finish(data('資料庫', {
+    courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
+    tasks: [],
+  })));
+  expect(screen.getByRole('searchbox')).toBe(question);
+  expect((question as HTMLInputElement).value).toBe('我今天要去哪間教室？');
+  const summary = screen.getByText('打字或語音詢問').closest('summary')!;
+  fireEvent.click(summary);
+  await screen.findByTestId('teacher-today');
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+});

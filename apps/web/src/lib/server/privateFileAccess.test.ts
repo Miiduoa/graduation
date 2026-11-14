@@ -98,23 +98,192 @@ it('allows managers and owners to read, but refuses another student', async () =
   store.docs.delete('groups/course/members/bob');
   await expect(authorize(store, GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('groups/course/members/bob', { status: 'active', role: 'member' });
+  // Legacy receipts without an attachments list keep previous manager access.
   await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
+  const receipt = 'groups/course/assignments/work/submissions/alice';
+  store.docs.set(receipt, { userId: 'alice', attachments: [{ url: GROUP_ANSWER }], submittedAt: Date.now() });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER.replace('answer.pdf', 'draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receipt, { userId: 'alice', attachments: [GROUP_ANSWER], submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
   await expect(authorize(store, GROUP_ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
 });
+it('legacy assignment URLs also require a submitted receipt with an exact file reference', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const receiptPath = 'groups/course/assignments/work/submissions/alice';
+  // Owners can preview drafts; other students cannot. Managers keep previous
+  // access when the receipt has no attachments list.
+  await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'bob', submittedAt: Date.now(), attachments: [ANSWER] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [{ path: ANSWER }] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER.replace('answer.pdf', 'private-draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: null, attachments: [ANSWER] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
+  store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+});
+
+it('legacy uploads require a live open assignment and an unsubmitted receipt', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+  for (const invalid of [
+    { published: false }, { status: 'draft' }, { status: 'closed' },
+    { dueAt: '2020-01-01T00:00:00Z' }, { dueAt: 'invalid' },
+  ]) {
+    store.docs.set('groups/course/assignments/work', invalid);
+    await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('groups/course/assignments/work', { dueAt: '2020-01-01T00:00:00Z', allowLateSubmission: true });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('groups/course/assignments/work/submissions/alice', { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/assignments/work/submissions/alice', { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.delete('groups/course/assignments/work/submissions/alice');
+  store.docs.delete('groups/course/assignments/work');
+  // Only the global assignments/{id} mirror remains: keep the previous upload path.
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  // A previously uploaded private draft remains previewable by its owner.
+  await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
+});
+
 it('requires an existing live post for downloads and author ownership for existing uploads', async () => {
   const store = fileStore();
   await expect(authorize(store, POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, POST)).resolves.toBeUndefined();
-  const existing = fileStore([['groups/course/posts/one', { authorId: 'alice' }]]);
+  const existing = fileStore([['groups/course/posts/one', { authorId: 'alice', attachments: [POST] }]]);
   await expect(authorize(existing, POST, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(existing, POST, 'teacher', true)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(existing, POST, 'alice', true)).resolves.toBeUndefined();
   await expect(authorize(existing, POST, 'bob', false)).resolves.toBeUndefined();
 });
+it('does not turn a finalized but unreferenced post attachment into a group-wide download', async () => {
+  const store = fileStore([['groups/course/posts/one', { authorId: 'alice' }]]);
+  const sibling = POST.replace('notes.pdf', 'unpublished.pdf');
+  // Historical posts without an attachments list keep previous member access.
+  await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+  store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [{ url: POST }] });
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+  await expect(authorize(store, sibling, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  // Even a manager cannot browse a file absent from the post's attachment list.
+  await expect(authorize(store, sibling, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('schools/pu/members/bob', { status: 'inactive' });
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('schools/pu/members/bob', { status: 'active' });
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
 it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {
   await expect(authorize(fileStore([['groups/course/posts/one', { authorId: 'alice', ...tombstone }]]), POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
 });
+it('rejects stamped school-member replay for group files after profile recreation', async () => {
+  const store = fileStore([
+    ['assignments/work', { groupId: 'course' }],
+    ['groups/course/posts/one', { authorId: 'alice', attachments: [POST] }],
+    ['users/alice', { schoolId: 'pu', bindingGeneration: 'trusted-generation' }],
+    ['schools/pu/members/alice', {
+      status: 'active',
+      profileBoundSchoolId: 'pu',
+      profileBoundGeneration: 'trusted-generation',
+    }],
+  ]);
+  const checks: [string, boolean][] = [
+    [COVER, false], [POST, false], [GROUP_ANSWER, true], [ANSWER, true],
+  ];
+  const expectAll = async (permitted: boolean) => {
+    for (const [path, writing] of checks) {
+      if (permitted) await expect(authorize(store, path, 'alice', writing)).resolves.toBeUndefined();
+      else await expect(authorize(store, path, 'alice', writing)).rejects.toMatchObject({ statusCode: 403 });
+    }
+  };
+  await expectAll(true);
+
+  // A stale active school and group membership must not authorize a new profile.
+  store.docs.delete('users/alice');
+  await expectAll(false);
+  store.docs.set('users/alice', { displayName: 'self-recreated' });
+  await expectAll(false);
+  store.docs.set('users/alice', { schoolId: 'another-school', bindingGeneration: 'trusted-generation' });
+  await expectAll(false);
+  store.docs.set('users/alice', { schoolId: 'pu', bindingGeneration: 'new-generation' });
+  await expectAll(false);
+
+  // Half-stamps fail closed instead of silently falling back to legacy access.
+  store.docs.set('users/alice', { schoolId: 'pu', bindingGeneration: 'trusted-generation' });
+  store.docs.set('schools/pu/members/alice', { status: 'active', profileBoundGeneration: 'trusted-generation' });
+  await expectAll(false);
+  store.docs.set('schools/pu/members/alice', { status: 'active', profileBoundSchoolId: 'pu' });
+  await expectAll(false);
+
+  store.docs.set('schools/pu/members/alice', {
+    status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'trusted-generation',
+  });
+  await expectAll(true);
+  store.docs.set('schools/pu/members/alice', {
+    status: 'inactive', profileBoundSchoolId: 'pu', profileBoundGeneration: 'trusted-generation',
+  });
+  await expectAll(false);
+});
+
+it('preserves legacy unstamped group-member access until migration is verified', async () => {
+  const store = fileStore();
+  await expect(authorize(store, COVER, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+});
+
+it('rejects stale campus story stamps after profile deletion, recreation and school change', async () => {
+  const store = fileStore([
+    ['users/alice', { schoolId: 'pu', primarySchoolId: 'pu', bindingGeneration: 'generation-one' }],
+    ['schools/pu/members/alice', {
+      status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'generation-one',
+    }],
+  ]);
+  const tryStory = (writing: boolean) => authorizePrivateFile(
+    store.db, parsePrivateFilePath(STORY)!, 'alice', writing,
+  );
+  await expect(tryStory(true)).resolves.toBeUndefined();
+  await expect(tryStory(false)).resolves.toBeUndefined();
+
+  // The same already-issued identity and active membership are not enough.
+  store.docs.delete('users/alice');
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('users/alice', { displayName: 'self recreated' });
+  for (const writing of [true, false]) {
+    await expect(tryStory(writing)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('users/alice', {
+    schoolId: 'other-school', bindingGeneration: 'generation-one',
+  });
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('users/alice', {
+    schoolId: 'pu', bindingGeneration: 'generation-two',
+  });
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+
+  // Server-controlled school-login transaction restores matching generations.
+  store.docs.set('users/alice', {
+    schoolId: 'pu', bindingGeneration: 'generation-one',
+  });
+  await expect(tryStory(false)).resolves.toBeUndefined();
+  store.docs.set('schools/pu/members/alice', {
+    status: 'inactive', profileBoundSchoolId: 'pu', profileBoundGeneration: 'generation-one',
+  });
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it.each(['group-cover', 'group-post', 'story'] as const)('restricts %s image MIME types', (kind) => {
   for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(true);
   for (const mime of ['image/svg+xml', 'image/bmp', 'text/html']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(false);

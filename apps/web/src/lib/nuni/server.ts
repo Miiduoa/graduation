@@ -10,7 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
-export { boundedBytes } from '../server/boundedBytes';
+import { boundedBytes as readBoundedBytes } from '../server/boundedBytes';
+
+export const boundedBytes = readBoundedBytes as (
+  source: Request | Response, limit: number,
+) => ReturnType<typeof readBoundedBytes>;
 
 export const SESSION_COOKIE =
   process.env.NODE_ENV === 'production'
@@ -19,7 +23,32 @@ export const SESSION_COOKIE =
 export const LOGIN_COOKIE =
   process.env.NODE_ENV === 'production' ? '__Host-campus-one-login' : 'campus-one-login';
 export const HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
-export type PlatformSession = { sessionHandle: string; expiresAt: number; pendingLogout?: true };
+export type PlatformServiceAccess = { social: boolean; cloudAi: boolean };
+export type PlatformSession = {
+  sessionHandle: string;
+  expiresAt: number;
+  pendingLogout?: true;
+  /** Legacy cookie field; ignored on read and removed on update. */
+  restrictedServices?: { social?: true; cloudAi?: true };
+};
+
+// Existing platform services are always enabled. Legacy preferences are ignored.
+export function platformServiceAccess(_session: PlatformSession): PlatformServiceAccess {
+  return { social: true, cloudAi: true };
+}
+
+export function requirePlatformService(_session: PlatformSession, _service: keyof PlatformServiceAccess): void {
+  // Compatibility helper: service preferences cannot revoke existing capabilities.
+}
+
+export function withPlatformServiceAccess(
+  session: PlatformSession,
+  _requested: PlatformServiceAccess,
+): PlatformSession {
+  const enabled = { ...session };
+  delete enabled.restrictedServices;
+  return enabled;
+}
 
 export function nuniEnabled() {
   // The legacy flag remains an API compatibility gate; it never selects the application shell.
@@ -132,6 +161,7 @@ export function readSession(request: NextRequest): PlatformSession | null {
     (value.pendingLogout !== undefined && value.pendingLogout !== true)
   )
     return null;
+  // Obsolete service restrictions must never invalidate a session or disable a service.
   return {
     sessionHandle: value.sessionHandle,
     expiresAt: value.expiresAt,
@@ -193,6 +223,7 @@ export function readPlatformAuthorization(request: NextRequest): PlatformSession
 export async function boundedJson(
   source: Request | Response,
   limit = 1024 * 1024,
+  retryableReadSignal?: AbortSignal,
 ): Promise<unknown> {
   if (!source.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
     throw new NuniError(502, 'INVALID_RESPONSE');
@@ -218,6 +249,13 @@ export async function boundedJson(
   } catch (error) {
     void reader.cancel().catch(() => {});
     if (error instanceof NuniError) throw error;
+    // A timed-out GET body is a transport failure; malformed JSON remains non-retryable.
+    if (
+      retryableReadSignal?.aborted &&
+      error instanceof Error &&
+      (error.name === 'AbortError' || error.name === 'TimeoutError')
+    )
+      throw new NuniError(503, 'READ_TIMEOUT');
     throw new NuniError(502, 'INVALID_RESPONSE');
   } finally {
     clearTimeout(timer);
@@ -270,7 +308,11 @@ export async function fetchJson(
           }
           throw new NuniError(response.status >= 500 ? 503 : response.status, code);
         }
-        return await boundedJson(response, responseLimit);
+        return await boundedJson(
+          response,
+          responseLimit,
+          (init.method ?? 'GET').toUpperCase() === 'GET' ? signal : undefined,
+        );
       } catch (error) {
         if (error instanceof NuniError) throw error;
         throw new NuniError(503, 'SERVICE_UNAVAILABLE');

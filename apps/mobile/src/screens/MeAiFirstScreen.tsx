@@ -93,6 +93,9 @@ export default function MeAiFirstScreen() {
           />
         ) : null}
       </AISection>
+      <AISection title="社群經營">
+        {!!uid && <AIRow title="我的社群頁" subtitle="整理貼文、相片、影片與私人收藏" onPress={() => rootNavigateNested('Today', 'CreatorProfile', { memberUid: uid })} />}
+      </AISection>
       <AISection title="學校帳號資料">
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>
           <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
@@ -106,6 +109,9 @@ export default function MeAiFirstScreen() {
             </Text>
           ) : null}
         </AICard>
+        {isStudent && profile ? (
+          <AIRow title="數位學生證" subtitle="查看卡面與出示學號" onPress={go('StudentCard')} />
+        ) : null}
         <AIRow title="個人資料" subtitle="修改顯示名稱、簡介與電話" onPress={go('ProfileEdit')} />
       </AISection>
       <AISection title="通知與私訊">

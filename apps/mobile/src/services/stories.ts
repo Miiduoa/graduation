@@ -6,14 +6,19 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   limit,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
+  startAfter,
   where,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { buildStoryViewerPage, STORY_VIEWER_QUERY_LIMIT, storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '../firebase';
+import { fetchSchoolDirectoryProfiles } from './memberDirectory';
 
 export function storiesCollection(db = getDb()) {
   return collection(db, 'campusStories');
@@ -34,6 +39,7 @@ export type CampusStoryDoc = {
   createdAt?: unknown;
   expiresAt?: number;
   viewCount?: number;
+  allowReplies?: boolean;
 };
 
 export function reserveStoryId(): string {
@@ -50,10 +56,12 @@ export async function publishStory(storyId: string, payload: {
   poiId?: string | null;
   poiName?: string | null;
   expiresAtMs: number;
+  allowReplies: boolean;
 }): Promise<string> {
   if (payload.mediaUrl) assertPrivateFileNamespace(payload.mediaUrl, `schools/${payload.schoolId}/stories/${storyId}`);
   const ref = doc(storiesCollection(), storyId);
   const content = {
+    allowReplies: payload.allowReplies,
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
@@ -108,15 +116,35 @@ export async function listActiveStoriesForSchool(
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
+type StoryScope = Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>;
+
+export async function markStoryViewed(story: StoryScope, viewerUid: string) {
+  if (story.authorUid === viewerUid) return;
   const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+  const viewRef = doc(db, ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, {
     viewerUid,
     viewedAt: serverTimestamp(),
   });
+}
+
+export async function listStoryViewers(
+  story: StoryScope,
+  cursor: QueryDocumentSnapshot | null,
+) {
+  const db = getDb();
+  const receipts = collection(db, ...storyViewerCollectionPath(story));
+  const snapshot = await getDocsFromServer(query(
+    receipts,
+    orderBy('viewedAt', 'desc'),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(STORY_VIEWER_QUERY_LIMIT),
+  ));
+  return buildStoryViewerPage(snapshot.docs, story.authorUid, (uids) =>
+    fetchSchoolDirectoryProfiles(story.schoolId, uids, db),
+  );
 }
 
 export async function deleteMyStory(storyId: string) {

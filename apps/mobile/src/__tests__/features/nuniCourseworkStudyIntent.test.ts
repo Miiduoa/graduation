@@ -20,6 +20,8 @@ test.each([
   '幫這份作業找 30 分鐘準備時間', '幫我這份作業找三十分鐘準備時段',
   '幫這份作業找空堂', '幫我找這份作業的準備空堂',
   '替第二份作業尋找30分鐘準備時間', '找「期末報告」的空堂',
+  '幫這份作業，找 30 分鐘空堂。', '幫剛才那份作業找半小時準備時間',
+  '那就幫我找半小時空堂',
 ])('finding time retains an exact source selection without inventing a clock: %s', (question) => {
   const result = answerCourseworkStudyIntent(input(question));
   expect(result?.courseworkStudy?.assignmentIds).toEqual(question.includes('第二份') ? ['second'] : ['first', 'second']);
@@ -27,6 +29,55 @@ test.each([
   expect(result?.courseworkStudy?.suggestTime).toBe(true);
   expect(result?.courseworkRead).toBe(read);
 });
+
+test.each([
+  ['明天要交，今天哪 30 分鐘能準備？', '2026-11-08'],
+  ['幫這份作業今天找半小時空堂', '2026-11-08'],
+  ['幫這份作業找明天的30分鐘空堂', '2026-11-09'],
+  ['幫我找後天的半小時準備時間', '2026-11-10'],
+])('an explicit preparation day stays attached to the selected assignment: %s', (question, suggestDate) => {
+  const result = answerCourseworkStudyIntent({ ...input(question), read: { ...read, openedAssignmentId: 'second' } });
+  expect(result?.courseworkStudy).toEqual({ assignmentIds: ['second'], suggestTime: true, suggestDate });
+  expect(result?.courseworkRead).toBeDefined();
+});
+
+test('choosing among results keeps the requested day but manual clocks replace that search condition', () => {
+  const first = answerCourseworkStudyIntent(input('幫這份作業找明天的半小時空堂'));
+  const chosen = answerCourseworkStudyIntent({ ...input('第二份'), previous: first?.courseworkStudy });
+  expect(chosen?.courseworkStudy).toEqual({ assignmentIds: ['second'], suggestTime: true, suggestDate: '2026-11-09' });
+  const manual = answerCourseworkStudyIntent({ ...input('後天 19:00 到 19:30'), previous: chosen?.courseworkStudy });
+  expect(manual?.courseworkStudy).toEqual({ assignmentIds: ['second'],
+    time: { date: '2026-11-10', startTime: '19:00', endTime: '19:30' } });
+});
+
+test('changing the search day retains the already chosen exact assignment instead of asking for a new one', () => {
+  const result = answerCourseworkStudyIntent({ ...input('那明天呢？'),
+    previous: { assignmentIds: ['second'], suggestTime: true, suggestDate: '2026-11-08' } });
+  expect(result?.courseworkStudy).toEqual({ assignmentIds: ['second'], suggestTime: true, suggestDate: '2026-11-09' });
+  expect(answerCourseworkStudyIntent(input('那明天呢？'))).toBeNull();
+});
+
+test('a generic half-hour follow-up has no coursework meaning without the immediate source', () => {
+  expect(answerCourseworkStudyIntent({ ...input('幫我找半小時空堂'), read: undefined })).toBeNull();
+});
+
+test('normalizing a conversational comma does not erase punctuation from an exact assignment title', () => {
+  if (read.result.kind !== 'assignments') throw new Error('fixture');
+  const snapshot: CourseworkRead = { ...read, result: { ...read.result, assignments: [
+    { ...read.result.assignments[0]!, title: '資料,模型' },
+  ] } };
+  const result = answerCourseworkStudyIntent({ ...input('找「資料,模型」的半小時準備時間'), read: snapshot });
+  expect(result?.courseworkStudy).toEqual({ assignmentIds: ['first'], suggestTime: true });
+});
+
+test.each(['2026-02-30', '2026-11-07', '2026-11-15'])(
+  'an invalid or out-of-window day never becomes an unrestricted search: %s', (day) => {
+    const result = answerCourseworkStudyIntent(input(`幫這份作業找${day}的半小時空堂`));
+    expect(result?.courseworkStudy?.suggestTime).toBeUndefined();
+    expect(result?.courseworkStudy?.suggestDate).toBeUndefined();
+    expect(result?.content).toContain('重新指定有效日期');
+  },
+);
 
 test('an exact follow-up keeps read-only finding intent while explicit clocks return to manual review', () => {
   const previous = { assignmentIds: ['first', 'second'], suggestTime: true as const };

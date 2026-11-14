@@ -27,6 +27,14 @@ const lmsLabel = (path: (typeof ACADEMIC_LMS_SECTIONS)[number]['path']) =>
 
 export const CAMPUS_SERVICES = [
   {
+    name: '數位學生證',
+    text: '開啟學生證卡面、出示學號與查找校方證件',
+    href: '/student-card',
+    access: 'account',
+    keywords: '學生證 數位證件 證件 學號 student id card',
+    category: 'campus',
+  },
+  {
     name: academicLabel('/calendar'),
     text: '新增、編輯與查看自己的活動、考試與行程',
     href: '/calendar',
@@ -118,19 +126,19 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: lmsLabel('/school-courses'),
-    text: '讀取玩課雲（WOW Class）課堂清單，前往教材、作業與公告',
+    text: '開啟所選學校的學習平臺，查看課堂、教材與作業',
     href: '/school-courses',
-    access: 'school',
-    keywords: 'WOW Class TronClass LMS 玩課雲 課程 教材 作業 老師',
+    access: 'public',
+    keywords: 'WOW Class TronClass LMS 玩課雲課程 NTU COOL eLearn eeclass Moodle iLearning E3 iLearn 課程 教材 作業 老師',
     category: 'study',
     parentHref: '/classroom',
   },
   {
     name: lmsLabel('/school-lms'),
-    text: '跨課程查看玩課雲截止、已交狀態、公告與可下載教材（未啟用時請用課程與作業）',
+    text: '前往校方平臺查看作業、公告與教材；已連線的玩課雲課堂可直接查看截止時間',
     href: '/school-lms',
-    access: 'school',
-    keywords: '玩課雲 作業 截止 教材 公告 WOW Class TronClass 作業與教材',
+    access: 'public',
+    keywords: '玩課雲作業 作業 截止 教材 公告 WOW Class TronClass 作業與教材',
     category: 'study',
     parentHref: '/classroom',
   },
@@ -189,6 +197,14 @@ export const CAMPUS_SERVICES = [
     href: '/dms',
     access: 'school',
     keywords: '聊天 message 私訊',
+    category: 'connect',
+  },
+  {
+    name: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板',
+    href: '/social',
+    access: 'platform',
+    keywords: 'Google 公開 跨校 貼文 社群 看板 social community',
     category: 'connect',
   },
   {
@@ -259,10 +275,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '失物招領',
-    text: '查看本校遺失與拾獲刊登',
+    text: '用 Google 帳號查看、刊登與管理失物',
     href: '/lost-found',
-    access: 'school',
-    keywords: '失物 招領 遺失 拾獲 lost found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 Google lost found',
     category: 'campus',
   },
   {

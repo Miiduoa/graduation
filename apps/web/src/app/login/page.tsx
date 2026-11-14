@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { AccountRoleLinks } from '@/components/AccountRoleLinks';
 import { SiteShell } from '@/components/SiteShell';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -87,9 +88,9 @@ function LoginForm({
     schoolTask && !options.loading && !options.error && !schoolAvailable;
   // School destinations stay school-only; Google must not appear to fulfill them.
   const hideGoogle = schoolTask;
-  const publicDestination = isPublicCampusPath(
-    new URL(destination, 'https://campus.local').pathname,
-  );
+  const taskPath = new URL(destination, 'https://campus.local').pathname;
+  const publicDestination = isPublicCampusPath(taskPath);
+  const merchantTask = !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
   const directoryDestination = campusServiceHref(
     '/search',
     selection?.requestedUnavailable ? buildCampusNavigationSearch(params) : campusSearch,
@@ -175,6 +176,14 @@ function LoginForm({
       }
     }
   }
+  if (merchantTask) {
+    return (
+      <SiteShell title="店家帳號登入" subtitle="第一次使用可透過 Google 建立帳號。已申請店家請用原帳號登入。">
+        <NuniSignIn returnUrl={destination} issue={issue} />
+        <Link href="/login" className={styles.backLink}>查看其他身分入口</Link>
+      </SiteShell>
+    );
+  }
   return (
     <SiteShell
       title={
@@ -192,26 +201,53 @@ function LoginForm({
             : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
-      <section className={styles.connectionIntro} aria-label="校務連線方式">
+      {!schoolTask && <AccountRoleLinks showSchool />}
+      <section
+        className={styles.connectionIntro}
+        aria-label={schoolTask ? '校務連線方式' : '開始使用平台'}
+      >
         <div>
-          <p className={styles.connectionKicker}>校園資料，一次整理</p>
-          <h2>用匯入與 Google 帳號，整理自己的課表</h2>
-          <p>尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。</p>
+          <p className={styles.connectionKicker}>{schoolTask ? '校園資料，一次整理' : '從日常需要的事開始'}</p>
+          <h2>{schoolTask ? '用匯入與 Google 帳號，整理自己的課表' : '一個 Google 帳號，就能開始'}</h2>
+          <p>
+            {schoolTask
+              ? '尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。'
+              : '整理課表與行程、參與公開交流，或接續已加入課班的教材與作業。需要校方提供的個人資料時，再另外連線學校帳號。'}
+          </p>
         </div>
         <div className={styles.connectionFacts}>
-          <span>尚未開放學號直接登入</span>
+          <span>{schoolTask ? '尚未開放學號直接登入' : '不需要學號或學校信箱'}</span>
           <span>可自行匯入課表、成績與活動</span>
         </div>
       </section>
       <div className={styles.loginLayout}>
-        <section className={styles.loginHelp} aria-label="學校帳號登入">
-          <div className={styles.methodHeading}>
-            <div>
-              <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-              <h2>學校帳號</h2>
+        {!hideGoogle && (
+          <NuniSignIn
+            returnUrl={destination}
+            issue={issue}
+            disabled={busy}
+            onStart={() => {
+              if (busyRef.current) return false;
+              busyRef.current = 'platform';
+              setPlatformBusy(true);
+              return true;
+            }}
+          />
+        )}
+        <details
+          className={`${styles.loginHelp} ${styles.schoolConnection}`}
+          aria-label="學校帳號登入"
+          open={schoolTask}
+        >
+          <summary>
+            <div className={styles.methodHeading}>
+              <div>
+                <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
+                <h2>需要校務資料時再連線</h2>
+              </div>
+              <span className={styles.methodStatus}>依服務開放</span>
             </div>
-            <span className={styles.methodStatus}>{schoolAvailable ? '尚未開放' : '依校園提供'}</span>
-          </div>
+          </summary>
           {(selection?.schools?.length ?? 0) > 0 && (
             <label className={styles.schoolPicker} htmlFor="login-school">
               <span>選擇學校</span>
@@ -335,20 +371,7 @@ function LoginForm({
           <Link href="/" className={styles.backLink}>
             ← 返回首頁
           </Link>
-        </section>
-        {!hideGoogle && (
-          <NuniSignIn
-            returnUrl={destination}
-            issue={issue}
-            disabled={busy}
-            onStart={() => {
-              if (busyRef.current) return false;
-              busyRef.current = 'platform';
-              setPlatformBusy(true);
-              return true;
-            }}
-          />
-        )}
+        </details>
       </div>
       <section className={styles.guestAccess} aria-labelledby="guest-access-title">
         <div>

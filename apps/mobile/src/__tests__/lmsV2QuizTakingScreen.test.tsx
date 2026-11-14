@@ -16,6 +16,9 @@ jest.mock('@react-navigation/native', () => ({
   }),
   useNavigation: () => ({ navigate: jest.fn() }),
 }));
+jest.mock('../state/auth', () => ({
+  useAuth: () => ({ user: { uid: '11111111-1111-4111-8111-111111111111' } }),
+}));
 jest.mock('../services/lmsV2QuizDelivery', () => ({
   loadLmsQuizWorkspace: jest.fn(),
   beginLmsQuizAttempt: jest.fn(),

@@ -15,8 +15,16 @@ it.each([
   vi.stubEnv('NUNI_CLASSROOM_ENABLED', nuni);
   for (const params of [{}, { tenant: 'campus', location: 'shop' }, { tenant: 'campus', location: 'shop', order: 'receipt' }, { tenant: 'campus', location: 'shop', items: 'veggie.1.regular' }]) {
     const page = await FoodPage({ searchParams: Promise.resolve(params) });
-    expect(page.props).toEqual({ initialTenant: params.tenant || '', initialOrder: params.order || '', initialLocation: '', initialItems: [] });
+    expect(page.props).toEqual({ initialTenant: params.tenant || '', initialOrder: params.order || '', initialLocation: '', initialItems: [], campusSearch: '' });
   }
+});
+it('passes only browsing hints without treating a school as an order tenant', async () => {
+  const page = await FoodPage({ searchParams: Promise.resolve({
+    school: 'PU', schoolId: ['pu', 'ntu'], campus: 'all', role: 'merchant', accountId: 'other', token: 'private',
+  }) });
+  expect(page.props.campusSearch).toBe('school=PU&schoolId=pu&campus=all');
+  expect(page.props.initialTenant).toBe('');
+  expect(page.props.initialOrder).toBe('');
 });
 it('parses the new entrance only with all gates and gives order precedence', async () => {
   vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'true');

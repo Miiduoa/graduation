@@ -15,6 +15,8 @@ import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 import { HomeFeedScreen } from './social/HomeFeedScreen';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
 import { BoardsScreen } from './social/BoardsScreen';
 import { RealtimeSocialScreen } from './social/RealtimeSocialScreen';
 import { StudyBuddyPanel } from './community/StudyBuddyPanel';
@@ -38,6 +40,8 @@ export function CommunityScreen(props: Record<string, unknown>) {
   const styles = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('feed');
+  const auth = useAuth();
+  const { school } = useSchool();
   const stackNav = (props as any)?.navigation;
 
   const route = (props as any)?.route;
@@ -75,6 +79,16 @@ export function CommunityScreen(props: Record<string, unknown>) {
             <Text style={styles.headingSub}>動態 · 看板 · 即時 · 學伴</Text>
           </View>
           <View style={styles.topActions}>
+            {!!auth.user?.uid && !!school?.id && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="我的社群頁"
+                onPress={() => stackNav?.navigate?.('CreatorProfile', { memberUid: auth.user.uid, schoolId: school.id })}
+                style={({ pressed }) => [styles.iconShortcut, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="person-outline" size={20} color={theme.colors.accent} />
+              </Pressable>
+            )}
             <Pressable
               onPress={() => stackNav?.navigate?.('PostCompose')}
               accessibilityRole="button"

@@ -1,44 +1,42 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { buildPersonalToday } from '@campus/shared';
-import { buildCampusClassroomMapHref } from '@campus/shared/src/campusClassroomLookup';
 import {
-  formatClassMeta,
   formatTodayHeaderDate,
   formatTodoDueLine,
   formatUpcomingDueLine,
   formatUpdatedAt,
   isDueWithinHours,
   isTodoOverdue,
+  isSameTaipeiDay,
   pickNextAction,
   sortTodayClasses,
   sortTodayTodos,
   TODAY_COPY,
-  type NextAction,
   type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
-import {
-  TODAY_FLOW_CLASS_TITLE,
-  TODAY_FLOW_WORK_TITLE,
-} from '@/lib/todayCourseWork';
+import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
 import {
   assignmentHref,
   assignmentSubmitHref,
-  courseWeekHref,
   todayClassesFromSchedule,
 } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
+import { TodayClassRows } from './TodayClassRows';
 import { TodayWelcome } from './TodayWelcome';
+import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
+  assistant?: ReactNode;
+  personalization?: ReactNode;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
@@ -61,6 +59,7 @@ type Props = {
 };
 
 type BoundProps = {
+  assistant?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
   signedIn: boolean;
@@ -82,9 +81,18 @@ export function StudentToday(props: Props) {
   const action = pickNextAction(props.classes, props.todos, now);
   const classes = sortTodayClasses(props.classes, now);
   const todos = sortTodayTodos(props.todos);
-  const visibleClasses = classes.slice(0, 4);
-  const extraClasses = classes.length > 4;
-  const timetableSchoolId = props.timetableStatus === 'ready' ? props.timetableSchoolId : null;
+  const primaryTodo = !props.unsigned && 'todo' in action ? action.todo : null;
+  const orderedTodos = primaryTodo
+    ? [primaryTodo, ...todos.filter((item) => item.id !== primaryTodo.id)]
+    : todos;
+  const primaryLabel =
+    action.type === 'overdue'
+      ? TODAY_COPY.overdue
+      : action.type === 'assignment'
+        ? action.todo.dueAt !== null && isSameTaipeiDay(action.todo.dueAt, now.getTime())
+          ? TODAY_COPY.dueToday
+          : '明天截止'
+        : TODAY_COPY.nextAssignment;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -108,69 +116,73 @@ export function StudentToday(props: Props) {
     };
   }, []);
 
+  const schedule = (
+    <TodayClassList
+      key={'classes:' + (props.scopeKey ?? '')}
+      classes={classes}
+      timetableSchoolId={props.timetableStatus === 'ready' ? props.timetableSchoolId : null}
+      primaryId={action.type === 'class' ? action.class.id : undefined}
+      status={props.timetableStatus}
+      now={now}
+      onRetry={props.onRetryTimetable}
+      importHref={props.importHref}
+      timetableHref={props.timetableHref}
+    />
+  );
+  const work = (
+    <TodoList
+      key={'todos:' + (props.scopeKey ?? '')}
+      todos={orderedTodos}
+      primaryId={primaryTodo?.id}
+      primaryLabel={primaryLabel}
+      unsigned={props.unsigned}
+      error={props.todosError}
+      lmsUnconnected={props.lmsUnconnected}
+      leavingTodoIds={props.leavingTodoIds}
+      now={now}
+      onRetry={props.onRetryTodos}
+    />
+  );
+
   return (
     <div className={styles.screen} data-testid="student-today">
       <header className={styles.header}>
-        <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
         <h1 className={styles.title}>今天</h1>
-        {props.updatedAt || props.refreshing ? (
-          <p
-            className={styles.updated}
-            role={props.refreshing ? 'status' : undefined}
-            aria-live="polite"
-          >
-            {props.refreshing ? '正在更新課程待辦…' : formatUpdatedAt(props.updatedAt!)}
-          </p>
-        ) : null}
+        <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
+      {!props.skeleton && props.unsigned && action.type !== 'class' && (
+        <TodayWelcome
+          importHref={props.importHref}
+          timetableHref={props.timetableHref}
+          hasTimetable={props.timetableStatus === 'ready'}
+        />
+      )}
+      {!props.skeleton && !props.unsigned && (action.type === 'empty' || action.type === 'allDone') && (
+        <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
+          <TodayStatus
+            finished={action.type === 'allDone'}
+            todosError={props.todosError}
+            timetableStatus={props.timetableStatus}
+            lmsUnconnected={props.lmsUnconnected}
+            weekHref={props.weekHref}
+          />
+        </div>
+      )}
       {props.skeleton ? (
         <TodaySkeleton />
       ) : (
-        <>
-          {props.unsigned && action.type !== 'class' ? (
-            <TodayWelcome
-              importHref={props.importHref}
-              timetableHref={props.timetableHref}
-              hasTimetable={props.timetableStatus === 'ready'}
-            />
-          ) : (
-            <NextActionCard
-              key={`action:${props.scopeKey ?? ''}:${props.timetableSchoolId ?? ''}`}
-              action={action}
-              unsigned={props.unsigned}
-              todosError={props.todosError}
-              timetableStatus={props.timetableStatus}
-              lmsUnconnected={props.lmsUnconnected}
-              now={now}
-              weekHref={props.weekHref}
-              timetableSchoolId={timetableSchoolId}
-            />
-          )}
-          <div className={styles.flow} data-testid="today-unified-flow">
-            <TodayClassList
-              classes={visibleClasses}
-              extra={extraClasses}
-              status={props.timetableStatus}
-              now={now}
-              onRetry={props.onRetryTimetable}
-              importHref={props.importHref}
-              timetableHref={props.timetableHref}
-              timetableSchoolId={timetableSchoolId}
-            />
-            <TodoList
-              key={`todos:${props.scopeKey ?? ''}`}
-              todos={todos}
-              unsigned={props.unsigned}
-              error={props.todosError}
-              lmsUnconnected={props.lmsUnconnected}
-              leavingTodoIds={props.leavingTodoIds}
-              now={now}
-              onRetry={props.onRetryTodos}
-            />
-            <TodayUnreadNotifications unsigned={props.unsigned} />
-          </div>
-        </>
+        <div className={styles.flow + ' ' + styles.planner} data-testid="today-unified-flow">
+          {primaryTodo ? [work, schedule] : [schedule, work]}
+          <TodayUnreadNotifications unsigned={props.unsigned} />
+        </div>
       )}
+      {props.personalization}
+      {props.assistant}
+      {props.updatedAt || props.refreshing ? (
+        <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
+          {props.refreshing ? '正在更新課程待辦…' : formatUpdatedAt(props.updatedAt!)}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -178,282 +190,54 @@ export function StudentToday(props: Props) {
 function TodaySkeleton() {
   return (
     <div className={styles.skeleton} aria-busy="true" data-testid="today-skeleton">
-      <span className={`${styles.bone} ${styles.boneCard}`} />
       <span className={styles.bone} />
-      <span className={styles.bone} />
-      <span className={styles.bone} />
+      <span className={styles.bone + ' ' + styles.boneRow} />
+      <span className={styles.bone + ' ' + styles.boneRow} />
+      <span className={styles.bone + ' ' + styles.boneRow} />
     </div>
   );
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
-
-function NextActionCard({
-  action,
-  unsigned,
+function TodayStatus({
+  finished,
   todosError,
   timetableStatus,
   lmsUnconnected,
-  now,
   weekHref,
-  timetableSchoolId,
 }: {
-  action: NextAction;
-  unsigned: boolean;
+  finished: boolean;
   todosError: string;
   timetableStatus: TimetableStatus;
   lmsUnconnected: boolean;
-  now: Date;
   weekHref: string;
-  timetableSchoolId?: string | null;
 }) {
-  const incomingKey = actionKey(action, unsigned);
-  const [shown, setShown] = useState({ action, unsigned });
-  const [visible, setVisible] = useState(true);
-  const shownKey = actionKey(shown.action, shown.unsigned);
-  const renderCurrent =
-    incomingKey === shownKey || unsigned !== shown.unsigned || !isContentKey(incomingKey);
-  const displayed = renderCurrent ? { action, unsigned } : shown;
-
-  useEffect(() => {
-    if (incomingKey === shownKey) {
-      if (shown.action !== action || shown.unsigned !== unsigned) setShown({ action, unsigned });
-      setVisible(true);
-      return;
-    }
-    const animate =
-      unsigned === shown.unsigned &&
-      !prefersReducedMotion() &&
-      isContentKey(shownKey) &&
-      isContentKey(incomingKey);
-    if (!animate) {
-      setShown({ action, unsigned });
-      setVisible(true);
-      return;
-    }
-    setVisible(false);
-    let frame = 0;
-    const timer = window.setTimeout(() => {
-      setShown({ action, unsigned });
-      frame = window.requestAnimationFrame(() => {
-        frame = window.requestAnimationFrame(() => setVisible(true));
-      });
-    }, 150);
-    return () => {
-      window.clearTimeout(timer);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, [incomingKey, shownKey, action, unsigned, shown.action, shown.unsigned]);
-
-  return (
-    <div
-      className={`${cardTone(displayed.action, displayed.unsigned)} ${styles.fade} ${renderCurrent || visible ? '' : styles.fadeOut}`}
-      data-testid="next-action"
-    >
-      <NextActionBody
-        action={displayed.action}
-        unsigned={displayed.unsigned}
-        todosError={todosError}
-        timetableStatus={timetableStatus}
-        lmsUnconnected={lmsUnconnected}
-        now={now}
-        weekHref={weekHref}
-        timetableSchoolId={timetableSchoolId}
-      />
-    </div>
-  );
-}
-
-function cardTone(action: NextAction, unsigned: boolean): string {
-  if (unsigned && action.type !== 'class') return styles.cardLight;
-  if (action.type === 'empty' || (action.type === 'allDone' && !action.todo))
-    return styles.cardLight;
-  return styles.card;
-}
-
-function NextActionBody({
-  action,
-  unsigned,
-  todosError,
-  timetableStatus,
-  lmsUnconnected,
-  now,
-  weekHref,
-  timetableSchoolId,
-}: {
-  action: NextAction;
-  unsigned: boolean;
-  todosError: string;
-  timetableStatus: TimetableStatus;
-  lmsUnconnected: boolean;
-  now: Date;
-  weekHref: string;
-  timetableSchoolId?: string | null;
-}) {
-  if (unsigned && action.type !== 'class') {
-    return <p className={styles.headline}>{TODAY_COPY.unsigned}</p>;
+  if (finished) return <p>{TODAY_COPY.allClassesDone}</p>;
+  if (todosError || timetableStatus === 'error') {
+    return <p>今天的安排還沒確認完整，請重試下方未讀取完成的資料。</p>;
   }
-
-  if (action.type === 'empty') {
-    if (todosError || timetableStatus === 'error') {
-      return (
-        <>
-          <p className={styles.headline}>今天的安排還沒確認完整</p>
-          <p className={styles.meta}>請重新讀取下方未完成的資料，再確認課程與待辦。</p>
-        </>
-      );
-    }
-    if (timetableStatus === 'loading') {
-      return (
-        <p className={styles.headline} role="status">
-          正在確認今天的課表…
-        </p>
-      );
-    }
-    if (timetableStatus === 'unsigned-scope') {
-      return (
-        <>
-          <p className={styles.headline}>先選擇要安排的校園</p>
-          <p className={styles.meta}>課表會依校園分開保存，切換後就能查看對應的安排。</p>
-        </>
-      );
-    }
-    if (timetableStatus === 'empty') {
-      return (
-        <>
-          <p className={styles.headline}>先加入你的課表</p>
-          <p className={styles.meta}>匯入課表後，就能在這裡確認今天的上課安排。</p>
-        </>
-      );
-    }
-    if (lmsUnconnected) {
-      return (
-        <>
-          <p className={styles.headline}>先加入 nuni 課程</p>
-          <p className={styles.meta}>加入課程後，這裡就會顯示作業與測驗。</p>
-          <Link className={styles.action} href="/classroom">
-            查看我的課程
-          </Link>
-        </>
-      );
-    }
-    return (
-      <>
-        <p className={styles.headline}>{TODAY_COPY.emptyDay}</p>
-        <Link className={styles.action} href={weekHref}>
-          {TODAY_COPY.viewWeek}
-        </Link>
-      </>
-    );
+  if (timetableStatus === 'loading') {
+    return <p role="status">正在確認今天的課表…</p>;
   }
-
-  if (action.type === 'allDone' && !action.todo) {
-    return <p className={styles.headline}>{TODAY_COPY.allClassesDone}</p>;
+  if (timetableStatus === 'unsigned-scope') {
+    return <p>先選擇要安排的校園。</p>;
   }
-
-  if (action.type === 'allDone' && action.todo) {
-    return (
-      <>
-        <Link href={assignmentHref(action.todo)} className={styles.cardMain}>
-          <p className={styles.kind}>{TODAY_COPY.allClassesDone}</p>
-          <p className={styles.headline}>{action.todo.title}</p>
-          <p className={styles.meta}>{formatTodoDueLine(action.todo, now)}</p>
-        </Link>
-        <Link className={styles.action} href={assignmentSubmitHref(action.todo)}>
-          {TODAY_COPY.goSubmit}
-        </Link>
-      </>
-    );
+  if (timetableStatus === 'empty') {
+    return <p>先加入你的課表，就能查看每天的安排。</p>;
   }
-
-  if (action.type === 'class') {
-    const courseHref = courseWeekHref(action.class.courseId);
-    const href = courseHref === '/timetable' ? weekHref : courseHref;
-    const mapHref = buildCampusClassroomMapHref({
-      schoolId: timetableSchoolId,
-      location: action.class.location,
-    });
-    return (
-      <>
-        <Link href={href} className={styles.cardMain}>
-          <p className={styles.kind}>{TODAY_COPY.nextClass}</p>
-          <p className={styles.headline}>{action.class.title}</p>
-          <p className={styles.meta}>{formatClassMeta(action.class)}</p>
-        </Link>
-        <div className={styles.classActions}>
-          <Link className={styles.action} href={href}>
-            {courseHref === '/timetable' ? TODAY_COPY.viewWeek : TODAY_COPY.viewCourse}
-          </Link>
-          {mapHref ? (
-            <Link
-              className={styles.action}
-              href={mapHref}
-              aria-label={`找教室：${action.class.location}`}
-            >
-              找教室
-            </Link>
-          ) : null}
-        </div>
-      </>
-    );
+  if (lmsUnconnected) {
+    return <Link href="/classroom">查看我的課程</Link>;
   }
-
-  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming')
-    return null;
-
   return (
     <>
-      <Link href={assignmentHref(action.todo)} className={styles.cardMain}>
-        <p className={styles.kind}>
-          {action.type === 'overdue'
-            ? TODAY_COPY.overdue
-            : action.type === 'upcoming'
-              ? TODAY_COPY.nextAssignment
-              : TODAY_COPY.dueToday}
-        </p>
-        <p className={styles.headline}>{action.todo.title}</p>
-        <p className={`${styles.meta} ${action.type === 'overdue' ? styles.metaDanger : ''}`}>
-          {action.type === 'upcoming'
-            ? formatUpcomingDueLine(action.todo)
-            : formatTodoDueLine(action.todo, now)}
-        </p>
-      </Link>
-      <Link className={styles.action} href={assignmentSubmitHref(action.todo)}>
-        {TODAY_COPY.goSubmit}
-      </Link>
+      <p>{TODAY_COPY.emptyDay}</p>
+      <Link href={weekHref}>{TODAY_COPY.viewWeek}</Link>
     </>
-  );
-}
-
-function actionKey(action: NextAction, unsigned: boolean): string {
-  if (unsigned && action.type !== 'class') return 'unsigned';
-  if (action.type === 'class') return `class:${action.class.id}`;
-  if (action.type === 'assignment') return `todo:${action.todo.id}`;
-  if (action.type === 'upcoming') return `upcoming:${action.todo.id}`;
-  if (action.type === 'overdue') return `overdue:${action.todo.id}`;
-  if (action.type === 'allDone') return `done:${action.todo?.id ?? ''}`;
-  return 'empty';
-}
-
-function isContentKey(key: string): boolean {
-  return (
-    key.startsWith('class:') ||
-    key.startsWith('todo:') ||
-    key.startsWith('upcoming:') ||
-    key.startsWith('overdue:') ||
-    key.startsWith('done:')
   );
 }
 
 function TodayClassList({
   classes,
-  extra,
+  primaryId,
   status,
   now,
   onRetry,
@@ -462,7 +246,7 @@ function TodayClassList({
   timetableSchoolId,
 }: {
   classes: TodayClass[];
-  extra: boolean;
+  primaryId?: string;
   status: TimetableStatus;
   now: Date;
   onRetry: () => void;
@@ -471,10 +255,21 @@ function TodayClassList({
   timetableSchoolId?: string | null;
 }) {
   return (
-    <section className={styles.section} aria-labelledby="today-class-title" data-testid="today-classes">
-      <h2 id="today-class-title" className={styles.sectionTitle}>
-        {TODAY_FLOW_CLASS_TITLE}
-      </h2>
+    <section
+      className={styles.section}
+      aria-labelledby="today-class-title"
+      data-testid="today-classes"
+    >
+      <div className={styles.sectionHeading}>
+        <h2 id="today-class-title" className={styles.sectionTitle}>
+          {TODAY_FLOW_CLASS_TITLE}
+        </h2>
+        {status === 'ready' && (
+          <Link className={styles.sectionLink} href={timetableHref}>
+            {TODAY_COPY.viewFullTimetable}
+          </Link>
+        )}
+      </div>
       {status === 'loading' ? (
         <div className={styles.skeleton} aria-busy="true">
           <span className={styles.bone} />
@@ -506,48 +301,7 @@ function TodayClassList({
       ) : classes.length === 0 ? (
         <p className={styles.empty}>今天沒有排課。</p>
       ) : (
-        <ul className={styles.list}>
-          {classes.map((item) => {
-            const ended = item.endAt <= now.getTime();
-            const courseHref = courseWeekHref(item.courseId);
-            const href = courseHref === '/timetable' ? timetableHref : courseHref;
-            const mapHref = buildCampusClassroomMapHref({
-              schoolId: timetableSchoolId,
-              location: item.location,
-            });
-            return (
-              <li key={item.id} className={styles.classRow}>
-                <Link
-                  href={href}
-                  className={`${styles.row} ${styles.withTime} ${ended ? styles.ended : ''}`}
-                  style={{ minHeight: 56 }}
-                >
-                  <span className={styles.time}>{formatClassMeta(item).split('・')[0]}</span>
-                  <span className={styles.rowBody}>
-                    <span className={styles.rowTitle}>{item.title}</span>
-                    <span className={styles.rowMeta}>{item.location || '教室未填'}</span>
-                  </span>
-                </Link>
-                {mapHref ? (
-                  <Link
-                    className={styles.classroomLink}
-                    href={mapHref}
-                    aria-label={`找教室：${item.location}`}
-                  >
-                    找教室
-                  </Link>
-                ) : null}
-              </li>
-            );
-          })}
-          {extra ? (
-            <li>
-              <Link className={styles.more} href={timetableHref}>
-                {TODAY_COPY.viewFullTimetable}
-              </Link>
-            </li>
-          ) : null}
-        </ul>
+        <TodayClassRows classes={classes} primaryId={primaryId} now={now} timetableHref={timetableHref} timetableSchoolId={timetableSchoolId} />
       )}
     </section>
   );
@@ -555,6 +309,8 @@ function TodayClassList({
 
 function TodoList({
   todos,
+  primaryId,
+  primaryLabel,
   unsigned,
   error,
   lmsUnconnected,
@@ -563,6 +319,8 @@ function TodoList({
   onRetry,
 }: {
   todos: TodayTodo[];
+  primaryId?: string;
+  primaryLabel: string;
   unsigned: boolean;
   error: string;
   lmsUnconnected: boolean;
@@ -576,9 +334,16 @@ function TodoList({
   const extra = Math.max(0, todos.length - 3);
   return (
     <section className={styles.section} aria-labelledby="today-todo-title" data-testid="today-work">
-      <h2 id="today-todo-title" className={styles.sectionTitle}>
-        {TODAY_FLOW_WORK_TITLE}
-      </h2>
+      <div className={styles.sectionHeading}>
+        <h2 id="today-todo-title" className={styles.sectionTitle}>
+          {TODAY_FLOW_WORK_TITLE}
+        </h2>
+        {!unsigned && (
+          <Link className={styles.sectionLink} href="/calendar">
+            查看行事曆
+          </Link>
+        )}
+      </div>
       {unsigned ? (
         <p className={styles.empty}>
           {TODAY_COPY.unsigned} <Link href="/calendar">也可先查看行事曆與期限</Link>
@@ -600,26 +365,39 @@ function TodoList({
         </p>
       ) : !unsigned && !error && !lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
-          目前沒有今日或即將到期的作業。<Link href="/calendar">查看行事曆</Link>
+          目前沒有今日或即將到期的作業。
         </p>
       ) : unsigned || todos.length === 0 ? null : (
         <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
           {visible.map((item) => {
             const overdue = isTodoOverdue(item, now);
             const soon = isDueWithinHours(item, now, 6);
+            const primary = item.id === primaryId;
+            const dueLine = !overdue && item.dueAt !== null && !isSameTaipeiDay(item.dueAt, now.getTime())
+              ? formatUpcomingDueLine(item)
+              : formatTodoDueLine(item, now);
             return (
-              <li key={item.id} className={leaving.has(item.id) ? styles.leaving : undefined}>
+              <li
+                key={item.id}
+                data-testid={primary ? 'next-action' : undefined}
+                className={styles.workItem + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
+              >
                 <Link
                   href={assignmentHref(item)}
                   className={`${styles.row} ${overdue ? styles.overdue : soon ? styles.dueSoon : ''}`}
                 >
                   <span className={styles.rowBody}>
+                    {primary && <span className={styles.kind}>{primaryLabel}</span>}
                     <span className={styles.rowTitle}>{item.title}</span>
-                    <span className={styles.rowMeta}>
-                      {item.courseName} · {formatTodoDueLine(item, now)}
-                    </span>
+                    <span className={styles.rowMeta}>{item.courseName}</span>
+                    <span className={styles.rowDeadline}>{dueLine}</span>
                   </span>
                 </Link>
+                {primary && (
+                  <Link className={styles.submit} href={assignmentSubmitHref(item)}>
+                    {TODAY_COPY.goSubmit}
+                  </Link>
+                )}
               </li>
             );
           })}
@@ -671,6 +449,18 @@ export function StudentTodayPage(props: BoundProps) {
   const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
+      assistant={props.assistant}
+      personalization={!scope.loading && props.now ? (
+        <CampusPersonalizationSection
+          key={scope.scopeKey}
+          scope={scope.scope}
+          now={props.now}
+          events={records.imported.records}
+          eventsReady={records.imported.ready}
+          eventsError={records.imported.error}
+          schoolName={scope.schoolName}
+        />
+      ) : null}
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
       now={props.now}

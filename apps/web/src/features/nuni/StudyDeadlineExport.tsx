@@ -1,5 +1,10 @@
 'use client';
 
+import {
+  studyDeadlineConflictText,
+  type StudyDeadlineSource,
+} from '@campus/shared/src/studyDeadlineConflicts';
+
 import { useState } from 'react';
 import type { NuniStudyTask } from '@campus/shared/src/nuniStudyAgenda';
 import {
@@ -31,10 +36,12 @@ export function StudyDeadlineExport({
   tasks,
   partial,
   retry,
+  conflictSources,
 }: {
   tasks: NuniStudyTask[];
   partial: boolean;
   retry(): void;
+  conflictSources?: readonly StudyDeadlineSource[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -102,6 +109,8 @@ export function StudyDeadlineExport({
                 <p key={studyCalendarKey(task)}>
                   {task.courseTitle} · {task.title} ·{' '}
                   {formatTaipeiDateTime(task.dueAt!, { seconds: false })}
+                  {' · '}
+                  {studyDeadlineConflictText(task, conflictSources)}
                 </p>
               ))}
               <button

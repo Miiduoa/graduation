@@ -59,7 +59,7 @@ it('keeps every service discoverable without inventing a school selection', () =
   expect(screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')).toBe(
     '/grades?tab=feedback',
   );
-  expect(screen.getByRole('link', { name: /^玩課雲課程/ }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: /^校方課程/ }).getAttribute('href')).toBe(
     '/school-courses',
   );
   expect(screen.getByRole('link', { name: /^餐廳/ }).getAttribute('href')).toBe('/cafeteria');
@@ -77,7 +77,10 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getByRole('link', { name: /^數位學生證/ }).getAttribute('href')).toBe(
+    '/student-card',
+  );
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
   });
@@ -321,13 +324,13 @@ it('recognizes a complex signed-in campus request using AI instead of only keywo
 
 it('hides readonly homework by default and restores it when enabled', () => {
   const view = render(<SearchPage />);
-  expect(screen.queryByRole('link', { name: /^玩課雲作業/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /^校方作業與教材/ })).toBeNull();
   view.rerender(
     <SchoolLmsReadonlyProvider enabled={true}>
       <SearchPage />
     </SchoolLmsReadonlyProvider>,
   );
-  expect(screen.getByRole('link', { name: /^玩課雲作業/ }).getAttribute('href')).toContain(
+  expect(screen.getByRole('link', { name: /^校方作業與教材/ }).getAttribute('href')).toContain(
     '/school-lms',
   );
 });

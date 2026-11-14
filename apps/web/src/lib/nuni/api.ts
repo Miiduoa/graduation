@@ -1,9 +1,14 @@
 import { handleAssistant } from './assistant';
+import { handlePlatformAssistantPermissions } from './platformAssistantPermissions';
 import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
 import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
 import { handleFood, isFoodResource } from './food';
 import { handlePersonalImportSync } from './personalImportSync';
+import { createPlatformPublicAgentGateway } from './platformPublicAgentGateway';
+import { createPlatformPublicAgentTransport } from './platformPublicAgentTransport';
+import { projectPlatformPublicAgent } from './platformPublicAgentProjector';
+import { handleLostFound } from './lostFound';
 import {
   createNuniClasses,
   NuniError,
@@ -34,6 +39,8 @@ import {
   nuniEnabled,
   platformRequest,
   publicOrigin,
+  platformServiceAccess,
+  withPlatformServiceAccess,
   readPlatformAuthorization,
   readSession,
   requireSameOrigin,
@@ -138,7 +145,25 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       }
       throw new NuniError(404, 'NOT_FOUND');
     }
+    // Disabled until the API, ledger, source reader and release are explicitly ready.
+    if (segments[0] === 'public-agent') {
+      if (segments.length !== 2 || process.env.CAMPUS_PUBLIC_AGENT_ENABLED !== 'true')
+        throw new NuniError(404, 'NOT_FOUND');
+      if (segments[1] === 'availability') {
+        if (request.method !== 'GET' || request.nextUrl.search)
+          throw new NuniError(400, 'INVALID_INPUT');
+        return jsonResponse({ enabled: true });
+      }
+      const gateway = createPlatformPublicAgentGateway({
+        enabled: true,
+        transport: createPlatformPublicAgentTransport(),
+        project: projectPlatformPublicAgent,
+      });
+      return await gateway(request, segments[1]);
+    }
+    if (path === 'assistant-permissions') return await handlePlatformAssistantPermissions(request);
     if (segments[0] === 'assistant') return await handleAssistant(request, segments);
+    if (segments[0] === 'lost-found') return await handleLostFound(request, segments);
     const method = request.method;
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
@@ -233,6 +258,30 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       }
       const response = jsonResponse({ authenticated: false });
       setCookie(response, SESSION_COOKIE, null);
+      return response;
+    }
+    if (path === 'service-access') {
+      if (method !== 'GET' && method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+      const session = requireSession(request);
+      // The encrypted cookie cannot override revoked upstream sessions.
+      parseNuniPrincipal(await platformRequest('sessions/current', session));
+      if (method === 'GET')
+        return jsonResponse({ ...platformServiceAccess(session), scope: 'web-session' });
+      const input = nuniRecord(await boundedJson(request, 1024));
+      onlyKeys(input, ['social', 'cloudAi']);
+      if (
+        Object.keys(input).length !== 2 ||
+        typeof input.social !== 'boolean' ||
+        typeof input.cloudAi !== 'boolean'
+      )
+        throw new NuniError(422, 'INVALID_INPUT');
+      if (!input.social || !input.cloudAi) throw new NuniError(422, 'PLATFORM_SERVICE_ALWAYS_ENABLED');
+      const updated = withPlatformServiceAccess(session, {
+        social: input.social,
+        cloudAi: input.cloudAi,
+      });
+      const response = jsonResponse({ ...platformServiceAccess(updated), scope: 'web-session' });
+      setCookie(response, SESSION_COOKIE, updated, session.expiresAt);
       return response;
     }
     if (path === 'memberships') {

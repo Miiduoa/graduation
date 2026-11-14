@@ -121,6 +121,7 @@ function PersonalProfile({ user }: { user: User }) {
 }
 
 const services = [
+  { href: '/community/me', label: '我的社群頁', description: '整理公開貼文、媒體與私人收藏。' },
   { href: '/timetable', label: '我的課表', description: '查看學校提供的上課時間與教室。' },
   { href: '/grades?tab=semester', label: '成績紀錄', description: '查詢學期成績與原始紀錄。' },
   { href: '/credit-planner', label: '學分規劃', description: '整理修課紀錄與接下來的計畫。' },

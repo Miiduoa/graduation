@@ -209,7 +209,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
     };
   }, [context, request, revision]);
 
-  const openWeb = async (path: '/classroom/account' | '/admin') => {
+  const openWeb = async (path: '/classroom/account' | '/admin' | '/admin#audit') => {
     setLinkError('');
     try {
       await Linking.openURL(`https://nuni.tw${path}`);
@@ -266,6 +266,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
           </Text>
           <Text style={s.body}>管理學校接入、服務狀態與檢舉。私人課程仍依課程成員資格授權。</Text>
           <Action label="開啟網頁管理工作台" onPress={() => void openWeb('/admin')} />
+          <Action label="查閱操作紀錄" onPress={() => void openWeb('/admin#audit')} />
         </View>
       ) : null}
       {linkError ? (
@@ -472,7 +473,11 @@ export function NuniWorkspaceScreen({
       if (storage.status === 'rejected') cleanupError(epoch);
     });
   };
-  const openWeb = () => void run('正在開啟網頁…', () => Linking.openURL('https://nuni.tw/login'));
+  const merchantEntry = target?.tab === 'merchant';
+  const openWeb = () => {
+    const path = merchantEntry ? '/merchant' : target?.tab === 'courses' ? '/classroom/login' : '/login';
+    void run('正在開啟網頁…', () => Linking.openURL(`https://nuni.tw${path}`));
+  };
   if (auth.loading || action)
     return (
       <View
@@ -528,9 +533,11 @@ export function NuniWorkspaceScreen({
         繼續時會建立帳號；再次登入會回到原本的帳號。
       </Text>
       <View style={s.panel}>
-        <Text style={s.title}>從你的課程開始</Text>
+        <Text style={s.title}>{merchantEntry ? '店家進駐與門市管理' : '從你的課程開始'}</Text>
         <Text style={s.body}>
-          加入老師的課程、查看待辦與繳交作業。學校資格和店家權限會另外確認。
+          {merchantEntry
+            ? '新店家可在登入後申請進駐。門市負責人請用原申請帳號查進度或管理門市。店員請向負責人確認登入方式。'
+            : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
         </Text>
         {capability.available ? (
           <Action label="使用 Google 繼續" onPress={() => void run('正在登入…', auth.signIn)} />

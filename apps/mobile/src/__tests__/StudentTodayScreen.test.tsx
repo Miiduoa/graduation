@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { RefreshControl } from 'react-native';
+import { askCampusAssistant } from '../features/campusAssistant';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
@@ -20,6 +21,7 @@ let mockAuth = {
 };
 const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
+let mockPersonalizationScope: { owner: string; schoolId: string } | null = null;
 const mockTimetable = {
   status: 'ready' as 'loading' | 'ready' | 'error' | 'empty',
   classes: [] as TodayClass[],
@@ -27,6 +29,7 @@ const mockTimetable = {
   retry: jest.fn(),
 };
 
+jest.mock('../features/campusAssistant', () => ({ askCampusAssistant: jest.fn(), OnDeviceAssistantError: class extends Error {} }));
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
@@ -37,7 +40,10 @@ jest.mock('../services/tronClassClient', () => ({ hasTCSession: jest.fn(async ()
 jest.mock('../hooks/useTodayTimetableData', () => ({
   useTodayTimetableData: () => mockTimetable,
 }));
+// The scoped preference UI has its own account/school lifecycle coverage.
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockPersonalizationScope }));
 jest.mock('@react-navigation/native', () => ({
+  NavigationContext: require('react').createContext(null),
   useNavigation: () => mockNavigation,
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
@@ -99,6 +105,7 @@ beforeEach(() => {
   jest.setSystemTime(new Date('2026-11-03T08:00:00+08:00'));
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' } };
+  mockPersonalizationScope = null;
   mockTimetable.status = 'ready';
   mockTimetable.classes = [];
   mockTimetable.termKey = '115-1';
@@ -184,6 +191,38 @@ test.each(['account', 'school'])(
   },
 );
 
+test.each(['account', 'school'])('drops assistant replies and in-flight dictation when the %s changes', async change => {
+  const ask = jest.mocked(askCampusAssistant);
+  const late = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
+  ask.mockResolvedValueOnce({ content: '上一個身分的課表', source: 'device', hasActions: false });
+  ask.mockResolvedValueOnce({ content: '上一個身分的教室', source: 'device', hasActions: false });
+  ask.mockReturnValueOnce(late.promise);
+  const view = render(<StudentTodayScreen />);
+  const input = await view.findByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '下一堂是什麼？');
+  await act(async () => fireEvent(input, 'submitEditing'));
+  expect(view.getByText('上一個身分的課表')).toBeTruthy();
+  fireEvent.changeText(input, '在哪裡？');
+  await act(async () => fireEvent(input, 'submitEditing'));
+  fireEvent.press(view.getByRole('button', { name: '查看前 1 組問答' }));
+  expect(view.getByText('上一個身分的課表')).toBeTruthy();
+  fireEvent.changeText(input, '幾點結束？');
+  fireEvent.press(view.getByLabelText('詢問手機助理'));
+  const request = ask.mock.lastCall![0];
+  mockAuth = change === 'account'
+    ? { user: { uid: 'student-b' }, profile: { ...mockAuth.profile!, uid: 'student-b' } }
+    : { ...mockAuth, profile: { ...mockAuth.profile!, schoolId: 'school-b' } };
+  view.rerender(<StudentTodayScreen />);
+  await view.findByLabelText('說出或輸入想做的事');
+  expect(request.signal?.aborted).toBe(true);
+  expect(view.queryByText('上一個身分的課表')).toBeNull();
+  expect(view.queryByText('上一個身分的教室')).toBeNull();
+  expect(view.queryByRole('button', { name: '收合先前問答' })).toBeNull();
+  await act(async () => late.resolve({ content: '逾期的回答', source: 'device', hasActions: false }));
+  expect(view.queryByText('逾期的回答')).toBeNull();
+  expect(mockNavigate).not.toHaveBeenCalled();
+});
+
 test('a profile from the previous account cannot supply the school for coursework', async () => {
   mockAuth = { ...mockAuth, user: { uid: 'student-b' } };
   jest.mocked(loadStudentHome).mockRejectedValueOnce(new Error('school missing'));
@@ -222,13 +261,13 @@ test('does not keep sense cards or sample recommendations on today', async () =>
   expect(view.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
 });
 
-test('shows upcoming work due after 24 hours as the next assignment, not due today', async () => {
+test('shows a future deadline once with its calendar date and a direct action', async () => {
   const data = result();
   const dueAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   data.tasks[0].dueAt = dueAt;
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
-  expect(await view.findByText(TODAY_COPY.nextAssignment)).toBeTruthy();
+  expect(await view.findAllByText('繳交期末報告')).toHaveLength(1);
   expect(
     view.getByText(
       formatUpcomingDueLine({
@@ -248,7 +287,8 @@ test('shows the earliest overdue item instead of the empty-day sentence', async 
   data.tasks[0].dueAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
-  expect(await view.findByText(TODAY_COPY.overdue)).toBeTruthy();
+  expect(await view.findByText(TODAY_COPY.overdueDays(2))).toBeTruthy();
+  expect(view.getAllByText('繳交期末報告')).toHaveLength(1);
   expect(view.getByText(TODAY_COPY.goSubmit)).toBeTruthy();
   expect(view.queryByText(TODAY_COPY.emptyDay)).toBeNull();
   expect(view.getAllByText(/已逾期/).length).toBeGreaterThan(0);
@@ -349,9 +389,9 @@ test('the explicit submit button opens the real assignment', async () => {
   const data = result();
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
-  await view.findByText(TODAY_COPY.nextAssignment);
-  const submit = view.getByRole('button', { name: TODAY_COPY.goSubmit });
-  expect(view.getByTestId('next-action')).not.toContainElement(submit);
+  const course = await view.findByLabelText('繳交期末報告，資料結構');
+  const submit = view.getByRole('button', { name: '去繳交，繳交期末報告' });
+  expect(course).not.toContainElement(submit);
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
@@ -379,15 +419,17 @@ test.each(['error', 'empty'] as const)(
   },
 );
 
-test('the empty-day card follows OLED mode without leaving light text on a cream surface', async () => {
+test('the empty schedule follows OLED mode and keeps the full timetable reachable', async () => {
   jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
   const view = render(<StudentTodayScreen />);
-  await view.findByText(TODAY_COPY.emptyDay);
+  await view.findByText('今天沒有排課。');
   act(() => applyTheme('dark'));
-  expect(view.getByTestId('next-action')).toHaveStyle({
-    backgroundColor: createDarkTheme().colors.surface2,
+  expect(view.getByTestId('student-today')).toHaveStyle({
+    backgroundColor: createDarkTheme().colors.bg,
   });
-  expect(view.getByText(TODAY_COPY.emptyDay)).toHaveStyle({ color: createDarkTheme().colors.text });
+  expect(view.getByText('今天沒有排課。')).toHaveStyle({ color: createDarkTheme().colors.muted });
+  fireEvent.press(view.getByText(TODAY_COPY.viewFullTimetable));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', { term: '115-1' });
 });
 
 test('one-tap homework uses the real current inbox task instead of a guessed target', async () => {
@@ -460,8 +502,8 @@ test('today class without linkedCourseId opens Classroom with timetable search p
   jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
   mockTimetable.classes = [todayClass({ courseCode: 'CS301' })];
   const view = render(<StudentTodayScreen />);
-  await view.findByText(TODAY_COPY.findCourse);
-  fireEvent.press(view.getByTestId('next-action'));
+  fireEvent.press(await view.findByRole('button', { name: /^下一堂課，資料結構，/ }));
+  expect(view.getAllByText('資料結構')).toHaveLength(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
     screen: 'Classroom',
     params: { q: '資料結構', from: 'timetable', code: 'CS301' },
@@ -477,8 +519,8 @@ test('today class with linkedCourseId still opens CourseHub', async () => {
     }),
   ];
   const view = render(<StudentTodayScreen />);
-  await view.findByText(TODAY_COPY.viewCourse);
-  fireEvent.press(view.getByTestId('next-action'));
+  fireEvent.press(await view.findByRole('button', { name: /^下一堂課，資料結構，/ }));
+  expect(view.getAllByText('資料結構')).toHaveLength(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
     screen: 'CourseHub',
     params: {
@@ -510,7 +552,6 @@ test('today class list press without linkedCourseId opens Classroom search', asy
   jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
   mockTimetable.classes = [todayClass({ courseCode: 'CS301', title: '資料結構' })];
   const view = render(<StudentTodayScreen />);
-  // Location text only appears on the class list row (not NextAction meta).
   fireEvent.press(await view.findByText('主顧 303'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
     screen: 'Classroom',
@@ -539,20 +580,20 @@ test('today class list press with linkedCourseId opens CourseHub', async () => {
   });
 });
 
-test.each([-48, 3, 72])('the work card opens its course for a deadline offset of %s hours', async (hours) => {
+test.each([-48, 3, 72])('the single work row opens its course for a deadline offset of %s hours', async (hours) => {
   const data = result();
   data.tasks[0].dueAt = new Date(Date.now() + hours * 60 * 60 * 1000);
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
-  await view.findAllByText('繳交期末報告');
-  fireEvent.press(view.getByTestId('next-action'));
+  expect(await view.findAllByText('繳交期末報告')).toHaveLength(1);
+  fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
 });
 
-test('after classes end, the card opens the course and its button still submits the assignment', async () => {
+test('after classes end, the work row and its separate submit button retain their destinations', async () => {
   const data = result();
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   mockTimetable.classes = [todayClass({
@@ -560,14 +601,14 @@ test('after classes end, the card opens the course and its button still submits 
     endAt: Date.now() - 60 * 60 * 1000,
   })];
   const view = render(<StudentTodayScreen />);
-  await view.findByText(TODAY_COPY.allClassesDone);
-  fireEvent.press(view.getByTestId('next-action'));
+  await view.findByText('已結束');
+  fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
-  const submit = view.getByRole('button', { name: TODAY_COPY.goSubmit });
-  expect(view.getByTestId('next-action')).not.toContainElement(submit);
+  const submit = view.getByRole('button', { name: '去繳交，繳交期末報告' });
+  expect(view.getByLabelText('繳交期末報告，資料結構')).not.toContainElement(submit);
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
@@ -577,10 +618,10 @@ test('after classes end, the card opens the course and its button still submits 
 });
 
 test.each([
-  { hours: 2, afterClass: false, heading: TODAY_COPY.dueToday },
-  { hours: 72, afterClass: false, heading: '下一個測驗' },
-  { hours: 72, afterClass: true, heading: TODAY_COPY.allClassesDone },
-])('the $heading card opens the exact quiz in one tap or lets the student visit the course', async ({ hours, afterClass, heading }) => {
+  { hours: 2, afterClass: false },
+  { hours: 72, afterClass: false },
+  { hours: 72, afterClass: true },
+])('the quiz row opens the exact quiz or its course with deadline $hours hours away', async ({ hours, afterClass }) => {
   const data = result();
   const dueAt = new Date(Date.now() + hours * 60 * 60 * 1000);
   data.tasks.push({
@@ -592,9 +633,13 @@ test.each([
     mockTimetable.classes = [todayClass({ startAt: Date.now() - 7200000, endAt: Date.now() - 3600000 })];
   }
   const view = render(<StudentTodayScreen />);
-  await view.findByText(heading);
-  const quiz = view.getByRole('button', { name: '去作答' });
-  const course = view.getByRole('button', { name: /排序測驗.*看課程/ });
+  expect(await view.findAllByText('排序測驗')).toHaveLength(1);
+  const quiz = view.getByRole('button', { name: '去作答，排序測驗' });
+  const course = view.getByRole('button', { name: '排序測驗，資料結構' });
+  const buttons = view.getAllByRole('button');
+  expect(buttons.indexOf(course)).toBeLessThan(
+    buttons.indexOf(view.getByLabelText('繳交期末報告，資料結構')),
+  );
   expect(course).not.toContainElement(quiz);
   fireEvent.press(quiz);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
@@ -609,7 +654,7 @@ test.each([
   });
 });
 
-test('a quiz due just after Taipei midnight says tomorrow when it is still the previous evening', async () => {
+test('a quiz due after Taipei midnight shows its actual date while it is still the previous evening', async () => {
   jest.setSystemTime(new Date('2026-11-03T23:55:00+08:00'));
   const data = result();
   data.tasks[0] = {
@@ -618,9 +663,9 @@ test('a quiz due just after Taipei midnight says tomorrow when it is still the p
   };
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
-  expect(await view.findByText('明天截止')).toBeVisible();
+  expect(await view.findByText('11/4 週三 00:05 截止')).toBeVisible();
   expect(view.queryByText(TODAY_COPY.dueToday)).toBeNull();
-  expect(view.getByRole('button', { name: '去作答' })).toBeVisible();
+  expect(view.getByRole('button', { name: '去作答，排序測驗' })).toBeVisible();
 });
 
 test('a class starting soon keeps the urgent quiz visible in the collapsed list above 13 late assignments', async () => {
@@ -638,6 +683,57 @@ test('a class starting soon keeps the urgent quiz visible in the collapsed list 
   const view = render(<StudentTodayScreen />);
   await view.findByText(TODAY_COPY.nextClass);
   expect(view.getByRole('button', { name: '期中考，資料結構' })).toBeVisible();
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
+  fireEvent.press(view.getByRole('button', { name: '去作答，期中考' }));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { screen: 'QuizTaking',
+    params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() } });
   expect(view.getByText(TODAY_COPY.moreTodos(11))).toBeVisible();
   expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();
+});
+
+test('the header opens the student card before the timetable finishes loading', () => {
+  mockTimetable.status = 'loading';
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(view.getByLabelText('開啟數位學生證'));
+  expect(rootNavigateNested).toHaveBeenCalledWith('我的', 'StudentCard');
+});
+
+test('distinguishes a class in progress and shows the timetable before non-urgent work', async () => {
+  mockTimetable.classes = [todayClass({ startAt: Date.parse('2026-11-03T07:50:00+08:00'),
+    endAt: Date.parse('2026-11-03T08:40:00+08:00') })];
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText('上課中')).toBeVisible();
+  expect(view.queryByText(TODAY_COPY.nextClass)).toBeNull();
+  expect(view.getByRole('button', { name: '上課中，資料結構，07:50 至 08:40，主顧 303' })).toBeVisible();
+  expect(view.getAllByText('07:50')).toHaveLength(1);
+  expect(view.getAllByText('08:40')).toHaveLength(1);
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('待處理'));
+});
+
+test('the personalization entry stays after urgent work and the timetable', async () => {
+  mockPersonalizationScope = { owner: 'firebase:student-a', schoolId: 'school-a' };
+  mockTimetable.classes = [todayClass()];
+  const data = result();
+  data.tasks[0].dueAt = new Date(Date.now() + 60 * 60 * 1000);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findByText('讓今天更適合你');
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
+  expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('讓今天更適合你'));
+});
+
+test.each(['pending', 'empty', 'error'])('opens the calendar from %s coursework', async (state) => {
+  if (state === 'empty') jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  if (state === 'error') jest.mocked(loadStudentHome).mockRejectedValue(new Error('offline'));
+  const view = render(<StudentTodayScreen />);
+  const calendar = await view.findByRole('button', { name: '查看行事曆' });
+  fireEvent.press(calendar);
+  expect(mockNavigate).toHaveBeenLastCalledWith('Today', {
+    screen: 'SmartCalendarScreen',
+    params: undefined,
+  });
+  if (state === 'pending') expect(await view.findByText('繳交期末報告')).toBeTruthy();
 });

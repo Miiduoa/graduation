@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createStoryId, publishStory } from './firestore';
-import { uploadStoryImage } from './media';
+import { uploadStoryImage, uploadStoryMedia } from './media';
 
 const mock = vi.hoisted(() => ({
   ref: vi.fn((_storage, path: string) => path),
@@ -31,7 +31,7 @@ beforeEach(() => {
 it('writes the image at the school story Storage path and publishes the matching document ID', async () => {
   const storyId = createStoryId();
   const file = new File(['jpg'], 'photo.jpg', { type: 'image/jpeg' });
-  const { url } = await uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId, file });
+  const { url } = await uploadStoryMedia({ schoolId: 'ncku', uid: 'student', storyId, file });
   expect(mock.upload).toHaveBeenCalledExactlyOnceWith('schools/ncku/stories/reserved/image', file, {
     contentType: 'image/jpeg',
     customMetadata: { ownerUid: 'student' },
@@ -41,6 +41,7 @@ it('writes the image at the school story Storage path and publishes the matching
     schoolId: 'ncku',
     authorUid: 'student',
     kind: 'image',
+    allowReplies: false,
     mediaUrl: url,
     expiresAtMs: 123,
   });
@@ -50,6 +51,7 @@ it('writes the image at the school story Storage path and publishes the matching
       schoolId: 'ncku',
       authorUid: 'student',
       kind: 'image',
+      allowReplies: false,
       mediaUrl: url,
       createdAt: 'server-time',
       expiresAt: 123,
@@ -58,12 +60,13 @@ it('writes the image at the school story Storage path and publishes the matching
 });
 
 it.each([
-  new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+  new File(['clip'], 'clip.mov', { type: 'video/quicktime' }),
+  new File([], 'empty.mp4', { type: 'video/mp4' }),
   new File([], 'empty.png', { type: 'image/png' }),
   new File([new ArrayBuffer(10 * 1024 * 1024 + 1)], 'large.jpg', { type: 'image/jpeg' }),
-])('rejects an invalid image before Storage receives it', async (file) => {
+])('rejects unsupported or empty media before Storage receives it', async (file) => {
   await expect(
-    uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
+    uploadStoryMedia({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
   ).rejects.toThrow();
   expect(mock.upload).not.toHaveBeenCalled();
 });
@@ -72,6 +75,7 @@ const content = {
   authorUid: 'student',
   schoolId: 'ncku',
   kind: 'image' as const,
+  allowReplies: true,
   text: '球場集合',
   mediaUrl: 'https://example.test/photo',
   bgColor: '#243b35',
@@ -116,8 +120,33 @@ it('passes through unrelated write failures without a read', async () => {
   expect(mock.readServer).not.toHaveBeenCalled();
 });
 
+it('uploads an MP4 at the reserved video path with uploader ownership', async () => {
+  const file = new File(['clip'], 'clip.mp4', { type: 'video/mp4' });
+  await uploadStoryMedia({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file });
+  expect(mock.upload).toHaveBeenCalledExactlyOnceWith('schools/ncku/stories/reserved/video', file, {
+    contentType: 'video/mp4',
+    customMetadata: { ownerUid: 'student' },
+  });
+  Object.defineProperty(file, 'size', { value: 100 * 1024 * 1024 });
+  await expect(
+    uploadStoryMedia({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
+  ).rejects.toThrow('小於 100 MB');
+  expect(mock.upload).toHaveBeenCalledTimes(1);
+});
+
 it('uploads an image exactly at the shared size limit', async () => {
   const file = new File([new ArrayBuffer(10 * 1024 * 1024)], 'photo.jpg', { type: 'image/jpeg' });
   await expect(uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file })).resolves.toMatchObject({ url: 'https://example.test/photo' });
   expect(mock.upload).toHaveBeenCalledOnce();
+});
+
+it.each([
+  new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+  new File([], 'empty.png', { type: 'image/png' }),
+  new File([new ArrayBuffer(10 * 1024 * 1024 + 1)], 'large.jpg', { type: 'image/jpeg' }),
+])('rejects an invalid image before Storage receives it', async (file) => {
+  await expect(
+    uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
+  ).rejects.toThrow();
+  expect(mock.upload).not.toHaveBeenCalled();
 });

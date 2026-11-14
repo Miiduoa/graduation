@@ -217,6 +217,11 @@ export function MeStack() {
         options={{ title: '助理權限', headerShown: false }}
       />
       <Stack.Screen
+        name="StudentCard"
+        getComponent={() => require('./StudentCardScreen').default}
+        options={{ title: '數位學生證' }}
+      />
+      <Stack.Screen
         name="QRCode"
         component={QRCodeScreen}
         options={{ title: 'QR 碼', headerShown: false }}
