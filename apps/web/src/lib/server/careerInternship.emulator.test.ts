@@ -95,6 +95,38 @@ suite('internship real Firestore transactions', () => {
     expect((await student.load('student')).records[0]).toMatchObject({ confirmed: true, revision });
     expect((await db.collection('schools/pu/adminLogs').get()).size).toBe(18);
   });
+  it('revokes assigned teacher access after demotion while retaining own student access', async () => {
+    const record = internshipRecord();
+    record.hours = [{ id: 'h', date: '2026-11-13', hours: 60, note: '測試', verified: true }];
+    record.documents = record.documents.map((d) => ({ ...d, submitted: true, verified: true }));
+    await db.doc('schools/pu/internshipRecords/record').set(record);
+    await db.doc('schools/pu/internshipRecords/own').set({ ...record, id: 'own', uid: 'teacher' });
+    expect(
+      (await call('teacher', { action: 'list', audience: 'student' })).snapshot?.records,
+    ).toHaveLength(2);
+    await db.doc('schools/pu/members/teacher').update({ role: 'member' });
+    expect(
+      (await call('teacher', { action: 'list', audience: 'student' })).snapshot?.records.map(
+        (r) => r.id,
+      ),
+    ).toEqual(['own']);
+    for (const id of ['record', 'own']) {
+      for (const command of [
+        { action: 'verifyHours', entryId: 'h', verified: false },
+        { action: 'verifyDocument', index: 0, verified: false, message: '請補件' },
+        { action: 'confirm' },
+      ] as const) {
+        await expect(call('teacher', { ...command, id, revision: 1 })).rejects.toMatchObject({
+          code: 'permission-denied',
+        });
+      }
+      expect((await db.doc(`schools/pu/internshipRecords/${id}`).get()).data()).toMatchObject({
+        revision: 1,
+        confirmed: false,
+      });
+    }
+    expect((await db.collection('schools/pu/adminLogs').get()).empty).toBe(true);
+  });
   it('coalesces duplicate creation at transaction level and rejects stale concurrent writes', async () => {
     await Promise.all([call('student', create()), call('student', create())]);
     expect((await db.collection('schools/pu/internshipRecords').get()).size).toBe(1);

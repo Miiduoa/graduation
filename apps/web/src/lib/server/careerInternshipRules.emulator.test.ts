@@ -42,7 +42,7 @@ suite('approval-only rules fragment (production rules remain untouched)', () => 
       for (const uid of ['student', 'other', 'teacher', 'staff', 'admin', 'dept', 'wrongDept'])
         await setDoc(doc(db, `schools/pu/members/${uid}`), {
           status: 'active',
-          role: uid === 'admin' ? 'admin' : 'member',
+          role: uid === 'admin' ? 'admin' : uid === 'teacher' ? 'teacher' : 'member',
         });
       await setDoc(doc(db, 'schools/pu/serviceRoles/staff'), {
         status: 'active',
@@ -91,6 +91,31 @@ suite('approval-only rules fragment (production rules remain untouched)', () => 
           'schools/other/internshipRecords/record',
         ),
       ),
+    );
+  });
+  it('revokes assigned reads and queries after teacher demotion while keeping own reads', async () => {
+    const db = env.authenticatedContext('teacher').firestore();
+    const assigned = () =>
+      getDocs(
+        query(collection(db, 'schools/pu/internshipRecords'), where('teacherUid', '==', 'teacher')),
+      );
+    await assertSucceeds(assigned());
+    await env.withSecurityRulesDisabled(async (c) => {
+      await setDoc(doc(c.firestore(), 'schools/pu/members/teacher'), {
+        status: 'active',
+        role: 'member',
+      });
+      await setDoc(doc(c.firestore(), 'schools/pu/internshipRecords/own'), {
+        uid: 'teacher',
+        teacherUid: 'other',
+        rule: { department: '測試系' },
+      });
+    });
+    await assertFails(getDoc(doc(db, 'schools/pu/internshipRecords/record')));
+    await assertFails(assigned());
+    await assertSucceeds(getDoc(doc(db, 'schools/pu/internshipRecords/own')));
+    await assertSucceeds(
+      getDocs(query(collection(db, 'schools/pu/internshipRecords'), where('uid', '==', 'teacher'))),
     );
   });
   it('revokes access when department assignment or membership is removed', async () => {

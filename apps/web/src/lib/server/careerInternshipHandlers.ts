@@ -100,6 +100,7 @@ export function createCareerInternshipHandlers({
       ]);
       if (member.data()?.status !== 'active')
         fail('permission-denied', '請使用這所學校的有效身分。');
+      const teacherEligible = ['teacher', 'staff', 'admin'].includes(member.data()?.role);
       const admin = member.data()?.role === 'admin';
       const staff =
         admin || (role.data()?.status === 'active' && role.data()?.career_staff === true);
@@ -136,7 +137,8 @@ export function createCareerInternshipHandlers({
                 ? [records]
                 : departments.map((d) => records.where('rule.department', '==', d));
           // Assigned teachers may verify only their assigned records, alongside own student records.
-          if (c.audience === 'student') queries.push(records.where('teacherUid', '==', uid));
+          if (c.audience === 'student' && teacherEligible)
+            queries.push(records.where('teacherUid', '==', uid));
           for (const query of queries) {
             const snap = await tx.get(query.limit(501));
             all.push(...snap.docs.map((d) => ({ ...d.data(), id: d.id }) as InternshipRecord));
@@ -229,7 +231,8 @@ export function createCareerInternshipHandlers({
       if (!snap.exists) fail('not-found', '找不到這筆實習紀錄。');
       const r = snap.data() as InternshipRecord;
       const owner = r.uid === uid;
-      const reviewer = staff || departments.includes(r.rule.department) || r.teacherUid === uid;
+      const assignedTeacher = teacherEligible && r.teacherUid === uid;
+      const reviewer = staff || departments.includes(r.rule.department) || assignedTeacher;
       if (!owner && !reviewer) fail('permission-denied', '無法查看這筆實習紀錄。');
       if (c.revision !== r.revision) fail('aborted', '紀錄已更新，請重新整理後再操作。');
       if (r.confirmed) fail('failed-precondition', '老師已確認此紀錄，如需更正請洽承辦。');
@@ -291,7 +294,7 @@ export function createCareerInternshipHandlers({
         if (!h) fail('not-found', '找不到這筆時數。');
         h.verified = c.verified;
       } else if (c.action === 'confirm') {
-        if (uid !== r.teacherUid) fail('permission-denied', '最後確認須由指定指導老師完成。');
+        if (!assignedTeacher) fail('permission-denied', '最後確認須由指定指導老師完成。');
         if (
           internshipProgress(r).verified < internshipProgress(r).required ||
           r.documents.some((d) => !d.verified)
