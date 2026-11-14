@@ -55,6 +55,21 @@ function fallbackStudySpeechUnits(text: string): string[] {
   return result;
 }
 
+// Decimal numbers, thousands separators and short ASCII domains in source
+// lessons should not be interrupted just because the speech engine needs a
+// new chunk. This only changes the preferred pause point, not the 160-unit cap.
+function isStudySpeechNaturalPause(units: string[], index: number): boolean {
+  const token = units[index];
+  if (!/[。！？；，、\n.!?;:：]/u.test(token)) return false;
+  const previous = units[index - 1] ?? '';
+  const next = units[index + 1] ?? '';
+  if ((token === '.' || token === ',') &&
+      /^[0-9]$/u.test(previous) && /^[0-9]$/u.test(next)) return false;
+  if (token === '.' &&
+      /^[A-Za-z0-9]$/u.test(previous) && /^[A-Za-z0-9]$/u.test(next)) return false;
+  return true;
+}
+
 function splitStudySpeech(text: string): string[] {
   // Code-point slicing keeps surrogate pairs but can split a Chinese combining
   // character, Korean Jamo syllable or emoji ZWJ/flag in mid-utterance.
@@ -137,7 +152,7 @@ function splitStudySpeech(text: string): string[] {
     if (end === offset) end = offset + 1;
     if (end < units.length) {
       for (let index = end - 1; index >= offset + 80; index -= 1) {
-        if (/[。！？；，、\n.!?;:：]/u.test(units[index])) {
+        if (isStudySpeechNaturalPause(units, index)) {
           end = index + 1;
           break;
         }

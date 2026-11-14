@@ -703,3 +703,32 @@ it.each([
   expect(chunks[1]?.startsWith(cluster)).toBe(true);
   expect(speak).toHaveBeenCalledTimes(chunks.length);
 });
+
+
+it.each([
+  { label: 'a decimal fraction', token: '3.14' },
+  { label: 'a thousands-grouped number', token: '1,234' },
+  { label: 'a dotted course domain', token: 'nuni.tw' },
+  { label: 'an alphanumeric version', token: 'v1.2' },
+])('does not insert a preferred speech pause inside $label', ({ token }) => {
+  // Punctuation falls within the preferred 80–160-unit break window.
+  // Older logic wrongly ended the first utterance at the dot or comma.
+  const original = '課'.repeat(145) + token + '後'.repeat(80);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks = speak.mock.calls.map(([utterance]) => (utterance as Utterance).text);
+  expect(chunks.join('')).toBe(original);
+  expect(chunks[0]?.length).toBe(160);
+  expect(chunks.every((part) => part.length > 0 && part.length <= 160)).toBe(true);
+});
+
+it('continues to prefer real sentence punctuation while chunking local speech', () => {
+  const original = '課'.repeat(140) + '。' + '後'.repeat(80);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks = speak.mock.calls.map(([utterance]) => (utterance as Utterance).text);
+  expect(chunks[0]).toBe('課'.repeat(140) + '。');
+  expect(chunks.join('')).toBe(original);
+});
