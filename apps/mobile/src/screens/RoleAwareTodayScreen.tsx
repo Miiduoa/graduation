@@ -25,7 +25,7 @@ export function RoleWorkspaceScreen({
   ...props
 }: ServiceScreenProps & { role: ResolvedDashboardRole }) {
   if (role === 'vendor') return <ShopDockScreen navigation={props.navigation} />;
-  const workspace = (
+  const workspace = (children?: React.ReactNode) => (
     <UnavailableFeatureScreen
       {...props}
       title={roleTitles[role] ?? '校園服務'}
@@ -37,6 +37,7 @@ export function RoleWorkspaceScreen({
             ]
           : undefined
       }
+      children={children}
       description={
         role === 'admin'
           ? '可以管理校方公告與活動，或查看目前公開的校園資訊。'
@@ -52,7 +53,7 @@ export function RoleWorkspaceScreen({
       onOpen={(route) => props.navigation?.navigate?.(route as never)}
     />
   ) : (
-    workspace
+    workspace()
   );
 }
 export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
