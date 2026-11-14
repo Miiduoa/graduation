@@ -8,6 +8,14 @@ import styles from './CourseStudyPanel.module.css';
 type SourceValueRow = { label: string; original: string; amount: number };
 
 const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|[%％])/u;
+const ENGLISH_PERCENT_COLUMN =
+  /\b(?:percent(?:age)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
+
+// An English rate header must not quietly use max-of-column scaling, and
+// raw numbers without an explicit percent sign remain ambiguous.
+function isPercentageColumn(header: string): boolean {
+  return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header);
+}
 
 /**
  * Optional, source-grounded comparison of plain non-negative values only.
@@ -20,7 +28,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // them as bars would imply a magnitude that the source does not support.
   const column = table.headers[1].trim();
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
-  if (SOURCE_PERCENT_COLUMN.test(column)) return null;
+  if (isPercentageColumn(column)) return null;
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
       /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
       // A number identifying a term, page, floor or class is an ordinal or
@@ -58,7 +66,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  */
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  if (!SOURCE_PERCENT_COLUMN.test(table.headers[1])) return null;
+  if (!isPercentageColumn(table.headers[1])) return null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {

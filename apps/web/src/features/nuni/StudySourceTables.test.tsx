@@ -776,3 +776,37 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
   const { container } = render(<StudySourceTables text={repeated} />);
   expect(container.querySelector('details')).toBeNull();
 });
+
+
+it('scales explicit English percent and rate columns to 100%, not to the highest row', () => {
+  for (const header of [
+    'Percent', 'Percentage', 'Completion Rate', 'Attendance Rate',
+    'Accuracy', 'Pass Rate', 'Passing Rate', 'Success Rate',
+  ]) {
+    const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 75% |', '| 網路 | 25% |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('summary')?.textContent).toContain('原文百分比（100% 滿格）');
+    expect(Array.from(container.querySelectorAll('meter')).map((bar) => [
+      bar.getAttribute('value'), bar.getAttribute('max'),
+    ])).toEqual([['75', '100'], ['25', '100']]);
+    unmount();
+  }
+});
+
+it('does not compare unlabeled English rates as quantities or block real numeric amounts', () => {
+  for (const header of ['Percent', 'Percentage', 'Completion Rate', 'Accuracy', 'Passing Rate']) {
+    const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 75 |', '| 網路 | 25 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    unmount();
+  }
+  const budget = ['| 課程 | Annual Budget |', '| --- | --- |',
+    '| 資料庫 | 75 |', '| 網路 | 25 |'].join('\n');
+  const { container } = render(<StudySourceTables text={budget} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => bar.getAttribute('max')))
+    .toEqual(['75', '75']);
+});
