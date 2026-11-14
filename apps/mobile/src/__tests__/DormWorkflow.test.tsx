@@ -259,6 +259,7 @@ test('mobile loads another workspace page using server cursors', async () => {
 });
 
 test('mobile blocks partial statistics until all 51 records have loaded', async () => {
+  const polling = jest.spyOn(globalThis, 'setInterval');
   const parcel = (i: number) => ({
     id: String(i),
     building: 'A',
@@ -292,4 +293,14 @@ test('mobile blocks partial statistics until all 51 records have loaded', async 
     ).toBe(false),
   );
   expect(view.getByText(/"A","51","0","0"/)).toBeTruthy();
+  const count = mockCall.mock.calls.length;
+  const tick = polling.mock.calls.find(([, ms]) => ms === 60000)?.[0] as () => void;
+  await act(async () => {
+    tick();
+  });
+  expect(mockCall.mock.calls.length).toBe(count);
+  expect(view.getByRole('button', { name: '匯出宿舍統計' }).props.accessibilityState.disabled).toBe(
+    false,
+  );
+  polling.mockRestore();
 });

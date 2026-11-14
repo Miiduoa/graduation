@@ -122,3 +122,11 @@
 - 有登入權限migration變更：依本次審查要求，僅在既有 accountDeletion 加入一個宿舍清理呼叫點，撤銷已刪帳者的宿舍授權；清理實作隔離於新 helper。這是本輪唯一共用帳號生命週期修改，未改登入、sessions、共用 authz／ACL、Firestore／Storage rules 或 migration；沒有部署或操作正式資料。
 - 驗證：後端 3 檔 99 項、網頁 2 檔 26 項、手機 2 檔 15 項通過；web、mobile、shared 全專案 typecheck 通過。後端以自身 ESLint 設定檢查變更檔案通過；最初從根目錄執行的 ESLint 套錯前端設定，切回 backend/functions 設定後通過。git diff --check 通過。暫存快取與型別輸出均置於 /tmp，完成後刪除；未安裝依賴或更換 node_modules symlink。
 - GitHub 實際宿舍 PR 為 #628（分支 feat/dorm-staff-workflow-20261114）；任務所列 #629 是社團 PR，本輪未修改社團內容。
+
+## 審查檔 review-dorm-r2 修正（2026-11-14）
+
+- P1：工作台各資料類型改採欄位白名單；外宿／報修不回傳 userId、審核者 UID 或歷程中的身分欄位。工單、外宿與包裹回傳隨機 publicId，分頁游標及後續操作使用同一識別碼，避免既有文件路徑中的 `pu-{學號}` 外露。原文件 ID 與本人歷史保留相容；首次讀取工作台時，僅為所讀取的既有文件補上隨機識別欄位，不需離線 migration。完整回應、跨頁及識別碼操作皆有回歸測試。
+- P2：一般 SSO 成功驗證後，僅對已開通宿舍的學校，以校方 adapter 本次回傳值刷新隔離的 dormSsoIdentities；缺漏或變更學號的舊 ssoLinks 不再覆蓋新映射。同步失敗不阻擋登入，也不記錄個資。介面改為說明須完成校方身分同步，無法匯入時請管理員確認，不保證重新登入必能解決校方缺漏資料。整合測試執行實際 callback 同步段，再驗證名冊匯入。
+- P2：網頁及手機開始載入後續分頁時暫停每分鐘輪詢，並使先前未完成的第一頁請求失效；保留已載入範圍直到使用者手動重新整理、切換模式或篩選。50＋1 筆案例跨輪詢週期仍保留完整統計。
+- 有登入權限migration變更：本輪依審查要求，窄幅修改 index.js 一般 SSO callback，加入上述隔離同步呼叫；屬「需晉瑋說『上』」範圍。未修改 sessions、共用 authz、ACL、Firestore／Storage rules 或 migration，未部署或操作正式資料；未修改其他 lane 檔案。
+- 驗證：後端 dormWorkflow／dormLoginIsolation／accountDeletion、網頁 DormWorkflow、手機 DormWorkflow／DormStaffHome 通過；web、mobile、shared 全專案 typecheck、後端變更模組 ESLint、index.js 語法與 git diff --check 通過。快取、型別增量檔及輸出置於 /tmp，完成後清除；未安裝依賴或更換 node_modules symlink。

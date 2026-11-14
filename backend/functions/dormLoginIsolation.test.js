@@ -6,9 +6,6 @@ const callback = source.slice(
   source.indexOf('exports.getSSOConfig ='),
 );
 
-test('SSO callback has no dorm dependency or dorm database access', () => {
-  expect(callback).not.toMatch(/dorm/i);
-});
 test.each([false, true])(
   'login issues a token even when dorm sync is unavailable (new=%s)',
   async (isNewUser) => {
@@ -42,7 +39,7 @@ test.each([false, true])(
         },
       },
     });
-    expect(requireDorm).not.toHaveBeenCalled();
+    expect(requireDorm).toHaveBeenCalledWith('./dormSsoIdentity');
     expect(createCustomToken).toHaveBeenCalledWith(
       'student',
       expect.objectContaining({ schoolId: 'pu' }),

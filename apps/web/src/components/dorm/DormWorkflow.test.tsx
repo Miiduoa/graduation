@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DormWorkflow } from './DormWorkflow';
 import {
@@ -318,6 +318,7 @@ it('loads the next workspace page with server cursors', async () => {
 });
 
 it('blocks partial statistics until all 51 records have loaded', async () => {
+  const polling = vi.spyOn(globalThis, 'setInterval');
   const parcel = (i: number) => ({
     id: String(i),
     building: 'A',
@@ -345,4 +346,12 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
   fireEvent.click(await screen.findByText('載入更多紀錄'));
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   expect(screen.getByText(/"A","51","0","0"/)).toBeTruthy();
+  const count = api.call.mock.calls.length;
+  const tick = polling.mock.calls.find(([, ms]) => ms === 60000)?.[0] as () => void;
+  await act(async () => {
+    tick();
+  });
+  expect(api.call.mock.calls.length).toBe(count);
+  expect(screen.getByText(/"A","51","0","0"/)).toBeTruthy();
+  polling.mockRestore();
 });

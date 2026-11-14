@@ -214,6 +214,7 @@ export function DormWorkflow({
   const [preview, setPreview] = useState(false);
   const generation = useRef(0);
   const rowGeneration = useRef(0);
+  const paginationStarted = useRef(false);
   const selectedStudentId = useRef('');
   const inputRef = useRef<FocusTarget | null>(null);
   const set = (key: string, value: string) => {
@@ -227,6 +228,7 @@ export function DormWorkflow({
   );
   const refresh = useCallback(
     async (staff = staffMode) => {
+      paginationStarted.current = false;
       setRowsLoaded(false);
       const token = generation.current;
       const rowToken = rowGeneration.current;
@@ -246,6 +248,8 @@ export function DormWorkflow({
     [call, staffMode, includeHistory],
   );
   const loadMore = async () => {
+    paginationStarted.current = true;
+    rowGeneration.current++;
     const token = generation.current;
     const rowToken = rowGeneration.current;
     setBusy(true);
@@ -309,7 +313,9 @@ export function DormWorkflow({
       });
     };
     load();
-    const timer = setInterval(load, 60000);
+    const timer = setInterval(() => {
+      if (!paginationStarted.current) load();
+    }, 60000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -747,7 +753,7 @@ export function DormWorkflow({
             <>
               <Label>
                 CSV：學號、棟、房、床。每批最多 400 位；學號必須對應本校已啟用帳號；一般 SSO
-                帳號請先重新登入以同步校方學號。
+                帳號需完成校方身分同步；若仍無法匯入，請聯絡管理員確認校方提供的學號。
               </Label>
               {f('csv', '貼上住宿生 CSV', '', true)}
               <Btn

@@ -1,6 +1,6 @@
 // Input must come directly from the verified school SSO adapter, never users/{uid}.
 async function writeDormSsoIdentity({ db, uid, schoolId, userInfo }) {
-  const value = userInfo.studentId || userInfo.employee_id;
+  const value = userInfo.studentId || userInfo.student_id || userInfo.employee_id;
   const studentId = typeof value === 'string' ? value.trim() : '';
   const name = userInfo.name || userInfo.displayName;
   // No client rule grants access to this collection. Replace stale claims on refresh.
@@ -38,6 +38,13 @@ async function resolveDormSsoIdentity({ db, schoolId, studentId }) {
   for (const doc of links.docs) {
     const link = doc.data();
     if (link.schoolId !== schoolId || !link.firebaseUid) continue;
+    const current = await db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('dormSsoIdentities')
+      .doc(link.firebaseUid)
+      .get();
+    if (current.exists) continue; // Fresh verified callback claims take precedence over legacy links.
     await writeDormSsoIdentity({
       db,
       schoolId,
@@ -47,3 +54,11 @@ async function resolveDormSsoIdentity({ db, schoolId, studentId }) {
   }
 }
 module.exports.resolveDormSsoIdentity = resolveDormSsoIdentity;
+
+// Called only after verified SSO login. Disabled schools retain their existing path.
+async function refreshDormSsoIdentity(args) {
+  const school = await args.db.collection('schools').doc(args.schoolId).get();
+  if (school.data()?.dormWorkflowEnabled !== true) return;
+  await writeDormSsoIdentity(args);
+}
+module.exports.refreshDormSsoIdentity = refreshDormSsoIdentity;

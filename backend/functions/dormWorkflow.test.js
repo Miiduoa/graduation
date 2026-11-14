@@ -453,7 +453,9 @@ test('scoped grants and personal data never enter legacy school-wide access path
     workflow: 'dorm_staff',
   });
   const workspace = await call('staff', { action: 'workspace' });
-  expect(workspace.packages.map((p) => p.id)).toEqual([id]);
+  expect(workspace.packages).toHaveLength(1);
+  expect(workspace.packages[0].id).toMatch(/^dw_/);
+  await call('staff', { action: 'returnPackage', id: workspace.packages[0].id });
   expect(workspace.repairs).toHaveLength(1);
   await expect(call('staff', { action: 'returnPackage', id: 'other' })).rejects.toMatchObject({
     code: 'permission-denied',
@@ -484,7 +486,7 @@ test('legacy pickup atomically updates both feeds and prevents staff return', as
     expect(data.get(`schools/pu/${collection}/${id}`).status).toBe('picked_up');
   expect((await call('staff', { action: 'workspace' })).packages).toEqual([]);
   const workspace = await call('staff', { action: 'workspace', includeHistory: true });
-  expect(workspace.packages.find((p) => p.id === id).status).toBe('picked_up');
+  expect(workspace.packages[0].status).toBe('picked_up');
   await call('staff', { action: 'returnPackage', id });
   expect(data.get(`schools/pu/dormPackages/${id}`).status).toBe('picked_up');
 });
@@ -1017,4 +1019,79 @@ test('closing accounts cannot recreate private repair or leave records while cle
   ])
     await expect(call('student', input)).rejects.toMatchObject({ code: 'failed-precondition' });
   expect([...data.keys()].some((key) => /\/dorm(Repairs|Leaves)\//.test(key))).toBe(false);
+});
+
+test('repair-only workspace omits identity metadata from rows, history and cursors', async () => {
+  const { call, data } = fixture();
+  data.set('schools/pu/dormStaffRoles/staff', {
+    status: 'active',
+    repairs: true,
+    buildings: ['A'],
+  });
+  for (let i = 0; i < 51; i++)
+    data.set(`schools/pu/dormLeaves/pu-123456_${i}`, {
+      userId: 'pu-123456',
+      building: 'A',
+      room: '101',
+      status: 'pending',
+      createdAt: i,
+      applicantName: '王同學',
+      maskedStudentId: '***456',
+      studentId: '123456',
+      reviewedBy: 'pu-654321',
+      history: [{ status: 'pending', at: 1, actor: 'pu-123456' }],
+    });
+  const result = await call('staff', { action: 'workspace' });
+  const json = JSON.stringify(result);
+  expect(json).not.toMatch(/123456|654321|userId|studentId|reviewedBy|actor/);
+  expect(result.leaves).toHaveLength(50);
+  expect(result.leaves[0].id).toMatch(/^dw_/);
+  expect(
+    (await call('staff', { action: 'workspace', cursors: result.nextCursors })).leaves,
+  ).toHaveLength(1);
+});
+
+test.each([undefined, 'old123'])(
+  'verified callback claims repair legacy SSO link studentId=%s',
+  async (oldId) => {
+    const fs = require('node:fs');
+    const vm = require('node:vm');
+    const { call, data, db } = fixture();
+    data.delete('schools/pu/dormSsoIdentities/student');
+    data.set('ssoLinks/pu_verified', { schoolId: 'pu', firebaseUid: 'student', studentId: oldId });
+    const source = fs.readFileSync(require.resolve('./index'), 'utf8');
+    const start = source.indexOf('      // Isolated dorm identity refresh');
+    const end = source.indexOf('      res.json({', start);
+    await vm.runInNewContext(`(async () => { ${source.slice(start, end)} })()`, {
+      db,
+      uid: 'student',
+      schoolId: 'pu',
+      userInfo: { studentId: 'new123', name: '校方姓名' },
+      require,
+    });
+    await call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: 'new123', building: 'A', room: '101', bed: '1' }],
+    });
+    expect(data.get('schools/pu/dormResidents/new123').userId).toBe('student');
+    if (oldId)
+      await expect(
+        call('staff', {
+          action: 'importResidents',
+          rows: [{ studentId: oldId, building: 'A', room: '101', bed: '1' }],
+        }),
+      ).rejects.toMatchObject({ code: 'failed-precondition' });
+  },
+);
+
+test('opaque workspace repair handles keep staff transitions and student history connected', async () => {
+  const { call, data } = fixture();
+  const original = await call('student', repair);
+  const workspace = await call('staff', { action: 'workspace' });
+  const handle = workspace.repairs[0].id;
+  expect(handle).not.toBe(original.id);
+  await call('staff', { action: 'repairStatus', id: handle, status: 'received' });
+  expect(data.get(`schools/pu/dormRepairs/${original.id}`).dormStatus).toBe('received');
+  expect((await call('student', { action: 'mine' })).repairs[0].id).toBe(original.id);
+  expect((await call('staff', { action: 'workspace' })).repairs[0].id).toBe(handle);
 });

@@ -1,3 +1,4 @@
+const { randomUUID } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('./authz');
@@ -64,6 +65,15 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       admin || (scoped && roles.buildings.includes(row.building || row.dormitory));
     const inBuilding = (row) => {
       if (!canAccessBuilding(row)) throw new HttpsError('permission-denied', '不屬於值班棟別');
+    };
+    // Public handles never contain account IDs; legacy documents receive a lookup field lazily.
+    const handles = new Map();
+    const publicId = (name, id) => handles.get(name + '/' + id);
+    const resolveRef = async (name, id) => {
+      if (!id.startsWith('dw_')) return school.collection(name).doc(id);
+      const matches = await school.collection(name).where('publicId', '==', id).limit(1).get();
+      if (!matches.docs.length) throw new HttpsError('not-found', '找不到紀錄');
+      return matches.docs[0].ref;
     };
     const list = async (name, own = false) => {
       let q = school.collection(name);
@@ -190,14 +200,32 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           if (cursor !== undefined) {
             if (typeof cursor !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(cursor))
               throw new HttpsError('invalid-argument', '分頁代碼錯誤');
-            const last = await school.collection(name).doc(cursor).get();
+            const last = await (await resolveRef(name, cursor)).get();
             if (!last.exists || !canAccessBuilding(last.data()))
               throw new HttpsError('invalid-argument', '分頁已失效，請重新整理');
             q = q.startAfter(last);
           }
           const snap = await q.limit(pageSize + 1).get();
           const docs = snap.docs.slice(0, pageSize);
-          nextCursors[key] = snap.docs.length > pageSize ? docs.at(-1).id : null;
+          for (const d of docs) {
+            if (name === 'dormResidents') continue;
+            const handle =
+              d.data().publicId ||
+              (await db.runTransaction(async (tx) => {
+                const current = await tx.get(d.ref);
+                const value = current.data()?.publicId || 'dw_' + randomUUID();
+                if (current.exists && !current.data().publicId)
+                  tx.update(d.ref, { publicId: value });
+                return value;
+              }));
+            handles.set(name + '/' + d.id, handle);
+          }
+          nextCursors[key] =
+            snap.docs.length > pageSize
+              ? name === 'dormResidents'
+                ? docs.at(-1).id
+                : publicId(name, docs.at(-1).id)
+              : null;
           rows.push(...docs.map((d) => ({ id: d.id, ...serialize(d.data()) })));
         }
         return rows.filter((row) => name !== 'dormResidents' || row.active !== false);
@@ -253,6 +281,59 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         row.maskedStudentId = applicant?.studentId
           ? '***' + applicant.studentId.slice(-3)
           : row.maskedStudentId || '待確認';
+      }
+      const fields = {
+        repairs: [
+          'title',
+          'description',
+          'dormitory',
+          'building',
+          'room',
+          'category',
+          'status',
+          'dormStatus',
+          'schoolReference',
+          'vendor',
+          'expectedDate',
+          'images',
+          'createdAt',
+        ],
+        leaves: [
+          'building',
+          'room',
+          'date',
+          'reason',
+          'status',
+          'applicantName',
+          'maskedStudentId',
+          'createdAt',
+        ],
+        packages: [
+          'studentId',
+          'building',
+          'room',
+          'description',
+          'location',
+          'status',
+          'arrivedAt',
+        ],
+        residents: ['studentId', 'name', 'building', 'room', 'bed', 'active'],
+      };
+      const collections = {
+        repairs: 'dormRepairs',
+        leaves: 'dormLeaves',
+        packages: 'dormPackages',
+      };
+      for (const [kind, allowed] of Object.entries(fields)) {
+        result[kind] = result[kind].map((row) => ({
+          id: kind === 'residents' ? row.id : publicId(collections[kind], row.id),
+          ...Object.fromEntries(
+            allowed.filter((key) => row[key] !== undefined).map((key) => [key, row[key]]),
+          ),
+          ...(['repairs', 'leaves'].includes(kind)
+            ? { history: (row.history || []).map(({ status, at }) => ({ status, at })) }
+            : {}),
+        }));
       }
       return result;
     }
@@ -334,9 +415,10 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       return { success: true, id: ref.id };
     }
     if (action === 'repairStatus' || action === 'repairDetails' || action === 'decideLeave') {
-      const ref = school
-        .collection(action !== 'decideLeave' ? 'dormRepairs' : 'dormLeaves')
-        .doc(required(input.id, 200));
+      const ref = await resolveRef(
+        action !== 'decideLeave' ? 'dormRepairs' : 'dormLeaves',
+        required(input.id, 200),
+      );
       let owner;
       await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
@@ -548,7 +630,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       staff('packages');
       const refs =
         action === 'returnPackage'
-          ? [school.collection('dormPackages').doc(required(input.id, 200))]
+          ? [await resolveRef('dormPackages', required(input.id, 200))]
           : (
               await school
                 .collection('dormPackages')
