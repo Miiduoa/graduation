@@ -79,14 +79,36 @@ it('uses real group IDs for course navigation, actual counts only, and no fake u
   expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
 });
 
-it('shows only real joined clubs and states that a public directory is unavailable', async () => {
-  localStorage.setItem('demoRole', 'club_officer');
+it('社團分段只顯示真實會籍，找社團使用鎖定空態且沒有入社操作', async () => {
   render(<ClubsPage />);
   await screen.findByText('本人社團');
   expect(screen.queryByText('本人課程群組 ↗')).toBeNull();
-  expect(screen.getByText(/社團公開列表尚未開放/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /審核|核准|管理成員/ })).toBeNull();
+  expect(screen.queryByText(/社團公開列表尚未開放/)).toBeNull();
+  expect(screen.getByRole('link', { name: '查看社團' }).getAttribute('href')).toBe(
+    '/groups/firestore-club/club/overview?schoolId=pu',
+  );
+  expect(screen.queryByLabelText('邀請碼')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '找社團' }));
+  expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
+  expect(screen.queryByText('本人社團')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看社團' })).toBeNull();
+  expect(joinByCode).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: /申請|核准|管理成員/ })).toBeNull();
+});
+
+it('社團搜尋與未加入空態不使用假資料', async () => {
+  render(<ClubsPage />);
+  await screen.findByText('本人社團');
+  fireEvent.change(screen.getByLabelText('搜尋我的社團'), { target: { value: '不存在' } });
+  expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
   expect(screen.queryByText(/程式設計社|王小明/)).toBeNull();
+});
+
+it('沒有會籍時引導找社團，沒有錯誤的零人數', async () => {
+  vi.mocked(loadMyGroups).mockResolvedValue([]);
+  render(<ClubsPage />);
+  await screen.findByText('還沒加入社團，可以到「找社團」看看。');
+  expect(screen.queryByRole('article')).toBeNull();
 });
 
 it('never fills an empty or failed source with demo groups', async () => {
@@ -169,7 +191,7 @@ it('confirms leaving and waits for the verified result before removing the group
 
 it('does not offer leave to the owner and surfaces the real ownership transfer action', async () => {
   vi.mocked(loadMyGroups).mockResolvedValue([{ ...club, role: 'owner' }]);
-  render(<ClubsPage />);
+  render(<GroupsPage />);
   await screen.findByText('本人社團');
   expect(screen.queryByRole('button', { name: '退出群組' })).toBeNull();
   expect(screen.getByText(/須先完成擁有權轉讓/)).toBeTruthy();

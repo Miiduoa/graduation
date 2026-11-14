@@ -10,6 +10,7 @@ import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { isFunctionsUnconfiguredError } from '@/lib/functionsUrl';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
 import { clubEnabled } from './clubService';
+import { ClubDirectory } from './ClubDirectory';
 import { GroupOwnershipTransfer } from './GroupOwnershipTransfer';
 import styles from './groups.module.css';
 
@@ -249,7 +250,9 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
               </h2>
               {group.description && <p className={styles.description}>{group.description}</p>}
               <div className={styles.actions}>
-                {group.type === 'club' && clubEnabled() && ( <Link className="btn"
+                {group.type === 'club' && clubEnabled() && (
+                  <Link
+                    className="btn"
                     href={`/groups/${encodeURIComponent(group.id)}/club?schoolId=${encodeURIComponent(schoolId)}`}
                   >
                     社團後台
@@ -341,7 +344,8 @@ export function GroupDirectory({
   const { school, ready } = useBrowsingSchoolPageContext(params);
   const { user, loading } = useAuth();
   if (!ready) {
-    return ( <SiteShell title={mode === 'clubs' ? '我的社團' : '我的群組'}>
+    return (
+      <SiteShell title={mode === 'clubs' ? '我的社團' : '我的群組'}>
         <SchoolScopePlaceholder />
       </SiteShell>
     );
@@ -353,7 +357,7 @@ export function GroupDirectory({
       title={mode === 'clubs' ? '我的社團' : '我的群組'}
       subtitle={
         mode === 'clubs'
-          ? '查看已加入的社團，透過邀請碼連結新夥伴。'
+          ? '生活 › 社團：查看我的社團與學校名單。'
           : '課程、社團與讀書會，都從你已加入的群組開始。'
       }
     >
@@ -371,11 +375,6 @@ export function GroupDirectory({
           我的社團
         </Link>
       </nav>
-      {mode === 'clubs' && (
-        <p className={styles.availability}>
-          社團公開列表尚未開放。想認識新社團，可向社團取得邀請碼。
-        </p>
-      )}
       {loading ? (
         <p className={styles.status} role="status">
           正在確認帳號…
@@ -391,6 +390,12 @@ export function GroupDirectory({
             登入學校帳號
           </Link>
         </section>
+      ) : mode === 'clubs' ? (
+        <ClubDirectory
+          key={JSON.stringify([user.uid, school.id])}
+          uid={user.uid}
+          schoolId={school.id}
+        />
       ) : (
         <MemberDirectory
           key={JSON.stringify([user.uid, school.id, mode])}
