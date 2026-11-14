@@ -445,6 +445,14 @@ export function createClubPortal({
             denied('參加者身分已失效');
           if (old.status !== 'registered' && input.allowWalkIn !== true)
             throw new HttpsError('failed-precondition', '這位不在報名名單');
+          if (old.status !== 'registered') {
+            const registrations = await bounded(ref.collection('registrations'), 1000);
+            if (
+              registrations.filter((r) => r.data().status === 'registered').length >=
+              (event.capacity || 1000)
+            )
+              throw new HttpsError('resource-exhausted', '名額已滿');
+          }
           if (!old.checkedInAt)
             tx.set(regRef, {
               ...old,
@@ -500,10 +508,25 @@ export function createClubPortal({
       }
       if (action !== 'read') throw new HttpsError('invalid-argument', '操作無效');
       if (!active && !approved && !office) denied('此社團僅供社員閱讀');
-      const members =
+      // Independent cursors keep large rosters/history from blocking the club page.
+      const page = async (query: any, cursor: unknown, size: number) => {
+        let ordered = query.orderBy('__name__');
+        if (cursor !== undefined) ordered = ordered.startAfter(id(cursor));
+        const docs = (await tx.get(ordered.limit(size + 1))).docs as any[];
+        return {
+          docs: docs.slice(0, size),
+          next: docs.length > size ? docs[size - 1].id : undefined,
+        };
+      };
+      const memberPage =
         officer || office
-          ? await bounded(groupRef.collection('members').where('status', '==', 'active'))
-          : [];
+          ? await page(
+              groupRef.collection('members').where('status', '==', 'active'),
+              input.memberCursor,
+              100,
+            )
+          : { docs: [], next: undefined };
+      const members = memberPage.docs;
       const privateMembers =
         officer && members.length
           ? await tx.getAll(
@@ -527,7 +550,12 @@ export function createClubPortal({
               )
             ).docs
           : [];
-      const events = await bounded(eventRef, 100);
+      const eventPage = await page(
+        !active && !office ? eventRef.where('visibility', '==', 'public') : eventRef,
+        input.eventCursor,
+        20,
+      );
+      const events = eventPage.docs;
       const directories = members.length
         ? await tx.getAll(...members.map((m) => school.collection('directory').doc(m.id)))
         : [];
@@ -604,13 +632,6 @@ export function createClubPortal({
                   '',
               )
             : '',
-          studentId: String(
-            m.data().studentId ||
-              (profiles[index]?.data()?.schoolId === schoolId
-                ? profiles[index]?.data()?.studentId
-                : '') ||
-              '',
-          ),
           duesPaid: officer && privateMembers[index]?.data()?.duesPaid === true,
         })),
         officialOfficers: officerMembers.map((m, index) => ({
@@ -634,6 +655,8 @@ export function createClubPortal({
             title: String(p.data().title || ''),
             body: String(p.data().body || ''),
           })),
+        memberCursor: memberPage.next,
+        eventCursor: eventPage.next,
         events: rows.sort((a, b) => a.startsAt - b.startsAt),
       };
     });

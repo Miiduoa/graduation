@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { beforeEach, expect, test } from 'vitest';
+import { clubRosterCsv } from '@campus/shared/src/clubExport';
 import { createClubPortal } from './clubPortalHandlers';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { createGroupInviteHandlers } from './groupInviteHandlers';
@@ -30,6 +31,14 @@ beforeEach(() => {
     ],
     ['schools/school/serviceRoles/staff', { status: 'active', clubs: true }],
   ]);
+  // The shared memory transaction does not implement document-ID cursors.
+  const transaction = store.db.runTransaction.bind(store.db);
+  store.db.runTransaction = (callback) =>
+    transaction((tx: any) => {
+      const get = tx.get.bind(tx);
+      tx.get = (query: any) => (query.order?.field === '__name__' ? query.get() : get(query));
+      return callback(tx);
+    });
   run = createClubPortal({ db: store.db, now: () => time });
 });
 test('開放一鍵加入與索引原子更新，重送不重複，退出重入', async () => {
@@ -204,6 +213,23 @@ test('QR 與後四碼由伺服器驗證，不在報名名單須明確現場加�
   await expect(
     call('officer', { action: 'checkIn', eventId: 'event', targetUid: 'other' }),
   ).rejects.toThrow('這位不在報名名單');
+  await expect(
+    call('officer', {
+      action: 'checkIn',
+      eventId: 'event',
+      targetUid: 'other',
+      allowWalkIn: true,
+    }),
+  ).rejects.toThrow('名額已滿');
+  expect(store.docs.has('groups/club/clubEvents/event/registrations/other')).toBe(false);
+  store.docs.get('groups/club/clubEvents/event')!.capacity = 2;
+  await call('officer', {
+    action: 'checkIn',
+    eventId: 'event',
+    targetUid: 'other',
+    allowWalkIn: true,
+  });
+  // Repeated check-in remains valid even after the walk-in fills the last seat.
   await call('officer', {
     action: 'checkIn',
     eventId: 'event',
@@ -237,4 +263,66 @@ test('社費保存在預設拒絕的幹部私有路徑，不寫入社員可讀�
   });
   expect((await call('officer')).members?.find((m) => m.id === 'student')?.duesPaid).toBe(true);
   expect((await call('student')).members).toEqual([]);
+});
+
+test('幹部與課外組回應及匯出不含完整學號', async () => {
+  await call('student', { action: 'join' });
+  store.docs.get('groups/club/members/student')!.studentId = 'S12345678';
+  store.docs.set('users/student', { schoolId: 'school', studentId: 'S12345678' });
+  for (const uid of ['student', 'officer', 'staff']) {
+    const view = await call(uid);
+    expect(JSON.stringify(view)).not.toContain('S12345678');
+    expect(JSON.stringify(view)).not.toContain('studentId');
+    expect(clubRosterCsv(view)).not.toContain('S12345678');
+    expect(clubRosterCsv(view)).not.toContain('學號');
+  }
+});
+
+test('超過五百位社員與一百場活動仍可閱讀介紹公告並逐頁讀完', async () => {
+  for (let n = 0; n < 505; n++) {
+    store.docs.set(`groups/club/members/member-${String(n).padStart(3, '0')}`, {
+      status: 'active',
+      role: 'member',
+    });
+  }
+  for (let n = 0; n < 105; n++) {
+    store.docs.set(`groups/club/clubEvents/event-${String(n).padStart(3, '0')}`, {
+      title: '社課',
+      startsAt: 5000,
+      endsAt: 6000,
+      visibility: n % 2 ? 'members' : 'public',
+    });
+  }
+  await call('officer', {
+    action: 'announcement',
+    operationId: 'notice',
+    title: '公告',
+    body: '照常閱讀',
+  });
+  const first = await call('officer');
+  expect(first.club?.name).toBe('攝影社');
+  expect(first.announcements?.[0].body).toBe('照常閱讀');
+  expect(first.members).toHaveLength(100);
+  expect(first.events).toHaveLength(20);
+  const members = [...first.members!],
+    events = [...first.events!];
+  let memberCursor = first.memberCursor,
+    eventCursor = first.eventCursor;
+  while (memberCursor) {
+    const next = await call('officer', { memberCursor });
+    members.push(...next.members!);
+    memberCursor = next.memberCursor;
+  }
+  while (eventCursor) {
+    const next = await call('officer', { eventCursor });
+    events.push(...next.events!);
+    eventCursor = next.eventCursor;
+  }
+  expect(new Set(members.map((m) => m.id)).size).toBe(506);
+  expect(new Set(events.map((e) => e.id)).size).toBe(105);
+  const visitor = await call('student');
+  expect(visitor.club?.name).toBe('攝影社');
+  expect(visitor.members).toEqual([]);
+  expect(visitor.events?.every((e) => e.visibility === 'public')).toBe(true);
+  expect(visitor.eventCursor).toBeTruthy();
 });

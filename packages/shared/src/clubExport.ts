@@ -7,12 +7,11 @@ export function clubRosterCsv(view: ClubPortalView) {
   return (
     '\ufeff' +
     [
-      ['類別', '名稱', '學號', '電話', '角色', '時間', '地點', '報名數', '簽到數'],
-      ...(view.members || []).map((m) => ['社員', m.name, m.studentId, m.phone, m.role]),
+      ['類別', '名稱', '電話', '角色', '時間', '地點', '報名數', '簽到數'],
+      ...(view.members || []).map((m) => ['社員', m.name, m.phone, m.role]),
       ...(view.events || []).map((e) => [
         '活動',
         e.title,
-        '',
         '',
         '',
         new Date(e.startsAt).toISOString(),

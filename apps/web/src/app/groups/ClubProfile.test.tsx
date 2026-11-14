@@ -58,9 +58,7 @@ test('幹部可審核、編輯、建立活動；學生看不到管理與電話',
     role: 'admin',
     status: 'active',
     requests: [{ id: 'applicant', name: '申請人' }],
-    members: [
-      { id: 'one', name: '社員', role: 'member', phone: '', studentId: '', duesPaid: false },
-    ],
+    members: [{ id: 'one', name: '社員', role: 'member', phone: '', duesPaid: false }],
   });
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   fireEvent.click(await screen.findByRole('button', { name: '管理' }));
@@ -101,4 +99,72 @@ test('切換社團或帳號忽略延遲回應；可重試錯誤', async () => {
   await act(async () => finish({ ...profile, club: { ...profile.club!, name: '舊社團' } }));
   expect(screen.queryByText('舊社團')).toBeNull();
   expect(screen.queryByRole('button', { name: '管理' })).toBeNull();
+});
+
+test('分頁載入更多社員會保留先前名冊，失敗可重試', async () => {
+  const first = { id: 'one', name: '第一位社員', role: 'member', phone: '', duesPaid: false };
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    role: 'admin',
+    status: 'active',
+    members: [first],
+    memberCursor: 'one',
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('載入更多社員');
+  fireEvent.click(screen.getByRole('button', { name: '管理' }));
+  vi.mocked(callClubPortal).mockRejectedValueOnce(new Error('暫時無法讀取'));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多社員' }));
+  await screen.findByText('暫時無法讀取');
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    members: [{ ...first, id: 'two', name: '第二位社員' }],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多社員' }));
+  await screen.findByText(/第二位社員/);
+  expect(screen.getByText(/第一位社員/)).toBeTruthy();
+  expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
+    action: 'read',
+    groupId: 'club',
+    memberCursor: 'one',
+  });
+  expect(screen.queryByText('載入更多社員')).toBeNull();
+});
+
+test('活動分頁保留前頁活動並在末頁移除載入按鈕', async () => {
+  const event: NonNullable<ClubPortalView['events']>[number] = {
+    id: 'first',
+    title: '第一場活動',
+    location: '教室',
+    startsAt: Date.now() + 100000,
+    endsAt: Date.now() + 200000,
+    capacity: 10,
+    registrationDeadline: 4000,
+    cancellationDeadline: 3000,
+    visibility: 'public',
+    registered: 0,
+    checkedIn: 0,
+    mine: false,
+    myCheckIn: false,
+  };
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    events: [event],
+    eventCursor: 'first',
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('載入更多活動');
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    events: [{ ...event, id: 'last', title: '最後一場活動' }],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多活動' }));
+  await screen.findByText(/最後一場活動/);
+  expect(screen.getByText(/第一場活動/)).toBeTruthy();
+  expect(screen.queryByText('載入更多活動')).toBeNull();
+  expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
+    action: 'read',
+    groupId: 'club',
+    eventCursor: 'first',
+  });
 });

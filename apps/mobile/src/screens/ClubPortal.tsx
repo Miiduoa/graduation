@@ -83,6 +83,50 @@ export function ClubPortal({
       generation.current++;
     };
   }, [uid, schoolId, selected, office, revision]);
+  async function loadMore(kind: 'member' | 'event') {
+    if (lock.current || !view) return;
+    const cursor = kind === 'member' ? view.memberCursor : view.eventCursor;
+    if (!cursor) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    const current = generation.current;
+    try {
+      const next = await callClubPortal(uid, schoolId, {
+        action: 'read',
+        groupId: selected,
+        [`${kind}Cursor`]: cursor,
+      });
+      if (generation.current === current)
+        setView(
+          (previous) =>
+            previous && {
+              ...previous,
+              ...(kind === 'member'
+                ? {
+                    members: [...(previous.members || []), ...(next.members || [])],
+                    officialOfficers: [
+                      ...(previous.officialOfficers || []),
+                      ...(next.officialOfficers || []),
+                    ],
+                    memberCursor: next.memberCursor,
+                  }
+                : {
+                    events: [...(previous.events || []), ...(next.events || [])],
+                    eventCursor: next.eventCursor,
+                  }),
+            },
+        );
+    } catch (err) {
+      if (generation.current === current)
+        setError(err instanceof Error ? err.message : '讀取失敗，請重試');
+    } finally {
+      if (generation.current === current) {
+        lock.current = false;
+        setBusy(false);
+      }
+    }
+  }
   async function act(input: Record<string, unknown>) {
     if (lock.current) return;
     lock.current = true;
@@ -151,6 +195,12 @@ export function ClubPortal({
   };
   return (
     <Card title="社團服務" subtitle="生活 › 社團">
+      {view?.memberCursor ? (
+        <Button text="載入更多社員" disabled={busy} onPress={() => void loadMore('member')} />
+      ) : null}
+      {view?.eventCursor ? (
+        <Button text="載入更多活動" disabled={busy} onPress={() => void loadMore('event')} />
+      ) : null}
       {error ? <Text accessibilityRole="alert">{error}</Text> : null}
       {notice ? <Text accessibilityRole="alert">{notice}</Text> : null}
       {!view && !error ? <Text style={style}>正在讀取社團資料…</Text> : null}
@@ -357,8 +407,7 @@ export function ClubPortal({
               {view.members?.map((m) => (
                 <View key={m.id} style={{ minHeight: 56 }}>
                   <Text style={style}>
-                    {m.name} · {m.role} · 學號 {m.studentId || '未提供'} · 電話{' '}
-                    {m.phone || '未提供'}
+                    {m.name} · {m.role} · 電話 {m.phone || '未提供'}
                   </Text>
                   {button(m.duesPaid ? '社費已繳' : '社費未繳', {
                     action: 'dues',
@@ -432,7 +481,7 @@ export function ClubPortal({
           ) : null}
           {officer || view.office ? (
             <Button
-              text="匯出名冊與活動 CSV（分享）"
+              text="匯出已載入的名冊與活動 CSV（分享）"
               onPress={() => {
                 void shareClubCsv(view).catch(() => setError('無法開啟分享，請重試'));
               }}

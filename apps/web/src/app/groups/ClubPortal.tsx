@@ -68,6 +68,50 @@ export function ClubPortal({
       generation.current++;
     };
   }, [uid, schoolId, selected, office, revision]);
+  async function loadMore(kind: 'member' | 'event') {
+    if (lock.current || !view) return;
+    const cursor = kind === 'member' ? view.memberCursor : view.eventCursor;
+    if (!cursor) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    const current = generation.current;
+    try {
+      const next = await callClubPortal(uid, schoolId, {
+        action: 'read',
+        groupId: selected,
+        [`${kind}Cursor`]: cursor,
+      });
+      if (generation.current === current)
+        setView(
+          (previous) =>
+            previous && {
+              ...previous,
+              ...(kind === 'member'
+                ? {
+                    members: [...(previous.members || []), ...(next.members || [])],
+                    officialOfficers: [
+                      ...(previous.officialOfficers || []),
+                      ...(next.officialOfficers || []),
+                    ],
+                    memberCursor: next.memberCursor,
+                  }
+                : {
+                    events: [...(previous.events || []), ...(next.events || [])],
+                    eventCursor: next.eventCursor,
+                  }),
+            },
+        );
+    } catch (err) {
+      if (generation.current === current)
+        setError(err instanceof Error ? err.message : '讀取失敗，請重試');
+    } finally {
+      if (generation.current === current) {
+        lock.current = false;
+        setBusy(false);
+      }
+    }
+  }
   async function act(input: Record<string, unknown>) {
     if (lock.current) return;
     lock.current = true;
@@ -141,6 +185,16 @@ export function ClubPortal({
       <button className="btn" disabled={busy} onClick={() => setRevision((n) => n + 1)}>
         重新讀取社團資料
       </button>
+      {view?.memberCursor && (
+        <button className="btn" disabled={busy} onClick={() => void loadMore('member')}>
+          載入更多社員
+        </button>
+      )}
+      {view?.eventCursor && (
+        <button className="btn" disabled={busy} onClick={() => void loadMore('event')}>
+          載入更多活動
+        </button>
+      )}
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {!view && !error && <p role="status">正在讀取社團資料…</p>}
@@ -400,8 +454,7 @@ export function ClubPortal({
               {view.members?.map((m) => (
                 <article key={m.id} style={{ minHeight: 56 }}>
                   <p>
-                    {m.name} · {m.role} · 學號 {m.studentId || '未提供'} · 電話{' '}
-                    {m.phone || '未提供'}
+                    {m.name} · {m.role} · 電話 {m.phone || '未提供'}
                   </p>
                   {button(m.duesPaid ? '社費已繳' : '社費未繳', {
                     action: 'dues',
@@ -488,7 +541,7 @@ export function ClubPortal({
                 URL.revokeObjectURL(url);
               }}
             >
-              匯出名冊與活動 CSV
+              匯出已載入的名冊與活動 CSV
             </button>
           )}
           {view.officialOfficers?.map((m) => (

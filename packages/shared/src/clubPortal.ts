@@ -22,12 +22,13 @@ export type ClubPortalView = {
   role?: string;
   status?: string;
   reason?: string;
+  memberCursor?: string;
+  eventCursor?: string;
   members?: {
     id: string;
     name: string;
     role: string;
     phone: string;
-    studentId: string;
     duesPaid: boolean;
   }[];
   officialOfficers?: { id: string; role: string; status: 'confirmed' | 'pending' }[];
