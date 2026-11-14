@@ -1,9 +1,11 @@
+import { clubEnabled } from './clubService';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { ClubProfile } from './ClubProfile';
 import { loadClubProfile } from './clubProfileService';
 
 vi.mock('./clubProfileService', () => ({ loadClubProfile: vi.fn() }));
+vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
 const profile = {
   id: 'club',
   schoolId: 'pu',
@@ -28,6 +30,7 @@ const profile = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(clubEnabled).mockReturnValue(false);
   vi.mocked(loadClubProfile).mockResolvedValue(profile);
 });
 test('依規格呈現唯讀社團、真實公告與活動尚未串接的界線', async () => {
@@ -64,4 +67,12 @@ test('切換社團時不顯示先前尚未完成的讀取結果', async () => {
   await screen.findByText('週三社課');
   await act(async () => finish({ ...profile, name: '舊社團' }));
   expect(screen.queryByText('舊社團')).toBeNull();
+});
+
+test.each(['owner', 'admin'])('管理已啟用時，%s 不顯示未開放說明', async (role) => {
+  vi.mocked(clubEnabled).mockReturnValue(true);
+  vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('週三社課');
+  expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
 });

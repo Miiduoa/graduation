@@ -1,4 +1,5 @@
 'use client';
+import { clubEnabled } from './clubService';
 import { useState, type ReactNode } from 'react';
 import styles from './groups.module.css';
 
@@ -50,7 +51,7 @@ export function ClubDirectory({ children }: { children: ReactNode }) {
       <p className={styles.availability}>
         「我的社團」列出已加入的群組，是否為正式社團仍以課外組名單為準。
       </p>
-      <p>這所學校還沒開放社團管理。</p>
+      {!clubEnabled() && <p>這所學校還沒開放社團管理。</p>}
     </div>
   );
 }

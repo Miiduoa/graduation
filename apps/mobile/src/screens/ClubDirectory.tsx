@@ -1,3 +1,4 @@
+import { clubSummaryEnabled } from '../services/clubSummary';
 import React, { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { Button, Card } from '../ui/components';
@@ -73,7 +74,7 @@ export function ClubDirectory({
       <Text style={textStyle}>
         「我的社團」列出已加入的群組，是否為正式社團仍以課外組名單為準。
       </Text>
-      <Text style={textStyle}>這所學校還沒開放社團管理。</Text>
+      {!clubSummaryEnabled() && <Text style={textStyle}>這所學校還沒開放社團管理。</Text>}
     </Card>
   );
 }

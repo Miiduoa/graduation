@@ -1,3 +1,4 @@
+import { clubSummaryEnabled } from '../services/clubSummary';
 import React, { useEffect, useRef, useState } from 'react';
 import { Text } from 'react-native';
 import { Button, Card } from '../ui/components';
@@ -76,7 +77,7 @@ export function ClubProfile({
           <Text style={textStyle}>介紹</Text>
           <Text style={textStyle}>{profile.description || '社團尚未提供介紹。'}</Text>
           <Text style={textStyle}>僅供現有社員閱讀。IG、LINE 官方連結尚未提供。</Text>
-          {['owner', 'admin'].includes(profile.role) ? (
+          {!clubSummaryEnabled() && ['owner', 'admin'].includes(profile.role) ? (
             <Text style={textStyle}>這所學校還沒開放社團管理。</Text>
           ) : null}
         </>

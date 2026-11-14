@@ -1,4 +1,5 @@
 'use client';
+import { clubEnabled } from './clubService';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { loadClubProfile } from './clubProfileService';
@@ -82,7 +83,9 @@ export function ClubProfile({
             <p style={{ whiteSpace: 'pre-wrap' }}>{group.description || '社團尚未提供介紹。'}</p>
             <p>僅供現有社員閱讀。IG、LINE 官方連結尚未提供。</p>
           </section>
-          {['owner', 'admin'].includes(group.role) && <p>這所學校還沒開放社團管理。</p>}
+          {!clubEnabled() && ['owner', 'admin'].includes(group.role) && (
+            <p>這所學校還沒開放社團管理。</p>
+          )}
         </>
       )}
       <button className="btn" onClick={() => setRevision((v) => v + 1)}>

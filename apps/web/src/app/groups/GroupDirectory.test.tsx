@@ -287,6 +287,7 @@ it.each([false, true])('社團後台入口沿用既有旗標：%s', async (enabl
   vi.mocked(clubEnabled).mockReturnValue(enabled);
   render(<ClubsPage />);
   await screen.findByText('本人社團');
+  expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
   const link = screen.queryByRole('link', { name: '社團後台' });
   if (enabled) expect(link?.getAttribute('href')).toBe('/groups/firestore-club/club?schoolId=pu');
   else expect(link).toBeNull();

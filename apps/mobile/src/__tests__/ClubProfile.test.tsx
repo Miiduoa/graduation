@@ -1,3 +1,4 @@
+import { clubSummaryEnabled } from '../services/clubSummary';
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { ClubProfile } from '../screens/ClubProfile';
@@ -20,6 +21,7 @@ jest.mock('../ui/components', () => {
     ),
   };
 });
+jest.mock('../services/clubSummary', () => ({ clubSummaryEnabled: jest.fn() }));
 const profile = {
   name: '攝影社',
   description: '週三社課',
@@ -29,6 +31,7 @@ const profile = {
 };
 beforeEach(() => {
   jest.resetAllMocks();
+  jest.mocked(clubSummaryEnabled).mockReturnValue(false);
   jest.mocked(loadClubProfile).mockResolvedValue(profile);
 });
 test('我的社團可搜尋並開啟既有 GroupDetail，找社團不冒充正式名錄', () => {
@@ -78,4 +81,18 @@ test('切換社團時忽略舊請求的結果', async () => {
   await screen.findByText('攝影社');
   await act(async () => finish({ ...profile, name: '舊社團' }));
   expect(screen.queryByText('舊社團')).toBeNull();
+});
+
+test.each(['owner', 'admin'])('管理已啟用時，%s 不顯示未開放說明', async (role) => {
+  jest.mocked(clubSummaryEnabled).mockReturnValue(true);
+  jest.mocked(loadClubProfile).mockResolvedValue({ ...profile, role });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('週三社課');
+  expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
+});
+
+test.each([false, true])('社團目錄管理說明沿用既有旗標：%s', (enabled) => {
+  jest.mocked(clubSummaryEnabled).mockReturnValue(enabled);
+  render(<ClubDirectory clubs={[]} onOpen={jest.fn()} />);
+  expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
 });
