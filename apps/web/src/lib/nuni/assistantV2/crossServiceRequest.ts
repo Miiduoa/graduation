@@ -1,20 +1,24 @@
 import type { AssistantServiceId } from '@campus/shared/src/assistantServices';
+import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
+import { publicCourseAssistantSource, type PublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { addDays, date, taipeiDate, type Obj } from './contracts';
 import { directReads, type DirectRead } from './directRead';
 import { informationReads, type InformationRead } from './information';
 import { studyWindow } from './tools';
+import { publicCourseArguments } from './publicCourses';
 
 export type CrossServiceOperation = {
   id: string;
   label: string;
   serviceId: AssistantServiceId;
-  kind: 'read' | 'study' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff';
+  kind: 'read' | 'study' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course';
   tool?: string;
   args: Obj;
   dependsOn: string[];
   directRead?: DirectRead;
   informationRead?: InformationRead;
   question?: string;
+  publicCourseIntent?: PublicCourseAssistantIntent;
 };
 export type CrossServiceRequest = { operations: CrossServiceOperation[] };
 
@@ -91,15 +95,23 @@ const genericPrefix = /^(?:(?:幫我|替我|請問|請|麻煩|我想|我的|我|
 /** Bounded, explicit compound requests only. Unconsumed clauses stay on the
  * existing conversational path; a familiar keyword cannot swallow another task.
  */
-export function crossServiceRequest(question: string, now: number): CrossServiceRequest | null {
+export function crossServiceRequest(question: string, now: number, schoolId = ''): CrossServiceRequest | null {
   if (!Number.isFinite(new Date(now).getTime()) || !question.trim() || question.length > 1000 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'`]/u.test(question)) return null;
+      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
   const text = question.normalize('NFKC').trim();
-  if (/不要|不用|不必|不需要|無須|別幫|先別|不是要|翻譯|這句話|假設|如果|例如|範例|之前|曾經|昨天|前天|剛才|剛剛|每天|每日|每週|每月|自動|持續|週|周|禮拜|月底|本月|下月|明年|今年/.test(text)) return null;
-  const clauses = text.split(/(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/)
-    .map(part => part.trim()).filter(Boolean);
+  if (/不要|不用|不必|不需要|無須|別幫|先別|不是要|翻譯|這句話|假設|如果|例如|範例|之前|曾經|昨天|前天|剛才|剛剛|每天|每日|每週|每月|自動|持續/.test(text)) return null;
+  const split = (value: string) => value.split(/(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/)
+    .map(part => part.trim()).filter(Boolean).map(question => ({ question, publicCourseIntent: null }));
+  const compound = publicCourseCompoundRequest(text, schoolId);
+  const clauses: { question: string; publicCourseIntent: PublicCourseAssistantIntent | null }[] = compound
+    ? compound.clauses.flatMap(clause => clause.publicCourseIntent ? [clause] : split(clause.question))
+    : split(text);
   if (!clauses.length || clauses.length > 12) return null;
-  const days = clauses.map(clause => requestedDay(clause, now));
+  // A weekday filter or a quoted course title belongs to its public source,
+  // not the private calendar's date or the remaining task grammar.
+  if (clauses.some(clause => !clause.publicCourseIntent &&
+      /[「」『』“”"'`]|週|周|禮拜|月底|本月|下月|明年|今年/.test(clause.question))) return null;
+  const days = clauses.map(clause => clause.publicCourseIntent ? undefined : requestedDay(clause.question, now));
   if (days.includes(null)) return null;
   const inheritedDays = [...new Set(days.filter((day): day is string => typeof day === 'string'))];
   const inheritedDay = inheritedDays.length === 1 ? inheritedDays[0] : taipeiDate(now);
@@ -107,7 +119,15 @@ export function crossServiceRequest(question: string, now: number): CrossService
   const add = (operation: Omit<CrossServiceOperation, 'id' | 'dependsOn'>) =>
     requested.push({ ...operation, id: 'task-' + (requested.length + 1), dependsOn: [] });
   for (let index = 0; index < clauses.length; index++) {
-    const clause = clauses[index].replace(/^先(?=查|看|幫我)/, '');
+    const publicCourseIntent = clauses[index].publicCourseIntent;
+    if (publicCourseIntent) {
+      const source = publicCourseIntent.kind === 'search' ? publicCourseAssistantSource(publicCourseIntent) : null;
+      add({ kind: 'public-course', serviceId: 'school-courses',
+        label: source ? `查${source.schoolName}公開課程` : '核對公開課程查詢條件',
+        args: publicCourseIntent.kind === 'search' ? publicCourseArguments(publicCourseIntent) : {}, publicCourseIntent });
+      continue;
+    }
+    const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
     const readClause = /^(?:個人行程|個人行事曆|行事曆|課表|未交作業|待繳作業|作業|測驗)$/.test(clause)
       ? '查' + clause : clause;
     const reads = directReads(readClause, now);
@@ -153,7 +173,7 @@ export function crossServiceRequest(question: string, now: number): CrossService
         args: { membership: /目錄/.test(short) ? 'all' : 'joined', feed: /動態/.test(short) } }); continue;
     }
     if (/^(?:相關|對應|這些作業的|作業相關的)?教材$/.test(short)) {
-      add({ kind: 'materials', label: '找課程教材', serviceId: 'classroom', args: {} }); continue;
+      add({ kind: 'materials', label: '找課程教材', serviceId: 'classroom', args: {}, question: clause }); continue;
     }
     if (/^(?:再點|幫我再點|點)(?:一次)?(?:上次|跟上次)(?:一樣|相同)的?(?:餐點|午餐|晚餐|早餐)?$/.test(clause) ||
         /^(?:上次|跟上次)一樣的?(?:餐點|午餐|晚餐|早餐)$/.test(short)) {
@@ -171,7 +191,8 @@ export function crossServiceRequest(question: string, now: number): CrossService
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
   if (requested.length < 2 || requested.length > 12 ||
-      new Set(requested.map(op => op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2) return null;
+      new Set(requested.map(op => op.kind === 'public-course' ? op.kind + ':' + JSON.stringify(op.args)
+        : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2) return null;
   const operations: CrossServiceOperation[] = [];
   let serial = requested.length;
   const prerequisite = (tool: string, args: Obj, label: string, serviceId: AssistantServiceId) => {
@@ -202,6 +223,8 @@ export function crossServiceRequest(question: string, now: number): CrossService
     }
     if (operation.kind === 'materials') {
       operation.dependsOn = operations.filter(op => op.tool === 'get_due_work').map(op => op.id);
+      if (!operation.dependsOn.length && /相關|對應|這些/.test(operation.question || ''))
+        operation.dependsOn = operations.filter(op => op.kind === 'public-course').map(op => op.id);
     }
     operations.push(operation);
   }

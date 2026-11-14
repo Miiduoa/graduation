@@ -72,7 +72,11 @@ const capabilityDescriptions = {
     summary: '可查已保存的匯入學業紀錄；新增或更改匯入資料需到匯入頁核對。',
     tools: ['get_imported_academics'],
   },
-  'school-courses': handoff('可開啟已提供的校方課程入口；本助理尚未接通校方課程操作。'),
+  'school-courses': {
+    modes: ['read', 'handoff'],
+    summary: '可查清大、暨大的已接通公開開課資料，保留校名、關鍵字、星期與學分條件；其他校園保留入口，匯入課表與正式選課仍須在原流程核對。',
+    tools: ['get_public_courses', 'list_campus_services', 'propose_open_page'],
+  },
   'school-lms': handoff('可開啟校方作業與教材入口；本助理尚未接通校方作業繳交。'),
   attendance: handoff('可開啟課程的點名與出席入口；本助理尚未代查或代送點名。'),
   announcements: handoff('可提供所選校園的公告入口；此工具不會讀取公告全文。'),

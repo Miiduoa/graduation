@@ -6,8 +6,13 @@ import {
 import { assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { formatImportedAcademicSummary, type ImportedAcademicSummary } from '@campus/shared/src/importedAcademicSummary';
 import { bounded, clip, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
-import { directReadAnswer } from './directRead';
+import { directReadAnswer, directReadCourseworkTargets, type DirectRead } from './directRead';
 import { informationAnswer } from './information';
+import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
+import { formatPublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistant';
+import { findSchoolById } from '@campus/shared/src/schools';
+import { PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
+import type { AssistantCourseworkTarget } from '../../assistantCoursework';
 import type { createTools } from './tools';
 import type { CrossServiceOperation, CrossServiceRequest } from './crossServiceRequest';
 
@@ -70,6 +75,50 @@ function readSummary(operation: CrossServiceOperation, value: unknown, now: numb
   return '已讀取此服務的可用資料。';
 }
 
+/** Selection hints for a later fresh read, never authority to reuse this task's data or cards. */
+function readPlanCourseworkTargets(
+  request: CrossServiceRequest,
+  plan: AssistantTaskPlan,
+  results: Map<string, unknown>,
+  now: number,
+): AssistantCourseworkTarget[] {
+  // A prepared plan keeps its original confirmation/revision path. A new source
+  // button must not quietly replace an existing calendar or food proposal.
+  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'reorder')) return [];
+  const work = request.operations.filter(operation => operation.kind === 'read' && operation.tool === 'get_due_work' &&
+    (operation.directRead?.kind === 'due-work' || operation.informationRead?.kind === 'work'));
+  // The existing pronoun follow-up can select a sole candidate automatically.
+  // Incomplete coursework cannot establish that it is the only requested source.
+  if (!work.length || work.some(operation => !results.has(operation.id) ||
+      plan.steps.find(step => step.id === operation.id)?.status !== 'completed')) return [];
+  const observed = new Map<string, string>();
+  const targets = new Map<string, AssistantCourseworkTarget>();
+  for (const operation of work) {
+    const value = unwrap(results.get(operation.id));
+    if (partial(value) || value.unavailable || typeof value.from !== 'string' || typeof value.to !== 'string') return [];
+    const from = typeof operation.args.from === 'string' ? operation.args.from : value.from;
+    const to = typeof operation.args.to === 'string' ? operation.args.to : value.to;
+    const start = Date.parse(from + 'T00:00:00+08:00'), end = Date.parse(to + 'T00:00:00+08:00') + 86400000;
+    if (value.from !== from || value.to !== to || !Number.isFinite(start) || !Number.isFinite(end) || start >= end) return [];
+    for (const task of [...rows(value.pending), ...rows(value.undated), ...rows(value.submitted), ...rows(value.overdue)]) {
+      if (typeof task.id !== 'string') continue;
+      const identity = JSON.stringify([task.courseId, task.kind, task.title, task.courseTitle,
+        task.dueAt, task.submitted, task.state]);
+      if (observed.has(task.id) && observed.get(task.id) !== identity) return [];
+      observed.set(task.id, identity);
+    }
+    const read: DirectRead = { kind: 'due-work', tool: 'get_due_work', args: { from, to },
+      taskKind: operation.directRead?.taskKind || operation.informationRead?.taskKind };
+    const pending = rows(value.pending).filter(task => typeof task.dueAt === 'string' &&
+      Date.parse(task.dueAt) >= start && Date.parse(task.dueAt) < end);
+    // Pass one node and its own evidence together: another date/kind's cached
+    // get_due_work result is not a substitute for this requested source.
+    for (const target of directReadCourseworkTargets([read], [{ tool: 'get_due_work', result: { ...value, pending } }], now))
+      targets.set(JSON.stringify([target.workspaceId, target.kind, target.taskId]), target);
+  }
+  return [...targets.values()].sort((left, right) => Date.parse(left.dueAt) - Date.parse(right.dueAt)).slice(0, 12);
+}
+
 /** Execute a bounded dependency plan using the same scoped dispatcher as chat.
  * There is no direct writer here: every mutation remains a signed proposal.
  */
@@ -81,6 +130,9 @@ export async function runCrossService(input: {
   now: number;
 }) {
   const { request, tools, binding, signal, now } = input;
+  const foreignPublicSource = request.operations.some(operation =>
+    operation.publicCourseIntent?.kind === 'search' && operation.publicCourseIntent.schoolId !== binding.schoolId);
+  const scopeName = findSchoolById(binding.schoolId)?.name || binding.schoolId;
   const taskPlan: AssistantTaskPlan = { version: 1, steps: [] };
   const steps: Step[] = [];
   const results = new Map<string, unknown>();
@@ -105,7 +157,8 @@ export async function runCrossService(input: {
     signal.throwIfAborted();
     if (++calls > 16) throw new V2Error(429, 'TASK_BUDGET_EXCEEDED');
     try {
-      const result = await bounded(child => tools.withSignal(child, () => tools.call(name, args, question)), signal, 4000);
+      const result = await bounded(child => tools.withSignal(child, () => tools.call(name, args, question)), signal,
+        name === 'get_public_courses' ? PUBLIC_COURSE_TOOL_TIMEOUT_MS : 4000);
       signal.throwIfAborted();
       steps.push({ name, status: result.cached ? 'cached' : 'ok', summary: '已核對此步驟的資料' });
       return result.value;
@@ -121,6 +174,8 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import'].includes(operation.serviceId))
+      step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
     if (dependencies.some(previous => !previous || previous.status === 'blocked' || previous.status === 'handoff' ||
@@ -136,7 +191,21 @@ export async function runCrossService(input: {
         step.summary = (getAssistantServiceCapability(service.id)?.summary || service.summary) + '。這項需求尚未代為完成，請在服務內接續。';
         continue;
       }
-      if (operation.kind === 'read') {
+      if (operation.kind === 'public-course') {
+        if (operation.publicCourseIntent?.kind !== 'search') {
+          step.summary = operation.publicCourseIntent?.kind === 'clarify'
+            ? operation.publicCourseIntent.content : '公開課程條件尚未確認，這一步尚未查詢。';
+          continue;
+        }
+        const value = await call('get_public_courses', operation.args);
+        const reads = parseAssistantPublicCourseResults([value]);
+        const read = reads?.[0];
+        if (!read || read.status !== 'ready') throw new V2Error(502, 'INVALID_PUBLIC_COURSE_RESULT');
+        results.set(operation.id, value);
+        step.status = read.truncated || Number(read.unresolvedCount || 0) > 0 ? 'partial' : 'completed';
+        step.summary = formatPublicCourseAssistantRead(read);
+        step.href = read.href;
+      } else if (operation.kind === 'read') {
         const value = await call(operation.tool!, operation.args);
         results.set(operation.id, value);
         const result = unwrap(value);
@@ -183,6 +252,11 @@ export async function runCrossService(input: {
         }
       } else if (operation.kind === 'materials') {
         const sources = operation.dependsOn.map(id => unwrap(results.get(id))).filter(result => Array.isArray(result.pending));
+        if (!sources.length && /相關|對應|這些/.test(operation.question || '') &&
+            request.operations.some(source => source.kind === 'public-course')) {
+          step.summary = '公開開課資料尚未對應到可存取的私人課程，無法核對相關教材；請先選擇原課程。';
+          continue;
+        }
         let courseIds = [...new Set(pendingTasks(operation, true).map(row => String(row.courseId)))];
         if (!sources.length) {
           const courses = unwrap(await call('list_courses', {}));
@@ -276,5 +350,8 @@ export async function runCrossService(input: {
     (cards.length ? '\n\n新增或備餐內容仍在下方確認卡；確認並核對結果後才算執行完成。' : '');
   for (const step of taskPlan.steps) step.summary = step.summary.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ')
     .replace(/\s+/g, ' ').trim().slice(0, 1200);
-  return { taskPlan, answer, cards, steps, dataRead: true as const, stopReason: unresolved.length ? 'TASKS_INCOMPLETE' : '' };
+  return { taskPlan, answer, cards, steps, dataRead: true as const,
+    courseworkTargets: readPlanCourseworkTargets(request, taskPlan, results, now),
+    ...(tools.publicCourseResults.length ? { publicCourseResults: tools.publicCourseResults } : {}),
+    stopReason: unresolved.length ? 'TASKS_INCOMPLETE' : '' };
 }

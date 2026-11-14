@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
+import { parseAssistantCourseworkTargets, courseworkStudyTarget } from '../../assistantCoursework';
 import { confirm } from './actions';
 import { V2Error, type Adapter } from './contracts';
 import { fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
@@ -201,5 +202,118 @@ describe('cross-service execution through the real runner', () => {
     expect(submit).not.toHaveBeenCalled();
     expect(fixture.writes).toHaveLength(0);
     expect(fixture.orderCalls).toHaveLength(0);
+  });
+});
+
+describe('coursework continuation from a compound read', () => {
+  it('retains exact selectable sources and continues through the ordinary reread and confirmation contract', async () => {
+    const fixture = fixtureAdapter();
+    const work = vi.spyOn(fixture.adapter, 'work');
+    const { reply } = await prepare('查未交作業，查公車', fixture);
+    const targets = parseAssistantCourseworkTargets('courseworkTargets' in reply ? reply.courseworkTargets : undefined);
+    expect(targets.map(target => target.taskId)).toEqual(['task-urgent', 'task-next']);
+    expect(targets[0]).toMatchObject({ workspaceId: 'course-a', kind: 'assignment', title: '樹與圖作業' });
+    expect(reply.cards).toEqual([]);
+    const originalReads = work.mock.calls.length;
+    const followup = input('幫這份作業找半小時', fixture, {
+      studyTarget: courseworkStudyTarget({ target: targets[0] }),
+    });
+    const preview = await run(followup);
+    expect(work.mock.calls.length).toBeGreaterThan(originalReads);
+    expect(followup.model).not.toHaveBeenCalled();
+    expect(preview).toMatchObject({ dataRead: true, modelCalls: 0 });
+    expect(preview.cards).toHaveLength(1);
+    expect(fixture.writes).toHaveLength(0);
+    const card = preview.cards[0], raw = { token: card.token, args: card.args };
+    await expect(confirm(binding, raw, secret, now, fixture.adapter, true, () => now))
+      .resolves.toMatchObject({ status: 'verified', replay: false });
+    await expect(confirm(binding, raw, secret, now, fixture.adapter, true, () => now))
+      .resolves.toMatchObject({ status: 'verified', replay: true });
+    expect(fixture.writes).toHaveLength(1);
+  });
+
+  it('preserves each requested date and kind instead of selecting from another cached work query', async () => {
+    const fixture = fixtureAdapter();
+    fixture.adapter.work = async () => [
+      { id: 'today-assignment', courseId: 'course-a', kind: 'assignment', title: '今天作業', dueAt: '2026-11-04T23:00:00+08:00', state: 'open', submitted: false },
+      { id: 'tomorrow-quiz', courseId: 'course-a', kind: 'quiz', title: '明天測驗', dueAt: '2026-11-05T23:00:00+08:00', state: 'open', submitted: false },
+      { id: 'other-day', courseId: 'course-a', kind: 'assignment', title: '明天作業', dueAt: '2026-11-05T23:00:00+08:00', state: 'open', submitted: false },
+      { id: 'other-kind', courseId: 'course-a', kind: 'quiz', title: '今天測驗', dueAt: '2026-11-04T23:00:00+08:00', state: 'open', submitted: false },
+      { id: 'submitted', courseId: 'course-a', kind: 'assignment', title: '已繳作業', dueAt: '2026-11-04T23:00:00+08:00', state: 'open', submitted: true },
+      { id: 'closed', courseId: 'course-a', kind: 'assignment', title: '已關閉作業', dueAt: '2026-11-04T23:00:00+08:00', state: 'closed', submitted: false },
+      { id: 'expired', courseId: 'course-a', kind: 'assignment', title: '過期作業', dueAt: '2026-11-04T08:00:00+08:00', state: 'open', submitted: false },
+      { id: 'undated', courseId: 'course-a', kind: 'assignment', title: '未定期限', dueAt: null, state: 'open', submitted: false },
+    ];
+    const { reply } = await prepare('查今天要交的作業，查明天測驗，查公車', fixture);
+    expect(reply).toMatchObject({ courseworkTargets: [
+      { taskId: 'today-assignment', kind: 'assignment' }, { taskId: 'tomorrow-quiz', kind: 'quiz' },
+    ] });
+    expect('courseworkTargets' in reply && reply.courseworkTargets).toHaveLength(2);
+  });
+
+  it('keeps the bounded information-reader fallback eligible without broadening its kind filter', async () => {
+    const fixture = fixtureAdapter();
+    const original = await fixture.adapter.work('course-a');
+    fixture.adapter.work = async () => [...original, { id: 'quiz-hidden', courseId: 'course-a', kind: 'quiz',
+      title: '未要求的測驗', dueAt: '2026-11-05T12:00:00+08:00', state: 'open', submitted: false }];
+    const { reply } = await prepare('查明天功課，查餐廳', fixture);
+    expect(reply).toMatchObject({ courseworkTargets: [{ taskId: 'task-urgent', kind: 'assignment' }] });
+    expect('courseworkTargets' in reply && reply.courseworkTargets).toHaveLength(1);
+  });
+
+  it.each(['partial', 'failed'] as const)('does not turn a %s coursework source into automatic follow-up selection', async mode => {
+    const fixture = fixtureAdapter();
+    if (mode === 'partial') fixture.adapter.courses = async () => ({ courses: [{ id: 'course-a', title: '資訊課程' }], partial: true });
+    else fixture.adapter.work = async () => { throw new Error('private upstream detail'); };
+    const { reply, taskPlan } = await prepare('查未交作業，查公車', fixture);
+    expect(reply).toMatchObject({ courseworkTargets: [] });
+    expect(taskPlan.steps.find(step => step.serviceId === 'bus')?.status).toBe('completed');
+    expect(reply.answer).not.toContain('private upstream detail');
+  });
+
+  it.each(['kind', 'course'] as const)('excludes ambiguous task ids across %s even if only one kind was requested', async ambiguity => {
+    const fixture = fixtureAdapter();
+    fixture.adapter.courses = async () => ({ partial: false, courses: ambiguity === 'course'
+      ? [{ id: 'course-a', title: '課程A' }, { id: 'course-b', title: '課程B' }]
+      : [{ id: 'course-a', title: '課程A' }] });
+    fixture.adapter.work = async courseId => [
+      { id: 'same-id', courseId, kind: 'assignment', title: '作業', dueAt: '2026-11-05T23:00:00+08:00', state: 'open', submitted: false },
+      ...(ambiguity === 'kind' ? [{ id: 'same-id', courseId, kind: 'quiz' as const, title: '測驗', dueAt: '2026-11-05T22:00:00+08:00', state: 'open', submitted: false }] : []),
+    ];
+    const { reply } = await prepare('查明天作業，查公車', fixture);
+    expect(reply).toMatchObject({ courseworkTargets: [] });
+    expect(reply.cards).toEqual([]);
+  });
+
+  it('deduplicates overlapping reads and keeps the existing twelve-source selection limit', async () => {
+    const fixture = fixtureAdapter();
+    fixture.adapter.work = async () => Array.from({ length: 15 }, (_, index) => ({
+      id: 'task-' + String(index).padStart(2, '0'), courseId: 'course-a', kind: 'assignment' as const,
+      title: '作業' + index, dueAt: '2026-11-05T23:00:00+08:00', state: 'open', submitted: false,
+    }));
+    const { reply } = await prepare('查未交作業，查明天作業，查公車', fixture);
+    const targets = parseAssistantCourseworkTargets('courseworkTargets' in reply ? reply.courseworkTargets : undefined);
+    expect(targets).toHaveLength(12);
+    expect(new Set(targets.map(target => target.taskId)).size).toBe(12);
+  });
+
+  it('rechecks a selected source after it was submitted instead of treating the previous reader as authority', async () => {
+    const fixture = fixtureAdapter();
+    const { reply } = await prepare('查未交作業，查餐廳', fixture);
+    const [target] = parseAssistantCourseworkTargets('courseworkTargets' in reply ? reply.courseworkTargets : undefined);
+    expect(target).toBeDefined();
+    const previous = await fixture.adapter.work(target.workspaceId);
+    fixture.adapter.work = async () => previous.map(task => ({ ...task, submitted: true }));
+    const followup = input('幫這份作業找半小時', fixture, { studyTarget: courseworkStudyTarget({ target }) });
+    const result = await run(followup);
+    expect(result).toMatchObject({ cards: [], stopReason: 'COURSEWORK_CHANGED', dataRead: true });
+    expect(followup.model).not.toHaveBeenCalled();
+    expect(fixture.writes).toHaveLength(0);
+  });
+
+  it('keeps a study proposal on its original confirmation path without adding a second preparation entry', async () => {
+    const { reply } = await prepare('查未交作業，安排今天15:00到16:00讀書，查公車');
+    expect(reply.cards).toHaveLength(1);
+    expect(reply).toMatchObject({ courseworkTargets: [] });
   });
 });

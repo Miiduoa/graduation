@@ -4,6 +4,8 @@ import { informationKinds } from './information';
 import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskPlan';
+import { parseAssistantPublicCourseResults, type AssistantPublicCourseResult } from '@campus/shared/src/assistantPublicCourseResults';
+import { parsePublicCourseArguments, publicCourseArguments, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
@@ -49,6 +51,12 @@ const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  get_public_courses: [
+    { schoolId: { enum: ['nthu', 'ncnu'] }, query: { type: 'string', maxLength: 80 },
+      weekday: { type: 'integer', minimum: 1, maximum: 7 },
+      credits: { type: 'number', minimum: 0, maximum: 40 } },
+    ['schoolId', 'query'],
+  ],
   list_campus_services: [
     {
       serviceId: { enum: ASSISTANT_SERVICES.map((service) => service.id) },
@@ -439,7 +447,13 @@ export function studyWindow(question: string, answer = ''): { from: string; to: 
 export const toolNames = Object.keys(definitions);
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
-function requestedToolDomains(question: string, simulation: boolean): [string, string][] {
+function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
+  const other = taskQuestionOutsidePublicCourses(question, schoolId);
+  if (other !== question) {
+    const domains: [string, string][] = publicCourseSearches(question, schoolId).length
+      ? [['公開開課', 'get_public_courses']] : [];
+    return [...domains, ...requestedToolDomains(other, simulation, schoolId)];
+  }
   const domains: [string, string][] = [];
   const add = (requested: boolean, label: string, tool: string) => {
     if (requested) domains.push([label, tool]);
@@ -473,7 +487,7 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
 }
 // Call only after execution, with successful (including cached) tool steps.
 // Selection alone does not establish coverage; preludes can cover unselected tools.
-export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[]): string {
+export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[], schoolId = ''): string {
   const completed = new Set(completedNames);
   // A successful day overview also reads due work and the schedule.
   if (completed.has('get_day_overview')) {
@@ -481,13 +495,20 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
     completed.add('get_schedule');
   }
   if (completed.has('get_course_work')) completed.add('get_due_work');
-  const deferred = requestedToolDomains(question, simulation)
+  const deferred = requestedToolDomains(question, simulation, schoolId)
     .filter(([, tool]) => !completed.has(tool)).map(([label]) => label);
   return deferred.length
     ? '本輪尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
     : '';
 }
-export function selectTools(question: string, simulation: boolean): string[] {
+export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
+  const other = taskQuestionOutsidePublicCourses(question, schoolId);
+  if (other !== question) {
+    const names = selectTools(other, simulation, schoolId)
+      .filter(name => name !== 'get_today_context' && name !== 'propose_open_page');
+    const publicNames = publicCourseSearches(question, schoolId).length ? ['get_public_courses'] : [];
+    return [...new Set([...publicNames, ...names])].slice(0, 8);
+  }
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
   const information = informationKinds(question);
@@ -573,7 +594,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
   if (names.length <= 8) return names;
-  const primary = requestedToolDomains(question, simulation)
+  const primary = requestedToolDomains(question, simulation, schoolId)
     .map(([, tool]) => tool).filter((tool) => names.includes(tool));
   return [...new Set([...primary, ...names])].slice(0, 8);
 }
@@ -597,6 +618,7 @@ export function validateTool(name: string, raw: unknown): Obj {
   const [props, required] = definitions[name];
   const a = object(raw, Object.keys(props));
   if (required.some((k) => a[k] === undefined)) return fail();
+  if (name === 'get_public_courses') return publicCourseArguments(parsePublicCourseArguments(a));
   if (name === 'propose_food_order') return { ...cartArgs(a) };
   for (const [key, value] of Object.entries(a)) {
     const spec = props[key] as Obj;
@@ -764,6 +786,7 @@ export function createTools(
   question = '',
   exactEventArguments = false,
 ) {
+  const executionQuestion = taskQuestionOutsidePublicCourses(question, binding.schoolId);
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
   let courses: Promise<{ id: string; title: string }[]> | undefined;
@@ -775,6 +798,7 @@ export function createTools(
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  const publicCourseResults: AssistantPublicCourseResult[] = [];
   async function requirePermission(key: AssistantPermissionKey) {
     try {
       await requireAssistantPermission(adapter, key);
@@ -897,13 +921,13 @@ export function createTools(
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
-    const explicit = parseAssistantCalendarIntent(question, now);
+    const explicit = parseAssistantCalendarIntent(executionQuestion, now);
     if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title) &&
       !(explicit?.kind === 'draft' && raw.title === explicit.event.title))
       raw = { ...raw, title: studyTitle(raw.title) };
     const l = await getLedger();
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
-    validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(question));
+    validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(executionQuestion));
     await requirePermission('createPersonalEvent');
     const card = signCard(
       binding,
@@ -922,6 +946,19 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_public_courses': {
+        const search = parsePublicCourseArguments(a);
+        const requested = publicCourseSearches(question, binding.schoolId);
+        if (!requested.some(item => canonical(publicCourseArguments(item)) === canonical(a)))
+          return fail('PUBLIC_COURSE_QUERY_MISMATCH');
+        if (!adapter.publicCourses) return fail('PUBLIC_COURSES_UNAVAILABLE', 503);
+        const data = await adapter.publicCourses(search);
+        const result = { search, data };
+        if (!parseAssistantPublicCourseResults([...publicCourseResults, result])?.length)
+          return fail('INVALID_PUBLIC_COURSE_RESULT', 502);
+        publicCourseResults.push(result);
+        return result;
+      }
       case 'list_campus_services': {
         const selected = a.serviceId ? getAssistantService(a.serviceId) : null;
         const services = a.serviceId ? (selected ? [selected] : []) : ASSISTANT_SERVICES;
@@ -1067,7 +1104,7 @@ export function createTools(
         );
         if (typeof detail.locationId !== 'string' || !detail.locationId)
           return fail('INVALID_INPUT');
-        const pickup = pickupAt(now, a.requestedPickupAt, question);
+        const pickup = pickupAt(now, a.requestedPickupAt, executionQuestion);
         const items = (Array.isArray(detail.lines) ? detail.lines : []).slice(0, 5).map((raw) => {
           const line = object(raw);
           const selected = Array.isArray(line.selectedOptionIds)
@@ -1367,6 +1404,7 @@ export function createTools(
   return {
     cards,
     context,
+    get publicCourseResults() { return [...publicCourseResults]; },
     recovery(name: string) {
       const next: Record<string, string> = {
         get_dining: '先呼叫 get_dining {} 取得 locationId',
@@ -1386,9 +1424,12 @@ export function createTools(
         get_transit: '先以 action=campus 查詢；arrivals 需真實 city/stopId',
       };
       return {
+        ...(name === 'get_public_courses' ? {
+          requestedQueries: publicCourseSearches(question, binding.schoolId).map(publicCourseArguments),
+        } : {}),
         nextStep:
           next[name] || `依 ${name} schema 補正參數後重試；日期 YYYY-MM-DD、時間 HH:mm，不猜 id`,
-        availableIds: (['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
+        availableIds: (name === 'get_public_courses' ? [] : ['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
           ? tenantIds
           : name === 'get_dining'
             ? [...diningIds]
@@ -1409,7 +1450,7 @@ export function createTools(
       };
     },
     withSignal: withOperationSignal,
-    async call(name: string, raw: unknown, requestQuestion = question) {
+    async call(name: string, raw: unknown, requestQuestion = executionQuestion) {
       const permission = proposalPermission(name);
       if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
@@ -1542,7 +1583,7 @@ export function createTools(
       } catch (error) {
         if (assistantPermissionRecovery(String((error as { code?: string }).code))) throw error;
         if (name !== 'reorder_last_food_order') throw error;
-        const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
+        const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, executionQuestion) });
         const retryKey = name + canonical(filled);
         if (retryKey === key) throw error;
         cache.set(retryKey, dispatch(name, filled));

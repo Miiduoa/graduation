@@ -1059,6 +1059,157 @@ it.each(['ncnu', 'nthu'] as const)('v2 reads %s public courses without model ava
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
+it.each([
+  '查清大資料庫課程，另外查公車',
+  '查今天課表，另外查清大資料庫課程',
+  '查我的行程，另外查清大資料庫課程',
+  '幫這份安排30分鐘，另外查清大資料庫課程',
+])('v2 sends the complete compound request without a local/public/followup early return: %s', async (phrase) => {
+  const requests: Record<string, unknown>[] = [];
+  const data = await publicCatalog('nthu').json();
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    requests.push(JSON.parse(String(init?.body)));
+    return json({ answer: '已保留兩項需求的處理結果。', steps: [], cards: [],
+      publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  savePrivateLesson();
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: phrase } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('公開資料庫課程');
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ schoolId: 'pu', question: phrase, history: [], consent: true });
+  expect(requests[0]).not.toHaveProperty('studyTarget');
+  expect(fetcher.mock.calls.every(([url]) => !url.startsWith('/api/public-course-catalog'))).toBe(true);
+  expect(new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw')
+    .searchParams.get('schoolId')).toBe('nthu');
+});
+
+it('v2 excludes an entire mixed public/private result from later model history while keeping ordinary discussion', async () => {
+  const requests: Record<string, unknown>[] = [];
+  const data = await publicCatalog('nthu').json();
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    requests.push(JSON.parse(String(init?.body)));
+    return requests.length === 2
+      ? json({ answer: '私人行程與外校公開查詢已讀取', steps: [], cards: [],
+        publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }] })
+      : json({ answer: '普通討論' + requests.length, steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  const sendQuestion = (text: string) => {
+    fireEvent.change(question, { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  };
+  sendQuestion('幫我比較兩種讀書策略');
+  await screen.findByText('普通討論1');
+  sendQuestion('查清大資料庫課程，另外查我的行程');
+  await screen.findByText('公開資料庫課程');
+  sendQuestion('繼續比較剛才的兩種策略');
+  await screen.findByText('普通討論3');
+  expect(requests[2].history).toEqual([
+    { role: 'user', content: '幫我比較兩種讀書策略' }, { role: 'assistant', content: '普通討論1' },
+  ]);
+  expect(JSON.stringify(requests[2])).not.toMatch(/清大|私人行程|外校公開/);
+  expect(requests.every(request => request.schoolId === 'pu')).toBe(true);
+});
+
+it.each(['button', 'followup'] as const)('v2 continues an exact private coursework target after a mixed public task with %s', async (method) => {
+  const requests: Record<string, unknown>[] = [];
+  const data = await publicCatalog('nthu').json();
+  const target = { workspaceId: 'cw_one', taskId: 'cwa_one', kind: 'assignment',
+    title: '私人期末資料模型', courseTitle: '私人資料庫管理', dueAt: '2099-11-13T10:00:00Z' };
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    requests.push(JSON.parse(String(init?.body)));
+    return requests.length === 1 ? json({ answer: '私人作業及外校公開開課已讀取。', steps: [], cards: [],
+      dataRead: true, courseworkTargets: [target], courseworkDate: '2030-11-14',
+      publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }],
+      taskPlan: { version: 1, steps: [
+        { id: 'public', serviceId: 'school-courses', label: '查清大公開課程', dependsOn: [],
+          status: 'completed', summary: '清大公開資料庫開課已核對。' },
+        { id: 'coursework', serviceId: 'classroom', label: '查目前帳號的未交作業', dependsOn: [],
+          status: 'completed', summary: '私人資料庫管理：私人期末資料模型尚未繳交。' },
+      ] },
+    }) : json({ answer: '已重新核對指定作業，準備時間尚待確認。', steps: [], cards: [], dataRead: true });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '查清大資料庫課程，另外查我的未交作業' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('公開資料庫課程');
+  expect(screen.getByRole('region', { name: '跨功能任務步驟' })).toBeTruthy();
+  // Exact selection revalidates the original private IDs, without copying any source text to history.
+  fireEvent.click(screen.getByRole('checkbox'));
+  if (method === 'button') {
+    fireEvent.click(screen.getByRole('button', { name: '替私人資料庫管理的私人期末資料模型安排30分鐘' }));
+  } else {
+    fireEvent.change(question, { target: { value: '幫這份作業找30分鐘' } });
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  }
+  await screen.findByText('已重新核對指定作業，準備時間尚待確認。');
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toMatchObject({ schoolId: 'pu', consent: false, history: [],
+    studyTarget: { workspaceId: 'cw_one', taskId: 'cwa_one', kind: 'assignment', date: '2030-11-14' } });
+  expect(JSON.stringify(requests[1])).not.toMatch(/nthu|清大|2099-11-13|尚未繳交/);
+});
+
+it.each(['account', 'school', 'logout'] as const)('v2 discards every late mixed result when the %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | undefined;
+  const data = await publicCatalog('nthu').json();
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    signal = init.signal as AbortSignal;
+    return new Promise<Response>(resolve => { finish = resolve; });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  fireEvent.change(screen.getByLabelText('問題'), { target: { value: '查清大資料庫課程，另外查我的行程' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(signal).toBeDefined());
+  if (change === 'account') state.context = 'session-b';
+  else if (change === 'school') state.school = 'ncnu';
+  else state.pending = true;
+  view.rerender(<Assistant />);
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { finish(json({ answer: '舊校園私人行程', steps: [], cards: [],
+    publicCourseResults: [{ search: { kind: 'search', schoolId: 'nthu', query: '資料庫' }, data }] })); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByText('舊校園私人行程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+});
+
+it('v2 retains the complete mixed request after an error without dispatching either half separately', async () => {
+  const phrase = '查清大資料庫課程，另外查我的行程';
+  const fetcher = vi.fn(async (url: string) => url.endsWith('capability')
+    ? json({ enabled: true, ready: true, version: 2 })
+    : new Response(JSON.stringify({ error: 'UPSTREAM_UNAVAILABLE' }), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: phrase } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByRole('alert');
+  expect(screen.getByRole('alert').textContent).toContain('查詢未完成');
+  expect(screen.getByText(phrase)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect((question as HTMLTextAreaElement).value).toBe(phrase);
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/nuni/assistant/capability', '/api/nuni/assistant/ask']);
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+});
+
 it('v2 preserves the sign-in gate and seeds a shared q only as an editable draft', async () => {
   state.query = 'q=' + encodeURIComponent('幫我查清大資料庫課程');
   state.authenticated = false;

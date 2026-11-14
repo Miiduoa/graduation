@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssistantClient';
+import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
@@ -437,8 +438,9 @@ function V2Conversation({
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim();
     if (!current || busy.current) return;
-    const publicCourseIntent = !selection && resolvePublicCourseAssistantIntent(current, schoolId);
-    const followup = !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
+    const publicCompound = !selection && publicCourseCompoundRequest(current, schoolId);
+    const publicCourseIntent = !publicCompound && !selection && resolvePublicCourseAssistantIntent(current, schoolId);
+    const followup = !publicCompound && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
     const targets = parseAssistantCourseworkTargets(turns.at(-1)?.reply.courseworkTargets);
     const studyDate = followup?.date ?? turns.at(-1)?.reply.courseworkDate;
     let studySelection = selection;
@@ -457,7 +459,7 @@ function V2Conversation({
       }
       studySelection = { target: targets[0], ...(studyDate ? { date: studyDate } : {}) };
     }
-    const local = !studySelection && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
+    const local = !publicCompound && !studySelection && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -465,7 +467,7 @@ function V2Conversation({
       setError('');
       return;
     }
-    const personalRead = !studySelection && canAnswerAssistantPersonalQuestion(current);
+    const personalRead = !publicCompound && !studySelection && canAnswerAssistantPersonalQuestion(current);
     if ((!consent || !ready) && !publicCourseIntent && !personalRead && !studySelection) return;
     busy.current = true;
     const pendingAsk = new AbortController();
@@ -513,7 +515,7 @@ function V2Conversation({
         }
       }
       if ((!ready || !consent) && !studySelection) return;
-      const history = studySelection ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
+      const history = studySelection ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead && turn.reply.publicCourseResults === undefined &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -528,6 +530,7 @@ function V2Conversation({
           ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      if (publicCompound || reply.publicCourseResults !== undefined) reply.dataRead = true;
       // The last selected source stays an untrusted hint for a fresh read, never a model-history fact.
       reply.courseworkTargets = parseAssistantCourseworkTargets(
         reply.courseworkTargets ?? (studySelection ? [studySelection.target] : undefined));

@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
+import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
 import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
 import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -23,9 +25,16 @@ import type { V2ActionStates, V2Card, V2Turn } from './types';
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
   if (parseAssistantTaskPlan(reply.taskPlan))
     return <p>已逐項整理這次任務，結果與尚待處理的項目如下。</p>;
-  if (reply.local || reply.dataRead)
+  if (reply.local || reply.dataRead || reply.publicCourseResults !== undefined)
     return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
   return <AssistantMarkdown text={reply.answer} />;
+}
+
+function PublicCourseResults({ results }: { results: unknown }) {
+  if (results === undefined) return null;
+  const reads = parseAssistantPublicCourseResults(results);
+  if (!reads) return <p className={styles.muted}>公開課程結果尚未通過核對，請重新查詢。</p>;
+  return reads.map((read, index) => <PublicCourseAssistantResult key={read.schoolId + ':' + index} read={read} />);
 }
 
 export function AssistantThread({
@@ -138,10 +147,11 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
-  const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
+  const publicCompound = publicCourseCompoundRequest(question, schoolId);
+  const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
-      (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
+    ((consent && ready) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+      (onStudyTarget && courseworkStudyFollowup(question) !== null))));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -241,6 +251,7 @@ export function AssistantThread({
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states} />
+                <PublicCourseResults results={turn.reply.publicCourseResults} />
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
                     <summary>查了哪些資料</summary>
