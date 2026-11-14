@@ -281,27 +281,52 @@ async function loadCourseContents(
   course: CourseRow,
 ): Promise<CourseContents> {
   const errors: LmsCourseError[] = [];
-  const [activitiesResult, announcementResult] = await Promise.all([
+  const [activitiesResult, coursewareResult, announcementResult] = await Promise.all([
     source.fetchActivities(cookies, course.id, ''),
+    // TronClass can keep courseware in a separately filtered activity feed.
+    // Read both rather than mistaking the unfiltered feed for a complete list.
+    source.fetchActivities(cookies, course.id, 'type=courseware_activity'),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
+  // A denied supplementary feed is still a denied session: never return or cache
+  // earlier results from the general activities endpoint after a school 401.
   if (!activitiesResult.ok) requireAuthorizedSchoolRead(activitiesResult.status);
+  if (!coursewareResult.ok) requireAuthorizedSchoolRead(coursewareResult.status);
   if (!announcementResult.ok) requireAuthorizedSchoolRead(announcementResult.status);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
-  if (activitiesResult.ok) {
-    for (const raw of activitiesResult.value) {
-      const material = parseMaterial(raw, course);
-      if (material) materials.push(material);
-      if (isAnnouncementActivityType(record(raw).type)) {
-        const item = parseAnnouncement(raw, 'activity', course);
-        if (item) activityAnnouncements.push(item);
-      }
+  const seenMaterials = new Set<number>();
+  // A courseware item may appear in both feeds; keep its first occurrence so
+  // the UI never duplicates the same assignment material.
+  const generalActivities = activitiesResult.ok ? activitiesResult.value : [];
+  // The filtered source contributes courseware only. It is not an independent
+  // announcement feed, even if an adapter unexpectedly includes other types.
+  const materialActivities = [
+    ...generalActivities,
+    ...(coursewareResult.ok ? coursewareResult.value : []),
+  ];
+  for (const raw of materialActivities) {
+    const material = parseMaterial(raw, course);
+    if (material && !seenMaterials.has(material.id)) {
+      seenMaterials.add(material.id);
+      materials.push(material);
     }
-  } else {
+  }
+  for (const raw of generalActivities) {
+    if (isAnnouncementActivityType(record(raw).type)) {
+      const item = parseAnnouncement(raw, 'activity', course);
+      if (item) activityAnnouncements.push(item);
+    }
+  }
+  if (!activitiesResult.ok) {
     errors.push({ courseId: course.id, courseName: course.name, area: 'materials', status: activitiesResult.status });
+  }
+  // A missing optional filtered endpoint (404) is tolerated. Other failures
+  // remain visible as incomplete sync even if general courseware was readable.
+  if (!coursewareResult.ok && coursewareResult.status !== 404) {
+    errors.push({ courseId: course.id, courseName: course.name, area: 'materials', status: coursewareResult.status });
   }
 
   let announcements: LmsAnnouncementItem[] = [];
@@ -512,7 +537,7 @@ export function createTronClassLmsHandler({
       // A relink can leave the original portal document intact.
       await verifyLinkedSession();
       const cacheData = cached.data();
-      const saveCache = async (snapshot: LmsReadonlySnapshot, stampSessionVersion = true) => {
+      const saveCache = async (snapshot: LmsReadonlySnapshot) => {
         if (!sessionVersion || !db.runTransaction) return;
         try {
           await db.runTransaction(async (tx) => {
@@ -521,12 +546,8 @@ export function createTronClassLmsHandler({
             // A concurrent refresh, relink or cleanup has already replaced our input.
             if (cached.exists !== current.exists || (current.exists &&
               (!current.updateTime || documentVersion(current) !== documentVersion(cached)))) return;
-            const currentData = current.data();
-            const keepLegacyShape = !stampSessionVersion && current.exists &&
-              currentData != null && !('sessionVersion' in currentData);
             tx.set(cacheRef, {
-              ownerUid: uid, sessionId: linkedId,
-              ...(keepLegacyShape ? {} : { sessionVersion }),
+              ownerUid: uid, sessionId: linkedId, sessionVersion,
               fetchedAt: snapshot.fetchedAt,
               expiresAt: new Date(snapshot.cache.expiresAt),
               snapshot,
@@ -539,10 +560,9 @@ export function createTronClassLmsHandler({
         }
       };
 
-      const legacyCompatibleCache = cacheData != null && !('sessionVersion' in cacheData);
       if (cached.exists && sessionVersion && cacheData &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
-        (cacheData.sessionVersion === sessionVersion || legacyCompatibleCache) &&
+        cacheData.sessionVersion === sessionVersion &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
         const pruned = readCachedExtras(cacheData.extras, now());
         extras = refresh ? {} : pruned.extras;
@@ -551,10 +571,8 @@ export function createTronClassLmsHandler({
       }
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
-        // Legacy caches without sessionVersion are left untouched; stale extras
-        // are only omitted from this response.
-        if (shouldPruneExtras && !legacyCompatibleCache) {
-          await saveCache(cachedHomework, true);
+        if (shouldPruneExtras) {
+          await saveCache(cachedHomework);
           await verifyLinkedSession();
         }
         return {
@@ -635,10 +653,10 @@ export function createTronClassLmsHandler({
       const homework = homeworkOnlySnapshot(snapshot);
       const merged = mergeExtras(homework, extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
-      // Do not rewrite a still-fresh legacy cache just to stamp sessionVersion
-      // when this request fetched no new school data and needs no prune.
-      if (fetchedFromSchool || refresh || (shouldPruneExtras && !legacyCompatibleCache)) {
-        await saveCache(homework, !legacyCompatibleCache || !cachedHomework);
+      // Versionless legacy documents never qualify as a hit; only fresh data
+      // fetched for the verified session may replace them.
+      if (fetchedFromSchool || refresh || shouldPruneExtras) {
+        await saveCache(homework);
       }
       // Do not return the old session's data if the user relinked during the write.
       await verifyLinkedSession();
