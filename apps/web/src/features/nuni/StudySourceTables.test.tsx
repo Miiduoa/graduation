@@ -701,6 +701,38 @@ it('refuses to guess credits or mix explicit units and plain numbers', () => {
   }
 });
 
+it('does not imply zero-based ratios for temperatures, pH, decibels or earthquake scales', () => {
+  const science = [
+    ['攝氏溫度', '20', '40'],
+    ['華氏溫度', '32', '64'],
+    ['酸鹼值', '4', '8'],
+    ['地震規模', '4', '6'],
+    ['噪音分貝', '30', '60'],
+    ['Temperature', '20', '40'],
+    ['Celsius', '20', '40'],
+    ['Fahrenheit', '32', '64'],
+    ['pH', '4', '8'],
+    ['Noise (dB)', '30', '60'],
+    ['Richter Scale', '4', '6'],
+  ] as const;
+  for (const [header, first, second] of science) {
+    const material = ['| 樣本 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual([first, second]);
+    expect(container.querySelectorAll('meter')).toHaveLength(0);
+    unmount();
+  }
+  // Real quantities must continue to offer the opt-in exact-source comparison.
+  const quantity = ['| 樣本 | 數量 |', '| --- | --- |',
+    '| 甲 | 20 |', '| 乙 | 40 |'].join('\n');
+  const { container } = render(<StudySourceTables text={quantity} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => bar.getAttribute('max')))
+    .toEqual(['40', '40']);
+});
+
 it('does not turn numeric years or identifiers into misleading comparison bars', () => {
   for (const header of ['年份', '學年度', '學號', '課程編號', '帳號', '郵遞區號', '年度', 'year', 'ID']) {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
