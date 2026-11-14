@@ -154,6 +154,8 @@ describe('study note filenames', () => {
     expect(courseStudyNotesFilename('  ..  ')).toBe('讀書白板-學習筆記.txt');
     expect(courseStudyNotesFilename('資料庫.MD')).toBe('資料庫-學習筆記.txt');
     expect(courseStudyNotesFilename('資料庫.MARKDOWN')).toBe('資料庫-學習筆記.txt');
+    expect(courseStudyNotesFilename('資料庫\\u200b.MARKDOWN')).toBe('資料庫-學習筆記.txt');
+    expect(courseStudyNotesFilename('👩‍💻.md')).toBe('👩‍💻-學習筆記.txt');
   });
 
   it('keeps long Unicode filenames within a normal filesystem component without splitting emoji', () => {

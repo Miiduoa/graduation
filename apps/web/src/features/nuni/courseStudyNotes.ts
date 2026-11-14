@@ -1,3 +1,4 @@
+import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
 import { splitStudySection, type StudyMode, type StudySource } from '@/lib/studyTutor';
 import type { StudyPassageMemory } from './courseStudySession';
 
@@ -69,12 +70,5 @@ export function buildCourseStudyNotes(
 
 /** A short UTF-8 filename, with no path separators or display-direction controls. */
 export function courseStudyNotesFilename(sourceTitle: string): string {
-  const safe = sourceTitle
-    .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069<>:"/\\|?*]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\.(pdf|txt|md|markdown)$/i, '')
-    .replace(/^[. ]+|[. ]+$/g, '');
-  const title = Array.from(safe).slice(0, 48).join('').trim();
-  return `${title || '讀書白板'}-學習筆記.txt`;
+  return `${courseStudyBackupFilenameStem(sourceTitle)}-學習筆記.txt`;
 }
