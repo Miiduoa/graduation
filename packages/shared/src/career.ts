@@ -145,7 +145,13 @@ export function careerHasSensitiveContent(title: string): boolean {
     /(?<!\d)(?:20\d{2}|1[01]\d)[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?!\d)/g,
     '',
   );
-  const compact = dateFree.toLowerCase().replace(/[\s\p{Cf}]/gu, '');
+  // Exempt only a short numeric room explicitly attached to a building or a
+  // location label and 教室. Keep the rest of the title under the privacy policy.
+  const resultText = dateFree.replace(
+    /((?:[\p{Script=Han}]{1,20}(?:大樓|館|樓))|(?:地點\s*[:：]\s*))\s*\d{1,4}\s*教室/gu,
+    '$1教室',
+  );
+  const compact = resultText.toLowerCase().replace(/[\s\p{Cf}]/gu, '');
   if (/(?<![a-z0-9])[a-f][+-]?(?![a-z0-9])/i.test(dateFree)) return true;
   // Name-like text immediately followed by a numeric result is also private,
   // including spaced digits, decimal results and fractions. Do not treat event
@@ -170,6 +176,18 @@ export function careerHasSensitiveContent(title: string): boolean {
     )
   )
     return true;
+  // Unitless Chinese results may follow a name, including separated digits.
+  // Require a complete result token; public durations and quantities retain units.
+  const chineseResultText = compact.replace(
+    /第[零〇一二三四五六七八九十百千兩壹貳參肆伍陸柒捌玖拾佰]+屆/gu,
+    '',
+  );
+  if (
+    /[\p{Script=Han}]{2,}[零〇一二三四五六七八九十百兩壹貳參肆伍陸柒捌玖拾佰]+(?:點[零〇一二三四五六七八九]+)?(?=$|[^\p{L}\p{N}])/u.test(
+      chineseResultText,
+    )
+  )
+    return true;
   // A Chinese grade may directly follow a name. Exact public compounds were
   // removed above, so「甲公司」stays public while「王測試甲」is withheld.
   if (
@@ -179,11 +197,11 @@ export function careerHasSensitiveContent(title: string): boolean {
   )
     return true;
   // Student identifiers can mix letters and digits rather than contain eight
-  // consecutive digits (for example S411A1234).
+  // consecutive digits, with either a letter or digit first.
   const identifiers = dateFree
     .replace(/[^\p{L}\p{N}]/gu, '')
-    .match(/(?<![a-z0-9])[a-z][a-z0-9]{7,}(?![a-z0-9])/gi);
-  if (identifiers?.some((value) => /\d/.test(value))) return true;
+    .match(/(?<![a-z0-9])[a-z0-9]{8,}(?![a-z0-9])/gi);
+  if (identifiers?.some((value) => /[a-z]/i.test(value) && /\d/.test(value))) return true;
   // Dates are public metadata; other long numeric identifiers may be student IDs.
   const withoutDates = dateFree.replace(/[^\p{L}\p{N}]/gu, '');
   return /\d{8,}/.test(withoutDates) || /\d+(?:[.．]\d+)?\s*分(?!鐘)/.test(folded);
