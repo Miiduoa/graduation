@@ -81,7 +81,7 @@ function splitStudySpeech(text: string): string[] {
         // A faulty iterator can reproduce the original text yet claim that
         // an accent, ZWJ emoji, flag pair or Hangul syllable ends mid-grapheme.
         // Such boundaries are unsafe even when the UTF-16 content matches.
-        const firstCharacter = Array.from(segment)[0] ?? '';
+        const firstCharacter = String.fromCodePoint(segment.codePointAt(0)!);
         if (verifiedOffset > 0 &&
             isStudySpeechContinuation(firstCharacter, previousCharacter, regionalRun)) {
           throw new Error('broken on-device grapheme boundary');
