@@ -99,9 +99,17 @@ export type CareerCommand =
     }
   | { action: 'sources'; sources: CareerSources };
 export type CareerReply = { snapshot?: WorkstudySnapshot; id?: string };
-export type CareerTransport = (schoolId: string, command: CareerCommand) => Promise<CareerReply>;
+export type CareerReadOptions = { signal?: AbortSignal };
+export type CareerTransport = (
+  schoolId: string,
+  command: CareerCommand,
+  options?: CareerReadOptions,
+) => Promise<CareerReply>;
 export type WorkstudyService = {
-  load: (audience: 'student' | 'staff' | 'ops') => Promise<WorkstudySnapshot>;
+  load: (
+    audience: 'student' | 'staff' | 'ops',
+    options?: CareerReadOptions,
+  ) => Promise<WorkstudySnapshot>;
   execute: (command: Exclude<CareerCommand, { action: 'list' }>) => Promise<CareerReply>;
   subscribe?: (
     audience: 'student' | 'staff' | 'ops',
@@ -115,8 +123,8 @@ export function createWorkstudyService(
   transport: CareerTransport,
 ): WorkstudyService {
   return {
-    async load(audience) {
-      const reply = await transport(schoolId, { action: 'list', audience });
+    async load(audience, options) {
+      const reply = await transport(schoolId, { action: 'list', audience }, options);
       if (!reply.snapshot) throw new Error('職涯資料不完整，請重新整理。');
       return reply.snapshot;
     },
@@ -202,22 +210,56 @@ export function createCareerCallableTransport({
   endpoint,
   authHeaders,
   fetcher = fetch,
+  timeoutMs = 15000,
 }: {
   endpoint: string;
   authHeaders: () => Promise<Record<string, string>>;
   fetcher?: typeof fetch;
+  timeoutMs?: number;
 }): CareerTransport {
-  return async (schoolId, command) => {
-    const response = await fetcher(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-      body: JSON.stringify({ data: { ...command, schoolId } }),
+  return async (schoolId, command, options) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const signal = options?.signal;
+    const timeout = setTimeout(
+      abort,
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000,
+    );
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    let rejectAbort = () => {};
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectAbort = () => reject(new Error('職涯操作已取消或等候逾時，請重新整理後重試。'));
+      controller.signal.addEventListener('abort', rejectAbort, { once: true });
+      if (controller.signal.aborted) rejectAbort();
     });
-    const body = (await response.json()) as { result?: CareerReply; error?: { message?: string } };
-    if (!response.ok || body.error)
-      throw new Error(body.error?.message || '暫時無法完成職涯操作，請稍後重試。');
-    if (!body.result) throw new Error('職涯服務回覆不完整，請重新整理。');
-    return body.result;
+    try {
+      return await Promise.race([
+        cancelled,
+        (async () => {
+          const headers = await authHeaders();
+          if (controller.signal.aborted) return await cancelled;
+          const response = await fetcher(endpoint, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ data: { ...command, schoolId } }),
+          });
+          const body = (await response.json()) as {
+            result?: CareerReply;
+            error?: { message?: string };
+          };
+          if (!response.ok || body.error)
+            throw new Error(body.error?.message || '暫時無法完成職涯操作，請稍後重試。');
+          if (!body.result) throw new Error('職涯服務回覆不完整，請重新整理。');
+          return body.result;
+        })(),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+      controller.signal.removeEventListener('abort', rejectAbort);
+    }
   };
 }
 

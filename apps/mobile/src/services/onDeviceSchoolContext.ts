@@ -119,12 +119,22 @@ function isRealTimestamp(value: unknown): value is string {
 // The server parser trims required titles and strips ASCII controls. A
 // JSON-restored snapshot may bypass it; do not let an empty title or control
 // separator become model evidence or impersonate a new prompt line.
+// Unicode direction overrides/isolates and C1 line separators are invisible in
+// student-facing text but can alter how the model reads a restored source label.
+// Keep normal Chinese, Latin and emoji text; reject only formatting controls.
+function unsafePromptControl(code: number): boolean {
+  return code < 32 || (code >= 0x7f && code <= 0x9f) ||
+    code === 0x061c || code === 0x200e || code === 0x200f ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069);
+}
+
 function safePromptEvidenceText(value: unknown, maxLength: number, optional = false): value is string {
   if (typeof value !== 'string' || value.length > maxLength ||
       (!optional && !value.trim())) return false;
   for (const character of value) {
     const code = character.codePointAt(0);
-    if (code !== undefined && (code < 32 || code === 127 || code === 0x2028 || code === 0x2029)) return false;
+    if (code !== undefined && (unsafePromptControl(code) || code === 0x2028 || code === 0x2029)) return false;
   }
   return true;
 }
@@ -182,7 +192,7 @@ function checkedSchoolLabel(value: unknown, maxLength: number): string {
   if (!label || label.length > maxLength) return '';
   for (const character of label) {
     const code = character.codePointAt(0);
-    if (code !== undefined && (code < 32 || code === 127 || code === 0x2028 || code === 0x2029)) return '';
+    if (code !== undefined && (unsafePromptControl(code) || code === 0x2028 || code === 0x2029)) return '';
   }
   return label;
 }

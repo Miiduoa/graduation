@@ -262,3 +262,137 @@ test.each([false, true])(
     );
   },
 );
+
+test('slow reads coalesce subscription and manual triggers into one latest snapshot', async () => {
+  const { view, service, changed } = setup();
+  let finish!: (value: WorkstudySnapshot) => void;
+  jest.mocked(service.load).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {});
+  expect(service.load).toHaveBeenCalledTimes(1);
+  act(() => {
+    changed();
+    changed();
+  });
+  fireEvent.press(view.getByRole('button', { name: '重新整理工讀資料' }));
+  expect(service.load).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
+  });
+  expect(service.load).toHaveBeenCalledTimes(2);
+  expect(view.queryByText('過期讀取結果')).toBeNull();
+  expect(view.getByText('測試用工讀')).toBeTruthy();
+});
+
+test('account remount and unmount abort pending reads and discard late failures', async () => {
+  const { view, service, props } = setup();
+  let rejectOld!: (reason: Error) => void;
+  let oldSignal: AbortSignal | undefined;
+  jest.mocked(service.load).mockImplementationOnce((_audience, options) => {
+    oldSignal = options?.signal;
+    return new Promise((_resolve, reject) => {
+      rejectOld = reject;
+    });
+  });
+  await act(async () => {});
+  const next = {
+    ...service,
+    load: jest.fn<ReturnType<WorkstudyService['load']>, Parameters<WorkstudyService['load']>>(
+      async () => snapshot(),
+    ),
+  };
+  view.rerender(<CareerWorkstudy {...props} ownerKey="other" service={next} />);
+  await act(async () => {
+    rejectOld(new Error('舊讀取已取消'));
+  });
+  expect(oldSignal?.aborted).toBe(true);
+  expect(view.queryByText('舊讀取已取消')).toBeNull();
+  expect(view.getByText('測試用工讀')).toBeTruthy();
+  let unmountSignal: AbortSignal | undefined;
+  let rejectUnmount!: (reason: Error) => void;
+  next.load.mockImplementationOnce((_audience?: unknown, options?: { signal?: AbortSignal }) => {
+    unmountSignal = options?.signal;
+    return new Promise<WorkstudySnapshot>((_resolve, reject) => {
+      rejectUnmount = reject;
+    });
+  });
+  fireEvent.press(view.getByRole('button', { name: '重新整理工讀資料' }));
+  view.unmount();
+  expect(unmountSignal?.aborted).toBe(true);
+  await act(async () => {
+    rejectUnmount(new Error('卸載已取消'));
+  });
+  expect(next.load).toHaveBeenCalledTimes(2);
+});
+
+test('a write cancels a hanging read before refreshing the saved snapshot', async () => {
+  const { view, service, changed } = setup('staff');
+  await view.findByRole('button', { name: '新增機會' });
+  let signal: AbortSignal | undefined;
+  jest.mocked(service.load).mockImplementationOnce((_audience, options) => {
+    signal = options?.signal;
+    return new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(new Error('讀取已取消')), { once: true });
+    });
+  });
+  act(() => changed());
+  fireEvent.press(view.getByRole('button', { name: '編輯測試用工讀' }));
+  fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+  await act(async () => {});
+  expect(signal?.aborted).toBe(true);
+  expect(service.load).toHaveBeenCalledTimes(3);
+  expect(view.queryByText('讀取已取消')).toBeNull();
+  expect(view.getByText('已儲存。')).toBeTruthy();
+});
+
+test('continuous refresh triggers allow each serialized read to commit without starvation', async () => {
+  const { view, service, changed } = setup();
+  await view.findByText('測試用工讀');
+  let finish!: (value: WorkstudySnapshot) => void;
+  jest.mocked(service.load).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => changed());
+  for (let i = 0; i < 4; i++) {
+    act(() => {
+      changed();
+      changed();
+    });
+    await act(async () => {
+      finish({ ...snapshot(), opportunities: [{ ...opportunity, title: `讀取結果${i}` }] });
+    });
+    expect(view.getByText(`讀取結果${i}`)).toBeTruthy();
+    if (i > 0) expect(view.queryByText(`讀取結果${i - 1}`)).toBeNull();
+    expect(service.load).toHaveBeenCalledTimes(i + 3);
+  }
+  view.unmount();
+});
+
+test('a cancelled read cannot overwrite the newer result after a write', async () => {
+  const { view, service, changed } = setup('staff');
+  await view.findByText('測試用工讀');
+  let finish!: (value: WorkstudySnapshot) => void;
+  jest.mocked(service.load).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => changed());
+  fireEvent.press(view.getByText('編輯測試用工讀'));
+  fireEvent.press(view.getByText('儲存機會'));
+  await act(async () => {});
+  await act(async () => {
+    finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '已取消的舊結果' }] });
+  });
+  expect(view.getByText('測試用工讀')).toBeTruthy();
+  expect(view.queryByText('已取消的舊結果')).toBeNull();
+  expect(service.load).toHaveBeenCalledTimes(3);
+});

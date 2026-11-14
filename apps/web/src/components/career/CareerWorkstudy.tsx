@@ -149,24 +149,53 @@ function Workspace({
   const alive = useRef(true);
   const inFlight = useRef(false);
   const generation = useRef(0);
-  async function refresh() {
-    const current = ++generation.current;
-    try {
-      const data = await service.load(audience);
-      if (alive.current && current === generation.current) {
-        setSnapshot(data);
-        setCheckedAt(Date.now());
-        setError('');
-      }
-    } catch (e) {
-      if (alive.current && current === generation.current) {
-        setSnapshot(null);
-        setError(e instanceof Error ? e.message : '暫時讀不到工讀資料，請重新整理。');
-      }
+  const readTask = useRef<Promise<void> | null>(null);
+  const readController = useRef<AbortController | null>(null);
+  const pendingRefresh = useRef(false);
+  const session = useRef(0);
+  function refresh(): Promise<void> {
+    if (!alive.current) return Promise.resolve();
+    if (readTask.current) {
+      // Queue one follow-up; triggers alone must not starve the active read.
+      pendingRefresh.current = true;
+      return readTask.current;
     }
+    const epoch = session.current;
+    const task = (async () => {
+      do {
+        pendingRefresh.current = false;
+        const controller = new AbortController();
+        readController.current = controller;
+        const current = ++generation.current;
+        try {
+          const data = await service.load(audience, { signal: controller.signal });
+          if (alive.current && !controller.signal.aborted && current === generation.current) {
+            setSnapshot(data);
+            setCheckedAt(Date.now());
+            setError('');
+          }
+        } catch (e) {
+          if (alive.current && !controller.signal.aborted && current === generation.current) {
+            setSnapshot(null);
+            setError(e instanceof Error ? e.message : '暫時讀不到工讀資料，請重新整理。');
+          }
+        }
+      } while (alive.current && epoch === session.current && pendingRefresh.current);
+    })();
+    readTask.current = task;
+    void task.finally(() => {
+      if (readTask.current === task) {
+        readTask.current = null;
+        readController.current = null;
+        // A write can request a refresh after the loop exits but before this cleanup.
+        if (alive.current && pendingRefresh.current) void refresh();
+      }
+    });
+    return task;
   }
   useEffect(() => {
     alive.current = true;
+    const epoch = session.current;
     let cancelled = false;
     void Promise.resolve().then(() => {
       if (!cancelled) void refresh();
@@ -193,6 +222,11 @@ function Workspace({
     return () => {
       cancelled = true;
       alive.current = false;
+      session.current = epoch + 1;
+      pendingRefresh.current = false;
+      readController.current?.abort();
+      readTask.current = null;
+      readController.current = null;
       clearInterval(timer);
       unsubscribe?.();
     };
@@ -206,6 +240,8 @@ function Workspace({
     setError('');
     setNotice('');
     generation.current++;
+    pendingRefresh.current = false;
+    readController.current?.abort();
     try {
       await service.execute(command);
       if (!alive.current) return;
@@ -321,8 +357,12 @@ function Workspace({
         onPress={() => {
           void refresh();
           void loadCourses()
-            .then(setCourses)
-            .catch(() => setCourses(null));
+            .then((value) => {
+              if (alive.current) setCourses(value);
+            })
+            .catch(() => {
+              if (alive.current) setCourses(null);
+            });
         }}
       />
       {!snapshot && !error && <Body>正在讀取工讀資料…</Body>}
