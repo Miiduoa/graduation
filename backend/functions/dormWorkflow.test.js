@@ -3,7 +3,8 @@ const { createDormWorkflowHandler, transition } = require('./dormWorkflow');
 function fixture() {
   const data = new Map([
     ['schools/pu', { dormWorkflowEnabled: true }],
-    ['schools/pu/members/student', { role: 'student', studentId: '123', displayName: '同學' }],
+    ['schools/pu/members/student', { role: 'student' }],
+    ['schools/pu/dormSsoIdentities/student', { studentId: '123', displayName: '同學' }],
     ['schools/pu/members/staff', { role: 'staff' }],
     ['schools/pu/members/admin', { role: 'admin' }],
     [
@@ -263,7 +264,7 @@ test('admin changes only dorm domains, records audit and cannot grant to another
       targetUid: 'outsider',
       packages: true,
       repairs: true,
-      buildings: [],
+      buildings: ['A'],
     }),
   ).rejects.toMatchObject({ code: 'permission-denied' });
 });
@@ -588,7 +589,8 @@ test('roster identity uses server-owned membership and ignores forged or duplica
 
 test('duplicate verified membership IDs fail without partially importing the roster', async () => {
   const { call, data } = fixture();
-  data.set('schools/pu/members/other', { role: 'student', studentId: '123' });
+  data.set('schools/pu/members/other', { role: 'student' });
+  data.set('schools/pu/dormSsoIdentities/other', { studentId: '123' });
   await expect(
     call('staff', {
       action: 'importResidents',
@@ -659,9 +661,10 @@ test.each([false, true])(
   'verified general SSO identity supports roster import (existing=%s)',
   async (existing) => {
     const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
-    const { dormSsoMembershipFields } = require('./dormSsoIdentity');
+    const { writeDormSsoIdentity } = require('./dormSsoIdentity');
     const { call, data, db } = fixture();
     data.delete('schools/pu/members/student');
+    data.delete('schools/pu/dormSsoIdentities/student');
     if (existing) data.set('schools/pu/members/student', { role: 'member', status: 'active' });
     data.set('users/student', { studentId: 'forged', displayName: '自行修改' });
     const input = {
@@ -675,14 +678,22 @@ test.each([false, true])(
       uid: 'student',
       schoolId: 'pu',
       profile: { role: 'student', displayName: '校方姓名' },
-      membershipFields: dormSsoMembershipFields({ studentId: '123' }),
     });
-    expect(data.get('schools/pu/members/student')).toMatchObject({
-      studentId: '123',
-      role: 'member',
+    await writeDormSsoIdentity({
+      db,
+      uid: 'student',
+      schoolId: 'pu',
+      userInfo: { studentId: '123', name: '校方姓名' },
     });
+    expect(data.get('schools/pu/members/student')).not.toHaveProperty('studentId');
+    expect(data.get('schools/pu/members/student')).not.toHaveProperty('displayName');
     await call('staff', input);
-    expect(data.get('schools/pu/dormResidents/123')).toMatchObject({ userId: 'student' });
+    expect(data.get('schools/pu/dormResidents/123')).toMatchObject({
+      userId: 'student',
+      name: '校方姓名',
+    });
+    const workspace = await call('staff', { action: 'workspace' });
+    expect(workspace.residents.filter((r) => r.name.includes('校方姓名'))).toHaveLength(1);
     await call('student', {
       action: 'requestLeave',
       date: '2099-01-01',
@@ -693,9 +704,69 @@ test.each([false, true])(
   },
 );
 
-test('SSO mapping ignores missing or malformed claims and supports the verified employee ID', () => {
-  const { dormSsoMembershipFields } = require('./dormSsoIdentity');
-  expect(dormSsoMembershipFields({})).toEqual({});
-  expect(dormSsoMembershipFields({ studentId: '../forged' })).toEqual({});
-  expect(dormSsoMembershipFields({ employee_id: ' E123 ' })).toEqual({ studentId: 'E123' });
+test('SSO mapping replaces missing or malformed claims without exposing them in membership', async () => {
+  const { writeDormSsoIdentity } = require('./dormSsoIdentity');
+  const { db, data } = fixture();
+  for (const userInfo of [
+    {},
+    { studentId: '../forged' },
+    { employee_id: ' E123 ', displayName: ' 校方姓名 ' },
+  ]) {
+    await writeDormSsoIdentity({ db, uid: 'student', schoolId: 'pu', userInfo });
+    expect(data.get('schools/pu/dormSsoIdentities/student')).toEqual({
+      studentId: userInfo.employee_id ? 'E123' : null,
+      displayName: userInfo.employee_id ? '校方姓名' : '',
+    });
+    expect(data.get('schools/pu/members/student')).not.toHaveProperty('studentId');
+  }
+});
+
+test.each([
+  undefined,
+  {},
+  { status: 'active', packages: true, repairs: true },
+  { status: 'active', packages: true, repairs: true, buildings: [] },
+])(
+  'shared service permissions never grant dorm access without explicit building scope: %j',
+  async (dormRoles) => {
+    const { call, data } = fixture();
+    const legacy = { status: 'active', repairs: true, packages: true };
+    data.set('schools/pu/serviceRoles/staff', legacy);
+    data.delete('schools/pu/dormStaffRoles/staff');
+    if (dormRoles) data.set('schools/pu/dormStaffRoles/staff', dormRoles);
+    expect(await call('staff', { action: 'config' })).toMatchObject({
+      repairs: false,
+      packages: false,
+    });
+    await expect(call('staff', { action: 'workspace' })).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    expect(data.get('schools/pu/serviceRoles/staff')).toEqual(legacy);
+    expect(hasServiceDomainAccess(legacy, 'packages')).toBe(true);
+  },
+);
+
+test('dorm grants require buildings while school administrators retain access', async () => {
+  const { call } = fixture();
+  await expect(
+    call('admin', { action: 'setStaff', targetUid: 'staff', packages: true, buildings: [] }),
+  ).rejects.toMatchObject({ code: 'invalid-argument' });
+  expect(await call('admin', { action: 'workspace' })).toHaveProperty('residents');
+});
+
+test('readable member profile IDs cannot establish a dorm roster identity', async () => {
+  const { call, data } = fixture();
+  data.delete('schools/pu/dormSsoIdentities/student');
+  data.set('schools/pu/members/student', {
+    role: 'member',
+    studentId: '123',
+    displayName: '非隔離映射',
+  });
+  await expect(
+    call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+    }),
+  ).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(data.has('schools/pu/dormResidents/123')).toBe(false);
 });

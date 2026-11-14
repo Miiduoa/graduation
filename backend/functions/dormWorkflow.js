@@ -35,15 +35,15 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       throw new HttpsError('invalid-argument', '學校代碼錯誤');
     const membership = await authz.assertActiveSchoolMember(schoolId, uid);
     const school = db.collection('schools').doc(schoolId);
-    const [schoolDoc, rolesDoc, dormRolesDoc] = await Promise.all([
+    const [schoolDoc, dormRolesDoc] = await Promise.all([
       school.get(),
-      school.collection('serviceRoles').doc(uid).get(),
       school.collection('dormStaffRoles').doc(uid).get(),
     ]);
-    const roles = dormRolesDoc.exists ? dormRolesDoc.data() : rolesDoc.data() || {};
+    const roles = dormRolesDoc.data() || {};
+    const scoped = Array.isArray(roles.buildings) && roles.buildings.length > 0;
     const admin = membership.role === 'admin';
-    const repairs = admin || (roles.status === 'active' && roles.repairs === true);
-    const packages = admin || (roles.status === 'active' && roles.packages === true);
+    const repairs = admin || (scoped && roles.status === 'active' && roles.repairs === true);
+    const packages = admin || (scoped && roles.status === 'active' && roles.packages === true);
     const enabled = schoolDoc.data()?.dormWorkflowEnabled === true;
     if (input.action === 'config')
       return {
@@ -61,10 +61,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         throw new HttpsError('permission-denied', '需要宿舍服務權限');
     };
     const canAccessBuilding = (row) =>
-      admin ||
-      !Array.isArray(roles.buildings) ||
-      !roles.buildings.length ||
-      roles.buildings.includes(row.building || row.dormitory);
+      admin || (scoped && roles.buildings.includes(row.building || row.dormitory));
     const inBuilding = (row) => {
       if (!canAccessBuilding(row)) throw new HttpsError('permission-denied', '不屬於值班棟別');
     };
@@ -75,14 +72,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       return snap.docs
         .map((d) => ({ id: d.id, ...serialize(d.data()) }))
         .filter((row) => name !== 'dormResidents' || row.active !== false)
-        .filter(
-          (row) =>
-            own ||
-            admin ||
-            !Array.isArray(roles.buildings) ||
-            !roles.buildings.length ||
-            roles.buildings.includes(row.building || row.dormitory),
-        );
+        .filter((row) => own || canAccessBuilding(row));
     };
     if (action === 'mine') {
       const roster = await school.collection('dormResidents').where('userId', '==', uid).get();
@@ -110,6 +100,8 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         input.buildings.some((b) => typeof b !== 'string' || !b.trim() || b.length > 70)
       )
         throw new HttpsError('invalid-argument', '請檢查棟別');
+      if ((input.packages === true || input.repairs === true) && !input.buildings.length)
+        throw new HttpsError('invalid-argument', '請至少指定一個值班棟別');
       await db.runTransaction(async (tx) => {
         await authz.assertSchoolAdmin(schoolId, uid, tx);
         const memberRef = school.collection('members').doc(target),
@@ -374,10 +366,9 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           bed: required(r.bed, 30),
         };
         inBuilding(row);
-        // School membership studentId is maintained by verified school login;
-        // users.studentId is client-editable and must never establish identity.
+        // Only the backend-only verified SSO mapping establishes roster identity.
         const members = await school
-          .collection('members')
+          .collection('dormSsoIdentities')
           .where('studentId', '==', studentId)
           .get();
         const matches = [];

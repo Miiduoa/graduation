@@ -565,7 +565,7 @@ export function DormWorkflow({
                 }
               />
               {f('targetUid', '輔導員帳號 UID')}
-              {f('buildings', '值班棟別（逗號分隔，留空代表全棟）')}
+              {f('buildings', '值班棟別（授權時必填，多棟以逗號分隔）')}
               {button('授予包裹及報修權限', {
                 action: 'setStaff',
                 targetUid: get('targetUid'),

@@ -2308,8 +2308,6 @@ exports.verifySSOCallback = onRequest(
       const schoolRole = await writeSchoolLoginProfile({
         uid,
         schoolId,
-        // Only verified adapter claims establish the dorm roster identity.
-        membershipFields: require('./dormSsoIdentity').dormSsoMembershipFields(userInfo),
         profile: {
           email:
             userInfo.email ||
@@ -2330,6 +2328,7 @@ exports.verifySSOCallback = onRequest(
         },
         ssoLinkRef,
       });
+      await require('./dormSsoIdentity').writeDormSsoIdentity({ db, uid, schoolId, userInfo });
       resolvedRole = schoolRole.role;
 
       const customToken = await auth.createCustomToken(uid, {

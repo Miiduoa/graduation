@@ -103,3 +103,12 @@
 - P2：Web／Mobile 本人今晚外宿摘要獨立儲存 mine 回傳的 leaves；進入職員工作台後仍另外取得 mine，不以整棟 workspace 外宿資料更新本人摘要。換帳號／學校時清除摘要，沿用既有請求世代檢查避免舊回應寫入。
 - 有登入權限migration變更：本輪依審查要求，窄幅修改 index.js 一般 SSO 回呼的 membershipFields 參數，僅同步可信學號；隔離的登入整合與既有宿舍授權部署皆列入「需晉瑋說『上』」。未改 sessions、ACL 判斷、Firestore／Storage rules 或 migration，未部署或寫入正式資料。
 - 驗證：後端 dormWorkflow／schoolLoginProfile／authz 共 69 項、Web DormWorkflow 10 項、Mobile DormWorkflow／DormStaffHome 12 項通過；Web 與 Mobile 全專案 typecheck 通過。新增一般 SSO 新建／既有帳號登入後匯入名冊及外宿申請整合案例，以及兩端職員切換與本人核可／未核可摘要回歸案例。測試使用合成資料，Jest 快取與型別檢查暫存置於 /tmp，完成後刪除。沿用 Node 24（工具提示專案要求 Node 20／22），未安裝依賴或更換 node_modules symlink。
+
+## PR #629 指定 R2 修正（可信身分隔離與明確宿舍授權）
+
+- P1：撤回一般 SSO 對 members.studentId 的新增寫入。成功校方登入後，僅從已驗證 adapter 投影學號及姓名至 schools/{schoolId}/dormSsoIdentities/{uid}；此隔離集合沒有客戶端讀寫授權，沿用現有規則的預設拒絕。重新登入取代舊映射，缺漏／不合法學號清空為 null，不採用 users 或 members 個人資料補值。
+- P1：宿舍 callable 不再回退 serviceRoles；非管理員必須具明確、啟用的 dormStaffRoles、對應 domain 及非空值班棟別。讀寫使用相同棟別判斷；授權拒絕空棟別，兩端提示一併修正。既有共用服務授權與 API 維持原狀，學校管理員仍可處理全校宿舍資料。
+- P2：名冊匯入以隔離 SSO 映射查找唯一且啟用的本校成員，姓名取自相同可信映射，修正一般 SSO 成員紀錄沒有姓名而無法搜尋、核對的問題。
+- 有登入權限migration變更：依本輪審查要求，窄幅修改 index.js 一般 SSO 回呼中本 PR 新增的宿舍身分同步，以及 dormWorkflow.js 的宿舍授權判斷；同步實作隔離於 dormSsoIdentity.js。此登入整合、宿舍授權與新增隔離集合仍列入「需晉瑋說『上』」部署範圍。未改共用登入 writer、sessions、共用 authz、ACL／Firestore／Storage rules 或 migration，未部署、遷移或操作正式資料。先前使用 members 學號映射的方案由本節取代；開通前一般 SSO 帳號須重新登入建立隔離映射。
+- 回歸涵蓋：一般 SSO 新／舊帳號以校方姓名匯入與搜尋、缺漏／不合法身分刷新、拒絕 members／users 非隔離學號、重複映射、共用服務不能取得宿舍權限、缺漏／空棟別拒絕授權，以及管理員保留存取能力。
+- 驗證：後端 dormWorkflow／schoolLoginProfile／authz 共 75 項、Web DormWorkflow／cloud 23 項、Mobile DormWorkflow／DormStaffHome 12 項通過；shared、Web、Mobile 全專案 typecheck、後端既有設定 ESLint、index.js 語法與 git diff --check 通過。首次根目錄 ESLint 套用了前端設定，改從 backend/functions 使用既有設定後通過。Jest 快取及型別檢查輸出置於 /tmp 並於驗證後刪除；未安裝套件、新增依賴或更換 node_modules symlink。
