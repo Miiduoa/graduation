@@ -67,6 +67,7 @@ function fixture(options = {}) {
     create: (ref, row) => data.set(ref.path, row),
     set: (ref, row, opts) =>
       data.set(ref.path, opts?.merge ? { ...data.get(ref.path), ...row } : row),
+    delete: (ref) => data.delete(ref.path),
     update: (ref, row) => data.set(ref.path, { ...data.get(ref.path), ...row }),
     commit: async () => {},
   });
@@ -172,9 +173,9 @@ test('packages require roster, retry is idempotent, all waiting packages are col
   });
   const { id } = await call('staff', request);
   await call('staff', request);
-  expect([...data.keys()].filter((k) => k.includes('/packages/'))).toHaveLength(1);
+  expect([...data.keys()].filter((k) => k.includes('/packages/'))).toHaveLength(0);
   await call('staff', { action: 'collectPackages', studentId: '123' });
-  expect(data.get('schools/pu/packages/' + id).status).toBe('picked_up');
+  expect(data.get('schools/pu/dormPackages/' + id).status).toBe('picked_up');
 });
 test('batch pickup selects only waiting parcels in authorized buildings after a student moves', async () => {
   const { call, data, db } = fixture();
@@ -205,7 +206,10 @@ test('batch pickup selects only waiting parcels in authorized buildings after a 
   await expect(call('staff', { action: 'collectPackages', studentId: '123' })).resolves.toEqual({
     success: true,
   });
-  expect(read.mock.calls).toEqual([['schools/pu/dormPackages/current']]);
+  expect(read.mock.calls).toEqual([
+    ['schools/pu/dormPackages/current'],
+    ['schools/pu/packages/current'],
+  ]);
   for (const [id, row] of Object.entries(parcels)) {
     const status = id === 'current' ? 'picked_up' : row.status;
     for (const collection of ['dormPackages', 'packages'])
@@ -444,8 +448,7 @@ test('scoped grants and personal data never enter legacy school-wide access path
     studentId: '123',
     building: 'A',
   });
-  expect(data.get('schools/pu/packages/' + id)).not.toHaveProperty('studentId');
-  expect(data.get('schools/pu/packages/' + id)).not.toHaveProperty('building');
+  expect(data.has('schools/pu/packages/' + id)).toBe(false);
   data.set('schools/pu/dormPackages/other', { studentId: '456', building: 'B', status: 'waiting' });
   data.set('schools/pu/dormRepairs/other', {
     userId: 'other',
@@ -482,8 +485,8 @@ test('legacy pickup atomically updates both feeds and prevents staff return', as
   const runTransaction = jest.spyOn(db, 'runTransaction');
   await confirmPackagePickup({ db, schoolId: 'pu', packageId: id, uid: 'student' });
   expect(runTransaction).toHaveBeenCalledTimes(1);
-  for (const collection of ['packages', 'dormPackages'])
-    expect(data.get(`schools/pu/${collection}/${id}`).status).toBe('picked_up');
+  expect(data.has(`schools/pu/packages/${id}`)).toBe(false);
+  expect(data.get(`schools/pu/dormPackages/${id}`).status).toBe('picked_up');
   expect((await call('staff', { action: 'workspace' })).packages).toEqual([]);
   const workspace = await call('staff', { action: 'workspace', includeHistory: true });
   expect(workspace.packages[0].status).toBe('picked_up');
@@ -667,7 +670,7 @@ test('parcel transaction retry notifies only the committed recipient and keeps r
   };
   const { id } = await call('staff', request);
   expect(data.get('schools/pu/dormPackages/' + id).recipientId).toBe('new-student');
-  expect(data.get('schools/pu/packages/' + id).recipientId).toBe('new-student');
+  expect(data.get('schools/pu/dormPackages/' + id).recipientId).toBe('new-student');
   expect(sendPushToUser).toHaveBeenCalledTimes(1);
   expect(sendPushToUser.mock.calls[0][0]).toBe('new-student');
   db.runTransaction = runTransaction;
@@ -1220,6 +1223,7 @@ function photoBucket() {
   const signed = jest.fn(async () => ['https://signed.invalid/random']);
   const file = (path) => ({
     save: jest.fn(async (bytes, opts) => objects.set(path, { bytes, ...opts.metadata })),
+    delete: jest.fn(async () => objects.delete(path)),
     getMetadata: jest.fn(async () => [objects.get(path)]),
     setMetadata: jest.fn(async (patch) => objects.set(path, { ...objects.get(path), ...patch })),
     copy: jest.fn(async (target) =>
@@ -1373,32 +1377,199 @@ test('stored applicant IDs are masked again and unauthorized photo sources fail 
   ).rejects.toMatchObject({ code: 'invalid-argument' });
 });
 
-
-test.each(['missing', 'inactive'])('legacy parcels remain available with %s membership while workspace stays protected', async (status) => {
-  const { call, data } = fixture();
-  if (status === 'missing') data.delete('schools/pu/members/student');
-  else data.set('schools/pu/members/student', { status: 'inactive' });
-  data.set('schools/pu', { dormWorkflowEnabled: false });
-  data.set('schools/pu/packages/private_student_id', { recipientId: 'student', description: '本人包裹', studentId: 'PRIVATE' });
-  data.set('schools/pu/packages/other', { recipientId: 'other', description: '不可見' });
-  const result = await call('student', { action: 'parcels' });
-  expect(result.rows).toEqual([{ id: expect.stringMatching(/^dw_/), data: { description: '本人包裹' } }]);
-  await expect(call('student', { action: 'workspace' })).rejects.toHaveProperty('code', 'permission-denied');
-  await expect(call(null, { action: 'parcels' })).rejects.toHaveProperty('code', 'unauthenticated');
-});
+test.each(['missing', 'inactive'])(
+  'legacy parcels remain available with %s membership while workspace stays protected',
+  async (status) => {
+    const { call, data } = fixture();
+    if (status === 'missing') data.delete('schools/pu/members/student');
+    else data.set('schools/pu/members/student', { status: 'inactive' });
+    data.set('schools/pu', { dormWorkflowEnabled: false });
+    data.set('schools/pu/packages/private_student_id', {
+      recipientId: 'student',
+      description: '本人包裹',
+      studentId: 'PRIVATE',
+    });
+    data.set('schools/pu/packages/other', { recipientId: 'other', description: '不可見' });
+    const result = await call('student', { action: 'parcels' });
+    expect(result.rows).toEqual([
+      { id: expect.stringMatching(/^dw_/), data: { description: '本人包裹' } },
+    ]);
+    await expect(call('student', { action: 'workspace' })).rejects.toHaveProperty(
+      'code',
+      'permission-denied',
+    );
+    await expect(call(null, { action: 'parcels' })).rejects.toHaveProperty(
+      'code',
+      'unauthenticated',
+    );
+  },
+);
 
 test('roster reimport preserves selected handles and page cursors', async () => {
   const { call, data } = fixture();
   for (let n = 0; n < 51; n++) {
-    data.set('schools/pu/dormResidents/' + n, { studentId: String(n), userId: 'student', building: 'A', room: '101', bed: '1', updatedAt: n });
+    data.set('schools/pu/dormResidents/' + n, {
+      studentId: String(n),
+      userId: 'student',
+      building: 'A',
+      room: '101',
+      bed: '1',
+      updatedAt: n,
+    });
   }
   const first = await call('staff', { action: 'workspace' });
   const cursor = first.nextCursors[JSON.stringify(['dormResidents', 'A'])];
   const original = [...data.entries()].find(([, row]) => row.publicId === cursor);
   data.set('schools/pu/dormSsoIdentities/student', { studentId: original[1].studentId });
-  await call('staff', { action: 'importResidents', rows: [{ studentId: original[1].studentId, building: 'A', room: '102', bed: '1' }] });
+  await call('staff', {
+    action: 'importResidents',
+    rows: [{ studentId: original[1].studentId, building: 'A', room: '102', bed: '1' }],
+  });
   expect(data.get(original[0]).publicId).toBe(cursor);
-  await expect(call('staff', { action: 'workspace', cursors: first.nextCursors })).resolves.toHaveProperty('residents');
+  await expect(
+    call('staff', { action: 'workspace', cursors: first.nextCursors }),
+  ).resolves.toHaveProperty('residents');
   await call('staff', { action: 'deactivateResident', studentId: cursor });
   expect(data.get(original[0]).active).toBe(false);
+});
+
+test('private parcels project only recipient fields and support pickup without legacy mirrors', async () => {
+  const { confirmPackagePickup } = require('./packagePickup');
+  const { call, data, db } = fixture();
+  const uid = 'pu-SYNTHETIC987654';
+  data.set('schools/pu/dormResidents/123', {
+    userId: uid,
+    studentId: '123',
+    building: 'A',
+    active: true,
+  });
+  const { id } = await call('staff', {
+    action: 'registerPackage',
+    key: 'private-projection',
+    studentId: '123',
+    description: '書籍',
+    location: '服務台',
+  });
+  expect([...data.keys()].filter((path) => path.includes('/packages/'))).toEqual([]);
+  expect((await call('student', { action: 'parcels' })).rows).toEqual([]);
+  const feed = await call(uid, { action: 'parcels' });
+  expect(feed.rows).toHaveLength(1);
+  expect(JSON.stringify(feed)).not.toMatch(/SYNTHETIC|recipientId|studentId|building|registeredBy/);
+  expect(feed.rows[0].id).toMatch(/^dw_/);
+  await expect(
+    confirmPackagePickup({ db, schoolId: 'pu', packageId: feed.rows[0].id, uid: 'student' }),
+  ).rejects.toHaveProperty('code', 'permission-denied');
+  await confirmPackagePickup({ db, schoolId: 'pu', packageId: feed.rows[0].id, uid });
+  expect(data.get('schools/pu/dormPackages/' + id).status).toBe('picked_up');
+  expect((await call(uid, { action: 'parcels' })).rows[0].data.status).toBe('picked_up');
+});
+
+const photoInput = {
+  action: 'uploadPhoto',
+  contentType: 'image/jpeg',
+  base64: Buffer.from('synthetic photo').toString('base64'),
+};
+test('closing account is rejected before any photo reaches Storage', async () => {
+  const bucket = photoBucket();
+  const { call, data } = fixture({ getBucket: () => bucket });
+  data.set('users/student', { accountDeletionInProgress: true });
+  await expect(call('student', photoInput)).rejects.toHaveProperty('code', 'failed-precondition');
+  expect(bucket.objects.size).toBe(0);
+  expect([...data.keys()].some((path) => path.includes('/dormPhotoUploads/'))).toBe(false);
+});
+
+test.each([false, true])(
+  'photo finalization failure compensates Storage and retains failed cleanup journal (%s)',
+  async (deleteFails) => {
+    const bucket = photoBucket();
+    const { call, data, db } = fixture({ getBucket: () => bucket });
+    const originalFile = bucket.file;
+    const remove = jest.fn(async (path) => {
+      if (deleteFails) throw new Error('Storage unavailable');
+      bucket.objects.delete(path);
+    });
+    bucket.file = (path) => {
+      const file = originalFile(path);
+      return {
+        ...file,
+        save: async (...args) => {
+          expect(data.get('schools/pu/dormPhotoUploads/' + path.split('/')[1])).toMatchObject({
+            userId: 'student',
+            state: 'uploading',
+          });
+          await file.save(...args);
+          data.set('users/student', { accountDeletionInProgress: true });
+        },
+        delete: () => remove(path),
+      };
+    };
+    await expect(call('student', photoInput)).rejects.toHaveProperty('code', 'failed-precondition');
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(bucket.objects.size).toBe(deleteFails ? 1 : 0);
+    const journals = [...data].filter(([path]) => path.includes('/dormPhotoUploads/'));
+    expect(journals).toHaveLength(deleteFails ? 1 : 0);
+    if (deleteFails) {
+      const { clearDormAccountData } = require('./dormAccountDeletion');
+      db.collectionGroup = (name) => name;
+      db.recursiveDelete = async (ref) => data.delete(ref.path);
+      const scanPages = async (name, visit) => {
+        for (const [path, row] of [...data])
+          if (path.split('/').at(-2) === name)
+            await visit({ id: path.split('/').at(-1), ref: { path }, data: () => row });
+      };
+      const cleanup = () =>
+        clearDormAccountData({ db, uid: 'student', scanPages, getBucket: () => originalBucket });
+      const originalBucket = { file: originalFile };
+      await expect(cleanup()).rejects.toThrow('仍在上傳');
+      expect(data.has(journals[0][0])).toBe(true);
+      journals[0][1].leaseUntil = Date.now() - 1;
+      await cleanup();
+      expect(bucket.objects.size).toBe(0);
+      expect(data.has(journals[0][0])).toBe(false);
+    }
+  },
+);
+
+test('Storage save failure removes partial bytes and its journal', async () => {
+  const bucket = photoBucket();
+  const originalFile = bucket.file;
+  bucket.file = (path) => ({
+    ...originalFile(path),
+    save: async () => {
+      bucket.objects.set(path, 'partial');
+      throw new Error('upload failed');
+    },
+  });
+  const { call, data } = fixture({ getBucket: () => bucket });
+  await expect(call('student', photoInput)).rejects.toThrow('upload failed');
+  expect(bucket.objects.size).toBe(0);
+  expect([...data.keys()].some((path) => path.includes('/dormPhotoUploads/'))).toBe(false);
+});
+
+test('Firestore finalization failure removes photo bytes and journal', async () => {
+  const bucket = photoBucket();
+  const { call, data, db } = fixture({ getBucket: () => bucket });
+  const run = db.runTransaction;
+  let count = 0;
+  jest.spyOn(db, 'runTransaction').mockImplementation(async (fn) => {
+    if (++count === 2) throw new Error('Firestore unavailable');
+    return run(fn);
+  });
+  await expect(call('student', photoInput)).rejects.toThrow('Firestore unavailable');
+  expect(bucket.objects.size).toBe(0);
+  expect([...data.keys()].some((path) => path.includes('/dormPhotoUploads/'))).toBe(false);
+});
+
+test('mixed legacy and private parcel feed preserves old parcels and deduplicates earlier mirrors', async () => {
+  const { call, data } = fixture();
+  data.set('schools/pu/packages/legacy-only', { recipientId: 'student', description: '舊包裹' });
+  data.set('schools/pu/packages/mirrored', { recipientId: 'student', description: '舊鏡像' });
+  data.set('schools/pu/dormPackages/mirrored', {
+    recipientId: 'student',
+    description: '私有來源',
+    status: 'returned',
+  });
+  const { rows } = await call('student', { action: 'parcels' });
+  expect(rows.map((row) => row.data.description).sort()).toEqual(['私有來源', '舊包裹'].sort());
+  expect(rows.find((row) => row.data.description === '私有來源').data.status).toBe('returned');
 });

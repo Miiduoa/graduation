@@ -20,7 +20,8 @@ async function clearDormAccountData({
       if (
         url.origin !== 'https://firebasestorage.googleapis.com' ||
         !url.pathname.startsWith(prefix)
-      ) return;
+      )
+        return;
       try {
         path = decodeURIComponent(url.pathname.slice(prefix.length));
       } catch {
@@ -55,7 +56,13 @@ async function clearDormAccountData({
         doc.data()[field] !== uid
       )
         return;
-      if (collection === 'dormPhotoUploads') await deletePhoto(doc.data().path);
+      if (collection === 'dormPhotoUploads') {
+        // A concurrent upload may still write bytes. Preserve its journal and
+        // retry deletion later; an abandoned request is recoverable after one hour.
+        if (doc.data().state === 'uploading' && doc.data().leaseUntil > Date.now())
+          throw new Error('宿舍照片仍在上傳，請稍後重試刪帳');
+        await deletePhoto(doc.data().path);
+      }
       if (collection === 'dormRepairs') {
         for (const image of doc.data().images || []) await deletePhoto(image);
       }

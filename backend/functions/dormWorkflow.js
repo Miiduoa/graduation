@@ -91,7 +91,11 @@ function createDormWorkflowHandler({
     };
     // Legacy recipient access is independent of school membership and workflow enablement.
     if (action === 'parcels') {
-      const snap = await school.collection('packages').where('recipientId', '==', uid).get();
+      const snapshots = await Promise.all(
+        ['packages', 'dormPackages'].map((name) =>
+          school.collection(name).where('recipientId', '==', uid).get(),
+        ),
+      );
       const rows = [];
       const allowed = [
         'description',
@@ -105,15 +109,19 @@ function createDormWorkflowHandler({
         'arrivedAt',
         'createdAt',
       ];
-      for (const d of snap.docs) {
-        const row = serialize(d.data());
-        rows.push({
-          id: await ensureHandle('packages', d),
-          data: Object.fromEntries(
-            allowed.filter((key) => row[key] !== undefined).map((key) => [key, row[key]]),
-          ),
-        });
-      }
+      for (const [index, snap] of snapshots.entries())
+        for (const d of snap.docs) {
+          // Older mirrored records are projected once, from the private source.
+          if (index === 0 && snapshots[1].docs.some((privateDoc) => privateDoc.id === d.id))
+            continue;
+          const row = serialize(d.data());
+          rows.push({
+            id: await ensureHandle(index === 0 ? 'packages' : 'dormPackages', d),
+            data: Object.fromEntries(
+              allowed.filter((key) => row[key] !== undefined).map((key) => [key, row[key]]),
+            ),
+          });
+        }
       return { rows };
     }
     const membership = await authz.assertActiveSchoolMember(schoolId, uid);
@@ -160,22 +168,43 @@ function createDormWorkflowHandler({
         throw new HttpsError('invalid-argument', '照片過大');
       const photoId = randomUUID();
       const path = 'dorm-private/' + photoId;
-      await getBucket().file(path).save(bytes, {
-        resumable: false,
-        metadata: {
-          contentType,
-        },
-      });
+      const uploadRef = school.collection('dormPhotoUploads').doc(photoId);
+      // Persist ownership before Storage can receive bytes. Account deletion must
+      // retain in-flight journals until the request settles (or its lease expires).
       await db.runTransaction(async (tx) => {
         const account = await tx.get(db.collection('users').doc(uid));
         if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
           throw new HttpsError('failed-precondition', '帳號已停用');
-        tx.create(school.collection('dormPhotoUploads').doc(photoId), {
+        tx.create(uploadRef, {
           userId: uid,
           path,
+          state: 'uploading',
+          leaseUntil: Date.now() + 60 * 60 * 1000,
           createdAt: FieldValue.serverTimestamp(),
         });
       });
+      const file = getBucket().file(path);
+      try {
+        await file.save(bytes, { resumable: false, timeout: 60000, metadata: { contentType } });
+        await db.runTransaction(async (tx) => {
+          const account = await tx.get(db.collection('users').doc(uid));
+          if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
+            throw new HttpsError('failed-precondition', '帳號已停用');
+          tx.update(uploadRef, { state: 'ready' });
+        });
+      } catch (error) {
+        // Keep the journal if either compensation or its Firestore cleanup fails.
+        // Account deletion can retry even after this process terminates.
+        try {
+          await file.delete({ ignoreNotFound: true });
+          await db.runTransaction(async (tx) => {
+            tx.delete(uploadRef);
+          });
+        } catch {
+          /* durable journal remains discoverable for cleanup */
+        }
+        throw error;
+      }
       return { path };
     }
     if (action === 'repairPhoto') {
@@ -781,14 +810,8 @@ function createDormWorkflowHandler({
           arrivedAt: FieldValue.serverTimestamp(),
         };
         tx.create(ref, parcel);
-        // Existing student feed contains only the legacy parcel fields.
-        tx.create(school.collection('packages').doc(ref.id), {
-          recipientId: parcel.recipientId,
-          description: parcel.description,
-          location: parcel.location,
-          status: parcel.status,
-          arrivedAt: parcel.arrivedAt,
-        });
+        // The student callable projects this private record; never mirror UIDs
+        // containing student numbers into the broadly readable legacy collection.
         return parcel;
       });
       if (parcel.existingId) return { success: true, id: parcel.existingId };
@@ -818,7 +841,10 @@ function createDormWorkflowHandler({
               .map((d) => d.ref);
       await db.runTransaction(async (tx) => {
         const snaps = await Promise.all(refs.map((r) => tx.get(r)));
-        for (const snap of snaps) {
+        const mirrors = await Promise.all(
+          snaps.map((snap) => tx.get(school.collection('packages').doc(snap.id))),
+        );
+        for (const [index, snap] of snaps.entries()) {
           if (!snap.exists) continue;
           const row = snap.data();
           if (action === 'collectPackages' && row.status !== 'waiting') continue;
@@ -830,9 +856,10 @@ function createDormWorkflowHandler({
               handledBy: uid,
               handledAt: FieldValue.serverTimestamp(),
             });
-            tx.update(school.collection('packages').doc(snap.id), {
-              status: action === 'returnPackage' ? 'returned' : 'picked_up',
-            });
+            if (mirrors[index].exists)
+              tx.update(school.collection('packages').doc(snap.id), {
+                status: action === 'returnPackage' ? 'returned' : 'picked_up',
+              });
           }
         }
       });
