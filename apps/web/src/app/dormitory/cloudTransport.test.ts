@@ -70,10 +70,12 @@ it('does not overwrite the last private projection with later legacy snapshots o
     expect(rows).toHaveBeenLastCalledWith(privateRows);
     rows.mockClear();
     legacyRows([{ id: 'legacy', data: {} }]);
-    availability(false);
-    legacyRows([]);
     expect(rows).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledTimes(1);
+    availability(false);
+    expect(rows).toHaveBeenLastCalledWith([{ id: 'legacy', data: {} }, ...privateRows]);
+    legacyRows([]);
+    expect(rows).toHaveBeenLastCalledWith(privateRows);
+    expect(error).toHaveBeenCalledTimes(2);
   } finally {
     stop();
   }

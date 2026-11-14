@@ -185,3 +185,10 @@
 - 兩端回歸測試涵蓋無 Functions、首次失敗備援、關閉工作流程、成功後失敗保留待領包裹、恢復後顯示已領取，以及取消訂閱停止輪詢；另驗證後續舊集合快照與端點不可用不會覆蓋投影。
 - 本輪無登入權限migration變更：未修改後端、登入、auth、sessions、ACL、Firestore／Storage rules 或 migration；原 PR 的 `dormStaffRoles`／`setStaff` 授權變更仍保留原核准要求。本輪不部署、不合併、不操作正式資料。
 - 驗證：網頁 3 檔 22 項、手機 1 檔 5 項通過；web／mobile／shared 全專案 typecheck 通過；`git diff --check` 通過。型別增量檔與 Jest 快取置於 `/tmp/dorm-r2-fix`，完成後清除。未安裝依賴或更換 node_modules symlink；執行環境 Node 24，工具提示專案要求 Node 20／22。
+
+## review-dorm-r2.out 後續 P2：失敗後持續更新舊包裹
+
+- 修正成功投影後舊集合訂閱永久停止更新畫面的問題：分開保存即時舊包裹與最近成功投影，利用舊包裹既有 `publicId` 對應投影代碼；端點失敗或不可用時，合併最新舊包裹與保留的私有包裹，並持續標記讀取異常。記住已見過的舊代碼，避免舊包裹刪除後從過期投影重新出現。
+- Web／Mobile 明示私有包裹保留上次紀錄、可能尚未更新；下一次端點成功後清除異常狀態並使用新投影。回歸測試涵蓋失敗後即時更新已領狀態、去重、刪除舊包裹時保留私有包裹、端點恢復及停止輪詢。
+- 本輪無登入權限migration變更，僅修改宿舍共用訂閱、兩端提示及測試。原 PR 的宿舍授權變更仍保留原審查與核准要求，未部署或合併。
+- 驗證：Web 3 檔 22 項、Mobile 2 檔 9 項通過；web／mobile／shared 全專案 typecheck 通過。型別增量檔與 Jest 快取置於 `/tmp` 並於完成後刪除；Vitest 停用快取。沿用既有依賴及 node_modules，執行環境 Node 24 有專案 Node 20／22 引擎提示。

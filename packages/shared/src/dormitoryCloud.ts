@@ -251,34 +251,49 @@ export function watchDormParcels(
   error: () => void,
 ): () => void {
   let cached: ParcelRows | undefined;
-  let projected = false;
+  let projection: ParcelRows | undefined;
+  let stale = false;
+  // Remember aliases even after a legacy parcel is removed from the subscription.
+  const legacyIds = new Set<string>();
   let stopPoll: (() => void) | undefined;
-  const fallback = () => {
-    if (projected) {
+  const publishFallback = () => {
+    if (projection) {
+      const privateRows = projection.filter((row) => !legacyIds.has(row.id));
+      rows([...(cached ?? []), ...privateRows]);
+      // Publishing rows marks the feed ready; report staleness afterwards.
       error();
     } else if (cached) rows(cached);
     else error();
   };
+  const fallback = () => {
+    stale = true;
+    publishFallback();
+  };
   const stopLegacy = legacy(
     (value) => {
-      cached = value;
-      if (!projected) rows(value);
+      cached = value.map((row) => {
+        legacyIds.add(row.id);
+        const id = typeof row.data.publicId === 'string' ? row.data.publicId : row.id;
+        legacyIds.add(id);
+        return { ...row, id };
+      });
+      if (stale || !projection) publishFallback();
     },
     () => {
-      if (!projected) error();
+      if (stale || !projection) error();
     },
   );
   const stopAvailable = available((value) => {
     if (!value) {
       stopPoll?.();
       stopPoll = undefined;
-      if (projected) error();
-      else if (cached) rows(cached);
+      fallback();
     } else if (!stopPoll) {
       stopPoll = pollDormParcels(
         load,
         (value) => {
-          projected = true;
+          projection = value;
+          stale = false;
           rows(value);
         },
         fallback,

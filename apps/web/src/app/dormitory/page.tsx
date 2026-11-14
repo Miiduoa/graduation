@@ -703,7 +703,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             <h3>校方登錄包裹</h3>
             {cloud.packagesState === 'loading' && <p role="status">正在讀取包裹…</p>}
             {cloud.packagesState === 'guest' && <p>登入校園帳號後可讀取自己的包裹。</p>}
-            {cloud.packagesState === 'error' && <p role="alert">包裹讀取失敗，請確認帳號及網路。<button type="button" onClick={() => setCloudRetry(n => n + 1)}>重試雲端紀錄</button></p>}
+            {cloud.packagesState === 'error' && <p role="alert">包裹讀取失敗，私有包裹暫時保留上次紀錄，可能尚未更新。請確認帳號及網路。<button type="button" onClick={() => setCloudRetry(n => n + 1)}>重試雲端紀錄</button></p>}
             {cloud.packagesState === 'ready' && !cloud.packages.filter(p => !p.postal).length && <p>{DORM_PACKAGES_EMPTY}</p>}
             <ul className={styles.milestones}>{cloud.packages.filter(p => !p.postal).map(item => <li key={item.id}>
               <div><h4>{item.title}</h4><p>到件日：{dormCloudDate(item.arrivedAt)}</p><p>領取地點：{item.location}</p>

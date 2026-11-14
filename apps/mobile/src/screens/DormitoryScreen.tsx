@@ -828,7 +828,7 @@ function DormitoryBody({
             <AICard title="校方登錄包裹">
               {cloud.packagesState === 'loading' && <Body>正在讀取包裹…</Body>}
               {cloud.packagesState === 'guest' && <Body>登入校園帳號後可讀取自己的包裹。</Body>}
-              {cloud.packagesState === 'error' && <><Body>包裹讀取失敗，請確認帳號及網路。</Body><AIButton label="重試雲端紀錄" onPress={() => setCloudRetry(n => n + 1)} /></>}
+              {cloud.packagesState === 'error' && <><Body>包裹讀取失敗，私有包裹暫時保留上次紀錄，可能尚未更新。請確認帳號及網路。</Body><AIButton label="重試雲端紀錄" onPress={() => setCloudRetry(n => n + 1)} /></>}
               {cloud.packagesState === 'ready' && !cloud.packages.filter(p => !p.postal).length && <Body>{DORM_PACKAGES_EMPTY}</Body>}
               {cloud.packages.filter(p => !p.postal).map(item => <View key={item.id} style={{ gap: 8, marginTop: 16 }}>
                 <Body>{item.title}</Body><Body>到件日：{dormCloudDate(item.arrivedAt)}</Body><Body>領取地點：{item.location}</Body>
