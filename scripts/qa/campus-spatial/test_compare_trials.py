@@ -1,7 +1,7 @@
 """Synthetic audit regression cases: these are not observed campus measurements."""
 import unittest
 
-from compare_trials import PRODUCTS, audit_rows
+from compare_trials import PRODUCTS, _valid_headers, audit_rows
 
 
 def row(product="nuni", repeat=1, **changes):
@@ -118,6 +118,50 @@ class AuditTrialsTests(unittest.TestCase):
         self.assertEqual(report["errors"], [])
         self.assertEqual(len(report["ready"]), 1)
         self.assertEqual(report["ready"][0]["conditions"]["scenario_id"], "synthetic-building-02")
+
+    def test_surplus_csv_cells_cannot_be_silently_ignored(self):
+        records = complete()
+        # csv.DictReader stores extra cells under a None key.
+        records[0][None] = ["hidden-shifted-evidence"]
+        report = audit_rows(records)
+        self.assertEqual(report["ready"], [])
+        self.assertTrue(any("surplus cells" in error for error in report["errors"]))
+
+    def test_unexpected_csv_fields_block_publishing(self):
+        records = complete()
+        records[0]["unreviewed_score"] = "5"
+        report = audit_rows(records)
+        self.assertEqual(report["ready"], [])
+        self.assertTrue(any("unexpected CSV fields" in error for error in report["errors"]))
+
+    def test_duplicate_or_extra_headers_are_rejected(self):
+        from compare_trials import FIELDS
+        self.assertTrue(_valid_headers(list(FIELDS)))
+        self.assertFalse(_valid_headers(list(FIELDS) + ["evidence_ref"]))
+        self.assertFalse(_valid_headers(list(FIELDS) + ["unreviewed_score"]))
+        self.assertFalse(_valid_headers(list(FIELDS[:-1]) + ["result"]))
+        self.assertFalse(_valid_headers(None))
+
+    def test_distinct_large_integer_repeat_ids_do_not_collapse_via_float(self):
+        records = complete()
+        for entry in records:
+            entry["repeat"] = str(9007199254740991 + int(entry["repeat"]))
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["pending"], [])
+        self.assertEqual(len(report["ready"]), 1)
+        self.assertEqual(report["ready"][0]["repeats"],
+                         [9007199254740992, 9007199254740993, 9007199254740994])
+
+    def test_fractional_or_scientific_repeat_tokens_are_rejected(self):
+        for token in ("1.0", "1e0", "-1"):
+            with self.subTest(token=token):
+                records = complete()
+                records[0]["repeat"] = token
+                report = audit_rows(records)
+                self.assertEqual(report["ready"], [])
+                self.assertTrue(any("expected a nonnegative integer" in error
+                                    for error in report["errors"]))
 
     def test_pending_when_only_two_repeats(self):
         result = audit_rows(complete(2))
