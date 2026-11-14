@@ -300,7 +300,7 @@ function ScopedCreatorProfile({
             <View style={styles.actions}>
               {own ? (
                 <>
-                  <Action label="發表貼文" solid onPress={() => navigation?.navigate?.('PostCompose')} />
+                  <Action label="發表貼文" solid onPress={() => navigation?.navigate?.('CreatorPostCompose')} />
                   <Action label="發布限動" onPress={() => navigation?.navigate?.('StoryCompose')} />
                 </>
               ) : followState === 'error' ? (
@@ -437,7 +437,7 @@ function ScopedCreatorProfile({
                     : own ? '你還沒有用公開身分發表貼文。' : '這位成員還沒有公開貼文。'}
               </Text>
               {own && tab === 'posts' && (
-                <Action label="發表第一篇貼文" solid onPress={() => navigation?.navigate?.('PostCompose')} />
+                <Action label="發表第一篇貼文" solid onPress={() => navigation?.navigate?.('CreatorPostCompose')} />
               )}
             </View>
           )

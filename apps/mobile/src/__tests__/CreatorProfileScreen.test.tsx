@@ -80,7 +80,7 @@ test('owner manages posts, media, saved posts and publishing without private-acc
   expect(await screen.findByText('我的校園貼文')).toBeTruthy();
   expect(screen.getByText('已載入 1 則公開貼文')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('發表貼文'));
-  expect(navigate).toHaveBeenCalledWith('PostCompose');
+  expect(navigate).toHaveBeenCalledWith('CreatorPostCompose');
   fireEvent.press(screen.getByLabelText('相片與影片'));
   expect(screen.getByLabelText('查看媒體貼文：我的校園貼文')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('我的收藏'));

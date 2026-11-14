@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { courseMaterialTextParts } from '@campus/shared/src/courseMaterialText';
 import { useSearchParams } from 'next/navigation';
 import {
   NuniError,
@@ -41,40 +42,16 @@ import { classroomCourseHref, classroomDirectoryHref } from './studyNavigation';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
 
-function referenceUrl(candidate: string): string | null {
-  try {
-    const url = new URL(candidate);
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export function CourseText({ text }: { text: string }) {
-  const parts: ReactNode[] = [];
-  const expression = /https?:\/\/[^\s<>"']+/gi;
-  let offset = 0;
-  for (const match of text.matchAll(expression)) {
-    const start = match.index!;
-    const candidate = match[0].replace(/[。，、；：！？）〉》」』】,.;!?)]+$/u, '');
-    parts.push(text.slice(offset, start));
-    const href = referenceUrl(candidate);
-    if (href) {
-      parts.push(
-        <a key={start} href={href} target="_blank" rel="noopener noreferrer">
-          {candidate}
-        </a>,
-      );
-      parts.push(match[0].slice(candidate.length));
-    } else {
-      parts.push(match[0]);
-    }
-    offset = start + match[0].length;
-  }
-  parts.push(text.slice(offset));
-  return <div className={`${shared.prose} ${styles.body}`}>{parts}</div>;
+  return (
+    <div className={`${shared.prose} ${styles.body}`}>
+      {courseMaterialTextParts(text).map((part, index) => part.href ? (
+        <a key={index} href={part.href} target="_blank" rel="noopener noreferrer">
+          {part.text}
+        </a>
+      ) : part.text)}
+    </div>
+  );
 }
 
 export function CourseMaterials({ workspace, units, onChanged }: { workspace: NuniWorkspace; units?: NuniUnit[] | null; onChanged?: () => void }) {
