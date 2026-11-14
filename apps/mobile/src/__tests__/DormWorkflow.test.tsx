@@ -79,3 +79,52 @@ test('student can reopen the same repaired ticket', async () => {
     ),
   );
 });
+
+test('disabled school keeps history read-only', async () => {
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: false, repairs: true }
+      : {
+          repairs: [
+            {
+              id: 'r',
+              title: '歷史報修',
+              dormitory: 'A',
+              room: '101',
+              dormStatus: 'fixed',
+              history: [{ status: 'fixed', at: 1 }],
+            },
+          ],
+          leaves: [],
+        },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="student" />);
+  expect(await view.findByText('歷史報修 · A 101')).toBeTruthy();
+  expect(view.queryByText('還沒修好')).toBeNull();
+  expect(view.queryByText('開啟輔導員工作台')).toBeNull();
+});
+test('changing parcel search clears the previously selected resident', async () => {
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true, packages: true }
+      : {
+          repairs: [],
+          leaves: [],
+          packages: [],
+          residents: [{ id: '123', studentId: '123', name: '小明', building: 'A', room: '101' }],
+        },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  const search = await view.findByLabelText('學號或姓名（本棟住宿生）');
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith(expect.objectContaining({ action: 'workspace' })),
+  );
+  fireEvent.changeText(search, '123');
+  fireEvent.press(await view.findByText('123 小明 A 101'));
+  fireEvent.changeText(search, '456');
+  expect(
+    view.getByRole('button', { name: '登錄並通知學生' }).props.accessibilityState.disabled,
+  ).toBe(true);
+  fireEvent.press(view.getByText('登錄並通知學生'));
+  expect(mockCall.mock.calls.some(([d]) => d.action === 'registerPackage')).toBe(false);
+});

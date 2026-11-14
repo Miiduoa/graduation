@@ -4,11 +4,11 @@
 
 完整讀取 `/workspace/agent-backend/lanes-1114/宿舍-規格-v1.md`，以已合併 #626 的學生雲端清單為基礎。此次加入正式工單、外宿卡及職員工作台；室友組合、入住點檢照片／PDF 仍屬規格 PR 3，不在這次變更內。
 
-手機 staff 首頁（有宿舍服務權限才顯示）、Dormitory、網頁 `/dormitory` 保留所有個人備忘及校方正式入口；開通後才有輔導員服務及備忘編輯表單中的「送給宿舍輔導員」。網頁另有 `/staff/dorm?schoolId=pu` 職員入口，沿用相同操作。`dorm_staff` 是 `staff` 的子身分，不新增頂層權限。權限判斷依本校有效 membership 及既有 `serviceRoles.packages / repairs`，不是依前端身分標籤。
+手機 staff 首頁（有宿舍服務權限才顯示）、Dormitory、網頁 `/dormitory` 保留所有個人備忘及校方正式入口；開通後才有輔導員服務及備忘編輯表單中的「送給宿舍輔導員」。網頁另有 `/staff/dorm?schoolId=pu` 職員入口，沿用相同操作。`dorm_staff` 是 `staff` 的子身分，不新增頂層權限。權限判斷依本校有效 membership 及獨立 `dormStaffRoles.packages / repairs`；沒有宿舍授權紀錄的既有服務人員仍沿用既有 serviceRoles，不是依前端身分標籤。
 
-正式工單五階段以 `dormStatus` 記錄，保留原 `status` 給既有讀取者；每次階段變更及重新開啟都附伺服器時間。學生可確認結案、在修好待確認或已結案後按「還沒修好」重開同一張單。舊備忘不冒充工單。舊 updateRepairStatus 對新工單轉交狀態機，舊備忘行為不變。
+正式工單五階段以 `dormStatus` 記錄，保留 `status` 對應欄位，完整內容僅透過 callable 讀取；每次階段變更及重新開啟都附伺服器時間。學生可確認結案、在修好待確認或已結案後按「還沒修好」重開同一張單。舊備忘不冒充工單。新工單透過 dormWorkflow 狀態機操作，舊備忘與舊 API 行為保留。
 
-外宿卡填日期及原因，學生僅讀本人資料；具有 repairs 權限的輔導員核可／不核可，每次審核有時間。正式報修透過既有 Firestore 監聽更新今晚報修數量，今晚已核可外宿也會顯示；外宿與工作台每 15 秒重新讀取，並提供手動重新整理。申請不等於核可。
+外宿卡填日期及原因，學生僅讀本人資料；具有 repairs 權限的輔導員核可／不核可，每次審核有時間。正式報修透過本人 callable 查詢更新今晚報修數量，今晚已核可外宿也會顯示；外宿與工作台每 15 秒重新讀取，並提供手動重新整理。申請不等於核可。
 
 包裹依匯入名冊登錄，只搜尋值班棟別內名冊；連續登錄清空學號／品名並回到學號欄，保留領取地點。核對學生身分頁上的學號與姓名後可一次核銷；郵局／掛號／收發室資料不由本工作台批次核銷。每日 21:00 可開啟三天未領清單並標記退件，這是值班清單，不新增排程任務。鍵盤原生語音輸入可填品名。公告需先預覽，只通知該棟名冊內帳號，學生也能在宿舍服務重讀。
 
@@ -21,8 +21,8 @@
 - 部署新的 `dormWorkflow` callable 及更新的 `updateRepairStatus`；Fly runtime 依既有 exports 載入方式提供同名 callable。
 - 逐校在 `schools/{schoolId}` 新增 `dormWorkflowEnabled: true` 才開通，缺省或 false 隱藏新服務。不可全校批次預設開啟。
 - 新集合：`schools/{schoolId}/dormLeaves`、`dormResidents`、`dormAnnouncements`。均只由驗證身份與權限的 callable 讀寫，不新增客戶端 Firestore 存取權。
-- `repairRequests` 新增 `workflow: dorm_staff`、`dormStatus`、`history`、`schoolReference`、`vendor`、`expectedDate`；`packages` 新資料增加 `studentId`、`building`、`description` 等名冊欄位。現有文件不回填、不遷移。
-- `serviceRoles` 新增 `staffSubtype: dorm_staff` 與選填 `buildings`，並沿用 `packages`、`repairs`。新工作台對非空 buildings 套用本棟範圍；舊 API、舊規則不收緊。空白代表全棟，僅管理員可設定。變更寫入既有 `adminLogs`。
+- 完整報修資料寫入 `dormRepairs`，包裹學號、棟別寫入 `dormPackages`，不進入舊規則允許全校服務人員直接讀取的集合。學生既有 `packages` feed 僅保留 recipientId、品名、地點、狀態、到件時間，不含學號、棟別或名冊資料；登錄與核銷同步原子更新。
+- 管理員指派／撤銷宿舍權限只寫入獨立 `dormStaffRoles`（packages、repairs、buildings），不再寫共用 `serviceRoles`，既有服務的有效權限不變。非空 buildings 限定棟別，空白代表全棟，僅管理員可設定；異動寫入 `adminLogs`。不修改共用登入或角色解析。
 - 照片最多三張、每張 10MB，使用既有 `temp/{uid}` 上傳及 Storage 規則，不新增公開路徑；網址只隨工單提供給本人及授權職員。
 - 沒有 SQL migration、Firestore rule、Storage rule 或複合 index 變更。沒有自動執行資料遷移。正式開通前請提供真實住宿生名冊及輔導員帳號，並驗證通知設備設定。
 
@@ -41,7 +41,7 @@
 
 ## 回滾
 
-先將指定學校 `dormWorkflowEnabled` 關閉，阻止新工作台操作，再回滾前端與 callable 部署。保留工單、外宿卡、名冊及公告，不刪除資料、不反向遷移；學生既有包裹／備忘頁、原有 API 與 serviceRoles 其他 domain 繼續可用。重新開通可讀回保留的工單。若只需撤銷特定輔導員，透過管理員移除宿舍服務權限，不變更其其他服務 domain。
+先將指定學校 `dormWorkflowEnabled` 關閉，阻止新工作台操作，再回滾前端與 callable 部署。保留工單、外宿卡、名冊及公告，不刪除資料、不反向遷移；學生既有包裹／備忘頁、原有 API 與 serviceRoles 其他 domain 繼續可用。關閉後學生仍可讀取本人歷史工單與外宿紀錄（唯讀），重新開通後恢復操作。若只需撤銷特定輔導員，透過管理員移除宿舍服務權限，不變更其其他服務 domain。
 
 ## 自動驗證結果
 
@@ -61,3 +61,11 @@
 - 有登入權限migration變更：上述為審查要求的狹義權限修正，仍屬「需晉瑋說『上』」的權限部署範圍；未修改登入、sessions、共用 authz、角色解析、Firestore／Storage rules 或 migration，未部署或操作正式資料。
 - 新增 5 項回歸案例，涵蓋跨棟覆寫、停用名冊、管理員移轉、同棟更新、多棟職員限制，以及 active／inactive 的其他服務有效權限與撤權結果。
 - 驗證：dormWorkflow.test.js、authz.test.js 共 26 項通過；shared typecheck、兩個變更 JS 檔案的 ESLint、handler 語法檢查、git diff --check 通過。執行環境為既有 Node 24，套件要求 Node 20／22，工具有引擎版本警告；無新增依賴、安裝套件或更動 node_modules symlink，未建立暫存檔。
+
+## 審查修正（R2，取代 R1 的共用授權寫入方式）
+
+- P1：依審查要求隔離宿舍授權與個資集合，改用 dormStaffRoles、dormRepairs、dormPackages；完整內容只經 callable 的成員、domain 與棟別檢查。保留既有 serviceRoles／舊服務 API，不清除、不啟用任何共用 domain。新授權無法取得舊 Firestore 全校 packages／repairRequests 讀權。
+- P2：學校關閉開通旗標後，mine 仍只查本人歷史；兩端保留狀態時間軸、照片與外宿紀錄，隱藏所有寫入操作。今晚宿舍摘要改接本人 callable 結果，避免隔離集合後漏計正式報修。
+- P2：兩端修改包裹搜尋文字立即清除已選學號；必須重新選取目前名冊結果才能啟用登錄。
+- 有登入權限migration變更：本次只在宿舍 handler 內進行審查要求的狹義權限／儲存隔離；未改登入、sessions、共用 authz、角色解析、Firestore／Storage rules 或 migration。新增集合與 callable 部署仍屬「需晉瑋說『上』」，本次未部署、未回填或遷移正式資料。此為尚未開通的 PR 資料模型修正，不自動轉移舊試驗資料或撤回過去另行核發的 serviceRoles。
+- R2 驗證：後端 dormWorkflow／authz 28 項、web DormWorkflow／dormitory 46 項、手機 DormWorkflow／DormStaffHome／dormitoryWorkspace 11 項通過；web、mobile、shared 全專案 typecheck、宿舍後端 ESLint、git diff --check 通過。使用 /tmp 的 tsconfig／Jest 設定只修正共享 node_modules symlink 的 workspace 解析；未排除檔案，驗證後刪除暫存設定。環境仍為 Node 24，套件引擎要求 20／22，無安裝依賴或更換 symlink。

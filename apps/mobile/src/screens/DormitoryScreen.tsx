@@ -1,3 +1,4 @@
+import type { DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
 import { DormWorkflow } from '../components/dorm/DormWorkflow';
 import { subscribeDormCloud } from '../services/dormitoryCloud';
 import { emptyDormCloud, dormCloudDate, dormParcelReturnNotice, DORM_CLOUD_REPAIR_LABELS, DORM_PACKAGES_EMPTY } from '@campus/shared/src/dormitoryCloud';
@@ -156,6 +157,8 @@ function DormitoryBody({
   const [cloud, setCloud] = useState(() => emptyDormCloud(!cloudUid));
   const [cloudRetry, setCloudRetry] = useState(0);
   const [showIdentity, setShowIdentity] = useState(false);
+  const [ownRepairs, setOwnRepairs] = useState<DormCloudRepair[]>([]);
+  const tonightRepairs = [...cloud.repairs.filter(r => !r.official), ...ownRepairs];
   const [tonightLeave, setTonightLeave] = useState(false);
   useEffect(() => {
     if (!cloudUid) return;
@@ -513,7 +516,7 @@ function DormitoryBody({
     <AIDetailScreen title="宿舍" subtitle={schoolName} onBack={onBack}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={{ ...pad, gap: 12 }}>
-        {view === 'home' && <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} />}
+        {view === 'home' && <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />}
         <AICard title={data.building || '住得安心，事情好處理'}>
           <Body>{data.room ? ('寢室 ' + data.room + (data.bed ? ' · ' + data.bed : '')) : '把入住事項、設備問題與重要日期放在一起。'}</Body>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 16 }}>
@@ -575,12 +578,12 @@ function DormitoryBody({
               {cloud.packages.some(p => p.status === 'waiting' && !p.postal) && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('parcels')}>
                 <Text style={{ color: aiTokens.text }}>待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}</Text>
               </Pressable>}
-              {cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('repairs')}>
-                <Text style={{ color: aiTokens.text }}>{cloud.repairs.some(r => r.official) ? '報修處理中' : '報修備忘待辦'} {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}</Text>
+              {tonightRepairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('repairs')}>
+                <Text style={{ color: aiTokens.text }}>{tonightRepairs.some(r => r.official) ? '報修處理中' : '報修備忘待辦'} {tonightRepairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[tonightRepairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}</Text>
               </Pressable>}
               {!!data.laundryEndAt && remaining > 0 && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('laundry')}><Text style={{ color: aiTokens.text }}>洗衣倒數 {remaining} 分鐘</Text></Pressable>}
               {tonightLeave && <View style={{ height: 56, justifyContent: 'center' }}><Body>外宿已登記（已核可）</Body></View>}
-              {!tonightLeave && !cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <Body>今晚沒有待辦。</Body>}
+              {!tonightLeave && !cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !tonightRepairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <Body>今晚沒有待辦。</Body>}
             </AICard>
             <AICard title="我的住宿備忘">
               <Body muted>此處資料由你自行填寫，不代表實際床位分配結果。</Body>
@@ -670,7 +673,7 @@ function DormitoryBody({
               <Body>漏水、斷電或受困請先聯絡現場人員，勿等待報修紀錄。</Body>
               {guide ? <><Body>{guide.officePhone} 轉 {guide.officeExtensions}</Body><AIButton variant="ghost" label="致電服務台" onPress={() => void openPublicLink('tel:' + guide.officePhone)} /></> : <Body>請依住宿指南或宿舍現場公告撥打服務台電話。</Body>}
             </AICard>
-            <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} />
+            <DormWorkflow schoolId={schoolId} uid={cloudUid} building={data.building} room={data.room} onTonightLeaveChange={setTonightLeave} onOwnRepairsChange={setOwnRepairs} />
             <AICard title="雲端報修備忘">
               <Body>此應用沒有將備忘送到學校。以下狀態僅是備忘標記，無法據此確認校方收件或設備修復；請依校方正式管道通報並確認。</Body>
               {cloud.repairsState === 'loading' && <Body>正在讀取報修紀錄…</Body>}

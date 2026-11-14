@@ -1,3 +1,4 @@
+import { projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
@@ -166,11 +167,13 @@ export function DormWorkflow({
   submitOnly = false,
   initialStaff = false,
   onTonightLeaveChange,
+  onOwnRepairsChange,
 }: {
   schoolId: string;
   uid?: string | null;
   submitOnly?: boolean;
   initialStaff?: boolean;
+  onOwnRepairsChange?: (repairs: DormCloudRepair[]) => void;
   onTonightLeaveChange?: (approved: boolean) => void;
   building?: string;
   room?: string;
@@ -227,7 +230,7 @@ export function DormWorkflow({
       .then((c) => {
         if (token === generation.current) {
           setConfig(c);
-          if (initialStaff && (c.repairs || c.packages)) {
+          if (c.enabled && initialStaff && (c.repairs || c.packages)) {
             setStaffMode(true);
             setTab(c.admin ? 'summary' : c.repairs ? 'repairs' : 'packages');
           }
@@ -241,7 +244,7 @@ export function DormWorkflow({
     };
   }, [call, uid, initialStaff]);
   useEffect(() => {
-    if (!config?.enabled || submitOnly) return;
+    if (!config || submitOnly) return;
     let active = true;
     const load = () => {
       void refresh().catch(() => {
@@ -260,6 +263,12 @@ export function DormWorkflow({
     const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
     onTonightLeaveChange?.(rows.leaves.some((r) => r.date === today && r.status === 'approved'));
   }, [rows.leaves, onTonightLeaveChange]);
+  useEffect(() => {
+    if (!staffMode)
+      onOwnRepairsChange?.(
+        rows.repairs.map((r) => projectDormRepair(r.id, { ...r, workflow: 'dorm_staff' })),
+      );
+  }, [rows.repairs, staffMode, onOwnRepairsChange]);
   async function act(data: Record<string, unknown>, done?: () => void) {
     if (busy) return;
     setBusy(true);
@@ -282,7 +291,7 @@ export function DormWorkflow({
       setBusy(false);
     }
   }
-  if (!uid || !config?.enabled) return null;
+  if (!uid || !config || (!config.enabled && submitOnly)) return null;
   const f = (key: string, label: string, initial = '', multiline = false) => (
     <Field
       key={key}
@@ -294,7 +303,15 @@ export function DormWorkflow({
   );
   const get = (key: string, fallback = '') => values[key] ?? fallback;
   const button = (title: string, data: Record<string, unknown>, done?: () => void) => (
-    <Btn label={title} disabled={busy} onPress={() => void act(data, done)} />
+    <Btn
+      label={title}
+      disabled={
+        busy ||
+        (data.action === 'registerPackage' &&
+          !rows.residents.some((r) => r.studentId === data.studentId))
+      }
+      onPress={() => void act(data, done)}
+    />
   );
   const ticket = (r: DormTicket, staff: boolean) => (
     <Box key={r.id}>
@@ -351,9 +368,11 @@ export function DormWorkflow({
         </>
       ) : (
         <>
-          {r.dormStatus === 'fixed' &&
+          {config.enabled &&
+            r.dormStatus === 'fixed' &&
             button('確認修好並結案', { action: 'repairStatus', id: r.id, status: 'closed' })}
-          {['fixed', 'closed'].includes(r.dormStatus) &&
+          {config.enabled &&
+            ['fixed', 'closed'].includes(r.dormStatus) &&
             button('還沒修好', { action: 'repairStatus', id: r.id, status: 'sent' })}
         </>
       )}
@@ -378,6 +397,16 @@ export function DormWorkflow({
       )}
     </Box>
   );
+  if (!config.enabled && !rows.repairs.length && !rows.leaves.length && !notice) return null;
+  if (!config.enabled)
+    return (
+      <Box>
+        <Label strong>宿舍歷史紀錄（唯讀）</Label>
+        <Label>{notice}</Label>
+        {rows.repairs.map((r) => ticket(r, false))}
+        {rows.leaves.map((r) => leave(r, false))}
+      </Box>
+    );
   return (
     <Box>
       <Label strong>{staffMode ? '輔導員工作台' : '宿舍輔導員服務'}</Label>
@@ -553,7 +582,10 @@ export function DormWorkflow({
                 focusRef={inputRef}
                 label="學號或姓名（本棟住宿生）"
                 value={get('search')}
-                onChange={(value) => set('search', value)}
+                onChange={(value) => {
+                  set('search', value);
+                  set('studentId', '');
+                }}
               />
               {!!get('search') &&
                 rows.residents

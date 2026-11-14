@@ -7,7 +7,7 @@ function fixture() {
     ['schools/pu/members/staff', { role: 'staff' }],
     ['schools/pu/members/admin', { role: 'admin' }],
     [
-      'schools/pu/serviceRoles/staff',
+      'schools/pu/dormStaffRoles/staff',
       { status: 'active', repairs: true, packages: true, buildings: ['A'] },
     ],
     ['users/student', { studentId: '123', displayName: '同學' }],
@@ -72,7 +72,7 @@ test('five states require receipt, schedule, fix and student confirmation; reope
   const { call, data } = fixture();
   const { id } = await call('student', repair);
   await call('student', repair);
-  expect([...data.keys()].filter((k) => k.includes('/repairRequests/'))).toHaveLength(1);
+  expect([...data.keys()].filter((k) => k.includes('/dormRepairs/'))).toHaveLength(1);
   await expect(
     call('staff', { action: 'repairStatus', id, status: 'fixed' }),
   ).rejects.toMatchObject({ code: 'failed-precondition' });
@@ -83,7 +83,7 @@ test('five states require receipt, schedule, fix and student confirmation; reope
   ).rejects.toMatchObject({ code: 'failed-precondition' });
   await call('student', { action: 'repairStatus', id, status: 'closed' });
   await call('student', { action: 'repairStatus', id, status: 'sent' });
-  const row = data.get('schools/pu/repairRequests/' + id);
+  const row = data.get('schools/pu/dormRepairs/' + id);
   expect(row.history.map((h) => h.status)).toEqual([
     'sent',
     'received',
@@ -184,8 +184,8 @@ test('admin changes only dorm domains, records audit and cannot grant to another
   });
   expect(data.get('schools/pu/serviceRoles/staff')).toMatchObject({
     orders: true,
-    repairs: false,
-    packages: false,
+    repairs: true,
+    packages: true,
   });
   expect([...data.keys()].some((k) => k.includes('/adminLogs/'))).toBe(true);
   await expect(
@@ -267,7 +267,7 @@ test('staff can update own building but even multi-building staff cannot transfe
   await call('staff', { action: 'importResidents', rows });
   await call('staff', { action: 'importResidents', rows: [{ ...rows[0], room: '103' }] });
   expect(data.get('schools/pu/dormResidents/123').room).toBe('103');
-  data.get('schools/pu/serviceRoles/staff').buildings = ['A', 'B'];
+  data.get('schools/pu/dormStaffRoles/staff').buildings = ['A', 'B'];
   await expect(
     call('staff', { action: 'importResidents', rows: [{ ...rows[0], building: 'B' }] }),
   ).rejects.toMatchObject({ code: 'permission-denied' });
@@ -291,7 +291,8 @@ test.each(['active', 'inactive'])(
     for (const domain of ['orders', 'printing', 'health'])
       expect(hasServiceDomainAccess(after, domain)).toBe(hasServiceDomainAccess(before, domain));
     expect(after.customMetadata).toBe('keep');
-    expect(hasServiceDomainAccess(after, 'packages')).toBe(true);
+    expect(after).toEqual(before);
+    expect(hasServiceDomainAccess(after, 'packages')).toBe(false);
     expect(await call('staff', { action: 'config' })).toMatchObject({
       packages: true,
       repairs: false,
@@ -304,8 +305,71 @@ test.each(['active', 'inactive'])(
       buildings: [],
     });
     const revoked = data.get('schools/pu/serviceRoles/staff');
+    expect(revoked).toEqual(before);
+    expect(await call('staff', { action: 'config' })).toMatchObject({
+      packages: false,
+      repairs: false,
+    });
     for (const domain of ['orders', 'printing', 'health'])
       expect(hasServiceDomainAccess(revoked, domain)).toBe(hasServiceDomainAccess(before, domain));
     expect(hasServiceDomainAccess(revoked, 'packages')).toBe(false);
   },
 );
+
+test('disabled schools retain only the signed-in member history and reject mutations', async () => {
+  const { call, data } = fixture();
+  const { id } = await call('student', repair);
+  await call('staff', { action: 'repairStatus', id, status: 'received' });
+  data.set('schools/pu', { dormWorkflowEnabled: false });
+  expect((await call('student', { action: 'mine' })).repairs.map((r) => r.id)).toEqual([id]);
+  expect((await call('staff', { action: 'mine' })).repairs).toEqual([]);
+  await expect(
+    call('student', { action: 'repairStatus', id, status: 'sent' }),
+  ).rejects.toMatchObject({ code: 'failed-precondition' });
+  await expect(call('staff', { action: 'workspace' })).rejects.toMatchObject({
+    code: 'failed-precondition',
+  });
+});
+test('scoped grants and personal data never enter legacy school-wide access paths', async () => {
+  const { call, data } = fixture();
+  data.set('users/staff', { displayName: '輔導員' });
+  await call('admin', {
+    action: 'setStaff',
+    targetUid: 'staff',
+    packages: true,
+    repairs: true,
+    buildings: ['A'],
+  });
+  expect(data.has('schools/pu/serviceRoles/staff')).toBe(false);
+  await call('student', repair);
+  expect([...data.keys()].some((k) => k.includes('/repairRequests/'))).toBe(false);
+  await call('staff', {
+    action: 'importResidents',
+    rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+  });
+  const { id } = await call('staff', {
+    action: 'registerPackage',
+    key: 'private',
+    studentId: '123',
+    description: '書',
+    location: '服務台',
+  });
+  expect(data.get('schools/pu/dormPackages/' + id)).toMatchObject({
+    studentId: '123',
+    building: 'A',
+  });
+  expect(data.get('schools/pu/packages/' + id)).not.toHaveProperty('studentId');
+  expect(data.get('schools/pu/packages/' + id)).not.toHaveProperty('building');
+  data.set('schools/pu/dormPackages/other', { studentId: '456', building: 'B', status: 'waiting' });
+  data.set('schools/pu/dormRepairs/other', {
+    userId: 'other',
+    building: 'B',
+    workflow: 'dorm_staff',
+  });
+  const workspace = await call('staff', { action: 'workspace' });
+  expect(workspace.packages.map((p) => p.id)).toEqual([id]);
+  expect(workspace.repairs).toHaveLength(1);
+  await expect(call('staff', { action: 'returnPackage', id: 'other' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+});

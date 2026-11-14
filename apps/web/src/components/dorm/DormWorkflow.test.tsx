@@ -9,7 +9,18 @@ import {
 const api = vi.hoisted(() => ({
   call: vi.fn(),
   config: { enabled: true, repairs: false, packages: false, admin: false },
-  rows: { repairs: [] as unknown[], leaves: [] as unknown[], packages: [], residents: [] },
+  rows: {
+    repairs: [] as unknown[],
+    leaves: [] as unknown[],
+    packages: [],
+    residents: [] as {
+      id: string;
+      studentId: string;
+      name: string;
+      building: string;
+      room: string;
+    }[],
+  },
 }));
 vi.mock('firebase/functions', () => ({
   httpsCallable: () => async (data: Record<string, unknown>) => ({ data: await api.call(data) }),
@@ -152,4 +163,42 @@ it('parses CSV strictly, counts workdays after reopen and exports counts without
   expect(
     dormWorkflowSummary({ repairs: [], leaves: [], residents: [], packages: [] }),
   ).not.toContain('學號');
+});
+
+it('keeps history read-only after school disables the workflow', async () => {
+  api.config.enabled = false;
+  api.rows.repairs = [
+    {
+      id: 'r',
+      title: '歷史報修',
+      dormitory: 'A',
+      room: '101',
+      dormStatus: 'fixed',
+      history: [{ status: 'fixed', at: 1 }],
+    },
+  ];
+  const onRepairs = vi.fn();
+  render(<DormWorkflow schoolId="pu" uid="alice" onOwnRepairsChange={onRepairs} />);
+  await waitFor(() =>
+    expect(onRepairs).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'r', official: true, status: 'fixed' }),
+    ]),
+  );
+  expect(await screen.findByText('歷史報修 · A 101')).toBeTruthy();
+  expect(screen.queryByText('還沒修好')).toBeNull();
+  expect(screen.queryByText('送給輔導員核可')).toBeNull();
+  expect(screen.queryByText('開啟輔導員工作台')).toBeNull();
+});
+it('requires a fresh resident selection after changing parcel search', async () => {
+  api.config.packages = true;
+  api.rows.residents = [{ id: '123', studentId: '123', name: '小明', building: 'A', room: '101' }];
+  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  const search = await screen.findByLabelText('學號或姓名（本棟住宿生）');
+  fireEvent.change(search, { target: { value: '123' } });
+  fireEvent.click(await screen.findByText('123 小明 A 101'));
+  expect((screen.getByText('登錄並通知學生') as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.change(search, { target: { value: '456' } });
+  expect((screen.getByText('登錄並通知學生') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByText('登錄並通知學生'));
+  expect(api.call.mock.calls.some(([d]) => d.action === 'registerPackage')).toBe(false);
 });

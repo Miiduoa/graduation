@@ -1,6 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
-const { createAuthzHelpers, SERVICE_ROLE_DOMAINS } = require('./authz');
+const { createAuthzHelpers } = require('./authz');
 const LABELS = {
   sent: '已送給輔導員',
   received: '輔導員已收到',
@@ -35,11 +35,12 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       throw new HttpsError('invalid-argument', '學校代碼錯誤');
     const membership = await authz.assertActiveSchoolMember(schoolId, uid);
     const school = db.collection('schools').doc(schoolId);
-    const [schoolDoc, rolesDoc] = await Promise.all([
+    const [schoolDoc, rolesDoc, dormRolesDoc] = await Promise.all([
       school.get(),
       school.collection('serviceRoles').doc(uid).get(),
+      school.collection('dormStaffRoles').doc(uid).get(),
     ]);
-    const roles = rolesDoc.data() || {};
+    const roles = dormRolesDoc.exists ? dormRolesDoc.data() : rolesDoc.data() || {};
     const admin = membership.role === 'admin';
     const repairs = admin || (roles.status === 'active' && roles.repairs === true);
     const packages = admin || (roles.status === 'active' && roles.packages === true);
@@ -52,7 +53,8 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         admin,
         role: repairs || packages ? 'dorm_staff' : 'student',
       };
-    if (!enabled) throw new HttpsError('failed-precondition', '這所學校尚未開通宿舍工作流程');
+    if (!enabled && input.action !== 'mine')
+      throw new HttpsError('failed-precondition', '這所學校尚未開通宿舍工作流程');
     const action = input.action;
     const staff = (domain) => {
       if (!(domain === 'packages' ? packages : repairs))
@@ -98,7 +100,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       }
       return {
         leaves: await list('dormLeaves', true),
-        repairs: (await list('repairRequests', true)).filter((r) => r.workflow === 'dorm_staff'),
+        repairs: (await list('dormRepairs', true)).filter((r) => r.workflow === 'dorm_staff'),
         announcements,
       };
     }
@@ -113,7 +115,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         await authz.assertSchoolAdmin(schoolId, uid, tx);
         const memberRef = school.collection('members').doc(target),
           accountRef = db.collection('users').doc(target),
-          serviceRef = school.collection('serviceRoles').doc(target);
+          serviceRef = school.collection('dormStaffRoles').doc(target);
         const [member, account, oldRoles] = await tx.getAll(memberRef, accountRef, serviceRef);
         if (!member.exists || (member.data().status && member.data().status !== 'active'))
           throw new HttpsError('permission-denied', '帳號不是本校啟用成員');
@@ -124,16 +126,9 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         )
           throw new HttpsError('failed-precondition', '帳號已停用');
         const granting = input.packages === true || input.repairs === true;
-        // Activating the shared record must not revive dormant non-dorm grants.
-        // Their effective access stays false; active grants remain untouched.
-        const inactiveDomains = {};
-        if (granting && oldRoles.data()?.status === 'inactive')
-          for (const domain of SERVICE_ROLE_DOMAINS)
-            if (!['packages', 'repairs'].includes(domain)) inactiveDomains[domain] = false;
         tx.set(
           serviceRef,
           {
-            ...inactiveDomains,
             status: granting ? 'active' : oldRoles.data()?.status || 'inactive',
             packages: input.packages === true,
             repairs: input.repairs === true,
@@ -189,10 +184,10 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       if (!repairs && !packages) staff('repairs');
       return {
         repairs: repairs
-          ? (await list('repairRequests')).filter((r) => r.workflow === 'dorm_staff')
+          ? (await list('dormRepairs')).filter((r) => r.workflow === 'dorm_staff')
           : [],
         leaves: repairs ? await list('dormLeaves') : [],
-        packages: packages ? await list('packages') : [],
+        packages: packages ? await list('dormPackages') : [],
         residents: packages ? await list('dormResidents') : [],
       };
     }
@@ -244,7 +239,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         };
       }
       const ref = school
-        .collection(action === 'submitRepair' ? 'repairRequests' : 'dormLeaves')
+        .collection(action === 'submitRepair' ? 'dormRepairs' : 'dormLeaves')
         .doc(uid + '_' + key);
       await db.runTransaction(async (tx) => {
         const old = await tx.get(ref);
@@ -254,7 +249,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
     }
     if (action === 'repairStatus' || action === 'repairDetails' || action === 'decideLeave') {
       const ref = school
-        .collection(action !== 'decideLeave' ? 'repairRequests' : 'dormLeaves')
+        .collection(action !== 'decideLeave' ? 'dormRepairs' : 'dormLeaves')
         .doc(required(input.id, 200));
       let owner;
       await db.runTransaction(async (tx) => {
@@ -408,7 +403,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       const packageKey = required(input.key, 100);
       if (!/^[a-zA-Z0-9_-]+$/.test(packageKey))
         throw new HttpsError('invalid-argument', '重試代碼錯誤');
-      const ref = school.collection('packages').doc(uid + '_' + packageKey);
+      const ref = school.collection('dormPackages').doc(uid + '_' + packageKey);
       const parcel = {
         recipientId: r.userId,
         studentId: r.studentId,
@@ -423,6 +418,14 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         const old = await tx.get(ref);
         if (!old.exists) {
           tx.create(ref, parcel);
+          // Existing student feed contains only the legacy parcel fields.
+          tx.create(school.collection('packages').doc(ref.id), {
+            recipientId: parcel.recipientId,
+            description: parcel.description,
+            location: parcel.location,
+            status: parcel.status,
+            arrivedAt: parcel.arrivedAt,
+          });
           created = true;
         }
       });
@@ -442,10 +445,10 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       staff('packages');
       const refs =
         action === 'returnPackage'
-          ? [school.collection('packages').doc(required(input.id, 200))]
+          ? [school.collection('dormPackages').doc(required(input.id, 200))]
           : (
               await school
-                .collection('packages')
+                .collection('dormPackages')
                 .where('studentId', '==', required(input.studentId, 50))
                 .get()
             ).docs.map((d) => d.ref);
@@ -456,12 +459,16 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           const row = snap.data();
           inBuilding(row);
           if (/郵局|掛號|收發室/.test(row.location || '')) continue;
-          if (row.status === 'waiting')
+          if (row.status === 'waiting') {
             tx.update(snap.ref, {
               status: action === 'returnPackage' ? 'returned' : 'picked_up',
               handledBy: uid,
               handledAt: FieldValue.serverTimestamp(),
             });
+            tx.update(school.collection('packages').doc(snap.id), {
+              status: action === 'returnPackage' ? 'returned' : 'picked_up',
+            });
+          }
         }
       });
       return { success: true };
