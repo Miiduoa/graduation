@@ -262,7 +262,7 @@ export function createCampusSpatialScene(
       case '=': next = { ...requestedCamera, zoom: requestedCamera.zoom * SPATIAL_ZOOM_FACTOR }; break;
       case '-':
       case '_': next = { ...requestedCamera, zoom: requestedCamera.zoom / SPATIAL_ZOOM_FACTOR }; break;
-      case 'Home': next = { bearing: 0, zoom: 1 }; break;
+      case 'Home': next = { ...requestedCamera, bearing: 0 }; break;
       default: return;
     }
     event.preventDefault();

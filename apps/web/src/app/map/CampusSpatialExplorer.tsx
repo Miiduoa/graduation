@@ -179,7 +179,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom < MAX_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom * SPATIAL_ZOOM_FACTOR });
         }}>＋</button>
-        <button className="btn" type="button" onClick={() => onCameraChange({ bearing: 0, zoom: 1 })}>回到北向</button>
+        <button className="btn" type="button" onClick={() => onCameraChange({ ...camera, bearing: 0 })}>回到北向</button>
         <span>縮放 {Math.round(camera.zoom * 100)}%</span>
         <span className={styles.compass}>
           <svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
