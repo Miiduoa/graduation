@@ -151,6 +151,9 @@ export function careerHasSensitiveContent(title: string): boolean {
   // including spaced digits, decimal results and fractions. Do not treat event
   // durations such as「30 分鐘」as grades.
   const nameAndScore = compact
+    // Only remove a complete public event ordinal; adjacent results still undergo
+    // the same checks (for example「第10屆實習 王測試95」).
+    .replace(/第[0-9零〇一二三四五六七八九十百千兩壹貳參肆伍陸柒捌玖拾佰]+屆/gu, '')
     .replace(/[^\p{L}\p{N}./]/gu, '')
     .replace(/\d+(?:\.\d+)?(?:分鐘|小時|學分|場|名|人|元|年度|年|月|日|天|週|周|時)/g, '');
   if (/(?:[\p{Script=Han}]{2,}|[a-z]{2,})\d{1,3}(?:\.\d+)?(?:分)?(?!\d)/u.test(nameAndScore))
@@ -167,7 +170,14 @@ export function careerHasSensitiveContent(title: string): boolean {
     )
   )
     return true;
-  if (/(?:^|[^\p{L}\p{N}])(?:優|甲|乙|丙|丁|戊)(?=$|[^\p{L}\p{N}])/u.test(dateFree)) return true;
+  // A Chinese grade may directly follow a name. Exact public compounds were
+  // removed above, so「甲公司」stays public while「王測試甲」is withheld.
+  if (
+    /(?:^|[^\p{L}\p{N}]|[\p{Script=Han}]{2,})(?:優|甲|乙|丙|丁|戊)(?=$|[^\p{L}\p{N}])/u.test(
+      dateFree,
+    )
+  )
+    return true;
   // Student identifiers can mix letters and digits rather than contain eight
   // consecutive digits (for example S411A1234).
   const identifiers = dateFree

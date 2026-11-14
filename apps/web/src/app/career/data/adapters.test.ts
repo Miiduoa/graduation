@@ -484,6 +484,13 @@ it.each(['2026/12/8至翌日實習說明會', '2026/12/8至月底實習申請'])
 );
 
 const policySensitiveTitles = [
+  ...['優', '甲', '乙', '丙', '丁', '戊', '优'].flatMap((grade) => [
+    `2026/12/8 實習申請 王測試${grade}`,
+    `2026/12/8 第10屆實習講座 王測試${grade}`,
+    `2026/12/8 甲公司說明會 王測試${grade}，請確認`,
+  ]),
+  '2026/12/8 第10屆實習講座 王測試95',
+  '2026/12/8 第10屆實習講座 王測試 S411A1234',
   '2026/12/8 實習申請 王測試不及格',
   '2026/12/8 實習申請 王測試優等',
   '2026/12/8 實習申請 等第 A+',
@@ -542,6 +549,11 @@ it.each(policySensitiveTitles)(
   },
 );
 it.each([
+  '第10屆實習講座',
+  '實習講座 第10屆',
+  '第１０屆實習講座',
+  '第 10 屆實習講座',
+  '第十一屆實習講座',
   '優良企業徵才',
   '甲公司說明會',
   '乙公司說明會',
@@ -554,7 +566,7 @@ it.each([
   async (event) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
-    const title = `2026/12/8 ${event}`;
+    const title = `2026/12/8 ${event}`.normalize('NFKC');
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => ({
