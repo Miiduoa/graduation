@@ -83,7 +83,7 @@ it('retains all existing services and search while adding a separate classroom e
   );
   expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe('/cafeteria');
   expect(screen.queryByRole('link', { name: '跨校交流' })).toBeNull();
-  expect(screen.queryByRole('link', { name: '職涯' })).toBeNull();
+  expect(screen.getByRole('link', { name: '職涯' }).getAttribute('href')).toBe('/career');
   expect(screen.getByRole('link', { name: '店家合作' }).getAttribute('href')).toBe('/merchant');
   expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
   expect(screen.getByRole('link', { name: '學校資訊' }).getAttribute('href')).toBe('/school-info');
@@ -192,7 +192,7 @@ it('keeps the nuni header and original school login around the complete shared m
     expect(screen.getByRole('link', { name: label === '成績' ? /^成績$/ : label })).toBeTruthy();
   expect(screen.getByRole('link', { name: '課程與作業' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu',
+    '/login?returnUrl=%2Fmap%3FschoolId%3Dtw-pu&schoolId=tw-pu',
   );
   expect(screen.getByRole('link', { name: '今天' }).getAttribute('href')).toBe('/?schoolId=tw-pu');
 });

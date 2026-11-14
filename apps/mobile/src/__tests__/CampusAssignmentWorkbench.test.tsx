@@ -54,7 +54,9 @@ test('searches a record on the last page and opens its authorized assignment wit
   expect(view.getByText('符合條件 1 筆 · 已同步 137 筆')).toBeTruthy();
   fireEvent.press(view.getByText('查看這份作業'));
   expect(ctx.navigation.navigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit', params: { groupId: 'g_0', assignmentId: 'a_136' },
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'g_0', assignmentId: 'a_136' },
   });
   expect(askCampusAssistant).not.toHaveBeenCalled();
   expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
@@ -134,7 +136,9 @@ test('the assistant preserves workbench search across tabs and clears it on scho
   expect(view.getByText('符合條件 1 筆 · 已同步 137 筆')).toBeTruthy();
   fireEvent.press(view.getByText('查看這份作業'));
   expect(navigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit', params: { groupId: 'g_0', assignmentId: 'a_136' },
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'g_0', assignmentId: 'a_136' },
   });
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
   expect(askCampusAssistant).not.toHaveBeenCalled();

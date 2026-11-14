@@ -229,12 +229,17 @@ it('offers school login for sharing only when student ID sign-in is open', async
   await screen.findByRole('button', { name: '新增課程' });
   expect(screen.getByText(SHARE_NEEDS_SCHOOL_LOGIN_COPY, { exact: false })).toBeTruthy();
   expect(screen.queryByText(SHARE_SCHOOL_LOGIN_UNAVAILABLE_COPY)).toBeNull();
-  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
-  );
-  expect(screen.getByRole('link', { name: '登入查看好友' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Ftimetable%3Fcampus%3Dpu',
-  );
+  for (const name of ['登入學校帳號', '登入查看好友']) {
+    const destination = new URL(
+      screen.getByRole('link', { name }).getAttribute('href')!,
+      'https://campus.local',
+    );
+    expect(destination.pathname).toBe('/login');
+    expect(Object.fromEntries(destination.searchParams)).toEqual({
+      returnUrl: '/timetable?campus=pu',
+      campus: 'pu',
+    });
+  }
   expect(screen.queryByRole('button', { name: '複製分享連結' })).toBeNull();
 });
 

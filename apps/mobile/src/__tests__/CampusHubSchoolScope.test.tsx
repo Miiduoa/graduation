@@ -49,7 +49,7 @@ test.each(['個人行程', '課表', '行事曆'])('搜尋 %s 仍找得到分流
   expect(view.getByText('校園行事曆')).toBeTruthy();
 });
 
-test.each(['住宿', '宿舍', '職涯', '實習', '入住', '就業'])(
+test.each(['住宿', '宿舍', '入住'])(
   'campus home reaches current school information when looking for %s',
   (keyword) => {
     const navigation = { navigate: jest.fn() };
@@ -58,6 +58,20 @@ test.each(['住宿', '宿舍', '職涯', '實習', '入住', '就業'])(
     fireEvent.press(view.getByText('學校資訊'));
     expect(safeNavigate).toHaveBeenCalledWith(navigation, 'SchoolInfo', undefined, {
       fallbackMessage: '「學校資訊」目前無法開啟。',
+    });
+  },
+);
+
+test.each(['職涯', '實習', '工讀', '就業', '工作', '徵才', '履歷', '求職'])(
+  '搜尋 %s 直接開啟職涯服務，不再只到學校資訊',
+  (keyword) => {
+    const navigation = { navigate: jest.fn() };
+    const view = render(<CampusHubScreen navigation={navigation} />);
+    fireEvent.changeText(view.getByLabelText('搜尋校園服務'), keyword);
+    expect(view.queryByText('學校資訊')).toBeNull();
+    fireEvent.press(view.getByRole('button', { name: '職涯，找實習、工讀與校方職涯資訊' }));
+    expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Career', undefined, {
+      fallbackMessage: '「職涯」目前無法開啟。',
     });
   },
 );
@@ -76,7 +90,7 @@ test('Taichung-specific transport entry is only available in its original PU con
 test('closed modules stay out of the directory while official information has clear entries', () => {
   const view = render(<CampusHubScreen />);
   expect(view.getByText('宿舍')).toBeTruthy();
-  expect(view.queryByText('職涯')).toBeNull();
+  expect(view.getByText('職涯')).toBeTruthy();
   expect(view.queryByText('社團')).toBeNull();
   expect(view.queryByText('校園錢包')).toBeNull();
   expect(view.queryByText('報修')).toBeNull();
@@ -104,7 +118,12 @@ test('lost-found uses the Google platform entry while its screen retains the exp
   const navigation = { navigate: jest.fn() };
   const view = render(<CampusHubScreen navigation={navigation} />);
   fireEvent.press(view.getByText('失物招領'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'PlatformLostFound', undefined, expect.any(Object));
+  expect(safeNavigate).toHaveBeenCalledWith(
+    navigation,
+    'PlatformLostFound',
+    undefined,
+    expect.any(Object),
+  );
 });
 
 test('the compact school control opens the picker directly from campus services', async () => {
@@ -198,11 +217,20 @@ test('站內點餐的訂單和 App 校園餐廳的訂單有各自的入口', () 
   const view = render(<CampusHubScreen navigation={navigation} />);
   fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '訂單紀錄');
   fireEvent.press(view.getByText('站內點餐'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'NuniWorkspace', { tab: 'food' }, expect.any(Object));
+  expect(safeNavigate).toHaveBeenCalledWith(
+    navigation,
+    'NuniWorkspace',
+    { tab: 'food' },
+    expect.any(Object),
+  );
   fireEvent.press(view.getByText('我的訂單'));
-  expect(safeNavigate).toHaveBeenLastCalledWith(navigation, 'StudentOrders', undefined, expect.any(Object));
+  expect(safeNavigate).toHaveBeenLastCalledWith(
+    navigation,
+    'StudentOrders',
+    undefined,
+    expect.any(Object),
+  );
 });
-
 
 test('生活先顯示常用任務，交流與課務仍能經搜尋直達', () => {
   const navigation = { navigate: jest.fn() };

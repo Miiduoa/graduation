@@ -211,10 +211,13 @@ it('tells Google-only guests honestly and preserves return target without claimi
   expect(screen.queryByText(/登入即可報名/)).toBeNull();
   expect(screen.queryByText(/工作階段/)).toBeNull();
   const link = screen.getByRole('link', { name: '查看學校登入說明' });
-  expect(link.getAttribute('href')).toContain('reconnect=school');
-  expect(decodeURIComponent(link.getAttribute('href')!.split('returnUrl=')[1]!)).toBe(
-    '/events/evt-1?schoolId=nthu&source=school-club-events',
-  );
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/login');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    reconnect: 'school',
+    returnUrl: '/events/evt-1?schoolId=nthu&source=school-club-events',
+    schoolId: 'nthu',
+  });
 });
 
 it('does not promise Providence school form covers a different selected school', async () => {

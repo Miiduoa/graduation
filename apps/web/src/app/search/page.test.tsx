@@ -77,7 +77,7 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(11);
   expect(screen.queryByRole('link', { name: /^數位學生證/ })).toBeNull();
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
@@ -207,16 +207,16 @@ it('uses the current school for feedback when the address still has an earlier c
   expect(target.searchParams.has('session')).toBe(false);
 });
 
-it.each(['職涯', '實習'])(
-  'finds the official school information destination when searching for %s',
+it.each(['職涯', '實習', '校內工讀'])(
+  'finds the public career workspace when searching for %s',
   (query) => {
     window.history.replaceState({}, '', `/search?campus=nthu&q=${encodeURIComponent(query)}`);
     render(<SearchPage />);
     const target = new URL(
-      screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')!,
+      screen.getByRole('link', { name: /^職涯/ }).getAttribute('href')!,
       'https://campus.example',
     );
-    expect(target.pathname).toBe('/school-info');
+    expect(target.pathname).toBe('/career');
     expect(target.searchParams.get('campus')).toBe('nthu');
     expect(target.searchParams.has('q')).toBe(false);
     expect(screen.getAllByRole('link')).toHaveLength(1);

@@ -28,7 +28,10 @@ describe('navigation linking config', () => {
       routes: [
         {
           name: '校園',
-          state: { routes: [{ name: 'Dormitory', params: { schoolId: 'pu' } }] },
+          state: {
+            index: 1,
+            routes: [{ name: 'CampusHome' }, { name: 'Dormitory', params: { schoolId: 'pu' } }],
+          },
         },
       ],
     });

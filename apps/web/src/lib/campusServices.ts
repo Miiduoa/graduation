@@ -298,11 +298,19 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '職涯',
+    text: '查看職涯截止日、校方公告與附近職缺來源',
+    href: '/career',
+    access: 'public',
+    keywords: '職涯 校內工讀 實習 學分 校園徵才 就業 工作 career internship',
+    category: 'campus',
+  },
+  {
     name: '學校資訊',
     text: '查看官方聯絡電話、網站與名錄地址',
     href: '/school-info',
     access: 'public',
-    keywords: '總機 官網 地址 名錄 聯絡 職涯 實習 徵才 就業 school info contact career',
+    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
     category: 'campus',
   },
   {

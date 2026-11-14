@@ -116,24 +116,17 @@ const sections: Array<{ title: string; searchOnly?: boolean; items: ServiceItem[
       },
       {
         icon: 'ic_school',
+        label: '職涯',
+        screen: 'Career',
+        description: '找實習、工讀與校方職涯資訊',
+        keywords: ['職涯', '實習', '工讀', '就業', '工作', '徵才', '履歷', '求職'],
+      },
+      {
+        icon: 'ic_school',
         label: '學校資訊',
         screen: 'SchoolInfo',
         description: '總機、官網與校方服務',
-        keywords: [
-          '總機',
-          '官網',
-          '地址',
-          '名錄',
-          '聯絡',
-          '宿舍',
-          '住宿',
-          '職涯',
-          '實習',
-          '寢室',
-          '入住',
-          '就業',
-          '工作',
-        ],
+        keywords: ['總機', '官網', '地址', '名錄', '聯絡', '宿舍', '住宿', '寢室', '入住'],
       },
       {
         icon: 'ic_health_heart',
@@ -248,8 +241,10 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const matchCount = filtered.reduce((count, section) => count + section.items.length, 0);
   const quickActions = keyword
     ? getMobileQuickActions(query).filter(
-        (action) => !filtered.some((section) =>
-          section.items.some((item) => item.screen === action.route && !item.params)),
+        (action) =>
+          !filtered.some((section) =>
+            section.items.some((item) => item.screen === action.route && !item.params),
+          ),
       )
     : [];
   const openService = (item: ServiceItem) => {

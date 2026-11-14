@@ -65,9 +65,11 @@ function LoginForm({
   const campusSearch = useCampusNavigationSearch(params);
   const selectedSchoolId = selection?.selectedSchoolId ?? null;
   const schoolDirectoryReady = !selection || !selection.loading;
-  const importHref = selectedSchoolId && selection?.selectedSchool
-    ? `/import?schoolId=${encodeURIComponent(selectedSchoolId)}`
-    : '/import';
+  const navigationSearch = selection?.requestedUnavailable
+    ? buildCampusNavigationSearch(params)
+    : campusSearch;
+  const href = (path: string) => campusServiceHref(path, navigationSearch);
+  const importHref = href('/import');
   const options = useSignInOptions(selectedSchoolId, schoolDirectoryReady);
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
@@ -91,10 +93,7 @@ function LoginForm({
   const taskPath = new URL(destination, 'https://campus.local').pathname;
   const publicDestination = isPublicCampusPath(taskPath);
   const merchantTask = !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
-  const directoryDestination = campusServiceHref(
-    '/search',
-    selection?.requestedUnavailable ? buildCampusNavigationSearch(params) : campusSearch,
-  );
+  const directoryDestination = href('/search');
   const guestDestination = publicDestination ? destination : directoryDestination;
   useEffect(() => {
     const restore = () => {
@@ -180,7 +179,7 @@ function LoginForm({
     return (
       <SiteShell title="店家帳號登入" subtitle="第一次使用可透過 Google 建立帳號。已申請店家請用原帳號登入。">
         <NuniSignIn returnUrl={destination} issue={issue} />
-        <Link href="/login" className={styles.backLink}>查看其他身分入口</Link>
+        <Link href={href('/login')} className={styles.backLink}>查看其他身分入口</Link>
       </SiteShell>
     );
   }
@@ -359,19 +358,19 @@ function LoginForm({
             <Link href={importHref} className="btn">前往資料匯入 <span aria-hidden="true">↗</span></Link>
           </div>
           <div className={styles.helpLinks}>
-            <Link href="/privacy">
+            <Link href={href('/privacy')}>
               了解資料使用方式 <span aria-hidden="true">↗</span>
             </Link>
-            <Link href="/terms">
+            <Link href={href('/terms')}>
               閱讀使用條款 <span aria-hidden="true">↗</span>
             </Link>
           </div>
           {schoolTask && (
-            <Link href="/login" className={styles.backLink}>
+            <Link href={href('/login')} className={styles.backLink}>
               改用一般登入
             </Link>
           )}
-          <Link href="/" className={styles.backLink}>
+          <Link href={href('/')} className={styles.backLink}>
             ← 返回首頁
           </Link>
         </details>
@@ -392,7 +391,7 @@ function LoginForm({
         </Link>
         <nav aria-label="不需登入的校園服務">
           {publicCampusServices.map((service) => (
-            <Link key={service.href} href={service.href}>
+            <Link key={service.href} href={href(service.href)}>
               {service.title}
             </Link>
           ))}

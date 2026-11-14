@@ -8,7 +8,7 @@ export const SERVICE_JOURNEY_GROUPS = {
   life: [
     { id: 'travel', label: '出門與交通', description: '先找到地方，再安排怎麼過去。' },
     { id: 'daily', label: '吃飯與住宿', description: '餐點、取餐與宿舍日常。' },
-    { id: 'resources', label: '校園資源', description: '查館藏、找活動，處理生活裡的小事。' },
+    { id: 'resources', label: '校園資源', description: '查館藏、找活動與職涯資訊。' },
   ],
   connect: [
     { id: 'topics', label: '看話題', description: '校內動態與跨校公開交流。' },
@@ -51,6 +51,7 @@ export function readJourneyFilters(
 ): JourneyFilters {
   const group = params.get('group');
   return {
+    // eslint-disable-next-line no-control-regex -- Remove ASCII control characters from URL search terms.
     query: (params.get('q') || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 100),
     group: SERVICE_JOURNEY_GROUPS[journey].some((item) => item.id === group) ? group! : 'all',
   };
@@ -72,6 +73,7 @@ const SERVICE_ICONS: Partial<Record<string, CampusIconName>> = {
   '/dormitory': 'repair',
   '/library': 'library',
   '/school-info': 'services',
+  '/career': 'calendar',
   '/lost-found': 'lost-found',
   '/events': 'calendar',
   '/clubs': 'people',

@@ -12,6 +12,7 @@ on:
       - 'apps/web/src/app/layout.tsx'
       - 'apps/web/src/app/servicePages.module.css'
       - 'apps/web/src/app/life/**'
+      - 'apps/web/src/app/career/**'
       - 'apps/web/src/app/connect/**'
       - 'apps/web/src/app/profile/**'
       - 'apps/web/src/app/login/**'

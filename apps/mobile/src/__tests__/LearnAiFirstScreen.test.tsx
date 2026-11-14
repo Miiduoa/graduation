@@ -76,6 +76,7 @@ test('a course card opens the materials cabinet instead of the class feed', asyn
   const view = render(<LearnAiFirstScreen />);
   fireEvent.press(await view.findByText('教材'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { groupId: 'course-a', groupName: '資料結構' },
   });
@@ -135,6 +136,7 @@ test('課務分區直接切換既有頁面，重按目前分區保留作業搜�
   expect(mockNavigate).not.toHaveBeenCalled();
   fireEvent.press(view.getByRole('tab', { name: '課表' }));
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
     screen: 'PersonalTimetable',
     params: undefined,
   });

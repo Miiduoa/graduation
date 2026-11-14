@@ -43,7 +43,7 @@ it('生活只列日常服務，課務、交流與學生證有自己的分類', (
   expect(screen.queryByRole('link', { name: '數位學生證' })).toBeNull();
   expect(screen.getByRole('link', { name: '宿舍' }).getAttribute('href')).toBe('/dormitory');
   expect(screen.getByRole('link', { name: '校園活動' }).getAttribute('href')).toBe('/events');
-  expect(screen.getByRole('status').textContent).toBe('共 9 項服務');
+  expect(screen.getByRole('status').textContent).toBe('共 10 項服務');
 });
 
 it('點餐未開時隱藏訂單；餐廳收在同一主入口內，且不誤稱免登入點餐', () => {
@@ -108,13 +108,13 @@ it('空結果可回完整目錄；中文輸入組字時 Escape 不清掉搜尋',
   expect(screen.getByRole('heading', { name: '沒有找到符合的服務' })).toBeTruthy();
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
-  expect(screen.getByRole('status').textContent).toBe('共 9 項服務');
+  expect(screen.getByRole('status').textContent).toBe('共 10 項服務');
   expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: '借書' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getByRole('status').textContent).toBe('共 9 項服務');
+  expect(screen.getByRole('status').textContent).toBe('共 10 項服務');
 });
 
 it('搜尋不繞過點餐開關，仍可找到菜單與個人宿舍備忘', () => {
@@ -310,4 +310,27 @@ it('Suspense 備援沒有錯誤範圍的可互動連結', () => {
   render(<LifePage />);
   expect(screen.getByRole('status').textContent).toBe('正在載入生活服務…');
   expect(screen.queryAllByRole('link')).toHaveLength(0);
+});
+
+it('校園資源可以找到免登入職涯頁，搜尋保留學校且不轉送無關參數', () => {
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'pu' },
+    loading: false,
+    catalogStatus: 'ready',
+  });
+  navigation.search = 'campus=pu&token=private';
+  render(<LifePage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園資源' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
+    target: { value: '校內工讀' },
+  });
+  const link = screen.getByRole('link', { name: '職涯' });
+  expect(within(link).getByText('可直接瀏覽')).toBeTruthy();
+  const href = new URL(link.getAttribute('href')!, 'https://nuni.tw');
+  expect(href.pathname).toBe('/career');
+  expect(href.searchParams.get('schoolId')).toBe('pu');
+  expect(href.searchParams.get('campus')).toBe('pu');
+  expect(href.searchParams.has('token')).toBe(false);
+  expect(href.searchParams.has('q')).toBe(false);
+  expect(screen.getAllByRole('link')).toHaveLength(1);
 });

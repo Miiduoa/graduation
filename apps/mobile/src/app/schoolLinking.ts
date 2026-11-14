@@ -51,6 +51,7 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
         },
       },
       校園: {
+        initialRouteName: 'CampusHome',
         screens: {
           CampusHome: 'campus',
           Map: 'map',
@@ -64,6 +65,7 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
           MenuSubscription: 'menu-subscription',
           Library: 'library',
           Dormitory: 'dormitory',
+          Career: 'career',
           SchoolInfo: 'school-info',
           Health: 'health',
           PrintService: 'print',
@@ -100,6 +102,7 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
         },
       },
       我的: {
+        initialRouteName: 'MeHome',
         screens: {
           MeHome: 'profile',
           Settings: 'settings',

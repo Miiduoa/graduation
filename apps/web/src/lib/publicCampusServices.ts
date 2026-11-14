@@ -3,6 +3,7 @@ export const publicCampusServices = [
   { href: '/bus', title: '公車資訊', detail: '路線與到站時間' },
   { href: '/announcements', title: '公開公告', detail: '學校發布的公開消息' },
   { href: '/events', title: '校園活動', detail: '公開活動與講座資訊' },
+  { href: '/career', title: '職涯', detail: '校方公告、截止日期與職缺來源' },
   { href: '/cafeteria', title: '餐廳', detail: '菜單與營業資訊' },
   { href: '/library', title: '圖書館', detail: '館藏查詢與官方服務入口' },
   { href: '/school-info', title: '學校資訊', detail: '官方聯絡與名錄來源' },

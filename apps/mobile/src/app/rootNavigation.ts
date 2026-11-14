@@ -86,7 +86,9 @@ export function rootNavigateNested(
 ) {
   return dispatchWhenReady(() => {
     const nestPayload =
-      params !== undefined && Object.keys(params).length > 0 ? { screen, params } : { screen };
+      params !== undefined && Object.keys(params).length > 0
+        ? { screen, params, initial: false }
+        : { screen, initial: false };
     rootNavigationRef.dispatch(
       CommonActions.navigate({
         name: tab as any,

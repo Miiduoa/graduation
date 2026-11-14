@@ -53,7 +53,28 @@ test.each([
 ] as const)('其餘既有 %s 路徑保持原本分區', (path, tabName, screen) => {
   const state = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
   expect(state?.routes[0].name).toBe(tabName);
-  expect(state?.routes[0].state?.routes[0].name).toBe(screen);
+  const stack = state?.routes[0].state;
+  expect(stack?.routes[stack.index ?? 0].name).toBe(screen);
+});
+
+test('同一個職涯連結在學校容器返回生活，在訪客容器返回公開入口', () => {
+  const path = 'career?schoolId=ncku';
+  const school = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
+  expect(school?.routes[0]).toMatchObject({
+    name: '校園',
+    state: {
+      index: 1,
+      routes: [{ name: 'CampusHome' }, { name: 'Career', params: { schoolId: 'ncku' } }],
+    },
+  });
+  expect(getPathFromState(school!, schoolLinking.config)).toBe(`/${path}`);
+
+  const guest = preAuthLinking.getStateFromPath?.(path, preAuthLinking.config);
+  expect(guest).toMatchObject({
+    index: 1,
+    routes: [{ name: 'LoginLanding' }, { name: 'Career', params: { schoolId: 'ncku' } }],
+  });
+  expect(getPathFromState(guest!, preAuthLinking.config)).toBe(`/${path}`);
 });
 
 test('抽出配置後，舊店家入口仍只保留校園提示並轉平台餐飲', () => {
@@ -62,9 +83,11 @@ test('抽出配置後，舊店家入口仍只保留校園提示並轉平台餐�
     schoolLinking.config,
   );
   expect(state?.routes[0].name).toBe('我的');
-  expect(state?.routes[0].state?.routes[0]).toMatchObject({
+  const stack = state?.routes[0].state;
+  expect(stack?.routes[0].name).toBe('MeHome');
+  expect(stack?.routes[stack.index ?? 0]).toMatchObject({
     name: 'NuniWorkspace',
     params: { tab: 'food', schoolId: 'pu' },
   });
-  expect(state?.routes[0].state?.routes[0].params).toEqual({ tab: 'food', schoolId: 'pu' });
+  expect(stack?.routes[stack.index ?? 0].params).toEqual({ tab: 'food', schoolId: 'pu' });
 });

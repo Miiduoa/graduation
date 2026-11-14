@@ -32,6 +32,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { collectionFromSegments } from '../data/firestorePath';
+import { calculateLearningAnalyticsGpa } from '../features/learningAnalyticsGpa';
 
 type SubmissionRecord = {
   id: string;
@@ -458,22 +459,11 @@ export function LearningAnalyticsScreen(props: any) {
     };
   }, [submissions]);
 
-  // GPA 計算
-  const gpaInfo = useMemo(() => {
-    const graded = semesterGrades.filter((g) => g.grade != null && g.credits > 0);
-    if (graded.length === 0) return null;
-    const totalCredits = graded.reduce((s, g) => s + g.credits, 0);
-    const weightedSum = graded.reduce((s, g) => s + g.grade * g.credits, 0);
-    const gpa = weightedSum / totalCredits / 25; // 假設100分制→4.0制（除以25）
-    const semesters = [...new Set(graded.map((g) => g.semester))].sort();
-    const gpaPerSemester = semesters.map((sem) => {
-      const semGrades = graded.filter((g) => g.semester === sem);
-      const sc = semGrades.reduce((s, g) => s + g.credits, 0);
-      const sw = semGrades.reduce((s, g) => s + g.grade * g.credits, 0);
-      return { sem, gpa: sw / sc / 25 };
-    });
-    return { overall: Math.min(gpa, 4.0), semesters: gpaPerSemester };
-  }, [semesterGrades]);
+  // 依學校換算 GPA：靜宜使用 4.3 制，其餘維持百分制加權換算
+  const gpaInfo = useMemo(
+    () => calculateLearningAnalyticsGpa(semesterGrades, school.id),
+    [semesterGrades, school.id],
+  );
 
   // 科目強弱雷達數據
   const radarData = useMemo(() => {

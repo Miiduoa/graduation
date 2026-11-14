@@ -61,6 +61,18 @@ it('returns a personal document to the account center', () => {
   );
 });
 
+it('keeps career in campus life and returns with the selected school', () => {
+  navigation.pathname = '/career';
+  navigation.search = 'schoolId=pu&campus=pu&session=private';
+  render(<ServiceBreadcrumbs title="職涯" />);
+  const nav = screen.getByRole('navigation', { name: '目前位置' });
+  expect(within(nav).getByRole('link', { name: '生活' }).getAttribute('href')).toBe(
+    '/life?schoolId=pu&campus=pu',
+  );
+  expect(within(nav).getAllByRole('link')).toHaveLength(1);
+  expect(within(nav).getByText('職涯').getAttribute('aria-current')).toBe('page');
+});
+
 it.each(['/groups/club-1/club', '/groups/club-1/club/overview', '/groups/club-1/club/members'])(
   'returns the club route %s to life and the club directory with the browsing campus',
   (pathname) => {

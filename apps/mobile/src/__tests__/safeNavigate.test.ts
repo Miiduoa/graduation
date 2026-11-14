@@ -3,7 +3,6 @@ import { isRouteRegistered, safeNavigate, resolveTabForRoute } from '../utils/sa
 jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() },
 }));
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Alert } = require('react-native');
 
 beforeEach(() => {
@@ -49,6 +48,7 @@ describe('resolveTabForRoute', () => {
   test('校園 tab 的 route', () => {
     expect(resolveTabForRoute('餐廳總覽')).toBe('校園');
     expect(resolveTabForRoute('Ordering')).toBe('校園');
+    expect(resolveTabForRoute('Career')).toBe('校園');
   });
 
   test('訊息 tab 的 route', () => {
@@ -91,6 +91,7 @@ describe('safeNavigate / same-stack', () => {
     expect(nav.navigate).toHaveBeenCalledWith('我的', {
       screen: 'AssistantPermissions',
       params: undefined,
+      initial: false,
     });
     expect(Alert.alert).not.toHaveBeenCalled();
   });
@@ -129,6 +130,7 @@ describe('safeNavigate / same-stack', () => {
     expect(nav.navigate).toHaveBeenCalledWith('學習', {
       screen: 'PersonalTimetable',
       params: { term: '1151' },
+      initial: false,
     });
     expect(Alert.alert).not.toHaveBeenCalled();
   });
@@ -148,6 +150,7 @@ describe('safeNavigate / same-stack', () => {
     expect(nav.navigate).toHaveBeenCalledWith('學習', {
       screen: 'PersonalTimetable',
       params: { term: '1151' },
+      initial: false,
     });
     expect(Alert.alert).not.toHaveBeenCalled();
   });
@@ -170,6 +173,7 @@ describe('safeNavigate / same-stack', () => {
     expect(navigate).toHaveBeenCalledWith('學習', {
       screen: 'CourseModules',
       params: { groupId: 'c1' },
+      initial: false,
     });
     expect(Alert.alert).not.toHaveBeenCalled();
   });
@@ -202,7 +206,6 @@ describe('safeNavigate / same-stack', () => {
   });
 });
 
-
 test.each([
   'CampusSocialScreen',
   'BoardDetail',
@@ -214,7 +217,11 @@ test.each([
 ])('%s 從其他分區進入交流，既有同堆疊路由仍原地開啟', (route) => {
   const fromMe = makeNavigation(['MeHome']);
   expect(safeNavigate(fromMe, route, { postId: 'p1' })).toBe(true);
-  expect(fromMe.navigate).toHaveBeenCalledWith('訊息', { screen: route, params: { postId: 'p1' } });
+  expect(fromMe.navigate).toHaveBeenCalledWith('訊息', {
+    screen: route,
+    params: { postId: 'p1' },
+    initial: false,
+  });
   const currentStack = makeNavigation(['Inbox', route]);
   expect(safeNavigate(currentStack, route, { postId: 'p1' })).toBe(true);
   expect(currentStack.navigate).toHaveBeenCalledWith(route, { postId: 'p1' });
@@ -229,8 +236,25 @@ test('通知的跨分區入口屬於交流，舊我的堆疊仍可直接返回�
   expect(fromToday.navigate).toHaveBeenCalledWith('訊息', {
     screen: 'Notifications',
     params: undefined,
+    initial: false,
   });
   const legacyMe = makeNavigation(['MeHome', 'Notifications']);
   expect(safeNavigate(legacyMe, 'Notifications')).toBe(true);
   expect(legacyMe.navigate).toHaveBeenCalledWith('Notifications', undefined);
+});
+
+test('備用的跨分頁入口也保留該分頁首頁', () => {
+  const navigation = makeNavigation(['TodayHome']);
+  expect(
+    safeNavigate(navigation, 'UnavailableRoute', undefined, {
+      fallbackRoute: 'Notifications',
+      fallbackParams: { filter: 'unread' },
+    }),
+  ).toBe(true);
+  expect(navigation.navigate).toHaveBeenCalledWith('訊息', {
+    screen: 'Notifications',
+    params: { filter: 'unread' },
+    initial: false,
+  });
+  expect(Alert.alert).not.toHaveBeenCalled();
 });

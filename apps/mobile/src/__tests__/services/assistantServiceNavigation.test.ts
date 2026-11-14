@@ -26,6 +26,7 @@ test('a mounted school tab can be reached through its real parent navigator', ()
   const child = { ...navigator(['AIChat']), getParent: () => root };
   expect(navigateMobileAssistantService('community', 'campus', child)).toBe(true);
   expect(child.navigate).toHaveBeenCalledWith('訊息', {
+    initial: false,
     screen: 'CampusSocialScreen',
     params: undefined,
   });

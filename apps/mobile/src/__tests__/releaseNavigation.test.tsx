@@ -1,9 +1,18 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  createNavigationContainerRef,
+  type ParamListBase,
+} from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { schoolLinking } from '../app/schoolLinking';
-import type { RootTabParamList } from '../app/rootNavigation';
+import {
+  rootNavigateNested,
+  rootNavigationRef,
+  type RootTabParamList,
+} from '../app/rootNavigation';
+import { safeNavigate } from '../utils/safeNavigate';
 import Constants from 'expo-constants';
 import { HomeStack } from '../screens/HomeStack';
 import { LearnStack } from '../screens/LearnStack';
@@ -17,8 +26,14 @@ jest.mock('expo-linking', () => ({
   ...jest.requireActual('expo-linking'),
   createURL: () => 'campus://',
 }));
-let mockAuth: any;
-const mockAuthContext = React.createContext<any>(null);
+type ReleaseTestAuth = {
+  user: { uid: string };
+  profile: { uid: string; role: string; roleGroup: string; schoolId: string };
+  loading: boolean;
+  profileLoading: boolean;
+};
+let mockAuth: ReleaseTestAuth;
+const mockAuthContext = React.createContext<ReleaseTestAuth | null>(null);
 let mockSchool = 'pu';
 jest.mock('../state/auth', () => ({
   useAuth: () => require('react').useContext(mockAuthContext) ?? mockAuth,
@@ -34,7 +49,7 @@ jest.mock('../hooks/usePermissions', () => ({
   }),
 }));
 jest.mock('../ui/RouteGuard', () => ({
-  RouteGuard: ({ children, requires }: any) => {
+  RouteGuard: ({ children, requires }: { children: React.ReactNode; requires: string }) => {
     const auth = require('react').useContext(mockAuthContext);
     return requires === 'admin.dashboard' && auth.profile?.role !== 'admin' ? null : children;
   },
@@ -49,7 +64,9 @@ jest.mock('../features/courseAdvisor', () => ({
 jest.mock('../features/campusAssistant', () => ({
   askCampusAssistant: jest.fn(),
   getOnDeviceAssistantReadiness: jest.fn(async () => ({
-    available: true, ready: false, modelId: 'qwen2.5-0.5b',
+    available: true,
+    ready: false,
+    modelId: 'qwen2.5-0.5b',
     reason: '尚未下載免費模型',
   })),
 }));
@@ -304,7 +321,8 @@ jest.mock('../screens/CourseGradebookScreen', () => {
   const { Text } = require('react-native');
   return {
     __esModule: true,
-    CourseGradebookScreen: ({ route }: any) => React.createElement(Text, null, `CourseGradebookScreen:${route.params.groupId}`),
+    CourseGradebookScreen: ({ route }: { route: { params: { groupId: string } } }) =>
+      React.createElement(Text, null, `CourseGradebookScreen:${route.params.groupId}`),
   };
 });
 jest.mock('../screens/CourseHubAiFirstScreen', () => {
@@ -926,6 +944,13 @@ jest.mock('../screens/social/StoryComposeScreen', () => {
     StoryComposeScreen: () => React.createElement(Text, null, 'StoryComposeScreen'),
   };
 });
+jest.mock('../screens/social/CreatorProfileScreen', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    CreatorProfileScreen: () => React.createElement(Text, null, 'CreatorProfileScreen'),
+  };
+});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -945,7 +970,7 @@ beforeEach(() => {
   });
 });
 async function mount(Stack: React.ComponentType) {
-  const navigation = createNavigationContainerRef<any>();
+  const navigation = createNavigationContainerRef<ParamListBase>();
   const view = render(
     <mockAuthContext.Provider value={{ ...mockAuth }}>
       <NavigationContainer ref={navigation}>
@@ -955,6 +980,26 @@ async function mount(Stack: React.ComponentType) {
   );
   await waitFor(() => expect(navigation.isReady()).toBe(true));
   return { view, navigation };
+}
+
+async function mountRootTabs() {
+  const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
+  const onUnhandledAction = jest.fn();
+  const view = render(
+    <mockAuthContext.Provider value={mockAuth}>
+      <NavigationContainer ref={rootNavigationRef} onUnhandledAction={onUnhandledAction}>
+        <Tabs.Navigator id={undefined} screenOptions={{ headerShown: false }}>
+          <Tabs.Screen name="Today" component={HomeStack} />
+          <Tabs.Screen name="學習" component={LearnStack} />
+          <Tabs.Screen name="校園" component={MapStack} />
+          <Tabs.Screen name="訊息" component={MessagesStack} />
+          <Tabs.Screen name="我的" component={MeStack} />
+        </Tabs.Navigator>
+      </NavigationContainer>
+    </mockAuthContext.Provider>,
+  );
+  await waitFor(() => expect(rootNavigationRef.isReady()).toBe(true));
+  return { view, navigation: rootNavigationRef, onUnhandledAction };
 }
 test('release AddCourse navigates to real course advice, with no simulated enrollment', async () => {
   const { view, navigation } = await mount(LearnStack);
@@ -1091,7 +1136,7 @@ test.each(['AIAgentConsole', 'AIAgentObservatory'])(
     expect(view.queryByText('AIAgentConsoleScreen')).toBeNull();
   },
 );
-test.each(['Clubs', 'DormitoryScreen', 'Career'])(
+test.each(['Clubs', 'DormitoryScreen'])(
   'Map %s is not registered; old placeholder routes do not open unavailable dorm pages',
   async (route) => {
     const { view, navigation } = await mount(MapStack);
@@ -1108,6 +1153,18 @@ test('Map has a dedicated dormitory workspace route', async () => {
   expect(navigation.getCurrentRoute()?.name).toBe('Dormitory');
   expect(view.queryByText(/宿舍包裹查詢與線上報修尚未開放/)).toBeNull();
   expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
+});
+
+test('Map opens the real selected-school career page and returns to life', async () => {
+  mockSchool = 'ncku';
+  const { view, navigation } = await mount(MapStack);
+  act(() => navigation.navigate('Career'));
+  expect(navigation.getCurrentRoute()?.name).toBe('Career');
+  expect(await view.findByText(/個人職涯資料尚未連結到校方系統/)).toBeTruthy();
+  expect(view.getByRole('button', { name: '前往成大生涯發展與就業輔導組' })).toBeTruthy();
+  expect(view.queryByText('新增紀錄')).toBeNull();
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
 });
 
 test('Map school information keeps real official housing and career services after retiring old routes', async () => {
@@ -1176,18 +1233,35 @@ test.each([MeStack, LearnStack])(
 );
 
 jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => null }));
-jest.mock('../data/firebaseSource', () => ({ firebaseSource: { listGrades: jest.fn(async () => [{
-  id: 'g1', userId: 'u1', schoolId: 'pu', courseId: 'course-1', courseName: '測試課程',
-  gradeSource: 'firebase-course', score: 80, publishedAt: '2026-01-01T00:00:00Z',
-}]) } }));
+jest.mock('../data/firebaseSource', () => ({
+  firebaseSource: {
+    listGrades: jest.fn(async () => [
+      {
+        id: 'g1',
+        userId: 'u1',
+        schoolId: 'pu',
+        courseId: 'course-1',
+        courseName: '測試課程',
+        gradeSource: 'firebase-course',
+        score: 80,
+        publishedAt: '2026-01-01T00:00:00Z',
+      },
+    ]),
+  },
+}));
 test('student grade row reaches its workspace gradebook through the navigator', async () => {
   const { view, navigation } = await mount(LearnStack);
-  await act(async () => { navigation.navigate('Grades'); });
+  await act(async () => {
+    navigation.navigate('Grades');
+  });
   await view.findByText('測試課程');
   fireEvent.press(view.getByText('測試課程'));
   await view.findByText('CourseGradebookScreen:course-1');
   expect(navigation.getCurrentRoute()?.name).toBe('CourseGradebook');
-  expect(navigation.getCurrentRoute()?.params).toMatchObject({ groupId: 'course-1', sourceSystem: 'workspace' });
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({
+    groupId: 'course-1',
+    sourceSystem: 'workspace',
+  });
 });
 
 test.each([HomeStack, MessagesStack])(
@@ -1206,7 +1280,6 @@ test.each([HomeStack, MessagesStack])(
     ).toBe(draftKey);
   },
 );
-
 
 test('交流首頁開啟社群與貼文後，返回仍在原來的交流堆疊', async () => {
   const { view, navigation } = await mount(MessagesStack);
@@ -1238,10 +1311,13 @@ test('交流的通知入口留在同一堆疊，返回仍保有對話入口', as
 });
 
 test.each([
-  ['community', 'CampusSocialScreen'],
-  ['post/shared-post', 'PostDetail'],
-  ['notifications', 'Notifications'],
-])('冷啟動 %s 連結使用交流分頁且返回交流首頁', async (path, screen) => {
+  ['community', 'CampusSocialScreen', '訊息', 'Inbox'],
+  ['post/shared-post', 'PostDetail', '訊息', 'Inbox'],
+  ['notifications', 'Notifications', '訊息', 'Inbox'],
+  ['career?schoolId=pu', 'Career', '校園', 'CampusHome'],
+  ['settings', 'Settings', '我的', 'MeHome'],
+])('冷啟動 %s 連結使用正確分頁且可返回該分頁首頁', async (path, screen, tab, home) => {
+  if (screen === 'Career') mockSchool = 'ncku';
   const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
   const navigation = createNavigationContainerRef<RootTabParamList>();
   const initialState = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
@@ -1260,10 +1336,109 @@ test.each([
   );
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe(screen));
   let state = navigation.getRootState();
-  expect(state.routes[state.index].name).toBe('訊息');
+  expect(state.routes[state.index].name).toBe(tab);
+  if (screen === 'Career') {
+    expect(mockSchool).toBe('ncku');
+    expect(mockAuth.profile.role).toBe('student');
+  }
   expect(navigation.canGoBack()).toBe(true);
   act(() => navigation.goBack());
-  expect(navigation.getCurrentRoute()?.name).toBe('Inbox');
+  expect(navigation.getCurrentRoute()?.name).toBe(home);
   state = navigation.getRootState();
+  expect(state.routes[state.index].name).toBe(tab);
+});
+
+test.each(['root', 'safe'] as const)('%s 首次由我的開啟公開社群頁，返回交流首頁', async (entry) => {
+  const { navigation, onUnhandledAction } = await mountRootTabs();
+  act(() => navigation.navigate('我的'));
+  expect(navigation.getCurrentRoute()?.name).toBe('MeHome');
+  expect(
+    navigation.getRootState().routes.find((route) => route.name === '訊息')?.state,
+  ).toBeUndefined();
+  act(() => {
+    if (entry === 'root') rootNavigateNested('訊息', 'CreatorProfile', { memberUid: 'u1' });
+    else safeNavigate(navigation, 'CreatorProfile', { memberUid: 'u1' });
+  });
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'CreatorProfile',
+    params: { memberUid: 'u1' },
+  });
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('Inbox');
+  const state = navigation.getRootState();
   expect(state.routes[state.index].name).toBe('訊息');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test.each(['root', 'safe'] as const)(
+  '%s 再次跨入已開啟交流堆疊，保留原看板與返回路徑',
+  async (entry) => {
+    const { navigation, onUnhandledAction } = await mountRootTabs();
+    act(() => navigation.navigate('訊息'));
+    act(() =>
+      navigation.navigate('訊息', {
+        screen: 'BoardDetail',
+        params: { boardId: 'board-1', boardName: '原看板' },
+      }),
+    );
+    const stackBefore = navigation
+      .getRootState()
+      .routes.find((route) => route.name === '訊息')?.state;
+    const keysBefore = stackBefore?.routes.map((route) => route.key);
+    act(() => navigation.navigate('我的'));
+    act(() => {
+      if (entry === 'root') rootNavigateNested('訊息', 'PostDetail', { postId: 'post-1' });
+      else safeNavigate(navigation, 'PostDetail', { postId: 'post-1' });
+    });
+    expect(navigation.getCurrentRoute()?.name).toBe('PostDetail');
+    const stackAfter = navigation
+      .getRootState()
+      .routes.find((route) => route.name === '訊息')?.state;
+    expect(stackAfter?.routes.slice(0, -1).map((route) => route.key)).toEqual(keysBefore);
+    act(() => navigation.goBack());
+    expect(navigation.getCurrentRoute()).toMatchObject({
+      name: 'BoardDetail',
+      params: { boardId: 'board-1', boardName: '原看板' },
+    });
+    act(() => navigation.goBack());
+    expect(navigation.getCurrentRoute()?.name).toBe('Inbox');
+    expect(onUnhandledAction).not.toHaveBeenCalled();
+  },
+);
+
+test('career announcements open Today while life preserves the selected-school career page', async () => {
+  mockSchool = 'ncku';
+  const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
+  const navigation = createNavigationContainerRef<RootTabParamList>();
+  const onUnhandledAction = jest.fn();
+  const view = render(
+    <mockAuthContext.Provider value={mockAuth}>
+      <NavigationContainer ref={navigation} onUnhandledAction={onUnhandledAction}>
+        <Tabs.Navigator id={undefined} screenOptions={{ headerShown: false }}>
+          <Tabs.Screen name="Today" component={HomeStack} />
+          <Tabs.Screen name="學習" component={LearnStack} />
+          <Tabs.Screen name="校園" component={MapStack} />
+          <Tabs.Screen name="訊息" component={MessagesStack} />
+          <Tabs.Screen name="我的" component={MeStack} />
+        </Tabs.Navigator>
+      </NavigationContainer>
+    </mockAuthContext.Provider>,
+  );
+  await waitFor(() => expect(navigation.isReady()).toBe(true));
+  act(() => navigation.navigate('校園'));
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  act(() => navigation.navigate('校園', { screen: 'Career' }));
+  expect(await view.findByRole('button', { name: '前往成大生涯發展與就業輔導組' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
+  expect(navigation.getCurrentRoute()?.name).toBe('公告總覽');
+  let state = navigation.getRootState();
+  expect(state.routes[state.index].name).toBe('Today');
+  expect(view.getByText('AnnouncementsListAiFirstScreen')).toBeTruthy();
+  act(() => navigation.navigate('校園'));
+  expect(navigation.getCurrentRoute()?.name).toBe('Career');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  state = navigation.getRootState();
+  expect(state.routes[state.index].name).toBe('校園');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
 });

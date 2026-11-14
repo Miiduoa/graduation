@@ -43,9 +43,26 @@ export function loginHref(
   options?: { reconnect?: 'school' },
 ): string {
   const safe = collapseInternalPathHash(sanitizeInternalPath(returnPath));
+  const source = toUrl(safe).searchParams;
+  const context = new URLSearchParams();
+  // The login form reads the browsing campus from its own URL, independently of
+  // returnUrl. Copy only campus selectors; the live directory still resolves them.
+  const requestedCampus = source.get('campus') || source.get('schoolId');
+  if (requestedCampus === 'all' || requestedCampus === 'personal') {
+    context.set('campus', 'all');
+  } else {
+    for (const key of ['school', 'schoolId', 'campus']) {
+      const value = source.get(key);
+      const valid = key === 'school'
+        ? /^[a-z0-9][a-z0-9_-]{0,79}$/i
+        : /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
+      if (value && value !== 'personal' && valid.test(value)) context.set(key, value);
+    }
+  }
   const reconnect =
     options?.reconnect === 'school' ? 'reconnect=school&' : '';
-  const href = `/login?${reconnect}returnUrl=${encodeURIComponent(safe)}`;
+  const query = context.toString();
+  const href = `/login?${reconnect}returnUrl=${encodeURIComponent(safe)}${query ? `&${query}` : ''}`;
   // Next.js <Link> keeps the current document fragment when the target has none.
   // Encoded %23 in returnUrl is not a fragment, so end with # to replace it.
   return safe.includes('#') ? `${href}#` : href;
