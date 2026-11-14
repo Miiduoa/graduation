@@ -100,7 +100,10 @@ export function parseTaiwanJobs(xml: string): CareerJob[] {
     })
     .slice(0, 10);
 }
+// Preserve the original response.text().length limit (UTF-16 code units).
 export const CAREER_SOURCE_LIMIT = 2_000_000;
+// UTF-8 needs at most three bytes per code unit, plus an optional stripped BOM.
+const CAREER_SOURCE_BYTE_LIMIT = CAREER_SOURCE_LIMIT * 3 + 3;
 export async function getText(url: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
@@ -120,14 +123,25 @@ export async function getText(url: string) {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > CAREER_SOURCE_LIMIT) {
+        if (size > CAREER_SOURCE_BYTE_LIMIT) {
           controller.abort();
           await reader.cancel();
           throw new Error('oversized source');
         }
         raw += decoder.decode(value, { stream: true });
+        if (raw.length > CAREER_SOURCE_LIMIT) {
+          controller.abort();
+          await reader.cancel();
+          throw new Error('oversized source');
+        }
       }
-      return raw + decoder.decode();
+      raw += decoder.decode();
+      if (raw.length > CAREER_SOURCE_LIMIT) {
+        controller.abort();
+        await reader.cancel();
+        throw new Error('oversized source');
+      }
+      return raw;
     } finally {
       reader.releaseLock();
     }

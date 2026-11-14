@@ -21,7 +21,7 @@
 - 應用程式與 HTTP 公開回應 TTL 都是 30 秒。
 - 同校並發請求共用同一個 Promise，完成或失敗後釋放。
 - 每個程序、每校每分鐘最多 10 次來源載入嘗試。命中快取與等待同一請求不計次；超過時回既有快取或既有不可用狀態，保留公開存取。這是上游保護，不是分散式用戶配額。
-- 外部回應逐塊累計解壓後 bytes，超過 2,000,000 bytes 立即 abort 並 cancel reader，不先呼叫 response.text()。TextDecoder 支援跨塊中文字元；10 秒 timeout 涵蓋串流讀取，並在 finally 清理 timer。
+- 外部回應逐塊解碼，沿用原本 2,000,000 個 UTF-16 code units 的長度門檻；另以 6,000,003 bytes（每個 code unit 最多 3 bytes，另含 UTF-8 BOM）作相容的安全上限。超限立即 abort 並 cancel reader，不先呼叫 response.text()。TextDecoder 支援跨塊中文字元；10 秒 timeout 涵蓋串流讀取，並在 finally 清理 timer。
 - 三個來源依舊獨立失敗，不影響其他區塊，也不爬取 104／1111／Cake。
 
 ## 需晉瑋說「上」
@@ -85,3 +85,10 @@ Java 21 使用既有 `/tmp/career-jre`，僅本機 demo-\* 模擬器資料。執
 - 真實 Firestore 模擬器：2 個檔案、15 項通過，包含完整結案、並發重送／版本衝突、跨校／跨系、撤銷資格、時數／文件及規則隔離。
 - web／mobile 的 tsconfig.career.json 與 shared typecheck 通過；變更程式三端 ESLint、Prettier 及 git diff --check 通過。
 - 重新查核 PR #627、#628、#629 的擁有檔案，與此 PR 變更交集皆為空。
+
+## 第二輪審查修正
+
+- 修正 P2：來源大小限制恢復依解碼後 UTF-16 長度計算，避免原本可接受的中文公告／職缺被 bytes 門檻拒收，保留串流超限中止與相容的 bytes 上限。
+- 新增 70 萬中文字、含 BOM 的長度邊界、emoji 邊界與解碼器結尾補字超限測試；既有跨塊中文字及超限 abort／cancel 測試持續通過。
+- 本輪職涯網頁與來源隔離回歸共 6 個檔案、174 項測試通過；web tsconfig.career.json 型別檢查、變更程式 ESLint、Prettier 與 git diff --check 通過。
+- 本輪未修改登入、權限、session、正式或草案 Firestore rules、migration；原有待核准模組維持隔離。
