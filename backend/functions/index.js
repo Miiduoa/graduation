@@ -3872,23 +3872,7 @@ exports.confirmPackagePickup = onCall(
 
     await assertActiveSchoolMember(schoolId, uid);
 
-    const packageRef = db.collection('schools').doc(schoolId).collection('packages').doc(packageId);
-    const packageDoc = await packageRef.get();
-
-    if (!packageDoc.exists) {
-      throw new HttpsError('not-found', 'Package not found');
-    }
-
-    if (packageDoc.data().recipientId !== uid) {
-      throw new HttpsError('permission-denied', 'This is not your package');
-    }
-
-    await packageRef.update({
-      status: 'picked_up',
-      pickedUpAt: FieldValue.serverTimestamp(),
-    });
-
-    return { success: true };
+    return require('./packagePickup').confirmPackagePickup({ db, schoolId, packageId, uid });
   },
 );
 

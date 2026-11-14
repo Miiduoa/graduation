@@ -2,10 +2,12 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { render } from '@testing-library/react-native';
 const mockCall = jest.fn();
+let mockUid = 'staff';
+let mockSchoolId = 'pu';
 jest.mock('firebase/functions', () => ({ httpsCallable: () => mockCall }));
 jest.mock('../firebase', () => ({ getFunctionsInstance: () => ({}) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'pu' } }) }));
-jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'staff' } }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId } }) }));
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: mockUid } }) }));
 jest.mock('../components/dorm/DormWorkflow', () => {
   const { Text } = require('react-native');
   return { DormWorkflow: () => <Text>實際宿舍工作台</Text> };
@@ -30,4 +32,20 @@ test('disabled school keeps the existing staff entry', async () => {
   const view = render(<DormStaffHome fallback={<Text>原本校務服務</Text>} onOpen={jest.fn()} />);
   expect(await view.findByText('原本校務服務')).toBeTruthy();
   expect(view.queryByText('實際宿舍工作台')).toBeNull();
+});
+
+test('account and school changes discard disabled capability and unknown stays visible', async () => {
+  mockCall.mockResolvedValue({ data: { enabled: false } });
+  const view = render(<DormStaffHome fallback={<Text>原本校務服務</Text>} onOpen={jest.fn()} />);
+  expect(await view.findByText('原本校務服務')).toBeTruthy();
+  mockCall.mockImplementation(() => new Promise(() => {}));
+  mockUid = 'other-staff';
+  view.rerender(<DormStaffHome fallback={<Text>原本校務服務</Text>} onOpen={jest.fn()} />);
+  expect(view.getByText('實際宿舍工作台')).toBeTruthy();
+  mockCall.mockRejectedValue(new Error('offline'));
+  mockSchoolId = 'ntnu';
+  view.rerender(<DormStaffHome fallback={<Text>原本校務服務</Text>} onOpen={jest.fn()} />);
+  expect(await view.findByText('實際宿舍工作台')).toBeTruthy();
+  mockUid = 'staff';
+  mockSchoolId = 'pu';
 });

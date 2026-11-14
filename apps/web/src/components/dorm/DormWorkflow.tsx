@@ -180,7 +180,21 @@ export function DormWorkflow({
   room?: string;
   draft?: { title: string; description: string; category: string; location: string };
 }) {
-  const [config, setConfig] = useState<DormWorkflowConfig | null>(null);
+  const capabilityKey = JSON.stringify([uid, schoolId]);
+  const [capability, setCapability] = useState<{ key: string; config: DormWorkflowConfig } | null>(
+    null,
+  );
+  // Unknown capabilities keep the service visible; the callable still enforces access.
+  const config =
+    capability?.key === capabilityKey
+      ? capability.config
+      : {
+          enabled: true,
+          repairs: false,
+          packages: false,
+          admin: false,
+          role: 'student' as const,
+        };
   const [rows, setRows] = useState<DormWorkflowRows>({
     repairs: [],
     leaves: [],
@@ -196,6 +210,8 @@ export function DormWorkflow({
   const [requestKey, setRequestKey] = useState(dormRequestKey);
   const [preview, setPreview] = useState(false);
   const generation = useRef(0);
+  const rowGeneration = useRef(0);
+  const selectedStudentId = useRef('');
   const inputRef = useRef<FocusTarget | null>(null);
   const set = (key: string, value: string) => {
     setValues((old) => ({ ...old, [key]: value }));
@@ -209,10 +225,11 @@ export function DormWorkflow({
   const refresh = useCallback(
     async (staff = staffMode) => {
       const token = generation.current;
+      const rowToken = rowGeneration.current;
       const result = await call<Partial<DormWorkflowRows>>({
         action: staff ? 'workspace' : 'mine',
       });
-      if (token === generation.current)
+      if (token === generation.current && rowToken === rowGeneration.current)
         setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
     },
     [call, staffMode],
@@ -220,7 +237,8 @@ export function DormWorkflow({
   useEffect(() => {
     generation.current++;
     const token = generation.current;
-    setConfig(null);
+    setCapability(null);
+    selectedStudentId.current = '';
     setRows({ repairs: [], leaves: [], packages: [], residents: [] });
     setValues({});
     setImages([]);
@@ -230,7 +248,7 @@ export function DormWorkflow({
     void call<DormWorkflowConfig>({ action: 'config' })
       .then((c) => {
         if (token === generation.current) {
-          setConfig(c);
+          setCapability({ key: capabilityKey, config: c });
           if (c.enabled && initialStaff && (c.repairs || c.packages)) {
             setStaffMode(true);
             setTab(c.admin ? 'summary' : c.repairs ? 'repairs' : 'packages');
@@ -243,9 +261,9 @@ export function DormWorkflow({
     return () => {
       generation.current++;
     };
-  }, [call, uid, initialStaff]);
+  }, [call, uid, initialStaff, capabilityKey]);
   useEffect(() => {
-    if (!config || submitOnly) return;
+    if (capability?.key !== capabilityKey || submitOnly) return;
     let active = true;
     const load = () => {
       void refresh().catch(() => {
@@ -257,9 +275,9 @@ export function DormWorkflow({
     return () => {
       active = false;
       clearInterval(timer);
-      generation.current++;
+      rowGeneration.current++;
     };
-  }, [config, refresh, submitOnly]);
+  }, [capability, capabilityKey, refresh, submitOnly]);
   useEffect(() => {
     const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
     onTonightLeaveChange?.(rows.leaves.some((r) => r.date === today && r.status === 'approved'));
@@ -272,6 +290,13 @@ export function DormWorkflow({
   }, [rows.repairs, staffMode, onOwnRepairsChange]);
   async function act(data: Record<string, unknown>, done?: () => void) {
     if (busy) return;
+    if (
+      data.action === 'registerPackage' &&
+      (!selectedStudentId.current ||
+        data.studentId !== selectedStudentId.current ||
+        !rows.residents.some((r) => r.studentId === selectedStudentId.current))
+    )
+      return;
     setBusy(true);
     setNotice('');
     const token = generation.current;
@@ -584,8 +609,9 @@ export function DormWorkflow({
                 label="學號或姓名（本棟住宿生）"
                 value={get('search')}
                 onChange={(value) => {
-                  set('search', value);
-                  set('studentId', '');
+                  selectedStudentId.current = '';
+                  setValues((old) => ({ ...old, search: value, studentId: '' }));
+                  setPreview(false);
                 }}
               />
               {!!get('search') &&
@@ -599,8 +625,13 @@ export function DormWorkflow({
                       key={r.id}
                       label={`${r.studentId} ${r.name} ${r.building} ${r.room}`}
                       onPress={() => {
-                        set('studentId', r.studentId);
-                        set('search', r.studentId);
+                        selectedStudentId.current = r.studentId;
+                        setValues((old) => ({
+                          ...old,
+                          studentId: r.studentId,
+                          search: r.studentId,
+                        }));
+                        setPreview(false);
                       }}
                     />
                   ))}
@@ -618,8 +649,8 @@ export function DormWorkflow({
                 },
                 () => {
                   setRequestKey(dormRequestKey());
-                  set('search', '');
-                  set('studentId', '');
+                  selectedStudentId.current = '';
+                  setValues((old) => ({ ...old, search: '', studentId: '' }));
                   set('item', '');
                   inputRef.current?.focus();
                 },

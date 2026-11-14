@@ -18,12 +18,14 @@ export function DormStaffHome({
 }) {
   const { school } = useSchool();
   const { user } = useAuth();
-  const [available, setAvailable] = useState<boolean | null>(null);
+  const capabilityKey = JSON.stringify([user?.uid, school.id]);
+  const [capability, setCapability] = useState<{ key: string; available: boolean } | null>(null);
+  const available = capability?.key === capabilityKey ? capability.available : true;
   useEffect(() => {
     let active = true;
-    setAvailable(null);
+    setCapability(null);
     if (!user?.uid) {
-      setAvailable(false);
+      setCapability({ key: capabilityKey, available: false });
       return;
     }
     void httpsCallable<Record<string, unknown>, DormWorkflowConfig>(
@@ -32,15 +34,18 @@ export function DormStaffHome({
     )({ action: 'config', schoolId: toPublicSchoolId(school.id) ?? school.id })
       .then((result) => {
         if (active)
-          setAvailable(result.data.enabled && (result.data.repairs || result.data.packages));
+          setCapability({
+            key: capabilityKey,
+            available: result.data.enabled && (result.data.repairs || result.data.packages),
+          });
       })
       .catch(() => {
-        if (active) setAvailable(false);
+        if (active) setCapability(null);
       });
     return () => {
       active = false;
     };
-  }, [school.id, user?.uid]);
+  }, [school.id, user?.uid, capabilityKey]);
   if (available !== true) return <>{fallback}</>;
   return (
     <AIDetailScreen title="校務服務" subtitle="職員・宿舍輔導員">

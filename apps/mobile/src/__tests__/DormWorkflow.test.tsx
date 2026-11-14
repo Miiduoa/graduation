@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 const mockCall = jest.fn();
 jest.mock('firebase/functions', () => ({
   httpsCallable: () => async (data: unknown) => ({ data: await mockCall(data) }),
@@ -121,10 +121,39 @@ test('changing parcel search clears the previously selected resident', async () 
   );
   fireEvent.changeText(search, '123');
   fireEvent.press(await view.findByText('123 小明 A 101'));
+  const staleSubmit = view.UNSAFE_root.findAll(
+    (node) =>
+      typeof node.type === 'function' &&
+      node.type.name === 'Btn' &&
+      node.props.label === '登錄並通知學生',
+  )[0].props.onPress;
   fireEvent.changeText(search, '456');
+  // A queued press from the previous render must also reject the old student.
+  act(() => staleSubmit());
   expect(
     view.getByRole('button', { name: '登錄並通知學生' }).props.accessibilityState.disabled,
   ).toBe(true);
   fireEvent.press(view.getByText('登錄並通知學生'));
   expect(mockCall.mock.calls.some(([d]) => d.action === 'registerPackage')).toBe(false);
+});
+
+test('mobile re-evaluates capabilities after account and school changes', async () => {
+  const view = render(<DormWorkflow schoolId="pu" uid="alice" />);
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith(expect.objectContaining({ action: 'mine' })),
+  );
+  view.rerender(<DormWorkflow schoolId="pu" uid="bob" />);
+  await waitFor(() =>
+    expect(mockCall.mock.calls.filter(([d]) => d.action === 'config')).toHaveLength(2),
+  );
+  expect(view.getByText('宿舍輔導員服務')).toBeTruthy();
+  view.rerender(<DormWorkflow schoolId="ntnu" uid="bob" />);
+  await waitFor(() => expect(mockCall).toHaveBeenCalledWith({ action: 'mine', schoolId: 'ntnu' }));
+  expect(view.getByText('宿舍輔導員服務')).toBeTruthy();
+});
+test('unknown capabilities keep the mobile workflow visible', async () => {
+  mockCall.mockRejectedValue(new Error('offline'));
+  const view = render(<DormWorkflow schoolId="pu" uid="student" />);
+  expect(await view.findByText('宿舍服務暫時無法連線。')).toBeTruthy();
+  expect(view.getByText('宿舍輔導員服務')).toBeTruthy();
 });

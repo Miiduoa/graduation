@@ -202,3 +202,28 @@ it('requires a fresh resident selection after changing parcel search', async () 
   fireEvent.click(screen.getByText('登錄並通知學生'));
   expect(api.call.mock.calls.some(([d]) => d.action === 'registerPackage')).toBe(false);
 });
+
+it('re-evaluates capabilities on account and school changes and ignores old responses', async () => {
+  let resolveOld!: (value: unknown) => void;
+  const view = render(<DormWorkflow schoolId="pu" uid="alice" />);
+  await screen.findByText('宿舍輔導員服務');
+  api.call.mockImplementation(async (data) => {
+    if (data.action !== 'config') return api.rows;
+    if (data.schoolId === 'pu')
+      return new Promise((resolve) => {
+        resolveOld = resolve;
+      });
+    return api.config;
+  });
+  view.rerender(<DormWorkflow schoolId="pu" uid="bob" />);
+  expect(screen.getByText('宿舍輔導員服務')).toBeTruthy();
+  view.rerender(<DormWorkflow schoolId="ntnu" uid="bob" />);
+  await waitFor(() => expect(api.call).toHaveBeenCalledWith({ action: 'mine', schoolId: 'ntnu' }));
+  resolveOld({ enabled: false });
+  await waitFor(() => expect(screen.getByText('宿舍輔導員服務')).toBeTruthy());
+  view.rerender(<DormWorkflow schoolId="ntnu" uid="carol" />);
+  await waitFor(() =>
+    expect(api.call.mock.calls.filter(([d]) => d.action === 'config')).toHaveLength(4),
+  );
+  expect(screen.getByText('宿舍輔導員服務')).toBeTruthy();
+});

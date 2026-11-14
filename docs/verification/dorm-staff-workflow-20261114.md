@@ -22,7 +22,7 @@
 - 逐校在 `schools/{schoolId}` 新增 `dormWorkflowEnabled: true` 才開通，缺省或 false 隱藏新服務。不可全校批次預設開啟。
 - 新集合：`schools/{schoolId}/dormLeaves`、`dormResidents`、`dormAnnouncements`。均只由驗證身份與權限的 callable 讀寫，不新增客戶端 Firestore 存取權。
 - 完整報修資料寫入 `dormRepairs`，包裹學號、棟別寫入 `dormPackages`，不進入舊規則允許全校服務人員直接讀取的集合。學生既有 `packages` feed 僅保留 recipientId、品名、地點、狀態、到件時間，不含學號、棟別或名冊資料；登錄與核銷同步原子更新。
-- 管理員指派／撤銷宿舍權限只寫入獨立 `dormStaffRoles`（packages、repairs、buildings），不再寫共用 `serviceRoles`，既有服務的有效權限不變。非空 buildings 限定棟別，空白代表全棟，僅管理員可設定；異動寫入 `adminLogs`。不修改共用登入或角色解析。
+- 管理員指派／撤銷宿舍權限只寫入獨立 `dormStaffRoles`（packages、repairs、buildings），不再寫共用 `serviceRoles`，既有服務的有效權限不變。非空 buildings 限定棟別，空白代表全棟，僅管理員可設定；異動寫入 `adminLogs`。未修改共用登入；本 PR 的共用 postLoginRoles／roles 解析有將 `dorm_staff` 映射為 `staff`，屬權限相關變更。
 - 照片最多三張、每張 10MB，使用既有 `temp/{uid}` 上傳及 Storage 規則，不新增公開路徑；網址只隨工單提供給本人及授權職員。
 - 沒有 SQL migration、Firestore rule、Storage rule 或複合 index 變更。沒有自動執行資料遷移。正式開通前請提供真實住宿生名冊及輔導員帳號，並驗證通知設備設定。
 
@@ -69,3 +69,12 @@
 - P2：兩端修改包裹搜尋文字立即清除已選學號；必須重新選取目前名冊結果才能啟用登錄。
 - 有登入權限migration變更：本次只在宿舍 handler 內進行審查要求的狹義權限／儲存隔離；未改登入、sessions、共用 authz、角色解析、Firestore／Storage rules 或 migration。新增集合與 callable 部署仍屬「需晉瑋說『上』」，本次未部署、未回填或遷移正式資料。此為尚未開通的 PR 資料模型修正，不自動轉移舊試驗資料或撤回過去另行核發的 serviceRoles。
 - R2 驗證：後端 dormWorkflow／authz 28 項、web DormWorkflow／dormitory 46 項、手機 DormWorkflow／DormStaffHome／dormitoryWorkspace 11 項通過；web、mobile、shared 全專案 typecheck、宿舍後端 ESLint、git diff --check 通過。使用 /tmp 的 tsconfig／Jest 設定只修正共享 node_modules symlink 的 workspace 解析；未排除檔案，驗證後刪除暫存設定。環境仍為 Node 24，套件引擎要求 20／22，無安裝依賴或更換 symlink。
+
+
+## 審查修正（R3）
+
+- Web／mobile 的包裹搜尋改為同步清空選取學號，選取結果時一次更新搜尋與學號。登錄送出當下以 ref 核對目前選取學號與名冊，拒絕舊 render 排隊的送出事件；新增舊事件回歸測試。
+- 能力狀態以 uid＋schoolId 綁定；身分或學校改變立即視為未知並重新查詢。未知／連線失敗保留宿舍入口。config 與輪詢使用不同取消代碼，避免輪詢清理丟棄新 config；手機職員首頁也套用相同的未知預設與身分綁定。
+- 既有 confirmPackagePickup 在單一 transaction 內檢查收件人並更新 packages 與存在的 dormPackages，保留舊包裹支援；已退件包裹不可再領取。回歸涵蓋既有入口領取、工作台狀態、禁止事後退件、非本人拒絕及舊包裹。
+- 更正前述 R1／R2「未改共用角色解析」的記錄：該描述僅適用當輪新增修正，不適用整份 PR。本 PR 原有 postLoginRoles／roles 的 dorm_staff → staff 解析變更仍存在，必須如實列為權限相關範圍；本輪未修改該映射、登入、rules 或 migration，也未部署。
+- 驗證：後端 dormWorkflow／authz 30 項、web DormWorkflow／dormitory 47 項、mobile DormWorkflow／DormStaffHome／dormitoryWorkspace 14 項通過；web、mobile、shared 全專案 typecheck、變更後端模組 ESLint、index.js 語法與 git diff --check 通過。沿用 /tmp 驗證設定修正共享 node_modules 的 workspace 解析，未排除檔案、安裝依賴或更換 symlink。

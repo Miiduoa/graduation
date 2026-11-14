@@ -57,7 +57,7 @@ function fixture() {
   const sendPushToUser = jest.fn().mockResolvedValue({});
   const handler = createDormWorkflowHandler({ db, sendPushToUser });
   const call = (uid, input) => handler({ auth: { uid }, data: { schoolId: 'pu', ...input } });
-  return { call, data, sendPushToUser };
+  return { call, data, sendPushToUser, db };
 }
 const repair = {
   action: 'submitRepair',
@@ -372,4 +372,44 @@ test('scoped grants and personal data never enter legacy school-wide access path
   await expect(call('staff', { action: 'returnPackage', id: 'other' })).rejects.toMatchObject({
     code: 'permission-denied',
   });
+});
+
+test('legacy pickup atomically updates both feeds and prevents staff return', async () => {
+  const { confirmPackagePickup } = require('./packagePickup');
+  const { call, data, db } = fixture();
+  data.set('schools/pu/dormResidents/123', {
+    studentId: '123',
+    userId: 'student',
+    building: 'A',
+    room: '101',
+    active: true,
+  });
+  const { id } = await call('staff', {
+    action: 'registerPackage',
+    studentId: '123',
+    key: 'pickup',
+    description: '書',
+    location: 'A櫃台',
+  });
+  const runTransaction = jest.spyOn(db, 'runTransaction');
+  await confirmPackagePickup({ db, schoolId: 'pu', packageId: id, uid: 'student' });
+  expect(runTransaction).toHaveBeenCalledTimes(1);
+  for (const collection of ['packages', 'dormPackages'])
+    expect(data.get(`schools/pu/${collection}/${id}`).status).toBe('picked_up');
+  const workspace = await call('staff', { action: 'workspace' });
+  expect(workspace.packages.find((p) => p.id === id).status).toBe('picked_up');
+  await call('staff', { action: 'returnPackage', id });
+  expect(data.get(`schools/pu/dormPackages/${id}`).status).toBe('picked_up');
+});
+test('legacy pickup keeps recipient authorization and supports legacy-only parcels', async () => {
+  const { confirmPackagePickup } = require('./packagePickup');
+  const { data, db } = fixture();
+  data.set('schools/pu/packages/legacy', { recipientId: 'student', status: 'waiting' });
+  await expect(
+    confirmPackagePickup({ db, schoolId: 'pu', packageId: 'legacy', uid: 'other' }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(data.get('schools/pu/packages/legacy').status).toBe('waiting');
+  await confirmPackagePickup({ db, schoolId: 'pu', packageId: 'legacy', uid: 'student' });
+  expect(data.get('schools/pu/packages/legacy').status).toBe('picked_up');
+  expect(data.has('schools/pu/dormPackages/legacy')).toBe(false);
 });
