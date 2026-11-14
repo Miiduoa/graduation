@@ -1215,6 +1215,59 @@ describe('public Providence building geometry route', () => {
       }
     });
 
+  it.each([false, true])(
+    'honors Retry-After on truncated HTTP 200 Overpass JSON (stale cache: %s)',
+    async (withStaleCache) => {
+      // An upstream timeout can end mid-JSON, before a top-level remark can be
+      // parsed. The operator's Retry-After must still hold even on invalid JSON.
+      // This is a synthetic failure; it does not assert a real outage occurred.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn();
+        if (withStaleCache) {
+          upstream.mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        }
+        upstream
+          .mockResolvedValueOnce(new Response('{"elements":[{"type":"way",', {
+            status: 200, headers: { 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const initial = withStaleCache ? await (await GET()).json() : null;
+        const attemptAt = start + (withStaleCache ? 25 * 60 * 60 * 1000 : 0);
+        clock.mockReturnValue(attemptAt);
+        const rejected = await GET();
+        expect(rejected.status).toBe(withStaleCache ? 200 : 503);
+        expect(rejected.headers.get('Cache-Control'))
+          .toBe(withStaleCache ? 'private, no-store' : 'no-store');
+        expect(rejected.headers.get('Retry-After')).toBe('3600');
+        if (withStaleCache) {
+          expect(await rejected.json()).toMatchObject({
+            stale: true, fetchedAt: initial.fetchedAt, buildings: initial.buildings,
+          });
+        } else {
+          expect((await rejected.json()).error).toMatch(/temporarily unavailable/);
+        }
+
+        clock.mockReturnValue(attemptAt + 11 * 60 * 1000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(withStaleCache ? 200 : 503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(withStaleCache ? 2 : 1);
+
+        clock.mockReturnValue(attemptAt + 60 * 60 * 1000 + 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(withStaleCache ? 3 : 2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
   it('keeps the last good snapshot when an HTTP 200 Overpass timeout has partial buildings', async () => {
     const partial = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,

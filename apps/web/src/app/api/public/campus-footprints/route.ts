@@ -264,7 +264,19 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     throw new Error('OSM response advertised partial content');
   }
   const raw = await readBoundedResponse(response, signal);
-  const payload = JSON.parse(raw) as unknown;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw) as unknown;
+  } catch {
+    // An overloaded Overpass instance/proxy can truncate its 200 JSON before
+    // the top-level remark is parseable. Never trust the fragment as geometry,
+    // but still respect an explicit Retry-After instead of retrying at 10 min.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(retryAfter, Date.now()));
+    }
+    throw new Error('Invalid Overpass JSON');
+  }
   // An incomplete Overpass response may omit or corrupt osm3s metadata.
   // Examine the soft-failure remark first, so a malformed replication header
   // cannot hide the operator's longer Retry-After request.
