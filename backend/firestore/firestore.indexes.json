@@ -441,20 +441,6 @@
       ]
     },
     {
-      "collectionGroup": "campusPosts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "authorUid",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "campusStories",
       "queryScope": "COLLECTION",
       "fields": [
