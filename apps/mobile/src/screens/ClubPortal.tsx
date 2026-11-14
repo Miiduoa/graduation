@@ -333,7 +333,6 @@ export function ClubPortal({
           {!view.events?.length ? <Text style={style}>目前沒有排定的活動。</Text> : null}
           {view.events
             ?.filter((e) => manage || e.endsAt >= clock)
-            .slice(0, manage ? undefined : 3)
             .map((e) => (
               <View key={e.id} style={{ gap: 8 }}>
                 <Text style={style}>

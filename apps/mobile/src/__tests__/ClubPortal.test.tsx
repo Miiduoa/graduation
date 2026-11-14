@@ -135,7 +135,7 @@ test('分頁載入更多社員會保留先前名冊，失敗可重試', async ()
   expect(screen.queryByText('載入更多社員')).toBeNull();
 });
 
-test('活動分頁保留前頁活動並在末頁移除載入按鈕', async () => {
+test('一般社員載入超過三場活動後保留全部活動並可報名第五場', async () => {
   const event: NonNullable<ClubPortalView['events']>[number] = {
     id: 'first',
     title: '第一場活動',
@@ -143,7 +143,7 @@ test('活動分頁保留前頁活動並在末頁移除載入按鈕', async () =>
     startsAt: Date.now() + 100000,
     endsAt: Date.now() + 200000,
     capacity: 10,
-    registrationDeadline: 4000,
+    registrationDeadline: Date.now() + 90000,
     cancellationDeadline: 3000,
     visibility: 'public',
     registered: 0,
@@ -151,24 +151,42 @@ test('活動分頁保留前頁活動並在末頁移除載入按鈕', async () =>
     mine: false,
     myCheckIn: false,
   };
-  jest
-    .mocked(callClubPortal)
-    .mockResolvedValue({ ...profile, events: [event], eventCursor: 'first' });
+  const events = Array.from({ length: 5 }, (_, index) => ({
+    ...event,
+    id: `event-${index + 1}`,
+    title: `第${index + 1}場活動`,
+  }));
+  const memberProfile = { ...profile, role: 'member', status: 'active' };
+  jest.mocked(callClubPortal).mockResolvedValue({
+    ...memberProfile,
+    events: events.slice(0, 3),
+    eventCursor: 'event-3',
+  });
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   await screen.findByText('載入更多活動');
   jest.mocked(callClubPortal).mockResolvedValue({
-    ...profile,
-    events: [{ ...event, id: 'last', title: '最後一場活動' }],
+    ...memberProfile,
+    events: events.slice(3),
   });
   fireEvent.press(screen.getByText('載入更多活動'));
-  await screen.findByText(/最後一場活動/);
-  expect(screen.getByText(/第一場活動/)).toBeTruthy();
+  await screen.findByText(/第5場活動/);
+  for (const row of events) {
+    expect(screen.getByText(new RegExp(row.title))).toBeTruthy();
+  }
   expect(screen.queryByText('載入更多活動')).toBeNull();
   expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
     action: 'read',
     groupId: 'club',
-    eventCursor: 'first',
+    eventCursor: 'event-3',
   });
+  fireEvent.press(screen.getAllByText('報名')[4]);
+  await waitFor(() =>
+    expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
+      action: 'register',
+      groupId: 'club',
+      eventId: 'event-5',
+    }),
+  );
 });
 
 test('待審申請分頁保留已載入名單，失敗可重試', async () => {

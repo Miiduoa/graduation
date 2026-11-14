@@ -359,7 +359,6 @@ export function ClubPortal({
             {!view.events?.length && <p>目前沒有排定的活動。</p>}
             {view.events
               ?.filter((e) => manage || e.endsAt >= clock)
-              .slice(0, manage ? undefined : 3)
               .map((e) => (
                 <article key={e.id}>
                   <h3>{e.title}</h3>
