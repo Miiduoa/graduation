@@ -5,7 +5,12 @@ import { callClubPortal } from '../services/clubPortal';
 import type { ClubPortalView } from '@campus/shared/src/clubPortal';
 jest.mock('../services/clubExport', () => ({ shareClubCsv: jest.fn() }));
 jest.mock('../services/clubPortal', () => ({ callClubPortal: jest.fn() }));
-jest.mock('../screens/ClubCheckIn', () => ({ ClubCheckIn: () => null }));
+jest.mock('../screens/ClubCheckIn', () => ({
+  ClubCheckIn: ({ acceptingCheckIns }: any) => {
+    const { Text } = require('react-native');
+    return <Text>{acceptingCheckIns ? '測試簽到開放' : '測試佇列管理'}</Text>;
+  },
+}));
 jest.mock('../firebase', () => ({ getFunctionsInstance: jest.fn() }));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('../ui/components', () => {
@@ -243,4 +248,56 @@ test('報名名單續載失敗保留原名單與游標，重試後合併同場�
     rosterEventId: 'event',
     registrationCursor: 'first',
   });
+});
+
+test('活動結束保留佇列管理；完整報名名單載入前不判定社員未報名', async () => {
+  const event = {
+    id: 'ended',
+    title: '已結束合成活動',
+    location: '測試教室',
+    startsAt: 1,
+    endsAt: 2,
+    capacity: 200,
+    registrationDeadline: 1,
+    cancellationDeadline: 1,
+    visibility: 'public',
+    registered: 101,
+    checkedIn: 0,
+    mine: false,
+    myCheckIn: false,
+    registrations: [{ uid: 'first', name: '首位', checkedInAt: null }],
+    registrationCursor: 'first',
+  };
+  jest.mocked(callClubPortal).mockResolvedValueOnce({
+    ...profile,
+    role: 'admin',
+    status: 'active',
+    events: [event],
+    members: [
+      { id: 'later', name: '後頁社員', role: 'member', phone: '', duesPaid: false },
+      { id: 'absent', name: '未報名社員', role: 'member', phone: '', duesPaid: false },
+    ],
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.press(await screen.findByText('管理'));
+  expect(screen.getByText('測試佇列管理')).toBeTruthy();
+  expect(screen.queryByText(/這位不在報名名單/)).toBeNull();
+  expect(screen.queryByText('仍然簽到')).toBeNull();
+  jest.mocked(callClubPortal).mockRejectedValueOnce(new Error('測試分頁失敗'));
+  fireEvent.press(screen.getByText('載入更多報名者'));
+  await screen.findByText('測試分頁失敗');
+  expect(screen.queryByText(/這位不在報名名單/)).toBeNull();
+  jest.mocked(callClubPortal).mockResolvedValueOnce({
+    ...profile,
+    events: [
+      {
+        ...event,
+        registrationCursor: undefined,
+        registrations: [{ uid: 'later', name: '後頁報名者', checkedInAt: null }],
+      },
+    ],
+  });
+  fireEvent.press(screen.getByText('載入更多報名者'));
+  await screen.findByText(/未報名社員 · 這位不在報名名單/);
+  expect(screen.queryByText(/後頁社員 · 這位不在報名名單/)).toBeNull();
 });

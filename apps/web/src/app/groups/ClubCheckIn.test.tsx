@@ -159,3 +159,40 @@ test('已連線開頁自動送出既存佇列，同步期間重複連線事件�
   expect(localStorage.getItem(key)).toBe('[]');
   expect(screen.getByText('0 筆待送出')).toBeTruthy();
 });
+
+test('活動結束時關閉新增與相機，重載仍可重送、查看拒絕並清除佇列', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  localStorage.setItem(key, '["1234"]');
+  vi.mocked(callClubPortal).mockRejectedValue(new Error('活動已結束'));
+  const props = {
+    uid: 'one',
+    schoolId: 'pu',
+    groupId: 'club',
+    eventId: 'event',
+    officer: true,
+    onConfirmed: vi.fn(),
+  };
+  const view = render(<ClubCheckIn {...props} />);
+
+  await screen.findByText('1 筆待送出');
+  view.rerender(<ClubCheckIn {...props} acceptingCheckIns={false} />);
+  expect(screen.queryByLabelText('掃描器輸入 QR 或學號後四碼')).toBeNull();
+  expect(screen.queryByText('相機掃描 QR')).toBeNull();
+  view.unmount();
+  render(<ClubCheckIn {...props} acceptingCheckIns={false} />);
+
+  await screen.findByText('1 筆待送出');
+  fireEvent.click(screen.getByRole('button', { name: '重送待送出簽到' }));
+  await screen.findByText(/活動已結束/);
+  expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+    action: 'checkIn',
+    groupId: 'club',
+    eventId: 'event',
+    checkInCode: '1234',
+  });
+  expect(props.onConfirmed).not.toHaveBeenCalled();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: '清除待送出紀錄' }));
+  await screen.findByText('0 筆待送出');
+  expect(localStorage.getItem(key)).toBe('[]');
+});

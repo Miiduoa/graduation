@@ -258,3 +258,61 @@ test('活動報名名單獨立分頁並保留其他活動與已載入名單', as
     registrationCursor: 'first-person',
   });
 });
+
+vi.mock('./ClubCheckIn', () => ({
+  ClubCheckIn: ({ acceptingCheckIns }: { acceptingCheckIns: boolean }) => (
+    <span>{acceptingCheckIns ? '測試簽到開放' : '測試佇列管理'}</span>
+  ),
+}));
+
+test('活動結束保留佇列管理；完整報名名單載入前不判定社員未報名', async () => {
+  const event = {
+    id: 'ended',
+    title: '已結束合成活動',
+    location: '測試教室',
+    startsAt: 1,
+    endsAt: 2,
+    capacity: 200,
+    registrationDeadline: 1,
+    cancellationDeadline: 1,
+    visibility: 'public',
+    registered: 101,
+    checkedIn: 0,
+    mine: false,
+    myCheckIn: false,
+    registrations: [{ uid: 'first', name: '首位', checkedInAt: null }],
+    registrationCursor: 'first',
+  };
+  vi.mocked(callClubPortal).mockResolvedValueOnce({
+    ...profile,
+    role: 'admin',
+    status: 'active',
+    events: [event],
+    members: [
+      { id: 'later', name: '後頁社員', role: 'member', phone: '', duesPaid: false },
+      { id: 'absent', name: '未報名社員', role: 'member', phone: '', duesPaid: false },
+    ],
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.click(await screen.findByRole('button', { name: '管理' }));
+  expect(screen.getByText('測試佇列管理')).toBeTruthy();
+  expect(screen.queryByText(/這位不在報名名單/)).toBeNull();
+  expect(screen.queryByText('仍然簽到')).toBeNull();
+  vi.mocked(callClubPortal).mockRejectedValueOnce(new Error('測試分頁失敗'));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多報名名單' }));
+  await screen.findByText('測試分頁失敗');
+  expect(screen.queryByText(/這位不在報名名單/)).toBeNull();
+  vi.mocked(callClubPortal).mockResolvedValueOnce({
+    ...profile,
+    events: [
+      {
+        ...event,
+        registrationCursor: undefined,
+        registrations: [{ uid: 'later', name: '後頁報名者', checkedInAt: null }],
+      },
+    ],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多報名名單' }));
+  await screen.findByText(/未報名社員 · 這位不在報名名單/);
+  expect(screen.queryByText(/後頁社員 · 這位不在報名名單/)).toBeNull();
+});

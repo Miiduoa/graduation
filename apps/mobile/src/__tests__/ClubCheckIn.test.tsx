@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react-native';
 import { ClubCheckIn } from '../screens/ClubCheckIn';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -214,5 +215,46 @@ test('暫時失敗紀錄可在重載後重送成功', async () => {
   await screen.findByText('1 筆待送出');
   fireEvent.press(screen.getByText('重送待送出簽到'));
   await waitFor(() => expect(props.onConfirmed).toHaveBeenCalledTimes(1));
+  expect(mockStorage.get(key)).toBe('[]');
+});
+
+test('活動結束時關閉新增與相機，重載仍可重送、查看拒絕並清除佇列', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  mockStorage.set(key, '["1234"]');
+  jest.mocked(callClubPortal).mockRejectedValue(new Error('活動已結束'));
+  const props = {
+    uid: 'one',
+    schoolId: 'pu',
+    groupId: 'club',
+    eventId: 'event',
+    officer: true,
+    onConfirmed: jest.fn(),
+  };
+  const view = render(<ClubCheckIn {...props} />);
+  fireEvent.press(screen.getByText('開始簽到'));
+  await screen.findByText('1 筆待送出');
+  view.rerender(<ClubCheckIn {...props} acceptingCheckIns={false} />);
+  expect(screen.queryByLabelText('學號後四碼或簽到碼')).toBeNull();
+  expect(screen.queryByText('相機掃描 QR')).toBeNull();
+  view.unmount();
+  render(<ClubCheckIn {...props} acceptingCheckIns={false} />);
+  fireEvent.press(screen.getByText('管理待送出簽到'));
+  await screen.findByText('1 筆待送出');
+  fireEvent.press(screen.getByText('重送待送出簽到'));
+  await screen.findByText(/活動已結束/);
+  expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+    action: 'checkIn',
+    groupId: 'club',
+    eventId: 'event',
+    checkInCode: '1234',
+  });
+  expect(props.onConfirmed).not.toHaveBeenCalled();
+  const alert = jest.spyOn(Alert, 'alert');
+  fireEvent.press(screen.getByText('清除待送出紀錄'));
+  await act(async () => {
+    alert.mock.calls[0][2]?.find((button) => button.text === '清除')?.onPress?.();
+  });
+  alert.mockRestore();
+  await screen.findByText('0 筆待送出');
   expect(mockStorage.get(key)).toBe('[]');
 });

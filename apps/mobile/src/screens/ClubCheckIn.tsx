@@ -15,6 +15,7 @@ export function ClubCheckIn({
   myCode,
   suffix,
   officer,
+  acceptingCheckIns = true,
   onConfirmed,
 }: {
   uid: string;
@@ -24,6 +25,7 @@ export function ClubCheckIn({
   myCode?: string;
   suffix?: string;
   officer: boolean;
+  acceptingCheckIns?: boolean;
   onConfirmed: () => void;
 }) {
   const key = JSON.stringify(['club-check-in', uid, schoolId, groupId, eventId]);
@@ -117,7 +119,7 @@ export function ClubCheckIn({
     };
   }, [key]);
   async function enqueue(value: string) {
-    if (!value.trim() || lock.current) return;
+    if (!acceptingCheckIns || !value.trim() || lock.current) return;
     try {
       await save((current) => [...new Set([...current, value.trim()])]);
       setCode('');
@@ -129,7 +131,7 @@ export function ClubCheckIn({
   }
   return (
     <View style={{ gap: 8 }}>
-      {myCode ? (
+      {myCode && acceptingCheckIns ? (
         <>
           <Button text="我的簽到碼" onPress={() => setExpanded(!expanded)} />
           {expanded ? (
@@ -144,34 +146,41 @@ export function ClubCheckIn({
       ) : null}
       {officer ? (
         <>
-          <Button text="開始簽到" onPress={() => setStarted(!started)} />
+          <Button
+            text={acceptingCheckIns ? '開始簽到' : '管理待送出簽到'}
+            onPress={() => setStarted(!started)}
+          />
           {started ? (
             <>
-              <Button
-                text="相機掃描 QR"
-                onPress={async () => {
-                  const result = permission?.granted ? permission : await requestPermission();
-                  if (result.granted) setScanning(!scanning);
-                  else setMessage('未開放相機，仍可輸入學號後四碼');
-                }}
-              />
-              {scanning ? (
-                <CameraView
-                  style={{ height: 260 }}
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={({ data }) => {
-                    setScanning(false);
-                    void enqueue(data);
-                  }}
-                />
+              {acceptingCheckIns ? (
+                <>
+                  <Button
+                    text="相機掃描 QR"
+                    onPress={async () => {
+                      const result = permission?.granted ? permission : await requestPermission();
+                      if (result.granted) setScanning(!scanning);
+                      else setMessage('未開放相機，仍可輸入學號後四碼');
+                    }}
+                  />
+                  {scanning ? (
+                    <CameraView
+                      style={{ height: 260 }}
+                      barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                      onBarcodeScanned={({ data }) => {
+                        setScanning(false);
+                        void enqueue(data);
+                      }}
+                    />
+                  ) : null}
+                  <TextInput
+                    accessibilityLabel="學號後四碼或簽到碼"
+                    placeholder="學號後四碼或簽到碼"
+                    value={code}
+                    onChangeText={setCode}
+                  />
+                  <Button text="確認簽到碼" disabled={busy} onPress={() => void enqueue(code)} />
+                </>
               ) : null}
-              <TextInput
-                accessibilityLabel="學號後四碼或簽到碼"
-                placeholder="學號後四碼或簽到碼"
-                value={code}
-                onChangeText={setCode}
-              />
-              <Button text="確認簽到碼" disabled={busy} onPress={() => void enqueue(code)} />
               <Text>{queue.length} 筆待送出</Text>
               {queue.map((entry, index) =>
                 failures[entry] ? (

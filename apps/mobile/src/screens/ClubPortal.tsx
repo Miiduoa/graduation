@@ -353,7 +353,7 @@ export function ClubPortal({
                 {e.mine && clock >= e.cancellationDeadline ? (
                   <Text style={style}>已過取消時間，請聯絡幹部</Text>
                 ) : null}
-                {clock >= e.startsAt && clock <= e.endsAt ? (
+                {(officer && manage) || (clock >= e.startsAt && clock <= e.endsAt) ? (
                   <ClubCheckIn
                     key={`${uid}:${schoolId}:${selected}:${e.id}`}
                     uid={uid}
@@ -363,10 +363,14 @@ export function ClubPortal({
                     myCode={e.myCheckInCode}
                     suffix={e.studentSuffix}
                     officer={officer && manage}
+                    acceptingCheckIns={clock >= e.startsAt && clock <= e.endsAt}
                     onConfirmed={() => void act({ action: 'read' })}
                   />
                 ) : null}
-                {manage
+                {manage && e.registrationCursor ? (
+                  <Text style={style}>請先載入完整報名名單，再確認未報名社員。</Text>
+                ) : null}
+                {manage && !e.registrationCursor
                   ? view.members
                       ?.filter((m) => !e.registrations?.some((r) => r.uid === m.id))
                       .map((m) => (

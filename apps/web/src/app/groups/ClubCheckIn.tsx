@@ -11,6 +11,7 @@ export function ClubCheckIn({
   myCode,
   suffix,
   officer,
+  acceptingCheckIns = true,
   onConfirmed,
 }: {
   uid: string;
@@ -20,6 +21,7 @@ export function ClubCheckIn({
   myCode?: string;
   suffix?: string;
   officer: boolean;
+  acceptingCheckIns?: boolean;
   onConfirmed: () => void;
 }) {
   const [qr, setQr] = useState(''),
@@ -98,7 +100,7 @@ export function ClubCheckIn({
   });
   return (
     <div>
-      {myCode && (
+      {myCode && acceptingCheckIns && (
         <>
           <button className="btn" onClick={() => setExpanded(!expanded)}>
             我的簽到碼
@@ -113,33 +115,38 @@ export function ClubCheckIn({
       )}
       {officer && (
         <details>
-          <summary>開始簽到</summary>
-          <ClubScanner
-            onCode={(value) => {
-              setCode(value);
-            }}
-          />
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const next = [...new Set([...queue, code.trim()])];
-              try {
-                save(next);
-                setCode('');
-                if (navigator.onLine) void send(next);
-              } catch {
-                setMessage('無法暫存，請確認瀏覽器儲存空間');
-              }
-            }}
-          >
-            <label>
-              掃描器輸入 QR 或學號後四碼
-              <input value={code} onChange={(e) => setCode(e.target.value)} required />
-            </label>
-            <button className="btn" disabled={busy}>
-              確認簽到
-            </button>
-          </form>
+          <summary>{acceptingCheckIns ? '開始簽到' : '管理待送出簽到'}</summary>
+          {acceptingCheckIns && (
+            <>
+              <ClubScanner
+                onCode={(value) => {
+                  setCode(value);
+                }}
+              />
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!acceptingCheckIns) return;
+                  const next = [...new Set([...queue, code.trim()])];
+                  try {
+                    save(next);
+                    setCode('');
+                    if (navigator.onLine) void send(next);
+                  } catch {
+                    setMessage('無法暫存，請確認瀏覽器儲存空間');
+                  }
+                }}
+              >
+                <label>
+                  掃描器輸入 QR 或學號後四碼
+                  <input value={code} onChange={(e) => setCode(e.target.value)} required />
+                </label>
+                <button className="btn" disabled={busy}>
+                  確認簽到
+                </button>
+              </form>
+            </>
+          )}
           <p>{queue.length} 筆待送出</p>
           {queue.map(
             (entry, index) =>

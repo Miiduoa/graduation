@@ -386,7 +386,7 @@ export function ClubPortal({
                       (!e.mine && e.registered >= e.capacity),
                   )}
                   {e.mine && clock >= e.cancellationDeadline && <p>已過取消時間，請聯絡幹部</p>}
-                  {clock >= e.startsAt && clock <= e.endsAt && (
+                  {((officer && manage) || (clock >= e.startsAt && clock <= e.endsAt)) && (
                     <ClubCheckIn
                       key={`${uid}:${schoolId}:${selected}:${e.id}`}
                       uid={uid}
@@ -396,29 +396,32 @@ export function ClubPortal({
                       myCode={e.myCheckInCode}
                       suffix={e.studentSuffix}
                       officer={officer && manage}
+                      acceptingCheckIns={clock >= e.startsAt && clock <= e.endsAt}
                       onConfirmed={() => void act({ action: 'read' })}
                     />
                   )}
                   {manage && (
                     <details>
                       <summary>現場加入名單</summary>
-                      {view.members
-                        ?.filter((m) => !e.registrations?.some((r) => r.uid === m.id))
-                        .map((m) => (
-                          <p key={m.id}>
-                            {m.name} · 這位不在報名名單{' '}
-                            {button(
-                              '仍然簽到',
-                              {
-                                action: 'checkIn',
-                                eventId: e.id,
-                                targetUid: m.id,
-                                allowWalkIn: true,
-                              },
-                              clock < e.startsAt || clock > e.endsAt,
-                            )}
-                          </p>
-                        ))}
+                      {e.registrationCursor && <p>請先載入完整報名名單，再確認未報名社員。</p>}
+                      {!e.registrationCursor &&
+                        view.members
+                          ?.filter((m) => !e.registrations?.some((r) => r.uid === m.id))
+                          .map((m) => (
+                            <p key={m.id}>
+                              {m.name} · 這位不在報名名單{' '}
+                              {button(
+                                '仍然簽到',
+                                {
+                                  action: 'checkIn',
+                                  eventId: e.id,
+                                  targetUid: m.id,
+                                  allowWalkIn: true,
+                                },
+                                clock < e.startsAt || clock > e.endsAt,
+                              )}
+                            </p>
+                          ))}
                     </details>
                   )}
                   {manage && (
