@@ -119,7 +119,11 @@ type StudyTextEncoding = 'utf-8' | 'big5';
 // Blob.text() or Blob.arrayBuffer(). Read actual bytes so UTF-8 decoding can
 // still reject corruption instead of silently changing course notes.
 async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
-  if (typeof file.arrayBuffer === 'function') return file.arrayBuffer();
+  // A mobile WebView may advertise this API but reject an actual file read.
+  if (typeof file.arrayBuffer === 'function') {
+    try { return await file.arrayBuffer(); }
+    catch { /* Fall through to the native on-device FileReader. */ }
+  }
   if (typeof FileReader !== 'function') throw new Error('No local binary file reader');
 
   return new Promise<ArrayBuffer>((resolve, reject) => {
@@ -138,34 +142,35 @@ async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
   });
 }
 
-async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
-  // Some embedded mobile WebViews expose Blob.arrayBuffer() but not Blob.text().
-  // Use a strict local UTF-8 decoder instead of failing an otherwise valid
-  // handout or checkpoint, or silently replacing malformed private text.
-  if (typeof file.text !== 'function') {
-    let raw: ArrayBuffer;
-    try {
-      raw = await readStudyFileBytes(file);
-    } catch {
-      throw new Error(`這個瀏覽器無法讀取${purpose}，目前教材與筆記仍保留。請改用支援檔案讀取的瀏覽器。`);
-    }
-    try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(raw);
-    } catch {
-      throw new Error(`這份${purpose}含有無法解碼的 UTF-8 位元組，尚未載入。請確認文字編碼；原教材與筆記仍保留。`);
-    }
+async function readStudyStrictUtf8Bytes(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+  let raw: ArrayBuffer;
+  try {
+    raw = await readStudyFileBytes(file);
+  } catch {
+    throw new Error(`這個瀏覽器無法讀取${purpose}，目前教材與筆記仍保留。請改用支援檔案讀取的瀏覽器。`);
   }
-  const text = await file.text();
-  if (text.includes('\uFFFD')) {
-    try {
-      new TextDecoder('utf-8', { fatal: true }).decode(await readStudyFileBytes(file));
-    } catch {
-      throw new Error(`這份${purpose}含有無法解碼的 UTF-8 位元組，尚未載入。請確認文字編碼；原教材與筆記仍保留。`);
-    }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(raw);
+  } catch {
+    throw new Error(`這份${purpose}含有無法解碼的 UTF-8 位元組，尚未載入。請確認文字編碼；原教材與筆記仍保留。`);
   }
-  return text;
 }
 
+async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+  // File.text() can exist but reject on an actual selected file in a WebView.
+  // Recover via a strict local byte read rather than erasing the study session.
+  if (typeof file.text !== 'function') return readStudyStrictUtf8Bytes(file, purpose);
+  let text: string;
+  try {
+    text = await file.text();
+  } catch {
+    return readStudyStrictUtf8Bytes(file, purpose);
+  }
+  // File.text() replaces malformed bytes with U+FFFD. Verify the original
+  // bytes while preserving any intentionally authored replacement character.
+  if (text.includes('\uFFFD')) await readStudyStrictUtf8Bytes(file, purpose);
+  return text;
+}
 // Legacy Taiwanese course notes may use Big5. Decode only when the student
 // explicitly selects it; do not guess and silently replace invalid bytes.
 async function readStudyTextFile(file: File, encoding: StudyTextEncoding): Promise<string> {

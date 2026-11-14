@@ -518,6 +518,56 @@ it('imports a private UTF-8 handout with the legacy FileReader-only mobile path'
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+it('imports a UTF-8 lesson if mobile File.text rejects but Blob.arrayBuffer works', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '實作前先看主鍵與外鍵的教材原文。';
+  const bytes = new TextEncoder().encode(content);
+  const file = new File([bytes], '課堂複習.markdown', { type: 'text/markdown' });
+  const failingText = vi.fn().mockRejectedValue(new Error('File.text rejected'));
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: failingText });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(failingText).toHaveBeenCalledOnce();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('uses native FileReader if both advertised mobile Blob APIs reject', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '保留有權使用的繁體中文課堂教材。';
+  const file = new File([new TextEncoder().encode(content)], '學習教材.txt', { type: 'text/plain' });
+  const failingText = vi.fn().mockRejectedValue(new Error('text read rejected'));
+  const failingBytes = vi.fn().mockRejectedValue(new Error('arrayBuffer rejected'));
+  Object.defineProperty(file, 'text', { value: failingText });
+  Object.defineProperty(file, 'arrayBuffer', { value: failingBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(failingText).toHaveBeenCalledOnce();
+  expect(failingBytes).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('rejects corrupted backup after both Blob APIs fail, preserving current notes', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '保留尚未備份的主鍵筆記' } });
+  const file = new File([Uint8Array.from([0x7b, 0x22, 0xff, 0x22, 0x7d])],
+    '損壞進度.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: vi.fn().mockRejectedValue(new Error('text failed')) });
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockRejectedValue(new Error('bytes failed')) });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent',
+    expect.stringContaining('進度備份含有無法解碼的 UTF-8 位元組'));
+  expect(note.value).toBe('保留尚未備份的主鍵筆記');
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('restores a reading checkpoint from legacy FileReader without replacing notes before confirmation', async () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });

@@ -1169,3 +1169,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 若舊版內嵌瀏覽器沒有 `File.text()`、也沒有 `File.arrayBuffer()`，但仍提供原生 `FileReader.readAsArrayBuffer()`，學生現在可在裝置上讀取已授權 UTF-8／明確選擇 Big5 的文字教材與 JSON 進度備份。依然以實際位元組嚴格 UTF-8 解碼；損壞備份拒收，避免悄悄取代現有教材或尚未保存的個人筆記。
 - 新增三項 DOM/模擬瀏覽器回歸：無兩種 Blob 讀法仍能匯入繁體中文講義、JSON 先預覽後確認還原、無效 UTF-8 備份保留未匯出筆記。未新增依賴、遠端服務或私人教材傳送；v1/v2 閱讀進度與逐題 checkpoint 格式保持原樣。
 - 這是向舊版 WebView 的 API 相容改善；不代表已完成實際 iOS Safari／Android Chrome 的鍵盤、下載、語音與讀屏驗收。須依提交後精確 head 核對完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro 與 Ahaboard 同教材同題同機對照；PR 維持 Draft、不合併、不部署。
+
+
+### 2026-11-15：修復行動 WebView 虛有檔案讀取 API 時的備援
+
+- 部分手機 WebView 雖提供 `File.text()` 或 `Blob.arrayBuffer()`，實際從裝置檔案 App 選取教材與進度 JSON 時仍會拒絕讀取。現在在這兩種讀取路徑遭拒後，改用裝置原生 `FileReader.readAsArrayBuffer()` 嘗試恢復。
+- UTF-8 仍以嚴格位元組解碼拒絕損壞內容，避免默默變成替代字元或覆蓋未備份筆記。新增 3 組模擬瀏覽器 DOM 回歸測試：`File.text` 拒絕、兩個 Blob API 均拒絕但 FileReader 成功、損壞 JSON 拒收。原始教材、scope、進度格式、其他功能與本機資料界線不變，無新套件或外部 API。
+- 這是程式與測試提交，不等於正式 Vitest、Web/Mobile CI、CodeQL、App 5504170 APPROVED、Maestro、iOS／Android 真機或 Ahaboard 同教材同題同機驗收；PR 保持 Draft、不合併、不部署。
