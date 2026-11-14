@@ -267,3 +267,84 @@ test.each([false, true])(
     );
   },
 );
+
+test('slow reads coalesce subscription and manual triggers into one latest snapshot', async () => {
+  const { view, service, changed } = setup();
+  let finish!: (value: WorkstudySnapshot) => void;
+  vi.mocked(service.load).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {});
+  expect(service.load).toHaveBeenCalledTimes(1);
+  act(() => {
+    changed();
+    changed();
+  });
+  fireEvent.click(view.getByRole('button', { name: '重新整理工讀資料' }));
+  expect(service.load).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
+  });
+  expect(service.load).toHaveBeenCalledTimes(2);
+  expect(view.queryByText('過期讀取結果')).toBeNull();
+  expect(view.getByText('測試用工讀')).toBeTruthy();
+});
+
+test('account remount and unmount abort pending reads and discard late failures', async () => {
+  const { view, service, props } = setup();
+  let rejectOld!: (reason: Error) => void;
+  let oldSignal: AbortSignal | undefined;
+  vi.mocked(service.load).mockImplementationOnce((_audience, options) => {
+    oldSignal = options?.signal;
+    return new Promise((_resolve, reject) => {
+      rejectOld = reject;
+    });
+  });
+  await act(async () => {});
+  const next = { ...service, load: vi.fn<WorkstudyService['load']>(async () => snapshot()) };
+  view.rerender(<CareerWorkstudy {...props} ownerKey="other" service={next} />);
+  await act(async () => {
+    rejectOld(new Error('舊讀取已取消'));
+  });
+  expect(oldSignal?.aborted).toBe(true);
+  expect(view.queryByText('舊讀取已取消')).toBeNull();
+  expect(view.getByText('測試用工讀')).toBeTruthy();
+  let unmountSignal: AbortSignal | undefined;
+  let rejectUnmount!: (reason: Error) => void;
+  next.load.mockImplementationOnce((_audience?: unknown, options?: { signal?: AbortSignal }) => {
+    unmountSignal = options?.signal;
+    return new Promise<WorkstudySnapshot>((_resolve, reject) => {
+      rejectUnmount = reject;
+    });
+  });
+  fireEvent.click(view.getByRole('button', { name: '重新整理工讀資料' }));
+  view.unmount();
+  expect(unmountSignal?.aborted).toBe(true);
+  await act(async () => {
+    rejectUnmount(new Error('卸載已取消'));
+  });
+  expect(next.load).toHaveBeenCalledTimes(2);
+});
+
+test('a write cancels a hanging read before refreshing the saved snapshot', async () => {
+  const { view, service, changed } = setup('staff');
+  await view.findByRole('button', { name: '新增機會' });
+  let signal: AbortSignal | undefined;
+  vi.mocked(service.load).mockImplementationOnce((_audience, options) => {
+    signal = options?.signal;
+    return new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(new Error('讀取已取消')), { once: true });
+    });
+  });
+  act(() => changed());
+  fireEvent.click(view.getByRole('button', { name: '編輯測試用工讀' }));
+  fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+  await act(async () => {});
+  expect(signal?.aborted).toBe(true);
+  expect(service.load).toHaveBeenCalledTimes(3);
+  expect(view.queryByText('讀取已取消')).toBeNull();
+  expect(view.getByText('已儲存。')).toBeTruthy();
+});
