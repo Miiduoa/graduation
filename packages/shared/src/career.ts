@@ -58,6 +58,13 @@ export function careerSoon(date: string, today = careerToday()) {
 }
 /** Only a single explicitly year-qualified date in a career deadline/event title. Publication dates never become deadlines. */
 export function careerTitleDate(title: string) {
+  // Keep status notices in announcements, but never offer their old date as an event.
+  if (
+    /取消|延期|延後|暫停|停辦|停開|改期|擇期|待定|未定|另行通知/.test(
+      title.normalize('NFKC').replace(/\s/g, ''),
+    )
+  )
+    return '';
   if (!/截止|報名|申請|徵才|說明會|講座|博覽會/.test(title)) return '';
   const matches = [
     ...title.matchAll(/(?<!\d)(20\d{2}|1[01]\d)[年/.-](\d{1,2})[月/.-](\d{1,2})(?:日)?(?!\d)/g),

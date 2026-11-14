@@ -39,7 +39,18 @@ function hasPersonalAcademicData(title: string): boolean {
     .replace(/绩/g, '績')
     .replace(/[^\p{L}\p{N}]/gu, '');
   // Conservatively omit the whole announcement, never publish a partially redacted title.
-  return /學號|成績|student(?:id|number)|grades?|scores?/.test(normalized);
+  if (
+    /學號|成績|評分|評量|分數|績點|名單|名冊|錄取|榜單|student(?:id|number)|grades?|scores?/.test(
+      normalized,
+    )
+  )
+    return true;
+  // Dates are public metadata; other long numeric identifiers may be student IDs.
+  const withoutDates = title
+    .normalize('NFKC')
+    .replace(/(?<!\d)(?:20\d{2}|1[01]\d)[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?!\d)/g, '')
+    .replace(/[^\p{L}\p{N}]/gu, '');
+  return /\d{8,}/.test(withoutDates) || /\d+(?:[.．]\d+)?\s*分(?!鐘)/.test(title.normalize('NFKC'));
 }
 
 /** Rpage list metadata only. Never fetch, return or persist article bodies. */

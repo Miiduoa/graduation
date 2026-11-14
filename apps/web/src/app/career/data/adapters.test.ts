@@ -51,6 +51,12 @@ it.each([
   '發布：2026/11/15 實習申請資訊',
   '公告日期：2026/11/15 實習申請資訊',
   '2026/11/15 更新：實習申請資訊',
+  '2026/12/8 講座取消',
+  '2026/12/8 講座延期',
+  '2026/12/8 講座日期待定',
+  '2026/12/8 徵才博覽會停辦',
+  '2026/12/8 說明會改期，日期另行通知',
+  '2026/12/8 講座延 後',
 ])('keeps ambiguous title out of calendar timeline: %s', (title) => {
   expect(careerTitleDate(title)).toBe('');
   expect(
@@ -78,6 +84,16 @@ it('public API excludes sensitive titles from announcements and calendar items f
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
   const sensitiveTitles = [
+    '2026/12/8 實習錄取名單 410123456 王測試',
+    '2026/12/8 實習評分 王測試 95 分',
+    '2026/12/8 實習 410123456 王測試',
+    '2026/12/8 實習 A410123456 王測試',
+    '2026/12/8 實習 ４１０１２３４５６ 王測試',
+    '2026/12/8 實習 410-123-456 王測試',
+    '2026/12/8 實習 王測試 95 分',
+    '2026/12/8 實習名冊 王測試',
+    '2026/12/8 實習甄選榜單',
+    '2026/12/8 實習' + '說明'.repeat(160) + '410123456',
     '2026/12/8 實習 学号：TEST-0001',
     '2026/12/8 實習 學 號：TEST-0001',
     '2026/12/8 實習 学・号：TEST-0001',
@@ -183,4 +199,35 @@ it('does not fetch a default school when school is missing or unsupported', asyn
   const response = await GET(new Request('https://nuni.tw/career/data?school=ntu'));
   expect(await response.json()).toEqual(emptyCareerFeed(false));
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('keeps cancellation notices readable without offering a calendar event', async () => {
+  const title = '2026/12/8 實習講座延期';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      text: async () =>
+        url === TAIWANJOBS_URL
+          ? '<DataList></DataList>'
+          : html.replace('實習申請2026/12/8截止', title),
+    })),
+  );
+  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+  const feed = await response.json();
+  expect(feed.announcements).toHaveLength(2);
+  expect(feed.announcements[0].title).toBe(title);
+  expect(feed.timeline).toEqual([]);
+});
+it('retains ordinary dated career announcements and event durations', () => {
+  for (const title of [
+    '2026/11/20 徵才講座',
+    '115年11月20日實習申請截止',
+    '2026/12/8 履歷講座 30 分鐘',
+  ]) {
+    expect(
+      parseCareerHtml(html.replace('實習申請2026/12/8截止', title), CAREER_HTML_SOURCES[0])[0]
+        .title,
+    ).toBe(title);
+  }
 });
