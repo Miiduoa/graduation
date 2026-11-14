@@ -371,11 +371,15 @@ async def camera_controls(page, _requests, _resources):
         states[f"limit{bound}"] = {"zoomPercent": bound, "nativeDisabled": True,
                                    "keyboardLimitGuard": True}
 
-    # Home resets both a rotated view and a non-default zoom.
+    # Home restores north without discarding a user's minimum-bound zoom.
     await page.keyboard.press("ArrowLeft")
+    before = await clears(page)
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
-    assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
+    await wait_for_repaint(page, before)
+    states["homeAtMinZoom"] = await camera_readout(page)
+    assert states["homeAtMinZoom"] == {"northDegrees": 0, "zoomPercent": 65}
+    await expect(dialog.get_by_text("縮放 65%", exact=True)).to_be_visible()
+    await assert_same_scene(page, canvas, context, selected)
     rotated = await click_camera("向右旋轉")
     await click_camera("放大空間圖")
     await selector_for(page).select_option(LIBRARY["id"])
@@ -391,8 +395,9 @@ async def camera_controls(page, _requests, _resources):
     await assert_same_scene(page, canvas, context, selected)
     await assert_idle_renderer(page)
     await click_camera("放大空間圖")
+    # The toolbar performs the same orientation-only reset at a zoomed-in view.
     states["northReset"] = await click_camera("回到北向")
-    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 100}
+    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 125}
     idle = await assert_idle_renderer(page)
     await page.screenshot(path=str(OUT / "camera-controls.png"))
     await context.dispose()
