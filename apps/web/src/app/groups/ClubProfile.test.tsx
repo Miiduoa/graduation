@@ -76,3 +76,18 @@ test.each(['owner', 'admin'])('管理已啟用時，%s 不顯示未開放說明'
   await screen.findByText('週三社課');
   expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
 });
+
+test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async () => {
+  let fail!: (error: Error) => void;
+  vi.mocked(loadClubProfile).mockReturnValueOnce(
+    new Promise((_, reject) => {
+      fail = reject;
+    }),
+  );
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
+  await screen.findByRole('heading', { name: '攝影社' });
+  await act(async () => fail(new Error('network')));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('社課通知')).toBeTruthy();
+});

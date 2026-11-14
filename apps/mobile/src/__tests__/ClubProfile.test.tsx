@@ -97,3 +97,18 @@ test.each([false, true])('社團目錄管理說明沿用既有旗標：%s', (ena
   render(<ClubDirectory clubs={[]} onOpen={jest.fn()} />);
   expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
 });
+
+test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async () => {
+  let fail!: (error: Error) => void;
+  jest.mocked(loadClubProfile).mockReturnValueOnce(
+    new Promise((_, reject) => {
+      fail = reject;
+    }),
+  );
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.press(screen.getByText('重新讀取社團資料'));
+  await screen.findByText('攝影社');
+  await act(async () => fail(new Error('network')));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('社課通知')).toBeTruthy();
+});
