@@ -67,6 +67,32 @@ it('uses the canonical group assignment without a global mirror', async () => {
   expect(privateGroupAssignmentPath('course', 'work', 'alice', 'answer.pdf')).toBe(GROUP_ANSWER);
   await expect(authorize(fileStore())).resolves.toBeUndefined();
 });
+it('group-path uploads honor same-group global receipts before canonical submission sync', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const globalReceipt = 'assignments/work/submissions/alice';
+  // Active student with no submitted receipt can upload in the new group namespace.
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z' });
+  // Previously the group-path branch only checked its own canonical receipt.
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  // An inconsistent owner cannot be treated as an unsubmitted draft.
+  store.docs.set(globalReceipt, { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+
+  // An unrelated assignment using the same ID in another group must not block this one.
+  store.docs.set('assignments/work', { groupId: 'another-group' });
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z' });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('assignments/work', { groupId: 'course' });
+  store.docs.set('groups/course/assignments/work', { status: 'closed' });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/assignments/work', { published: true });
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
 it.each(['left', 'inactive', 'missing'])('rejects group membership %s', async (status) => {
   const store = fileStore([['groups/course/members/alice', { status }]]);
   await expect(authorize(store)).rejects.toMatchObject({ statusCode: 403 });
@@ -98,10 +124,15 @@ it('allows managers and owners to read, but refuses another student', async () =
   store.docs.delete('groups/course/members/bob');
   await expect(authorize(store, GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('groups/course/members/bob', { status: 'active', role: 'member' });
-  // Legacy receipts without an attachments list keep previous manager access.
-  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  // Merely uploading a private draft is not evidence of a submission.
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
   const receipt = 'groups/course/assignments/work/submissions/alice';
+  // Historical submitted receipts without an attachments array remain accessible.
+  store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  store.docs.set(receipt, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set(receipt, { userId: 'alice', attachments: [{ url: GROUP_ANSWER }], submittedAt: Date.now() });
   await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
   await expect(authorize(store, GROUP_ANSWER.replace('answer.pdf', 'draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
@@ -113,11 +144,13 @@ it('allows managers and owners to read, but refuses another student', async () =
 it('legacy assignment URLs also require a submitted receipt with an exact file reference', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const receiptPath = 'groups/course/assignments/work/submissions/alice';
-  // Owners can preview drafts; other students cannot. Managers keep previous
-  // access when the receipt has no attachments list.
+  // The owner may preview a draft; a teacher needs a real submission receipt
+  // even when the legacy attachments list was never stored.
   await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
-  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now() });
   await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
   store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
@@ -132,6 +165,111 @@ it('legacy assignment URLs also require a submitted receipt with an exact file r
   store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
   store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
   await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+});
+
+it.each([GROUP_ANSWER, ANSWER])('rejects malformed submitted-receipt attachment fields for %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const receipt = 'groups/course/assignments/work/submissions/alice';
+  for (const attachments of [null, {}, 'invalid', false]) {
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments });
+    await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, path, 'alice', false)).resolves.toBeUndefined();
+  }
+});
+
+it.each([GROUP_ANSWER, ANSWER])('requires a meaningful submittedAt timestamp for teacher GET on %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const receipt = 'groups/course/assignments/work/submissions/alice';
+  for (const submittedAt of [
+    false, 0, -1, '', 'not-a-date', {}, { seconds: 123 }, Number.NaN,
+    '2025-02-29', '2026-02-30', '2026-02-30T12:30:00Z', '2026-04-31',
+  ]) {
+    store.docs.set(receipt, { userId: 'alice', submittedAt, attachments: [path] });
+    await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, path, 'alice', false)).resolves.toBeUndefined();
+  }
+
+  const submitted = new Date('2026-11-11T00:00:00.000Z');
+  for (const submittedAt of [
+    submitted, submitted.getTime(), submitted.toISOString(), { toMillis: () => submitted.getTime() },
+    '2024-02-29', '2024-02-29T12:30:00+08:00',
+  ]) {
+    store.docs.set(receipt, { userId: 'alice', submittedAt, attachments: [path] });
+    await expect(authorize(store, path, 'teacher', false)).resolves.toBeUndefined();
+    store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
+    await expect(authorize(store, path, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    store.docs.set('schools/pu/members/teacher', { status: 'active' });
+  }
+});
+
+it.each([GROUP_ANSWER, ANSWER])('does not reopen uploads when a same-group global mirror is closed on %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  // A canonical assignment remains published while its global mirror is closed.
+  await expect(authorize(store, path, 'alice', true)).resolves.toBeUndefined();
+  for (const closed of [
+    { groupId: 'course', published: false },
+    { groupId: 'course', status: 'closed' },
+    { groupId: 'course', dueAt: '2020-01-01T00:00:00Z' },
+    { groupId: 'course', dueAt: 'invalid' },
+  ]) {
+    store.docs.set('assignments/work', closed);
+    await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('assignments/work', {
+    groupId: 'course', dueAt: '2020-01-01T00:00:00Z', allowLateSubmission: true,
+  });
+  await expect(authorize(store, path, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
+it.each([GROUP_ANSWER, ANSWER])('refuses scheduled, unpublished and archived assignment uploads across canonical and global mirrors on %s', async (path) => {
+  const store = fileStore([['assignments/work', { groupId: 'course', published: true }]]);
+  // A closed side of a two-layout mirror must veto a still-open side.
+  for (const status of ['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled']) {
+    store.docs.set('groups/course/assignments/work', { published: true, status, allowLateSubmission: true });
+    await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+    store.docs.set('groups/course/assignments/work', { published: true });
+    store.docs.set('assignments/work', { groupId: 'course', published: true, status, allowLateSubmission: true });
+    await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+    store.docs.set('assignments/work', { groupId: 'course', published: true });
+  }
+  await expect(authorize(store, path, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, path, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, path, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
+it('rejects scheduled or archived legacy uploads even without a canonical assignment copy', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course', published: true }]]);
+  store.docs.delete('groups/course/assignments/work');
+  for (const status of ['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled']) {
+    store.docs.set('assignments/work', { groupId: 'course', published: true, status, allowLateSubmission: true });
+    await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('assignments/work', { groupId: 'course', published: true });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+});
+
+it('legacy upload checks global submission receipts even when canonical group assignment exists', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const globalReceipt = 'assignments/work/submissions/alice';
+  // Same student can upload before submission, while both assignment copies exist.
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z' });
+  // Previously the canonical group copy skipped this already-submitted global receipt.
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(globalReceipt, { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(globalReceipt, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  // A valid draft receipt never overrides a closed canonical assignment.
+  store.docs.set('groups/course/assignments/work', { published: false });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/assignments/work', { published: true });
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
 });
 
 it('legacy uploads require a live open assignment and an unsubmitted receipt', async () => {
@@ -153,7 +291,26 @@ it('legacy uploads require a live open assignment and an unsubmitted receipt', a
   await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.delete('groups/course/assignments/work/submissions/alice');
   store.docs.delete('groups/course/assignments/work');
-  // Only the global assignments/{id} mirror remains: keep the previous upload path.
+  // A live global-only legacy assignment remains writable without its group copy.
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  for (const invalid of [
+    { groupId: 'course', published: false },
+    { groupId: 'course', status: 'closed' },
+    { groupId: 'course', status: 'draft' },
+    { groupId: 'course', dueAt: '2020-01-01T00:00:00Z' },
+    { groupId: 'course', dueAt: 'invalid' },
+    { groupId: 'another-school' },
+  ]) {
+    store.docs.set('assignments/work', invalid);
+    await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('assignments/work', { groupId: 'course', dueAt: '2020-01-01T00:00:00Z', allowLateSubmission: true });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('assignments/work/submissions/alice', { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('assignments/work/submissions/alice', { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('assignments/work/submissions/alice', { userId: 'alice', submittedAt: null });
   await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
   // A previously uploaded private draft remains previewable by its owner.
   await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
@@ -184,6 +341,47 @@ it('does not turn a finalized but unreferenced post attachment into a group-wide
   await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('schools/pu/members/bob', { status: 'active' });
   await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
+it.each([
+  { published: false },
+  { status: 'draft' },
+  { status: 'scheduled' },
+  { status: 'pending' },
+  { status: 'unpublished' },
+  { status: 'archived' },
+  { status: 'cancelled' },
+  { status: 'canceled' },
+])('keeps unpublished group post attachments private from other members %j', async (visibility) => {
+  const path = 'groups/course/posts/one';
+  const store = fileStore([[path, { authorId: 'alice', attachments: [POST], ...visibility }]]);
+  // A listed attachment alone cannot publish an explicitly unpublished post.
+  await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, POST, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(path, { authorId: 'alice', attachments: [POST], published: true, status: 'published' });
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
+it('does not mistake an unpublished legacy post with no attachment list for a live post', async () => {
+  const path = 'groups/course/posts/one';
+  const store = fileStore([[path, { authorId: 'alice', status: 'draft' }]]);
+  await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(path, { authorId: 'alice', status: 'published' });
+  // Preserve compatibility for a truly published old post missing attachments.
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
+it('rejects malformed attachment fields instead of treating them as legacy shared posts', async () => {
+  const postPath = 'groups/course/posts/one';
+  const store = fileStore([[postPath, { authorId: 'alice' }]]);
+  for (const attachments of [null, {}, 'invalid', false]) {
+    store.docs.set(postPath, { authorId: 'alice', attachments });
+    await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, POST, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  }
 });
 
 it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {

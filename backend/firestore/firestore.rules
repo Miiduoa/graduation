@@ -188,6 +188,18 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
     }
 
+    // Read receipts can only add the authenticated reader. Never permit
+    // overwriting or removing another participant's acknowledgement.
+    function onlyOwnMessageReadReceipt() {
+      let before = resource.data.get('readBy', []);
+      let after = request.resource.data.get('readBy', null);
+      return before is list && after is list
+        && (
+          (request.auth.uid in before && after == before)
+          || (!(request.auth.uid in before) && after == before.concat([request.auth.uid]))
+        );
+    }
+
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
     function profileName(uid) {
       return exists(/databases/$(database)/documents/users/$(uid))
@@ -305,7 +317,10 @@ service cloud.firestore {
       let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
       let due = assignment.get('dueAt', null);
       return assignment.get('published', true) != false
-        && !(assignment.get('status', '') in ['draft', 'closed'])
+        && !(assignment.get('status', '') in [
+          'draft', 'closed', 'scheduled', 'pending', 'unpublished',
+          'archived', 'cancelled', 'canceled', 'deleted'
+        ])
         && (due == null || assignment.get('allowLateSubmission', false) == true
           || (due is timestamp && request.time <= due)
           || (due is string && request.time <= timestamp.value(due)));
@@ -965,13 +980,15 @@ service cloud.firestore {
         allow read: if isConversationMember(conversationId);
         allow create: if isConversationMember(conversationId)
           && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          // A sender cannot declare that other participants already read a new message.
+          && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid];
         allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
           && (
             (
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy'])
-              && request.auth.uid in request.resource.data.readBy
+              && onlyOwnMessageReadReceipt()
             )
             || (
               resource.data.senderId == request.auth.uid
@@ -1026,30 +1043,165 @@ service cloud.firestore {
         allow create: if isActiveGroupMember(groupId)
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
+          // AI origin fields are server-owned, including legacy/alternate SDK writes.
+          && request.resource.data.get('isAI', false) == false
+          && !('generatedBy' in request.resource.data)
+          && request.resource.data.get('authorName', '') != '助理回覆'
+          // No member may mint votes while creating a post.
+          && request.resource.data.get('likedBy', []) == []
+          && request.resource.data.get('likes', 0) == 0
           && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
-        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'assistantReply'])
-          && (canManageGroup(groupId)
-            || (ownsOrdinaryPost() && request.resource.data.get('kind', 'post') != 'announcement'));
+        // Ordinary members may react to a published post, but only with their
+        // own single vote. Content editors cannot forge other members' votes.
+        function ownPostVoteOnly() {
+          let before = resource.data;
+          let after = request.resource.data;
+          return after.diff(before).affectedKeys().hasOnly(['likes', 'likedBy', 'updatedAt'])
+            && changesOnlyOwnVote(
+              before.get('likedBy', []), after.get('likedBy', []),
+              before.get('likes', 0), after.get('likes', 0)
+            );
+        }
+
+        function isVisiblePostForReactions() {
+          return resource.data.get('published', true) != false
+            && !(resource.data.get('status', '') in [
+              'draft', 'scheduled', 'pending', 'unpublished',
+              'archived', 'cancelled', 'canceled', 'deleted'
+            ])
+            && resource.data.get('deleted', false) != true
+            && resource.data.get('deletedAt', null) == null;
+        }
+
+        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'authorId', 'assistantReply', 'isAI', 'generatedBy'
+        ])
+          && request.resource.data.get('isAI', false) == false
+          && request.resource.data.get('authorName', '') != '助理回覆'
+          && (
+            (isActiveGroupMember(groupId) && isVisiblePostForReactions() && ownPostVoteOnly())
+            || (
+              (canManageGroup(groupId)
+                || (ownsOrdinaryPost()
+                  && request.resource.data.get('kind', 'post') != 'announcement'
+                  // A moderator's soft deletion cannot be undone by the post author.
+                  // Ordinary author edits of active posts remain allowed.
+                  && resource.data.get('deleted', false) != true
+                  && resource.data.get('deletedAt', null) == null
+                  && !(resource.data.get('status', '') in ['deleted', 'cancelled', 'canceled'])))
+              && request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
+              && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
+            )
+          );
         allow delete: if canManageGroup(groupId) || ownsOrdinaryPost();
 
         match /comments/{commentId} {
-          allow read: if isActiveGroupMember(groupId);
+          // Comments are a separate collection path: membership alone must not
+          // expose replies on an author's withdrawn or unpublished post.
+          // The parent lookup is fixed to this group/post, not client input.
+          function canReadPostComments() {
+            let postData = get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data;
+            return isActiveGroupMember(groupId)
+              && exists(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId))
+              && (
+                postData.get('authorId', null) == request.auth.uid
+                || (
+                  postData.get('published', true) != false
+                  && !(postData.get('status', '') in [
+                    'draft', 'scheduled', 'pending', 'unpublished',
+                    'archived', 'cancelled', 'canceled', 'deleted'
+                  ])
+                  && postData.get('deleted', false) != true
+                  && postData.get('deletedAt', null) == null
+                )
+              );
+          }
+
+          allow read: if canReadPostComments();
           // 助理回覆只由伺服器（Cloud Functions）寫入；用戶端不能寫、不能改、不能冒用助理的名字
-          allow create: if isActiveGroupMember(groupId)
+          // Direct SDK clients must not forge answer/vote state or persist
+          // unbounded / non-text comment bodies. Server replies use Admin SDK.
+          function validNewMemberComment() {
+            let body = request.resource.data.get('body', null);
+            return body is string
+              && body.size() > 0
+              && body.size() <= 5000
+              && request.resource.data.get('likedBy', []) == []
+              && request.resource.data.get('likeCount', 0) == 0
+              && request.resource.data.get('isAnswer', false) == false
+              && request.resource.data.get('isBestAnswer', false) == false;
+          }
+
+          allow create: if canReadPostComments()
             && commentId != 'assistant'
             && request.resource.data.authorId == request.auth.uid
             && request.resource.data.get('isAI', false) != true
             && !('generatedBy' in request.resource.data)
-            && request.resource.data.get('authorName', '') != '助理回覆';
-          allow update: if commentId != 'assistant'
+            && request.resource.data.get('authorName', '') != '助理回覆'
+            && validNewMemberComment();
+          allow update: if canReadPostComments()
+            && commentId != 'assistant'
             && resource.data.authorId != 'campus-assistant'
             && resource.data.get('isAI', false) != true
             && request.resource.data.get('isAI', false) != true
             && request.resource.data.get('generatedBy', null) == resource.data.get('generatedBy', null)
             && request.resource.data.get('authorName', '') != '助理回覆'
             && request.resource.data.authorId == resource.data.authorId
-            && (canManageGroup(groupId) || activeAuthor());
-          allow delete: if commentId != 'assistant' && (canManageGroup(groupId) || activeAuthor());
+            && (
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny(['body'])
+              || (
+                request.resource.data.get('body', null) is string
+                && request.resource.data.body.size() > 0
+                && request.resource.data.body.size() <= 5000
+              )
+            )
+            && (
+              request.resource.data.get('isAnswer', false) == resource.data.get('isAnswer', false)
+              || canManageGroup(groupId)
+            )
+            && (
+              request.resource.data.get('isBestAnswer', false) == resource.data.get('isBestAnswer', false)
+              || canManageGroup(groupId)
+            )
+            // A comment owner/manager may not manufacture likes for other members.
+            // Preserve the old vote fields during ordinary edits; a reaction change
+            // may only add/remove the current UID with the exact count delta.
+            && (
+              (
+                request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
+                && request.resource.data.get('likeCount', 0) == resource.data.get('likeCount', 0)
+              )
+              || (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['likedBy', 'likeCount', 'updatedAt'])
+                && changesOnlyOwnVote(
+                  resource.data.get('likedBy', []),
+                  request.resource.data.get('likedBy', []),
+                  resource.data.get('likeCount', 0),
+                  request.resource.data.get('likeCount', 0)
+                )
+              )
+            )
+            // The parent post author is not automatically the author of each
+            // reply. Only the reply author or an active manager may edit text;
+            // any active member may make an own-vote-only reaction change.
+            && (
+              canManageGroup(groupId)
+              || resource.data.authorId == request.auth.uid
+              || (
+                request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['likedBy', 'likeCount', 'updatedAt'])
+                && changesOnlyOwnVote(
+                  resource.data.get('likedBy', []),
+                  request.resource.data.get('likedBy', []),
+                  resource.data.get('likeCount', 0),
+                  request.resource.data.get('likeCount', 0)
+                )
+              )
+            );
+          allow delete: if canReadPostComments()
+            && commentId != 'assistant'
+            && (canManageGroup(groupId) || resource.data.authorId == request.auth.uid);
         }
       }
 
@@ -2027,7 +2179,13 @@ service cloud.firestore {
     }
 
     match /postLikes/{docId} {
-      allow read: if isSignedIn();
+      // A global list of votes exposes campus members' identities across
+      // groups. Keep exact-document reads to members of the parent post;
+      // enumeration is server-only until consumers use a school-scoped index.
+      allow get: if isSignedIn()
+        && resource.data.get('postId', null) is string
+        && canReadGroupPost(resource.data.postId);
+      allow list: if false;
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && canReadGroupPost(request.resource.data.postId);

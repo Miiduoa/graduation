@@ -29,6 +29,10 @@ export const PRIVATE_FILE_MAX_BYTES = {
 export const GROUP_COVER_FILENAME = /^cover\.[A-Za-z0-9]+$/;
 
 const CLOSED_ACCOUNT_STATUSES = new Set(['deleted', 'disabled', 'suspended', 'inactive']);
+// A scheduled, withdrawn or archived assignment cannot issue new upload URLs.
+const ASSIGNMENT_NOT_OPEN_STATUSES = new Set([
+  'draft', 'closed', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled',
+]);
 
 export type PrivateFileKind = 'group-cover' | 'group-post' | 'assignment' | 'story';
 
@@ -135,10 +139,39 @@ function referencesPrivateFile(attachments: unknown, path: string): boolean {
     ));
 }
 
-/** Absent or non-array attachments are legacy records; keep the previous access path. */
-function allowsListedOrLegacyPrivateFile(attachments: unknown, path: string): boolean {
-  if (!Array.isArray(attachments)) return true;
-  return referencesPrivateFile(attachments, path);
+/** Only a genuinely absent attachments key is an eligible legacy record.
+ * Explicit null, malformed objects or strings must not grant group-wide access. */
+function allowsListedOrLegacyPrivateFile(record: Record<string, unknown>, path: string): boolean {
+  if (!Object.prototype.hasOwnProperty.call(record, 'attachments')) return true;
+  return referencesPrivateFile(record.attachments, path);
+}
+
+/** Only a real, nonempty submission time grants a teacher access to private files.
+ * Firestore Timestamp, legacy ISO strings and millisecond numbers are supported.
+ * Booleans, empty values and arbitrary maps cannot act as a submitted receipt. */
+function hasSubmittedReceiptTime(value: unknown): boolean {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) && value.getTime() > 0;
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0;
+  if (typeof value === 'string') {
+    if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) return false;
+    // Date.parse normalizes impossible calendar dates (e.g. Feb 30) into
+    // another month. A malformed legacy receipt must never authorize GET.
+    const day = value.slice(0, 10);
+    const dayMs = Date.parse(`${day}T00:00:00.000Z`);
+    if (!Number.isFinite(dayMs) || new Date(dayMs).toISOString().slice(0, 10) !== day) return false;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) && ms > 0;
+  }
+  if (value && typeof value === 'object') {
+    const toMillis = (value as { toMillis?: unknown }).toMillis;
+    if (typeof toMillis === 'function') {
+      try {
+        const ms = toMillis.call(value);
+        return typeof ms === 'number' && Number.isFinite(ms) && ms > 0;
+      } catch { return false; }
+    }
+  }
+  return false;
 }
 
 function accountBlocked(data: Record<string, unknown>): boolean {
@@ -285,6 +318,22 @@ function storyExpiresAtMs(value: unknown): number | null {
   return null;
 }
 
+/** A global mirror can close before its group copy is synchronized. It must
+ * remain an independent guard for new signed uploads in either namespace. */
+function legacyMirrorAcceptsNewPrivateUpload(data: Record<string, unknown>): boolean {
+  const dueValue = data.dueAt;
+  const validDueString = typeof dueValue !== 'string' || (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+    Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+    new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+  );
+  const due = dueValue == null || typeof dueValue === 'number' || !validDueString
+    ? null : storyExpiresAtMs(dueValue);
+  return data.published !== false &&
+    !ASSIGNMENT_NOT_OPEN_STATUSES.has(String(data.status || '')) &&
+    (data.dueAt == null || data.allowLateSubmission === true || (due !== null && Date.now() <= due));
+}
+
 export function assertStoryMediaRead(input: {
   schoolId: string;
   uid: string;
@@ -421,7 +470,13 @@ export async function authorizePrivateFile(
         // The author can preview an uploaded draft. Other group members may
         // download only the precise object referenced by the live post.
         // Finalizing a private upload must not publish a sibling by guessable path.
-        if (!writing && data.authorId !== uid && !allowsListedOrLegacyPrivateFile(data.attachments, scope.path)) deny();
+        if (!writing && data.authorId !== uid && (
+          // A draft/scheduled post is not published merely because an upload
+          // URL or an attachment path is present on the document.
+          data.published === false ||
+          ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled'].includes(String(data.status || '')) ||
+          !allowsListedOrLegacyPrivateFile(data, scope.path)
+        )) deny();
       }
       if (scope.kind === 'assignment' && scope.groupId) {
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
@@ -438,6 +493,27 @@ export async function authorizePrivateFile(
           // submissionId/userId/groupId/assignmentId. Payload shape, content, status
           // and request.time are enforced when the submission document is written.
           if (scope.userId !== uid) deny();
+          // When this group assignment has a legacy global mirror, its submission
+          // may have been finalized before the canonical group receipt synced.
+          // The group-path upload must not reopen an already submitted draft.
+          // A global assignment for another group is unrelated to this namespace.
+          const globalAssignmentRef = db.collection('assignments').doc(scope.assignmentId || '');
+          const globalAssignment = await tx.get(globalAssignmentRef);
+          if (globalAssignment.exists && asRecord(globalAssignment.data()).groupId === groupId) {
+            // A closed/expired global mirror must not be reopened by a stale
+            // still-open canonical assignment while its state is syncing.
+            if (!legacyMirrorAcceptsNewPrivateUpload(asRecord(globalAssignment.data()))) deny();
+            const globalSubmission = await tx.get(
+              globalAssignmentRef.collection('submissions').doc(scope.userId || ''),
+            );
+            const globalPrevious = asRecord(globalSubmission.data());
+            const globalOwner = 'userId' in globalPrevious ? globalPrevious.userId
+              : 'uid' in globalPrevious ? globalPrevious.uid
+                : 'studentId' in globalPrevious ? globalPrevious.studentId : scope.userId;
+            if (globalSubmission.exists && (
+              globalOwner !== uid || globalPrevious.submittedAt != null
+            )) deny();
+          }
           // acceptsStudentSubmission: publication, status, deadline and late policy.
           const dueValue = data.dueAt;
           const validDueString = typeof dueValue !== 'string' || (
@@ -446,7 +522,7 @@ export async function authorizePrivateFile(
             new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
           );
           const due = dueValue == null || typeof dueValue === 'number' || !validDueString ? null : storyExpiresAtMs(dueValue);
-          if (data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+          if (data.published === false || ASSIGNMENT_NOT_OPEN_STATUSES.has(String(data.status || '')) ||
             (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due))) deny();
           // Submission update: isSubmissionOwner and submittedAt must still be null.
           if (submission.exists && (owner !== uid || previous.submittedAt != null)) deny();
@@ -456,13 +532,12 @@ export async function authorizePrivateFile(
           // attachment on an actual submitted receipt; owner previews remain possible.
           // Assigned peer reviewers remain excluded from file access.
           if (scope.userId !== uid && (
-            !manager || (
-              Array.isArray(previous.attachments) && (
-                !submission.exists || owner !== scope.userId ||
-                previous.submittedAt == null ||
-                !referencesPrivateFile(previous.attachments, scope.path)
-              )
-            )
+            !manager ||
+            // Legacy receipts may omit attachments, but a missing/unsubmitted
+            // receipt is never proof that a teacher may read an uploaded draft.
+            !submission.exists || owner !== scope.userId ||
+            !hasSubmittedReceiptTime(previous.submittedAt) ||
+            !allowsListedOrLegacyPrivateFile(previous, scope.path)
           )) deny();
         }
       }
@@ -472,11 +547,48 @@ export async function authorizePrivateFile(
       if (scope.kind === 'assignment' && !scope.groupId && writing) {
         if (scope.userId !== uid) deny();
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
-        const [assignment, submission] = await tx.getAll(
-          assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
+        // A legacy URL must honor its global submission receipt even when a
+        // canonical group assignment has since been created or restored.
+        // Otherwise the mere presence of the group copy reopens uploads.
+        const [assignment, submission, legacySubmission] = await tx.getAll(
+          assignmentRef,
+          assignmentRef.collection('submissions').doc(scope.userId || ''),
+          db.collection('assignments').doc(scope.assignmentId || '')
+            .collection('submissions').doc(scope.userId || ''),
         );
+        const previousLegacy = asRecord(legacySubmission.data());
+        const legacyOwner = 'userId' in previousLegacy ? previousLegacy.userId
+          : 'uid' in previousLegacy ? previousLegacy.uid
+            : 'studentId' in previousLegacy ? previousLegacy.studentId : scope.userId;
+        if (legacySubmission.exists && (legacyOwner !== uid || previousLegacy.submittedAt != null)) deny();
+        // Even with a canonical copy, the global mirror that minted this
+        // legacy namespace can independently close or expire.
+        if (assignment.exists) {
+          const mirror = await tx.get(db.collection('assignments').doc(scope.assignmentId || ''));
+          const mirrorData = asRecord(mirror.data());
+          if (!mirror.exists || mirrorData.groupId !== groupId ||
+            !legacyMirrorAcceptsNewPrivateUpload(mirrorData)) deny();
+        }
         if (!assignment.exists) {
-          // Historical data with only the global mirror: previous owner-upload path.
+          // A global-only legacy assignment must not bypass current submission
+          // closure or an already recorded submission in the global namespace.
+          const mirrorRef = db.collection('assignments').doc(scope.assignmentId || '');
+          const mirror = await tx.get(mirrorRef);
+          const legacy = asRecord(mirror.data());
+          const dueValue = legacy.dueAt;
+          const validDueString = typeof dueValue !== 'string' || (
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+            Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+            new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+          );
+          const due = dueValue == null || typeof dueValue === 'number' || !validDueString
+            ? null : storyExpiresAtMs(dueValue);
+          if (
+            !mirror.exists || legacy.groupId !== groupId ||
+            legacy.published === false || ASSIGNMENT_NOT_OPEN_STATUSES.has(String(legacy.status || '')) ||
+            (legacy.dueAt != null && legacy.allowLateSubmission !== true &&
+              (due === null || Date.now() > due))
+          ) deny();
         } else {
         const data = asRecord(assignment.data());
         const previous = asRecord(submission.data());
@@ -492,7 +604,7 @@ export async function authorizePrivateFile(
         const due = dueValue == null || typeof dueValue === 'number' || !validDueString
           ? null : storyExpiresAtMs(dueValue);
         if (
-          data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+          data.published === false || ASSIGNMENT_NOT_OPEN_STATUSES.has(String(data.status || '')) ||
           (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due)) ||
           (submission.exists && (owner !== uid || previous.submittedAt != null))
         ) deny();
@@ -512,11 +624,11 @@ export async function authorizePrivateFile(
           : 'uid' in previous ? previous.uid
             : 'studentId' in previous ? previous.studentId : scope.userId;
         if (
-          Array.isArray(previous.attachments) && (
-            !submission.exists || owner !== scope.userId ||
-            previous.submittedAt == null ||
-            !referencesPrivateFile(previous.attachments, scope.path)
-          )
+          !submission.exists || owner !== scope.userId ||
+          !hasSubmittedReceiptTime(previous.submittedAt) ||
+          // Preserve access to genuinely submitted historical receipts with
+          // no file list. A present list remains an exact allow-list.
+          !allowsListedOrLegacyPrivateFile(previous, scope.path)
         ) deny();
       }
       if (
