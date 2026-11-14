@@ -394,7 +394,7 @@ describe('size and filenames', () => {
     expect(courseStudyProgressFilename('  ... ')).toBe('讀書白板-閱讀進度.campus-study.json');
     expect(courseStudyProgressFilename('課程.MD')).toBe('課程-閱讀進度.campus-study.json');
     expect(courseStudyProgressFilename('課程.MARKDOWN')).toBe('課程-閱讀進度.campus-study.json');
-    expect(courseStudyProgressFilename('課程\\u2060.MARKDOWN')).toBe('課程-閱讀進度.campus-study.json');
+    expect(courseStudyProgressFilename('課程\u2060.MARKDOWN')).toBe('課程-閱讀進度.campus-study.json');
     expect(courseStudyProgressFilename('👩‍💻.md')).toBe('👩‍💻-閱讀進度.campus-study.json');
     const name = courseStudyProgressFilename('😀'.repeat(150));
     expect(name).toBe(`${'😀'.repeat(48)}-閱讀進度.campus-study.json`);
