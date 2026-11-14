@@ -63,7 +63,30 @@ export function careerTitleDate(title: string) {
     ...title.matchAll(/(?<!\d)(20\d{2}|1[01]\d)[年/.-](\d{1,2})[月/.-](\d{1,2})(?:日)?(?!\d)/g),
   ];
   if (matches.length !== 1) return '';
-  const [, y, m, d] = matches[0];
+  const match = matches[0];
+  const before = title.slice(0, match.index);
+  const after = title.slice(match.index! + match[0].length);
+  const remainder = before + ' ' + after;
+  // A second date without a year, or a shortened range endpoint, is still
+  // ambiguous. Never turn the first date into a single-day calendar event.
+  if (
+    /(?<!\d)\d{1,2}[月/.-]\d{1,2}(?:日)?(?!\d)|(?:至|到|[~～–—-])\s*\d{1,2}\s*日?/.test(remainder)
+  )
+    return '';
+  if (
+    /(?:發布|發佈|刊登|更新|公告日期)\s*[:：]?\s*$/.test(before) ||
+    /^\s*(?:[日）)\]】]\s*)?(?:發布|發佈|刊登|更新|公告)/.test(after)
+  )
+    return '';
+  // The single date must sit next to a deadline/event phrase, rather than
+  // merely coexist with an unrelated career keyword somewhere in the title.
+  const event = '(?:截止|報名|申請|徵才|說明會|講座|博覽會)';
+  if (
+    !new RegExp(event + '[^，。；：:]{0,12}$').test(before) &&
+    !new RegExp('^[^，。；：:]{0,12}' + event).test(after)
+  )
+    return '';
+  const [, y, m, d] = match;
   const year = Number(y) + (y.length === 3 ? 1911 : 0);
   const date = `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   return careerDate(date) ? date : '';

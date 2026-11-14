@@ -45,7 +45,16 @@ export function parseCareerHtml(
       );
       if (!link) return [];
       const url = careerSafeUrl(attr(link, 'href'), new URL(source.url).hostname, source.url);
-      const title = text(link).slice(0, 300);
+      // Inspect the complete decoded title before truncation so sensitive fields
+      // cannot slip into the public feed (including its timeline and cache).
+      const fullTitle = text(link).normalize('NFKC');
+      if (
+        /學號|学生学号|學生成績|個人成績|成績\s*[:：=\d]|student\s*(?:id|number)|(?:grade|score)\s*[:=]/i.test(
+          fullTitle,
+        )
+      )
+        return [];
+      const title = fullTitle.slice(0, 300);
       if (!url || !title || seen.has(url)) return [];
       if (source.source === '資管系' && !/實習|工讀|職涯|徵才|就業|求職|履歷|面試/.test(title))
         return [];

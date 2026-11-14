@@ -39,6 +39,67 @@ it('never promotes publication dates or ambiguous dates into deadlines', () => {
   expect(careerTitleDate('2026/11/20 至 2026/11/21 徵才')).toBe('');
   expect(careerTitleDate('115年11月20日徵才')).toBe('2026-11-20');
 });
+it.each([
+  '2026/11/15 公告：實習申請至 12/08 截止',
+  '2026/11/20 至 11/21 徵才博覽會',
+  '2026年11月20日至21日徵才博覽會',
+  '2026/11/20～11/21 徵才博覽會',
+  '2026年11月20日至11月21日徵才博覽會',
+  '發布：2026/11/15 實習申請資訊',
+  '公告日期：2026/11/15 實習申請資訊',
+  '2026/11/15 更新：實習申請資訊',
+])('keeps ambiguous title out of calendar timeline: %s', (title) => {
+  expect(careerTitleDate(title)).toBe('');
+  expect(
+    careerTimeline(
+      [
+        {
+          title,
+          date: '2026-11-01',
+          url: 'https://cdif.pu.edu.tw/p/406-1102-1.php',
+          source: '職產處',
+        },
+      ],
+      '2026-11-01',
+    ),
+  ).toEqual([]);
+});
+it.each([
+  ['2026/12/8 實習申請截止', '2026-12-08'],
+  ['實習申請至2026年12月8日截止', '2026-12-08'],
+  ['公告：2026/12/8 校園徵才博覽會', '2026-12-08'],
+])('accepts an explicit single event/deadline date: %s', (title, date) => {
+  expect(careerTitleDate(title)).toBe(date);
+});
+it('public API excludes sensitive titles from announcements and calendar items for both sources', async () => {
+  const sensitiveTitles = [
+    '2026/12/8 實習錄取 學號：TEST-STUDENT-ID 成績：TEST-GRADE',
+    '2026/12/8 實習成績：TEST-GRADE',
+    '2026/12/8 實習成績 95 分',
+    '2026/12/8 實習 Student ID: TEST-STUDENT-ID',
+    '2026/12/8 實習 Grade: TEST-GRADE',
+    '2026/12/8 實習 Ｓｔｕｄｅｎｔ ＩＤ：TEST-STUDENT-ID',
+    '2026/12/8 實習' + '說明'.repeat(160) + '學號：TEST-STUDENT-ID',
+  ];
+  const sensitiveHtml = sensitiveTitles
+    .map((title, i) => `<div class="d-txt"><a href="/p/406-1102-${i + 10}.php">${title}</a></div>`)
+    .join('');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : html + sensitiveHtml),
+    })),
+  );
+  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+  const feed = await response.json();
+  expect(feed.announcements).toHaveLength(2);
+  expect(
+    feed.announcements.every((item: { title: string }) => item.title === '實習申請2026/12/8截止'),
+  ).toBe(true);
+  expect(feed.announcementsUnavailable).toBe(false);
+  expect(JSON.stringify(feed)).not.toMatch(/TEST-STUDENT-ID|TEST-GRADE|成績|Student|Grade|學號/i);
+});
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
   const records = Array.from({ length: 8 }, (_, i) => ({
     title: `2026/11/${15 + i} ${i === 1 ? '校園徵才' : '實習申請截止'}`,
