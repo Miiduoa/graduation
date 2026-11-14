@@ -264,7 +264,9 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   }
   const raw = await readBoundedResponse(response, signal);
   const payload = JSON.parse(raw) as unknown;
-  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
+  // An incomplete Overpass response may omit or corrupt osm3s metadata.
+  // Examine the soft-failure remark first, so a malformed replication header
+  // cannot hide the operator's longer Retry-After request.
   // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
   // on timeout or memory exhaustion. Never promote that partial result to a
   // fresh 24-hour snapshot or replace a previously verified fallback.
@@ -277,6 +279,8 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(),
     ));
   }
+  // Complete responses must still pass the strict replication freshness check.
+  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   const now = Date.now();
   // A way's edit timestamp cannot be newer than the Overpass replication
   // snapshot that contains it. Preserve checked geometry, but drop any

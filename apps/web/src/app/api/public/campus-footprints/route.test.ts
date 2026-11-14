@@ -1131,6 +1131,52 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each([
+    ['missing', {}],
+    ['stale', { timestamp_osm_base: '2020-01-01T00:00:00Z' }],
+  ])('honors Retry-After on an HTTP 200 remark with %s replication metadata',
+    async (_label, osm3s) => {
+      // A timeout may interrupt the osm3s header as well as the elements.
+      // Its remark is decisive: never accept the data or disregard a longer
+      // public-service cooldown merely because replication metadata is bad.
+      const partial = JSON.stringify({
+        ...JSON.parse(osmPayload),
+        osm3s,
+        remark: 'runtime error: Query timed out in "query"',
+      });
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response(partial, {
+            status: 200, headers: { 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+        expect(rejected.headers.get('Retry-After')).toBe('3600');
+        expect((await rejected.json()).error).toMatch(/temporarily unavailable/);
+
+        clock.mockReturnValue(start + 11 * 60 * 1000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + 60 * 60 * 1000 + 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
   it('keeps the last good snapshot when an HTTP 200 Overpass timeout has partial buildings', async () => {
     const partial = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
