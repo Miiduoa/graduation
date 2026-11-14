@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react-native';
 import { ClubCheckIn } from '../screens/ClubCheckIn';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { callClubPortal } from '../services/clubPortal';
 const mockStorage = new Map<string, string>();
 let mockOnline = false,
@@ -8,9 +9,9 @@ let mockOnline = false,
 jest.mock('../services/clubPortal', () => ({ callClubPortal: jest.fn() }));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: async (key: string) => mockStorage.get(key) || null,
-  setItem: async (key: string, value: string) => {
+  setItem: jest.fn(async (key: string, value: string) => {
     mockStorage.set(key, value);
-  },
+  }),
 }));
 jest.mock('@react-native-community/netinfo', () => ({
   fetch: async () => ({ isConnected: mockOnline }),
@@ -110,4 +111,49 @@ test('伺服器拒絕時保留待送出，其他帳號不讀取該佇列', async
   expect(mockStorage.get(JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']))).toBe(
     '["1234"]',
   );
+});
+
+test('連續輸入在暫存尚未完成時依序保留所有簽到碼', async () => {
+  let finish!: () => void;
+  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(
+    (key, value) =>
+      new Promise<void>((resolve) => {
+        finish = () => {
+          mockStorage.set(key, value);
+          resolve();
+        };
+      }),
+  );
+  render(
+    <ClubCheckIn
+      uid="one"
+      schoolId="pu"
+      groupId="club"
+      eventId="event"
+      officer
+      onConfirmed={jest.fn()}
+    />,
+  );
+  fireEvent.press(screen.getByText('開始簽到'));
+  await act(async () => {});
+  fireEvent.changeText(screen.getByLabelText('學號後四碼或簽到碼'), '1234');
+  fireEvent.press(screen.getByText('確認簽到碼'));
+  await waitFor(() => expect(finish).toBeDefined());
+  fireEvent.changeText(screen.getByLabelText('學號後四碼或簽到碼'), '5678');
+  fireEvent.press(screen.getByText('確認簽到碼'));
+  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  await act(async () => finish());
+  await screen.findByText('2 筆待送出');
+  expect(mockStorage.get(JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']))).toBe(
+    '["1234","5678"]',
+  );
+  await act(async () => {
+    mockOnline = true;
+    mockNetworkListener({ isConnected: true });
+  });
+  await screen.findByText('0 筆待送出');
+  expect(jest.mocked(callClubPortal).mock.calls.map((args) => args[2].checkInCode)).toEqual([
+    '1234',
+    '5678',
+  ]);
 });

@@ -37,11 +37,18 @@ export function ClubCheckIn({
   const [permission, requestPermission] = useCameraPermissions(),
     lock = useRef(false),
     mounted = useRef(true),
-    pending = useRef<string[]>([]);
-  const save = async (next: string[]) => {
-    await AsyncStorage.setItem(key, JSON.stringify(next));
-    pending.current = next;
-    if (mounted.current) setQueue(next);
+    pending = useRef<string[]>([]),
+    writes = useRef<Promise<void>>(Promise.resolve());
+  // Compute each change after the preceding durable write, including removals.
+  const save = (change: (current: string[]) => string[]) => {
+    const write = writes.current.then(async () => {
+      const next = change(pending.current);
+      await AsyncStorage.setItem(key, JSON.stringify(next));
+      pending.current = next;
+      if (mounted.current) setQueue(next);
+    });
+    writes.current = write.catch(() => {});
+    return write;
   };
   async function send() {
     if (lock.current) return;
@@ -57,7 +64,7 @@ export function ClubCheckIn({
           checkInCode: pending.current[0],
         });
         confirmedMessage = result.message || '簽到已由伺服器確認';
-        await save(pending.current.slice(1));
+        await save((current) => current.slice(1));
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
       if (mounted.current) {
@@ -99,7 +106,7 @@ export function ClubCheckIn({
   async function enqueue(value: string) {
     if (!value.trim() || lock.current) return;
     try {
-      await save([...new Set([...pending.current, value.trim()])]);
+      await save((current) => [...new Set([...current, value.trim()])]);
       setCode('');
       const state = await NetInfo.fetch();
       if (state.isConnected) void send();
@@ -167,7 +174,7 @@ export function ClubCheckIn({
                     {
                       text: '清除',
                       onPress: () => {
-                        void save([]);
+                        void save(() => []);
                       },
                     },
                   ])

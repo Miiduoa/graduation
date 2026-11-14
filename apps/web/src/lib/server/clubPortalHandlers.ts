@@ -575,13 +575,47 @@ export function createClubPortal({
         input.rosterEventId === undefined
           ? undefined
           : await tx.get(eventRef.doc(id(input.rosterEventId)));
+      // Read lightweight event documents in bounded batches before selecting a page.
+      // This avoids a new composite index and keeps old IDs from hiding upcoming events.
+      const candidates: any[] = [];
+      if (!rosterEvent) {
+        let cursor: string | undefined;
+        do {
+          const batch = await page(
+            !active && !office ? eventRef.where('visibility', '==', 'public') : eventRef,
+            cursor,
+            100,
+          );
+          candidates.push(...batch.docs);
+          cursor = batch.next;
+        } while (cursor);
+      }
+      const clock = now();
+      const orderedEvents = candidates
+        .filter((doc) => officer || office || doc.data().endsAt >= clock)
+        .sort((a, b) => {
+          const left = a.data(),
+            right = b.data();
+          return (
+            Number(left.endsAt < clock) - Number(right.endsAt < clock) ||
+            left.startsAt - right.startsAt ||
+            a.id.localeCompare(b.id)
+          );
+        });
+      const eventOffset =
+        input.eventCursor === undefined
+          ? 0
+          : orderedEvents.findIndex((doc) => doc.id === id(input.eventCursor)) + 1;
+      const selectedEvents = orderedEvents.slice(eventOffset, eventOffset + 20);
       const eventPage = rosterEvent
         ? { docs: rosterEvent.exists ? [rosterEvent] : [], next: undefined }
-        : await page(
-            !active && !office ? eventRef.where('visibility', '==', 'public') : eventRef,
-            input.eventCursor,
-            20,
-          );
+        : {
+            docs: selectedEvents,
+            next:
+              orderedEvents.length > eventOffset + 20
+                ? selectedEvents[selectedEvents.length - 1].id
+                : undefined,
+          };
       const events = eventPage.docs;
       const directories = members.length
         ? await tx.getAll(...members.map((m) => school.collection('directory').doc(m.id)))
@@ -714,7 +748,7 @@ export function createClubPortal({
         requestCursor: requestPage.next,
         memberCursor: memberPage.next,
         eventCursor: eventPage.next,
-        events: rows.sort((a, b) => a.startsAt - b.startsAt),
+        events: rows,
       };
     });
   };

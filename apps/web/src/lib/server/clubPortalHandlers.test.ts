@@ -468,3 +468,47 @@ test('超過千位有效報名仍可閱讀並獨立翻頁，不外洩名單且�
   expect(visitor.registrations).toBeUndefined();
   expect(visitor.registrationCursor).toBeUndefined();
 });
+
+test('歷史活動超過一頁時仍優先顯示近期活動，管理可繼續讀取歷史', async () => {
+  for (let n = 0; n < 105; n++) {
+    store.docs.set(`groups/club/clubEvents/old-${String(n).padStart(3, '0')}`, {
+      title: '歷史社課',
+      startsAt: 100,
+      endsAt: 200,
+      visibility: 'public',
+    });
+  }
+  for (const [id, startsAt, endsAt] of [
+    ['z-later', 5000, 6000],
+    ['z-sooner', 2000, 3000],
+    ['z-ongoing', 500, 1500],
+  ] as const) {
+    store.docs.set(`groups/club/clubEvents/${id}`, {
+      title: id,
+      startsAt,
+      endsAt,
+      visibility: 'public',
+    });
+  }
+  for (const uid of ['student', 'officer', 'staff']) {
+    const first = await call(uid);
+    expect(first.events!.slice(0, 3).map((e) => e.id)).toEqual([
+      'z-ongoing',
+      'z-sooner',
+      'z-later',
+    ]);
+    if (uid === 'student') {
+      expect(first.events).toHaveLength(3);
+      expect(first.eventCursor).toBeUndefined();
+    } else {
+      const ids = first.events!.map((e) => e.id);
+      let cursor = first.eventCursor;
+      while (cursor) {
+        const next = await call(uid, { eventCursor: cursor });
+        ids.push(...next.events!.map((e) => e.id));
+        cursor = next.eventCursor;
+      }
+      expect(new Set(ids).size).toBe(108);
+    }
+  }
+});
