@@ -549,17 +549,26 @@ function FriendsContent({ schoolId, uid }: { schoolId: string; uid: string }) {
         ) : (
           <ul className={styles.list}>
             {friends.map((friend) => (
-              <li key={friend.id}>
+              <li key={friend.id} className={styles.friendRow}>
                 <div>
                   <h3>{friend.name}</h3>
                   <p>已是好友</p>
                 </div>
-                <Link
-                  className="btn"
-                  href={`/timetable?friend=${encodeURIComponent(friend.uid)}&schoolId=${encodeURIComponent(schoolId)}`}
-                >
-                  看共同空堂
-                </Link>
+                <div className={`${styles.actions} ${styles.friendActions}`}>
+                  <Link
+                    className="btn primary"
+                    href={`/dms/new?peer=${encodeURIComponent(friend.uid)}`}
+                    aria-label={`傳訊息給${friend.name}`}
+                  >
+                    傳訊息
+                  </Link>
+                  <Link
+                    className="btn"
+                    href={`/timetable?friend=${encodeURIComponent(friend.uid)}&schoolId=${encodeURIComponent(schoolId)}`}
+                  >
+                    看共同空堂
+                  </Link>
+                </div>
               </li>
             ))}
           </ul>

@@ -9,6 +9,48 @@
 .toolbar input {
   min-width: min(280px, 100%);
 }
+.publicSearch {
+  justify-content: flex-start;
+  gap: 16px;
+}
+.publicSearch > label {
+  min-width: 0;
+}
+.publicSearch .queryField {
+  flex: 1 1 260px;
+}
+.publicSearch input,
+.publicSearch select {
+  min-width: 0;
+  width: 100%;
+}
+.publicSearch .creditsField {
+  flex: 0 1 150px;
+}
+.searchActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.filterHelp {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.filterHelp p {
+  margin: 0;
+}
+.appliedFilters {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 12px);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
 .source {
   display: flex;
   justify-content: space-between;
@@ -57,7 +99,8 @@
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.courses h2 {
+.courses h2,
+.courses h3 {
   font-size: 19px;
   font-weight: 600;
   margin: 0 0 20px;
@@ -106,6 +149,13 @@
 @media (max-width: 600px) {
   .toolbar > * {
     flex: 1 1 100%;
+  }
+  .publicSearch .queryField,
+  .publicSearch .creditsField {
+    flex-basis: 100%;
+  }
+  .publicSearch .searchActions > button {
+    flex: 1 1 auto;
   }
   .toolbar [role='tablist'] {
     display: grid;

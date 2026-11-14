@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { getPublicSchoolInfo, publicSchoolInfoDirectory } from '@campus/shared/src/publicSchoolInfo';
 import { getDocs } from 'firebase/firestore';
 import { fetchSchoolDirectory } from '../services/schoolDirectory';
 import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
@@ -94,4 +95,23 @@ test('a directory connection failure keeps only explicitly labeled public univer
   expect(schools.some((school) => school.id === 'ntu')).toBe(true);
   expect(schools.some((school) => school.id === 'tw-demo-uni')).toBe(false);
   expect(schools.some((school) => school.name.includes('（示範）'))).toBe(false);
+});
+
+
+test('all MOE directory schools are selectable offline without enabling private integrations', async () => {
+  source.mockRejectedValueOnce(new Error('offline'));
+  const schools = await fetchSchoolDirectory();
+  const records = schools.map((school) => getPublicSchoolInfo(school.id, school.name)?.id).sort();
+  expect(records).toEqual(Object.keys(publicSchoolInfoDirectory).sort());
+  const yuntech = schools.find((school) => school.id === 'yuntech');
+  expect(yuntech?.integrationStatus).toMatchObject({ enabled: false, sso: false, grades: false });
+  expect(yuntech?.domains).toBeUndefined();
+});
+
+test('one public NCHU entry retains the actual remote tenant ID', async () => {
+  source.mockResolvedValueOnce({
+    docs: [{ id: 'nchu', data: () => ({ name: '國立中興大學', publicBrowsing: true }) }],
+  } as never);
+  const schools = await fetchSchoolDirectory();
+  expect(schools.filter((school) => school.name === '國立中興大學').map((s) => s.id)).toEqual(['nchu']);
 });

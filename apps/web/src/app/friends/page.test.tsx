@@ -7,6 +7,7 @@ import {
   listPendingRequests,
   loadMyHandle,
   publishHandle,
+  sendFriendRequest,
   sentRequestState,
   unpublishHandle,
   type FriendRow,
@@ -84,6 +85,20 @@ beforeEach(() => {
   vi.mocked(sentRequestState).mockResolvedValue({ kind: 'none' });
   vi.mocked(unpublishHandle).mockResolvedValue(undefined);
   vi.mocked(publishHandle).mockResolvedValue('alice_new');
+});
+
+it('opens an accepted friend through the prepared DM route without creating a new invitation', async () => {
+  vi.mocked(listAcceptedFriends).mockResolvedValue([{ ...friend('陳小文'), uid: 'bob' }]);
+  const view = render(<FriendsPage />);
+  const message = await screen.findByRole('link', { name: '傳訊息給陳小文' });
+  expect(message.getAttribute('href')).toBe('/dms/new?peer=bob');
+  expect(screen.getByRole('link', { name: '看共同空堂' }).getAttribute('href')).toBe(
+    '/timetable?friend=bob&schoolId=pu',
+  );
+  expect(sendFriendRequest).not.toHaveBeenCalled();
+  session.loading = true;
+  view.rerender(<FriendsPage />);
+  expect(screen.queryByRole('link', { name: '傳訊息給陳小文' })).toBeNull();
 });
 
 it('keeps the removal action available after failure and only confirms the successful retry', async () => {

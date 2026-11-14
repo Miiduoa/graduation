@@ -16,6 +16,7 @@ import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline 
 import { photoPdfAvailable } from './nativePhotoPdf';
 import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
+import { CampusPersonalization } from '../../components/CampusPersonalization';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import {
   MATERIAL_CURSOR_CYCLE_MESSAGE,
@@ -874,6 +875,7 @@ function CourseScope({
             />
           )}
           <CourseList classes={classes} open={openCourse} joinRequested={joinRequested} />
+          <CampusPersonalization active={active && focused} />
         </>
       )}
     </ScrollView>

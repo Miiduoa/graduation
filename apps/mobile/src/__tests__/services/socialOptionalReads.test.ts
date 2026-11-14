@@ -1,11 +1,13 @@
-import { getDocs } from 'firebase/firestore';
+import { getDocs, getDocsFromServer, orderBy, where } from 'firebase/firestore';
 import { listSubscribedBoardIds } from '../../services/boards';
 import { listActiveStoriesForSchool } from '../../services/stories';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
+const serverRead = getDocsFromServer as jest.Mock;
 const error = Object.assign(new Error('offline'), { code: 'unavailable' });
 beforeEach(() => {
   jest.clearAllMocks();
+  serverRead.mockReset().mockRejectedValue(error);
   jest.mocked(getDocs).mockRejectedValue(error);
 });
 

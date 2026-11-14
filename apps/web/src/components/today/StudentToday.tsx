@@ -30,11 +30,13 @@ import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
 import { TodayWelcome } from './TodayWelcome';
+import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
   assistant?: ReactNode;
+  personalization?: ReactNode;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
@@ -174,6 +176,7 @@ export function StudentToday(props: Props) {
           <TodayUnreadNotifications unsigned={props.unsigned} />
         </div>
       )}
+      {props.personalization}
       {props.assistant}
       {props.updatedAt || props.refreshing ? (
         <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
@@ -331,9 +334,16 @@ function TodoList({
   const extra = Math.max(0, todos.length - 3);
   return (
     <section className={styles.section} aria-labelledby="today-todo-title" data-testid="today-work">
-      <h2 id="today-todo-title" className={styles.sectionTitle}>
-        {TODAY_FLOW_WORK_TITLE}
-      </h2>
+      <div className={styles.sectionHeading}>
+        <h2 id="today-todo-title" className={styles.sectionTitle}>
+          {TODAY_FLOW_WORK_TITLE}
+        </h2>
+        {!unsigned && (
+          <Link className={styles.sectionLink} href="/calendar">
+            查看行事曆
+          </Link>
+        )}
+      </div>
       {unsigned ? (
         <p className={styles.empty}>
           {TODAY_COPY.unsigned} <Link href="/calendar">也可先查看行事曆與期限</Link>
@@ -355,7 +365,7 @@ function TodoList({
         </p>
       ) : !unsigned && !error && !lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
-          目前沒有今日或即將到期的作業。<Link href="/calendar">查看行事曆</Link>
+          目前沒有今日或即將到期的作業。
         </p>
       ) : unsigned || todos.length === 0 ? null : (
         <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
@@ -440,6 +450,17 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      personalization={!scope.loading && props.now ? (
+        <CampusPersonalizationSection
+          key={scope.scopeKey}
+          scope={scope.scope}
+          now={props.now}
+          events={records.imported.records}
+          eventsReady={records.imported.ready}
+          eventsError={records.imported.error}
+          schoolName={scope.schoolName}
+        />
+      ) : null}
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
       now={props.now}

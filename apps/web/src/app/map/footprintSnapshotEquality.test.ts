@@ -73,6 +73,7 @@ it('never treats duplicate POIs as the same complete snapshot', () => {
   expect(reuseUnchangedProvidenceFootprints(previousDuplicates, next)).toBe(next);
 });
 
+
 it('reuses a verified building ring with a different starting vertex or winding', () => {
   const previous = [original];
   const ring = copy().outline;

@@ -1,4 +1,5 @@
 import { handleAssistant } from './assistant';
+import { handlePlatformAssistantPermissions } from './platformAssistantPermissions';
 import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
 import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
@@ -160,6 +161,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       });
       return await gateway(request, segments[1]);
     }
+    if (path === 'assistant-permissions') return await handlePlatformAssistantPermissions(request);
     if (segments[0] === 'assistant') return await handleAssistant(request, segments);
     if (segments[0] === 'lost-found') return await handleLostFound(request, segments);
     const method = request.method;

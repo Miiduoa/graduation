@@ -7,6 +7,9 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
+import { SchoolLearningLinks } from '@/components/academic/SchoolLearningLinks';
+import { getPublicSchoolInfo } from '@campus/shared/src/publicSchoolInfo';
+import { PublicCourseSearch } from './PublicCourseSearch';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolCourseReconciliation } from '@/components/academic/SchoolCourseReconciliation';
 import { AcademicConnectionError } from '@/lib/academicClient';
@@ -181,7 +184,7 @@ function Courses({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                   <div><dt>學期</dt><dd>{formatSemester(course.semester)}</dd></div>
                 </dl>
                 <div className={courseStyles.cardActions}>
-                  <Link href={schoolLmsEnabled ? `/school-lms?course=${course.id}` : '/classroom'}>{schoolLmsEnabled ? '本課作業與教材' : 'nuni 課程空間'}</Link>
+                  <Link href={schoolLmsEnabled ? `/school-lms?course=${course.id}&campus=${schoolId}` : '/classroom'}>{schoolLmsEnabled ? '本課作業與教材' : 'nuni 課程空間'}</Link>
                   <a href={course.href} target="_blank" rel="noopener noreferrer" aria-label={`前往 ${course.name} 的 WOW Class 課堂`}>開啟課堂 ↗</a>
                 </div>
               </li>)}
@@ -213,17 +216,27 @@ export default function SchoolCoursesPage() {
   });
   const returnUrl = `${path}${browse.schoolSearch}`;
   return (
-    <SiteShell title="WOW Class 課程" subtitle="找到正在上的課，接著查看教材、作業與課堂公告。">
-      {loading || browse.status === 'loading' ? (
+    <SiteShell title="校方課程" subtitle="依所選校園查看課程、作業與教材。">
+      {browse.status === 'loading' || (isOfficialAcademicSchool(browse.schoolId) && loading) ? (
         <div className={styles.status} role="status">正在確認學校與帳號…</div>
-      ) : browse.status === 'error' || error ? (
+      ) : browse.status === 'error' || (isOfficialAcademicSchool(browse.schoolId) && error) ? (
         <section className={styles.status} role="alert"><h2>暫時無法確認學校與帳號</h2><p>請重新整理後再讀取課程。</p></section>
       ) : browse.status !== 'ready' || !browse.schoolId ? (
         <section className={styles.status}><h2>請先選擇一所學校</h2><p>選擇校園後，再連線該校的學習平臺。</p></section>
       ) : !isOfficialAcademicSchool(browse.schoolId) ? (
-        <section className={styles.status}><h2>這所學校的課堂連線尚未接通</h2><p>目前無法讀取「{browse.schoolName}」的學習平臺，不會顯示其他學校的課程。</p></section>
+        <>
+          {(browse.schoolId === 'ncnu' || browse.schoolId === 'nthu') && getPublicSchoolInfo(browse.schoolId, browse.schoolName) && (
+            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName}
+              schoolSearch={browse.schoolSearch} queryParameters={params.getAll('q')}
+              weekdayParameters={params.getAll('weekday')} creditsParameters={params.getAll('credits')} />
+          )}
+          <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
+        </>
       ) : !user ? (
-        <SchoolAccountRequired returnUrl={returnUrl} alternative="請先至 WOW Class 查看課程。" />
+        <>
+          <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
+          <SchoolAccountRequired returnUrl={returnUrl} alternative="請先至 WOW Class 查看課程。" />
+        </>
       ) : <Courses key={`${user.uid}:${browse.schoolId}`} uid={user.uid} schoolId={browse.schoolId} returnUrl={returnUrl} />}
     </SiteShell>
   );
