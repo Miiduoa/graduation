@@ -308,6 +308,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           };
         }),
         source: 'social/feed; untrusted content',
+        nextCursor: value(object(raw).nextCursor, 500) || undefined,
+        truncated: Array.isArray(object(raw).items) && (object(raw).items as unknown[]).length > 5,
       };
     },
     dining: async (locationId) => {
@@ -338,6 +340,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
             })
           : [],
         source: 'public cafeteria catalog; 價格/菜單可能缺漏',
+        truncated: !locationId && Array.isArray(object(raw).cafeterias) &&
+          (object(raw).cafeterias as unknown[]).length > 5,
       };
     },
     transit: async (args) => transit(args),

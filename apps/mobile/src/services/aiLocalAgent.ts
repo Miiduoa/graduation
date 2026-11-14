@@ -1621,6 +1621,33 @@ function pickChoiceMenuFromAgent(
   return undefined;
 }
 
+/** Per-turn reads may share a result only when their complete arguments match. */
+function intentReadKey(tool: string, args: Record<string, string>): string {
+  return JSON.stringify([tool, Object.keys(args).sort().map((key) => [key, args[key]])]);
+}
+
+function completedAgentWrite(result: ToolCallResult): boolean {
+  return result.success && result.isWrite === true &&
+    (result as ToolCallResult & { isDraft?: boolean }).isDraft !== true;
+}
+
+function canUseSingleReadSkill(
+  skill: LearnedSkill,
+  intents: DetectedIntent[],
+  allowedToolNames: Set<string>,
+): boolean {
+  // A remembered result is an optimization, not a new task plan or authority.
+  // Compound requests must retain every intent, and actions still need their
+  // current source lookup, argument resolution and ordinary execution checks.
+  return intents.length === 1 && !intents[0].isWrite &&
+    !intents[0].prereqRead && !isWriteToolName(skill.tool) &&
+    (!skill.steps || skill.steps.length === 1) &&
+    allowedToolNames.has(skill.tool) &&
+    intentReadKey(skill.tool, skill.args) === intentReadKey(intents[0].tool, intents[0].args) &&
+    (!skill.steps || intentReadKey(skill.steps[0].tool, skill.steps[0].args) ===
+      intentReadKey(skill.tool, skill.args));
+}
+
 export type AgentQueryResult = {
   intents: DetectedIntent[];
   results: Array<{ tool: string; result: ToolCallResult; reason: string }>;
@@ -1834,25 +1861,8 @@ export async function autonomousQuery(
     console.log(`[AI Agent] 短回應路由：${followUpToolFromMenu}（透過 lastChoiceMenu.producedByTool）`);
   }
 
-  // ── Step 0.5: 技能快取查找 — 已學會的操作直接執行 ──
-  const cachedSkill = findLearnedSkill(resolvedMessage);
-  if (cachedSkill && cachedSkill.successCount >= 2 && allowedToolNames.has(cachedSkill.tool)) {
-    console.log(`[AI Agent] 技能快取命中: "${resolvedMessage.slice(0, 20)}" → ${cachedSkill.tool} (成功${cachedSkill.successCount}次)`);
-    try {
-      const skillResult = await executeLearnedSkill(cachedSkill, toolCtx);
-      if (skillResult.success) {
-        return finishAgentResult({
-          intents: [{ tool: cachedSkill.tool, args: cachedSkill.args, priority: 20, reason: `(已學技能) ${cachedSkill.description.slice(0, 20)}`, isWrite: true }],
-          results: [], totalTimeMs: Date.now() - start,
-          contextText: '', executedActions: [{ tool: cachedSkill.tool, result: skillResult, reason: cachedSkill.description }],
-          failedActions: [], pendingWriteActions: [],
-          choiceMenu: skillResult.choiceMenu,
-        });
-      }
-    } catch { /* 技能執行失敗，繼續正常流程 */ }
-  }
-
   let intents = analyzeIntents(resolvedMessage);
+
   if (isLeaveReviewIntent(resolvedMessage) && canReviewLeave(ctx.role)) {
     const decision = detectLeaveReviewDecision(resolvedMessage);
     const leaveId = resolvedMessage.match(/\b(?:lv|leave|evt)[-_a-z0-9]+\b/i)?.[0];
@@ -1989,7 +1999,31 @@ export async function autonomousQuery(
     });
   }
 
-  const readIntents = intents.filter(i => !i.isWrite);
+  // 單一讀取技能；複合任務保留完整執行流程。
+  const cachedSkill = findLearnedSkill(resolvedMessage);
+  if (cachedSkill && cachedSkill.successCount >= 2 &&
+      canUseSingleReadSkill(cachedSkill, intents, allowedToolNames) &&
+      !/然後|接著|順便|另外|同時|並且|也幫|再幫/.test(resolvedMessage)) {
+    console.log(`[AI Agent] 技能快取命中: "${resolvedMessage.slice(0, 20)}" → ${cachedSkill.tool} (成功${cachedSkill.successCount}次)`);
+    try {
+      const skillResult = await executeLearnedSkill(cachedSkill, toolCtx);
+      if (skillResult.success) {
+        return finishAgentResult({
+          intents,
+          results: [{ tool: cachedSkill.tool, result: skillResult, reason: intents[0].reason }],
+          totalTimeMs: Date.now() - start,
+          contextText: `【${intents[0].reason}】\n${skillResult.summary || '已讀取資料。'}`,
+          executedActions: [],
+          failedActions: [], pendingWriteActions: [],
+          choiceMenu: skillResult.choiceMenu,
+        });
+      }
+    } catch { /* 技能執行失敗，繼續正常流程 */ }
+  }
+
+  const readIntents = intents.filter((intent, index, all) => !intent.isWrite &&
+    all.findIndex((other) => !other.isWrite &&
+      intentReadKey(other.tool, other.args) === intentReadKey(intent.tool, intent.args)) === index);
   const writeIntents = intents.filter(i => i.isWrite);
 
   // ── Step 1: 並行執行所有讀取查詢 ──
@@ -1998,21 +2032,23 @@ export async function autonomousQuery(
       try {
         const result = await executeTool(intent.tool, intent.args, toolCtx);
         return { tool: intent.tool, result, reason: intent.reason };
-      } catch (e: any) {
+      } catch {
         return {
           tool: intent.tool,
-          result: { success: false, error: e.message, summary: `${intent.reason}失敗` } as ToolCallResult,
+          result: { success: false, error: 'read_unavailable', summary: `${intent.reason}尚未完成` } as ToolCallResult,
           reason: intent.reason,
         };
       }
     }),
   );
 
-  // 建立讀取結果快取（key = tool name）+ 學習成功的讀取
-  const readCache: Record<string, ToolCallResult> = {};
-  for (const r of readResults) {
+  // Cache successful and failed reads for this turn only. A failed dependency
+  // must not be retried implicitly before a write, nor replaced by another
+  // filter's successful result.
+  const readCache = new Map<string, ToolCallResult>();
+  for (const [index, r] of readResults.entries()) {
+    readCache.set(intentReadKey(r.tool, readIntents[index].args), r.result);
     if (r.result.success) {
-      readCache[r.tool] = r.result;
       learnFromSuccess(message, r.tool, {}, false);
     }
   }
@@ -2024,27 +2060,26 @@ export async function autonomousQuery(
   for (const wi of writeIntents) {
     let finalArgs = { ...wi.args };
     const resolvedKeys = new Set<string>();
+    let dependencyFailed = false;
 
     // 如果有前置讀取需求，先執行前置讀取
-    if (wi.prereqRead && wi.resolveFromRead) {
+    if (wi.prereqRead) {
       // 優先用已有的讀取快取
-      let prereqResult = readCache[wi.prereqRead.tool];
+      const key = intentReadKey(wi.prereqRead.tool, wi.prereqRead.args);
+      let prereqResult = readCache.get(key);
       if (!prereqResult) {
         try {
           prereqResult = await executeTool(wi.prereqRead.tool, wi.prereqRead.args, toolCtx);
-          readCache[wi.prereqRead.tool] = prereqResult;
-          // 把前置讀取的結果也加到 readResults 裡
-          readResults.push({
-            tool: wi.prereqRead.tool,
-            result: prereqResult,
-            reason: `(前置查詢)`,
-          });
         } catch {
-          prereqResult = { success: false, summary: '前置查詢失敗', error: '無法查詢' };
+          prereqResult = { success: false, summary: '前置查詢尚未完成', error: 'read_unavailable' };
         }
+        readCache.set(key, prereqResult);
+        readResults.push({ tool: wi.prereqRead.tool, result: prereqResult,
+          reason: `${wi.reason}的前置查詢` });
       }
 
-      if (prereqResult.success) {
+      dependencyFailed = !prereqResult.success;
+      if (prereqResult.success && wi.resolveFromRead) {
         const resolved = wi.resolveFromRead(prereqResult, message);
         for (const [key, value] of Object.entries(resolved)) {
           if (value !== '' && value !== undefined && value !== null) {
@@ -2095,6 +2130,12 @@ export async function autonomousQuery(
       continue;
     }
 
+    if (dependencyFailed) {
+      failedActions.push({ tool: wi.tool, reason: wi.reason,
+        missingInfo: '必要資料尚未取得，這項操作尚未執行；請重新查詢來源後再確認。' });
+      continue;
+    }
+
     // 參數齊全，直接執行！
     try {
       console.log(`[AI Agent] 自動執行寫入: ${wi.tool}`, finalArgs);
@@ -2114,22 +2155,24 @@ export async function autonomousQuery(
   }
 
   // ── Step 3: 格式化結果 ──
-  // Show the known, user-safe verification precondition instead of returning an
-  // empty answer. Never surface other failed reads: those may contain private
-  // upstream errors from a previous account or campus.
+  // Every requested read retains a visible outcome. Failed reads expose only a
+  // fixed explanation, never a private upstream error or a previous scope's text.
   const contextParts = readResults
-    .filter(r => r.result.summary && (r.result.success || r.result.error === 'school_scope_unverified'))
     .map(r => r.result.success
-      ? `【${r.reason}】\n${r.result.summary}`
-      : `【${r.reason}需要驗證身分】\n${r.result.summary}`);
+      ? `【${r.reason}】\n${r.result.summary || '已讀取資料，尚無可整理的內容。'}`
+      : r.result.error === 'school_scope_unverified'
+        ? `【${r.reason}需要驗證身分】\n${r.result.summary}`
+        : `【${r.reason}尚未完成】\n這項來源暫時無法確認，不能視為沒有資料；其他已取得的結果仍列在本次回覆。`);
 
   // 加入已執行操作的結果
   for (const ea of executedActions) {
     const r = ea.result;
     // 成功 → ✅；失敗但有 choiceMenu / isWrite=false → 屬於「需要使用者澄清」，不顯示失敗紅標
     const isClarification = !r.success && r.isWrite === false && Boolean(r.summary || (r as any).choiceMenu);
-    if (r.success) {
+    if (completedAgentWrite(r)) {
       contextParts.push(`【✅ ${ea.reason}】\n${r.summary ?? ''}`);
+    } else if (r.success) {
+      contextParts.push(`【${ea.reason}的準備結果，操作尚未完成】\n${r.summary ?? ''}`);
     } else if (isClarification) {
       contextParts.push(`【💡 ${ea.reason}】\n${r.summary ?? ''}`);
     } else {
@@ -2140,7 +2183,7 @@ export async function autonomousQuery(
   // 加入無法執行的操作
   for (const fa of failedActions) {
     contextParts.push(
-      `【💭 ${fa.reason}需要補充資訊】\n${fa.missingInfo}。請在回覆中：(1) 列出 2-3 個合理選項（用 1. 2. 3. 編號清單）讓使用者直接選；(2) 已知資訊不要重複問；(3) 結尾告訴使用者「回我選的編號或具體名稱，我馬上幫你執行」。`,
+      `【${fa.reason}尚未完成】\n${fa.missingInfo}。請如實說明未完成原因；只有讀取結果確實提供候選時才列出選項，不要猜測目標或自行改換操作。`,
     );
   }
 
@@ -2182,12 +2225,12 @@ export function buildLocalAgentPrompt(
     '# 你是「小靜」— 靜宜大學 AI 校園助理',
     '',
     '## 身份',
-    '你是已經幫使用者查詢資料和執行操作的 AI 代理。以下是系統已完成的結果，請友善地總結回報給使用者。',
+    '你是協助使用者查詢資料和執行操作的 AI 代理。以下列出每項實際結果，請分別回報已查詢、待確認、已完成與未完成的項目。',
     '',
     '## 規則',
     '1. 繁體中文，友善簡潔，像朋友聊天',
     '2. 直接用已查到的數據回答，引用具體數字和名稱',
-    '3. 如果有操作已成功執行，要明確告訴使用者「已完成」',
+    '3. 只有工具確認成功寫入且不是草稿的操作，才能說「已完成」；備妥選單、草稿或開啟入口不能視為已送出',
     '4. 如果有操作失敗或需要更多資訊，要清楚說明缺什麼，並同時給出「代理產物」：分步計畫、可複製的補資料範例、建議開啟的 App 畫面；不可只叫使用者自己去弄就結束',
     '5. 結尾可提供下一步建議',
     '6. 不要說「請自行查看」，你就是全能助理',
@@ -2212,14 +2255,16 @@ export function buildLocalAgentPrompt(
 
   // 特別標注已執行的操作
   if (queryResult.executedActions.length > 0) {
-    parts.push('## 已代理完成的操作');
+    parts.push('## 各項操作的實際結果');
     for (const ea of queryResult.executedActions) {
-      parts.push(ea.result.success
+      parts.push(completedAgentWrite(ea.result)
         ? `✅ ${ea.reason}：${ea.result.summary}`
+        : ea.result.success
+          ? `待確認 ${ea.reason}：${ea.result.summary}（尚未完成操作）`
         : `❌ ${ea.reason}失敗：${ea.result.summary ?? ea.result.error}`);
     }
     parts.push('');
-    parts.push('請在回答中確認這些操作已完成，讓使用者安心。');
+    parts.push('請逐項依實際狀態回答，不要將尚未送出的準備結果或失敗項目概括為全部完成。');
     parts.push('');
   }
 

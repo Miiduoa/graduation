@@ -28,6 +28,19 @@ const base = {
   onCancel: vi.fn(),
 };
 
+it('shows a compound task result once and retains the answer if its task contract is invalid', () => {
+  const reply = { answer: '來源完整回覆：查到資料庫課程', dataRead: true, steps: [], cards: [],
+    taskPlan: { version: 1 as const, steps: [{ id: 'read-course', serviceId: 'timetable' as const,
+      label: '核對課表', dependsOn: [], status: 'completed' as const, summary: '查到資料庫課程' }] } };
+  const { rerender } = render(<AssistantThread {...base} turns={[{ question: '查課表和餐廳', reply }]} />);
+  expect(screen.getAllByText('查到資料庫課程')).toHaveLength(1);
+  expect(screen.queryByText('來源完整回覆：查到資料庫課程')).toBeNull();
+  rerender(<AssistantThread {...base} turns={[{ question: '查課表和餐廳', reply: {
+    ...reply, taskPlan: { ...reply.taskPlan, steps: [] },
+  } }]} />);
+  expect(screen.getByText('來源完整回覆：查到資料庫課程')).toBeTruthy();
+});
+
 it('shows empty state, suggestion chips and a labelled composer', () => {
   render(<AssistantThread {...base} />);
   expect(screen.getByRole('heading', { name: '今天想問什麼？' })).toBeTruthy();

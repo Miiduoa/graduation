@@ -59,8 +59,8 @@ describe('tool selection coverage within eight tools', () => {
     }
   });
 
-  it.each(['幫我規劃作業，也查教材社團公車', '再點一次，也查作業教材社團公車'])
-    ('explicitly defers domains omitted by a special path: %s', (question) => {
+  it.each(['幫我規劃作業，也查教材社團公車', '再點一次，也查作業教材社團公車'])(
+    'explicitly defers domains omitted by a special path: %s', (question) => {
       const names = selectTools(question, false);
       const notice = toolSelectionNotice(question, false, names);
       expect(names.length).toBeLessThanOrEqual(8);
@@ -79,8 +79,8 @@ describe('tool selection coverage within eight tools', () => {
     expect(notice).toContain('通知');
   });
 
-  it.each(['通知', compound + '和通知', '幫我點便當、作業、教材、通知'])
-    ('never advertises simulation notifications in production: %s', (question) => {
+  it.each(['通知', compound + '和通知', '幫我點便當、作業、教材、通知'])(
+    'never advertises simulation notifications in production: %s', (question) => {
       expect(selectTools(question, false)).not.toContain('get_notifications');
     });
 
@@ -138,7 +138,9 @@ describe('tool selection coverage within eight tools', () => {
     if (fail) vi.spyOn(f.adapter, 'clubs').mockRejectedValue(new Error('Unavailable'));
     let calls = 0;
     const result = await run({
-      question: '查社團與教材', history: [], binding, adapter: f.adapter,
+      // Named sources stay on the model path; generic compound requests now
+      // execute both readers through the dependency planner.
+      question: '查攝影社的社團動態與資料結構教材', history: [], binding, adapter: f.adapter,
       model: async () => ({
         message: calls++ === 0
           ? { role: 'assistant', content: '', tool_calls: [{ id: 'clubs', type: 'function',

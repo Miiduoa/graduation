@@ -3,6 +3,7 @@ import { operationSignal, withOperationSignal } from './operation';
 import { informationKinds } from './information';
 import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
+import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskPlan';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
@@ -415,7 +416,7 @@ function clockRanges(text: string): { from: string; to: string }[] {
 const PERIODS: [RegExp, string, string][] = [
   [/上午|早上|早晨|今早|明早/, '08:00', '12:00'],
   [/中午/, '11:00', '13:00'],
-  [/晚上|今晚|今夜/, '18:00', '22:00'],
+  [/晚上|晚間|今晚|今夜|明晚/, '18:00', '22:00'],
   [/下午/, '13:00', '18:00'],
 ];
 export function studyWindow(question: string, answer = ''): { from: string; to: string } {
@@ -680,7 +681,8 @@ export function schedule(ledger: Ledger, from: string, to: string) {
         end: c.endAt,
       });
   }
-  return { classes: result, unplaced, source: 'personal-imports', updatedAt: ledger.updatedAt };
+  return { classes: result, unplaced, hasTimetableSource: ledger.records.some(record => record.kind === 'timetable'),
+    source: 'personal-imports', updatedAt: ledger.updatedAt };
 }
 export function calendar(ledger: Ledger, from: string, to: string) {
   return ledger.records
@@ -769,6 +771,7 @@ export function createTools(
   const workCache = new Map<string, Promise<Task[]>>();
   let realms: Promise<{ tenantId: string; schoolId?: string }[]> | undefined;
   const tasks = new Map<string, Task>();
+  const ambiguousTaskIds = new Set<string>();
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
@@ -828,7 +831,11 @@ export function createTools(
   async function work(courseId: string) {
     if (!workCache.has(courseId)) workCache.set(courseId, adapter.work(courseId));
     const found = await workCache.get(courseId)!;
-    found.forEach((t) => tasks.set(t.id, t));
+    found.forEach((t) => {
+      const previous = tasks.get(t.id);
+      if (previous && (previous.courseId !== t.courseId || previous.kind !== t.kind)) ambiguousTaskIds.add(t.id);
+      tasks.set(t.id, t);
+    });
     return found;
   }
   async function dueWork(a: Obj) {
@@ -927,6 +934,7 @@ export function createTools(
             label: service.label,
             summary: service.summary,
             access: service.access,
+            capability: getAssistantServiceCapability(service.id),
             href: assistantServiceHref(service.id, binding.schoolId, 'platform'),
           })),
           total: services.length,
@@ -1231,10 +1239,11 @@ export function createTools(
       case 'propose_study_plan': {
         const requested = Array.isArray(a.taskIds) ? (a.taskIds as string[]) : [];
         if (new Set(requested).size !== requested.length) return fail();
-        if (requested.length && requested.some((k) => !tasks.has(k))) return fail('UNKNOWN_PENDING_TASK');
+        if (requested.length && requested.some((k) => !tasks.has(k) || ambiguousTaskIds.has(k))) return fail('UNKNOWN_PENDING_TASK');
         const selected = (requested.length ? requested.map((k) => tasks.get(k)!) : [...tasks.values()].filter((t) => !t.submitted && t.state === 'open' && t.dueAt && Date.parse(t.dueAt) >= now))
           .sort((a, b) => String(a?.dueAt || '9999').localeCompare(String(b?.dueAt || '9999')))
           .slice(0, 4);
+        if (selected.some(t => ambiguousTaskIds.has(t.id))) return fail('UNKNOWN_PENDING_TASK');
         if (selected.some((t) => t.submitted || t.state !== 'open'))
           return fail('UNKNOWN_PENDING_TASK');
         if (!selected.length)
@@ -1400,17 +1409,17 @@ export function createTools(
       };
     },
     withSignal: withOperationSignal,
-    async call(name: string, raw: unknown) {
+    async call(name: string, raw: unknown, requestQuestion = question) {
       const permission = proposalPermission(name);
       if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
       if (!exactEventArguments && name === 'propose_personal_event') {
-        const spoken = parseSpokenClock(question);
+        const spoken = parseSpokenClock(requestQuestion);
         if (spoken) {
-          const window = studyWindow(question);
+          const window = studyWindow(requestQuestion);
           if (
             window.from < window.to &&
-            (personalSlotSelect(question) || !parseClock(cleaned.startTime))
+            (personalSlotSelect(requestQuestion) || !parseClock(cleaned.startTime))
           ) {
             cleaned.startTime = window.from;
             cleaned.endTime = window.to;
@@ -1419,13 +1428,13 @@ export function createTools(
         }
       }
       if (name === 'propose_study_plan' || name === 'find_free_time') {
-        const window = studyWindow(question);
+        const window = studyWindow(requestQuestion);
         const ranged = parseRange(cleaned.from) || parseRange(cleaned.to);
         const from = parseClock(cleaned.from) || ranged?.from || window.from;
         const to = parseClock(cleaned.to) || ranged?.to || window.to;
         if (from && to) {
           const requestedWindow = name === 'propose_study_plan' &&
-            (parseSpokenClock(question) || PERIODS.some(([pattern]) => pattern.test(question)));
+            (parseSpokenClock(requestQuestion) || PERIODS.some(([pattern]) => pattern.test(requestQuestion)));
           cleaned.from = requestedWindow && from < window.from ? window.from : from;
           cleaned.to = requestedWindow && to > window.to ? window.to : to;
         }
@@ -1458,7 +1467,7 @@ export function createTools(
       }
       if (name === 'list_food_orders' && reorder) delete cleaned.state;
       if (name === 'reorder_last_food_order' || name === 'propose_food_order')
-        cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, question);
+        cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);

@@ -3,6 +3,8 @@ import { PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS } from '@campus/shared/src/pl
 import { directReads, directReadAnswer, directReadCourseworkTargets } from './directRead';
 import { prepareExplicitEventRequest } from './explicitEventRequest';
 import { prepareCourseworkStudyRequest } from './courseworkStudyRequest';
+import { crossServiceRequest } from './crossServiceRequest';
+import { runCrossService } from './crossService';
 import {
   formatImportedAcademicSummary,
   type ImportedAcademicSummary,
@@ -295,6 +297,14 @@ export async function run(input: RunInput) {
       stopReason = study.stopReason;
       log('assistant.completed');
       return { version: 2, ...study, modelCalls: 0, usage, simulation: input.adapter.simulation };
+    }
+    const taskRequest = input.planRevision ? null : crossServiceRequest(input.question, now);
+    if (taskRequest) {
+      const result = await runCrossService({ request: taskRequest, tools, binding: input.binding, signal, now });
+      steps.push(...result.steps);
+      stopReason = result.stopReason;
+      log('assistant.completed');
+      return { version: 2, ...result, modelCalls: 0, usage, simulation: input.adapter.simulation };
     }
     const explicitEvent = input.planRevision ? null : await prepareExplicitEventRequest({ question: input.question, tools, signal, now });
     if (explicitEvent) {

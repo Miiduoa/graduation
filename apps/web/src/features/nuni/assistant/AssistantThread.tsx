@@ -6,6 +6,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
+import { AssistantTaskPlan } from './AssistantTaskPlan';
+import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
@@ -19,6 +21,8 @@ import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, rest
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
+  if (parseAssistantTaskPlan(reply.taskPlan))
+    return <p>已逐項整理這次任務，結果與尚待處理的項目如下。</p>;
   if (reply.local || reply.dataRead)
     return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
   return <AssistantMarkdown text={reply.answer} />;
@@ -236,6 +240,7 @@ export function AssistantThread({
                 ) : null}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
+                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states} />
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
                     <summary>查了哪些資料</summary>

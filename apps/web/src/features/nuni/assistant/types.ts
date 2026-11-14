@@ -23,6 +23,8 @@ export type V2Reply = {
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
   courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
   courseworkDate?: string;
+  /** Server-prepared task results; validate before rendering or linking. */
+  taskPlan?: import('@campus/shared/src/assistantTaskPlan').AssistantTaskPlan;
 };
 
 export type V2Turn = {
