@@ -346,6 +346,14 @@ async function loadCourseContents(
       seen.add(signature);
       announcements.push(item);
     }
+    // The dedicated feed alone cannot prove completeness: the general
+    // activities feed may contain additional course notices. Keep the
+    // available notices but surface the failed source as incomplete.
+    if (!activitiesResult.ok) {
+      errors.push({
+        courseId: course.id, courseName: course.name, area: 'announcements', status: activitiesResult.status,
+      });
+    }
   } else if (activitiesResult.ok) {
     announcements = activityAnnouncements;
     if (announcementResult.status !== 404) {
