@@ -667,9 +667,9 @@ async def desktop(page, requests, resources):
     await expect(progress).to_have_attribute(
         "aria-valuetext", f"第 2 個地點，共 {len(options)} 個：{options[1]['name']}"
     )
-    await dialog.get_by_role("button", name="下一個地點", exact=True).click()
+    await dialog.get_by_role("button", name=f"下一個地點：{options[2]['name']}", exact=True).click()
     await expect(selector_for(page)).to_have_value(options[2]["id"])
-    await dialog.get_by_role("button", name="上一個地點", exact=True).click()
+    await dialog.get_by_role("button", name=f"上一個地點：{options[1]['name']}", exact=True).click()
     await expect(selector_for(page)).to_have_value(options[1]["id"])
     await progress.focus()
     await page.keyboard.press("End")
