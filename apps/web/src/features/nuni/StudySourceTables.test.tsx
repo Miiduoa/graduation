@@ -857,3 +857,52 @@ it('does not misrepresent bare progress or rate numbers as max-relative percenta
   expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
     .toEqual(['75', '75']);
 });
+
+it('does not scale bare rates or ratios as if the largest student value were 100%', () => {
+  const headers = [
+    '成長率', '報酬率', '年增率', '存活率', '學生通過比例',
+    'Growth Rate', 'Interest Rate', 'Profit Ratio', 'Market Share',
+  ];
+  for (const header of headers) {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 75 |', '| 乙 | 25 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('does not force an artificial 100% ceiling on growth or return percentages', () => {
+  const headers = [
+    '成長率', '年增率', '報酬率', '利率', '營業利潤率',
+    'Growth Rate', 'Interest Rate (%)', 'Percent Change', 'Profit Margin (%)',
+  ];
+  for (const header of headers) {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 75% |', '| 乙 | 25% |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    const table = screen.getByRole('table');
+    expect(within(table).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['75%', '25%']);
+    expect(container.querySelector('details')).toBeNull();
+    unmount();
+  }
+});
+
+it('keeps fixed 100% charts for bounded completion rates and numeric budgets', () => {
+  for (const header of ['完成率', 'Attendance Rate']) {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 75% |', '| 乙 | 25% |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
+      .toEqual(['100', '100']);
+    unmount();
+  }
+  const budget = ['| 項目 | 年度預算 |', '| --- | --- |',
+    '| 甲 | 75 |', '| 乙 | 25 |'].join('\n');
+  const { container } = render(<StudySourceTables text={budget} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
+    .toEqual(['75', '75']);
+});

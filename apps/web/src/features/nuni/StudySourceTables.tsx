@@ -13,8 +13,28 @@ const ENGLISH_PERCENT_COLUMN =
 
 // An English rate header must not quietly use max-of-column scaling, and
 // raw numbers without an explicit percent sign remain ambiguous.
+// A generic rate/ratio header is not a quantity even if it contains bare
+// numbers. Never scale 75 to a 100%-looking bar just because it is the maximum.
+const SOURCE_RATE_OR_RATIO_COLUMN = /(?:率|比例|比率|佔比|占比)/u;
+const ENGLISH_RATE_OR_RATIO_COLUMN = /\b(?:rate|ratio|share)\b/iu;
+// Changes, investment returns and interest can exceed 100% or be negative.
+// A fixed 100% meter would claim a ceiling that the lesson never established.
+const SOURCE_UNBOUNDED_RATE_COLUMN =
+  /(?:成長|增長|變化|變動|增減|漲幅|跌幅|年增|月增|報酬|回報|利率|通膨|年化|殖利率|利潤|毛利|盈餘|虧損|淨利)/u;
+const ENGLISH_UNBOUNDED_RATE_COLUMN =
+  /\b(?:growth|change|increase|decrease|return|yield|interest|inflation|profit|loss|margin|appreciation|depreciation)\b/iu;
+
 function isPercentageColumn(header: string): boolean {
-  return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header);
+  return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
+    SOURCE_RATE_OR_RATIO_COLUMN.test(header) || ENGLISH_RATE_OR_RATIO_COLUMN.test(header);
+}
+
+// Only columns with an established 0–100 interpretation receive a 100% meter.
+// A bare "Rate", ratio, growth or return stays as a source table, not a graph.
+function isBoundedPercentageColumn(header: string): boolean {
+  return (SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header)) &&
+    !SOURCE_UNBOUNDED_RATE_COLUMN.test(header) &&
+    !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
 }
 
 /**
@@ -66,7 +86,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  */
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  if (!isPercentageColumn(table.headers[1])) return null;
+  if (!isBoundedPercentageColumn(table.headers[1])) return null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {
