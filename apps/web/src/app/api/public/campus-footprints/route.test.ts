@@ -651,6 +651,81 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['incomplete remark', 'truncated JSON'])(
+    'honours Retry-After on HTTP 200 with %s without accepting geometry',
+    async (kind) => {
+      const start = Math.floor(Date.now() / 1000) * 1000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        // An incomplete result may also omit the replication timestamp.
+        // The 200 + remark is a soft upstream failure, not a valid snapshot.
+        const incomplete = kind === 'incomplete remark'
+          ? JSON.stringify({
+            osm3s: {},
+            ...JSON.parse(osmPayload),
+            remark: 'runtime error: Query timed out',
+          })
+          : '{"elements":[{"type":"way","id":255784049';
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response(incomplete, {
+            status: 200, headers: { 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const refused = await GET();
+        expect(refused.status).toBe(503);
+        expect(refused.headers.get('Cache-Control')).toBe('no-store');
+        expect(refused.headers.get('Retry-After')).toBe('3600');
+        expect((await refused.json()).error).toMatch(/temporarily unavailable/);
+
+        clock.mockReturnValue(start + 11 * 60_000);
+        expect((await GET()).headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + 60 * 60_000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it('preserves dated stale outlines when an HTTP 200 remark requests a longer retry pause', async () => {
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    const day = 24 * 60 * 60 * 1000;
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          ...JSON.parse(osmPayload),
+          remark: 'runtime error: Query timed out',
+        }), { status: 200, headers: { 'Retry-After': '3600' } }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const original = await (await GET()).json();
+      clock.mockReturnValue(start + day + 1_000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(fallback.headers.get('Retry-After')).toBe('3600');
+      expect(await fallback.json()).toMatchObject({
+        stale: true, fetchedAt: original.fetchedAt, buildings: original.buildings,
+      });
+      clock.mockReturnValue(start + day + 11 * 60_000);
+      expect((await GET()).headers.get('Retry-After')).toBe('2941');
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('keeps the last good snapshot when an HTTP 200 Overpass timeout has partial buildings', async () => {
     const partial = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
@@ -899,6 +974,8 @@ describe('public Providence building geometry route', () => {
   });
 
   it.each([
+    { status: 400, retryAfter: null, cooldown: '86400' },
+    { status: 403, retryAfter: null, cooldown: '86400' },
     { status: 406, retryAfter: null, cooldown: '86400' },
     { status: 429, retryAfter: '3600', cooldown: '3600' },
     { status: 503, retryAfter: '3600', cooldown: '3600' },
