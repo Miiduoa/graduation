@@ -10,6 +10,8 @@ async function writeDormSsoIdentity({ db, uid, schoolId, userInfo }) {
   };
   const ref = db.collection('schools').doc(schoolId).collection('dormSsoIdentities').doc(uid);
   await db.runTransaction(async (tx) => {
+    const account = await tx.get(db.collection('users').doc(uid));
+    if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress) return;
     tx.set(ref, identity);
   });
 }
@@ -17,6 +19,21 @@ module.exports = { writeDormSsoIdentity };
 
 // Resolve only backend-owned, verified SSO links when an enabled dorm feature needs them.
 async function resolveDormSsoIdentity({ db, schoolId, studentId }) {
+  // The legacy PU login uses a deterministic UID and a server-written membership,
+  // rather than ssoLinks. Never resolve from the client-editable users profile.
+  if (schoolId === 'pu') {
+    const uid = `pu-${studentId.toLowerCase()}`;
+    const member = await db.collection('schools').doc('pu').collection('members').doc(uid).get();
+    const data = member.data();
+    if (data?.studentId === studentId && data.lastLoginAt && data.status === 'active') {
+      await writeDormSsoIdentity({
+        db,
+        schoolId,
+        uid,
+        userInfo: { studentId, name: data.displayName },
+      });
+    }
+  }
   const links = await db.collection('ssoLinks').where('studentId', '==', studentId).get();
   for (const doc of links.docs) {
     const link = doc.data();

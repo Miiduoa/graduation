@@ -908,3 +908,113 @@ test('workspace defaults to actionable statuses and keeps history available expl
     (await call('staff', { action: 'workspace', includeHistory: true })).packages,
   ).toHaveLength(3);
 });
+
+// Execute the real legacy PU profile wrapper and profile writer before importing.
+test('legacy PU login data can import a resident without ssoLinks or login changes', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { createSchoolLoginProfileWriter } = require('./schoolLoginProfile');
+  const { call, data, db } = fixture();
+  data.delete('schools/pu/dormSsoIdentities/student');
+  const source = fs.readFileSync(require.resolve('./index'), 'utf8');
+  const start = source.indexOf('async function upsertPuStudentProfile(');
+  const end = source.indexOf('async function provisionUniversalDevAccount(', start);
+  const upsert = vm.runInNewContext(source.slice(start, end) + '; upsertPuStudentProfile', {
+    writeSchoolLoginProfile: createSchoolLoginProfileWriter({ db }),
+    PROVIDENCE_UNIVERSITY_SCHOOL_ID: 'pu',
+  });
+  await upsert({
+    uid: 'pu-123',
+    studentId: '123',
+    displayName: '校方姓名',
+    email: '123@pu.edu.tw',
+  });
+  await call('staff', {
+    action: 'importResidents',
+    rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+  });
+  expect(data.get('schools/pu/dormResidents/123')).toMatchObject({
+    userId: 'pu-123',
+    name: '校方姓名',
+  });
+  const result = await call('pu-123', {
+    action: 'requestLeave',
+    key: 'leave',
+    date: '2099-01-01',
+    reason: '返家',
+  });
+  expect(result.success).toBe(true);
+  await call('staff', {
+    action: 'registerPackage',
+    key: 'parcel',
+    studentId: '123',
+    description: '包裹',
+    location: '管理室',
+  });
+  expect(data.get('schools/pu/dormPackages/staff_parcel').recipientId).toBe('pu-123');
+});
+
+test.each(['deleted', 'deleting'])(
+  'closing accounts cannot recreate verified mappings or accept parcels (%s)',
+  async (status) => {
+    const { call, data } = fixture();
+    data.delete('schools/pu/dormSsoIdentities/student');
+    data.set(
+      'users/student',
+      status === 'deleted' ? { status } : { accountDeletionInProgress: true },
+    );
+    data.set('ssoLinks/verified', { schoolId: 'pu', firebaseUid: 'student', studentId: '123' });
+    await expect(
+      call('staff', {
+        action: 'importResidents',
+        rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+      }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(data.has('schools/pu/dormSsoIdentities/student')).toBe(false);
+    data.set('schools/pu/dormResidents/123', {
+      studentId: '123',
+      userId: 'student',
+      building: 'A',
+      active: true,
+    });
+    await expect(
+      call('staff', {
+        action: 'registerPackage',
+        key: 'closing',
+        studentId: '123',
+        description: '包裹',
+        location: '管理室',
+      }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(data.has('schools/pu/dormPackages/staff_closing')).toBe(false);
+  },
+);
+
+test.each([
+  { studentId: '123', status: 'active' },
+  { studentId: '456', status: 'active', lastLoginAt: 1 },
+  { studentId: '123', status: 'inactive', lastLoginAt: 1 },
+])('legacy PU mapping rejects a membership without matching login evidence: %j', async (member) => {
+  const { call, data } = fixture();
+  data.delete('schools/pu/dormSsoIdentities/student');
+  data.set('schools/pu/members/pu-123', member);
+  data.set('users/pu-123', { studentId: '123' });
+  await expect(
+    call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+    }),
+  ).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(data.has('schools/pu/dormResidents/123')).toBe(false);
+});
+
+test('closing accounts cannot recreate private repair or leave records while cleanup runs', async () => {
+  const { call, data } = fixture();
+  data.set('users/student', { accountDeletionInProgress: true });
+  for (const input of [
+    repair,
+    { action: 'requestLeave', key: 'leave', date: '2099-01-01', reason: '返家' },
+  ])
+    await expect(call('student', input)).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect([...data.keys()].some((key) => /\/dorm(Repairs|Leaves)\//.test(key))).toBe(false);
+});

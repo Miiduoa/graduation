@@ -322,6 +322,9 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         .collection(action === 'submitRepair' ? 'dormRepairs' : 'dormLeaves')
         .doc(uid + '_' + key);
       await db.runTransaction(async (tx) => {
+        const account = await tx.get(db.collection('users').doc(uid));
+        if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
+          throw new HttpsError('failed-precondition', '帳號已停用');
         const old = await tx.get(ref);
         if (!old.exists) {
           if (action === 'requestLeave') Object.assign(row, await activeResidence(tx, uid));
@@ -469,6 +472,15 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       }
       await db.runTransaction(async (tx) => {
         const refs = rows.map((row) => school.collection('dormResidents').doc(row.studentId));
+        const accounts = await tx.getAll(
+          ...rows.map((row) => db.collection('users').doc(row.userId)),
+        );
+        if (
+          accounts.some(
+            (a) => a.data()?.status === 'deleted' || a.data()?.accountDeletionInProgress,
+          )
+        )
+          throw new HttpsError('failed-precondition', '名冊包含已停用帳號');
         const existing = await tx.getAll(...refs);
         // Read every destination before writing so concurrent moves retry safely.
         existing.forEach((snap, index) => {
@@ -496,6 +508,9 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         if (!resident.exists || resident.data().active === false)
           throw new HttpsError('failed-precondition', '學號不在住宿生名單');
         const r = resident.data();
+        const account = await tx.get(db.collection('users').doc(r.userId));
+        if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
+          throw new HttpsError('failed-precondition', '住宿生帳號已停用');
         inBuilding(r);
         const parcel = {
           recipientId: r.userId,

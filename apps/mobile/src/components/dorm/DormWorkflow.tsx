@@ -200,6 +200,8 @@ export function DormWorkflow({
     packages: [],
     residents: [],
   });
+  const [rowsLoaded, setRowsLoaded] = useState(false);
+  const summaryReady = rowsLoaded && !Object.values(rows.nextCursors || {}).some(Boolean);
   const [ownLeaves, setOwnLeaves] = useState<DormLeave[]>([]);
   const [staffMode, setStaffMode] = useState(false);
   const [tab, setTab] = useState('repairs');
@@ -225,6 +227,7 @@ export function DormWorkflow({
   );
   const refresh = useCallback(
     async (staff = staffMode) => {
+      setRowsLoaded(false);
       const token = generation.current;
       const rowToken = rowGeneration.current;
       const [result, mine] = await Promise.all([
@@ -236,6 +239,7 @@ export function DormWorkflow({
       ]);
       if (token === generation.current && rowToken === rowGeneration.current) {
         setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
+        setRowsLoaded(true);
         setOwnLeaves((mine ?? result).leaves ?? []);
       }
     },
@@ -270,6 +274,7 @@ export function DormWorkflow({
     generation.current++;
     const token = generation.current;
     setCapability(null);
+    setRowsLoaded(false);
     setOwnLeaves([]);
     selectedStudentId.current = '';
     setRows({ repairs: [], leaves: [], packages: [], residents: [] });
@@ -600,13 +605,20 @@ export function DormWorkflow({
           {config.admin && (
             <Box>
               <Label strong>住服組總覽（不含學生個資）</Label>
-              <Label>{dormWorkflowSummary(rows)}</Label>
+              <Label>
+                {summaryReady
+                  ? dormWorkflowSummary(rows)
+                  : '請先載入全部紀錄，再查看或匯出完整統計。'}
+              </Label>
               <Btn
                 label="匯出宿舍統計"
-                disabled={busy}
-                onPress={() =>
-                  void exportSummary(dormWorkflowSummary(rows)).catch(() => setNotice('匯出失敗。'))
-                }
+                disabled={busy || !summaryReady}
+                onPress={() => {
+                  if (!summaryReady || busy) return;
+                  void exportSummary(dormWorkflowSummary(rows)).catch(() =>
+                    setNotice('匯出失敗。'),
+                  );
+                }}
               />
               {f('targetUid', '輔導員帳號 UID')}
               {f('buildings', '值班棟別（授權時必填，多棟以逗號分隔）')}

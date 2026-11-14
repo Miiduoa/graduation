@@ -112,3 +112,13 @@
 - 有登入權限migration變更：依本輪審查要求，窄幅修改 index.js 一般 SSO 回呼中本 PR 新增的宿舍身分同步，以及 dormWorkflow.js 的宿舍授權判斷；同步實作隔離於 dormSsoIdentity.js。此登入整合、宿舍授權與新增隔離集合仍列入「需晉瑋說『上』」部署範圍。未改共用登入 writer、sessions、共用 authz、ACL／Firestore／Storage rules 或 migration，未部署、遷移或操作正式資料。先前使用 members 學號映射的方案由本節取代；開通前一般 SSO 帳號須重新登入建立隔離映射。
 - 回歸涵蓋：一般 SSO 新／舊帳號以校方姓名匯入與搜尋、缺漏／不合法身分刷新、拒絕 members／users 非隔離學號、重複映射、共用服務不能取得宿舍權限、缺漏／空棟別拒絕授權，以及管理員保留存取能力。
 - 驗證：後端 dormWorkflow／schoolLoginProfile／authz 共 75 項、Web DormWorkflow／cloud 23 項、Mobile DormWorkflow／DormStaffHome 12 項通過；shared、Web、Mobile 全專案 typecheck、後端既有設定 ESLint、index.js 語法與 git diff --check 通過。首次根目錄 ESLint 套用了前端設定，改從 backend/functions 使用既有設定後通過。Jest 快取及型別檢查輸出置於 /tmp 並於驗證後刪除；未安裝套件、新增依賴或更換 node_modules symlink。
+
+
+## 審查檔 review-dorm-r1 修正（2026-11-14）
+
+- P1：宿舍名冊匯入可辨識靜宜既有登入寫入的 `pu-{學號小寫}` UID 與伺服器專用 membership；必須有相符學號、啟用狀態及 lastLoginAt。姓名取 membership，不信任可編輯的 users 學號。未改登入、SSO callback 或 sessions，宿舍同步失敗仍只影響宿舍功能。整合測試執行現有 upsertPuStudentProfile 與 schoolLoginProfile writer，再驗證匯入、外宿及包裹登錄。
+- P2：刪帳旗標寫入後呼叫獨立 dormAccountDeletion helper，跨校撤除 dormStaffRoles、dormSsoIdentities，刪除本人名冊、外宿、報修及包裹，並清理本人對應的既有包裹 feed 鏡像；保留他人與非學校同名集合。以文件路徑分頁掃描，不需新增 collection-group 索引。新增宿舍寫入交易同步檢查刪帳狀態，避免清理期間重建個資。
+- P2：網頁與手機在全部分頁完成前隱藏統計數字並禁止匯出，提示先載入全部紀錄；載完才產生完整 CSV。測試以 50＋1 筆包裹驗證匯出按鈕與最終 51 筆統計。
+- 有登入權限migration變更：依本次審查要求，僅在既有 accountDeletion 加入一個宿舍清理呼叫點，撤銷已刪帳者的宿舍授權；清理實作隔離於新 helper。這是本輪唯一共用帳號生命週期修改，未改登入、sessions、共用 authz／ACL、Firestore／Storage rules 或 migration；沒有部署或操作正式資料。
+- 驗證：後端 3 檔 99 項、網頁 2 檔 26 項、手機 2 檔 15 項通過；web、mobile、shared 全專案 typecheck 通過。後端以自身 ESLint 設定檢查變更檔案通過；最初從根目錄執行的 ESLint 套錯前端設定，切回 backend/functions 設定後通過。git diff --check 通過。暫存快取與型別輸出均置於 /tmp，完成後刪除；未安裝依賴或更換 node_modules symlink。
+- GitHub 實際宿舍 PR 為 #628（分支 feat/dorm-staff-workflow-20261114）；任務所列 #629 是社團 PR，本輪未修改社團內容。

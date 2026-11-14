@@ -257,3 +257,39 @@ test('mobile loads another workspace page using server cursors', async () => {
     ),
   );
 });
+
+test('mobile blocks partial statistics until all 51 records have loaded', async () => {
+  const parcel = (i: number) => ({
+    id: String(i),
+    building: 'A',
+    status: 'waiting',
+    description: '包裹',
+    location: '管理室',
+  });
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true, repairs: true, packages: true, admin: true }
+      : data.action === 'mine'
+        ? { repairs: [], leaves: [] }
+        : {
+            repairs: [],
+            leaves: [],
+            residents: [],
+            packages: data.cursors ? [parcel(50)] : Array.from({ length: 50 }, (_, i) => parcel(i)),
+            nextCursors: { parcels: data.cursors ? null : '49' },
+          },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="admin" initialStaff />);
+  await view.findByText('匯出宿舍統計');
+  expect(view.getByRole('button', { name: '匯出宿舍統計' }).props.accessibilityState.disabled).toBe(
+    true,
+  );
+  expect(view.getByText('請先載入全部紀錄，再查看或匯出完整統計。')).toBeTruthy();
+  fireEvent.press(await view.findByText('載入更多紀錄'));
+  await waitFor(() =>
+    expect(
+      view.getByRole('button', { name: '匯出宿舍統計' }).props.accessibilityState.disabled,
+    ).toBe(false),
+  );
+  expect(view.getByText(/"A","51","0","0"/)).toBeTruthy();
+});
