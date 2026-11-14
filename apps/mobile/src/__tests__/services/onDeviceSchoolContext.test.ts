@@ -178,6 +178,7 @@ test('a damaged restored timetable fails closed even with a valid clock and matc
     expect(prompt).toContain('此回合沒有主動同步且有效的校園資料');
     expect(prompt).not.toContain('資料庫概論');
     expect(prompt).not.toContain('Alice 私人作業');
+    expect(prompt).not.toContain('IGNORE_FROM_CACHED_');
   }
   // A legitimate no-period course remains a valid saved timetable entry.
   const noPeriod = {
