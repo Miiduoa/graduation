@@ -459,8 +459,11 @@ export function LearningAnalyticsScreen(props: any) {
     };
   }, [submissions]);
 
-  // 共用靜宜 4.3 制對照表，逐科換算後依學分加權
-  const gpaInfo = useMemo(() => calculateLearningAnalyticsGpa(semesterGrades), [semesterGrades]);
+  // 依學校換算 GPA：靜宜使用 4.3 制，其餘維持百分制加權換算
+  const gpaInfo = useMemo(
+    () => calculateLearningAnalyticsGpa(semesterGrades, school.id),
+    [semesterGrades, school.id],
+  );
 
   // 科目強弱雷達數據
   const radarData = useMemo(() => {
