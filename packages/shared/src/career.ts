@@ -56,6 +56,147 @@ export function careerSoon(date: string, today = careerToday()) {
   const days = (Date.parse(date) - Date.parse(today)) / 86400000;
   return days >= 0 && days <= 7;
 }
+// A single policy is shared by the adapter, timeline and calendar exporter.
+const careerSensitiveTerms = [
+  '成績',
+  '等第',
+  '分數',
+  '學號',
+  '不及格',
+  '及格',
+  '優等',
+  '甲等',
+  '乙等',
+  '丙等',
+  '丁等',
+  '名次',
+  '排名',
+  '錄取名單',
+  '榜單',
+  '名單',
+  '個資',
+  'gpa',
+  'studentid',
+  'grade',
+  'score',
+  // Preserve the existing conservative treatment of result and roster labels.
+  '評分',
+  '評量',
+  '績點',
+  '平均',
+  '均分',
+  '總分',
+  '總評',
+  '名冊',
+  '錄取',
+  'studentnumber',
+  'academicaverage',
+  'weightedaverage',
+  'average',
+];
+const careerExactPublicCompounds = [
+  '優良企業',
+  '甲公司',
+  '乙公司',
+  '丙公司',
+  '丁公司',
+  '戊公司',
+  '己公司',
+  '庚公司',
+  '辛公司',
+  '壬公司',
+  '癸公司',
+];
+const careerTraditionalCharacters: Record<string, string> = {
+  学: '學',
+  号: '號',
+  绩: '績',
+  数: '數',
+  优: '優',
+  录: '錄',
+  单: '單',
+  个: '個',
+  资: '資',
+  评: '評',
+  点: '點',
+  总: '總',
+  册: '冊',
+  两: '兩',
+  权: '權',
+};
+function careerFold(title: string) {
+  return title
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(
+      /[学号绩数优录单个资评点总册两权]/g,
+      (character) => careerTraditionalCharacters[character],
+    );
+}
+export function careerHasSensitiveContent(title: string): boolean {
+  let folded = careerFold(title);
+  // Exempt exact public compounds only, never the rest of a title containing them.
+  for (const word of careerExactPublicCompounds) folded = folded.replaceAll(word, '');
+  const normalized = folded.replace(/[^\p{L}\p{N}]/gu, '');
+  if (careerSensitiveTerms.some((term) => normalized.includes(term))) return true;
+  // Remove public dates first. A standalone letter grade is withheld even without
+  // a result label: identifying names are not limited to a fixed surname list.
+  const dateFree = folded.replace(
+    /(?<!\d)(?:20\d{2}|1[01]\d)[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?!\d)/g,
+    '',
+  );
+  const compact = dateFree.toLowerCase().replace(/[\s\p{Cf}]/gu, '');
+  if (/(?<![a-z0-9])[a-f][+-]?(?![a-z0-9])/i.test(dateFree)) return true;
+  // Name-like text immediately followed by a numeric result is also private,
+  // including spaced digits, decimal results and fractions. Do not treat event
+  // durations such as「30 分鐘」as grades.
+  const nameAndScore = compact
+    .replace(/[^\p{L}\p{N}./]/gu, '')
+    .replace(/\d+(?:\.\d+)?(?:分鐘|小時|學分|場|名|人|元|年度|年|月|日|天|週|周|時)/g, '');
+  if (/(?:[\p{Script=Han}]{2,}|[a-z]{2,})\d{1,3}(?:\.\d+)?(?:分)?(?!\d)/u.test(nameAndScore))
+    return true;
+  // Results may precede the identifying name as well. Use the same unit-stripped
+  // text so ordinary public quantities (30 分鐘、500 元、104 人) stay readable.
+  if (/(?<!\d)\d{1,3}(?:\.\d+)?(?:分)?(?:[\p{Script=Han}]{2,}|[a-z]{2,})/u.test(nameAndScore))
+    return true;
+  // Chinese numeric scores and standalone Chinese result levels are private too.
+  // Strip separators consistently, but keep duration units such as「九十分鐘」public.
+  if (
+    /[零〇一二三四五六七八九十百兩壹貳參肆伍陸柒捌玖拾佰]+(?:點[零〇一二三四五六七八九]+)?分(?!鐘)/u.test(
+      compact,
+    )
+  )
+    return true;
+  if (/(?:^|[^\p{L}\p{N}])(?:優|甲|乙|丙|丁|戊)(?=$|[^\p{L}\p{N}])/u.test(dateFree)) return true;
+  // Student identifiers can mix letters and digits rather than contain eight
+  // consecutive digits (for example S411A1234).
+  const identifiers = dateFree
+    .replace(/[^\p{L}\p{N}]/gu, '')
+    .match(/(?<![a-z0-9])[a-z][a-z0-9]{7,}(?![a-z0-9])/gi);
+  if (identifiers?.some((value) => /\d/.test(value))) return true;
+  // Dates are public metadata; other long numeric identifiers may be student IDs.
+  const withoutDates = dateFree.replace(/[^\p{L}\p{N}]/gu, '');
+  return /\d{8,}/.test(withoutDates) || /\d+(?:[.．]\d+)?\s*分(?!鐘)/.test(folded);
+}
+export const CAREER_TIMELINE_KEYWORDS = [
+  '徵才',
+  '實習',
+  '博覽會',
+  '說明會',
+  '講座',
+  '工作坊',
+  '職缺',
+  '就業',
+  '企業參訪',
+  '履歷',
+  '面試技巧',
+  '求職',
+];
+export function careerHasTimelineKeyword(title: string) {
+  const normalized = careerFold(title).replace(/[^\p{L}\p{N}]/gu, '');
+  return CAREER_TIMELINE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
 const careerStatus = /取消|延期|延後|暫停|停辦|停開|改期|擇期|待定|未定|另行通知/;
 const careerExplicitDate = /(?<!\d)(20\d{2}|1[01]\d)[年/.-](\d{1,2})[月/.-](\d{1,2})(?:日)?(?!\d)/g;
 
@@ -63,7 +204,7 @@ const careerExplicitDate = /(?<!\d)(20\d{2}|1[01]\d)[年/.-](\d{1,2})[月/.-](\d
 export function careerTitleDate(title: string) {
   // Keep status notices in announcements, but never offer their old date as an event.
   if (careerStatus.test(title.normalize('NFKC').replace(/\s/g, ''))) return '';
-  if (!/截止|報名|申請|徵才|說明會|講座|博覽會/.test(title)) return '';
+  if (careerHasSensitiveContent(title) || !careerHasTimelineKeyword(title)) return '';
   const matches = [...title.matchAll(careerExplicitDate)];
   if (matches.length !== 1) return '';
   const match = matches[0];
@@ -90,7 +231,7 @@ export function careerTitleDate(title: string) {
     return '';
   // The single date must sit next to a deadline/event phrase, rather than
   // merely coexist with an unrelated career keyword somewhere in the title.
-  const event = '(?:截止|報名|申請|徵才|說明會|講座|博覽會)';
+  const event = '(?:截止|報名|申請|' + CAREER_TIMELINE_KEYWORDS.join('|') + ')';
   if (
     !new RegExp(event + '[^，。；：:]{0,12}$').test(before) &&
     !new RegExp('^[^，。；：:]{0,12}' + event).test(after)
@@ -134,6 +275,7 @@ export function careerTimeline(
     .slice(0, 5);
 }
 export function careerCalendarUrl(item: CareerTimelineItem) {
+  if (!careerDate(item.date) || careerTitleDate(item.title) !== item.date) return '';
   const end = new Date(item.date + 'T00:00:00Z');
   end.setUTCDate(end.getUTCDate() + 1);
   const params = new URLSearchParams({

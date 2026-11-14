@@ -482,3 +482,122 @@ it.each(['2026/12/8至翌日實習說明會', '2026/12/8至月底實習申請'])
     expect(feed.timeline).toEqual([]);
   },
 );
+
+const policySensitiveTitles = [
+  '2026/12/8 實習申請 王測試不及格',
+  '2026/12/8 實習申請 王測試優等',
+  '2026/12/8 實習申請 等第 A+',
+  '2026/12/8 實習申請 学号：TEST-0001',
+  '2026/12/8 實習申請 王測試不・及 格',
+  '2026/12/8 實習申請 王測試优 等',
+  '2026/12/8 實習申請 個 資',
+  '2026/12/8 實習申請 王測試排名',
+  '2026/12/8 實習申請 王測試名次',
+  '2026/12/8 實習申請 王測試甲等',
+  '2026/12/8 實習申請 王測試乙等',
+  '2026/12/8 實習申請 王測試丙等',
+  '2026/12/8 實習申請 王測試丁等',
+  '2026/12/8 實習申請 王測試a+',
+  '2026/12/8 實習申請 王測試b-',
+  '2026/12/8 優良企業徵才 王測試不及格',
+  '2026/12/8 甲公司說明會 王測試優等',
+  '2026/12/8 乙公司說明會 等第 A+',
+];
+it.each(policySensitiveTitles)(
+  'denies the entire normalized title before API caching or calendar export: %s',
+  async (title) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+    const item = {
+      title,
+      date: '2026-12-08',
+      source: '職產處',
+      url: 'https://cdif.pu.edu.tw/p/406-1102-2.php',
+    };
+    expect(careerTimeline([item], '2026-11-14')).toEqual([]);
+    expect(careerCalendarUrl(item)).toBe('');
+    const input = `<div class="d-txt"><a href="/p/406-1102-2.php">${title}</a></div>` + html;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : input),
+      })),
+    );
+    const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+    expect(response.headers.get('Cache-Control')).toContain('public');
+    const cacheBody = await response.text();
+    expect(cacheBody).not.toContain(title);
+    expect(cacheBody).not.toMatch(/王測試|TEST-0001|406-1102-2/);
+    const feed = JSON.parse(cacheBody);
+    expect(feed.announcements.map((a: { title: string }) => a.title)).toEqual([
+      '實習申請2026/12/8截止',
+      '實習申請2026/12/8截止',
+    ]);
+    expect(feed.timeline).toHaveLength(2);
+    for (const safe of feed.timeline)
+      expect(new URL(careerCalendarUrl(safe)).searchParams.get('text')).toBe(
+        '實習申請2026/12/8截止',
+      );
+  },
+);
+it.each([
+  '優良企業徵才',
+  '甲公司說明會',
+  '乙公司說明會',
+  '丙公司說明會',
+  '丁公司說明會',
+  '企業參訪',
+  '履歷工作坊',
+])(
+  'keeps a public compound and career keyword through the API, cache and calendar: %s',
+  async (event) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+    const title = `2026/12/8 ${event}`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        text: async () =>
+          url === TAIWANJOBS_URL
+            ? '<DataList></DataList>'
+            : html.replace('實習申請2026/12/8截止', title),
+      })),
+    );
+    const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+    expect(response.headers.get('Cache-Control')).toContain('public');
+    const feed = JSON.parse(await response.text());
+    expect(feed.announcements.map((a: { title: string }) => a.title)).toEqual([title, title]);
+    expect(feed.timeline).toHaveLength(2);
+    for (const item of feed.timeline)
+      expect(new URL(careerCalendarUrl(item)).searchParams.get('text')).toBe(title);
+  },
+);
+it('keeps a general announcement without allowing a generic application date into calendars', async () => {
+  const title = '2026/12/8 報名申請截止';
+  const item = {
+    title,
+    date: '2026-12-08',
+    source: '職產處',
+    url: 'https://cdif.pu.edu.tw/p/406-1102-1.php',
+  };
+  expect(careerTitleDate(title)).toBe('');
+  expect(careerTimeline([item], '2026-11-14')).toEqual([]);
+  expect(careerCalendarUrl(item)).toBe('');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      text: async () =>
+        url === TAIWANJOBS_URL
+          ? '<DataList></DataList>'
+          : html.replace('實習申請2026/12/8截止', title),
+    })),
+  );
+  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+  expect(response.headers.get('Cache-Control')).toContain('public');
+  const feed = JSON.parse(await response.text());
+  expect(feed.announcements.map((a: { title: string }) => a.title)).toEqual([title]);
+  expect(feed.timeline).toEqual([]);
+});
