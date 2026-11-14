@@ -1,12 +1,21 @@
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import type { DormWorkflowConfig } from '@campus/shared/src/dormWorkflow';
 import { getDb, getFunctionsInstance, getFunctionsBaseUrl } from '../firebase';
 import {
   watchDormCloud,
   watchDormParcels,
   type DormCloudState,
 } from '@campus/shared/src/dormitoryCloud';
+
+export async function getDormWorkflowConfig(schoolId: string): Promise<DormWorkflowConfig> {
+  const result = await httpsCallable<Record<string, unknown>, DormWorkflowConfig>(
+    getFunctionsInstance(),
+    'dormWorkflow',
+  )({ action: 'config', schoolId: toPublicSchoolId(schoolId) ?? schoolId });
+  return result.data;
+}
 
 export function subscribeDormCloud(
   schoolId: string,

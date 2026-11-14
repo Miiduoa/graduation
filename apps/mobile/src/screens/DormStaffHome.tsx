@@ -1,8 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
-import type { DormWorkflowConfig } from '@campus/shared/src/dormWorkflow';
-import { getFunctionsInstance } from '../firebase';
+import { getDormWorkflowConfig } from '../services/dormitoryCloud';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
 import { AICard, AIButton } from '../ui/aiFirst';
@@ -28,15 +25,12 @@ export function DormStaffHome({
       setCapability({ key: capabilityKey, available: false });
       return;
     }
-    void httpsCallable<Record<string, unknown>, DormWorkflowConfig>(
-      getFunctionsInstance(),
-      'dormWorkflow',
-    )({ action: 'config', schoolId: toPublicSchoolId(school.id) ?? school.id })
-      .then((result) => {
+    void getDormWorkflowConfig(school.id)
+      .then((config) => {
         if (active)
           setCapability({
             key: capabilityKey,
-            available: result.data.enabled && (result.data.repairs || result.data.packages),
+            available: config.enabled && (config.repairs || config.packages),
           });
       })
       .catch(() => {

@@ -61,6 +61,16 @@ test('disabled school keeps the original home', async () => {
   expect(view.queryByText('實際宿舍工作台')).toBeNull();
   expect(view.queryByText('宿舍服務')).toBeNull();
 });
+test.each([
+  ['tw-pu', 'pu'],
+  ['ntnu', 'ntnu'],
+])('config lookup maps %s to %s through the service', async (schoolId, expectedSchoolId) => {
+  mockSchoolId = schoolId;
+  mockCall.mockResolvedValue({ data: { enabled: true, packages: true } });
+  const view = render(home());
+  expect(await view.findByText('實際宿舍工作台')).toBeTruthy();
+  expect(mockCall).toHaveBeenCalledWith({ action: 'config', schoolId: expectedSchoolId });
+});
 test('failed capability query keeps the original home intact', async () => {
   mockCall.mockRejectedValue(new Error('offline'));
   const view = render(home());
