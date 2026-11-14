@@ -159,7 +159,11 @@ function Content({ schoolId }: { schoolId: string }) {
     </View>
   );
 }
-export function CareerScreen({ navigation }: { navigation?: { goBack?: () => void } }) {
+export function CareerScreen({
+  navigation,
+}: {
+  navigation?: { goBack?: () => void; navigate?: (route: '公告總覽') => void };
+}) {
   const { school, selectionReady } = useSchool();
   return (
     <AIDetailScreen
@@ -167,6 +171,7 @@ export function CareerScreen({ navigation }: { navigation?: { goBack?: () => voi
       subtitle={`生活 › 職涯 · ${school.name}`}
       onBack={() => navigation?.goBack?.()}
     >
+      <AIButton label="查看校方公告" onPress={() => navigation?.navigate?.('公告總覽')} />
       {selectionReady !== false && school.id ? (
         <Content key={school.id} schoolId={school.id} />
       ) : (

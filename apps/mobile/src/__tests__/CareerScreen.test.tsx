@@ -102,3 +102,12 @@ test('external jobs only link out with approved labels', async () => {
   expect(view.getByRole('button', { name: '到 Cake 找更多 ↗' })).toBeTruthy();
   expect(view.queryByText('一鍵應徵')).toBeNull();
 });
+
+test('preserves the school-announcements entry even when career sources are unavailable', async () => {
+  respond(emptyCareerFeed());
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CareerScreen navigation={navigation} />);
+  await view.findByText(CAREER_JOBS_UNAVAILABLE);
+  fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
+  expect(navigation.navigate).toHaveBeenCalledWith('公告總覽');
+});

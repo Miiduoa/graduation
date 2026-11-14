@@ -29,6 +29,19 @@ export const CAREER_HTML_SOURCES = [
 ] as const;
 export const TAIWANJOBS_URL =
   'https://free.taiwanjobs.gov.tw/webservice_taipei/Webservice.ashx?zipno=433&count=10';
+/** Normalize decoded titles before matching, including separators inserted between letters. */
+function hasPersonalAcademicData(title: string): boolean {
+  const normalized = title
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/学/g, '學')
+    .replace(/号/g, '號')
+    .replace(/绩/g, '績')
+    .replace(/[^\p{L}\p{N}]/gu, '');
+  // Conservatively omit the whole announcement, never publish a partially redacted title.
+  return /學號|成績|student(?:id|number)|grades?|scores?/.test(normalized);
+}
+
 /** Rpage list metadata only. Never fetch, return or persist article bodies. */
 export function parseCareerHtml(
   html: string,
@@ -49,8 +62,7 @@ export function parseCareerHtml(
       // cannot slip into the public feed (including its timeline and cache).
       // Reject grade-related titles regardless of punctuation, names or score format.
       const fullTitle = text(link).normalize('NFKC');
-      if (/學號|学生学号|成[績绩]|student\s*(?:id|number)|\b(?:grades?|scores?)\b/i.test(fullTitle))
-        return [];
+      if (hasPersonalAcademicData(fullTitle)) return [];
       const title = fullTitle.slice(0, 300);
       if (!url || !title || seen.has(url)) return [];
       if (source.source === '資管系' && !/實習|工讀|職涯|徵才|就業|求職|履歷|面試/.test(title))

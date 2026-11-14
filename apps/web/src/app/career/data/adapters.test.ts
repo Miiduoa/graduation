@@ -78,6 +78,20 @@ it('public API excludes sensitive titles from announcements and calendar items f
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
   const sensitiveTitles = [
+    '2026/12/8 實習 学号：TEST-0001',
+    '2026/12/8 實習 學 號：TEST-0001',
+    '2026/12/8 實習 学・号：TEST-0001',
+    '2026/12/8 實習 學\u200b號：TEST-0001',
+    '2026/12/8 實習 成 績 為 95 分',
+    '2026/12/8 實習 成／绩：95 分',
+    '2026/12/8 實習 STUDENT-ID：TEST-0001',
+    '2026/12/8 實習 S.t.u.d.e.n.t I.D.：TEST-0001',
+    '2026/12/8 實習 student_number：TEST-0001',
+    '2026/12/8 實習 g.r.a.d.e／s.c.o.r.e：95',
+    '2026/12/8 實習 Ｇ Ｒ Ａ Ｄ Ｅ：95',
+    '2026/12/8 實習 成<span>績</span>：95',
+    '2026/12/8 實習 学&#x53f7;：TEST-0001',
+    '2026/12/8 實習' + '說明'.repeat(160) + '学 号：TEST-0001',
     '2026/12/8 實習錄取 學號：TEST-STUDENT-ID 成績：TEST-GRADE',
     '2026/12/8 實習成績：TEST-GRADE',
     '2026/12/8 實習成績 95 分',
@@ -119,7 +133,7 @@ it('public API excludes sensitive titles from announcements and calendar items f
   ).toBe(true);
   expect(feed.announcementsUnavailable).toBe(false);
   expect(JSON.stringify(feed)).not.toMatch(
-    /TEST-STUDENT-ID|TEST-GRADE|成績|成绩|Student|Grades?|Scores?|學號/i,
+    /TEST-0001|TEST-STUDENT-ID|TEST-GRADE|成績|成绩|Student|Grades?|Scores?|學號/i,
   );
 });
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
