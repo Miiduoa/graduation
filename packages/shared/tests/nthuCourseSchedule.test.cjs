@@ -239,6 +239,7 @@ test('unverified NTHU semester remains review-only and never creates an invented
     code: '11520AES 520300',
     semester: '1152',
     time: 'M2M3M4MnM5M6M7',
+    room: '教室甲',
     meetings: [{ room: '教室甲', time: 'M2M3M4MnM5M6M7' }],
   };
   const csv = nthuTimetableImportCsv(course);
