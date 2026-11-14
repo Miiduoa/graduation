@@ -207,6 +207,7 @@ export function DormWorkflow({
   const [values, setValues] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [includeHistory, setIncludeHistory] = useState(false);
   const [images, setImages] = useState<string[]>([]);
   const [requestKey, setRequestKey] = useState(dormRequestKey);
   const [preview, setPreview] = useState(false);
@@ -228,7 +229,10 @@ export function DormWorkflow({
       const token = generation.current;
       const rowToken = rowGeneration.current;
       const [result, mine] = await Promise.all([
-        call<Partial<DormWorkflowRows>>({ action: staff ? 'workspace' : 'mine' }),
+        call<Partial<DormWorkflowRows>>({
+          action: staff ? 'workspace' : 'mine',
+          ...(staff && includeHistory ? { includeHistory: true } : {}),
+        }),
         staff ? call<Partial<DormWorkflowRows>>({ action: 'mine' }) : Promise.resolve(null),
       ]);
       if (token === generation.current && rowToken === rowGeneration.current) {
@@ -236,8 +240,33 @@ export function DormWorkflow({
         setOwnLeaves((mine ?? result).leaves ?? []);
       }
     },
-    [call, staffMode],
+    [call, staffMode, includeHistory],
   );
+  const loadMore = async () => {
+    const token = generation.current;
+    const rowToken = rowGeneration.current;
+    setBusy(true);
+    try {
+      const page = await call<DormWorkflowRows>({
+        action: 'workspace',
+        cursors: rows.nextCursors,
+        includeHistory,
+      });
+      if (token !== generation.current || rowToken !== rowGeneration.current) return;
+      setRows((old) => ({
+        ...old,
+        repairs: [...old.repairs, ...page.repairs],
+        leaves: [...old.leaves, ...page.leaves],
+        packages: [...old.packages, ...page.packages],
+        residents: [...old.residents, ...page.residents],
+        nextCursors: page.nextCursors,
+      }));
+    } catch {
+      if (token === generation.current) setNotice('讀取失敗，請重試。');
+    } finally {
+      if (token === generation.current) setBusy(false);
+    }
+  };
   useEffect(() => {
     generation.current++;
     const token = generation.current;
@@ -276,7 +305,7 @@ export function DormWorkflow({
       });
     };
     load();
-    const timer = setInterval(load, 15000);
+    const timer = setInterval(load, 60000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -414,6 +443,11 @@ export function DormWorkflow({
       <Label strong>
         {r.date} · {r.building} {r.room} · {DORM_LEAVE_LABELS[r.status]}
       </Label>
+      {staff && (
+        <Label>
+          申請人：{r.applicantName || '姓名待確認'} · 學號 {r.maskedStudentId || '待確認'}
+        </Label>
+      )}
       <Label>{r.reason}</Label>
       {r.history.map((h, i) => (
         <Label key={i}>
@@ -459,6 +493,16 @@ export function DormWorkflow({
             setRows({ repairs: [], leaves: [], packages: [], residents: [] });
           }}
         />
+      )}
+      {staffMode && (
+        <Btn
+          label={includeHistory ? '回待處理紀錄' : '包含已結案及已處理紀錄'}
+          disabled={busy}
+          onPress={() => setIncludeHistory((value) => !value)}
+        />
+      )}
+      {staffMode && Object.values(rows.nextCursors || {}).some(Boolean) && (
+        <Btn label="載入更多紀錄" disabled={busy} onPress={() => void loadMore()} />
       )}
       {!staffMode ? (
         <>

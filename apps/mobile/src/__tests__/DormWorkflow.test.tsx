@@ -201,3 +201,59 @@ test.each([false, true])(
     expect(onTonight).toHaveBeenLastCalledWith(approved);
   },
 );
+
+test('mobile leave reviewers see applicant name and masked student ID', async () => {
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true, repairs: true }
+      : {
+          repairs: [],
+          packages: [],
+          residents: [],
+          leaves: [
+            {
+              id: 'leave',
+              date: '2099-01-01',
+              building: 'A',
+              room: '101',
+              reason: '返家',
+              status: 'pending',
+              history: [],
+              applicantName: '王同學',
+              maskedStudentId: '***456',
+            },
+          ],
+        },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  expect(await view.findByText('申請人：王同學 · 學號 ***456')).toBeTruthy();
+  expect(view.queryByText('123456')).toBeNull();
+});
+test('mobile loads another workspace page using server cursors', async () => {
+  const cursors = { leaves: 'last-row' };
+  mockCall.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? { enabled: true, repairs: true }
+      : {
+          repairs: [],
+          leaves: [],
+          packages: [],
+          residents: [],
+          nextCursors: data.cursors ? { leaves: null } : cursors,
+        },
+  );
+  const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  fireEvent.press(await view.findByText('載入更多紀錄'));
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'workspace', cursors }),
+    ),
+  );
+  await waitFor(() => expect(view.queryByText('載入更多紀錄')).toBeNull());
+  fireEvent.press(view.getByText('包含已結案及已處理紀錄'));
+  await waitFor(() =>
+    expect(mockCall).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'workspace', includeHistory: true }),
+    ),
+  );
+});

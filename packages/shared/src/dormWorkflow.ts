@@ -33,6 +33,8 @@ export type DormTicket = {
   images?: string[];
 };
 export type DormLeave = {
+  applicantName?: string;
+  maskedStudentId?: string;
   id: string;
   building: string;
   room: string;
@@ -59,6 +61,7 @@ export type DormStaffParcel = {
   arrivedAt: number | { _seconds: number };
 };
 export type DormWorkflowRows = {
+  nextCursors?: Record<string, string | null>;
   announcements?: Array<{ id: string; building: string; title: string; body: string }>;
   repairs: DormTicket[];
   leaves: DormLeave[];

@@ -2328,7 +2328,6 @@ exports.verifySSOCallback = onRequest(
         },
         ssoLinkRef,
       });
-      await require('./dormSsoIdentity').writeDormSsoIdentity({ db, uid, schoolId, userInfo });
       resolvedRole = schoolRole.role;
 
       const customToken = await auth.createCustomToken(uid, {

@@ -173,23 +173,102 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
     }
     if (action === 'workspace') {
       if (!repairs && !packages) staff('repairs');
-      return {
-        repairs: repairs
-          ? (await list('dormRepairs')).filter((r) => r.workflow === 'dorm_staff')
-          : [],
-        leaves: repairs ? await list('dormLeaves') : [],
-        packages: packages ? await list('dormPackages') : [],
-        residents: packages ? await list('dormResidents') : [],
+      const nextCursors = {};
+      const pageSize = 50;
+      const page = async (name, statuses, time) => {
+        const rows = [];
+        // Separate streams avoid the Firestore `in` operand limit for multi-building staff.
+        for (const building of admin ? [null] : [...new Set(roles.buildings)]) {
+          const key = JSON.stringify([name, building]);
+          const cursor = input.cursors?.[key];
+          if (cursor === null) continue;
+          let q = school.collection(name);
+          if (building !== null) q = q.where('building', '==', building);
+          if (statuses) q = q.where('status', 'in', statuses);
+          if (name === 'dormRepairs') q = q.where('workflow', '==', 'dorm_staff');
+          q = q.orderBy(time, 'desc').orderBy('__name__', 'desc');
+          if (cursor !== undefined) {
+            if (typeof cursor !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(cursor))
+              throw new HttpsError('invalid-argument', '分頁代碼錯誤');
+            const last = await school.collection(name).doc(cursor).get();
+            if (!last.exists || !canAccessBuilding(last.data()))
+              throw new HttpsError('invalid-argument', '分頁已失效，請重新整理');
+            q = q.startAfter(last);
+          }
+          const snap = await q.limit(pageSize + 1).get();
+          const docs = snap.docs.slice(0, pageSize);
+          nextCursors[key] = snap.docs.length > pageSize ? docs.at(-1).id : null;
+          rows.push(...docs.map((d) => ({ id: d.id, ...serialize(d.data()) })));
+        }
+        return rows.filter((row) => name !== 'dormResidents' || row.active !== false);
       };
+      const result = {
+        repairs: repairs
+          ? await page(
+              'dormRepairs',
+              input.includeHistory === true
+                ? ['pending', 'assigned', 'in_progress', 'completed', 'closed']
+                : ['pending', 'assigned', 'in_progress', 'completed'],
+              'createdAt',
+            )
+          : [],
+        leaves: repairs
+          ? await page(
+              'dormLeaves',
+              input.includeHistory === true ? ['pending', 'approved', 'rejected'] : ['pending'],
+              'createdAt',
+            )
+          : [],
+        packages: packages
+          ? await page(
+              'dormPackages',
+              input.includeHistory === true ? ['waiting', 'picked_up', 'returned'] : ['waiting'],
+              'arrivedAt',
+            )
+          : [],
+        residents: packages ? await page('dormResidents', null, 'updatedAt') : [],
+        nextCursors,
+      };
+      // Older applications resolve their applicant from the authorized building's roster too.
+      const applicants = new Map();
+      for (const row of result.leaves) {
+        if (row.applicantName && row.maskedStudentId) continue;
+        const applicantKey = JSON.stringify([row.userId, row.building]);
+        if (!applicants.has(applicantKey)) {
+          const roster = await school
+            .collection('dormResidents')
+            .where('userId', '==', row.userId)
+            .where('building', '==', row.building)
+            .limit(1)
+            .get();
+          applicants.set(
+            applicantKey,
+            roster.docs
+              .map((d) => ({ studentId: d.id, ...d.data() }))
+              .find((r) => r.building === row.building && canAccessBuilding(r)),
+          );
+        }
+        const applicant = applicants.get(applicantKey);
+        row.applicantName = applicant?.name || row.applicantName || '姓名待確認';
+        row.maskedStudentId = applicant?.studentId
+          ? '***' + applicant.studentId.slice(-3)
+          : row.maskedStudentId || '待確認';
+      }
+      return result;
     }
+
     const activeResidence = async (tx, userId) => {
       const roster = await tx.get(school.collection('dormResidents').where('userId', '==', userId));
-      const active = roster.docs.map((d) => d.data()).filter((r) => r.active !== false);
+      const active = roster.docs
+        .map((d) => ({ studentId: d.id, ...d.data() }))
+        .filter((r) => r.active !== false);
       if (active.length !== 1)
         throw new HttpsError('failed-precondition', '請先向宿舍服務台確認啟用住宿名冊');
       return {
         building: required(active[0].building, 70),
         room: required(active[0].room, 50),
+        applicantName: active[0].name || '姓名待確認',
+        maskedStudentId: '***' + String(active[0].studentId).slice(-3),
       };
     };
     if (action === 'submitRepair' || action === 'requestLeave') {
@@ -367,6 +446,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         };
         inBuilding(row);
         // Only the backend-only verified SSO mapping establishes roster identity.
+        await require('./dormSsoIdentity').resolveDormSsoIdentity({ db, schoolId, studentId });
         const members = await school
           .collection('dormSsoIdentities')
           .where('studentId', '==', studentId)
@@ -377,7 +457,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         if (matches.length !== 1)
           throw new HttpsError(
             'failed-precondition',
-            '學號需對應唯一的本校已啟用帳號，請先以校方 SSO 重新登入同步學號：' + studentId,
+            '學號需對應唯一的本校已啟用帳號，請先以校方 SSO 登入：' + studentId,
           );
         rows.push({
           ...row,

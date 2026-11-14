@@ -26,19 +26,35 @@ function fixture() {
     get: async () => snapshot(path),
     collection: (name) => collection(path + '/' + name),
   });
-  const collection = (path, filters = []) => ({
+  const queries = [];
+  const collection = (path, filters = [], orders = [], after = null, max = Infinity) => ({
     doc: (id) => doc(path + '/' + (id || `auto${++next}`)),
-    where: (f, _op, v) => collection(path, [...filters, [f, v]]),
-    get: async () => ({
-      docs: [...data.keys()]
-        .filter(
-          (k) =>
-            k.startsWith(path + '/') &&
-            k.split('/').length === path.split('/').length + 1 &&
-            filters.every(([f, v]) => data.get(k)[f] === v),
-        )
-        .map(snapshot),
-    }),
+    where: (f, op, v) => collection(path, [...filters, [f, op, v]], orders, after, max),
+    orderBy: (f, direction) => collection(path, filters, [...orders, [f, direction]], after, max),
+    startAfter: (snap) => collection(path, filters, orders, snap.id, max),
+    limit: (n) => collection(path, filters, orders, after, n),
+    get: async () => {
+      queries.push({ path, filters, orders, after, max });
+      let keys = [...data.keys()].filter(
+        (k) =>
+          k.startsWith(path + '/') &&
+          k.split('/').length === path.split('/').length + 1 &&
+          filters.every(([f, op, v]) =>
+            op === 'in' ? v.includes(data.get(k)[f]) : data.get(k)[f] === v,
+          ),
+      );
+      if (orders.length)
+        keys.sort((a, b) => {
+          for (const [field, direction] of orders) {
+            const av = field === '__name__' ? a.split('/').at(-1) : data.get(a)[field];
+            const bv = field === '__name__' ? b.split('/').at(-1) : data.get(b)[field];
+            if (av !== bv) return (av > bv ? 1 : -1) * (direction === 'desc' ? -1 : 1);
+          }
+          return 0;
+        });
+      if (after) keys = keys.slice(keys.findIndex((k) => k.split('/').at(-1) === after) + 1);
+      return { docs: keys.slice(0, max).map(snapshot) };
+    },
     add: async (row) => {
       const r = doc(path + '/auto' + ++next);
       data.set(r.path, row);
@@ -58,7 +74,7 @@ function fixture() {
   const sendPushToUser = jest.fn().mockResolvedValue({});
   const handler = createDormWorkflowHandler({ db, sendPushToUser });
   const call = (uid, input) => handler({ auth: { uid }, data: { schoolId: 'pu', ...input } });
-  return { call, data, sendPushToUser, db };
+  return { call, data, sendPushToUser, db, queries };
 }
 const repair = {
   action: 'submitRepair',
@@ -466,7 +482,8 @@ test('legacy pickup atomically updates both feeds and prevents staff return', as
   expect(runTransaction).toHaveBeenCalledTimes(1);
   for (const collection of ['packages', 'dormPackages'])
     expect(data.get(`schools/pu/${collection}/${id}`).status).toBe('picked_up');
-  const workspace = await call('staff', { action: 'workspace' });
+  expect((await call('staff', { action: 'workspace' })).packages).toEqual([]);
+  const workspace = await call('staff', { action: 'workspace', includeHistory: true });
   expect(workspace.packages.find((p) => p.id === id).status).toBe('picked_up');
   await call('staff', { action: 'returnPackage', id });
   expect(data.get(`schools/pu/dormPackages/${id}`).status).toBe('picked_up');
@@ -769,4 +786,125 @@ test('readable member profile IDs cannot establish a dorm roster identity', asyn
     }),
   ).rejects.toMatchObject({ code: 'failed-precondition' });
   expect(data.has('schools/pu/dormResidents/123')).toBe(false);
+});
+
+test('enabled dorm import lazily resolves verified links, without trusting user profiles', async () => {
+  const { call, data } = fixture();
+  data.delete('schools/pu/dormSsoIdentities/student');
+  data.set('ssoLinks/pu_verified', {
+    schoolId: 'pu',
+    firebaseUid: 'student',
+    studentId: '123',
+    name: '校方姓名',
+  });
+  data.set('ssoLinks/other_verified', {
+    schoolId: 'other',
+    firebaseUid: 'outsider',
+    studentId: '123',
+  });
+  await call('staff', {
+    action: 'importResidents',
+    rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+  });
+  expect(data.get('schools/pu/dormResidents/123')).toMatchObject({
+    userId: 'student',
+    name: '校方姓名',
+  });
+  expect(data.has('schools/pu/dormSsoIdentities/outsider')).toBe(false);
+});
+test('disabled dorm features never resolve SSO identity and sync failures stay in dorm', async () => {
+  const { call, data, db, queries } = fixture();
+  data.set('schools/pu', { dormWorkflowEnabled: false });
+  await call('student', { action: 'config' });
+  await call('student', { action: 'mine' });
+  await expect(call('staff', { action: 'importResidents', rows: [] })).rejects.toMatchObject({
+    code: 'failed-precondition',
+  });
+  expect(queries.some((q) => q.path === 'ssoLinks')).toBe(false);
+  data.set('schools/pu', { dormWorkflowEnabled: true });
+  data.set('ssoLinks/pu_verified', { schoolId: 'pu', firebaseUid: 'student', studentId: '123' });
+  db.runTransaction = jest.fn().mockRejectedValue(new Error('dorm sync unavailable'));
+  await expect(
+    call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+    }),
+  ).rejects.toThrow('dorm sync unavailable');
+  await expect(call('student', { action: 'config' })).resolves.toMatchObject({ enabled: true });
+});
+test('workspace queries authorized buildings and statuses with stable bounded cursor pages', async () => {
+  const { call, data, queries } = fixture();
+  for (let i = 0; i < 120; i++)
+    data.set('schools/pu/dormLeaves/leave' + String(i).padStart(3, '0'), {
+      userId: 'student',
+      building: i < 60 ? 'A' : 'B',
+      room: '101',
+      status: 'pending',
+      createdAt: 1,
+    });
+  data.set('schools/pu/dormResidents/123456', {
+    userId: 'student',
+    studentId: '123456',
+    name: '王同學',
+    building: 'A',
+    updatedAt: 1,
+  });
+  const first = await call('staff', { action: 'workspace' });
+  expect(first.leaves).toHaveLength(50);
+  expect(first.leaves[0]).toMatchObject({ applicantName: '王同學', maskedStudentId: '***456' });
+  expect(first.leaves[0]).not.toHaveProperty('studentId');
+  const second = await call('staff', { action: 'workspace', cursors: first.nextCursors });
+  expect(second.leaves).toHaveLength(10);
+  expect(new Set([...first.leaves, ...second.leaves].map((r) => r.id)).size).toBe(60);
+  for (const query of queries.filter((q) => q.orders.length)) {
+    expect(query.filters).toContainEqual(['building', '==', 'A']);
+    expect(query.max).toBe(51);
+    expect(query.orders.at(-1)).toEqual(['__name__', 'desc']);
+    if (!query.path.endsWith('/dormResidents'))
+      expect(query.filters.some(([f, op]) => f === 'status' && op === 'in')).toBe(true);
+  }
+  expect(second.nextCursors[JSON.stringify(['dormLeaves', 'A'])]).toBeNull();
+});
+
+test('workspace supports multiple authorized buildings and rejects out-of-scope cursors', async () => {
+  const { call, data } = fixture();
+  data.get('schools/pu/dormStaffRoles/staff').buildings = ['A', 'B'];
+  for (const building of ['A', 'B', 'C'])
+    data.set('schools/pu/dormPackages/' + building, {
+      building,
+      status: 'waiting',
+      arrivedAt: 1,
+    });
+  const result = await call('staff', { action: 'workspace' });
+  expect(result.packages.map((r) => r.building)).toEqual(['A', 'B']);
+  await expect(
+    call('staff', {
+      action: 'workspace',
+      cursors: {
+        [JSON.stringify(['dormPackages', 'A'])]: 'C',
+      },
+    }),
+  ).rejects.toMatchObject({ code: 'invalid-argument' });
+  expect((await call('admin', { action: 'workspace' })).packages).toHaveLength(3);
+});
+
+test('workspace defaults to actionable statuses and keeps history available explicitly', async () => {
+  const { call, data, queries } = fixture();
+  for (const status of ['waiting', 'picked_up', 'returned'])
+    data.set('schools/pu/dormPackages/' + status, {
+      building: 'A',
+      status,
+      arrivedAt: 1,
+    });
+  expect((await call('staff', { action: 'workspace' })).packages.map((r) => r.status)).toEqual([
+    'waiting',
+  ]);
+  expect(queries.find((q) => q.path.endsWith('/dormPackages')).filters).toContainEqual([
+    'status',
+    'in',
+    ['waiting'],
+  ]);
+  expect(
+    (await call('staff', { action: 'workspace', includeHistory: true })).packages,
+  ).toHaveLength(3);
 });

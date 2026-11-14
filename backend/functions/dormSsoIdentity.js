@@ -14,3 +14,19 @@ async function writeDormSsoIdentity({ db, uid, schoolId, userInfo }) {
   });
 }
 module.exports = { writeDormSsoIdentity };
+
+// Resolve only backend-owned, verified SSO links when an enabled dorm feature needs them.
+async function resolveDormSsoIdentity({ db, schoolId, studentId }) {
+  const links = await db.collection('ssoLinks').where('studentId', '==', studentId).get();
+  for (const doc of links.docs) {
+    const link = doc.data();
+    if (link.schoolId !== schoolId || !link.firebaseUid) continue;
+    await writeDormSsoIdentity({
+      db,
+      schoolId,
+      uid: link.firebaseUid,
+      userInfo: { studentId: link.studentId, name: link.name },
+    });
+  }
+}
+module.exports.resolveDormSsoIdentity = resolveDormSsoIdentity;

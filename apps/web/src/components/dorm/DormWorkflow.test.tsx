@@ -270,3 +270,49 @@ it.each([false, true])(
     expect(onTonight).toHaveBeenLastCalledWith(approved);
   },
 );
+
+it('authorized leave reviewers see applicant name and only masked student ID', async () => {
+  api.config.repairs = true;
+  api.rows.leaves = [
+    {
+      id: 'leave',
+      date: '2099-01-01',
+      building: 'A',
+      room: '101',
+      reason: '返家',
+      status: 'pending',
+      history: [],
+      applicantName: '王同學',
+      maskedStudentId: '***456',
+    },
+  ];
+  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  expect(await screen.findByText('申請人：王同學 · 學號 ***456')).toBeTruthy();
+  expect(screen.queryByText('123456')).toBeNull();
+});
+it('loads the next workspace page with server cursors', async () => {
+  api.config.repairs = true;
+  const cursors = { leaves: 'last-row' };
+  api.call.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? api.config
+      : {
+          ...api.rows,
+          nextCursors: data.cursors ? { leaves: null } : cursors,
+        },
+  );
+  render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
+  fireEvent.click(await screen.findByText('載入更多紀錄'));
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'workspace', cursors }),
+    ),
+  );
+  await waitFor(() => expect(screen.queryByText('載入更多紀錄')).toBeNull());
+  fireEvent.click(screen.getByText('包含已結案及已處理紀錄'));
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'workspace', includeHistory: true }),
+    ),
+  );
+});
