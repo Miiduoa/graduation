@@ -1,3 +1,4 @@
+const { hasServiceDomainAccess } = require('./authz');
 const { createDormWorkflowHandler, transition } = require('./dormWorkflow');
 function fixture() {
   const data = new Map([
@@ -236,3 +237,75 @@ test('removing a resident preserves the record but blocks new packages and build
     }),
   ).rejects.toMatchObject({ code: 'failed-precondition' });
 });
+
+test.each([false, true])(
+  'roster import cannot overwrite another building, including inactive residents (%s)',
+  async (inactive) => {
+    const { call, data } = fixture();
+    const original = {
+      studentId: '123',
+      userId: 'student',
+      building: 'B',
+      room: '201',
+      active: !inactive,
+    };
+    data.set('schools/pu/dormResidents/123', original);
+    const rows = [{ studentId: '123', building: 'A', room: '101', bed: '1' }];
+    await expect(call('staff', { action: 'importResidents', rows })).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    expect(data.get('schools/pu/dormResidents/123')).toEqual(original);
+    expect((await call('staff', { action: 'workspace' })).residents).toEqual([]);
+    await call('admin', { action: 'importResidents', rows });
+    expect(data.get('schools/pu/dormResidents/123')).toMatchObject({ building: 'A', active: true });
+  },
+);
+
+test('staff can update own building but even multi-building staff cannot transfer residents', async () => {
+  const { call, data } = fixture();
+  const rows = [{ studentId: '123', building: 'A', room: '102', bed: '2' }];
+  await call('staff', { action: 'importResidents', rows });
+  await call('staff', { action: 'importResidents', rows: [{ ...rows[0], room: '103' }] });
+  expect(data.get('schools/pu/dormResidents/123').room).toBe('103');
+  data.get('schools/pu/serviceRoles/staff').buildings = ['A', 'B'];
+  await expect(
+    call('staff', { action: 'importResidents', rows: [{ ...rows[0], building: 'B' }] }),
+  ).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test.each(['active', 'inactive'])(
+  'dorm grants preserve effective non-dorm access for %s records',
+  async (status) => {
+    const { call, data } = fixture();
+    data.set('users/staff', { displayName: '輔導員' });
+    const before = { status, orders: true, printing: true, health: true, customMetadata: 'keep' };
+    data.set('schools/pu/serviceRoles/staff', before);
+    await call('admin', {
+      action: 'setStaff',
+      targetUid: 'staff',
+      packages: true,
+      repairs: false,
+      buildings: ['A'],
+    });
+    const after = data.get('schools/pu/serviceRoles/staff');
+    for (const domain of ['orders', 'printing', 'health'])
+      expect(hasServiceDomainAccess(after, domain)).toBe(hasServiceDomainAccess(before, domain));
+    expect(after.customMetadata).toBe('keep');
+    expect(hasServiceDomainAccess(after, 'packages')).toBe(true);
+    expect(await call('staff', { action: 'config' })).toMatchObject({
+      packages: true,
+      repairs: false,
+    });
+    await call('admin', {
+      action: 'setStaff',
+      targetUid: 'staff',
+      packages: false,
+      repairs: false,
+      buildings: [],
+    });
+    const revoked = data.get('schools/pu/serviceRoles/staff');
+    for (const domain of ['orders', 'printing', 'health'])
+      expect(hasServiceDomainAccess(revoked, domain)).toBe(hasServiceDomainAccess(before, domain));
+    expect(hasServiceDomainAccess(revoked, 'packages')).toBe(false);
+  },
+);

@@ -1,6 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
-const { createAuthzHelpers } = require('./authz');
+const { createAuthzHelpers, SERVICE_ROLE_DOMAINS } = require('./authz');
 const LABELS = {
   sent: '已送給輔導員',
   received: '輔導員已收到',
@@ -124,9 +124,16 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         )
           throw new HttpsError('failed-precondition', '帳號已停用');
         const granting = input.packages === true || input.repairs === true;
+        // Activating the shared record must not revive dormant non-dorm grants.
+        // Their effective access stays false; active grants remain untouched.
+        const inactiveDomains = {};
+        if (granting && oldRoles.data()?.status === 'inactive')
+          for (const domain of SERVICE_ROLE_DOMAINS)
+            if (!['packages', 'repairs'].includes(domain)) inactiveDomains[domain] = false;
         tx.set(
           serviceRef,
           {
+            ...inactiveDomains,
             status: granting ? 'active' : oldRoles.data()?.status || 'inactive',
             packages: input.packages === true,
             repairs: input.repairs === true,
@@ -342,7 +349,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       staff('packages');
       if (!Array.isArray(input.rows) || !input.rows.length || input.rows.length > 400)
         throw new HttpsError('invalid-argument', '每批 1–400 位住宿生');
-      const batch = db.batch();
+      const rows = [];
       const studentIds = new Set();
       for (const r of input.rows) {
         const studentId = required(r.studentId, 50);
@@ -366,7 +373,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
             'failed-precondition',
             '學號需對應唯一的本校已啟用帳號：' + studentId,
           );
-        batch.set(school.collection('dormResidents').doc(studentId), {
+        rows.push({
           ...row,
           active: true,
           userId: matches[0].id,
@@ -374,7 +381,18 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
-      await batch.commit();
+      await db.runTransaction(async (tx) => {
+        const refs = rows.map((row) => school.collection('dormResidents').doc(row.studentId));
+        const existing = await tx.getAll(...refs);
+        // Read every destination before writing so concurrent moves retry safely.
+        existing.forEach((snap, index) => {
+          if (!snap.exists) return;
+          inBuilding(snap.data());
+          if (!admin && snap.data().building !== rows[index].building)
+            throw new HttpsError('permission-denied', '跨棟移轉需要學校管理員處理');
+        });
+        rows.forEach((row, index) => tx.set(refs[index], row));
+      });
       return { success: true };
     }
     if (action === 'registerPackage') {

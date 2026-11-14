@@ -53,3 +53,11 @@
 - 未連正式資料做寫入驗收；尚待校方裝置驗證推播、十件包裹操作時間及正式 Firebase Storage 照片權限。沒有生產 migration 或部署。
 
 名冊匯入為新增／更新；「移出住宿名冊」保留原紀錄並設 `active: false`，不再出現在自動完成、公告對象或接受新包裹。重新匯入可恢復，不會自動刪除未列在 CSV 的住宿生。
+
+## 審查修正（R1）
+
+- P1：名冊匯入改用 Firestore transaction，先讀取整批既有名冊並檢查原棟別，再寫入；包含已移出的住宿生。跨棟移轉僅限學校管理員，即使職員同時負責兩棟也不能移轉。
+- P1（依審查要求隔離的權限修正）：僅修改宿舍 handler 的 setStaff 寫入。當共用 serviceRoles 原為 inactive，而此次授予宿舍服務時，將非宿舍 domain（沿用既有 SERVICE_ROLE_DOMAINS 清單）的旗標明確設為 false，避免共用 status 啟用時恢復舊權限。原為 active 的其他服務保持原狀；其他中繼資料保留。這會清除停用紀錄中的舊服務旗標，未來若要恢復該服務須另外明確授權。
+- 有登入權限migration變更：上述為審查要求的狹義權限修正，仍屬「需晉瑋說『上』」的權限部署範圍；未修改登入、sessions、共用 authz、角色解析、Firestore／Storage rules 或 migration，未部署或操作正式資料。
+- 新增 5 項回歸案例，涵蓋跨棟覆寫、停用名冊、管理員移轉、同棟更新、多棟職員限制，以及 active／inactive 的其他服務有效權限與撤權結果。
+- 驗證：dormWorkflow.test.js、authz.test.js 共 26 項通過；shared typecheck、兩個變更 JS 檔案的 ESLint、handler 語法檢查、git diff --check 通過。執行環境為既有 Node 24，套件要求 Node 20／22，工具有引擎版本警告；無新增依賴、安裝套件或更動 node_modules symlink，未建立暫存檔。
