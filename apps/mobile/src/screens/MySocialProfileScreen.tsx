@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AIDetailScreen } from '../ui/aiFirst';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { theme } from '../ui/theme';
@@ -39,38 +39,39 @@ function OwnPosts({ uid, schoolId, schoolName, displayName, bio }: {
   const [revision, setRevision] = useState(0);
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreError, setMoreError] = useState(false);
-  const mounted = useRef(false);
+  const requestGeneration = useRef(0);
   const moreLock = useRef(false);
 
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
-
-  useEffect(() => {
-    let live = true;
+  useFocusEffect(useCallback(() => {
+    const generation = ++requestGeneration.current;
+    const isCurrent = () => requestGeneration.current === generation;
+    moreLock.current = false;
+    setMoreBusy(false);
     setTimeline(initial);
     setMoreError(false);
     void loadOwnCampusPosts(schoolId, uid).then(
       (page) => {
-        if (live) setTimeline({ status: 'ready', posts: page.items, cursor: page.cursor, hasMore: page.hasMore });
+        if (isCurrent()) setTimeline({ status: 'ready', posts: page.items, cursor: page.cursor, hasMore: page.hasMore });
       },
       () => {
-        if (live) setTimeline({ ...initial, status: 'error' });
+        if (isCurrent()) setTimeline({ ...initial, status: 'error' });
       },
     );
-    return () => { live = false; };
-  }, [schoolId, uid, revision]);
+    // Firestore reads cannot be aborted; invalidate first-page and pagination results on blur.
+    return () => { requestGeneration.current += 1; };
+  }, [schoolId, uid, revision]));
 
   async function loadMore() {
     if (moreLock.current || !timeline.hasMore || !timeline.cursor || timeline.status !== 'ready') return;
     moreLock.current = true;
+    const generation = requestGeneration.current;
+    const isCurrent = () => requestGeneration.current === generation;
     const cursor = timeline.cursor;
     setMoreBusy(true);
     setMoreError(false);
     try {
       const result = await loadOwnCampusPosts(schoolId, uid, cursor);
-      if (mounted.current) setTimeline((previous) => {
+      if (isCurrent()) setTimeline((previous) => {
         if (previous.status !== 'ready' || previous.cursor !== cursor) return previous;
         const existing = new Set(previous.posts.map((post) => post.id));
         return {
@@ -81,10 +82,12 @@ function OwnPosts({ uid, schoolId, schoolName, displayName, bio }: {
         };
       });
     } catch {
-      if (mounted.current) setMoreError(true);
+      if (isCurrent()) setMoreError(true);
     } finally {
-      moreLock.current = false;
-      if (mounted.current) setMoreBusy(false);
+      if (isCurrent()) {
+        moreLock.current = false;
+        setMoreBusy(false);
+      }
     }
   }
 
