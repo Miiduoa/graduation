@@ -51,7 +51,7 @@ export function ClubProfile({
             {profile.memberCount === null ? '社員數未提供' : `${profile.memberCount} 位社員`} ·
             社課時間未提供
           </Text>
-          <Button text="已加入" disabled onPress={() => {}} />
+          <Button text="已加入" disabled />
           <Text style={textStyle}>
             這是你已加入的社團群組；本頁不代表課外組已核可，也不提供入社或申請。
           </Text>

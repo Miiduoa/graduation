@@ -53,6 +53,7 @@ test('沒有社團時呈現鎖定空態', () => {
 test('社團頁呈現真實公告、介紹與活動資料界線，沒有寫入按鈕', async () => {
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   await screen.findByText('攝影社');
+  expect(screen.getByText('已加入')).toBeDisabled();
   expect(screen.getByText('社課通知')).toBeTruthy();
   expect(screen.getByText('週三社課')).toBeTruthy();
   expect(screen.getByText('目前沒有排定的活動。')).toBeTruthy();
