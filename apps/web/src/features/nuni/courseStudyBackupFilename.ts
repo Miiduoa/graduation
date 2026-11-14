@@ -74,6 +74,14 @@ function truncateFilenameStem(value: string): string {
         // A broken WebView segmenter must not skip or duplicate the source.
         if (typeof segment !== 'string' || !segment || !value.startsWith(segment, offset))
           throw new Error('invalid filename segmentation');
+        // Some broken WebViews yield individual UTF-16 code units instead of
+        // graphemes. Their concatenation still matches the original title,
+        // but truncating after a lone high surrogate corrupts the filename.
+        const firstUnit = segment.charCodeAt(0);
+        const lastUnit = segment.charCodeAt(segment.length - 1);
+        if ((firstUnit >= 0xdc00 && firstUnit <= 0xdfff) ||
+            (lastUnit >= 0xd800 && lastUnit <= 0xdbff))
+          throw new Error('broken surrogate in filename grapheme segmentation');
         offset += segment.length;
         const width = Array.from(segment).length;
         if (!truncated) {

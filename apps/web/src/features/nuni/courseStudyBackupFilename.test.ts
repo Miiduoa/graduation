@@ -45,6 +45,34 @@ describe('mobile backup filename grapheme boundaries', () => {
     }
   });
 
+  it('falls back when a WebView splits an emoji into UTF-16 surrogate halves', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: class {
+        segment(value: string) {
+          // Each UTF-16 code unit is returned in source order, including
+          // the two halves of emoji. Coverage alone must not validate this.
+          return Array.from({ length: value.length }, (_, index) => ({ segment: value[index] }));
+        }
+      },
+    });
+    try {
+      const prefix = '課'.repeat(47);
+      const flag = prefix + '🇹🇼後續文字.markdown';
+      expect(courseStudyBackupFilenameStem(flag)).toBe(prefix);
+      expect(courseStudyNotesFilename(flag)).toBe(prefix + '-學習筆記.txt');
+      expect(courseStudyProgressFilename(flag)).toBe(prefix + '-閱讀進度.campus-study.json');
+      expect(courseStudyPracticeCheckpointFilename(flag)).toBe(prefix + '-逐題練習.campus-practice.json');
+
+      // An ordinary surrogate pair that fits the cap should remain intact.
+      expect(courseStudyBackupFilenameStem(prefix + '😀後續.md')).toBe(prefix + '😀');
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+      else Reflect.deleteProperty(Intl, 'Segmenter');
+    }
+  });
+
   it('does not skip characters after an overlong cluster from an abnormal WebView', () => {
     const title = prefix + '🇹🇼後續文字.md';
     const original = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
