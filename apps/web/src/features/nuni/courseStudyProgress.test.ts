@@ -393,6 +393,7 @@ describe('size and filenames', () => {
     expect(courseStudyProgressFilename('../資料\\庫\u0000\n<>:"|?*\u202e\u2067.pdf')).toBe('資料 庫-閱讀進度.campus-study.json');
     expect(courseStudyProgressFilename('  ... ')).toBe('讀書白板-閱讀進度.campus-study.json');
     expect(courseStudyProgressFilename('課程.MD')).toBe('課程-閱讀進度.campus-study.json');
+    expect(courseStudyProgressFilename('課程.MARKDOWN')).toBe('課程-閱讀進度.campus-study.json');
     const name = courseStudyProgressFilename('😀'.repeat(150));
     expect(name).toBe(`${'😀'.repeat(48)}-閱讀進度.campus-study.json`);
     expect(Buffer.byteLength(name, 'utf8')).toBeLessThan(255);

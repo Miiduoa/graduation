@@ -819,7 +819,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     setPendingSource(null);
     setError('');
     try {
-      if (!/\.(pdf|txt|md)$/i.test(file.name)) throw new Error('請選擇 PDF、TXT 或 Markdown 文字檔。');
+      if (!/\.(pdf|txt|md|markdown)$/i.test(file.name)) throw new Error('請選擇 PDF、TXT 或 Markdown 文字檔。');
       if (!file.size || file.size > PERSONAL_IMPORT_DOCUMENT_LIMITS.bytes) throw new Error('請選擇有內容且不超過 8 MiB 的檔案。');
       // At most three UTF-8 bytes (or two Big5 bytes) per UTF-16 code unit, plus an optional BOM.
       // Reject text files that cannot possibly fit before decoding them on a phone.
@@ -958,7 +958,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         <summary ref={sourceSummary}>{source ? '換一份講義或貼上內容' : '選擇要讀的內容'}</summary>
         <div className={styles.importBody}>
           <label className={styles.field} htmlFor={inputId}>選擇講義
-            <input ref={sourceInput} id={inputId} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+            <input ref={sourceInput} id={inputId} type="file" accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"
               disabled={!!reading} onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';

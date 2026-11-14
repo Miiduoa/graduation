@@ -1101,3 +1101,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修正裝置朗讀的退路：即使 `Intl.Segmenter` 回傳的文字完全正確、位置連續，有些異常 WebView 仍可能將許多字素錯包成單一超過 160 UTF-16 單位的片段。原先在這個特例直接依 code point 硬切，會把 Emoji ZWJ、國旗、CRLF、組合重音或韓文 Jamo 切在不同語音片段。現在大段同樣走離線有界的續接規則；真正大於單片段上限的單一複合字形仍須有限度拆開，不宣稱完整 Unicode 字素實作。
 - 新增五組模擬 WebView／語音引擎正反回歸，確認原文可無損拼回、每段不超過 160 UTF-16 單位、常見字素不跨段。獨立 JS 邊界煙測也驗證五組，但**尚非正式 Vitest 或手機真機證據**。不改動私人教材、閱讀／練習 JSON、離線語音邊界，也不新增套件／付費 API。
 - 本版應依精確 head 再查 Web/Mobile CI、CodeQL 與 App 5504170 審查；Maestro、iOS Safari／Android Chrome 及 Ahaboard 同教材同題同機實測仍待驗收。PR 保持 Draft，不合併、不部署。
+
+### 2026-11-14：完整 `.markdown` 副檔名的授權教材可直接匯入
+
+- 原白板檔案選取器和檔名預檢只接受 `.md`，學生從手機檔案 App 選到有效的 `.markdown` 講義時會被拒絕。現在同時支援 `.md`／`.markdown`（包含大寫副檔名），沿用既有的裝置端 UTF-8／明確選擇 Big5、大小上限、來源替換確認與失敗保留筆記機制；仍不接受 HTML 或未知副檔名。
+- 筆記 TXT、閱讀進度 JSON、練習 checkpoint JSON 匯出檔名會去除已匯入講義的 `.markdown` 尾綴，避免在手機下載清單重複顯示副檔名。新增授權教材成功匯入／不相容檔案拒收的模擬 DOM 正反案例，以及三種備份檔名的單元斷言。不變動備份內容、教材來源或私人資料傳輸。
+- 此為檔案選取與匯出名稱的程式改善，不是 iOS／Android 實機驗收。完整 Web／Mobile CI、CodeQL、指定 App 5504170 APPROVED、Maestro、WebGPU 教學品質及 Ahaboard 同教材同題同機比較仍須以本次精確 SHA 驗證；PR 保持 Draft，不合併、不部署。

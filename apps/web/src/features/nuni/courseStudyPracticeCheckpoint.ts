@@ -166,7 +166,7 @@ export function isStudyPracticeCheckpoint(raw: string): boolean {
 export function courseStudyPracticeCheckpointFilename(sourceTitle: string): string {
   // Reuse the same sanitization / Unicode boundary as the reading progress backup.
   const safe = sourceTitle.replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069<>:"/\\|?*]/gu, ' ')
-    .replace(/\s+/g, ' ').trim().replace(/\.(pdf|txt|md)$/i, '').replace(/^[. ]+|[. ]+$/g, '');
+    .replace(/\s+/g, ' ').trim().replace(/\.(pdf|txt|md|markdown)$/i, '').replace(/^[. ]+|[. ]+$/g, '');
   const title = Array.from(safe).slice(0, 48).join('').trim();
   return (title || '讀書白板') + '-逐題練習.campus-practice.json';
 }

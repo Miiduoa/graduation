@@ -153,6 +153,7 @@ describe('study note filenames', () => {
     expect(filename).not.toMatch(/[\p{Cc}\u202a-\u202e\u2066-\u2069<>:"/\\|?*]/u);
     expect(courseStudyNotesFilename('  ..  ')).toBe('讀書白板-學習筆記.txt');
     expect(courseStudyNotesFilename('資料庫.MD')).toBe('資料庫-學習筆記.txt');
+    expect(courseStudyNotesFilename('資料庫.MARKDOWN')).toBe('資料庫-學習筆記.txt');
   });
 
   it('keeps long Unicode filenames within a normal filesystem component without splitting emoji', () => {

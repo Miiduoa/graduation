@@ -245,7 +245,7 @@ export function parseCourseStudyProgress(raw: string, expectedScope: CourseStudy
 
 export function courseStudyProgressFilename(sourceTitle: string): string {
   const safe = sourceTitle.replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069<>:"/\\|?*]/gu, ' ')
-    .replace(/\s+/g, ' ').trim().replace(/\.(pdf|txt|md)$/i, '').replace(/^[. ]+|[. ]+$/g, '');
+    .replace(/\s+/g, ' ').trim().replace(/\.(pdf|txt|md|markdown)$/i, '').replace(/^[. ]+|[. ]+$/g, '');
   const title = Array.from(safe).slice(0, 48).join('').trim();
   return `${title || '讀書白板'}-閱讀進度.campus-study.json`;
 }

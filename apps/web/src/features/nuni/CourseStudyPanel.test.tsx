@@ -476,6 +476,34 @@ it('rejects a definitely oversized UTF-8 lesson file before decoding, retaining 
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+
+it('imports .markdown handouts through the existing local-only reader, including uppercase extensions', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const picker = screen.getByLabelText('選擇講義') as HTMLInputElement;
+  expect(picker.accept.split(',')).toContain('.markdown');
+  const source = '主鍵可唯一識別資料列。';
+  const file = new File([source], '課堂講義.MARKDOWN', { type: 'text/markdown' });
+  const read = vi.fn().mockResolvedValue(source);
+  Object.defineProperty(file, 'text', { value: read });
+  fireEvent.change(picker, { target: { files: [file] } });
+  expect(await screen.findByText(source)).toBeTruthy();
+  expect(read).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('still refuses unrelated file extensions without replacing an authorized lesson', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const file = new File(['無關內容'], '其他檔案.html', { type: 'text/html' });
+  const read = vi.fn();
+  Object.defineProperty(file, 'text', { value: read });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent', expect.stringContaining('PDF、TXT 或 Markdown'),
+  );
+  expect(read).not.toHaveBeenCalled();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('allows a valid 60,000-character multibyte lesson through file preflight', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const content = '中'.repeat(60_000);

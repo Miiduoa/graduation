@@ -173,6 +173,7 @@ describe('versioned independent review checkpoint', () => {
 
   it('creates a safe Unicode filename and treats malformed data as not-a-checkpoint', () => {
     expect(courseStudyPracticeCheckpointFilename('../資料庫.pdf')).toBe('資料庫-逐題練習.campus-practice.json');
+    expect(courseStudyPracticeCheckpointFilename('資料庫.markdown')).toBe('資料庫-逐題練習.campus-practice.json');
     expect(courseStudyPracticeCheckpointFilename('😀'.repeat(100))).toBe('😀'.repeat(48) + '-逐題練習.campus-practice.json');
     expect(isStudyPracticeCheckpoint('{oops')).toBe(false);
   });
