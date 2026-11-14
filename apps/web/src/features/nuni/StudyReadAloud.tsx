@@ -81,7 +81,7 @@ function splitStudySpeech(text: string): string[] {
         // A faulty iterator can reproduce the original text yet claim that
         // an accent, ZWJ emoji, flag pair or Hangul syllable ends mid-grapheme.
         // Such boundaries are unsafe even when the UTF-16 content matches.
-        const firstCharacter = Array.from(segment)[0];
+        const firstCharacter = Array.from(segment)[0] ?? '';
         if (verifiedOffset > 0 &&
             isStudySpeechContinuation(firstCharacter, previousCharacter, regionalRun)) {
           throw new Error('broken on-device grapheme boundary');
@@ -127,7 +127,9 @@ function splitStudySpeech(text: string): string[] {
   }
   if (!segmented) {
     // Older or partially broken engines use the previous code-point-safe path.
-    units.push(...fallbackStudySpeechUnits(text));
+    // Do not spread long lesson arrays into push(): older WebViews can reject
+    // hundreds of thousands of function arguments with RangeError.
+    for (const unit of fallbackStudySpeechUnits(text)) units.push(unit);
   }
 
   const chunks: string[] = [];

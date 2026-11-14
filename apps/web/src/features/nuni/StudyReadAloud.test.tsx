@@ -651,3 +651,19 @@ it('uses the bounded local grapheme fallback when Intl.Segmenter is missing', ()
   expect(chunks.join('')).toBe(original);
   expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
 });
+
+it('reads a long lesson without an Intl.Segmenter or a function-argument overflow', () => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), { Segmenter: undefined }));
+  const original = '甲'.repeat(160 * 1000 + 7);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }))).not.toThrow();
+  const utterances = speak.mock.calls.map(([utterance]) => utterance as Utterance);
+  expect(utterances).toHaveLength(1001);
+  expect(utterances.map((utterance) => utterance.text).join('')).toBe(original);
+  expect(utterances.every((utterance) =>
+    utterance.voice === local && utterance.text.length > 0 && utterance.text.length <= 160)).toBe(true);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
