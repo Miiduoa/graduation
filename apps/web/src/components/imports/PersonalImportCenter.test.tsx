@@ -1884,7 +1884,7 @@ it('拆分未勾選課程後，所有單節仍排除於正式匯入', async () =
   await prepare('課程名稱,星期,開始節次,結束節次\n排除課程,一,1,2\n保留課程,二,3,3');
   fireEvent.click(screen.getByRole('checkbox', { name: /第 1 筆/ }));
   fireEvent.click(screen.getAllByRole('button', { name: '拆成單節課程' })[0]);
-  const boxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+  const boxes = screen.getAllByRole('checkbox', { name: /第 \d+ 筆/ }) as HTMLInputElement[];
   expect(boxes.filter((box) => !box.checked)).toHaveLength(2);
   expect(screen.queryByRole('button', { name: '修正星期一第2節 排除課程' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));

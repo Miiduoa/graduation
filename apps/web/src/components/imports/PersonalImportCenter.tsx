@@ -98,6 +98,7 @@ type AiImportRequest = {
   source: Pick<PersonalImportSource, 'type' | 'name'>;
   fromDocument?: boolean;
   retry?: PersonalImportAiRetry;
+  cloudImageConsent?: boolean;
 };
 function errorMessage(error: unknown, fallback = '這次沒有完成，草稿仍保留，請再試一次。') {
   return personalImportErrorMessage(error, fallback);
@@ -460,6 +461,7 @@ function ImportWorkspace({
         downloadLabel: '',
       };
   const [sourceImage, setSourceImage] = useState<File | null>(null);
+  const [cloudImageConsent, setCloudImageConsent] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [parseIssues, setParseIssues] = useState<ImportIssue[]>([]);
   const [notice, setNotice] = useState('');
@@ -818,6 +820,7 @@ function ImportWorkspace({
         input: request.input,
         options: { ...options, source: request.source },
         signal: controller.signal,
+        cloudImageConsent: request.cloudImageConsent,
         cloudHeaders: nuni?.session?.context
           ? { 'X-Campus-Session': nuni.session.context }
           : undefined,
@@ -1533,8 +1536,8 @@ function ImportWorkspace({
           >
             <span className={styles.sourceNumber}>02</span>
             <strong>AI 讀取截圖</strong>
-            <span>先在裝置讀取文字，再整理課表、成績或活動。</span>
-            <small>雲端優先 · 本機備援</small>
+            <span>{cloudImageConsent && kind === 'timetable' ? '雲端視覺模型直接看原圖，依畫面位置辨識課表。' : '本機先讀取文字；也可勾選下方選項改用雲端看圖。'}</span>
+            <small>{cloudImageConsent && kind === 'timetable' ? '雲端看圖 · 逐筆核對' : '本機 OCR · 雲端文字整理'}</small>
           </button>
           <button
             type="button"
@@ -1550,7 +1553,9 @@ function ImportWorkspace({
         </div>
         <p id="import-ai-download-note" className={styles.note}>
           {aiAvailability.available
-            ? `優先使用雲端整理，送出文字前會遮罩可辨識的姓名、學號與證號；原圖不會上傳。雲端無法使用時改用本機模型（首次下載${aiAvailability.downloadLabel}）或規則解析。`
+            ? cloudImageConsent && kind === 'timetable'
+              ? '你已選擇雲端看圖。截圖將直接送至 Cloudflare 視覺模型，包含圖片上所有可見內容；失敗時會清楚提示本機備援。'
+              : '目前先由本機 OCR 讀取圖片，再以雲端整理文字。原圖不會上傳，送出文字前會遮罩可辨識個資；雲端無法使用時改用本機備援。'
             : aiAvailability.reason ||
               '目前瀏覽器無法使用裝置端 AI，可使用學校表格、檔案或一般圖片讀取。'}
         </p>
@@ -1609,6 +1614,25 @@ function ImportWorkspace({
             部分網站會限制書籤程式，或以圖片、內嵌頁面呈現資料。工具沒有開啟或找不到表格時，請直接複製表格或使用截圖匯入。
           </p>
         </details>
+        {kind === 'timetable' && (
+          <label className={styles.note} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={cloudImageConsent}
+              disabled={!nuni?.session?.context || reading || saving}
+              onChange={(event) => setCloudImageConsent(event.target.checked)}
+              aria-label="同意上傳原始課表截圖給雲端視覺模型"
+            />
+            <span>
+              <strong>使用雲端 AI 直接辨識原圖</strong>
+              <span style={{ display: 'block' }}>
+                {nuni?.session?.context
+                  ? '勾選代表同意把課表圖片傳送至 Cloudflare；截圖上的姓名、學號等資料無法先可靠遮罩。請先裁切掉不需要的個資。'
+                  : '雲端看圖需要先登入 nuni。未登入時仍可使用本機辨識。'}
+              </span>
+            </span>
+          </label>
+        )}
         <input
           ref={aiImageInput}
           type="file"
@@ -1629,6 +1653,7 @@ function ImportWorkspace({
               requestAi({
                 input: { image: file },
                 source: { type: 'screenshot', name: file.name },
+                cloudImageConsent: kind === 'timetable' && !!nuni?.session?.context && cloudImageConsent,
               });
             event.target.value = '';
           }}
@@ -1848,7 +1873,8 @@ function ImportWorkspace({
                   className="btn"
                   disabled={reading || saving || removingAiModel || !aiAvailability.available}
                   onClick={() =>
-                    sourceImage && requestAi({ input: { image: sourceImage }, source })
+                    sourceImage && requestAi({ input: { image: sourceImage }, source,
+                      cloudImageConsent: kind === 'timetable' && !!nuni?.session?.context && cloudImageConsent })
                   }
                 >
                   AI 重新讀取圖片

@@ -22,6 +22,7 @@ import {
 } from '@campus/shared/src/imports/aiTableAudit';
 import type { PersonalImportOptions } from '@campus/shared/src/imports/types';
 import { recognizePersonalImportImage } from './personalImportOcr';
+import { requestPersonalImportCloudImage, PERSONAL_IMPORT_CLOUD_IMAGE_MAX_BYTES } from '@campus/shared/src/imports/aiCloudImage';
 import {
   deletePersonalImportAiModelCache as deleteLocalCache,
   getPersonalImportAiAvailability as localAvailability,
@@ -44,6 +45,8 @@ export type PersonalImportAiRequest = {
   onProgress: (message: string) => void;
   onPartial?: (result: PersonalImportAiRunResult) => void;
   cloudHeaders?: Record<string, string>;
+  /** Only an explicit UI choice authorizes uploading a screenshot to Cloudflare. */
+  cloudImageConsent?: boolean;
   knownNames?: readonly string[];
   retry?: PersonalImportAiRetry;
 };
@@ -156,8 +159,50 @@ export async function runPersonalImportAi(
   };
   try {
     let source = request.input.text ?? '';
+    if (!request.retry && request.input.image && options.kind === 'timetable' && request.cloudImageConsent) {
+      progress('正在送出課表截圖給雲端視覺模型，原圖會被傳送；尚未變更你的課表。');
+      try {
+        const image = request.input.image;
+        if (image.size > PERSONAL_IMPORT_CLOUD_IMAGE_MAX_BYTES)
+          throw new Error('圖片超過 4 MB，雲端看圖需要較小的截圖。');
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(image.type))
+          throw new Error('雲端看圖只接受 PNG、JPEG 或 WebP。');
+        const bytes = new Uint8Array(await image.arrayBuffer());
+        if (signal.aborted) throw cancelled();
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 32_768)
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+        const cloud = await requestPersonalImportCloudImage({
+          base64: btoa(binary),
+          mime: image.type as 'image/png' | 'image/jpeg' | 'image/webp',
+          kind: 'timetable',
+          academicYear: options.academicYear,
+          semester: options.semester,
+          explicitConsent: true,
+          headers: request.cloudHeaders,
+          signal,
+        });
+        if (signal.aborted) throw cancelled();
+        if (cloud.ok === true) {
+          const vision = parsePersonalImportAiResponse(cloud.output, '', options, 'image');
+          vision.issues.push({
+            code: 'import-provider', severity: 'warning',
+            message: '本次由雲端視覺模型直接閱讀截圖，未經本機 OCR。請對照原圖核對課名、星期、節次與教室。',
+          });
+          request.onPartial?.({ ...vision, sourceText: '' });
+          return { ...vision, sourceText: '' };
+        }
+        provider = '雲端圖片辨識未完成：' + (cloud.ok === false ? cloud.message : '請重試') + ' 已切換本機 OCR，後續的雲端服務只處理辨識文字。';
+      } catch (error) {
+        if (signal.aborted) throw cancelled();
+        provider = '雲端看圖未完成：' + (error instanceof Error ? error.message : '請重試') +
+          '，已切換本機 OCR；沒有當作雲端看圖成功。';
+      }
+      progress(provider);
+      successful.issues.push({ code: 'import-provider', severity: 'warning', message: provider });
+    }
     if (!request.retry && request.input.image) {
-      progress('正在這台裝置讀取圖片文字，原圖不會上傳。');
+      progress(provider || '正在這台裝置讀取圖片文字，原圖不會上傳。');
       try {
         source = await recognizePersonalImportImage(request.input.image, signal, progress, options.kind);
         if (!source.trim()) throw new Error('圖片文字辨識未取得文字。');
