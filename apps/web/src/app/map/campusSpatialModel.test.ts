@@ -111,7 +111,9 @@ describe('campus spatial coordinates', () => {
   });
 
   it('handles antipodal data and very high latitude without invalid projected numbers', () => {
-    expect(buildCampusSpatialModel([place('a', 0, 0), place('b', 0, 180)]).unavailableReason)
+    // (0, 0) is reserved as a missing-location sentinel; use an actual
+    // antipodal pair to exercise the projection's distant-campus guard.
+    expect(buildCampusSpatialModel([place('a', 5, 15), place('b', -5, -165)]).unavailableReason)
       .toBe('area-too-large');
     const polar = buildCampusSpatialModel([place('a', 89.999, 0), place('b', 89.999, 90)]);
     expect(polar.unavailableReason).toBeNull();
