@@ -124,20 +124,50 @@ export default function LearnAiFirstScreen() {
   return (
     <AIScreen refreshControl={<RefreshControl refreshing={visible?.loading ?? false} onRefresh={() => void load()} tintColor={theme.colors.accent} />}>
       <AIHero
-        eyebrow="CAMPUS ONE"
+        eyebrow="nuni"
         title="課務"
         subtitle="先看自己的課表，再處理這堂課要做的事。"
       />
-      <AISection title="課務分區">
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 4, gap: 8 }}
+      >
         {STUDENT_ACADEMIC_SECTIONS.map((section) => (
-          <AIRow
+          <Pressable
             key={section.id}
-            title={section.label}
-            subtitle={STUDENT_SECTION_SUBTITLE[section.id]}
-            onPress={() => safeNavigate(navigation, section.mobileScreen)}
-          />
+            accessibilityRole="tab"
+            accessibilityLabel={section.label}
+            accessibilityHint={STUDENT_SECTION_SUBTITLE[section.id]}
+            accessibilityState={{ selected: section.id === 'coursework' }}
+            onPress={() => {
+              if (section.id !== 'coursework') safeNavigate(navigation, section.mobileScreen);
+            }}
+            style={({ pressed }) => ({
+              minHeight: 44,
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              justifyContent: 'center',
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: section.id === 'coursework' ? theme.colors.accent : theme.colors.border,
+              backgroundColor:
+                section.id === 'coursework' ? theme.colors.accentSoft : theme.colors.surface,
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: 14,
+                fontWeight: section.id === 'coursework' ? '700' : '500',
+              }}
+            >
+              {section.label}
+            </Text>
+          </Pressable>
         ))}
-      </AISection>
+      </ScrollView>
       {workspace ? (
         <View style={{ flexDirection: 'row', marginHorizontal: 16, marginTop: 14, gap: 8 }} accessibilityLabel="課務進度摘要">
           {[

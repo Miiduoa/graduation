@@ -21,11 +21,9 @@ import {
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
-import {
-  assignmentHref,
-  assignmentSubmitHref,
-  todayClassesFromSchedule,
-} from '@/lib/todayScreen';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
+import { loginHref } from '@/lib/navigation';
+import { assignmentHref, assignmentSubmitHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
@@ -87,6 +85,17 @@ export function StudentToday(props: Props) {
   const orderedTodos = primaryTodo
     ? [primaryTodo, ...todos.filter((item) => item.id !== primaryTodo.id)]
     : todos;
+  const showWelcome =
+    !props.skeleton &&
+    props.unsigned &&
+    (props.timetableStatus === 'empty' ||
+      props.timetableStatus === 'unsigned-scope' ||
+      (props.timetableStatus === 'ready' && action.type !== 'class'));
+  const showPlanner =
+    !props.unsigned || !['empty', 'unsigned-scope'].includes(props.timetableStatus);
+  const returnSearch = buildCampusNavigationSearch(
+    new URL(props.timetableHref, 'https://campus.local').searchParams,
+  );
   const primaryLabel =
     action.type === 'overdue'
       ? TODAY_COPY.overdue
@@ -153,36 +162,48 @@ export function StudentToday(props: Props) {
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
       {props.agent}
-      {!props.skeleton && props.unsigned && action.type !== 'class' && (
+      {showWelcome && (
         <TodayWelcome
           importHref={props.importHref}
           timetableHref={props.timetableHref}
           hasTimetable={props.timetableStatus === 'ready'}
+          needsSchool={props.timetableStatus === 'unsigned-scope'}
         />
       )}
-      {!props.skeleton && !props.unsigned && (action.type === 'empty' || action.type === 'allDone') && (
-        <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
-          <TodayStatus
-            finished={action.type === 'allDone'}
-            todosError={props.todosError}
-            timetableStatus={props.timetableStatus}
-            lmsUnconnected={props.lmsUnconnected}
-            weekHref={props.weekHref}
-          />
-        </div>
-      )}
+      {!props.skeleton &&
+        !props.unsigned &&
+        (action.type === 'empty' || action.type === 'allDone') && (
+          <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
+            <TodayStatus
+              finished={action.type === 'allDone'}
+              todosError={props.todosError}
+              timetableStatus={props.timetableStatus}
+              lmsUnconnected={props.lmsUnconnected}
+              weekHref={props.weekHref}
+            />
+          </div>
+        )}
       {props.skeleton ? (
         <TodaySkeleton />
-      ) : (
+      ) : showPlanner ? (
         <div className={styles.flow + ' ' + styles.planner} data-testid="today-unified-flow">
-          {primaryTodo ? [work, schedule] : [schedule, work]}
-          <TodayUnreadNotifications unsigned={props.unsigned} />
+          {props.unsigned ? schedule : primaryTodo ? [work, schedule] : [schedule, work]}
+          {!props.unsigned && <TodayUnreadNotifications unsigned={false} />}
         </div>
-      )}
-      {props.personalization}
+      ) : null}
+      {!props.skeleton && props.unsigned && !showWelcome ? (
+        <p className={styles.guestAccess}>
+          <Link href={loginHref(campusServiceHref('/', returnSearch))}>登入查看作業與通知</Link>
+        </p>
+      ) : null}
       {props.assistant}
+      {props.personalization}
       {props.updatedAt || props.refreshing ? (
-        <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
+        <p
+          className={styles.updated}
+          role={props.refreshing ? 'status' : undefined}
+          aria-live="polite"
+        >
           {props.refreshing ? '正在更新課程待辦…' : formatUpdatedAt(props.updatedAt!)}
         </p>
       ) : null}
@@ -304,7 +325,13 @@ function TodayClassList({
       ) : classes.length === 0 ? (
         <p className={styles.empty}>今天沒有排課。</p>
       ) : (
-        <TodayClassRows classes={classes} primaryId={primaryId} now={now} timetableHref={timetableHref} timetableSchoolId={timetableSchoolId} />
+        <TodayClassRows
+          classes={classes}
+          primaryId={primaryId}
+          now={now}
+          timetableHref={timetableHref}
+          timetableSchoolId={timetableSchoolId}
+        />
       )}
     </section>
   );
@@ -367,18 +394,17 @@ function TodoList({
           ，加入後作業期限會出現在這裡與行事曆。
         </p>
       ) : !unsigned && !error && !lmsUnconnected && todos.length === 0 ? (
-        <p className={styles.empty}>
-          目前沒有今日或即將到期的作業。
-        </p>
+        <p className={styles.empty}>目前沒有今日或即將到期的作業。</p>
       ) : unsigned || todos.length === 0 ? null : (
         <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
           {visible.map((item) => {
             const overdue = isTodoOverdue(item, now);
             const soon = isDueWithinHours(item, now, 6);
             const primary = item.id === primaryId;
-            const dueLine = !overdue && item.dueAt !== null && !isSameTaipeiDay(item.dueAt, now.getTime())
-              ? formatUpcomingDueLine(item)
-              : formatTodoDueLine(item, now);
+            const dueLine =
+              !overdue && item.dueAt !== null && !isSameTaipeiDay(item.dueAt, now.getTime())
+                ? formatUpcomingDueLine(item)
+                : formatTodoDueLine(item, now);
             return (
               <li
                 key={item.id}
@@ -454,17 +480,19 @@ export function StudentTodayPage(props: BoundProps) {
     <StudentToday
       assistant={props.assistant}
       agent={props.agent}
-      personalization={!scope.loading && props.now ? (
-        <CampusPersonalizationSection
-          key={scope.scopeKey}
-          scope={scope.scope}
-          now={props.now}
-          events={records.imported.records}
-          eventsReady={records.imported.ready}
-          eventsError={records.imported.error}
-          schoolName={scope.schoolName}
-        />
-      ) : null}
+      personalization={
+        !scope.loading && props.now ? (
+          <CampusPersonalizationSection
+            key={scope.scopeKey}
+            scope={scope.scope}
+            now={props.now}
+            events={records.imported.records}
+            eventsReady={records.imported.ready}
+            eventsError={records.imported.error}
+            schoolName={scope.schoolName}
+          />
+        ) : null
+      }
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
       now={props.now}

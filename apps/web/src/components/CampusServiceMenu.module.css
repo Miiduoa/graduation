@@ -3,10 +3,6 @@
   min-width: 0;
 }
 
-.mobileLabel {
-  display: none;
-}
-
 .menu summary {
   display: flex;
   align-items: center;
@@ -21,6 +17,8 @@
   white-space: nowrap;
   list-style: none;
   cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
   transition:
     color 160ms ease,
     background-color 160ms ease;
@@ -358,10 +356,6 @@
   .menu summary {
     padding-inline: 9px;
   }
-
-  .menu summary > svg {
-    display: none;
-  }
 }
 
 @media (max-width: 940px) {
@@ -381,25 +375,16 @@
 }
 
 @media (max-width: 760px) {
-  .menu {
-    height: 100%;
-  }
-
   .menu summary {
-    flex-direction: column;
-    gap: 4px;
-    min-height: 56px;
-    height: 100%;
-    padding: 5px 2px 7px;
-    border-radius: 9px;
-    font-size: var(--font-label-size);
-    line-height: 1.2;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
     -webkit-tap-highlight-color: transparent;
   }
 
   .menu summary > svg {
-    width: 22px;
-    height: 22px;
+    width: 19px;
+    height: 19px;
   }
 
   .menu summary::after,
@@ -407,23 +392,19 @@
     display: none;
   }
 
-  .mobileLabel {
-    display: inline;
-  }
-
   .menuPanel {
     position: fixed;
-    top: auto;
-    bottom: calc(var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px))) + 8px);
+    top: calc(76px + env(safe-area-inset-top, 0px));
+    bottom: auto;
     left: max(12px, env(safe-area-inset-left, 0px));
     right: max(12px, env(safe-area-inset-right, 0px));
     width: auto;
     max-height: min(
       72dvh,
-      calc(100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 24px)
+      calc(100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 88px)
     );
     border-radius: 16px;
-    animation-name: revealFromBottom;
+    animation-name: reveal;
   }
 
   .menuHead {

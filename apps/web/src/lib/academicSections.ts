@@ -26,7 +26,14 @@ export function academicNavigationPath(
   if (!pathname) return null;
   if (pathname === '/credit-planner/review') return '/credit-planner';
   if (pathname.startsWith('/school-lms/')) return '/school-lms';
-  if (pathname === '/classroom' || pathname.startsWith('/classroom/course')) return '/classroom';
+  if (
+    pathname === '/classroom' ||
+    pathname.startsWith('/classroom/course/') ||
+    pathname === '/classroom/material-bookmarks' ||
+    pathname.startsWith('/course/') ||
+    pathname === '/groups' ||
+    pathname.startsWith('/groups/')
+  ) return '/classroom';
   if (ACADEMIC_SECTIONS.some((section) => section.path === pathname)) {
     return pathname as AcademicSectionPath;
   }

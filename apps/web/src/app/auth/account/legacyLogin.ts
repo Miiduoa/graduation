@@ -1,6 +1,7 @@
 import { mockSchools, normalizeSchoolQuery, searchSchools } from '@campus/shared/src/schools';
 import { classroomLoginHref, CREATE_PATH, JOIN_PATH } from '@/features/platform/constants';
 import { collapseInternalPathHash, loginHref, sanitizeInternalPath } from '@/lib/navigation';
+import { SERVICE_JOURNEY_GROUPS } from '@/lib/serviceJourneys';
 
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
 export const PLATFORM_LOGIN_TRANSACTION_KEY = 'campus.platform-login.transaction';
@@ -50,6 +51,7 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/classroom/grades',
   '/clubs',
   '/community',
+  '/connect',
   '/credit-planner',
   '/dms',
   '/events',
@@ -142,6 +144,7 @@ const LEGACY_SIMPLE_RETURN_PATHS = new Set([
   '/account-deletion',
   '/calendar',
   '/career',
+  '/connect',
   '/food',
   '/life',
   '/search',
@@ -259,8 +262,19 @@ function allowedReturnPath(value: string | null | undefined): string | null {
     /^\/events\/[^/]+$/u.test(normalized) ||
     ALLOWED_RETURN_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
   if (!allowed) return null;
+  const journey = normalized === '/life' ? 'life' : normalized === '/connect' ? 'connect' : null;
   const context = new URLSearchParams();
   for (const [key, value] of parsed.searchParams) {
+    if (journey) {
+      if (key === 'group') {
+        if (!context.has(key) && SERVICE_JOURNEY_GROUPS[journey].some((group) => group.id === value)) {
+          context.set(key, value);
+        }
+        continue;
+      }
+      if (!['school', 'schoolId', 'campus', 'q'].includes(key)) continue;
+      if (key === 'q' && value.length > 100) continue;
+    }
     if (isServiceListPath(normalized) && key === 'q' && value.length > 200) continue;
     if ((RETURN_CONTEXT_KEYS.has(key) || isServiceListContext(normalized, key, value)) &&
       !context.has(key) && !hasUnsafeReturnCharacters(value)) {

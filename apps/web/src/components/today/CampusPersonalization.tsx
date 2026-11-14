@@ -25,6 +25,7 @@ export type CampusPersonalizationProps = {
   storageError?: string;
   schoolName?: string;
   now: Date;
+  compactSetup?: boolean;
 };
 
 const DAY_MS = 86_400_000;
@@ -312,12 +313,15 @@ export function CampusPersonalization({
   storageError,
   schoolName,
   now,
+  compactSetup = false,
 }: CampusPersonalizationProps) {
   const id = useId();
-  const [editing, setEditing] = useState(!preferences.configured);
+  const [editing, setEditing] = useState(!preferences.configured && !compactSetup);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
   const editButton = useRef<HTMLButtonElement>(null);
+  const section = useRef<HTMLElement>(null);
+  const previousEditing = useRef(editing);
   const saveError = useRef<HTMLParagraphElement>(null);
   const stage = CAMPUS_STAGE_OPTIONS.find((option) => option.value === preferences.stage)?.label;
   const focus = CAMPUS_FOCUS_OPTIONS.find((option) => option.value === preferences.focus)?.label;
@@ -333,6 +337,13 @@ export function CampusPersonalization({
     if (message && !editing) editButton.current?.focus();
   }, [message, editing]);
   useEffect(() => {
+    if (previousEditing.current !== editing) {
+      if (editing) section.current?.querySelector<HTMLSelectElement>('select')?.focus();
+      else editButton.current?.focus();
+    }
+    previousEditing.current = editing;
+  }, [editing]);
+  useEffect(() => {
     if (failed) saveError.current?.focus();
   }, [failed]);
 
@@ -347,12 +358,16 @@ export function CampusPersonalization({
   }
 
   return (
-    <section className={styles.section} aria-labelledby={`${id}-title`}>
+    <section ref={section} className={styles.section} aria-labelledby={`${id}-title`}>
       <div className={styles.heading}>
         <div>
-          <h2 id={`${id}-title`}>{editing ? '讓首頁更適合你' : '接下來可以做'}</h2>
+          <h2 id={`${id}-title`}>
+            {editing || !preferences.configured ? '讓首頁更適合你' : '接下來可以做'}
+          </h2>
           <p className={styles.intro}>
-            {editing ? '選擇目前的階段與重點，安排適合你的校園日常。' : summary}
+            {editing || !preferences.configured
+              ? '選擇年級與最近的重點，讓首頁接上你的日常。'
+              : summary}
           </p>
         </div>
         {!editing ? (
@@ -366,11 +381,13 @@ export function CampusPersonalization({
               setFailed(false);
             }}
           >
-            調整安排
+            {preferences.configured ? '調整安排' : '設定首頁安排'}
           </button>
         ) : null}
       </div>
-      <p className={styles.storage}>此裝置記住你的選擇，隨時可以調整。</p>
+      {editing || preferences.configured ? (
+        <p className={styles.storage}>此裝置記住你的選擇，隨時可以調整。</p>
+      ) : null}
       {storageError || failed ? (
         <p ref={saveError} className={styles.error} role="alert" tabIndex={-1}>
           {storageError || '這次未能儲存。你的選擇還在，請稍後再試。'}
@@ -393,7 +410,7 @@ export function CampusPersonalization({
             save({ ...createDefaultCampusPreferences(), configured: true }, true);
           }}
         />
-      ) : (
+      ) : preferences.configured ? (
         <>
           <div className={styles.phase}>
             <div className={styles.phaseHeading}>
@@ -428,7 +445,7 @@ export function CampusPersonalization({
             ))}
           </ul>
         </>
-      )}
+      ) : null}
     </section>
   );
 }

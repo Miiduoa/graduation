@@ -32,7 +32,7 @@ export const CAMPUS_SERVICES = [
     href: '/student-card',
     access: 'account',
     keywords: '學生證 數位證件 證件 學號 student id card',
-    category: 'campus',
+    category: 'account',
   },
   {
     name: academicLabel('/calendar'),
@@ -309,7 +309,7 @@ export const CAMPUS_SERVICES = [
     name: '校園助理',
     text: '查詢課務與校園服務；排課請用課表裡的幫我安排',
     href: '/ai-assistant',
-    access: 'school',
+    access: 'account',
     keywords: '問答 安排 課表 assistant',
     category: 'account',
   },

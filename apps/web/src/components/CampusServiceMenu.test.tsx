@@ -119,27 +119,26 @@ it('preserves school context without copying unrelated session or return paramet
 it('sends a signed-in firebase user to profile from 我', () => {
   firebase.user = { uid: 'u1' };
   render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
 });
 
 it('sends a signed-in nuni student to profile from 我 instead of login', () => {
   auth.session = { platformAccountId: 'a', isPlatformOperator: false };
   render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
 });
 
-it('keeps 我 on login when neither firebase nor nuni session is present', () => {
+it('keeps the account destination stable for a guest who can choose how to sign in', () => {
   render(<AppHeader />);
-  expect(screen.getByRole('link', { name: '我' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fprofile',
-  );
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
 });
 
 it('routes the Nuni account to its courses and hides operator links during revalidation', () => {
   auth.session = { platformAccountId: 'a', isPlatformOperator: true };
   const view = render(<AppHeader />);
   expect(screen.getByRole('link', { name: '課務' }).getAttribute('href')).toBe('/timetable');
-  expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
+  expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
+  expect(screen.queryByRole('link', { name: '我的帳號' })).toBeNull();
   expect(screen.getByRole('link', { name: '平台管理' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
   auth.loading = true;
@@ -152,7 +151,9 @@ it('marks classroom children as part of the added service without selecting exis
   navigation.pathname = '/classroom/course/cw_11111111-1111-4111-8111-111111111111';
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
-  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBe(
+    'page',
+  );
   expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('aria-current')).toBeNull();
 });
 
@@ -388,10 +389,14 @@ it.each([
   ['/grades', '課務'],
   ['/credit-planner', '課務'],
   ['/classroom/grades', '課務'],
-  ['/settings', '我'],
-  ['/classroom/account', '我'],
+  ['/settings', '我的'],
+  ['/classroom/account', '我的'],
   ['/orders/order-1', '生活'],
   ['/school-info', '生活'],
+  ['/community/post/topic-1', '交流'],
+  ['/social', '交流'],
+  ['/dms/chat-1', '交流'],
+  ['/student-card', '我的'],
 ])('shows the parent section for %s', (pathname, label) => {
   navigation.pathname = pathname;
   render(<AppHeader />);
@@ -678,7 +683,6 @@ it('does not steal focus when restoring an open directory', () => {
   expect(document.activeElement).toBe(page);
 });
 
-
 it('uses the existing Today assistant when its header voice shortcut is pressed', () => {
   navigation.pathname = '/';
   const openTodayVoice = vi.fn();
@@ -721,9 +725,32 @@ it('continues a filtered menu search in the directory while keeping only the cam
   const links = screen.getAllByRole('link').length - 1;
   expect(screen.getByRole('status').textContent).toBe(`找到 ${links} 項服務`);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書 & 續借' } });
-  const directory = new URL(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')!, window.location.origin);
+  const directory = new URL(
+    screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')!,
+    window.location.origin,
+  );
   expect(directory.pathname).toBe('/search');
   expect(Object.fromEntries(directory.searchParams)).toEqual({
-    schoolId: 'nthu', q: '借書 & 續借', category: 'campus',
+    schoolId: 'nthu',
+    q: '借書 & 續借',
+    category: 'campus',
   });
+});
+
+it('keeps exactly five primary destinations and moves service search out of the tab sequence', () => {
+  navigation.search = 'schoolId=nthu&session=private';
+  render(<AppHeader />);
+  const nav = screen.getByRole('navigation', { name: '主要導覽' });
+  const links = Array.from(nav.querySelectorAll('a'));
+  expect(links.map((link) => link.textContent)).toEqual(['今天', '課務', '生活', '交流', '我的']);
+  for (const link of links) {
+    const destination = new URL(link.href);
+    expect(destination.searchParams.get('schoolId')).toBe('nthu');
+    expect(destination.searchParams.has('session')).toBe(false);
+  }
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(nav.contains(menu)).toBe(false);
+  fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+  expect(menu.open).toBe(true);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋服務' }));
 });

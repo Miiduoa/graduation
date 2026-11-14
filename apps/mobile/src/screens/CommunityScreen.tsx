@@ -74,7 +74,17 @@ export function CommunityScreen(props: Record<string, unknown>) {
         }}
       >
         <View style={styles.topBar}>
-          <View style={{ flex: 1 }}>
+          {stackNav?.canGoBack?.() && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="返回上一頁"
+              onPress={() => stackNav?.goBack?.()}
+              style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.75 }]}
+            >
+              <Ionicons name="arrow-back" size={22} color={theme.colors.text} />
+            </Pressable>
+          )}
+          <View style={{ flex: 1, minWidth: 100 }}>
             <Text style={styles.heading}>校園社群</Text>
             <Text style={styles.headingSub}>動態 · 看板 · 即時 · 學伴</Text>
           </View>
@@ -83,7 +93,12 @@ export function CommunityScreen(props: Record<string, unknown>) {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="我的社群頁"
-                onPress={() => stackNav?.navigate?.('CreatorProfile', { memberUid: auth.user.uid, schoolId: school.id })}
+                onPress={() =>
+                  stackNav?.navigate?.('CreatorProfile', {
+                    memberUid: auth.user.uid,
+                    schoolId: school.id,
+                  })
+                }
                 style={({ pressed }) => [styles.iconShortcut, pressed && { opacity: 0.85 }]}
               >
                 <Ionicons name="person-outline" size={20} color={theme.colors.accent} />
@@ -156,45 +171,72 @@ export function CommunityScreen(props: Record<string, unknown>) {
   );
 }
 
-const createStyles = () => StyleSheet.create({
-  topBar: { flexDirection: 'row', alignItems: 'center', marginBottom: theme.space.md },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  composeButton: {
-    minHeight: 40,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: theme.colors.accent,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  composeText: { color: theme.colors.onAccent, fontSize: 13, fontWeight: '700' },
-  heading: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
-  headingSub: { fontSize: 11, color: theme.colors.textSecondary, marginTop: 2, letterSpacing: 0.4 },
-  iconShortcut: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.accentSoft ?? 'rgba(124,93,250,0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-  },
+const createStyles = () =>
+  StyleSheet.create({
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: theme.space.md,
+    },
+    backButton: {
+      minWidth: 44,
+      minHeight: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 12,
+    },
+    topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    composeButton: {
+      minHeight: 40,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+      backgroundColor: theme.colors.accent,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    composeText: { color: theme.colors.onAccent, fontSize: 13, fontWeight: '700' },
+    heading: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
+    headingSub: {
+      fontSize: 11,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+      letterSpacing: 0.4,
+    },
+    iconShortcut: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.accentSoft ?? 'rgba(124,93,250,0.10)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+    },
 
-  tabRow: { flexDirection: 'row', gap: 6, backgroundColor: theme.colors.surface, padding: 4, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  tabActive: { backgroundColor: theme.colors.accent },
-  tabTxt: { fontSize: 13, color: theme.colors.textSecondary, fontWeight: '600' },
-  tabTxtActive: { color: theme.colors.onAccent, fontWeight: '700' },
-});
+    tabRow: {
+      flexDirection: 'row',
+      gap: 6,
+      backgroundColor: theme.colors.surface,
+      padding: 4,
+      borderRadius: 999,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+    },
+    tab: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+      paddingVertical: 8,
+      borderRadius: 999,
+    },
+    tabActive: { backgroundColor: theme.colors.accent },
+    tabTxt: { fontSize: 13, color: theme.colors.textSecondary, fontWeight: '600' },
+    tabTxtActive: { color: theme.colors.onAccent, fontWeight: '700' },
+  });
 
 export default CommunityScreen;

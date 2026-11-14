@@ -47,7 +47,7 @@ export function MapStack() {
       <Stack.Screen
         name="CampusHome"
         component={CampusHubScreen}
-        options={{ title: '校園', headerShown: false }}
+        options={{ title: '生活', headerShown: false }}
       />
       {/* Map 保留為舊連結的相容入口。 */}
       <Stack.Screen

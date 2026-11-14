@@ -123,3 +123,19 @@ test('initially renders a manageable number of tasks and reveals remaining items
   fireEvent.press(view.getByText('顯示更多（尚有 6 項）'));
   expect(view.getByText('額外作業 25')).toBeTruthy();
 });
+
+test('課務分區直接切換既有頁面，重按目前分區保留作業搜尋', async () => {
+  const view = render(<LearnAiFirstScreen />);
+  await view.findByText('迴歸分析作業');
+  fireEvent.changeText(view.getByLabelText('搜尋課務'), '迴歸');
+  const current = view.getByRole('tab', { name: '課程與作業' });
+  expect(current.props.accessibilityState.selected).toBe(true);
+  fireEvent.press(current);
+  expect(view.getByLabelText('搜尋課務').props.value).toBe('迴歸');
+  expect(mockNavigate).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('tab', { name: '課表' }));
+  expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    screen: 'PersonalTimetable',
+    params: undefined,
+  });
+});

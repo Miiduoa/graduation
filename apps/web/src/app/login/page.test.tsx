@@ -111,16 +111,17 @@ it('states student-id login is not open and never claims direct school-id connec
   expect(container.textContent).not.toContain('可連線');
   expect(container.textContent).not.toContain('使用學號連線');
 });
-it('keeps unavailable school-login wording even when student-id option reports available', () => {
+it('describes the available school sign-in accurately while preserving the original task', () => {
   state.user = null;
   state.studentId = true;
   const { container } = render(<LoginPage />);
-  expect(screen.getByRole('heading', { name: '需要校務資料時再連線' })).toBeTruthy();
-  expect(container.textContent).toContain('學號直接登入目前尚未開放');
-  expect(container.textContent).not.toContain('可連線');
-  expect(container.textContent).not.toContain('使用學號連線');
-  expect(container.textContent).not.toContain('提供學號直接連線');
-  expect(container.textContent).not.toContain('使用學校的既有帳號連線');
+  expect(screen.getByRole('heading', { name: '確認你的學校帳號' })).toBeTruthy();
+  expect(screen.getByText('輸入學號與密碼，完成後返回原本的頁面。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+  expect(container.textContent).not.toContain('學號直接登入目前尚未開放');
+  expect(container.textContent).not.toContain('尚未開放學號直接登入');
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
 });
 it('keeps a school return destination during an availability failure instead of offering the wrong account', () => {
   state.user = null;
@@ -555,6 +556,7 @@ it('does not repeatedly redirect while school options are still loading', () => 
 });
 
 it.each([
+  '/connect?campus=pu&group=topics&q=campus',
   '/map?school=pu&focus=library#route',
   '/bus?schoolId=tw-pu',
   '/announcements/news-123?schoolId=tw-pu',
@@ -708,6 +710,25 @@ it('uses school credentials and returns to WOW Class courses with the selected c
   state.selectedSchoolId = 'pu';
   const destination = '/school-courses?school=pu&schoolId=pu&campus=pu';
   state.params = new URLSearchParams({ returnUrl: destination });
+  render(<LoginPage />);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fillSchoolLogin();
+  fireEvent.submit(screen.getByLabelText('學號').closest('form')!);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith(destination));
+  expect(signIn).toHaveBeenCalledWith('A1234567', 'test-only-password', expect.any(AbortSignal), 'pu');
+});
+it('returns a school reconnect to the same explicitly scoped profile', async () => {
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  const destination = '/profile?schoolId=pu&campus=pu&school=PU';
+  state.params = new URLSearchParams({
+    reconnect: 'school',
+    returnUrl: destination,
+    schoolId: 'pu',
+    campus: 'pu',
+    school: 'PU',
+  });
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   fillSchoolLogin();
@@ -883,10 +904,17 @@ it('does not treat another Firebase user as a verified school session', () => {
   expect(replace).not.toHaveBeenCalled();
 });
 
-it('offers task-specific entries before asking a visitor for credentials', () => {
+it('keeps ordinary sign-in first and exposes role-specific entries on request', () => {
   state.params = new URLSearchParams();
   state.user = null;
   render(<LoginPage />);
+  expect(screen.getByTestId('platform-sign-in')).toBeTruthy();
+  const summary = screen.getByText('店家、教師與管理入口');
+  const disclosure = summary.closest('details')!;
+  expect(disclosure.open).toBe(false);
+  expect(screen.getByTestId('platform-sign-in').compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(summary);
+  expect(disclosure.open).toBe(true);
   expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).getAttribute('href')).toBe('/merchant/apply');
   expect(screen.getByRole('link', { name: '查看申請或進入門市' }).getAttribute('href')).toBe('/merchant/workspace');
   expect(screen.getByRole('link', { name: '學生與教師進入課程' }).getAttribute('href')).toBe('/classroom');

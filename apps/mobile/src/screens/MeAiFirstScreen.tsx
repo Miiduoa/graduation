@@ -1,7 +1,6 @@
 import React, { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { MESSAGING_NAV_SECTIONS } from '@campus/shared/src/academicSections';
 import { AIScreen, AIHero, AISection, AICard, AIRow, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
@@ -10,9 +9,6 @@ import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
 import { loadFailureCopy } from '../utils/loadFailureCopy';
 import { rootNavigateNested } from '../app/rootNavigation';
-
-const NOTIFY_SECTION = MESSAGING_NAV_SECTIONS[0];
-const DM_SECTION = MESSAGING_NAV_SECTIONS[1];
 
 export default function MeAiFirstScreen() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -65,37 +61,8 @@ export default function MeAiFirstScreen() {
       <AIHero
         eyebrow="nuni"
         title={displayName}
-        subtitle={details || '管理帳號、課務資料與個人設定。'}
+        subtitle={details || '你的個人內容、帳號與使用設定。'}
       />
-      <AISection title="我的社群">
-        <AIRow
-          title="個人社群首頁"
-          subtitle="署名貼文、圖文作品與內容管理"
-          onPress={go('MySocialProfile')}
-        />
-        <AIRow
-          title="發表貼文"
-          subtitle="用文字或照片分享校園生活"
-          onPress={() => rootNavigateNested('Today', 'CreatorPostCompose')}
-        />
-      </AISection>
-      <AISection title="Google 帳號">
-        <AIRow
-          title="課程、店家與 Google 帳號"
-          subtitle="和網頁版共用的課程、學校資格與店家權限"
-          onPress={go('NuniWorkspace')}
-        />
-        {platformReady ? (
-          <AIRow
-            title="開啟課表助理"
-            subtitle="用已驗證的 nuni 帳號查這堂課與作業"
-            onPress={go('NuniTimetableAssistant')}
-          />
-        ) : null}
-      </AISection>
-      <AISection title="社群經營">
-        {!!uid && <AIRow title="我的社群頁" subtitle="整理貼文、相片、影片與私人收藏" onPress={() => rootNavigateNested('Today', 'CreatorProfile', { memberUid: uid })} />}
-      </AISection>
       <AISection title="學校帳號資料">
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>
           <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
@@ -114,53 +81,40 @@ export default function MeAiFirstScreen() {
         ) : null}
         <AIRow title="個人資料" subtitle="修改顯示名稱、簡介與電話" onPress={go('ProfileEdit')} />
       </AISection>
-      <AISection title="通知與私訊">
+      <AISection title="我的內容">
         <AIRow
-          title={NOTIFY_SECTION.label}
-          subtitle="作業、系統與服務通知"
-          onPress={go(NOTIFY_SECTION.mobileScreen)}
+          title="個人社群首頁"
+          subtitle="整理署名貼文、圖文作品與發表新內容"
+          onPress={go('MySocialProfile')}
         />
-        <AIRow
-          title={DM_SECTION.label}
-          subtitle="與同學、老師的對話"
-          onPress={() => rootNavigateNested(DM_SECTION.mobileTab, DM_SECTION.mobileScreen)}
-        />
-        <AIRow
-          title="找人"
-          subtitle="加好友後才能看對方課表"
-          onPress={() => rootNavigateNested('訊息', 'FriendSearch')}
-        />
-      </AISection>
-      <AISection title="課務與生活">
-        <AIRow
-          title="課表"
-          subtitle="一週、單日、匯入與空堂"
-          onPress={() => rootNavigateNested('學習', 'PersonalTimetable')}
-        />
-        <AIRow
-          title="課程與成績"
-          subtitle="從已加入的課程查看已發布成績"
-          onPress={go('LearnHome')}
-        />
-        {isStudent && profile ? (
+        {!!uid && (
           <AIRow
-            title="學分規劃"
-            subtitle="依你的修課資料檢查畢業條件"
-            onPress={go('CreditAuditStack')}
+            title="查看公開社群頁"
+            subtitle="查看別人看到的個人介紹與作品"
+            onPress={() => rootNavigateNested('訊息', 'CreatorProfile', { memberUid: uid })}
+          />
+        )}
+      </AISection>
+      <AISection title="帳號與助理">
+        <AIRow
+          title="Google 帳號與連線"
+          subtitle="管理 Google 帳號、學校資格與店家權限"
+          onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'account' })}
+        />
+        {platformReady ? (
+          <AIRow
+            title="開啟課表助理"
+            subtitle="用已驗證的 nuni 帳號查這堂課與作業"
+            onPress={go('NuniTimetableAssistant')}
           />
         ) : null}
-        <AIRow title="行事曆" subtitle="查看課程時間與自己的安排" onPress={go('Calendar')} />
-        <AIRow title="我的群組" subtitle="查看已加入的課程與社團群組" onPress={go('Groups')} />
       </AISection>
-      <AISection title="資料與通知設定">
-        <AIRow title="通知設定" onPress={go('NotificationSettings')} />
-        <AIRow title="匯出我的資料" subtitle="取得帳號可匯出的資料" onPress={go('DataExport')} />
-        <AIRow title="刪除帳號" subtitle="查看刪除範圍與確認步驟" onPress={go('AccountDeletion')} />
-      </AISection>
-      <AISection title="使用設定">
-        <AIRow title="語言" onPress={go('LanguageSettings')} />
-        <AIRow title="外觀" subtitle="調整淺色與深色模式" onPress={go('Settings')} />
-        <AIRow title="無障礙設定" onPress={go('AccessibilitySettings')} />
+      <AISection title="設定與協助">
+        <AIRow
+          title="使用設定"
+          subtitle="外觀、通知、助理權限與資料管理"
+          onPress={go('Settings')}
+        />
         <AIRow title="幫助與回饋" onPress={go('Help')} />
         <AIRow
           title={busy ? '正在登出…' : '登出學校帳號'}

@@ -201,22 +201,25 @@ function LoginForm({
             : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
-      {!schoolTask && <AccountRoleLinks showSchool />}
       <section
         className={styles.connectionIntro}
         aria-label={schoolTask ? '校務連線方式' : '開始使用平台'}
       >
         <div>
-          <p className={styles.connectionKicker}>{schoolTask ? '校園資料，一次整理' : '從日常需要的事開始'}</p>
-          <h2>{schoolTask ? '用匯入與 Google 帳號，整理自己的課表' : '一個 Google 帳號，就能開始'}</h2>
+          <p className={styles.connectionKicker}>{schoolTask ? '接續原本的操作' : '開始使用 nuni'}</p>
+          <h2>{schoolTask ? '確認你的學校帳號' : '一個 Google 帳號，就能開始'}</h2>
           <p>
             {schoolTask
-              ? '尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。'
-              : '整理課表與行程、參與公開交流，或接續已加入課班的教材與作業。需要校方提供的個人資料時，再另外連線學校帳號。'}
+              ? schoolAvailable
+                ? '使用所選學校的學號與密碼驗證，完成後會回到你原本要做的事。'
+                : schoolUnavailable
+                  ? '這項功能需要學校帳號。目前尚未開放連線，你可以先匯入自己的課表、成績與行程。'
+                  : '確認所選學校提供的登入方式，再繼續原本的操作。'
+              : '接續課程、作業與公開交流。第一次使用會直接建立帳號，不必另外註冊。'}
           </p>
         </div>
         <div className={styles.connectionFacts}>
-          <span>{schoolTask ? '尚未開放學號直接登入' : '不需要學號或學校信箱'}</span>
+          <span>{schoolTask ? '保留原本的操作位置' : '不需要學號或學校信箱'}</span>
           <span>可自行匯入課表、成績與活動</span>
         </div>
       </section>
@@ -277,7 +280,7 @@ function LoginForm({
           ) : schoolAvailable ? (
             <>
               <p>
-                學號直接登入目前尚未開放；開通後可用於讀取本人的課表、成績與校務紀錄。學校帳號驗證不會自動取得教師、課班或平台管理權限。
+                使用所選學校的帳號驗證身分。課程、教師與管理權限依各服務的授權提供。
               </p>
               {schoolRequired && (
                 <p>
@@ -287,7 +290,7 @@ function LoginForm({
                 </p>
               )}
               <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
-                <p className={styles.formIntro}>學號直接登入尚未開放；開通前請先匯入課表與成績，或以 Google 帳號登入平台服務。</p>
+                <p className={styles.formIntro}>輸入學號與密碼，完成後返回原本的頁面。</p>
                 <Input
                   id="student-id"
                   name="studentId"
@@ -338,7 +341,7 @@ function LoginForm({
               </form>
               <details className={styles.connectionDetails}>
                 <summary>連線後能看到哪些資料？</summary>
-                <p>學號直接登入目前尚未開放；開通後可依學校系統當次回應取得個人課表與成績。學校帳號驗證不等於取得平台的教師或管理權限。</p>
+                <p>依學校當次提供的資料查看個人紀錄。課程成員、教師與平台管理權限會分別確認。</p>
                 <p>密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。</p>
               </details>
             </>
@@ -373,6 +376,12 @@ function LoginForm({
           </Link>
         </details>
       </div>
+      {!schoolTask && (
+        <details className={styles.connectionDetails}>
+          <summary>店家、教師與管理入口</summary>
+          <AccountRoleLinks showSchool />
+        </details>
+      )}
       <section className={styles.guestAccess} aria-labelledby="guest-access-title">
         <div>
           <h2 id="guest-access-title">先瀏覽校園資訊</h2>

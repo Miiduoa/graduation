@@ -33,6 +33,16 @@ it('lists lost-found as a Google platform service', () => {
   expect(lostFound?.text).toContain('Google');
 });
 
+it('keeps student identity and the shared school/Google assistant under the account section', () => {
+  const card = CAMPUS_SERVICES.find((service) => service.href === '/student-card');
+  const assistant = CAMPUS_SERVICES.find((service) => service.href === '/ai-assistant');
+  expect(card?.category).toBe('account');
+  expect(card?.access).toBe('account');
+  expect(assistant?.category).toBe('account');
+  expect(assistant?.access).toBe('account');
+  expect(serviceAccessLabel(assistant!.access, { loading: false, studentId: false })).toBe('依帳號查看');
+});
+
 it.each(['Google', '公開 貼文', '跨校'])(
   'finds public exchange through %s without requiring school sign-in availability',
   (query) => {

@@ -15,7 +15,7 @@ import headerStyles from './AppHeader.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { LoginLink } from './LoginLink';
 import { currentReturnPath } from '@/lib/navigation';
-import { primaryNavigationSection } from '@/lib/primaryNavigation';
+import { PRIMARY_DESTINATIONS, primaryNavigationSection } from '@/lib/primaryNavigation';
 
 type HeaderProps = { onOpenVoice?: () => void };
 
@@ -46,7 +46,7 @@ function Header({ onOpenVoice }: HeaderProps) {
   const checking = !hydrated || loading || nuni.loading;
   return (
     <>
-      <header className={headerStyles.header + (onOpenVoice ? ' ' + headerStyles.today : '')} data-campus-navigation="true">
+      <header className={headerStyles.header} data-campus-navigation="true">
         <Link href={href('/')} className={headerStyles.brand} aria-label="nuni">
           <span className={headerStyles.mark} aria-hidden>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -70,25 +70,12 @@ function Header({ onOpenVoice }: HeaderProps) {
             onClick={onOpenVoice ?? (() => setQuickOpen((opened) => !opened))}
           >
             <CampusIcon name="microphone" size={18} />
-            <span>語音 AI</span>
+            <span>助理</span>
           </button>
-          <Link
-            href={href('/search')}
-            className={headerStyles.quickSearch}
-            aria-label="搜尋服務與語音輸入"
-            title="搜尋服務與語音輸入"
-          >
-            <CampusIcon name="search" size={17} />
-            <span>搜尋</span>
-          </Link>
+          <CampusServiceMenu />
           {!checking && nuni.session?.isPlatformOperator && (
             <Link className={headerStyles.operatorLink} href="/admin">
               平台管理
-            </Link>
-          )}
-          {!checking && (user || nuni.session) && (
-            <Link className={headerStyles.profileLink} href="/profile">
-              我的帳號
             </Link>
           )}
           {user || nuni.session || nuni.pendingLogout ? (
@@ -132,29 +119,17 @@ function Header({ onOpenVoice }: HeaderProps) {
           ) : null}
         </div>
         <nav aria-label="主要導覽" className={headerStyles.nav}>
-          <Link href={href('/')} aria-current={activeSection === 'today' ? 'page' : undefined}>
-            <CampusIcon name="calendar" size={17} />
-            今天
-          </Link>
-          <Link
-            href={href('/timetable')}
-            aria-current={activeSection === 'study' ? 'page' : undefined}
-            title="課務：課表、課程與作業、成績"
-          >
-            <CampusIcon name="library" size={17} />
-            課務
-          </Link>
-          <Link href={href('/life')} aria-current={activeSection === 'life' ? 'page' : undefined}>
-            <CampusIcon name="map" size={17} />
-            生活
-          </Link>
-          <Link
-            href={user || nuni.session ? '/profile' : '/login?returnUrl=%2Fprofile'}
-            aria-current={activeSection === 'me' ? 'page' : undefined}
-          >
-            <CampusIcon name="profile" size={17} />我
-          </Link>
-          <CampusServiceMenu />
+          {PRIMARY_DESTINATIONS.map((destination) => (
+            <Link
+              key={destination.id}
+              href={href(destination.href)}
+              aria-current={activeSection === destination.id ? 'page' : undefined}
+              title={destination.id === 'study' ? '課務：課表、課程與作業、成績' : undefined}
+            >
+              <CampusIcon name={destination.icon} size={17} />
+              {destination.label}
+            </Link>
+          ))}
         </nav>
       </header>
       {quickOpen && (
@@ -179,7 +154,9 @@ function Header({ onOpenVoice }: HeaderProps) {
         >
           <div className={headerStyles.voicePanelHeading}>
             <span>校園快速操作</span>
-            <button type="button" onClick={closeQuick} aria-label="關閉校園語音 AI">關閉</button>
+            <button type="button" onClick={closeQuick} aria-label="關閉校園語音 AI">
+              關閉
+            </button>
           </div>
           <QuickCampusEntry />
         </section>
@@ -196,7 +173,7 @@ export function AppHeader(props: HeaderProps) {
   return (
     <Suspense
       fallback={
-        <header className={headerStyles.header + (props.onOpenVoice ? ' ' + headerStyles.today : '')} data-campus-navigation="true">
+        <header className={headerStyles.header} data-campus-navigation="true">
           <Link href="/" className={headerStyles.brand} aria-label="nuni">
             <span className={headerStyles.mark} aria-hidden="true">
               {/* eslint-disable-next-line @next/next/no-img-element */}

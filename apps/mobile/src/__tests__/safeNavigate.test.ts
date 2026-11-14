@@ -201,3 +201,36 @@ describe('safeNavigate / same-stack', () => {
     expect(allText).not.toContain('即將推出');
   });
 });
+
+
+test.each([
+  'CampusSocialScreen',
+  'BoardDetail',
+  'PostCompose',
+  'CreatorPostCompose',
+  'PostDetail',
+  'StoryCompose',
+  'CreatorProfile',
+])('%s 從其他分區進入交流，既有同堆疊路由仍原地開啟', (route) => {
+  const fromMe = makeNavigation(['MeHome']);
+  expect(safeNavigate(fromMe, route, { postId: 'p1' })).toBe(true);
+  expect(fromMe.navigate).toHaveBeenCalledWith('訊息', { screen: route, params: { postId: 'p1' } });
+  const currentStack = makeNavigation(['Inbox', route]);
+  expect(safeNavigate(currentStack, route, { postId: 'p1' })).toBe(true);
+  expect(currentStack.navigate).toHaveBeenCalledWith(route, { postId: 'p1' });
+  const legacyHome = makeNavigation(['TodayHome', route]);
+  expect(safeNavigate(legacyHome, route)).toBe(true);
+  expect(legacyHome.navigate).toHaveBeenCalledWith(route, undefined);
+});
+
+test('通知的跨分區入口屬於交流，舊我的堆疊仍可直接返回原處', () => {
+  const fromToday = makeNavigation(['TodayHome']);
+  expect(safeNavigate(fromToday, 'Notifications')).toBe(true);
+  expect(fromToday.navigate).toHaveBeenCalledWith('訊息', {
+    screen: 'Notifications',
+    params: undefined,
+  });
+  const legacyMe = makeNavigation(['MeHome', 'Notifications']);
+  expect(safeNavigate(legacyMe, 'Notifications')).toBe(true);
+  expect(legacyMe.navigate).toHaveBeenCalledWith('Notifications', undefined);
+});

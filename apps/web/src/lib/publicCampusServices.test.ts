@@ -11,8 +11,11 @@ it('registers campus events as a public browsing entry including detail paths', 
 
 it('treats the public service directories as public without opening academic routes', () => {
   expect(isPublicCampusPath('/life')).toBe(true);
+  expect(isPublicCampusPath('/connect')).toBe(true);
   expect(isPublicCampusPath('/search')).toBe(true);
   expect(isPublicCampusPath('/life/private')).toBe(false);
+  expect(isPublicCampusPath('/connect/private')).toBe(false);
+  expect(isPublicCampusPath('/connect-other')).toBe(false);
   expect(isPublicCampusPath('/search/private')).toBe(false);
   expect(isPublicCampusPath('/timetable')).toBe(false);
   expect(isPublicCampusPath('/grades')).toBe(false);

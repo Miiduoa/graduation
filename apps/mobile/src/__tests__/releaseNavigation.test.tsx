@@ -1,6 +1,9 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { schoolLinking } from '../app/schoolLinking';
+import type { RootTabParamList } from '../app/rootNavigation';
 import Constants from 'expo-constants';
 import { HomeStack } from '../screens/HomeStack';
 import { LearnStack } from '../screens/LearnStack';
@@ -10,6 +13,10 @@ import { MessagesStack } from '../screens/MessagesStack';
 import { ensureLmsV2DemoSignIn } from '../services/lmsV2DemoSignIn';
 import { askCampusAssistant } from '../features/campusAssistant';
 jest.mock('@react-navigation/native', () => jest.requireActual('@react-navigation/native'));
+jest.mock('expo-linking', () => ({
+  ...jest.requireActual('expo-linking'),
+  createURL: () => 'campus://',
+}));
 let mockAuth: any;
 const mockAuthContext = React.createContext<any>(null);
 let mockSchool = 'pu';
@@ -1183,12 +1190,80 @@ test('student grade row reaches its workspace gradebook through the navigator', 
   expect(navigation.getCurrentRoute()?.params).toMatchObject({ groupId: 'course-1', sourceSystem: 'workspace' });
 });
 
-test('個人頁發文使用獨立路由，保留一般發文路由', async () => {
-  const { navigation } = await mount(HomeStack);
-  act(() => navigation.navigate('PostCompose'));
-  const draftKey = navigation.getRootState().routes.find((route) => route.name === 'PostCompose')?.key;
-  expect(draftKey).toBeTruthy();
-  act(() => navigation.navigate('CreatorPostCompose'));
-  expect(navigation.getCurrentRoute()?.name).toBe('CreatorPostCompose');
-  expect(navigation.getRootState().routes.find((route) => route.name === 'PostCompose')?.key).toBe(draftKey);
+test.each([HomeStack, MessagesStack])(
+  '個人頁發文使用獨立路由，保留一般發文路由與舊入口',
+  async (Stack) => {
+    const { navigation } = await mount(Stack);
+    act(() => navigation.navigate('PostCompose'));
+    const draftKey = navigation
+      .getRootState()
+      .routes.find((route) => route.name === 'PostCompose')?.key;
+    expect(draftKey).toBeTruthy();
+    act(() => navigation.navigate('CreatorPostCompose'));
+    expect(navigation.getCurrentRoute()?.name).toBe('CreatorPostCompose');
+    expect(
+      navigation.getRootState().routes.find((route) => route.name === 'PostCompose')?.key,
+    ).toBe(draftKey);
+  },
+);
+
+
+test('交流首頁開啟社群與貼文後，返回仍在原來的交流堆疊', async () => {
+  const { view, navigation } = await mount(MessagesStack);
+  expect(view.getByText('交流')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '前往校園社群' }));
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusSocialScreen');
+  expect(view.getByText('CommunityScreen')).toBeTruthy();
+  act(() => navigation.navigate('BoardDetail', { boardId: 'campus-board', boardName: '校園板' }));
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({ boardId: 'campus-board' });
+  act(() => navigation.navigate('PostDetail', { postId: 'campus-post' }));
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({ postId: 'campus-post' });
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('BoardDetail');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusSocialScreen');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('Inbox');
+  expect(view.getByText('DmsScreen')).toBeTruthy();
+});
+
+test('交流的通知入口留在同一堆疊，返回仍保有對話入口', async () => {
+  const { view, navigation } = await mount(MessagesStack);
+  fireEvent.press(view.getByRole('button', { name: '前往通知' }));
+  expect(navigation.getCurrentRoute()?.name).toBe('Notifications');
+  expect(view.getByText('NotificationsAiFirstScreen')).toBeTruthy();
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('Inbox');
+  expect(view.getByText('DmsScreen')).toBeTruthy();
+});
+
+test.each([
+  ['community', 'CampusSocialScreen'],
+  ['post/shared-post', 'PostDetail'],
+  ['notifications', 'Notifications'],
+])('冷啟動 %s 連結使用交流分頁且返回交流首頁', async (path, screen) => {
+  const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
+  const navigation = createNavigationContainerRef<RootTabParamList>();
+  const initialState = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
+  render(
+    <mockAuthContext.Provider value={mockAuth}>
+      <NavigationContainer ref={navigation} initialState={initialState}>
+        <Tabs.Navigator id={undefined} screenOptions={{ headerShown: false }}>
+          <Tabs.Screen name="Today" component={HomeStack} />
+          <Tabs.Screen name="學習" component={LearnStack} />
+          <Tabs.Screen name="校園" component={MapStack} />
+          <Tabs.Screen name="訊息" component={MessagesStack} />
+          <Tabs.Screen name="我的" component={MeStack} />
+        </Tabs.Navigator>
+      </NavigationContainer>
+    </mockAuthContext.Provider>,
+  );
+  await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe(screen));
+  let state = navigation.getRootState();
+  expect(state.routes[state.index].name).toBe('訊息');
+  expect(navigation.canGoBack()).toBe(true);
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('Inbox');
+  state = navigation.getRootState();
+  expect(state.routes[state.index].name).toBe('訊息');
 });

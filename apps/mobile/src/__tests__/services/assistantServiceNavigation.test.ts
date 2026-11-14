@@ -25,7 +25,10 @@ test('a mounted school tab can be reached through its real parent navigator', ()
   const root = navigator(['Today', '學習', '校園', '訊息', '我的']);
   const child = { ...navigator(['AIChat']), getParent: () => root };
   expect(navigateMobileAssistantService('community', 'campus', child)).toBe(true);
-  expect(child.navigate).toHaveBeenCalledWith('Today', { screen: 'CampusSocialScreen', params: undefined });
+  expect(child.navigate).toHaveBeenCalledWith('訊息', {
+    screen: 'CampusSocialScreen',
+    params: undefined,
+  });
 });
 
 test('platform private services never borrow Firebase tabs even if both navigators are present', () => {

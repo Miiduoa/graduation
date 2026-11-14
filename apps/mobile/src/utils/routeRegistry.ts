@@ -28,13 +28,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   公告詳情: 'Today',
   活動總覽: 'Today',
   活動詳情: 'Today',
-  CampusSocialScreen: 'Today',
   CampusGame: 'Today',
-  BoardDetail: 'Today',
-  PostCompose: 'Today',
-  CreatorPostCompose: 'Today',
-  PostDetail: 'Today',
-  StoryCompose: 'Today',
   SmartCalendarScreen: 'Today',
 
   // ── 學習 tab（學生/老師/TA/主任/餐廳 cockpit 與相關工具）─────
@@ -137,6 +131,14 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   FriendSearch: '訊息',
   FriendsManage: '訊息',
   FollowingLists: '訊息',
+  CampusSocialScreen: '訊息',
+  BoardDetail: '訊息',
+  PostCompose: '訊息',
+  CreatorPostCompose: '訊息',
+  PostDetail: '訊息',
+  StoryCompose: '訊息',
+  CreatorProfile: '訊息',
+  Notifications: '訊息',
 
   // ── 我的 tab（hidden tab，drawer 進入）─────────────────
   MeHome: '我的',
@@ -145,7 +147,6 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   ProfileEdit: '我的',
   Settings: '我的',
   AssistantPermissions: '我的',
-  Notifications: '我的',
   NotificationSettings: '我的',
   LanguageSettings: '我的',
   AccessibilitySettings: '我的',

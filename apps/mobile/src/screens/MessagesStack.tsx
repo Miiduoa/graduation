@@ -19,6 +19,14 @@ import { FollowingListsScreen } from './FollowingListsScreen';
 import { ChatScreen } from './ChatScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { RouteGuard } from '../ui/RouteGuard';
+import { CommunityScreen } from './CommunityScreen';
+import { BoardDetailScreen } from './social/BoardDetailScreen';
+import { PostComposeScreen } from './social/PostComposeScreen';
+import { PostDetailScreen } from './social/PostDetailScreen';
+import { StoryComposeScreen } from './social/StoryComposeScreen';
+import { CreatorProfileScreen } from './social/CreatorProfileScreen';
+import { CampusGameScreen } from './CampusGameScreen';
+import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
@@ -43,12 +51,46 @@ export function MessagesStack() {
       <Stack.Screen
         name="Inbox"
         component={MessagesLandingScreen}
-        options={{ title: '私訊', headerShown: false }}
+        options={{ title: '交流', headerShown: false }}
       />
       <Stack.Screen
         name="MessagesHome"
         component={MessagesLandingScreen}
-        options={{ title: '私訊', headerShown: false }}
+        options={{ title: '交流', headerShown: false }}
+      />
+      {/* 沿用同一組畫面與權限；HomeStack 保留舊程式導覽的路由。 */}
+      <Stack.Screen
+        name="CampusSocialScreen"
+        component={CommunityScreen}
+        options={{ title: '校園社群', headerShown: false }}
+      />
+      <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
+      <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
+      <Stack.Screen
+        name="CreatorPostCompose"
+        component={PostComposeScreen}
+        options={{ title: '發表貼文' }}
+      />
+      <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ title: '貼文' }} />
+      <Stack.Screen
+        name="StoryCompose"
+        component={StoryComposeScreen}
+        options={{ title: '發 Story' }}
+      />
+      <Stack.Screen
+        name="CreatorProfile"
+        component={CreatorProfileScreen}
+        options={{ title: '校園個人頁' }}
+      />
+      <Stack.Screen
+        name="CampusGame"
+        component={CampusGameScreen}
+        options={{ title: '校園漫步' }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsAiFirstScreen}
+        options={{ title: '通知', headerShown: false }}
       />
       <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: '群組' }} />
       <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: '群組' }} />

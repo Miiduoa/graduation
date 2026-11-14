@@ -20,11 +20,22 @@ it.each([
   ['/cafeteria/restaurant-1', 'life'],
   ['/food', 'life'],
   ['/shops', 'life'],
-  ['/hub', 'life'],
+  ['/hub', 'today'],
   ['/bus/registered', 'life'],
   ['/library', 'life'],
   ['/events/talk-1', 'life'],
-  ['/community/post/topic-1', 'life'],
+  ['/community/post/topic-1', 'connect'],
+  ['/connect', 'connect'],
+  ['/social', 'connect'],
+  ['/dms/conversation-1', 'connect'],
+  ['/friends', 'connect'],
+  ['/announcements/news-1', 'connect'],
+  ['/messages', 'connect'],
+  ['/student-card', 'me'],
+  ['/student-card/verify', 'me'],
+  ['/profile', 'me'],
+  ['/auth/account', 'me'],
+  ['/auth/platform/class-workspace/cw_123', 'study'],
   ['/settings', 'me'],
   ['/classroom/account', 'me'],
   ['/admin/students/student-1', 'more'],
@@ -39,6 +50,9 @@ it.each([
   '/grades-old',
   '/school-courses-old',
   '/unknown',
+  '/connect-old',
+  '/community-old',
+  '/student-card-old',
   '/classroom/login',
   null,
   undefined,
@@ -46,9 +60,9 @@ it.each([
   expect(primaryNavigationSection(pathname)).toBeNull();
 });
 
-it('treats legacy /today and /hub only as section aliases, not as link targets from header vocabulary', () => {
+it('keeps home aliases in the section they redirect to', () => {
   expect(primaryNavigationSection('/today')).toBe('today');
-  expect(primaryNavigationSection('/hub')).toBe('life');
+  expect(primaryNavigationSection('/hub')).toBe('today');
   expect(primaryNavigationSection('/')).toBe('today');
   expect(primaryNavigationSection('/life')).toBe('life');
 });
