@@ -1118,3 +1118,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 三種本機匯出（TXT 學習筆記、閱讀進度 JSON、逐題練習 JSON）改用同一份檔名處理規則。原先只移除控制字元與部分雙向文字控制符；如果教材標題在 `.markdown` 前含有 U+200B 零寬空白或 U+2060 word joiner，手機下載清單可能顯示不易辨識的檔名，且無法去掉原教材副檔名。現在在**匯出檔名**中移除常見不可見格式與雙向控制符，既有 48 code point 上限及固定備份副檔名不變；刻意保留 ZWJ/ZWNJ，避免破壞語言及 Emoji 顯示。
 - 為三種匯出路徑各加正反回歸：隱藏字元後的 `.markdown` 仍能移除，含 ZWJ 的 Emoji 教材名稱仍保留。未改動來源教材、個人筆記、JSON 內容、scope/驗證、下載機制或私人資料傳輸，也不新增依賴。
 - 這是可獨立核對的檔名安全及行動使用改善，不代表 iOS Safari／Android Chrome 真機、完整 CI/CodeQL、App 5504170 審查、Maestro、WebGPU 中文教學或 Ahaboard 同機比較已通過。PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-14：手機備份名稱在 48 字元邊界不截斷國旗或組合字形
+
+- 原共用檔名規則雖依 Unicode code point 截至 48 個，但可能留下國旗的一半 regional indicator、Emoji ZWJ 的前半、重音組合符號或韓文 Jamo 的不完整字形。現在保留既有檔名淨化與 48 code point 上限，在支援的瀏覽器使用裝置內建 Intl.Segmenter 選完整字素；舊版／異常 WebView 使用有限的本機邊界回退，不跳過超出上限字素之後的字串。
+- 同時涵蓋 TXT 筆記、閱讀 JSON、逐題練習 JSON。新增 Vitest 正反案例檢查 Emoji／國旗／重音／韓文在上限內及上限邊緣的檔名，以及沒有或異常 Segmenter 的退路。教材文字、JSON 備份格式、跨帳號／課程 scope、E 校園資料界線均不變，不新增套件或付費服務。
+- 本輪僅完成程式與有限邊界檢查；Web/Mobile 全套 CI、CodeQL、App 5504170 APPROVED、iOS Safari／Android Chrome 真機、Maestro、WebGPU 繁體中文教學可靠性及 Ahaboard 同教材同機比較必須依新 SHA 另驗。PR 保留 Draft，不合併、不部署。
