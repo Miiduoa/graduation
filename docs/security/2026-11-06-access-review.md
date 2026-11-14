@@ -732,3 +732,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 **第三次精確 head 的 evaluator 限制與降階相容方案**：`b190c453f5baaa212edc5d6a8a1022b63b6b92ba` 的 [Rules job #132518328190](https://github.com/Miiduoa/graduation/actions/runs/43618340274/job/132518328190) 再得 **329 passed / 3 failed**，同三項相容案例都在更新反應時觸及 Firestore 的 1000 expressions 上限，即使採用 affectedKeys 短路，仍超過 16 emoji 的規則求值預算。為避免放寬任何人的 UID 權限或刪除舊測試，這輪採保守的 **6 個 emoji key（👍 ❤️ 😂 😆 🎉 😢）**，現有其他 emoji 歷史資料仍可讀、保持原樣，客戶端更新未知 emoji 會被拒絕（功能相容風險待修）。待新 head 的 emulator 先證實基礎讀寫與撤權通過，才能單獨規劃不限 emoji 的受審核伺服器端反應 API。
 
 **第四次 CI 誤差排查（2026-11-15）**：`48a41913a020ed1fa845565422e6d0d8ab9e0159` 的 [Rules job #132519573817](https://github.com/Miiduoa/graduation/actions/runs/43618748807/job/132519573817) **329 passed / 3 failed**，這次不再是 1000 expressions 錯誤，而是三個原有「existing DM members retain reads, sends and edits」相容回歸仍使用舊版 `reactions: { bob: '❤️' }`（**UID → emoji**）。因此歷史存在兩種資料形狀：舊用戶端 UID→emoji，新版 Mobile 顯示的 emoji→UID[]。不能為了修補安全而破壞任何一種。現追加 UID→emoji 的對應本人欄位精確限制（受檢 UID 以外的 map keys 不可變），並保留前輪 emoji→UID[] 的六種受審核 emoji 逐 key 限制，補上舊格式的正常、偽造、清票、型別及重放回歸。**新 head CI 尚待確認**；舊格式和新格式並存需要前端規格統一，不能宣稱完全相容。前版 16 key 超過求值上限是另一次獨立已證實的問題。
+
+
+## 2026-11-15：店家 followers 收據限本人精確讀取（PR #577）
+
+檢視 Firestore `schools/{schoolId}/cafeterias/{cafeteriaId}/followers/{uid}` 發現，原規則 `allow read: if isSignedIn()` 讓任何登入帳號直接讀取或列舉不同店家的全部追蹤收據，進而取得用戶 UID 與其店家追蹤興趣。無須是該使用者本人，也無需具備該校校籍。這是由既有 Rules 可推導的隱私資料曝光面，**尚無正式站遭到列舉的證據**。
+
+本輪將讀權分離為 `get: isSelf(uid)`、`list: false`，維持既有 `create/delete: isSelf(uid)` 與 `update: false`。目前 Web／Mobile 的 `isFollowingStorefront` 都只依登入者 UID 進行單筆 `getDoc`／`getDocFromServer`，`followStorefront` 仍建立／刪除本人收據，正常追蹤功能不應受影響。受限制的僅是直接讀取他人追蹤及全店追蹤者名單。若未來需要店家總追蹤數，須採伺服器維護的無個資彙總，不能恢復任意列舉用戶資料。
+
+新增 `backend/tests/security-rules.test.js` Firebase Emulator 合成回歸：本人與另一帳號各自合法 GET、跨帳號／跨校／匿名讀取拒絕、無條件與過濾查詢 list 拒絕、本人追蹤／取消後復原、他人冒刪／冒寫拒絕。**本輪原始碼與測試完成並不代表新 head CI 已通過**，須重新核對精確提交 Rules、主 CI、CodeQL 與相容性。此修補不回收先前已被下載的追蹤資料，也不處理尚未解除的群組未發布父貼文 get/list、已發 GCS/Supabase URL 撤銷、真隔離 Storage 競態、歷史可信附件引用、minimatch 雙鎖檔及正式發布回復驗證。
+
+沿用資安 Draft PR，不觸碰主線、正式資料／憑證／token／migration、部署、E 校園，也不重新執行未取得授權的 npm/pnpm audit；指定 nuni-merge-gate App 5504170 對精確 head 的「審查通過」仍是主線合併必要條件。

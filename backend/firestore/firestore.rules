@@ -667,7 +667,11 @@ service cloud.firestore {
         }
 
         match /followers/{uid} {
-          allow read: if isSignedIn();
+          // A storefront follow receipt exposes personal shopping interests.
+          // Web and Mobile only read the current user's own receipt by exact ID.
+          // Listing an entire store's followers would reveal other accounts.
+          allow get: if isSelf(uid);
+          allow list: if false;
           allow create, delete: if isSelf(uid);
           allow update: if false;
         }

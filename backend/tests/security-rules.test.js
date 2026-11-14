@@ -306,6 +306,36 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('storefront follower receipts cannot expose another user or enumerate customers', async () => {
+    const followers = 'schools/pu/cafeterias/cafe-1/followers';
+    await seedFirestore(async (db) => {
+      await db.doc(`${followers}/alice`).set({ createdAt: new Date('2026-11-14T12:00:00Z') });
+      await db.doc(`${followers}/mallory`).set({ createdAt: new Date('2026-11-14T12:00:00Z') });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    // The Web/Mobile storefront toggle reads the exact current user's UID.
+    await assertSucceeds(alice.doc(`${followers}/alice`).get());
+    await assertSucceeds(mallory.doc(`${followers}/mallory`).get());
+    await assertFails(bob.doc(`${followers}/alice`).get());
+    await assertFails(mallory.doc(`${followers}/alice`).get());
+    await assertFails(alice.doc(`${followers}/mallory`).get());
+    await assertFails(guest.doc(`${followers}/alice`).get());
+    // Firestore list is forbidden even when a client supplies an ID filter.
+    await assertFails(alice.collection(followers).get());
+    await assertFails(alice.collection(followers).where('__name__', '==', 'alice').get());
+    await assertFails(mallory.collection(followers).get());
+
+    // Following and unfollowing one's own shop receipt remain operational.
+    await assertSucceeds(alice.doc(`${followers}/alice`).delete());
+    await assertSucceeds(alice.doc(`${followers}/alice`).set({ createdAt: new Date() }));
+    await assertFails(bob.doc(`${followers}/alice`).delete());
+    await assertFails(bob.doc(`${followers}/alice`).set({ createdAt: new Date() }));
+  });
+
   test('orphaned, disabled or revoked cafeteria operators cannot read orders or edit storefronts', async () => {
     const school = 'schools/tw-demo-uni';
     const cafe = `${school}/cafeterias/cafe-a`;
