@@ -24,6 +24,7 @@ import {
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
   DORM_REPAIR_COPY,
+  DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
@@ -571,11 +572,11 @@ function DormitoryBody({
               {cloud.packages.some(p => p.status === 'waiting' && !p.postal) && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('parcels')}>
                 <Text style={{ color: aiTokens.text }}>待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}</Text>
               </Pressable>}
-              {cloud.repairs.some(r => r.status && r.status !== 'closed') && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('repairs')}>
-                <Text style={{ color: aiTokens.text }}>報修處理中 {cloud.repairs.filter(r => r.status && r.status !== 'closed').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed')!.status!]}</Text>
+              {cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('repairs')}>
+                <Text style={{ color: aiTokens.text }}>報修處理中 {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}</Text>
               </Pressable>}
               {!!data.laundryEndAt && remaining > 0 && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('laundry')}><Text style={{ color: aiTokens.text }}>洗衣倒數 {remaining} 分鐘</Text></Pressable>}
-              {!cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <Body>今晚沒有待辦。</Body>}
+              {!cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <Body>今晚沒有待辦。</Body>}
             </AICard>
             <AICard title="我的住宿備忘">
               <Body muted>此處資料由你自行填寫，不代表實際床位分配結果。</Body>
@@ -757,6 +758,7 @@ function DormitoryBody({
                     )}
                   </View>
                   <Field label="位置" value={repair.location} maxLength={100} placeholder="例如：浴室洗手台" onChangeText={(text) => setRepair({ ...repair, location: text })} />
+                  <Field label={DORM_REPAIR_COPY.referenceLabel} value={repair.reference} maxLength={DORM_REPAIR_REFERENCE_LIMIT} placeholder={DORM_REPAIR_COPY.referencePlaceholder} onChangeText={(reference) => setRepair({ ...repair, reference })} />
                   <Field label="可聯繫時段／入室協調（選填）" value={repair.availability} maxLength={160}
                     placeholder="例如：平日 18 點後可聯繫，入室前請先協調" onChangeText={(availability) => setRepair({ ...repair, availability })} />
                   <Field label="下次追問日期（選填，YYYY-MM-DD）" value={repair.followUpDate} maxLength={10}
@@ -786,6 +788,7 @@ function DormitoryBody({
                 <Body muted>{DORM_REPAIR_STATUSES[item.status]}</Body>
                 {!!item.location && <Body>位置：{item.location}</Body>}
                 {!!item.description && <Body>{item.description}</Body>}
+                {!!item.reference && <Body>{DORM_REPAIR_COPY.referenceDisplay}：{item.reference}</Body>}
                 {!!item.availability && <Body>可聯繫時段／入室協調：{item.availability}</Body>}
                 {!!item.followUpDate && item.status !== 'resolved' && <Body>{item.followUpDate <= today ? '追問日期已到／已過' : '下次追問'}：{item.followUpDate}</Body>}
                 {!!item.followUpNote && <Body>聯繫紀錄（自行記錄）：{item.followUpNote}</Body>}

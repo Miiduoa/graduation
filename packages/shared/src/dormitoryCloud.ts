@@ -15,6 +15,7 @@ export const DORM_CLOUD_REPAIR_LABELS = {
   in_progress: '已安排維修',
   completed: '已修好，請確認',
   closed: '已結案',
+  cancelled: '已取消',
 } as const;
 export type DormCloudRepairStatus = keyof typeof DORM_CLOUD_REPAIR_LABELS;
 export type DormCloudRepair = {
@@ -88,7 +89,7 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
   const raw = row.status === 'inProgress' ? 'in_progress' : row.status;
   const counselorActivity =
     raw !== 'pending' ||
-    ['assignedAt', 'in_progressAt', 'completedAt', 'closedAt'].some(
+    ['assignedAt', 'in_progressAt', 'completedAt', 'closedAt', 'cancelledAt'].some(
       (key) => dormCloudTime(row[key]) !== null,
     );
   const status =
@@ -101,6 +102,7 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
     'in_progress',
     'completed',
     'closed',
+    'cancelled',
   ];
   const steps = order.flatMap((step) => {
     if (!status) return [];

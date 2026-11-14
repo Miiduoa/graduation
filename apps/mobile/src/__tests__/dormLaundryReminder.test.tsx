@@ -266,3 +266,33 @@ test('cloud parcels show arrival and identity, keep postal items separate, and p
   expect(screen.queryByText(/PRIVATE-REF|已送出|單號|你抽中了|通行證|已扣款/)).toBeNull();
   expect(screen.getByText('緊急請直接打服務台')).toBeTruthy();
 });
+
+test('a resident can view and update an existing local repair reference', async () => {
+  const { DORM_REPAIR_COPY } = require('@campus/shared/src/dormitory');
+  await AsyncStorage.setItem(scope, JSON.stringify({ repairs: [{ id: 'local', title: '水龍頭漏水', reference: 'LOCAL-123' }] }));
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('設備問題'));
+  expect(screen.getByText(`${DORM_REPAIR_COPY.referenceDisplay}：LOCAL-123`)).toBeTruthy();
+  fireEvent.press(screen.getByText('編輯'));
+  fireEvent.changeText(screen.getByLabelText(DORM_REPAIR_COPY.referenceLabel), 'LOCAL-456');
+  await act(async () => fireEvent.press(screen.getByText(DORM_REPAIR_COPY.saveMemo)));
+  expect(screen.getByText(`${DORM_REPAIR_COPY.referenceDisplay}：LOCAL-456`)).toBeTruthy();
+  expect(JSON.parse((await AsyncStorage.getItem(scope))!).repairs[0].reference).toBe('LOCAL-456');
+});
+
+test('cancelled repairs show their timestamp without counting as pending tasks', async () => {
+  const { projectDormRepair, dormCloudDate } = require('@campus/shared/src/dormitoryCloud');
+  const cancelledAt = Date.UTC(2026, 10, 14, 8);
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    change({ packages: [], repairs: [projectDormRepair('cancelled', { description: '已取消的報修', status: 'cancelled', cancelledAt })], packagesState: 'ready', repairsState: 'ready', identity: null });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  expect(screen.queryByText(/報修處理中/)).toBeNull();
+  expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
+  fireEvent.press(screen.getByText('設備問題'));
+  expect(screen.getByText(`已取消 · ${dormCloudDate(cancelledAt)}`)).toBeTruthy();
+  expect(screen.queryByText(/尚未確認輔導員接手/)).toBeNull();
+});

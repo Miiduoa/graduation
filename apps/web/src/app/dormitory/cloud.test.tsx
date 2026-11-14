@@ -181,3 +181,17 @@ it('does not relabel a preexisting server-side personal memo as delivered to a c
   expect(reopened.status).toBe('pending');
   expect(reopened.steps).toContainEqual({ status: 'pending', at: 1700000060000 });
 });
+
+it('shows cancellation time and excludes cancelled repairs from tonight tasks', () => {
+  render(<DormitoryPage />);
+  const cancelledAt = Date.UTC(2026, 10, 14, 8);
+  const repair = projectDormRepair('cancelled', { description: '已取消的冷氣報修', status: 'cancelled', cancelledAt, reference: 'STAFF-ONLY' });
+  expect(repair.status).toBe('cancelled');
+  expect(repair.steps).toContainEqual({ status: 'cancelled', at: cancelledAt });
+  act(() => mock.listeners[0]({ ...state(), repairs: [repair] }));
+  expect(screen.queryByText(/報修處理中/)).toBeNull();
+  expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  expect(screen.getByText(/已取消 ·/)).toBeTruthy();
+  expect(screen.queryByText(/尚未確認輔導員接手|STAFF-ONLY/)).toBeNull();
+});

@@ -8,6 +8,7 @@ import {
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
   DORM_REPAIR_COPY,
+  DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
@@ -482,11 +483,11 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
           {cloud.packages.some(p => p.status === 'waiting' && !p.postal) && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('parcels')}>
             待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}
           </button>}
-          {cloud.repairs.some(r => r.status && r.status !== 'closed') && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('repairs')}>
-            報修處理中 {cloud.repairs.filter(r => r.status && r.status !== 'closed').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed')!.status!]}
+          {cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('repairs')}>
+            報修處理中 {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}
           </button>}
           {!!data.laundryEndAt && remaining > 0 && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('laundry')}>洗衣倒數 {remaining} 分鐘</button>}
-          {!cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <p>今晚沒有待辦。</p>}
+          {!cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <p>今晚沒有待辦。</p>}
         </section>}
 
         {view === 'overview' && (
@@ -630,6 +631,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                   <label>問題名稱 *<input required minLength={2} maxLength={90} value={repairDraft.title} onChange={(e) => setRepairDraft({ ...repairDraft, title: e.target.value })} placeholder="例如：浴室水龍頭持續滴水" /></label>
                   <label>類別<select value={repairDraft.category} onChange={(e) => setRepairDraft({ ...repairDraft, category: e.target.value as DormRepairCategory })}>{Object.entries(DORM_REPAIR_CATEGORIES).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
                   <label>位置<input maxLength={100} value={repairDraft.location} onChange={(e) => setRepairDraft({ ...repairDraft, location: e.target.value })} placeholder="例如：浴室洗手台" /></label>
+                  <label>{DORM_REPAIR_COPY.referenceLabel}<input maxLength={DORM_REPAIR_REFERENCE_LIMIT} value={repairDraft.reference} placeholder={DORM_REPAIR_COPY.referencePlaceholder} onChange={(e) => setRepairDraft({ ...repairDraft, reference: e.target.value })} /></label>
                   <label>可聯繫時段／入室協調（選填）<input maxLength={160} value={repairDraft.availability} placeholder="例如：平日 18 點後可聯繫，入室前請先協調"
                     onChange={(e) => setRepairDraft({ ...repairDraft, availability: e.target.value })} /></label>
                   <label>下次追問日期（選填）<input type="date" min="2000-01-01" max="2099-12-31" value={repairDraft.followUpDate}
@@ -656,6 +658,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                     <div className={styles.repairHead}><div><span className={styles.category}>{DORM_REPAIR_CATEGORIES[item.category]}</span><h4>{item.title}</h4></div><span className={styles.status}>{DORM_REPAIR_STATUSES[item.status]}</span></div>
                     {item.location && <p>位置：{item.location}</p>}
                     {item.description && <p className={styles.description}>{item.description}</p>}
+                    {item.reference && <p>{DORM_REPAIR_COPY.referenceDisplay}：{item.reference}</p>}
                     {item.availability && <p>可聯繫時段／入室協調：{item.availability}</p>}
                     {item.followUpDate && item.status !== 'resolved' && <p>{item.followUpDate <= today ? '追問日期已到／已過' : '下次追問'}：{item.followUpDate}</p>}
                     {item.followUpNote && <p className={styles.description}>聯繫紀錄（自行記錄）：{item.followUpNote}</p>}
@@ -666,6 +669,10 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                     <div className={styles.actions}>
                       <button type="button" onClick={() => beginRepair(item)}>編輯</button>
                       <button type="button" onClick={() => void copyRepair(item)}>複製內容</button>
+                      {item.reference && <button type="button" onClick={async () => {
+                        try { await navigator.clipboard.writeText(item.reference!); setNotice('已複製編號。'); }
+                        catch { setSaveError('無法複製，請手動選取編號。'); }
+                      }}>複製編號</button>}
                       {item.status === 'draft' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'reported', updatedAt: Date.now() } : r) })}>我已自行通報</button>}
                       {item.status !== 'resolved' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'resolved', updatedAt: Date.now() } : r) })}>我已確認修復</button>}
                       {item.status === 'resolved' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map(r => r.id === item.id ? { ...r, status: 'draft', updatedAt: Date.now() } : r) })}>重新開啟備忘</button>}
