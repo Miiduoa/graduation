@@ -164,6 +164,54 @@ describeEmulator('story list client against the repository Firestore rules', () 
     expect(newAudience.empty).toBe(true);
   });
 
+  it('keeps retired receipts isolated after a same-school author change', async () => {
+    // A retired story ID can be reassigned by an administrative fixture even though
+    // ordinary clients cannot update authorUid. A valid school membership alone
+    // must not grant either author access to the other author's old receipts.
+    const oldPath = 'campusStories/active-web/schools/pu/authors/alice/views';
+    const newPath = 'campusStories/active-web/schools/pu/authors/charlie/views';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all([
+        db.doc('users/charlie').set({ status: 'active', schoolId: 'pu', primarySchoolId: 'pu' }),
+        db.doc('schools/pu/members/charlie').set({ status: 'active', role: 'student' }),
+        db.doc(oldPath + '/prior-viewer').set({
+          viewerUid: 'prior-viewer',
+          viewedAt: new Date(now - 2_000),
+        }),
+        db.doc(newPath + '/current-viewer').set({
+          viewerUid: 'current-viewer',
+          viewedAt: new Date(now - 1_000),
+        }),
+      ]);
+      await db.doc('campusStories/active-web').set({
+        schoolId: 'pu', authorUid: 'charlie', kind: 'text',
+        expiresAt: now + 3_600_000, createdAt: now,
+      });
+    });
+
+    const currentAuthor = environment.authenticatedContext('charlie').firestore() as unknown as Firestore;
+    const audience = (db: Firestore, path: string) => getDocsFromServer(
+      query(collection(db, path), orderBy('viewedAt', 'desc'), limit(21)),
+    );
+
+    // The old author remains an active member of the SAME school.
+    // Neither that identity nor the new author can read the retired subcollection.
+    await expect(audience(alice, oldPath)).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(audience(currentAuthor, oldPath)).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    await expect(getDocFromServer(doc(alice, oldPath + '/prior-viewer'))).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+
+    // The replacement author retains the valid path and can read the new receipt.
+    const currentPage = await audience(currentAuthor, newPath);
+    expect(currentPage.docs.map((row) => row.id)).toEqual(['current-viewer']);
+    expect((await getDocFromServer(doc(currentAuthor, newPath + '/current-viewer'))).exists()).toBe(true);
+    await expect(audience(alice, newPath)).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
   it('rechecks the author membership and story expiry before revealing a previously readable audience', async () => {
     const receiptPath = 'campusStories/active-web/schools/pu/authors/alice/views/viewer-pu';
     await environment.withSecurityRulesDisabled(async (context) => {
