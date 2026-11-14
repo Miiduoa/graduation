@@ -75,10 +75,24 @@ function hasPersonalAcademicData(title: string): boolean {
   // text so ordinary public quantities (30 分鐘、500 元、104 人) stay readable.
   if (/(?<!\d)\d{1,3}(?:\.\d+)?(?:分)?(?:[\p{Script=Han}]{2,}|[a-z]{2,})/u.test(nameAndScore))
     return true;
+  // Chinese numeric scores and standalone Chinese result levels are private too.
+  // Strip separators consistently, but keep duration units such as「九十分鐘」public.
+  if (
+    /[零〇一二三四五六七八九十百兩壹貳參肆伍陸柒捌玖拾佰]+(?:點[零〇一二三四五六七八九]+)?分(?!鐘)/u.test(
+      compact,
+    )
+  )
+    return true;
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:優|優等|甲|乙|丙|丁|戊|甲等|乙等|丙等|丁等|及格|不及格)(?=$|[^\p{L}\p{N}])/u.test(
+      dateFree,
+    )
+  )
+    return true;
   // Student identifiers can mix letters and digits rather than contain eight
   // consecutive digits (for example S411A1234).
   const identifiers = dateFree
-    .replace(/[\s\p{Cf}-]/gu, '')
+    .replace(/[^\p{L}\p{N}]/gu, '')
     .match(/(?<![a-z0-9])[a-z][a-z0-9]{7,}(?![a-z0-9])/gi);
   if (identifiers?.some((value) => /\d/.test(value))) return true;
   // Dates are public metadata; other long numeric identifiers may be student IDs.

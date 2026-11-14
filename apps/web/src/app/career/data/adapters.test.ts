@@ -328,6 +328,17 @@ it.each([
   '95/100 王測試 實習申請',
   '95 Test Student 實習申請',
   '實習申請 王測試 S411A1234',
+  ...['.', '．', '/', '・', '_', '\u200b', ' - '].map(
+    (separator) => `實習申請 王測試 S411${separator}A1234`,
+  ),
+  '實習申請 王測試 九十五分',
+  '實習申請 王測試 九十五點五分',
+  '實習申請 王測試 玖拾伍分',
+  '實習申請 王測試 九 五 分',
+  '九十五分 王測試 實習申請',
+  ...['優', '優等', '甲', '乙等', '丙', '丁等', '及格', '不及格'].map(
+    (grade) => `實習申請 王測試 ${grade}`,
+  ),
 ])(
   'withholds reversed results and mixed student identifiers before public caching: %s',
   async (suffix) => {
@@ -439,6 +450,9 @@ it('retains ordinary dated career announcements and event durations', () => {
     '2026/12/8 履歷講座 104人力銀行',
     '2026/12/8 實習說明會 教室B201',
     '2026/12/8 實習講座 報名費500元',
+    '2026/12/8 履歷講座 九十分鐘',
+    '2026/12/8 優良企業徵才講座',
+    '2026/12/8 甲公司實習說明會',
   ]) {
     expect(
       parseCareerHtml(html.replace('實習申請2026/12/8截止', title), CAREER_HTML_SOURCES[0])[0]
