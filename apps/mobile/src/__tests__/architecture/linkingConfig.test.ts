@@ -1,29 +1,42 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { schoolLinking } from '../../app/schoolLinking';
 
-function extractLinkingConfigSource(): string {
-  const appSource = fs.readFileSync(path.join(process.cwd(), 'App.tsx'), 'utf8');
-  const start = appSource.indexOf('const linking');
-  const end = appSource.indexOf('const { usingFirebase');
+jest.unmock('@react-navigation/native');
+jest.mock('expo-linking', () => ({ createURL: () => 'campus://' }));
 
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('Unable to locate App.tsx linking config');
-  }
+type ScreenPaths = {
+  [screen: string]: string | { path?: string; screens?: ScreenPaths } | undefined;
+};
 
-  return appSource.slice(start, end);
+function registeredPaths(
+  screens: ScreenPaths,
+  prefix = '',
+): Array<{ screen: string; path: string }> {
+  return Object.entries(screens).flatMap(([screen, entry]) => {
+    if (entry === undefined) return [];
+    if (typeof entry === 'string') return [{ screen, path: `${prefix}${entry}` }];
+    const path = `${prefix}${entry.path ?? ''}`;
+    if (entry.screens) return registeredPaths(entry.screens, path ? `${path}/` : '');
+    return entry.path === undefined ? [] : [{ screen, path }];
+  });
 }
 
 describe('navigation linking config', () => {
   it('registers the dormitory deep link in the school-session campus tab', () => {
-    const campus = extractLinkingConfigSource().split('校園: {')[1]?.split('訊息: {')[0];
-    expect(campus).toContain("Dormitory: 'dormitory'");
+    expect(
+      schoolLinking.getStateFromPath?.('dormitory?schoolId=pu', schoolLinking.config),
+    ).toMatchObject({
+      routes: [
+        {
+          name: '校園',
+          state: { routes: [{ name: 'Dormitory', params: { schoolId: 'pu' } }] },
+        },
+      ],
+    });
   });
 
   it('does not reuse the same path for multiple screens', () => {
-    const linkingConfigSource = extractLinkingConfigSource();
-    const paths = [
-      ...linkingConfigSource.matchAll(/([A-Za-z0-9_\u4e00-\u9fff]+):\s*'([^']+)'/g),
-    ].map((match) => ({ screen: match[1], path: match[2] }));
+    const paths = registeredPaths(schoolLinking.config?.screens ?? {});
+    expect(paths.length).toBeGreaterThan(0);
     const duplicatePaths = [...new Set(paths.map((entry) => entry.path))]
       .map((pathValue) => ({
         path: pathValue,
