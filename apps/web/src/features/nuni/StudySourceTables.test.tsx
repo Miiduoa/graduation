@@ -689,7 +689,7 @@ it('visualizes exact source percentages on a fixed 100% scale without changing s
     '| 資料庫 | 75% |',
     '| 網路 | 0％ |',
     '| 程式設計 | 100.00% |',
-  ].join('\\n');
+  ].join('\n');
   const { container, rerender } = render(<StudySourceTables text={material} />);
   expect(screen.getByText('展開第 2 欄「完成率」的原文百分比（100% 滿格）')).toBeTruthy();
   expect(Array.from(container.querySelectorAll('meter')).map((meter) => ({
@@ -721,14 +721,14 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
   ];
   for (const { header, values } of examples) {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
-      '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\\n');
+      '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
     expect(container.querySelector('details')).toBeNull();
     unmount();
   }
   const repeated = ['| 項目 | 完成率 |', '| --- | --- |',
-    '| 甲 | 20% |', '| 甲 | 30% |'].join('\\n');
+    '| 甲 | 20% |', '| 甲 | 30% |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
   expect(container.querySelector('details')).toBeNull();
 });

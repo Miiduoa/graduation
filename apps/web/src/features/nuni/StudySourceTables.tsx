@@ -51,7 +51,7 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   const labels = new Set<string>();
   for (const [label, original] of table.rows) {
     if (!label?.trim() || !original ||
-        !/^(?:0|[1-9]\\d?|100)(?:\\.\\d{1,2})?[%％]$/u.test(original) ||
+        !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original) ||
         labels.has(label.trim())) return null;
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;
