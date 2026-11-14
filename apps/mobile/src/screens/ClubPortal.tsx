@@ -83,9 +83,10 @@ export function ClubPortal({
       generation.current++;
     };
   }, [uid, schoolId, selected, office, revision]);
-  async function loadMore(kind: 'member' | 'event') {
+  async function loadMore(kind: 'member' | 'event' | 'request') {
     if (lock.current || !view) return;
-    const cursor = kind === 'member' ? view.memberCursor : view.eventCursor;
+    const cursor =
+      view[kind === 'member' ? 'memberCursor' : kind === 'event' ? 'eventCursor' : 'requestCursor'];
     if (!cursor) return;
     lock.current = true;
     setBusy(true);
@@ -111,10 +112,15 @@ export function ClubPortal({
                     ],
                     memberCursor: next.memberCursor,
                   }
-                : {
-                    events: [...(previous.events || []), ...(next.events || [])],
-                    eventCursor: next.eventCursor,
-                  }),
+                : kind === 'request'
+                  ? {
+                      requests: [...(previous.requests || []), ...(next.requests || [])],
+                      requestCursor: next.requestCursor,
+                    }
+                  : {
+                      events: [...(previous.events || []), ...(next.events || [])],
+                      eventCursor: next.eventCursor,
+                    }),
             },
         );
     } catch (err) {
@@ -197,6 +203,10 @@ export function ClubPortal({
     <Card title="社團服務" subtitle="生活 › 社團">
       {view?.memberCursor ? (
         <Button text="載入更多社員" disabled={busy} onPress={() => void loadMore('member')} />
+      ) : null}
+
+      {view?.requestCursor ? (
+        <Button text="載入更多待審申請" disabled={busy} onPress={() => void loadMore('request')} />
       ) : null}
       {view?.eventCursor ? (
         <Button text="載入更多活動" disabled={busy} onPress={() => void loadMore('event')} />

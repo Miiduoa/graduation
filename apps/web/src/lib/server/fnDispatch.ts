@@ -144,12 +144,6 @@ async function invokeHostedCallable(
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
-  if (name === 'clubPortal') {
-    const { clubPortalRateLimit } = await import('./clubPortalRateLimit');
-    if (request.auth?.uid) clubPortalRateLimit.check(request.auth.uid);
-    const { createClubPortal } = await import('./clubPortalHandlers');
-    return createClubPortal({ db })(request);
-  }
   if (name === 'prepareDmConversation' || name === 'sendDmText') {
     const { createDmConversations } = await import('./dmConversationsHandler');
     const handlers = createDmConversations({ db });
@@ -291,7 +285,7 @@ export async function dispatchFnRequest(
     if (uid) {
       // DM / story-reply Functions have no per-UID minute cap. Do not share
       // the hosted 10/min budget with chat, or a long conversation is rejected.
-      if (name !== 'clubPortal' && name !== 'prepareDmConversation' && name !== 'sendDmText' && name !== 'replyToCampusStory') {
+      if (name !== 'prepareDmConversation' && name !== 'sendDmText' && name !== 'replyToCampusStory') {
         checkUidRateLimit(uid);
       }
       if (name === 'joinGroupByCode') {

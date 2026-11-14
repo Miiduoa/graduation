@@ -4,7 +4,6 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import GroupsPage from './page';
 import ClubsPage from '../clubs/page';
 import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
-import { callClubPortal } from './clubPortalService';
 import { clubEnabled } from './clubService';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
 
@@ -21,7 +20,6 @@ vi.mock('./groupService', () => ({
   leaveMemberGroup: vi.fn(),
   loadMyGroups: vi.fn(),
 }));
-vi.mock('./clubPortalService', () => ({ callClubPortal: vi.fn() }));
 vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
 const course: MemberGroup = {
   id: 'firestore-course',
@@ -50,7 +48,6 @@ function deferred<T>() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(callClubPortal).mockResolvedValue({ success: true, office: false, clubs: [] });
   vi.mocked(clubEnabled).mockReturnValue(false);
   account.user = { uid: 'alice' };
   account.loading = false;
@@ -95,7 +92,7 @@ it('社團分段只顯示真實會籍，找社團使用鎖定空態且沒有入�
   );
   expect(screen.getByLabelText('邀請碼')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '找社團' }));
-  expect(await screen.findByText('學校還沒提供社團名單。')).toBeTruthy();
+  expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '本人社團' })).toBeNull();
   expect(screen.queryByRole('button', { name: '加入群組' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看社團' })).toBeNull();
@@ -290,7 +287,7 @@ it.each([false, true])('社團後台入口沿用既有旗標：%s', async (enabl
   vi.mocked(clubEnabled).mockReturnValue(enabled);
   render(<ClubsPage />);
   await screen.findByText('本人社團');
-  expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
+  expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
   const link = screen.queryByRole('link', { name: '社團後台' });
   if (enabled) expect(link?.getAttribute('href')).toBe('/groups/firestore-club/club?schoolId=pu');
   else expect(link).toBeNull();

@@ -68,9 +68,10 @@ export function ClubPortal({
       generation.current++;
     };
   }, [uid, schoolId, selected, office, revision]);
-  async function loadMore(kind: 'member' | 'event') {
+  async function loadMore(kind: 'member' | 'event' | 'request') {
     if (lock.current || !view) return;
-    const cursor = kind === 'member' ? view.memberCursor : view.eventCursor;
+    const cursor =
+      view[kind === 'member' ? 'memberCursor' : kind === 'event' ? 'eventCursor' : 'requestCursor'];
     if (!cursor) return;
     lock.current = true;
     setBusy(true);
@@ -96,10 +97,15 @@ export function ClubPortal({
                     ],
                     memberCursor: next.memberCursor,
                   }
-                : {
-                    events: [...(previous.events || []), ...(next.events || [])],
-                    eventCursor: next.eventCursor,
-                  }),
+                : kind === 'request'
+                  ? {
+                      requests: [...(previous.requests || []), ...(next.requests || [])],
+                      requestCursor: next.requestCursor,
+                    }
+                  : {
+                      events: [...(previous.events || []), ...(next.events || [])],
+                      eventCursor: next.eventCursor,
+                    }),
             },
         );
     } catch (err) {
@@ -188,6 +194,12 @@ export function ClubPortal({
       {view?.memberCursor && (
         <button className="btn" disabled={busy} onClick={() => void loadMore('member')}>
           載入更多社員
+        </button>
+      )}
+
+      {view?.requestCursor && (
+        <button type="button" disabled={busy} onClick={() => void loadMore('request')}>
+          載入更多待審申請
         </button>
       )}
       {view?.eventCursor && (

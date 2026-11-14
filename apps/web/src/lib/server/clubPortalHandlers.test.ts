@@ -326,3 +326,64 @@ test('超過五百位社員與一百場活動仍可閱讀介紹公告並逐頁�
   expect(visitor.events?.every((e) => e.visibility === 'public')).toBe(true);
   expect(visitor.eventCursor).toBeTruthy();
 });
+
+test('報名姓名不依賴社員分頁，公開活動非社員也能核對且學生不取得名單', async () => {
+  await event();
+  const attendees = ['member-z', 'student'];
+  for (let n = 0; n < 101; n++)
+    store.docs.set(`groups/club/members/member-${String(n).padStart(3, '0')}`, {
+      status: 'active',
+      role: 'member',
+    });
+  store.docs.set('groups/club/members/member-z', { status: 'active', role: 'member' });
+  for (const uid of attendees) {
+    store.docs.set(`groups/club/clubEvents/event/registrations/${uid}`, { status: 'registered' });
+    store.docs.set(`schools/school/directory/${uid}`, { displayName: `姓名-${uid}` });
+  }
+  for (const uid of ['officer', 'staff']) {
+    const view = await call(uid);
+    expect(view.members?.some((m) => m.id === 'member-z')).toBe(false);
+    expect(view.events?.[0].registrations?.map((r) => r.name).sort()).toEqual(
+      attendees.map((id) => `姓名-${id}`).sort(),
+    );
+  }
+  expect((await call('student')).events?.[0].registrations).toBeUndefined();
+});
+
+test('五百筆以上申請可逐頁審核，不阻斷介紹、公告與活動，也不外洩申請', async () => {
+  await event();
+  await call('officer', {
+    action: 'announcement',
+    operationId: 'notice',
+    title: '公告',
+    body: '正常',
+  });
+  for (let n = 0; n < 505; n++)
+    store.docs.set(`groups/club/joinRequests/applicant-${String(n).padStart(3, '0')}`, {
+      status: 'pending',
+      displayName: `申請者${n}`,
+    });
+  store.docs.set('groups/club/joinRequests/declined', {
+    status: 'declined',
+    displayName: '不顯示',
+  });
+  const first = await call('officer');
+  expect(first.club?.name).toBe('攝影社');
+  expect(first.announcements?.[0].body).toBe('正常');
+  expect(first.events).toHaveLength(1);
+  expect(first.requests).toHaveLength(100);
+  const ids = first.requests!.map((r) => r.id);
+  let cursor = first.requestCursor;
+  while (cursor) {
+    const next = await call('officer', { requestCursor: cursor });
+    ids.push(...next.requests!.map((r) => r.id));
+    cursor = next.requestCursor;
+  }
+  expect(ids).toHaveLength(505);
+  expect(new Set(ids).size).toBe(505);
+  for (const uid of ['student', 'staff']) {
+    const view = await call(uid, { requestCursor: first.requestCursor });
+    expect(view.requests).toEqual([]);
+    expect(view.requestCursor).toBeUndefined();
+  }
+});

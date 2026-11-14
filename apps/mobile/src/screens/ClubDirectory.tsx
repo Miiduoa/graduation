@@ -1,4 +1,4 @@
-import { ClubPortal } from './ClubPortal';
+import { clubSummaryEnabled } from '../services/clubSummary';
 import React, { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { Button, Card } from '../ui/components';
@@ -7,17 +7,10 @@ import { theme } from '../ui/theme';
 export function ClubDirectory({
   clubs,
   onOpen,
-  uid,
-  schoolId,
-  onRefresh,
 }: {
-  onRefresh?: () => void;
-  uid?: string;
-  schoolId?: string;
   clubs: { groupId: string; name: string }[];
   onOpen: (groupId: string) => void;
 }) {
-  const [dirty, setDirty] = useState(false);
   const [segment, setSegment] = useState<'mine' | 'discover'>('mine');
   const [search, setSearch] = useState('');
   const visible = clubs.filter((club) =>
@@ -31,10 +24,6 @@ export function ClubDirectory({
           text="我的社團"
           kind={segment === 'mine' ? 'primary' : undefined}
           onPress={() => {
-            if (dirty) {
-              onRefresh?.();
-              setDirty(false);
-            }
             setSegment('mine');
             setSearch('');
           }}
@@ -63,11 +52,12 @@ export function ClubDirectory({
         }}
       />
       {segment === 'discover' ? (
-        uid && schoolId ? (
-          <ClubPortal uid={uid} schoolId={schoolId} onChanged={() => setDirty(true)} />
-        ) : (
-          <Text style={textStyle}>請先登入本校帳號。</Text>
-        )
+        <>
+          <Text style={textStyle}>學校還沒提供社團名單。</Text>
+          <Text style={textStyle}>
+            尚未串接課外組核可名單，因此這裡不列出一般群組，也不提供入社或申請。
+          </Text>
+        </>
       ) : !clubs.length ? (
         <Text style={textStyle}>還沒加入社團，可以到「找社團」看看。</Text>
       ) : !visible.length ? (
@@ -84,6 +74,7 @@ export function ClubDirectory({
       <Text style={textStyle}>
         「我的社團」列出已加入的群組，是否為正式社團仍以課外組名單為準。
       </Text>
+      {!clubSummaryEnabled() && <Text style={textStyle}>這所學校還沒開放社團管理。</Text>}
     </Card>
   );
 }

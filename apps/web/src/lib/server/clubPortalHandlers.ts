@@ -539,9 +539,14 @@ export function createClubPortal({
             ...officerMembers.map((m) => approvalRef.collection('officers').doc(m.id)),
           )
         : [];
-      const requests = officer
-        ? await bounded(groupRef.collection('joinRequests').where('status', '==', 'pending'))
-        : [];
+      const requestPage = officer
+        ? await page(
+            groupRef.collection('joinRequests').where('status', '==', 'pending'),
+            input.requestCursor,
+            100,
+          )
+        : { docs: [], next: undefined };
+      const requests = requestPage.docs;
       const posts =
         active || office
           ? (
@@ -570,6 +575,19 @@ export function createClubPortal({
         const records = await bounded(doc.ref.collection('registrations'), 1000),
           registrations = records.filter((r) => r.data().status === 'registered'),
           mine = records.find((r) => r.id === uid)?.data();
+        // Resolve attendees independently of the current member page, including public guests.
+        const attendeeNames = new Map<string, string>();
+        if (officer || office) {
+          for (let offset = 0; offset < registrations.length; offset += 100) {
+            const batch = registrations.slice(offset, offset + 100);
+            const names = await tx.getAll(
+              ...batch.map((r) => school.collection('directory').doc(r.id)),
+            );
+            batch.forEach((r, index) =>
+              attendeeNames.set(r.id, String(names[index].data()?.displayName || '未提供姓名')),
+            );
+          }
+        }
         rows.push({
           id: doc.id,
           title: e.title,
@@ -594,10 +612,7 @@ export function createClubPortal({
             ? {
                 registrations: registrations.map((r) => ({
                   uid: r.id,
-                  name: String(
-                    directories[members.findIndex((m) => m.id === r.id)]?.data()?.displayName ||
-                      '未提供姓名',
-                  ),
+                  name: attendeeNames.get(r.id) || '未提供姓名',
                   checkedInAt: r.data().checkedInAt || null,
                 })),
               }
@@ -655,6 +670,7 @@ export function createClubPortal({
             title: String(p.data().title || ''),
             body: String(p.data().body || ''),
           })),
+        requestCursor: requestPage.next,
         memberCursor: memberPage.next,
         eventCursor: eventPage.next,
         events: rows.sort((a, b) => a.startsAt - b.startsAt),

@@ -22,6 +22,7 @@ export type ClubPortalView = {
   role?: string;
   status?: string;
   reason?: string;
+  requestCursor?: string;
   memberCursor?: string;
   eventCursor?: string;
   members?: {
