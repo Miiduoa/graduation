@@ -37,3 +37,11 @@ test('失去讀權不使用假資料或快取代替', async () => {
   vi.mocked(loadGroupDiscussionPage).mockRejectedValue(new Error('permission-denied'));
   await expect(loadClubProfile('one', 'pu', 'club')).rejects.toThrow('permission-denied');
 });
+
+test('可讀的課程群組也不能呈現為社團', async () => {
+  vi.mocked(loadGroupDiscussionPage).mockResolvedValue({
+    group: { type: 'course' },
+    page: { posts: [] },
+  } as never);
+  await expect(loadClubProfile('one', 'pu', 'course')).rejects.toThrow('這不是社團');
+});

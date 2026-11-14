@@ -54,3 +54,15 @@ test('查詢途中切換帳號，不回傳舊社團內容', async () => {
   });
   await expect(loadClubProfile('one', 'pu', 'club')).rejects.toThrow('帳號已變更');
 });
+
+test.each([
+  ['其他學校的社團', { type: 'club', schoolId: 'other' }],
+  ['課程群組', { type: 'course', schoolId: 'pu' }],
+  ['不存在的社團', undefined],
+])('%s 不讀取公告，即使會籍仍有效', async (_label, group) => {
+  mockDoc.mockImplementation(async (path: string) => ({
+    data: () => (path.endsWith('/members/one') ? { status: 'active', role: 'member' } : group),
+  }));
+  await expect(loadClubProfile('one', 'pu', 'club')).rejects.toThrow('無法確認社團資格');
+  expect(mockDocs).not.toHaveBeenCalled();
+});
