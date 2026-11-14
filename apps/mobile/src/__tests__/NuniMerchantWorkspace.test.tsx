@@ -534,3 +534,68 @@ test('unsaved settings cannot activate using different server settings until the
     view.getByRole('button', { name: '檢查並啟用門市' }).props.accessibilityState.disabled,
   ).toBe(false);
 });
+
+test.each(['approved', 'under-review'])(
+  'connects a %s application to same-campus workspaces',
+  async (state) => {
+    mockRequest.mockImplementation(async (path) =>
+      path === 'merchant-applications'
+        ? {
+            applications: [
+              {
+                tenantId: 'school-one',
+                applicationId: 'fma-one',
+                brandName: '餐坊',
+                locationName: '申請門市',
+                state,
+                reviewerNote: '',
+                submittedAt: '2026-11-13T00:00:00Z',
+              },
+            ],
+          }
+        : respond(path),
+    );
+    const view = render(ui());
+    await view.findByText('餐坊 · 申請門市');
+    expect(view.queryByRole('button', { name: '前往管理門市：第二門市' })).toBeNull();
+    const link = view.queryByRole('button', { name: '前往管理門市：第一門市' });
+    if (state !== 'approved') {
+      expect(link).toBeNull();
+      return;
+    }
+    fireEvent.press(link!);
+    await view.findByRole('button', { name: '檢查初始菜單' });
+    expect(mockRequest).toHaveBeenCalledWith(base, 'context-a', undefined, undefined);
+    fireEvent.press(view.getByRole('button', { name: '返回我的門市' }));
+    await view.findByText('餐坊 · 申請門市');
+  },
+);
+
+test('provides reload guidance when the approved campus has no workspace yet', async () => {
+  mockRequest.mockImplementation(async (path) => {
+    if (path === 'merchant-applications')
+      return {
+        applications: [
+          {
+            tenantId: 'school-three',
+            applicationId: 'fma-three',
+            brandName: '餐坊',
+            locationName: '申請門市',
+            state: 'approved',
+            reviewerNote: '',
+            submittedAt: '2026-11-13T00:00:00Z',
+          },
+        ],
+      };
+    return respond(path);
+  });
+  const view = render(ui());
+  await view.findByText('這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。');
+  expect(view.queryByRole('button', { name: /前往管理門市/ })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '重新載入店家資料' }));
+  await waitFor(() =>
+    expect(mockRequest.mock.calls.filter(([path]) => path === 'merchant-workspaces')).toHaveLength(
+      2,
+    ),
+  );
+});

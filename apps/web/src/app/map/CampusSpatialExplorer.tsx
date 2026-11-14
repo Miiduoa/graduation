@@ -18,6 +18,7 @@ import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
+import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
 import styles from './CampusSpatialExplorer.module.css';
 
@@ -31,6 +32,14 @@ type Props = {
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
+const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
+
+// A dated stale fallback may return HTTP 200 together with Retry-After.
+// Validate the seconds before disabling the manual retry on mobile.
+function footprintCooldownSeconds(response: Response): number | null {
+  const raw = response.headers?.get('retry-after')?.trim();
+  return raw && /^[1-9]\d{0,5}$/.test(raw) ? Math.min(86_400, Number(raw)) : null;
+}
 
 function readAppearance() {
   const root = document.documentElement;
@@ -203,6 +212,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintDate, setFootprintDate] = useState<string | null>(null);
   const [footprintBaseDate, setFootprintBaseDate] = useState<string | null>(null);
   const [footprintStale, setFootprintStale] = useState(false);
+  const [footprintRefreshing, setFootprintRefreshing] = useState(false);
+  const [footprintRefreshFailed, setFootprintRefreshFailed] = useState(false);
+  const staleSnapshotRef = useRef(false);
+  // Refresh previously valid snapshots at their deadline, including in suspended tabs.
+  const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
+  const footprintExpiresAtRef = useRef<number | null>(null);
+  const footprintRequestActiveRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
@@ -265,10 +281,48 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   }, [footprintRetryAfter]);
 
   useEffect(() => {
-    if (school !== 'pu' || model.unavailableReason) return;
+    if (school !== 'pu' || footprintClock === null) return;
+    const checkSnapshotAge = () => {
+      if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
+      const now = Date.now();
+      if (now >= footprintClock.expiresAt) {
+        // Refresh once at the deadline, retaining the verified geometry and dates.
+        // A pending refresh already serves this purpose; do not restart it on resume.
+        footprintExpiresAtRef.current = null;
+        staleSnapshotRef.current = true;
+        setFootprintClock(null);
+        setFootprintStale(true);
+        if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
+          setFootprintAttempt((value) => value + 1);
+        }
+      } else if (now >= footprintClock.staleAt) {
+        staleSnapshotRef.current = true;
+        setFootprintStale(true);
+      }
+    };
+    const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
+    const timer = window.setTimeout(checkSnapshotAge, Math.max(0, nextDeadline - Date.now()));
+    document.addEventListener('visibilitychange', checkSnapshotAge);
+    window.addEventListener('pageshow', checkSnapshotAge);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', checkSnapshotAge);
+      window.removeEventListener('pageshow', checkSnapshotAge);
+    };
+  }, [school, footprintClock, footprintStale, footprintRetryAfter]);
+
+  useEffect(() => {
+    if (school !== 'pu' || model.unavailableReason) {
+      staleSnapshotRef.current = false;
+      return;
+    }
     let active = true;
     let timedOut = false;
-    setFootprintStatus('loading');
+    // A local age deadline must not discard a previously verified outline.
+    const preserveStale = staleSnapshotRef.current;
+    footprintRequestActiveRef.current = true;
+    setFootprintStatus(preserveStale ? 'ready' : 'loading');
+    setFootprintRefreshing(preserveStale);
     const controller = new AbortController();
     // Aborting fetch is advisory: a stalled response body or a proxy/mock that
     // ignores AbortSignal may never settle. End the loading UI independently,
@@ -276,8 +330,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     const timeout = window.setTimeout(() => {
       if (!active) return;
       timedOut = true;
+      footprintRequestActiveRef.current = false;
       controller.abort();
-      setFootprintStatus('unavailable');
+      setFootprintRefreshing(false);
+      const keepStale = preserveStale;
+      if (keepStale) setFootprintRefreshFailed(true);
+      setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
@@ -289,33 +347,59 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             contentRange !== null) {
           // Only our 503 responses use this contract. Ignore malformed or
           // unreasonably large intermediary values rather than freezing the UI.
-          const raw = response.status === 503 ? response.headers?.get('retry-after')?.trim() : null;
-          if (active && !timedOut && raw && /^[1-9]\d{0,5}$/.test(raw)) {
-            const seconds = Math.min(86_400, Number(raw));
+          const seconds = response.status === 503 ? footprintCooldownSeconds(response) : null;
+          if (active && !timedOut && seconds !== null) {
             setFootprintRetryAfter({ until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60) });
           }
           throw new Error('footprint source unavailable');
         }
-        return response.json() as Promise<unknown>;
+        const cooldownSeconds = response.status === 200 ? footprintCooldownSeconds(response) : null;
+        return { payload: await response.json() as unknown, cooldownSeconds };
       })
-      .then((response) => {
+      .then(({ payload, cooldownSeconds }) => {
         if (!active || timedOut) return;
-        const snapshot = parseProvidenceFootprintSnapshot(response);
+        const snapshot = parseProvidenceFootprintSnapshot(payload);
         if (!snapshot) throw new Error('No recent, source-checked building outlines');
-        setFootprints(snapshot.buildings);
+        const fetchedMs = Date.parse(snapshot.fetchedAt);
+        const replicationMs = snapshot.osmBaseAt === null ? Infinity : Date.parse(snapshot.osmBaseAt);
+        const expiresAt = Math.min(fetchedMs + 7 * FOOTPRINT_DAY_MS, replicationMs + 7 * FOOTPRINT_DAY_MS);
+        const staleAt = Math.min(fetchedMs + FOOTPRINT_DAY_MS, replicationMs + 2 * FOOTPRINT_DAY_MS);
+        footprintExpiresAtRef.current = expiresAt;
+        setFootprintClock({ staleAt, expiresAt });
+        // A fresh timestamp alone must not tear down and recreate the WebGL context.
+        // Keep geometry only when all source, revision and shape fields match.
+        setFootprints((current) => reuseUnchangedProvidenceFootprints(current, snapshot.buildings));
         setFootprintDate(snapshot.fetchedAt.slice(0, 10));
         setFootprintBaseDate(snapshot.osmBaseAt?.slice(0, 10) ?? null);
         setFootprintStale(snapshot.stale);
-        setFootprintRetryAfter(null);
+        staleSnapshotRef.current = snapshot.stale;
+        const seconds = snapshot.stale ? cooldownSeconds : null;
+        setFootprintRetryAfter(seconds === null ? null : {
+          until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60),
+        });
+        setFootprintRefreshing(false);
+        setFootprintRefreshFailed(false);
         setFootprintStatus('ready');
       })
       .catch(() => {
         if (!active || timedOut) return;
-        // Keep the existing marker-only canvas; do not recreate the GPU context on failure.
-        setFootprintStatus('unavailable');
+        // Keep the previously verified snapshot even after its refresh deadline.
+        // Normal first-load failures remain marker-only.
+        setFootprintRefreshing(false);
+        const keepStale = preserveStale;
+        if (keepStale) setFootprintRefreshFailed(true);
+        setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
-      .finally(() => window.clearTimeout(timeout));
-    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+      .finally(() => {
+        if (active) footprintRequestActiveRef.current = false;
+        window.clearTimeout(timeout);
+      });
+    return () => {
+      active = false;
+      footprintRequestActiveRef.current = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [school, model.unavailableReason, footprintAttempt]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
@@ -390,6 +474,22 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
+                    {footprintStale && <>
+                      <span>目前使用有日期標註的舊輪廓，可手動檢查是否已有更新；原始地點與步行導航不受影響。</span>
+                      {footprintRetryAfter !== null && <span>
+                        來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
+                      </span>}
+                      {footprintRefreshing && <span>正在檢查更新，暫時保留舊輪廓。</span>}
+                      {footprintRefreshFailed && !footprintRefreshing && <span>更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
+                      <button className={styles.retryFootprints} type="button"
+                        disabled={footprintRetryAfter !== null || footprintRefreshing}
+                        onClick={() => {
+                          setFootprintRefreshFailed(false);
+                          setFootprintAttempt((value) => value + 1);
+                        }}>
+                        重新讀取建築輪廓
+                      </button>
+                    </>}
                   </>
                 )}
                 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap 貢獻者</a>

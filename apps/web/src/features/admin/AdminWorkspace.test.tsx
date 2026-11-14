@@ -1032,3 +1032,127 @@ it.each(['school', 'tenantId'])(
     expect(screen.queryByRole('heading', { name: '完整管理台' })).toBeNull();
   },
 );
+
+it('scopes audit by stable tenant id across overlapping names, mentions and rename, and restores history', async () => {
+  fetcher.mockImplementation(async (url: string) => {
+    if (url.endsWith('/proxy')) return ok(inactiveProxy);
+    if (url.endsWith('/audit'))
+      return ok({
+        records: [
+          {
+            id: 'related',
+            targetTenantId: tenant.tenantId,
+            actionLabel: '更新學校說明',
+            actorName: '營運人員',
+            targetSchoolName: '更名前校名',
+            detail: '調整聯絡資訊',
+            createdAt: '2026-11-13T01:00:00Z',
+            via: 'operator',
+            before: null,
+            after: null,
+          },
+          {
+            id: 'cross-school-mention',
+            targetTenantId: 'school-two',
+            actionLabel: '跨校合作紀錄',
+            actorName: '營運人員',
+            targetSchoolName: '第二學校',
+            detail: '第一學校協助辦理',
+            createdAt: '2026-11-13T01:00:00Z',
+            via: 'operator',
+            before: null,
+            after: null,
+          },
+          {
+            id: 'platform-mention',
+            targetTenantId: null,
+            actionLabel: '平台紀錄',
+            actorName: '第一學校管理員',
+            targetSchoolName: null,
+            detail: '第一學校',
+            createdAt: '2026-11-13T01:00:00Z',
+            via: 'operator',
+            before: null,
+            after: null,
+          },
+          {
+            id: 'unrelated',
+            targetTenantId: 'school-one-affiliated',
+            actionLabel: '另一校的修改',
+            actorName: '營運人員',
+            targetSchoolName: '第一學校附屬學校',
+            detail: '',
+            createdAt: '2026-11-13T01:00:00Z',
+            via: 'operator',
+            before: null,
+            after: null,
+          },
+        ],
+      });
+    return ok({ schools: [tenant] });
+  });
+  renderSchools();
+  fireEvent.click(await screen.findByRole('button', { name: '管理第一學校' }));
+  const shortcut = await screen.findByRole('button', { name: '查閱此校操作紀錄' });
+  await waitFor(() => expect(shortcut.closest('fieldset')!.disabled).toBe(false));
+  const schoolUrl = window.location.href;
+  fireEvent.click(shortcut);
+  await screen.findByText('更新學校說明');
+  expect(screen.queryByText('另一校的修改')).toBeNull();
+  expect(screen.queryByText('跨校合作紀錄')).toBeNull();
+  expect(screen.queryByText('平台紀錄')).toBeNull();
+  expect((screen.getByLabelText('在已載入紀錄中搜尋') as HTMLInputElement).value).toBe('');
+  expect(new URLSearchParams(window.location.hash.split('?')[1]).get('tenantId')).toBe(
+    tenant.tenantId,
+  );
+  expect(screen.getByText('學校篩選：第一學校（school-one）')).toBeTruthy();
+  const auditUrl = window.location.href;
+  act(() => {
+    window.history.replaceState(null, '', '/admin#audit');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await screen.findByText('另一校的修改');
+  act(() => {
+    window.history.replaceState(null, '', auditUrl);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await waitFor(() => expect(screen.queryByText('另一校的修改')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: '清除學校篩選' }));
+  await screen.findByText('另一校的修改');
+  expect(new URLSearchParams(window.location.hash.split('?')[1]).has('tenantId')).toBe(false);
+  fireEvent.change(screen.getByLabelText('在已載入紀錄中搜尋'), { target: { value: '第一學校' } });
+  fireEvent.click(screen.getByRole('button', { name: '篩選' }));
+  expect(screen.getByText('另一校的修改')).toBeTruthy();
+  expect(screen.getByText('跨校合作紀錄')).toBeTruthy();
+  expect(screen.getByText('平台紀錄')).toBeTruthy();
+  expect(screen.queryByText('更新學校說明')).toBeNull();
+  expect(screen.getByText(/未包含完整歷史/)).toBeTruthy();
+  act(() => {
+    window.history.replaceState(null, '', schoolUrl);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await screen.findByRole('heading', { name: tenant.displayName });
+});
+
+it('keeps unsaved school changes when leaving for audit search is cancelled', async () => {
+  fetcher.mockImplementation(async (url: string) =>
+    url.endsWith('/proxy')
+      ? ok(inactiveProxy)
+      : ok({ schools: [{ ...tenant, lifecycle: 'provisioned' }] }),
+  );
+  renderSchools();
+  fireEvent.click(await screen.findByRole('button', { name: '管理第一學校' }));
+  const name = await screen.findByLabelText('學校名稱');
+  await waitFor(() => expect(name.closest('fieldset')!.disabled).toBe(false));
+  fireEvent.change(name, { target: { value: '尚未儲存的校名' } });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button', { name: '查閱此校操作紀錄' }));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect((screen.getByLabelText('學校名稱') as HTMLInputElement).value).toBe('尚未儲存的校名');
+  expect(window.location.hash).toContain('#schools/');
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: '查閱此校操作紀錄' }));
+  expect(new URLSearchParams(window.location.hash.split('?')[1]).get('tenantId')).toBe(
+    tenant.tenantId,
+  );
+});
