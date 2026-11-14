@@ -330,6 +330,20 @@ it('drops a building preview when its selected campus location is withdrawn', as
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
 });
 
+it.each(['pu-library', 'pu-xijia', 'pu-health', 'pu-parking-p1', 'pu-gate-osm'])(
+  'keeps floor-plan modelling available for Providence location %s regardless of source type', async (id) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((candidate) => candidate.id === id)!;
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+    render(<CampusSpatialExplorer school="pu" locations={[place]} selected={place} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
+    const preview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+    expect(preview.textContent).toContain(place.name);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  },
+);
+
 it('adds source-checked Providence building shapes without changing navigation or hiding source dates', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let resolveFetch: ((value: unknown) => void) | undefined;
@@ -898,6 +912,11 @@ it.each(['failure', 'timeout'])('retains an expired stale outline after refresh 
     clock += 2 * 60_000;
     fireEvent(window, new Event('pageshow'));
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    fireEvent.click(retry);
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     if (outcome === 'timeout') {
       const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
@@ -907,6 +926,8 @@ it.each(['failure', 'timeout'])('retains an expired stale outline after refresh 
     await act(async () => { rejectRefresh(new Error('offline after snapshot expiry')); });
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/更新未成功，仍顯示先前/)).toBeTruthy();
+    expect(retry.disabled).toBe(false);
+    expect(within(dialog).getByText(new RegExp(`資料讀取：${new Date(clock - 7 * day - 60_000).toISOString().slice(0, 10)}`))).toBeTruthy();
     await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
