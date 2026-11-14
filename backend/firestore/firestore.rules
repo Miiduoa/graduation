@@ -200,20 +200,44 @@ service cloud.firestore {
         );
     }
 
-    // Each private-message reaction belongs to one participant. A member may
-    // add, change or remove their own emoji, never anyone else's reaction.
-    // Missing reactions on historical messages are treated as an empty map.
-    function onlyOwnMessageReaction() {
+    // Reactions use emoji -> [uid] on existing mobile and web clients.
+    // Check every supported emoji independently: an active member may only
+    // append/remove their own UID, never rewrite a peer's acknowledgement.
+    function onlyOwnReactionEmoji(before, after, emoji) {
       let uid = request.auth.uid;
+      let oldVotes = before.get(emoji, []);
+      let newVotes = after.get(emoji, []);
+      return oldVotes is list && newVotes is list
+        && (
+          newVotes == oldVotes
+          || (!(uid in oldVotes) && newVotes == oldVotes.concat([uid]))
+          || (uid in oldVotes && newVotes == oldVotes.removeAll([uid]))
+        );
+    }
+
+    function onlyOwnMessageReaction() {
       let before = resource.data.get('reactions', {});
       let after = request.resource.data.get('reactions', {});
       return before is map && after is map
-        && after.diff(before).affectedKeys().hasOnly([uid])
-        && (!(uid in after) || (
-          after[uid] is string
-          && after[uid].size() > 0
-          && after[uid].size() <= 32
-        ));
+        // Firestore Rules cannot iterate arbitrary map keys. Unknown emoji
+        // remain read-only until an independently reviewed write path exists.
+        && after.diff(before).affectedKeys().hasOnly(['👍', '❤️', '😂', '😆', '😮', '😢', '🙏', '🎉', '🔥', '👏', '👎', '😍', '😡', '🤯', '💯', '💪'])
+        && onlyOwnReactionEmoji(before, after, '👍')
+        && onlyOwnReactionEmoji(before, after, '❤️')
+        && onlyOwnReactionEmoji(before, after, '😂')
+        && onlyOwnReactionEmoji(before, after, '😆')
+        && onlyOwnReactionEmoji(before, after, '😮')
+        && onlyOwnReactionEmoji(before, after, '😢')
+        && onlyOwnReactionEmoji(before, after, '🙏')
+        && onlyOwnReactionEmoji(before, after, '🎉')
+        && onlyOwnReactionEmoji(before, after, '🔥')
+        && onlyOwnReactionEmoji(before, after, '👏')
+        && onlyOwnReactionEmoji(before, after, '👎')
+        && onlyOwnReactionEmoji(before, after, '😍')
+        && onlyOwnReactionEmoji(before, after, '😡')
+        && onlyOwnReactionEmoji(before, after, '🤯')
+        && onlyOwnReactionEmoji(before, after, '💯')
+        && onlyOwnReactionEmoji(before, after, '💪');
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填

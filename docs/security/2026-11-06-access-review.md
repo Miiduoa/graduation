@@ -721,6 +721,8 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 **新發現的獨立缺口**：Firestore `conversations/{conversationId}/messages/{messageId}` 原本允許任何有效對話成員直接覆寫整個 `reactions` map（只限制頂層變更欄位），或在 create 預填任意人的表情。可以偽造他人對訊息的反應、刪除他人表情及覆寫其他人的 emoji，屬資料完整性缺口；目前沒有正式資料遭利用證據。
 
-**最小修補**：新訊息 `reactions` 必須缺省或空 map；更新須為 map，且 `MapDiff.affectedKeys()` 僅含目前登入 UID，新增／更換本人 emoji 須為 1–32 字元字串；刪除本人反應與合法重試保留。沿用舊訊息缺少 `reactions` 的相容形狀；一般 readBy、撤回與訊息內容規則不放寬。新增合成 Firebase Emulator 回歸涵蓋正常反應、冒名、清票、數值／過長（需後續補驗）及其他欄位竄改、跨校非成員、同一上下文撤權／停權及恢復、競態下舊反應快照拒絕。
+**更正後修補**：既有 App 真正資料形狀是 `reactions: { emoji: [uid, ...] }`，不是以 UID 為 map key。新訊息 `reactions` 必須缺省或空 map；更新時目前有效成員僅能在受審查的 16 個 emoji key 中對自己的 UID 新增／刪除，其他人的 UID 須完整保留，且不可同筆改寫訊息正文。未知 emoji key 暫時唯讀（避免 Firestore Rules 無法動態遍歷 map key 的限制導致越權），必須在產品端評估相容性後擴充。允許舊訊息沒有 reactions，保留正常 readBy 與撤回。合成回歸涵蓋正常票、跨帳號偽造與清票、重複 UID、非法型別、跨校、撤權及競態重放。
 
 **驗證界線**：本項程式碼及回歸提交後，精確新 head 的 GitHub CI／CodeQL 須另行驗證，不以父 head 成功結果代替。仍未完成未發布群組父貼文 Firestore get/list 與 Web/Mobile 查詢過渡、GCS/Supabase 已簽 URL 撤權、真隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔相容與正式發布／回復。持續遵守禁用 E 校園連線、正式資料／token／migration／部署未授權不動，以及不重跑未授權 npm/pnpm audit。指定 App 5504170 對精確 head 未 APPROVED 前不得合併 main。
+
+**隔離 CI 失敗與修正紀錄（不可省略）**：首次提交 `807ab668b69afcf7874906bb9c7618ae44d83fdd` 的 [Rules job #132514984597](https://github.com/Miiduoa/graduation/actions/runs/43617275795/job/132514984597) 完成 **330 passed / 2 failed / 0 skipped**；兩項失敗是同名的既有 `nested conversation message reaction/read/recall cannot strip or forge fields` 回歸，證明最初的 UID→emoji 假設與正式 Mobile 所使用的 emoji→UID[] 結構不相容。此修正同時調整 Rules 和合成矩陣，不擴張讀取或合併權限。只有**本次新 head** 的完整 Firebase Emulator CI 成功，才能視為已驗證；原失敗不能標為綠燈。
