@@ -154,12 +154,19 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     const revealedItem = decodedDisclosed.replace(
       /^(?:[ \t]*\r?\n){1,3}[ \t]*(?:>[ \t]*){0,2}(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)?/u, '',
     );
+    // A model may put "- SQL", "• 主鍵" or "1. B" on the SAME line as
+    // "Answer:". Only strip that list syntax when the expected answer starts
+    // with a letter: "- 1" can be a negative numeric answer and must stay distinct.
+    // This affects NEW self-check validation only, never the displayed question.
+    const sameLineList = /^\p{L}/u.test(answer)
+      ? revealedItem.replace(/^[ \t]*(?:>[ \t]*){0,2}(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)/u, '')
+      : revealedItem;
     // An opening _ or __ is presentation markup, not part of a leaked answer.
     // Remember its length so a closing underscore is not mistaken for an identifier.
     // Local models sometimes print a literal HTML-formatted answer key.
     // Match up to three short literal style tags with bounded attributes in
     // the comparison copy. Never parse/execute HTML or rewrite displayed text.
-    const answerPresentation = revealedItem.replace(
+    const answerPresentation = sameLineList.replace(
       /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
     );
     const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
