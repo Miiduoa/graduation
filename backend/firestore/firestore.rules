@@ -216,19 +216,30 @@ service cloud.firestore {
     }
 
     function onlyOwnMessageReaction() {
+      let uid = request.auth.uid;
       let before = resource.data.get('reactions', {});
       let after = request.resource.data.get('reactions', {});
       let changed = after.diff(before).affectedKeys();
       return before is map && after is map
-        // Keep the evaluator under 1000 expressions on real Firestore rules.
-        // Unreviewed emoji remain read-only until validated independently.
-        && changed.hasOnly(['👍', '❤️', '😂', '😆', '🎉', '😢'])
-        && (!changed.hasAny(['👍']) || onlyOwnReactionEmoji(before, after, '👍'))
-        && (!changed.hasAny(['❤️']) || onlyOwnReactionEmoji(before, after, '❤️'))
-        && (!changed.hasAny(['😂']) || onlyOwnReactionEmoji(before, after, '😂'))
-        && (!changed.hasAny(['😆']) || onlyOwnReactionEmoji(before, after, '😆'))
-        && (!changed.hasAny(['🎉']) || onlyOwnReactionEmoji(before, after, '🎉'))
-        && (!changed.hasAny(['😢']) || onlyOwnReactionEmoji(before, after, '😢'));
+        && (
+          // Older clients use UID -> emoji. Preserve their current contract,
+          // but never allow one member to modify another UID's value.
+          (changed.hasOnly([uid]) && (
+            !(uid in after) || (
+              after[uid] is string && after[uid].size() > 0 && after[uid].size() <= 32
+            )
+          ))
+          // Newer clients use emoji -> [UID]. No peer UID may be changed.
+          || (
+            changed.hasOnly(['👍', '❤️', '😂', '😆', '🎉', '😢'])
+            && (!changed.hasAny(['👍']) || onlyOwnReactionEmoji(before, after, '👍'))
+            && (!changed.hasAny(['❤️']) || onlyOwnReactionEmoji(before, after, '❤️'))
+            && (!changed.hasAny(['😂']) || onlyOwnReactionEmoji(before, after, '😂'))
+            && (!changed.hasAny(['😆']) || onlyOwnReactionEmoji(before, after, '😆'))
+            && (!changed.hasAny(['🎉']) || onlyOwnReactionEmoji(before, after, '🎉'))
+            && (!changed.hasAny(['😢']) || onlyOwnReactionEmoji(before, after, '😢'))
+          )
+        );
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填

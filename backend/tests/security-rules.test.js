@@ -1625,6 +1625,18 @@ describe('firestore security rules', () => {
     await assertSucceeds(bob.doc(parent + '/messages/legacy').update({
       reactions: { '👍': ['bob'] },
     }));
+    // Preserve the older UID -> emoji format without making peer fields writable.
+    const oldClient = bob.doc(parent + '/messages/legacy-uid-keyed');
+    await seedFirestore((db) => db.doc(parent + '/messages/legacy-uid-keyed').set({
+      senderId: 'alice', content: 'Old client', reactions: { alice: '❤️' },
+    }));
+    await assertSucceeds(oldClient.update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await assertSucceeds(oldClient.update({ reactions: { alice: '❤️', bob: '😢' } }));
+    await assertFails(oldClient.update({ reactions: { bob: '😢' } }));
+    await assertFails(oldClient.update({ reactions: { alice: '🔥', bob: '😢' } }));
+    await assertFails(oldClient.update({ reactions: { alice: '❤️', bob: '😢', charlie: '🎉' } }));
+    await assertFails(oldClient.update({ reactions: { alice: '❤️', bob: 1 } }));
+    await assertSucceeds(oldClient.update({ reactions: { alice: '❤️' } }));
 
     // Same authenticated context is rejected after membership or account revocation.
     await seedFirestore((db) => db.doc(parent).update({ memberIds: ['alice', 'charlie'] }));
