@@ -1,6 +1,6 @@
 import * as photoPdf from '../screens/nuni/nativePhotoPdf';
 import React from 'react';
-import { AppState, ScrollView, type AppStateStatus } from 'react-native';
+import { AppState, Linking, ScrollView, type AppStateStatus } from 'react-native';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
@@ -3142,4 +3142,22 @@ it('保留收藏頁後仍重新驗權，刷新遭撤權時不顯示舊教材', a
     view.unmount();
     subscription.mockRestore();
   }
+});
+
+
+it.each(['student', 'owner-teacher'] as const)('lets %s open a reading URL from the course material tab', async (role) => {
+  const appState = jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  course = { ...course, memberRole: role };
+  const reading = { ...material(1), body: '請閱讀 https://example.test/reading。' };
+  mockRequest.mockImplementation((path, context, input) => path.endsWith('/materials/page')
+    ? Promise.resolve({ materials: [reading], nextCursor: null })
+    : response(path, context, input));
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+  const view = await openCourse();
+  fireEvent.press(view.getByRole('button', { name: '教材 1' }));
+  fireEvent.press(view.getByRole('link', { name: 'https://example.test/reading' }));
+  await waitFor(() => expect(open).toHaveBeenCalledWith('https://example.test/reading'));
+  view.unmount();
+  open.mockRestore();
+  appState.mockRestore();
 });

@@ -94,7 +94,15 @@ function reply(answer: string) {
   return Response.json({ answer, steps: [], cards: [] });
 }
 
-function saveTodayLesson(now = new Date()): string {
+function saveTodayLesson(now?: Date): string {
+  // Preserve main's deterministic weekday clock for the UI tests while keeping
+  // explicit historical instants available to the weekend boundary tests.
+  // Only Date is faked: asynchronous React and Testing Library timers stay real.
+  if (!now) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-12T02:30:00.000Z'));
+    now = new Date();
+  }
   // PU's verified timetable profile accepts Monday–Friday. At Taiwan midnight
   // on weekends, a same-day test lesson would be rejected as damaged storage.
   // Keep the fixture valid and ask for the next teaching day instead.
@@ -129,7 +137,21 @@ beforeEach(() => {
   state.pendingLogout = false;
   vi.clearAllMocks();
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+it('pins the default PU lesson UI fixture to a valid Thursday without faking async timers', () => {
+  expect(saveTodayLesson()).toBe('今天有哪些課？');
+  expect(new Date().toISOString()).toBe('2026-11-12T02:30:00.000Z');
+  const rows = readPersonalImports({ owner: 'platform:' + state.context, schoolId: state.school });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4,
+    title: '入口測試資料庫', startTime: '10:10', endTime: '11:00',
+  });
+});
 
 it.each([
   ['Friday', '2026-11-13T17:30:00+08:00', '今天有哪些課？', 5],

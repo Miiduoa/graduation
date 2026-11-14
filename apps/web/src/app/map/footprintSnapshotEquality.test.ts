@@ -72,3 +72,37 @@ it('never treats duplicate POIs as the same complete snapshot', () => {
   const next = [copy(), copy()];
   expect(reuseUnchangedProvidenceFootprints(previousDuplicates, next)).toBe(next);
 });
+
+
+it('reuses a verified building ring with a different starting vertex or winding', () => {
+  const previous = [original];
+  const ring = copy().outline;
+  const rotated = { ...copy(), outline: [...ring.slice(1), ...ring.slice(0, 1)] };
+  const reversed = { ...copy(), outline: [...ring].reverse() };
+  const reversedRotated = {
+    ...copy(), outline: [...reversed.outline.slice(2), ...reversed.outline.slice(0, 2)],
+  };
+  expect(reuseUnchangedProvidenceFootprints(previous, [rotated])).toBe(previous);
+  expect(reuseUnchangedProvidenceFootprints(previous, [reversed])).toBe(previous);
+  expect(reuseUnchangedProvidenceFootprints(previous, [reversedRotated])).toBe(previous);
+});
+
+it('keeps different vertex connections or one moved coordinate as a real geometry update', () => {
+  // Synthetic four-vertex ring to distinguish permutation from cyclic rotation.
+  const outline: Array<[number, number]> = [
+    [120.58131, 24.22624], [120.58143, 24.22624],
+    [120.58143, 24.22634], [120.58131, 24.22634],
+  ];
+  const before: ProvidenceFootprint = { ...copy(), outline };
+  const changedConnections: ProvidenceFootprint = {
+    ...copy(), outline: [outline[0], outline[2], outline[1], outline[3]],
+  };
+  const movedVertex: ProvidenceFootprint = {
+    ...copy(), outline: [outline[2], outline[3], outline[0], [120.58144, 24.22624]],
+  };
+  const previous = [before];
+  const reordered = [changedConnections];
+  const moved = [movedVertex];
+  expect(reuseUnchangedProvidenceFootprints(previous, reordered)).toBe(reordered);
+  expect(reuseUnchangedProvidenceFootprints(previous, moved)).toBe(moved);
+});
