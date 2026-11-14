@@ -42,6 +42,49 @@ it('never promotes publication dates or ambiguous dates into deadlines', () => {
   expect(careerTitleDate('2026/11/20 至 2026/11/21 徵才')).toBe('');
   expect(careerTitleDate('115年11月20日徵才')).toBe('2026-11-20');
 });
+it.each(CAREER_HTML_SOURCES)(
+  'normalizes $source article URLs before publishing or opening calendars',
+  async (source) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+    const article = '/p/406-1102-1.php';
+    const linkHtml = (href: string) =>
+      `<div class="d-txt"><a href="${href}">2026/12/8 實習申請截止</a></div>`;
+    const input = [
+      article + '?studentId=TEST-STUDENT-ID&amp;grade=TEST-GRADE#TEST-FRAGMENT',
+      source.url + article.slice(1) + '?Lang=zh-tw&amp;unknown=TEST-UNKNOWN',
+      '/p/404-1102-2,r28.php?studentId=TEST-STUDENT-ID',
+      '/p/406-1102-TEST-STUDENT-ID.php',
+      '/p/406-1102-1.php/TEST-GRADE',
+      '/p/406-1102-1.php%3FstudentId=TEST-STUDENT-ID',
+      '/other/p/406-1102-1.php',
+      `https://${new URL(source.url).hostname}:8443${article}`,
+    ]
+      .map(linkHtml)
+      .join('');
+    expect(parseCareerHtml(input, source).map((item) => item.url)).toEqual([
+      source.url + article.slice(1),
+      source.url + 'p/404-1102-2,r28.php',
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : input),
+      })),
+    );
+    const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+    const feed = await response.json();
+    expect(feed.announcements).toHaveLength(4);
+    expect(feed.timeline).toHaveLength(4);
+    expect(JSON.stringify(feed)).not.toMatch(/TEST-|studentId|grade|Lang|unknown|[?#]/i);
+    for (const item of feed.timeline) {
+      const calendar = new URL(careerCalendarUrl(item));
+      expect(calendar.searchParams.get('details')).toContain(item.url);
+      expect(calendar.searchParams.get('details')).not.toMatch(/TEST-|studentId|grade|[?#]/i);
+    }
+  },
+);
 it.each([
   '2026/11/15 公告：實習申請至 12/08 截止',
   '2026/11/20 至 11/21 徵才博覽會',

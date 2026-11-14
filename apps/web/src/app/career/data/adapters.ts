@@ -29,6 +29,16 @@ export const CAREER_HTML_SOURCES = [
 ] as const;
 export const TAIWANJOBS_URL =
   'https://free.taiwanjobs.gov.tw/webservice_taipei/Webservice.ashx?zipno=433&count=10';
+/** Rpage article identity lives in the path; no query or fragment is needed. */
+function announcementUrl(value: string, source: (typeof CAREER_HTML_SOURCES)[number]): string {
+  const safe = careerSafeUrl(value, new URL(source.url).hostname, source.url);
+  if (!safe) return '';
+  const url = new URL(safe);
+  if (url.port || !/^\/p\/40[46]-\d+-\d+(?:,r\d+)?\.php$/.test(url.pathname)) return '';
+  // Rebuild from approved fields so arbitrary URL metadata cannot enter the
+  // public cache or be forwarded to an external calendar provider.
+  return url.origin + url.pathname;
+}
 /** Normalize decoded titles before matching, including separators inserted between letters. */
 function hasPersonalAcademicData(title: string): boolean {
   const normalized = title
@@ -68,7 +78,7 @@ export function parseCareerHtml(
         /\/p\/40[46]-/.test(attr(n, 'href')),
       );
       if (!link) return [];
-      const url = careerSafeUrl(attr(link, 'href'), new URL(source.url).hostname, source.url);
+      const url = announcementUrl(attr(link, 'href'), source);
       // Inspect the complete decoded title before truncation so sensitive fields
       // cannot slip into the public feed (including its timeline and cache).
       // Reject grade-related titles regardless of punctuation, names or score format.
