@@ -47,6 +47,10 @@ describe('public Providence building geometry route', () => {
     const called = new URL(mockedFetch.mock.calls[0][0]);
     expect(called.hostname).toBe('overpass-api.de');
     const query = called.searchParams.get('data')!;
+    // Overpass execution and public memory budgets must remain below the
+    // independent 12-second HTTP transport deadline.
+    expect(query).toContain('[out:json][timeout:8][maxsize:67108864]');
+    expect(query).not.toContain('[timeout:12]');
     expect(query).toContain('way(id:');
     expect(query).toContain('255784049');
     expect(query).toContain('out meta geom;');

@@ -83,7 +83,9 @@ function freshCacheControl(validUntil: number): string {
   const secondsRemaining = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
   return `public, max-age=0, s-maxage=${Math.min(3600, secondsRemaining)}`;
 }
-const query = '[out:json][timeout:12];way(id:' +
+// Keep Overpass's own 8-second execution budget below our 12-second network
+// deadline, leaving transport headroom; bound its server-side memory to 64 MiB.
+const query = '[out:json][timeout:8][maxsize:67108864];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
 type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; osmBaseAt: string | null; validUntil: number; discardAfter: number };
