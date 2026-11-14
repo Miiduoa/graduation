@@ -198,3 +198,63 @@ test('待審申請分頁保留已載入名單，失敗可重試', async () => {
   });
   await waitFor(() => expect(screen.queryByText('載入更多待審申請')).toBeNull());
 });
+
+test('活動報名名單獨立分頁並保留其他活動與已載入名單', async () => {
+  const event: NonNullable<ClubPortalView['events']>[number] = {
+    id: 'first',
+    title: '第一場活動',
+    location: '教室',
+    startsAt: Date.now() + 100000,
+    endsAt: Date.now() + 200000,
+    capacity: 200,
+    registrationDeadline: 4000,
+    cancellationDeadline: 3000,
+    visibility: 'public',
+    registered: 101,
+    checkedIn: 0,
+    mine: false,
+    myCheckIn: false,
+    registrationCursor: 'first-person',
+    registrations: [{ uid: 'first-person', name: '第一位參加者', checkedInAt: null }],
+  };
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    role: 'admin',
+    status: 'active',
+    events: [
+      event,
+      {
+        ...event,
+        id: 'second',
+        title: '第二場活動',
+        registrationCursor: undefined,
+        registrations: [],
+      },
+    ],
+    eventCursor: 'second',
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.click(await screen.findByRole('button', { name: '管理' }));
+  vi.mocked(callClubPortal).mockResolvedValueOnce({
+    ...profile,
+    events: [
+      {
+        ...event,
+        registrationCursor: undefined,
+        registrations: [{ uid: 'last-person', name: '最後一位參加者', checkedInAt: null }],
+      },
+    ],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多報名名單' }));
+  await screen.findByText(/最後一位參加者/);
+  expect(screen.getByText(/第一位參加者/)).toBeTruthy();
+  expect(screen.getByText(/第二場活動/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '載入更多活動' })).toBeTruthy();
+  expect(screen.queryByText('載入更多報名名單')).toBeNull();
+  expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
+    action: 'read',
+    groupId: 'club',
+    rosterEventId: 'first',
+    registrationCursor: 'first-person',
+  });
+});

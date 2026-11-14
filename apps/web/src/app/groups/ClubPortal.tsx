@@ -118,6 +118,45 @@ export function ClubPortal({
       }
     }
   }
+  async function loadRegistrations(eventId: string, cursor: string) {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    const current = generation.current;
+    try {
+      const next = await callClubPortal(uid, schoolId, {
+        action: 'read',
+        groupId: selected,
+        rosterEventId: eventId,
+        registrationCursor: cursor,
+      });
+      const row = next.events?.find((event) => event.id === eventId);
+      if (generation.current === current && row)
+        setView(
+          (previous) =>
+            previous && {
+              ...previous,
+              events: previous.events?.map((event) =>
+                event.id === eventId
+                  ? {
+                      ...row,
+                      registrations: [...(event.registrations || []), ...(row.registrations || [])],
+                    }
+                  : event,
+              ),
+            },
+        );
+    } catch (err) {
+      if (generation.current === current)
+        setError(err instanceof Error ? err.message : '讀取失敗，請重試');
+    } finally {
+      if (generation.current === current) {
+        lock.current = false;
+        setBusy(false);
+      }
+    }
+  }
   async function act(input: Record<string, unknown>) {
     if (lock.current) return;
     lock.current = true;
@@ -397,6 +436,14 @@ export function ClubPortal({
                         </li>
                       ))}
                     </ul>
+                  )}
+                  {manage && e.registrationCursor && (
+                    <button
+                      disabled={busy}
+                      onClick={() => void loadRegistrations(e.id, e.registrationCursor!)}
+                    >
+                      載入更多報名名單
+                    </button>
                   )}
                 </article>
               ))}

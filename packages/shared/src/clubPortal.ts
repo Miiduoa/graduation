@@ -51,6 +51,7 @@ export type ClubPortalView = {
     myCheckIn: boolean;
     myCheckInCode?: string;
     studentSuffix?: string;
+    registrationCursor?: string;
     registrations?: { uid: string; name: string; checkedInAt: number | null }[];
   }[];
 };

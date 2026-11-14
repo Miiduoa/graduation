@@ -408,7 +408,15 @@ export function createClubPortal({
             const prefix = `nuni-club:${groupId}:${id(input.eventId)}:`;
             if (code.startsWith(prefix)) target = id(code.slice(prefix.length));
             else if (/^[A-Za-z0-9]{4}$/.test(code)) {
-              const records = await bounded(ref.collection('registrations'), 1000);
+              const records = (
+                await tx.get(
+                  ref
+                    .collection('registrations')
+                    .where('status', '==', 'registered')
+                    .where('studentSuffix', '==', code)
+                    .limit(2),
+                )
+              ).docs as any[];
               const matches = records.filter(
                 (r) => r.data().status === 'registered' && r.data().studentSuffix === code,
               );
@@ -446,11 +454,15 @@ export function createClubPortal({
           if (old.status !== 'registered' && input.allowWalkIn !== true)
             throw new HttpsError('failed-precondition', '這位不在報名名單');
           if (old.status !== 'registered') {
-            const registrations = await bounded(ref.collection('registrations'), 1000);
-            if (
-              registrations.filter((r) => r.data().status === 'registered').length >=
-              (event.capacity || 1000)
-            )
+            const registrations = (
+              await tx.get(
+                ref
+                  .collection('registrations')
+                  .where('status', '==', 'registered')
+                  .limit(event.capacity || 1000),
+              )
+            ).docs as any[];
+            if (registrations.length >= (event.capacity || 1000))
               throw new HttpsError('resource-exhausted', '名額已滿');
           }
           if (!old.checkedInAt)
@@ -491,11 +503,15 @@ export function createClubPortal({
               action === 'cancel' ? '已過取消時間，請聯絡幹部' : '已過報名時間',
             );
           if (action === 'register') {
-            const registrations = await bounded(ref.collection('registrations'), 1000);
-            if (
-              registrations.filter((r) => r.data().status === 'registered').length >=
-              (event.capacity || 1000)
-            )
+            const registrations = (
+              await tx.get(
+                ref
+                  .collection('registrations')
+                  .where('status', '==', 'registered')
+                  .limit(event.capacity || 1000),
+              )
+            ).docs as any[];
+            if (registrations.length >= (event.capacity || 1000))
               throw new HttpsError('resource-exhausted', '名額已滿');
           }
           tx.set(regRef, {
@@ -555,11 +571,17 @@ export function createClubPortal({
               )
             ).docs
           : [];
-      const eventPage = await page(
-        !active && !office ? eventRef.where('visibility', '==', 'public') : eventRef,
-        input.eventCursor,
-        20,
-      );
+      const rosterEvent =
+        input.rosterEventId === undefined
+          ? undefined
+          : await tx.get(eventRef.doc(id(input.rosterEventId)));
+      const eventPage = rosterEvent
+        ? { docs: rosterEvent.exists ? [rosterEvent] : [], next: undefined }
+        : await page(
+            !active && !office ? eventRef.where('visibility', '==', 'public') : eventRef,
+            input.eventCursor,
+            20,
+          );
       const events = eventPage.docs;
       const directories = members.length
         ? await tx.getAll(...members.map((m) => school.collection('directory').doc(m.id)))
@@ -572,14 +594,32 @@ export function createClubPortal({
       for (const doc of events) {
         const e = doc.data();
         if (!active && !office && e.visibility !== 'public') continue;
-        const records = await bounded(doc.ref.collection('registrations'), 1000),
-          registrations = records.filter((r) => r.data().status === 'registered'),
-          mine = records.find((r) => r.id === uid)?.data();
+        const activeQuery = doc.ref.collection('registrations').where('status', '==', 'registered');
+        // Read totals in bounded pages too, so even an oversized legacy event
+        // cannot exceed a single query's response size or block the club page.
+        let registered = 0,
+          checkedIn = 0,
+          summaryCursor: string | undefined;
+        do {
+          const summary = await page(activeQuery, summaryCursor, 100);
+          registered += summary.docs.length;
+          checkedIn += summary.docs.filter((r) => r.data().checkedInAt).length;
+          summaryCursor = summary.next;
+        } while (summaryCursor);
+        const mine = (await tx.get(doc.ref.collection('registrations').doc(uid))).data();
+        const rosterPage =
+          officer || office
+            ? await page(
+                activeQuery,
+                input.rosterEventId === doc.id ? input.registrationCursor : undefined,
+                100,
+              )
+            : { docs: [], next: undefined };
         // Resolve attendees independently of the current member page, including public guests.
         const attendeeNames = new Map<string, string>();
         if (officer || office) {
-          for (let offset = 0; offset < registrations.length; offset += 100) {
-            const batch = registrations.slice(offset, offset + 100);
+          for (let offset = 0; offset < rosterPage.docs.length; offset += 100) {
+            const batch = rosterPage.docs.slice(offset, offset + 100);
             const names = await tx.getAll(
               ...batch.map((r) => school.collection('directory').doc(r.id)),
             );
@@ -598,8 +638,8 @@ export function createClubPortal({
           registrationDeadline: e.registrationDeadline ?? e.startsAt,
           cancellationDeadline: e.cancellationDeadline ?? e.startsAt,
           visibility: e.visibility || 'members',
-          registered: registrations.length,
-          checkedIn: registrations.filter((r) => r.data().checkedInAt).length,
+          registered,
+          checkedIn,
           mine: mine?.status === 'registered',
           myCheckIn: Boolean(mine?.checkedInAt),
           ...(mine?.status === 'registered'
@@ -610,7 +650,8 @@ export function createClubPortal({
             : {}),
           ...(officer || office
             ? {
-                registrations: registrations.map((r) => ({
+                registrationCursor: rosterPage.next,
+                registrations: rosterPage.docs.map((r) => ({
                   uid: r.id,
                   name: attendeeNames.get(r.id) || '未提供姓名',
                   checkedInAt: r.data().checkedInAt || null,

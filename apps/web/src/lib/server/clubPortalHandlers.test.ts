@@ -387,3 +387,84 @@ test('五百筆以上申請可逐頁審核，不阻斷介紹、公告與活動�
     expect(view.requestCursor).toBeUndefined();
   }
 });
+
+test('千筆以上取消紀錄不影響閱讀、報名、後四碼簽到與現場名額', async () => {
+  await event();
+  store.docs.get('groups/club/clubEvents/event')!.capacity = 2;
+  for (let n = 0; n < 1005; n++)
+    store.docs.set(`groups/club/clubEvents/event/registrations/cancelled-${n}`, {
+      status: 'cancelled',
+      studentSuffix: '5678',
+    });
+  expect((await call('officer')).events?.[0]).toMatchObject({ registered: 0, registrations: [] });
+  await call('student', { action: 'register', eventId: 'event' });
+  expect((await call()).events?.[0]).toMatchObject({ registered: 1, mine: true });
+  time = 5500;
+  await call('officer', { action: 'checkIn', eventId: 'event', checkInCode: '5678' });
+  await call('officer', {
+    action: 'checkIn',
+    eventId: 'event',
+    targetUid: 'other',
+    allowWalkIn: true,
+  });
+  await expect(
+    call('officer', {
+      action: 'checkIn',
+      eventId: 'event',
+      targetUid: 'staff',
+      allowWalkIn: true,
+    }),
+  ).rejects.toThrow('名額已滿');
+  const row = (await call('officer')).events?.[0];
+  expect(row).toMatchObject({ registered: 2, checkedIn: 2 });
+  expect(row?.registrations).toHaveLength(2);
+  time = 1000;
+  await expect(call('staff', { action: 'register', eventId: 'event' })).rejects.toThrow('名額已滿');
+});
+
+test('超過千位有效報名仍可閱讀並獨立翻頁，不外洩名單且總數不受分頁影響', async () => {
+  await event();
+  await call('officer', {
+    action: 'createEvent',
+    operationId: 'second',
+    title: '另一活動',
+    location: '教室',
+    startsAt: 5000,
+    endsAt: 6000,
+    registrationDeadline: 4000,
+    cancellationDeadline: 3000,
+    capacity: 1,
+    visibility: 'public',
+  });
+  for (let n = 0; n < 1005; n++) {
+    const uid = `attendee-${String(n).padStart(4, '0')}`;
+    store.docs.set(`groups/club/clubEvents/event/registrations/${uid}`, {
+      status: 'registered',
+      checkedInAt: n % 2 ? 5500 : null,
+    });
+  }
+  for (const uid of ['officer', 'staff']) {
+    const first = await call(uid);
+    expect(first.club?.name).toBe('攝影社');
+    expect(first.events).toHaveLength(2);
+    const row = first.events!.find((e) => e.id === 'event')!;
+    expect(row).toMatchObject({ registered: 1005, checkedIn: 502 });
+    expect(row.registrations).toHaveLength(100);
+    const ids = row.registrations!.map((r) => r.uid);
+    let cursor = row.registrationCursor;
+    while (cursor) {
+      const page = (await call(uid, { rosterEventId: 'event', registrationCursor: cursor }))
+        .events![0];
+      expect(page).toMatchObject({ registered: 1005, checkedIn: 502 });
+      ids.push(...page.registrations!.map((r) => r.uid));
+      cursor = page.registrationCursor;
+    }
+    expect(ids).toHaveLength(1005);
+    expect(new Set(ids).size).toBe(1005);
+  }
+  const visitor = (
+    await call('student', { rosterEventId: 'event', registrationCursor: 'attendee-0001' })
+  ).events![0];
+  expect(visitor.registrations).toBeUndefined();
+  expect(visitor.registrationCursor).toBeUndefined();
+});
