@@ -195,3 +195,52 @@ test('待審申請分頁保留已載入名單，失敗可重試', async () => {
   });
   await waitFor(() => expect(screen.queryByText('載入更多待審申請')).toBeNull());
 });
+
+test('報名名單續載失敗保留原名單與游標，重試後合併同場活動', async () => {
+  const event = {
+    id: 'event',
+    title: '社課',
+    location: '教室',
+    startsAt: 1,
+    endsAt: 9999999999999,
+    capacity: 200,
+    registrationDeadline: 1,
+    cancellationDeadline: 1,
+    visibility: 'public',
+    registered: 101,
+    checkedIn: 0,
+    mine: false,
+    myCheckIn: false,
+    registrations: [{ uid: 'first', name: '第一位', checkedInAt: null }],
+    registrationCursor: 'first',
+  };
+  jest
+    .mocked(callClubPortal)
+    .mockResolvedValueOnce({ ...profile, role: 'admin', status: 'active', events: [event] });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.press(await screen.findByText('管理'));
+  jest.mocked(callClubPortal).mockRejectedValueOnce(new Error('連線中斷'));
+  fireEvent.press(screen.getByText('載入更多報名者'));
+  await screen.findByText('連線中斷');
+  expect(screen.getByText('第一位')).toBeTruthy();
+  jest.mocked(callClubPortal).mockResolvedValueOnce({
+    ...profile,
+    events: [
+      {
+        ...event,
+        registrationCursor: undefined,
+        registrations: [{ uid: 'last', name: '第一百零一位', checkedInAt: null }],
+      },
+    ],
+  });
+  fireEvent.press(screen.getByText('載入更多報名者'));
+  await screen.findByText('第一百零一位');
+  expect(screen.getByText('第一位')).toBeTruthy();
+  expect(screen.queryByText('載入更多報名者')).toBeNull();
+  expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
+    action: 'read',
+    groupId: 'club',
+    rosterEventId: 'event',
+    registrationCursor: 'first',
+  });
+});

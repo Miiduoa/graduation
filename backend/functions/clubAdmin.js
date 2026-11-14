@@ -142,14 +142,34 @@ function createClubAdmin({
           throw new HttpsError('not-found', '活動或社員不存在');
         const event = eventDoc.data();
         const old = registration.data() || {};
+        // Preserve counters initialized by the isolated club portal when old clients write.
+        const hasCounters =
+          Number.isSafeInteger(event.registeredCount) &&
+          event.registeredCount >= 0 &&
+          Number.isSafeInteger(event.checkedInCount) &&
+          event.checkedInCount >= 0;
         if (action === 'checkIn') {
           if (now() < event.startsAt || now() > event.endsAt || old.status !== 'registered')
             throw new HttpsError('failed-precondition', '僅活動期間可為已報名社員簽到');
-          if (!old.checkedInAt)
+          if (!old.checkedInAt) {
+            if (hasCounters) tx.update(ref, { checkedInCount: event.checkedInCount + 1 });
             tx.update(registrationRef, { checkedInAt: now(), checkedInBy: uid });
+          }
         } else {
           if (now() >= event.startsAt || old.checkedInAt)
             throw new HttpsError('failed-precondition', '活動開始後不可變更報名');
+          if (hasCounters)
+            tx.update(ref, {
+              registeredCount:
+                event.registeredCount +
+                (action === 'register'
+                  ? old.status === 'registered'
+                    ? 0
+                    : 1
+                  : old.status === 'registered'
+                    ? -1
+                    : 0),
+            });
           tx.set(registrationRef, {
             status: action === 'register' ? 'registered' : 'cancelled',
             checkedInAt: null,

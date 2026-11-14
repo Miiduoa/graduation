@@ -7,10 +7,12 @@ import { createGroupInviteHandlers } from './groupInviteHandlers';
 let store: ReturnType<typeof createMemoryGroupStore>,
   run: ReturnType<typeof createClubPortal>,
   time: number;
+let reads: { path: string; aggregate: boolean; size: number; maximum: number }[];
 const call = (uid = 'student', data: Record<string, unknown> = {}) =>
   run({ auth: { uid }, data: { schoolId: 'school', groupId: 'club', action: 'read', ...data } });
 beforeEach(() => {
   time = 1000;
+  reads = [];
   store = createMemoryGroupStore([
     [
       'groups/club',
@@ -31,12 +33,78 @@ beforeEach(() => {
     ],
     ['schools/school/serviceRoles/staff', { status: 'active', clubs: true }],
   ]);
-  // The shared memory transaction does not implement document-ID cursors.
+  // Keep advanced Firestore query support local to this lane's tests.
+  const wrap = (source: any, orders: string[] = [], after?: any[], aggregate = false): any =>
+    new Proxy(source, {
+      get(target, key) {
+        if (key === 'collection') return (name: string) => wrap(target.collection(name));
+        if (key === 'doc') return (name: string) => wrap(target.doc(name));
+        if (key === 'where') return (...args: any[]) => wrap(target.where(...args), orders, after);
+        if (key === 'orderBy')
+          return (field: string) => wrap(target.orderBy(field), [...orders, field], after);
+        if (key === 'startAfter') return (...values: any[]) => wrap(target, orders, values);
+        if (key === 'limit') return (size: number) => wrap(target.limit(size), orders, after);
+        if (key === 'count') return () => wrap(target, orders, after, true);
+        if (key === 'clubQuery')
+          return async () => {
+            let rows = [...store.docs.entries()]
+              .filter(
+                ([path, data]) =>
+                  path.startsWith(target.path + '/') &&
+                  !path.slice(target.path.length + 1).includes('/') &&
+                  target.filters.every((f: any) =>
+                    f.op === '>='
+                      ? (data[f.field] as number) >= f.value
+                      : f.op === '<'
+                        ? (data[f.field] as number) < f.value
+                        : f.op === '>'
+                          ? (data[f.field] as number) > f.value
+                          : data[f.field] === f.value,
+                  ),
+              )
+              .map(([path, data]) => ({
+                id: path.split('/').pop()!,
+                data: () => data,
+                ref: wrap(store.db.doc(path)),
+              }));
+            const compare = (a: any[], b: any[]) => {
+              for (let n = 0; n < a.length; n++) {
+                if (a[n] < b[n]) return -1;
+                if (a[n] > b[n]) return 1;
+              }
+              return 0;
+            };
+            const values = (row: any) =>
+              orders.map((field) => (field === '__name__' ? row.id : row.data()[field]));
+            rows.sort((a, b) => compare(values(a), values(b)));
+            if (after) rows = rows.filter((row) => compare(values(row), after) > 0);
+            if (aggregate) {
+              reads.push({ path: target.path, aggregate: true, size: 0, maximum: target.maximum });
+              return { data: () => ({ count: rows.length }) };
+            }
+            rows = rows.slice(0, target.maximum);
+            reads.push({
+              path: target.path,
+              aggregate: false,
+              size: rows.length,
+              maximum: target.maximum,
+            });
+            return { docs: rows, size: rows.length, empty: !rows.length };
+          };
+        return target[key];
+      },
+    });
+  const collection = store.db.collection.bind(store.db);
+  store.db.collection = (name: string) => wrap(collection(name));
   const transaction = store.db.runTransaction.bind(store.db);
   store.db.runTransaction = (callback) =>
     transaction((tx: any) => {
       const get = tx.get.bind(tx);
-      tx.get = (query: any) => (query.order?.field === '__name__' ? query.get() : get(query));
+      tx.get = async (query: any) => {
+        if (query.filters) return query.clubQuery();
+        const doc = await get(query);
+        return { ...doc, ref: wrap(doc.ref) };
+      };
       return callback(tx);
     });
   run = createClubPortal({ db: store.db, now: () => time });
@@ -340,6 +408,7 @@ test('報名姓名不依賴社員分頁，公開活動非社員也能核對且�
     store.docs.set(`groups/club/clubEvents/event/registrations/${uid}`, { status: 'registered' });
     store.docs.set(`schools/school/directory/${uid}`, { displayName: `姓名-${uid}` });
   }
+  delete store.docs.get('groups/club/clubEvents/event')!.registeredCount;
   for (const uid of ['officer', 'staff']) {
     const view = await call(uid);
     expect(view.members?.some((m) => m.id === 'member-z')).toBe(false);
@@ -443,6 +512,7 @@ test('超過千位有效報名仍可閱讀並獨立翻頁，不外洩名單且�
       checkedInAt: n % 2 ? 5500 : null,
     });
   }
+  delete store.docs.get('groups/club/clubEvents/event')!.registeredCount;
   for (const uid of ['officer', 'staff']) {
     const first = await call(uid);
     expect(first.club?.name).toBe('攝影社');
@@ -511,4 +581,84 @@ test('歷史活動超過一頁時仍優先顯示近期活動，管理可繼續�
       expect(new Set(ids).size).toBe(108);
     }
   }
+});
+
+test('活動與報名讀取量受頁面限制，已有計數不再掃描報名統計', async () => {
+  for (let n = 0; n < 2005; n++)
+    store.docs.set(`groups/club/clubEvents/event-${String(n).padStart(4, '0')}`, {
+      title: '社課',
+      startsAt: 5000,
+      endsAt: 6000,
+      visibility: 'public',
+      registeredCount: 800,
+      checkedInCount: 300,
+    });
+  const first = await call('officer');
+  expect(first.events).toHaveLength(20);
+  expect(first.events![0]).toMatchObject({ registered: 800, checkedIn: 300 });
+  expect(
+    reads.filter((r) => r.path === 'groups/club/clubEvents').reduce((n, r) => n + r.size, 0),
+  ).toBe(21);
+  expect(reads.some((r) => r.aggregate)).toBe(false);
+  expect(
+    reads.filter((r) => r.path.endsWith('/registrations')).every((r) => r.maximum === 101),
+  ).toBe(true);
+  reads = [];
+  const next = await call('officer', { eventCursor: first.eventCursor });
+  expect(next.events).toHaveLength(20);
+  expect(next.events!.some((e) => first.events!.some((prior) => prior.id === e.id))).toBe(false);
+  expect(
+    reads.filter((r) => r.path === 'groups/club/clubEvents').reduce((n, r) => n + r.size, 0),
+  ).toBe(21);
+});
+
+test('取消重送、重報、重複簽到與交易失敗皆維持正確計數', async () => {
+  await event();
+  await call('student', { action: 'register', eventId: 'event' });
+  await call('student', { action: 'cancel', eventId: 'event' });
+  await call('student', { action: 'cancel', eventId: 'event' });
+  expect(store.docs.get('groups/club/clubEvents/event')).toMatchObject({
+    registeredCount: 0,
+    checkedInCount: 0,
+  });
+  store.failNextCommit();
+  await expect(call('student', { action: 'register', eventId: 'event' })).rejects.toThrow();
+  expect(store.docs.get('groups/club/clubEvents/event')!.registeredCount).toBe(0);
+  await call('student', { action: 'register', eventId: 'event' });
+  time = 5500;
+  await call('officer', { action: 'checkIn', eventId: 'event', targetUid: 'student' });
+  await call('officer', { action: 'checkIn', eventId: 'event', targetUid: 'student' });
+  expect(store.docs.get('groups/club/clubEvents/event')).toMatchObject({
+    registeredCount: 1,
+    checkedInCount: 1,
+  });
+});
+
+test('即時與歷史頁交界不漏資料，游標固定時間邊界且拒絕無效游標', async () => {
+  for (let n = 0; n < 21; n++)
+    store.docs.set(`groups/club/clubEvents/live-${String(n).padStart(2, '0')}`, {
+      title: '近期',
+      startsAt: 5000,
+      endsAt: 6000,
+      visibility: 'public',
+      registeredCount: 0,
+      checkedInCount: 0,
+    });
+  store.docs.set('groups/club/clubEvents/history', {
+    title: '歷史',
+    startsAt: 1,
+    endsAt: 2,
+    visibility: 'public',
+    registeredCount: 0,
+    checkedInCount: 0,
+  });
+  const first = await call('officer');
+  time = 9000;
+  const next = await call('officer', { eventCursor: first.eventCursor });
+  expect(next.events!.map((e) => e.id)).toEqual(['live-20', 'history']);
+  expect(next.eventCursor).toBeUndefined();
+  await expect(call('officer', { eventCursor: 'invalid' })).rejects.toHaveProperty(
+    'code',
+    'invalid-argument',
+  );
 });

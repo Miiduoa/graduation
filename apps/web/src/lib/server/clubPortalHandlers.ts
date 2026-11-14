@@ -351,6 +351,23 @@ export function createClubPortal({
         return { success: true, office };
       }
       const eventRef = groupRef.collection('clubEvents');
+      // Older events use server aggregates until their next write initializes counters.
+      // Aggregate queries return counts only, never the complete registration collection.
+      const totals = async (ref: any, event: Record<string, any>) => {
+        if (
+          Number.isSafeInteger(event.registeredCount) &&
+          event.registeredCount >= 0 &&
+          Number.isSafeInteger(event.checkedInCount) &&
+          event.checkedInCount >= 0
+        )
+          return { registeredCount: event.registeredCount, checkedInCount: event.checkedInCount };
+        const query = ref.collection('registrations').where('status', '==', 'registered');
+        const [registered, checkedIn] = await Promise.all([
+          tx.get(query.count()),
+          tx.get(query.where('checkedInAt', '>', 0).count()),
+        ]);
+        return { registeredCount: registered.data().count, checkedInCount: checkedIn.data().count };
+      };
       if (action === 'createEvent') {
         if (!officer) denied();
         const title = text(input.title, 120),
@@ -392,7 +409,7 @@ export function createClubPortal({
         if (prior.exists) {
           if (Object.entries(payload).some(([key, value]) => prior.data()[key] !== value))
             throw new HttpsError('already-exists', '操作代碼已使用');
-        } else tx.create(ref, payload);
+        } else tx.create(ref, { ...payload, registeredCount: 0, checkedInCount: 0 });
         return { success: true, office };
       }
       if (['register', 'cancel', 'checkIn'].includes(action)) {
@@ -400,6 +417,7 @@ export function createClubPortal({
           eventDoc = await tx.get(ref),
           event = eventDoc.data();
         if (!eventDoc.exists) throw new HttpsError('not-found', '活動不存在');
+        const summary = await totals(ref, event);
         let target = uid;
         if (action === 'checkIn') {
           if (!officer) denied();
@@ -454,18 +472,14 @@ export function createClubPortal({
           if (old.status !== 'registered' && input.allowWalkIn !== true)
             throw new HttpsError('failed-precondition', '這位不在報名名單');
           if (old.status !== 'registered') {
-            const registrations = (
-              await tx.get(
-                ref
-                  .collection('registrations')
-                  .where('status', '==', 'registered')
-                  .limit(event.capacity || 1000),
-              )
-            ).docs as any[];
-            if (registrations.length >= (event.capacity || 1000))
+            if (summary.registeredCount >= (event.capacity || 1000))
               throw new HttpsError('resource-exhausted', '名額已滿');
           }
-          if (!old.checkedInAt)
+          if (!old.checkedInAt) {
+            tx.update(ref, {
+              registeredCount: summary.registeredCount + (old.status === 'registered' ? 0 : 1),
+              checkedInCount: summary.checkedInCount + 1,
+            });
             tx.set(regRef, {
               ...old,
               status: 'registered',
@@ -480,6 +494,7 @@ export function createClubPortal({
                   '',
               ).slice(-4),
             });
+          }
           return {
             success: true,
             office,
@@ -503,17 +518,15 @@ export function createClubPortal({
               action === 'cancel' ? '已過取消時間，請聯絡幹部' : '已過報名時間',
             );
           if (action === 'register') {
-            const registrations = (
-              await tx.get(
-                ref
-                  .collection('registrations')
-                  .where('status', '==', 'registered')
-                  .limit(event.capacity || 1000),
-              )
-            ).docs as any[];
-            if (registrations.length >= (event.capacity || 1000))
+            if (summary.registeredCount >= (event.capacity || 1000))
               throw new HttpsError('resource-exhausted', '名額已滿');
           }
+          tx.update(ref, {
+            ...summary,
+            registeredCount:
+              summary.registeredCount +
+              (action === 'register' ? 1 : old.status === 'registered' ? -1 : 0),
+          });
           tx.set(regRef, {
             status: action === 'register' ? 'registered' : 'cancelled',
             checkedInAt: null,
@@ -575,47 +588,55 @@ export function createClubPortal({
         input.rosterEventId === undefined
           ? undefined
           : await tx.get(eventRef.doc(id(input.rosterEventId)));
-      // Read lightweight event documents in bounded batches before selecting a page.
-      // This avoids a new composite index and keeps old IDs from hiding upcoming events.
-      const candidates: any[] = [];
-      if (!rosterEvent) {
-        let cursor: string | undefined;
-        do {
-          const batch = await page(
-            !active && !office ? eventRef.where('visibility', '==', 'public') : eventRef,
-            cursor,
-            100,
-          );
-          candidates.push(...batch.docs);
-          cursor = batch.next;
-        } while (cursor);
+      // Freeze the live/history boundary in the cursor so paging remains stable as time passes.
+      type EventCursor = { phase: 'live' | 'history'; clock: number; end?: number; key?: string };
+      let cursor: EventCursor = { phase: 'live', clock: now() };
+      if (input.eventCursor !== undefined) {
+        try {
+          const value = JSON.parse(text(input.eventCursor, 500));
+          if (
+            !['live', 'history'].includes(value.phase) ||
+            !Number.isSafeInteger(value.clock) ||
+            !Number.isSafeInteger(value.end) ||
+            typeof value.key !== 'string'
+          )
+            throw new Error();
+          cursor = { phase: value.phase, clock: value.clock, end: value.end, key: id(value.key) };
+        } catch {
+          throw new HttpsError('invalid-argument', '活動分頁代碼無效');
+        }
       }
-      const clock = now();
-      const orderedEvents = candidates
-        .filter((doc) => officer || office || doc.data().endsAt >= clock)
-        .sort((a, b) => {
-          const left = a.data(),
-            right = b.data();
-          return (
-            Number(left.endsAt < clock) - Number(right.endsAt < clock) ||
-            left.startsAt - right.startsAt ||
-            a.id.localeCompare(b.id)
-          );
-        });
-      const eventOffset =
-        input.eventCursor === undefined
-          ? 0
-          : orderedEvents.findIndex((doc) => doc.id === id(input.eventCursor)) + 1;
-      const selectedEvents = orderedEvents.slice(eventOffset, eventOffset + 20);
+      const canReadHistory = officer || office;
+      const eventDocs: any[] = [];
+      let nextEvent: string | undefined;
+      if (!rosterEvent) {
+        for (const phase of cursor.phase === 'live' && canReadHistory
+          ? (['live', 'history'] as const)
+          : [cursor.phase]) {
+          if (phase === 'history' && !canReadHistory) break;
+          let query: any = eventRef.where('endsAt', phase === 'live' ? '>=' : '<', cursor.clock);
+          if (!active && !office) query = query.where('visibility', '==', 'public');
+          query = query.orderBy('endsAt').orderBy('__name__');
+          if (phase === cursor.phase && cursor.key)
+            query = query.startAfter(cursor.end, cursor.key);
+          const batch = (await tx.get(query.limit(21 - eventDocs.length))).docs as any[];
+          eventDocs.push(...batch);
+          if (eventDocs.length > 20) {
+            const last = eventDocs[19];
+            // The last displayed row can belong to the previous phase at the boundary.
+            nextEvent = JSON.stringify({
+              phase: last.data().endsAt >= cursor.clock ? 'live' : 'history',
+              clock: cursor.clock,
+              end: last.data().endsAt,
+              key: last.id,
+            });
+            break;
+          }
+        }
+      }
       const eventPage = rosterEvent
         ? { docs: rosterEvent.exists ? [rosterEvent] : [], next: undefined }
-        : {
-            docs: selectedEvents,
-            next:
-              orderedEvents.length > eventOffset + 20
-                ? selectedEvents[selectedEvents.length - 1].id
-                : undefined,
-          };
+        : { docs: eventDocs.slice(0, 20), next: nextEvent };
       const events = eventPage.docs;
       const directories = members.length
         ? await tx.getAll(...members.map((m) => school.collection('directory').doc(m.id)))
@@ -629,17 +650,7 @@ export function createClubPortal({
         const e = doc.data();
         if (!active && !office && e.visibility !== 'public') continue;
         const activeQuery = doc.ref.collection('registrations').where('status', '==', 'registered');
-        // Read totals in bounded pages too, so even an oversized legacy event
-        // cannot exceed a single query's response size or block the club page.
-        let registered = 0,
-          checkedIn = 0,
-          summaryCursor: string | undefined;
-        do {
-          const summary = await page(activeQuery, summaryCursor, 100);
-          registered += summary.docs.length;
-          checkedIn += summary.docs.filter((r) => r.data().checkedInAt).length;
-          summaryCursor = summary.next;
-        } while (summaryCursor);
+        const { registeredCount: registered, checkedInCount: checkedIn } = await totals(doc.ref, e);
         const mine = (await tx.get(doc.ref.collection('registrations').doc(uid))).data();
         const rosterPage =
           officer || office
