@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import GroupsPage from './page';
 import ClubsPage from '../clubs/page';
 import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import { clubEnabled } from './clubService';
 import { joinByCode, leaveMemberGroup, loadMyGroups, type MemberGroup } from './groupService';
 
 const account = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ vi.mock('./groupService', () => ({
   leaveMemberGroup: vi.fn(),
   loadMyGroups: vi.fn(),
 }));
+vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
 const course: MemberGroup = {
   id: 'firestore-course',
   schoolId: 'pu',
@@ -46,6 +48,7 @@ function deferred<T>() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(clubEnabled).mockReturnValue(false);
   account.user = { uid: 'alice' };
   account.loading = false;
   vi.mocked(loadMyGroups).mockResolvedValue([course, club]);
@@ -87,10 +90,11 @@ it('社團分段只顯示真實會籍，找社團使用鎖定空態且沒有入�
   expect(screen.getByRole('link', { name: '查看社團' }).getAttribute('href')).toBe(
     '/groups/firestore-club/club/overview?schoolId=pu',
   );
-  expect(screen.queryByLabelText('邀請碼')).toBeNull();
+  expect(screen.getByLabelText('邀請碼')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '找社團' }));
   expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
-  expect(screen.queryByText('本人社團')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '本人社團' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '加入群組' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看社團' })).toBeNull();
   expect(joinByCode).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: /申請|核准|管理成員/ })).toBeNull();
@@ -122,21 +126,24 @@ it('never fills an empty or failed source with demo groups', async () => {
   expect(screen.queryByRole('article')).toBeNull();
 });
 
-it('does not show joined or send duplicate mutations before the verified response resolves', async () => {
-  const operation = deferred<MemberGroup>();
-  vi.mocked(joinByCode).mockReturnValueOnce(operation.promise);
-  render(<GroupsPage />);
-  await screen.findByText('本人社團');
-  fireEvent.change(screen.getByLabelText('邀請碼'), { target: { value: 'ABC12345' } });
-  const form = screen.getByRole('button', { name: '加入群組' }).closest('form')!;
-  fireEvent.submit(form);
-  fireEvent.submit(form);
-  expect(joinByCode).toHaveBeenCalledTimes(1);
-  expect(screen.queryByText('已加入「新加入社團」。')).toBeNull();
-  await act(async () => operation.resolve({ ...club, id: 'new-club', name: '新加入社團' }));
-  expect(screen.getByText('已加入「新加入社團」。')).toBeTruthy();
-  expect(screen.getByText('新加入社團')).toBeTruthy();
-});
+it.each([GroupsPage, ClubsPage])(
+  'does not show joined or send duplicate mutations before the verified response resolves',
+  async (Page) => {
+    const operation = deferred<MemberGroup>();
+    vi.mocked(joinByCode).mockReturnValueOnce(operation.promise);
+    render(<Page />);
+    await screen.findByText('本人社團');
+    fireEvent.change(screen.getByLabelText('邀請碼'), { target: { value: 'ABC12345' } });
+    const form = screen.getByRole('button', { name: '加入群組' }).closest('form')!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(joinByCode).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('已加入「新加入社團」。')).toBeNull();
+    await act(async () => operation.resolve({ ...club, id: 'new-club', name: '新加入社團' }));
+    expect(screen.getByText('已加入「新加入社團」。')).toBeTruthy();
+    expect(screen.getByText('新加入社團')).toBeTruthy();
+  },
+);
 
 it('shows that join is not enabled instead of asking the member to retry', async () => {
   vi.mocked(joinByCode).mockRejectedValueOnce(
@@ -171,32 +178,38 @@ it('requires a fresh server read after an unconfirmed mutation instead of allowi
   );
 });
 
-it('confirms leaving and waits for the verified result before removing the group', async () => {
-  vi.mocked(loadMyGroups).mockResolvedValue([club]);
-  const operation = deferred<void>();
-  vi.mocked(leaveMemberGroup).mockReturnValueOnce(operation.promise);
-  render(<GroupsPage />);
-  await screen.findByText('本人社團');
-  fireEvent.click(screen.getByRole('button', { name: '退出群組' }));
-  expect(leaveMemberGroup).not.toHaveBeenCalled();
-  const confirm = screen.getByRole('button', { name: '確認退出' });
-  fireEvent.click(confirm);
-  fireEvent.click(confirm);
-  expect(leaveMemberGroup).toHaveBeenCalledTimes(1);
-  expect(screen.getByText('本人社團')).toBeTruthy();
-  await act(async () => operation.resolve());
-  expect(screen.queryByRole('article')).toBeNull();
-  expect(screen.getByText('已退出「本人社團」。')).toBeTruthy();
-});
+it.each([GroupsPage, ClubsPage])(
+  'confirms leaving and waits for the verified result before removing the group',
+  async (Page) => {
+    vi.mocked(loadMyGroups).mockResolvedValue([club]);
+    const operation = deferred<void>();
+    vi.mocked(leaveMemberGroup).mockReturnValueOnce(operation.promise);
+    render(<Page />);
+    await screen.findByText('本人社團');
+    fireEvent.click(screen.getByRole('button', { name: '退出群組' }));
+    expect(leaveMemberGroup).not.toHaveBeenCalled();
+    const confirm = screen.getByRole('button', { name: '確認退出' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(leaveMemberGroup).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('本人社團')).toBeTruthy();
+    await act(async () => operation.resolve());
+    expect(screen.queryByRole('article')).toBeNull();
+    expect(screen.getByText('已退出「本人社團」。')).toBeTruthy();
+  },
+);
 
-it('does not offer leave to the owner and surfaces the real ownership transfer action', async () => {
-  vi.mocked(loadMyGroups).mockResolvedValue([{ ...club, role: 'owner' }]);
-  render(<GroupsPage />);
-  await screen.findByText('本人社團');
-  expect(screen.queryByRole('button', { name: '退出群組' })).toBeNull();
-  expect(screen.getByText(/須先完成擁有權轉讓/)).toBeTruthy();
-  expect(screen.getByRole('button', { name: '轉讓擁有權' })).toBeTruthy();
-});
+it.each([GroupsPage, ClubsPage])(
+  'does not offer leave to the owner and surfaces the real ownership transfer action',
+  async (Page) => {
+    vi.mocked(loadMyGroups).mockResolvedValue([{ ...club, role: 'owner' }]);
+    render(<Page />);
+    await screen.findByText('本人社團');
+    expect(screen.queryByRole('button', { name: '退出群組' })).toBeNull();
+    expect(screen.getByText(/須先完成擁有權轉讓/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '轉讓擁有權' })).toBeTruthy();
+  },
+);
 
 it('links club and study groups to the real discussion page instead of an App-only stub', async () => {
   render(<GroupsPage />);
@@ -268,4 +281,29 @@ it('scopes both group results and form state to the selected school', async () =
   expect(loadMyGroups).toHaveBeenLastCalledWith('alice', 'nthu');
   expect((screen.getByLabelText('邀請碼') as HTMLInputElement).value).toBe('');
   expect(screen.queryByText('本人社團')).toBeNull();
+});
+
+it.each([false, true])('社團後台入口沿用既有旗標：%s', async (enabled) => {
+  vi.mocked(clubEnabled).mockReturnValue(enabled);
+  render(<ClubsPage />);
+  await screen.findByText('本人社團');
+  const link = screen.queryByRole('link', { name: '社團後台' });
+  if (enabled) expect(link?.getAttribute('href')).toBe('/groups/firestore-club/club?schoolId=pu');
+  else expect(link).toBeNull();
+});
+
+it('加入確認期間切換分段，回到我的社團仍呈現已確認的結果', async () => {
+  const operation = deferred<MemberGroup>();
+  vi.mocked(joinByCode).mockReturnValueOnce(operation.promise);
+  render(<ClubsPage />);
+  await screen.findByText('本人社團');
+  fireEvent.change(screen.getByLabelText('邀請碼'), { target: { value: 'ABC12345' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入群組' }));
+  fireEvent.click(screen.getByRole('button', { name: '找社團' }));
+  await act(async () => operation.resolve({ ...club, id: 'new-club', name: '新加入社團' }));
+  fireEvent.click(screen.getByRole('button', { name: '我的社團' }));
+  expect(screen.getByRole('heading', { name: '新加入社團' })).toBeTruthy();
+  expect(screen.getByText('已加入「新加入社團」。')).toBeTruthy();
+  expect(joinByCode).toHaveBeenCalledTimes(1);
+  expect(loadMyGroups).toHaveBeenCalledTimes(1);
 });

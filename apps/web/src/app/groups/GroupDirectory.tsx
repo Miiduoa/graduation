@@ -191,7 +191,7 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
       )}
       <div className={styles.toolbar}>
         <label className={styles.field}>
-          搜尋{mode === 'clubs' ? '社團' : '群組'}
+          搜尋{mode === 'clubs' ? '我的社團' : '群組'}
           <input
             type="search"
             placeholder="名稱或介紹"
@@ -216,7 +216,11 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
       {filtered.length === 0 ? (
         <section className={styles.status}>
           <h2>
-            {groups.length ? '沒有符合條件的結果' : `尚未加入${mode === 'clubs' ? '社團' : '群組'}`}
+            {groups.length
+              ? '沒有符合條件的結果'
+              : mode === 'clubs'
+                ? '還沒加入社團，可以到「找社團」看看。'
+                : '尚未加入群組'}
           </h2>
           <p>
             {groups.length ? '試試其他關鍵字或類型。' : '向授課教師或社團取得邀請碼後，即可加入。'}
@@ -249,7 +253,16 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
                 )}
               </h2>
               {group.description && <p className={styles.description}>{group.description}</p>}
+              {mode === 'clubs' && <p>下一場活動尚未串接 · 未讀公告數未提供</p>}
               <div className={styles.actions}>
+                {mode === 'clubs' && (
+                  <Link
+                    className="btn"
+                    href={`/groups/${encodeURIComponent(group.id)}/club/overview?schoolId=${encodeURIComponent(schoolId)}`}
+                  >
+                    查看社團
+                  </Link>
+                )}
                 {group.type === 'club' && clubEnabled() && (
                   <Link
                     className="btn"
@@ -391,11 +404,9 @@ export function GroupDirectory({
           </Link>
         </section>
       ) : mode === 'clubs' ? (
-        <ClubDirectory
-          key={JSON.stringify([user.uid, school.id])}
-          uid={user.uid}
-          schoolId={school.id}
-        />
+        <ClubDirectory key={JSON.stringify([user.uid, school.id])}>
+          <MemberDirectory uid={user.uid} schoolId={school.id} mode="clubs" />
+        </ClubDirectory>
       ) : (
         <MemberDirectory
           key={JSON.stringify([user.uid, school.id, mode])}
