@@ -24,6 +24,10 @@ const state = vi.hoisted(() => ({
     logout: vi.fn(),
   },
 }));
+// The account screen owns auth/state; the social timeline has independent Firebase tests.
+vi.mock('./MySocialProfile', () => ({
+  MySocialProfile: ({ name }: { name: string }) => <section data-testid="my-social-profile">{name}</section>,
+}));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => state.nuni,
   browserRequest: vi.fn(async (path: string) => {
@@ -217,4 +221,18 @@ it('offers recovery when course authentication cannot be confirmed', () => {
   expect(screen.queryByText('Google 帳號已登入')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新確認 Google 帳號' }));
   expect(state.nuni.refresh).toHaveBeenCalledTimes(1);
+});
+
+it('integrates the creator area only for a verified Firebase account', async () => {
+  render(<ProfilePage />);
+  expect(await screen.findByTestId('my-social-profile')).toBeTruthy();
+  expect(screen.getByText('Account A')).toBeTruthy();
+});
+
+it('does not expose a Firebase creator timeline for a Google-only platform account', () => {
+  state.user = null;
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+  render(<ProfilePage />);
+  expect(screen.queryByTestId('my-social-profile')).toBeNull();
+  expect(screen.getByRole('link', { name: '前往跨校交流' }).getAttribute('href')).toBe('/social');
 });
