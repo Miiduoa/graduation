@@ -667,3 +667,39 @@ it('reads a long lesson without an Intl.Segmenter or a function-argument overflo
     utterance.voice === local && utterance.text.length > 0 && utterance.text.length <= 160)).toBe(true);
   expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
 });
+
+it.each([
+  { name: 'emoji ZWJ', leading: 158, cluster: '👩‍💻' },
+  { name: 'combining accent', leading: 159, cluster: 'e\u0301' },
+  { name: 'regional-indicator flag', leading: 158, cluster: '🇹🇼' },
+  { name: 'CRLF', leading: 159, cluster: '\r\n' },
+  { name: 'Hangul Jamo', leading: 159, cluster: '각' },
+])('keeps $name intact when an oversized Intl.Segmenter unit has multiple clusters', ({ leading, cluster }) => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), {
+    Segmenter: class {
+      segment(text: string) {
+        // A faulty WebView can return the whole lesson as a single grapheme.
+        // The content and offset are correct, but naive code-point slicing
+        // splits the real cluster when it happens to cross the 160-unit cap.
+        return [{ segment: text }];
+      }
+    },
+  }));
+  const sourceText = '甲'.repeat(leading) + cluster + '乙'.repeat(240);
+  render(<StudyReadAloud text={sourceText} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 12; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    expect(utterance.voice).toBe(local);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks.join('')).toBe(sourceText);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+  expect(chunks[0]).toBe('甲'.repeat(leading));
+  expect(chunks[1]?.startsWith(cluster)).toBe(true);
+  expect(speak).toHaveBeenCalledTimes(chunks.length);
+});

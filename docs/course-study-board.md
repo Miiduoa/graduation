@@ -1094,3 +1094,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - 新生成的逐題複習題若把明示答案包成字面 HTML 實體（例如 `Answer: &lt;strong&gt;SQL&lt;/strong&gt;`、`參考答案：&#60;code&#62;主鍵&#60;/code&#62;`）或 `《主鍵》`／`〈SQL〉`，會先在**比較用副本**還原有限的角括號，再依既有短標籤、答案字面及識別字界線拒收；原題文字與學生教材、備份不被改寫或執行為 HTML。
 - 保留 `SQLServer` 不等於 `SQL`、`B2` 不等於 `B`、`12` 不等於 `1` 的正反測試；只針對新 Worker 回覆，不改 v1/v2 原文講解、閱讀進度、逐題 checkpoint 或筆記。這是模擬 Worker 驗證，不代表 WebGPU 教學正確性或 iOS／Android 真機通過；PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-14：行動 WebView 回傳過大字素片段時避免二次切破文字
+
+- 修正裝置朗讀的退路：即使 `Intl.Segmenter` 回傳的文字完全正確、位置連續，有些異常 WebView 仍可能將許多字素錯包成單一超過 160 UTF-16 單位的片段。原先在這個特例直接依 code point 硬切，會把 Emoji ZWJ、國旗、CRLF、組合重音或韓文 Jamo 切在不同語音片段。現在大段同樣走離線有界的續接規則；真正大於單片段上限的單一複合字形仍須有限度拆開，不宣稱完整 Unicode 字素實作。
+- 新增五組模擬 WebView／語音引擎正反回歸，確認原文可無損拼回、每段不超過 160 UTF-16 單位、常見字素不跨段。獨立 JS 邊界煙測也驗證五組，但**尚非正式 Vitest 或手機真機證據**。不改動私人教材、閱讀／練習 JSON、離線語音邊界，也不新增套件／付費 API。
+- 本版應依精確 head 再查 Web/Mobile CI、CodeQL 與 App 5504170 審查；Maestro、iOS Safari／Android Chrome 及 Ahaboard 同教材同題同機實測仍待驗收。PR 保持 Draft，不合併、不部署。

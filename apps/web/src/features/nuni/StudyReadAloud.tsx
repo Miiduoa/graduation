@@ -105,17 +105,11 @@ function splitStudySpeech(text: string): string[] {
           units.push(segment);
           continue;
         }
-        // A pathological grapheme must still fit the mobile utterance cap.
-        // Never split a UTF-16 surrogate pair in this bounded fallback.
-        let part = '';
-        for (const character of segment) {
-          if (part && part.length + character.length > STUDY_SPEECH_CHUNK_LENGTH) {
-            units.push(part);
-            part = '';
-          }
-          part += character;
-        }
-        if (part) units.push(part);
+        // A WebView can report one oversized segment containing many actual
+        // graphemes. Use the bounded on-device continuation rules instead of
+        // slicing code points straight through a flag, CRLF, or emoji ZWJ.
+        // A truly oversized single cluster may still require a bounded cut.
+        for (const unit of fallbackStudySpeechUnits(segment)) units.push(unit);
       }
       if (verifiedOffset !== text.length) {
         throw new Error('incomplete on-device grapheme segmentation');
