@@ -92,6 +92,33 @@ class AuditTrialsTests(unittest.TestCase):
         self.assertTrue(any("greater than zero" in err for err in report["errors"]))
         self.assertEqual(report["ready"], [])
 
+
+    def test_incomplete_fourth_repeat_cannot_be_cherry_picked_from_three_valid_repeats(self):
+        records = [entry for entry in complete(4)
+                   if not (entry["product"] == "apple-maps" and entry["repeat"] == "4")]
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["ready"], [])
+        self.assertTrue(any("missing products" in str(item) for item in report["pending"]))
+        self.assertTrue(any("no partial-cohort metrics" in str(item) for item in report["pending"]))
+
+    def test_invalid_fourth_repeat_does_not_leave_misleading_ready_metrics(self):
+        records = complete(4)
+        records[-1]["seconds"] = "0"
+        report = audit_rows(records)
+        self.assertEqual(report["ready"], [])
+        self.assertTrue(any("greater than zero" in error for error in report["errors"]))
+        self.assertTrue(any("no partial-cohort metrics" in str(item) for item in report["pending"]))
+
+    def test_incomplete_scenario_does_not_block_a_fully_paired_other_scenario(self):
+        records = complete(4)
+        records[-1]["evidence_ref"] = ""
+        independent = [dict(entry, scenario_id="synthetic-building-02") for entry in complete()]
+        report = audit_rows(records + independent)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(len(report["ready"]), 1)
+        self.assertEqual(report["ready"][0]["conditions"]["scenario_id"], "synthetic-building-02")
+
     def test_pending_when_only_two_repeats(self):
         result = audit_rows(complete(2))
         self.assertEqual(result["ready"], [])

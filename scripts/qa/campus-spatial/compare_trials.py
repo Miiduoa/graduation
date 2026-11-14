@@ -57,30 +57,38 @@ def _date(value: str, label: str) -> date:
 def audit_rows(rows: list[dict[str, str]]) -> dict:
     """Return machine-readable findings, including incomplete/unscored cases."""
     errors: list[str] = []
+    invalid_scenarios: set[str] = set()
+
+    def reject(row: dict, reason: str) -> None:
+        errors.append(reason)
+        scenario = row.get("scenario_id")
+        if isinstance(scenario, str) and scenario.strip():
+            invalid_scenarios.add(scenario)
+
     unique: set[tuple[str, str, str]] = set()
     trials: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for line, row in enumerate(rows, start=2):
         label = f"line {line}"
         if any(field not in row for field in FIELDS):
-            errors.append(f"{label}: missing required CSV columns")
+            reject(row, f"{label}: missing required CSV columns")
             continue
         # csv.DictReader uses None for a truncated record; reject rather than crash.
         row = {field: row[field] or "" for field in FIELDS}
         if any(not row[field].strip() for field in FIELDS if field not in
                {"steps", "seconds", "fps", "visual_rating", "evidence_ref"}):
-            errors.append(f"{label}: missing required metadata")
+            reject(row, f"{label}: missing required metadata")
             continue
         if row["product"] not in PRODUCTS or row["task"] not in TASKS:
-            errors.append(f"{label}: unknown product or task")
+            reject(row, f"{label}: unknown product or task")
             continue
         if row["school_id"] != "pu":
-            errors.append(f"{label}: only verified Providence (pu) trials are in scope")
+            reject(row, f"{label}: only verified Providence (pu) trials are in scope")
             continue
         if row["result"] not in RESULTS or row["verified_target"] not in TARGETS:
-            errors.append(f"{label}: invalid result or verification level")
+            reject(row, f"{label}: invalid result or verification level")
             continue
         if not row["ground_truth_ref"].startswith(("https://", "http://")):
-            errors.append(f"{label}: ground truth needs an explicit source URL")
+            reject(row, f"{label}: ground truth needs an explicit source URL")
             continue
         try:
             source_date = _date(row["ground_truth_date"], f"{label} ground_truth_date")
@@ -98,11 +106,11 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             if rating is not None and not 1 <= rating <= 5:
                 raise ValueError(f"{label} visual_rating: use 1..5 or blank")
         except ValueError as error:
-            errors.append(str(error))
+            reject(row, str(error))
             continue
         key = (row["scenario_id"], str(repetition), row["product"])
         if key in unique:
-            errors.append(f"{label}: duplicate scenario/repeat/product {key}")
+            reject(row, f"{label}: duplicate scenario/repeat/product {key}")
             continue
         unique.add(key)
         # Even a reported failure needs an independently verified target;
@@ -110,12 +118,13 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
         if row["result"] != "unverified":
             expected_target = row["task"] if row["task"] in {"building", "classroom", "route"} else "ui"
             if row["verified_target"] != expected_target:
-                errors.append(f"{label}: result cannot exceed verified target level for {row['task']}")
+                reject(row, f"{label}: result cannot exceed verified target level for {row['task']}")
                 continue
         trials[(row["scenario_id"], str(repetition))].append(row)
 
     grouped: dict[tuple[str, ...], dict[int, list[dict]]] = defaultdict(dict)
     pending: list[dict] = []
+    blocked_scenarios = set(invalid_scenarios)
     for (scenario, repeat), records in sorted(trials.items()):
         reference = records[0]
         values = tuple(reference[field] for field in COHORT_FIELDS)
@@ -135,12 +144,19 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             if _number(record["steps"], "steps", integer=True) is None or _number(record["seconds"], "seconds") is None:
                 reasons.append(f"{record['product']}: missing timed steps/seconds")
         if reasons:
+            blocked_scenarios.add(scenario)
             pending.append({"scenario_id": scenario, "repeat": int(repeat), "reasons": sorted(set(reasons))})
         else:
             grouped[values][int(repeat)] = records
 
     ready: list[dict] = []
     for metadata, repeats in sorted(grouped.items()):
+        if metadata[0] in blocked_scenarios:
+            # Incomplete/invalid later repeats cannot be omitted just because
+            # an earlier subset already passed the minimum sample count.
+            pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
+                            "reasons": ["another repeat in this scenario is incomplete or invalid; no partial-cohort metrics"]})
+            continue
         if len(repeats) < MIN_REPEATS:
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
                             "reasons": [f"only {len(repeats)} complete repeats; need {MIN_REPEATS}"]})
