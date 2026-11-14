@@ -33,7 +33,8 @@ function setup() {
       set: (ref, data) => { counter.set(ref.path, data); },
     }),
   };
-  const fetcher = vi.fn().mockResolvedValue(Response.json({
+  // Each request needs a fresh response body; streams can only be consumed once.
+  const fetcher = vi.fn().mockImplementation(async () => Response.json({
     success: true, result: { response: { complete: true, rows: [
       { title: '資料庫', dayOfWeek: 3, startPeriod: '2', endPeriod: '3', location: 'A301',
         evidence: '資料庫 星期三 第2到3節 A301', uncertainFields: [] },
@@ -74,6 +75,11 @@ it.each(['PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', 'PERSONAL_IMPORT_CLOUD_ACCO
     const fixedDependencies = { ...dependencies, now: () => now };
     expect((await handlePersonalImportCloudImage(req(), fixedDependencies)).status).toBe(200);
     expect((await handlePersonalImportCloudImage(req(), fixedDependencies)).status).toBe(200);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect([...counter.values()]).toEqual([
+      expect.objectContaining({ count: 2, timestamps: [now, now] }),
+      expect.objectContaining({ count: 2 }),
+    ]);
     fetcher.mockClear();
     const before = structuredClone(counter);
     for (const limit of ['2', '1']) {
