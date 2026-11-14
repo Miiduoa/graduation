@@ -8,6 +8,9 @@ import { Platform } from 'react-native';
 import { dormStorageKey } from '@campus/shared/src/dormitory';
 import { laundryNotificationAllowed, refreshDormLaundryReminder, selectDormLaundryScope } from '../services/dormLaundryReminder';
 
+jest.mock('../services/dormitoryCloud', () => ({ subscribeDormCloud: jest.fn((_school, _uid, change) => { change({ packages: [], repairs: [], packagesState: 'ready', repairsState: 'ready', identity: null }); return jest.fn(); }) }));
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
+
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' }, selectionReady: true }) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'private-id' } }) }));
 jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => null }));
@@ -209,4 +212,57 @@ test('a resident can start a timer after denying notifications, turn reminders o
   await act(async () => fireEvent.press(screen.getByText('清除計時')));
   expect(await screen.findByText('尚未開始')).toBeTruthy();
   expect([...alarms.keys()]).toEqual(['unrelated']);
+});
+
+
+test('a resident records repair follow-up, copies the handoff and reopens a memo', async () => {
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('設備問題'));
+  fireEvent.press(screen.getByText('冷氣無法正常運作'));
+  fireEvent.changeText(screen.getByLabelText('可聯繫時段／入室協調（選填）'), '週五晚上請先聯絡');
+  fireEvent.changeText(screen.getByLabelText('下次追問日期（選填，YYYY-MM-DD）'), '2026-12-01');
+  fireEvent.changeText(screen.getByLabelText('聯繫紀錄（自行記錄）'), '服務台請我補照片');
+  await act(async () => fireEvent.press(screen.getByText('存成我的報修備忘')));
+  expect(screen.getByText('下次追問：2026-12-01')).toBeTruthy();
+  await act(async () => fireEvent.press(screen.getByText('複製內容')));
+  expect(require('expo-clipboard').setStringAsync).toHaveBeenCalledWith(expect.stringContaining('週五晚上請先聯絡'));
+  await act(async () => fireEvent.press(screen.getByText('我已確認修復')));
+  expect(screen.queryByText('下次追問：2026-12-01')).toBeNull();
+  await act(async () => fireEvent.press(screen.getByText('重新開啟備忘')));
+  const saved = JSON.parse((await AsyncStorage.getItem(scope))!);
+  expect(saved.repairs[0]).toMatchObject({ status: 'draft', followUpDate: '2026-12-01', followUpNote: '服務台請我補照片' });
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getByText(/官方包裹查詢未串接/)).toBeTruthy();
+  expect(screen.getByText('到校方確認包裹查詢方式 ↗')).toBeTruthy();
+});
+
+test('cloud parcels show arrival and identity, keep postal items separate, and preserve local notes', async () => {
+  const { projectDormParcel, projectDormRepair } = require('@campus/shared/src/dormitoryCloud');
+  const subscribe = require('../services/dormitoryCloud').subscribeDormCloud;
+  subscribe.mockImplementationOnce((_school, _uid, change) => {
+    change({ packagesState: 'ready', repairsState: 'ready',
+      identity: { studentId: 'S123456', name: '林同學' },
+      packages: [projectDormParcel('arrival', { description: '家人寄的衣服', location: '希嘉學苑服務台', createdAt: Date.now() - 4 * 86400000 }), projectDormParcel('postal', { description: '不混入的掛號', courier: '中華郵政' })],
+      repairs: [projectDormRepair('r', { description: '冷氣不冷', status: 'completed', completedAt: Date.now(), reference: 'PRIVATE-REF' })],
+    });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  expect(screen.getByText(/待領包裹 1 件/)).toBeTruthy();
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getByText('家人寄的衣服')).toBeTruthy();
+  expect(screen.getByText('明天起退件')).toBeTruthy();
+  expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
+  expect(screen.queryByText('不混入的掛號')).toBeNull();
+  expect(screen.getByText('我自己記的')).toBeTruthy();
+  fireEvent.press(screen.getByText('領取碼'));
+  expect(screen.getByText('S123456')).toHaveStyle({ fontSize: 34 });
+  expect(screen.getByText('林同學')).toHaveStyle({ fontSize: 34 });
+  fireEvent.press(screen.getByText('關閉領取碼'));
+  fireEvent.press(screen.getByText('設備問題'));
+  expect(screen.getByText(/已修好，請確認 ·/)).toBeTruthy();
+  expect(screen.queryByText(/PRIVATE-REF|已送出|單號|你抽中了|通行證|已扣款/)).toBeNull();
+  expect(screen.getByText('緊急請直接打服務台')).toBeTruthy();
 });

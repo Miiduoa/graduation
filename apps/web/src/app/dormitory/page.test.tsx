@@ -76,40 +76,14 @@ it('keeps separate room notes after switching selected school', () => {
   expect(localStorage.getItem(dormStorageKey('guest', 'ncku'))).toBeNull();
 });
 
-it('routes an NTOU repair by category and keeps its handwritten ticket number private to that campus', () => {
+it('routes an NTOU repair by category without exposing the legacy school reference', () => {
   selectedCampus.schoolId = 'ntou';
   selectedCampus.schoolName = '國立臺灣海洋大學';
-  const page = render(<DormitoryPage />);
+  render(<DormitoryPage />);
   fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
-  const handoff = () => within(screen.getByRole('group', { name: '校方報修管道' }));
-  const generalUrl = handoff().getByRole('link').getAttribute('href')!;
-  expect(new URL(generalUrl).hostname).toMatch(/\.ntou\.edu\.tw$/);
-  fireEvent.click(screen.getByRole('button', { name: '已自行確認處理完成' }));
   fireEvent.click(screen.getByRole('button', { name: '宿舍網路無法連線' }));
-  const key = dormStorageKey('guest', 'ntou');
-  expect(handoff().getByRole('link').getAttribute('href')).toBe('tel:0800080412');
-  expect(localStorage.getItem(key)).toBeNull();
-  fireEvent.change(screen.getByRole('combobox', { name: '類別' }), { target: { value: 'air' } });
-  expect(handoff().getByRole('link').getAttribute('href')).toBe(generalUrl);
-  fireEvent.click(screen.getByRole('button', { name: DORM_REPAIR_COPY.saveMemo }));
-  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
-  fireEvent.change(screen.getByRole('textbox', { name: DORM_REPAIR_COPY.referenceLabel }), { target: { value: ' R-1358 ' } });
-  fireEvent.click(screen.getByRole('button', { name: DORM_REPAIR_COPY.saveMemo }));
-  expect(screen.getByText('R-1358')).toBeTruthy();
-  expect(JSON.parse(localStorage.getItem(key)!).repairs[0]).toMatchObject({ reference: 'R-1358', status: 'draft' });
-  expect(handoff().getAllByRole('link')).toHaveLength(1);
-  expect(handoff().getByRole('link', { name: '到海大教務系統網站查修繕紀錄' }).getAttribute('href')).toBe(generalUrl);
-  expect(screen.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
-  expect((screen.getByRole('textbox', { name: DORM_REPAIR_COPY.referenceLabel }) as HTMLInputElement).value).toBe('R-1358');
-
-  selectedCampus.schoolId = 'unlisted';
-  selectedCampus.schoolName = '其他學校';
-  page.rerender(<DormitoryPage />);
-  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
-  expect(screen.queryByText('R-1358')).toBeNull();
-  expect(screen.queryByRole('link')).toBeNull();
-  expect(screen.getByText(/請向這所學校的住宿服務單位確認報修方式/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '致電海大宿網客服' }).getAttribute('href')).toBe('tel:0800080412');
+  expect(screen.queryByLabelText(DORM_REPAIR_COPY.referenceLabel)).toBeNull();
 });
 
 it('opens a legacy repair at its saved location even after the resident changes halls', () => {
@@ -123,34 +97,23 @@ it('opens a legacy repair at its saved location even after the resident changes 
   expect(screen.getByRole('link', { name: '致電希嘉學苑服務台' }).getAttribute('href')).toBe('tel:0426328001');
   expect(screen.queryByRole('link', { name: /思高/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '編輯' }));
-  expect((screen.getByRole('textbox', { name: DORM_REPAIR_COPY.referenceLabel }) as HTMLInputElement).value).toBe('');
+  expect(screen.queryByLabelText(DORM_REPAIR_COPY.referenceLabel)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: DORM_REPAIR_COPY.saveMemo }));
   expect(JSON.parse(localStorage.getItem(key)!).repairs[0]).toMatchObject({ id: 'older', status: 'reported', location: '希嘉學苑一樓' });
 });
 
-it('copies only the receipt and keeps it selectable when clipboard access fails', async () => {
-  const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'));
-  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+it('keeps counselor-only school references out of the student screen and copied text', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  try {
-    localStorage.setItem(dormStorageKey('guest', 'pu'), JSON.stringify({
-      repairs: [{ id: 'r1', title: '洗手台漏水', reference: '001587', location: '希嘉學苑一樓' }],
-    }));
-    render(<DormitoryPage />);
-    fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
-    const copy = screen.getByRole('button', { name: DORM_REPAIR_COPY.copyReference });
-    fireEvent.click(copy);
-    expect(await screen.findByText(DORM_REPAIR_COPY.copiedReference)).toBeTruthy();
-    expect(writeText).toHaveBeenCalledWith('001587');
-    fireEvent.click(copy);
-    expect((await screen.findByRole('alert')).textContent).toContain('手動複製');
-    expect(screen.queryByText(DORM_REPAIR_COPY.copiedReference)).toBeNull();
-    expect(screen.getByText('001587')).toBeTruthy();
-    expect(screen.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
-  } finally {
-    if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
+  localStorage.setItem(dormStorageKey('guest', 'pu'), JSON.stringify({ repairs: [{ id: 'r1', title: '洗手台漏水', reference: 'PRIVATE-001587', location: '希嘉學苑一樓' }] }));
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  expect(screen.queryByText(/PRIVATE-001587/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '複製內容' }));
+  expect(await screen.findByText(/已複製問題說明/)).toBeTruthy();
+  expect(writeText.mock.calls[0][0]).not.toContain('PRIVATE-001587');
+  expect(document.body.textContent).not.toMatch(/已送出|單號/);
+  Reflect.deleteProperty(navigator, 'clipboard');
 });
 
 it('refuses stale writes from another browser tab instead of overwriting changes', () => {
@@ -274,7 +237,26 @@ it('keeps repair copy honest: local memo only, no ticket or school-progress clai
   expect(screen.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '＋ 記錄問題' }));
   expect(screen.getByRole('button', { name: DORM_REPAIR_COPY.saveMemo })).toBeTruthy();
-  expect(screen.getByLabelText(DORM_REPAIR_COPY.referenceLabel)).toBeTruthy();
+  expect(screen.queryByLabelText(DORM_REPAIR_COPY.referenceLabel)).toBeNull();
   expect(screen.queryByRole('button', { name: /送出/ })).toBeNull();
   expect(screen.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
+});
+
+it('keeps contact arrangements and follow-up notes through edits and reopening a repaired item', () => {
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  fireEvent.click(screen.getByRole('button', { name: '冷氣無法正常運作' }));
+  fireEvent.change(screen.getByLabelText('可聯繫時段／入室協調（選填）'), { target: { value: '週五 18 點後，入室前聯絡' } });
+  fireEvent.change(screen.getByLabelText('下次追問日期（選填）'), { target: { value: '2026-12-01' } });
+  fireEvent.change(screen.getByLabelText('聯繫紀錄（自行記錄）'), { target: { value: '11/14 服務台請我補照片' } });
+  fireEvent.click(screen.getByRole('button', { name: DORM_REPAIR_COPY.saveMemo }));
+  expect(screen.getByText(/下次追問：2026-12-01/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  expect((screen.getByLabelText('聯繫紀錄（自行記錄）') as HTMLTextAreaElement).value).toBe('11/14 服務台請我補照片');
+  fireEvent.click(screen.getByRole('button', { name: DORM_REPAIR_COPY.saveMemo }));
+  fireEvent.click(screen.getByRole('button', { name: '我已確認修復' }));
+  expect(screen.queryByText(/下次追問：/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新開啟備忘' }));
+  const saved = JSON.parse(localStorage.getItem(dormStorageKey('guest', 'pu'))!).repairs[0];
+  expect(saved).toMatchObject({ status: 'draft', availability: '週五 18 點後，入室前聯絡', followUpDate: '2026-12-01', followUpNote: '11/14 服務台請我補照片' });
 });
