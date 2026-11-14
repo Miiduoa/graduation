@@ -95,10 +95,11 @@ function reply(answer: string) {
 }
 
 function saveTodayLesson() {
-  // This imported course uses PU's weekday-only period profile. Pin a Thursday
-  // rather than inheriting a weekend CI clock; keep async timers real for React.
+  // The Providence timetable only supports Monday–Friday. Without a fixed
+  // teaching day this valid local-read fixture fails when CI runs on weekends.
+  // Fake Date only: React and Testing Library keep real async timers.
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-11-11T16:30:00.000Z'));
+  vi.setSystemTime(new Date('2026-11-12T02:30:00.000Z'));
   const now = new Date();
   const taipei = new Date(now.getTime() + 8 * 60 * 60 * 1000);
   const row = {
@@ -125,7 +126,10 @@ beforeEach(() => {
   state.pendingLogout = false;
   vi.clearAllMocks();
 });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it.each([
   ['explanation', '資料庫索引', '請解釋什麼是資料庫索引？', '索引能加快資料查找。', '可以舉個例子嗎？', '例如先依學號找到資料。'],
