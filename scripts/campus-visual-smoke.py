@@ -435,7 +435,7 @@ async def check_unsigned_today(page, campus='pu'):
     await expect(page.locator('time[aria-current="date"]')).to_have_count(0)
 
 
-async def check_deep_link_login_scope(page, preference):
+async def check_deep_link_login_scope(page, preference, *, student_card=False):
     """The explicit campus survives Header login despite a different saved choice."""
     key = 'campus.browse-school.v1:guest'
     previous = await page.evaluate('key => localStorage.getItem(key)', key)
@@ -497,6 +497,10 @@ async def check_deep_link_login_scope(page, preference):
         )
         await expect_saved_school(saved_school)
 
+        if student_card:
+            await check_student_card_login_scope(page, preference, saved_school)
+            return
+
         target = '/school-info?school=PU&schoolId=pu&campus=pu&token=discard-me#contact'
         await goto_path(page, target)
         await expect(page.get_by_role('heading', name='學校資訊', exact=True)).to_be_visible()
@@ -537,6 +541,122 @@ async def check_deep_link_login_scope(page, preference):
             if (previous === null) localStorage.removeItem(key);
             else localStorage.setItem(key, previous);
         }''', {'key': key, 'previous': previous})
+
+
+async def check_student_card_login_scope(page, preference, saved_school):
+    """A school-only card keeps its PU task and school method through guest login."""
+    target = '/student-card?campus=pu'
+    expected = {
+        'returnUrl': [target], 'campus': ['pu'], 'reconnect': ['school'],
+    }
+    await goto_path(page, target)
+    await expect(page.get_by_role('heading', level=1, name='數位學生證', exact=True)).to_be_visible()
+    await expect(page.locator('header summary[aria-label^="切換校園："]')).to_contain_text('靜宜大學')
+    sign_in = page.get_by_role('link', name='登入學校帳號', exact=True)
+    await expect(sign_in).to_be_visible()
+    destination = urlparse(await sign_in.get_attribute('href'))
+    assert destination.path == '/login'
+    assert parse_qs(destination.query, keep_blank_values=True) == expected
+    assert not destination.fragment
+    await sign_in.focus()
+    await sign_in.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/login')
+    await expect(page.get_by_role('heading', level=1, name='連線學校帳號', exact=True)).to_be_visible()
+    assert parse_qs(urlparse(page.url).query, keep_blank_values=True) == expected
+    assert not urlparse(page.url).fragment
+    school = page.locator('details[aria-label="學校帳號登入"]')
+    await expect(school).to_have_js_property('open', True)
+    await expect(school.get_by_role('combobox', name='選擇學校', exact=True)).to_have_value('pu')
+    await expect(school.get_by_role('status')).to_have_text(
+        '學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'
+    )
+    await expect(school.get_by_label('學號', exact=True)).to_have_count(0)
+    assert await page.evaluate(
+        'key => JSON.parse(localStorage.getItem(key))', 'campus.browse-school.v1:guest'
+    ) == {'schoolId': saved_school}
+    await no_overflow(page)
+    await page.screenshot(
+        path=str(OUT / f'student-card-login-from-{preference}-mobile.png'),
+        full_page=True, animations='disabled',
+    )
+
+
+async def check_directory_keyboard_return(page, journey, group, query, service_path, title):
+    """Real Next Back/Forward restores the selected result, not just its filters."""
+    label = '生活' if journey == 'life' else '交流'
+    await goto_path(page, '/?campus=pu')
+    await page.get_by_role('navigation', name='主要導覽').get_by_role(
+        'link', name=label, exact=True
+    ).click()
+    await expect(page.get_by_role('heading', level=1, name=label, exact=True)).to_be_visible()
+    await page.get_by_role('button', name=group, exact=True).click()
+    search = page.get_by_role('searchbox', name='快速找服務')
+    await search.fill(query)
+    link = page.locator(f'#{journey}-service-results a[href^="{service_path}?"]')
+    await expect(link).to_have_count(1)
+    directory_url = page.url
+    await link.focus()
+    await link.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == service_path)
+    await expect(page.get_by_role('heading', level=1, name=title, exact=True)).to_be_visible()
+    for attempt in range(2):
+        await page.go_back(wait_until='domcontentloaded')
+        await page.wait_for_url(directory_url)
+        await expect(search).to_have_value(query)
+        await expect(page.get_by_role('button', name=group, exact=True)).to_have_attribute('aria-pressed', 'true')
+        await expect(link).to_be_focused()
+        await check_primary_navigation(page, label)
+        if attempt == 0:
+            await page.screenshot(
+                path=str(OUT / f'{journey}-directory-history-mobile.png'),
+                full_page=True, animations='disabled',
+            )
+        await page.keyboard.press('Tab')
+        assert await page.evaluate('''() => Boolean(
+            document.activeElement?.closest('main')
+            && document.activeElement?.getAttribute('href') !== '#page-content'
+        )'''), 'Returning keyboard navigation restarted at the page header'
+        await page.go_forward(wait_until='domcontentloaded')
+        await page.wait_for_url(lambda value: urlparse(value).path == service_path)
+        await expect(page.get_by_role('heading', level=1, name=title, exact=True)).to_be_visible()
+    # A new visit from primary navigation must not reuse the previous entry's return.
+    await page.get_by_role('navigation', name='主要導覽').get_by_role(
+        'link', name=label, exact=True
+    ).click()
+    await expect(page.get_by_role('heading', level=1, name=label, exact=True)).to_be_visible()
+    await expect(search).to_have_value('')
+    await expect(page.get_by_role('button', name='全部', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await expect(link).not_to_be_focused()
+
+
+async def check_directory_child_return(page):
+    await goto_path(page, '/life?campus=pu')
+    await page.get_by_role('button', name='吃飯與住宿', exact=True).click()
+    summary = page.get_by_label('點餐與取餐的其他入口', exact=True)
+    await summary.focus()
+    await summary.press('Space')
+    child = page.locator('#life-service-results a[href^="/cafeteria?"]')
+    await expect(child).to_be_visible()
+    await child.focus()
+    await child.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/cafeteria')
+    await expect(page.get_by_role('heading', level=1, name='餐廳', exact=True)).to_be_visible()
+    await page.go_back(wait_until='domcontentloaded')
+    await expect(page.get_by_role('heading', level=1, name='生活', exact=True)).to_be_visible()
+    await expect(page.get_by_role('button', name='吃飯與住宿', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await expect(summary.locator('..')).to_have_js_property('open', True)
+    await expect(child).to_be_visible()
+    await expect(child).to_be_focused()
+    await page.screenshot(
+        path=str(OUT / 'life-directory-child-history-mobile.png'),
+        full_page=True, animations='disabled',
+    )
+    await page.go_forward(wait_until='domcontentloaded')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/cafeteria')
+    await page.get_by_role('navigation', name='主要導覽').get_by_role('link', name='生活', exact=True).click()
+    await expect(page.get_by_role('heading', level=1, name='生活', exact=True)).to_be_visible()
+    await expect(summary.locator('..')).to_have_js_property('open', False)
+    await expect(child).not_to_be_focused()
 
 
 async def check_career_directory_return(page):
@@ -882,11 +1002,19 @@ async def main():
             results.append('service search, empty recovery and category filtering work on mobile')
 
             await page.set_viewport_size({'width': 390, 'height': 844})
+            await check_directory_keyboard_return(page, 'life', '校園資源', '借書', '/library', '圖書館')
+            results.append('life directory Back and Forward restore the result and keyboard position without affecting a fresh visit')
+            await check_directory_keyboard_return(page, 'connect', '找人與聊天', '好友', '/friends', '找人')
+            results.append('connect directory Back and Forward restore the result and keyboard position without affecting a fresh visit')
+            await check_directory_child_return(page)
+            results.append('returning to a directory child restores its disclosure and focus only in the original history entry')
             await check_career_directory_return(page)
             results.append('career opens from campus resources with scoped life navigation and browser Back restores work-study search')
             for preference in ['nthu', 'all']:
                 await check_deep_link_login_scope(page, preference)
                 results.append(f'PU deep-link Header login overrides saved {preference} browsing preference without copying auth query to the outer URL')
+                await check_deep_link_login_scope(page, preference, student_card=True)
+                results.append(f'PU student-card school login preserves its task and campus despite saved {preference} browsing preference')
 
             club_path = '/groups/journey-club/club/overview'
             await goto_path(page, club_path + '?campus=pu&schoolId=pu')

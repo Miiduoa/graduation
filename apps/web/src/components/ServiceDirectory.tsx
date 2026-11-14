@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { CampusIcon } from './CampusIcon';
 import { useSchoolLmsReadonlyEnabled } from './SchoolLmsReadonlyProvider';
@@ -19,18 +19,78 @@ import {
 } from '@/lib/serviceJourneys';
 import styles from './ServiceDirectory.module.css';
 
+const DIRECTORY_RETURN_STATE = '__campusServiceDirectoryReturn';
+type DirectoryReturn = {
+  token: string;
+  journey: ServiceJourney;
+  url: string;
+  scope: string;
+  serviceHref: string;
+};
+
+let observedWindow: Window | undefined;
+let pendingReturn: DirectoryReturn | null = null;
+let returnSequence = 0;
+const returnListeners = new Set<() => void>();
+
+function directoryReturnState(state: unknown): DirectoryReturn | null {
+  if (!state || typeof state !== 'object') return null;
+  const saved = (state as Record<string, unknown>)[DIRECTORY_RETURN_STATE];
+  if (!saved || typeof saved !== 'object') return null;
+  const value = saved as Partial<DirectoryReturn>;
+  return typeof value.token === 'string' &&
+    (value.journey === 'life' || value.journey === 'connect') &&
+    typeof value.url === 'string' &&
+    typeof value.scope === 'string' &&
+    typeof value.serviceHref === 'string'
+    ? (value as DirectoryReturn)
+    : null;
+}
+
+function currentDirectoryUrl() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function publishDirectoryReturn(value: DirectoryReturn | null) {
+  pendingReturn = value;
+  returnListeners.forEach((listener) => listener());
+}
+
+function captureDirectoryReturn(event: PopStateEvent) {
+  const saved = directoryReturnState(event.state);
+  publishDirectoryReturn(saved?.url === currentDirectoryUrl() ? saved : null);
+}
+
+function subscribeDirectoryReturn(listener: () => void) {
+  if (observedWindow !== window) {
+    observedWindow?.removeEventListener('popstate', captureDirectoryReturn);
+    observedWindow = window;
+    pendingReturn = null;
+    // The directory is unmounted while its service is open. Keep one observer
+    // for the browser session; it records history returns but never moves focus.
+    window.addEventListener('popstate', captureDirectoryReturn);
+  }
+  returnListeners.add(listener);
+  return () => returnListeners.delete(listener);
+}
+
+const getPendingDirectoryReturn = () => pendingReturn;
+const getServerDirectoryReturn = () => null;
+
 function ServiceRow({
   service,
   scope,
   schoolLmsEnabled,
   showChildren,
   recommended,
+  onVisit,
 }: {
   service: CampusService;
   scope: string;
   schoolLmsEnabled: boolean;
   showChildren: boolean;
   recommended: boolean;
+  onVisit: (event: MouseEvent<HTMLAnchorElement>, serviceHref: string) => void;
 }) {
   const id = useId();
   const children = showChildren ? secondaryCampusServices(service.href, schoolLmsEnabled) : [];
@@ -39,6 +99,8 @@ function ServiceRow({
       <Link
         className={styles.service}
         href={campusServiceHref(service.href, scope)}
+        data-service-href={service.href}
+        onClick={(event) => onVisit(event, service.href)}
         aria-labelledby={`${id}-name`}
         aria-describedby={`${id}-description ${id}-access`}
       >
@@ -67,6 +129,8 @@ function ServiceRow({
               <li key={child.href}>
                 <Link
                   href={campusServiceHref(child.href, scope)}
+                  data-service-href={child.href}
+                  onClick={(event) => onVisit(event, child.href)}
                   aria-label={child.name}
                   aria-describedby={`${id}-child-${index}`}
                 >
@@ -98,6 +162,12 @@ export function ServiceDirectory({
   const scope = useCampusNavigationSearch(params);
   const id = useId();
   const search = useRef<HTMLInputElement>(null);
+  const directory = useRef<HTMLDivElement>(null);
+  const historyReturn = useSyncExternalStore(
+    subscribeDirectoryReturn,
+    getPendingDirectoryReturn,
+    getServerDirectoryReturn,
+  );
   const [selection, setSelection] = useState(() => ({
     queryString,
     journey,
@@ -116,17 +186,79 @@ export function ServiceDirectory({
   const searching = Boolean(filters.query.trim());
   const resultsId = `${journey}-service-results`;
 
+  useEffect(() => {
+    if (
+      !historyReturn ||
+      getPendingDirectoryReturn() !== historyReturn ||
+      historyReturn.journey !== journey
+    )
+      return;
+    const current = directoryReturnState(window.history.state);
+    if (
+      current?.token !== historyReturn.token ||
+      current.url !== currentDirectoryUrl() ||
+      current.url !== historyReturn.url ||
+      current.scope !== scope
+    ) {
+      publishDirectoryReturn(null);
+      return;
+    }
+    // Wait for Next's search params and the rendered results to catch up with
+    // popstate. A new entry, changed campus or edited filters cannot opt in.
+    if (new URL(current.url, window.location.origin).searchParams.toString() !== queryString)
+      return;
+    const target = Array.from(
+      directory.current?.querySelectorAll<HTMLAnchorElement>('a[data-service-href]') ?? [],
+    ).find((link) => link.dataset.serviceHref === current.serviceHref);
+    publishDirectoryReturn(null);
+    if (!target) return;
+    const parent = target.closest('details');
+    if (parent) parent.open = true;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+  }, [historyReturn, journey, queryString, schoolLmsEnabled, scope]);
+
+  function rememberReturn(event: MouseEvent<HTMLAnchorElement>, serviceHref: string) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      (event.currentTarget.target && event.currentTarget.target !== '_self')
+    )
+      return;
+    publishDirectoryReturn(null);
+    try {
+      window.history.replaceState(
+        {
+          ...window.history.state,
+          [DIRECTORY_RETURN_STATE]: {
+            token: `${Date.now()}-${++returnSequence}`,
+            journey,
+            url: currentDirectoryUrl(),
+            scope,
+            serviceHref,
+          } satisfies DirectoryReturn,
+        },
+        '',
+      );
+    } catch {
+      // Opening a service must still work if History access is unavailable.
+    }
+  }
+
   function updateFilters(next: JourneyFilters) {
     setSelection({ queryString, journey, filters: next });
+    publishDirectoryReturn(null);
     try {
       const url = new URL(window.location.href);
       writeJourneyFilters(url.searchParams, next);
+      const state = { ...window.history.state };
+      delete state[DIRECTORY_RETURN_STATE];
       // Returning from a service restores the directory filters through browser history.
-      window.history.replaceState(
-        window.history.state,
-        '',
-        `${url.pathname}${url.search}${url.hash}`,
-      );
+      window.history.replaceState(state, '', `${url.pathname}${url.search}${url.hash}`);
     } catch {
       // Search remains usable when the browser disallows history updates.
     }
@@ -147,13 +279,14 @@ export function ServiceDirectory({
           schoolLmsEnabled={schoolLmsEnabled}
           showChildren={!searching}
           recommended={!filtering && recommendedHref === service.href}
+          onVisit={rememberReturn}
         />
       ))}
     </ul>
   );
 
   return (
-    <div className={styles.directory}>
+    <div ref={directory} className={styles.directory}>
       {introduction && <p className={styles.introduction}>{introduction}</p>}
       <div className={styles.finder}>
         <form

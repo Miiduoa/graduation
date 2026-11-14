@@ -11,6 +11,7 @@ import {
   type PlatformAssistantPermissions,
 } from '@campus/shared/src/platformAssistantPermissions';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
+import { loginHref } from '@/lib/navigation';
 import styles from './settings.module.css';
 
 const CHANGE_KEY = 'nuni.platform.assistant-permissions-changed';
@@ -21,7 +22,7 @@ function samePermissions(a: PlatformAssistantPermissions, b: PlatformAssistantPe
   );
 }
 
-export function PlatformAssistantPermissions() {
+export function PlatformAssistantPermissions({ returnUrl = '/settings?section=assistant' }: { returnUrl?: string }) {
   const auth = useNuniSession();
   const ready = !auth.loading && !auth.pendingLogout && !auth.error;
   const scope =
@@ -55,7 +56,7 @@ export function PlatformAssistantPermissions() {
       <div className={styles.notice}>
         <h3>登入後設定 AI 代辦權限</h3>
         <p>使用 Google 帳號登入後，即可選擇允許助理代辦的項目。</p>
-        <Link className="btn primary" href="/login">
+        <Link className="btn primary" href={loginHref(returnUrl)}>
           前往登入
         </Link>
       </div>

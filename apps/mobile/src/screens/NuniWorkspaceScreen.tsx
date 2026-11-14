@@ -474,8 +474,15 @@ export function NuniWorkspaceScreen({
     });
   };
   const merchantEntry = target?.tab === 'merchant';
+  const foodEntry = target?.tab === 'food';
   const openWeb = () => {
-    const path = merchantEntry ? '/merchant' : target?.tab === 'courses' ? '/classroom/login' : '/login';
+    const path = merchantEntry
+      ? '/merchant'
+      : target?.tab === 'courses'
+        ? '/classroom/login'
+        : foodEntry
+          ? '/login?returnUrl=%2Ffood'
+          : '/login';
     void run('正在開啟網頁…', () => Linking.openURL(`https://nuni.tw${path}`));
   };
   if (auth.loading || action)
@@ -533,11 +540,15 @@ export function NuniWorkspaceScreen({
         繼續時會建立帳號；再次登入會回到原本的帳號。
       </Text>
       <View style={s.panel}>
-        <Text style={s.title}>{merchantEntry ? '店家進駐與門市管理' : '從你的課程開始'}</Text>
+        <Text style={s.title}>
+          {merchantEntry ? '店家進駐與門市管理' : foodEntry ? '點餐與訂單' : '從你的課程開始'}
+        </Text>
         <Text style={s.body}>
           {merchantEntry
             ? '新店家可在登入後申請進駐。門市負責人請用原申請帳號查進度或管理門市。店員請向負責人確認登入方式。'
-            : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
+            : foodEntry
+              ? '登入後回到點餐頁；可用服務依店家實際開放狀態顯示。'
+              : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
         </Text>
         {capability.available ? (
           <Action label="使用 Google 繼續" onPress={() => void run('正在登入…', auth.signIn)} />

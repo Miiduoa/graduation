@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   use,
   useCallback,
@@ -37,6 +38,10 @@ import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { useSignInOptions } from '@/lib/signInOptions';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { loginHref, schoolLoginHref } from '@/lib/navigation';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   getAuth,
@@ -220,7 +225,14 @@ function SettingsContent({
 }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
-  const schoolLoginReady = useSignInOptions().studentId;
+  const selection = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params ?? new URLSearchParams(schoolSearch));
+  const hash = useLocationHash();
+  const schoolReady = !selection || (
+    !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
+  );
+  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady).studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -243,6 +255,10 @@ function SettingsContent({
     currentSettingsSection,
     () => initialSection,
   );
+  const settingsReturn = campusServiceHref(
+    activeSection === 'general' ? '/settings' : `/settings?section=${activeSection}`,
+    campusSearch,
+  ) + hash;
   const sectionContent = useRef<HTMLDivElement>(null);
   const focusSection = useRef(false);
   useEffect(() => {
@@ -668,7 +684,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>登入後查看通知</h3>
               <p>課程更新與學校通知使用各自的帳號。外觀設定不需要登入。</p>
-              <Link href="/classroom/login" className="btn primary">
+              <Link href={loginHref(settingsReturn)} className="btn primary">
                 登入課程空間
               </Link>
             </section>
@@ -677,7 +693,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>學校通知</h3>
               <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
-              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              <Link href={schoolLoginHref(settingsReturn)} className="btn">
                 連線學校帳號
               </Link>
             </section>
@@ -826,7 +842,7 @@ function SettingsContent({
         <SectionHeading title="助理權限">
           設定助理可以代你完成哪些事。每項動作獨立授權，開啟後仍需每次確認。
         </SectionHeading>
-        {showPlatform && <PlatformAssistantPermissions />}
+        {showPlatform && <PlatformAssistantPermissions returnUrl={settingsReturn} />}
         {user && <>
         {user && !isFirebaseConfigured() && (
           <div className={styles.notice} role="status">
@@ -1096,7 +1112,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>登入課程空間</h3>
               <p>登入後可開啟已加入的課程、作業與課堂回饋。你也可以先調整外觀。</p>
-              <Link href="/classroom/login" className="btn primary">
+              <Link href={loginHref(settingsReturn)} className="btn primary">
                 登入課程空間
               </Link>
             </section>
@@ -1107,7 +1123,7 @@ function SettingsContent({
               <p>
                 學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
               </p>
-              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              <Link href={schoolLoginHref(settingsReturn)} className="btn">
                 連線學校帳號
               </Link>
             </section>
