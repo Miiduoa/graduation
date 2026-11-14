@@ -11,6 +11,7 @@ import { useNuniSession } from '@/features/nuni/Session';
 import { getAuth, getDb } from '@/lib/firebase';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
+import { MySocialProfile } from './MySocialProfile';
 import styles from './profile.module.css';
 
 type Profile = Partial<
@@ -134,7 +135,17 @@ export default function ProfilePage() {
   const hasCourseAccount = !nuni.loading && !nuni.pendingLogout && !nuni.error && !!nuni.session;
   const schoolLoginReady = options.studentId;
   return (
-    <SiteShell title="個人資料" subtitle="管理你的帳號，接著處理課務與校園生活。">
+    <SiteShell title="我的" subtitle="你的內容、課務與個人設定。">
+      {!loading && user && (
+        <MySocialProfile key={user.uid} uid={user.uid} name={user.displayName?.trim() || '我的帳號'} />
+      )}
+      {!loading && !user && hasCourseAccount && (
+        <section className={styles.socialAccess}>
+          <h2>我的社群</h2>
+          <p>分享跨校話題，或探索不同校園的公開交流。</p>
+          <Link className="btn primary" href="/social">前往跨校交流</Link>
+        </section>
+      )}
       <div className={styles.layout}>
         <div className={styles.accountStack}>
           <NuniAccountPanel />
