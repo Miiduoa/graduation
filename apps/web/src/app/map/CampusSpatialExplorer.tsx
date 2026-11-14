@@ -65,7 +65,7 @@ function subscribeAppearance(notify: () => void) {
   };
 }
 
-function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, onSelect, footprints }: {
+function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, onSelect, footprints, sceneLabels }: {
   model: ReturnType<typeof buildCampusSpatialModel>;
   selectedId: string | null;
   overhead: boolean;
@@ -73,6 +73,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   onCameraChange: (camera: CampusSpatialCamera) => void;
   onSelect: (id: string) => void;
   footprints: readonly ProvidenceFootprint[];
+  sceneLabels: ReadonlyMap<string, { visual: string; accessible: string }>;
 }) {
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -115,7 +116,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Neither Three.js nor a graphics context is requested before the dialog opens.
     void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
       if (!active) return;
-      scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
+      scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints, sceneLabels });
       if (!active) {
         scene.dispose();
         scene = null;
@@ -144,7 +145,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       scene?.dispose();
       runtime.current = null;
     };
-  }, [host, model, onSelect, onCameraChange, attempt, footprints]);
+  }, [host, model, onSelect, onCameraChange, attempt, footprints, sceneLabels]);
 
   return (
     <>
@@ -255,10 +256,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // A plain name in the native select or a quick-pick button can send visitors
   // to the wrong POI. Distinguish only duplicates using *existing* metadata;
   // the ordinal is a list identifier, never a claimed physical entrance.
-  const pointDisplayLabels = useMemo(() => {
-    // Visually equivalent Unicode and full-width names must also be
-    // disambiguated. This groups labels only; it never rewrites the POI ID,
-    // coordinate, audited name or building metadata.
+  // Reuse one disambiguation source for the list, screen readers and labels
+  // drawn over the WebGL scene. A short ordinal comes first on narrow screens.
+  const { pointDisplayLabels, sceneLabels } = useMemo(() => {
     const nameKey = (name: string) =>
       name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('zh-TW');
     const counts = new Map<string, number>();
@@ -267,20 +267,29 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const ordinals = new Map<string, number>();
-    return new Map(model.points.map((point) => {
+    const pointDisplayLabels = new Map<string, string>();
+    const sceneLabels = new Map<string, { visual: string; accessible: string }>();
+    for (const point of model.points) {
       const key = nameKey(point.name);
       const count = counts.get(key) ?? 1;
-      if (count === 1) return [point.id, point.name] as const;
-      const ordinal = (ordinals.get(key) ?? 0) + 1;
-      ordinals.set(key, ordinal);
-      const details = [
-        point.location.building?.trim() ? `建築：${point.location.building.trim()}` : null,
-        point.location.floor?.trim() ? `樓層：${point.location.floor.trim()}` : null,
-        point.category.trim() ? `類別：${point.category.trim()}` : null,
-        `同名地點 ${ordinal}／${count}`,
-      ].filter(Boolean).join(' · ');
-      return [point.id, `${point.name}（${details}）`] as const;
-    }));
+      let accessible = point.name;
+      let visual = point.name;
+      if (count > 1) {
+        const ordinal = (ordinals.get(key) ?? 0) + 1;
+        ordinals.set(key, ordinal);
+        const details = [
+          point.location.building?.trim() ? `建築：${point.location.building.trim()}` : null,
+          point.location.floor?.trim() ? `樓層：${point.location.floor.trim()}` : null,
+          point.category.trim() ? `類別：${point.category.trim()}` : null,
+          `同名地點 ${ordinal}／${count}`,
+        ].filter(Boolean).join(' · ');
+        accessible = `${point.name}（${details}）`;
+        visual = `${ordinal}／${count} · ${point.name}`;
+      }
+      pointDisplayLabels.set(point.id, accessible);
+      sceneLabels.set(point.id, { visual, accessible });
+    }
+    return { pointDisplayLabels, sceneLabels };
   }, [model.points]);
   const selectionOutsideSearch = Boolean(
     selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id),
@@ -531,6 +540,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
               onCameraChange={changeCamera}
               onSelect={selectPlace}
               footprints={visibleFootprints}
+              sceneLabels={sceneLabels}
             />
             <div className={styles.viewTools} role="group" aria-label="導覽視角">
               <button className="btn" type="button" aria-pressed={showOverview} onClick={() => {

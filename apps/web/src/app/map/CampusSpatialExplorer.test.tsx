@@ -240,6 +240,10 @@ it('disambiguates identical POI names for screen readers and mobile destinations
   const shortcuts = within(dialog).getByRole('group', { name: '搜尋結果捷徑' });
   const labelEast = '共用空間（建築：示意甲館 · 樓層：2F · 類別：教學空間 · 同名地點 1／2）';
   const labelWest = '共用空間（建築：示意乙館 · 樓層：3F · 類別：教學空間 · 同名地點 2／2）';
+  // In-scene markers must be distinct visually and in their spoken names too.
+  const sceneLabels = scene.create.mock.calls[0][2].sceneLabels;
+  expect(sceneLabels.get('sample-east')).toEqual({ visual: '1／2 · 共用空間', accessible: labelEast });
+  expect(sceneLabels.get('sample-west')).toEqual({ visual: '2／2 · 共用空間', accessible: labelWest });
   expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
   const second = within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelWest}」` });
   expect(within(dialog).getByRole('option', { name: labelEast })).toBeTruthy();
@@ -279,6 +283,11 @@ it('groups equivalent full-width and standard Unicode POI names without merging 
   expect(options).toHaveLength(3); // Placeholder and two independent POIs.
   expect(options[1].textContent).toContain('同名地點 1／2');
   expect(options[2].textContent).toContain('同名地點 2／2');
+  const sceneLabels = scene.create.mock.calls[0][2].sceneLabels;
+  expect(sceneLabels.get('full-width').visual).toBe('1／2 · Ａ館教室');
+  expect(sceneLabels.get('standard').visual).toBe('2／2 · A館教室');
+  expect(sceneLabels.get('full-width').accessible).toContain('示意甲館');
+  expect(sceneLabels.get('standard').accessible).toContain('示意乙館');
   fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
     { target: { value: 'standard' } });
   expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)

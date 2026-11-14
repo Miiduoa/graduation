@@ -101,7 +101,8 @@ function drawFrame(elapsed = 16) {
 }
 
 function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) => void,
-  footprints: readonly ProvidenceFootprint[] = []) {
+  footprints: readonly ProvidenceFootprint[] = [],
+  sceneLabels?: ReadonlyMap<string, { visual: string; accessible: string }>) {
   const container = document.createElement('div');
   container.tabIndex = -1;
   const bounds = { width: 800, height: 480 };
@@ -112,10 +113,33 @@ function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) =>
   document.body.append(container);
   const onSelect = vi.fn();
   const onError = vi.fn();
-  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange, footprints });
+  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange, footprints, sceneLabels });
   scenes.push(scene);
   return { scene, container, bounds, onSelect, onError, renderer: webgl.renderers.at(-1)! };
 }
+
+
+it('distinguishes on-scene markers for synthetic duplicate POIs without changing the destination ID', () => {
+  const rooms = buildCampusSpatialModel([
+    { id: 'sample-east', name: '共用空間', category: '教學空間', description: '合成測試',
+      building: '示意甲館', floor: '2F', lat: 24.2261, lng: 120.5801 },
+    { id: 'sample-west', name: '共用空間', category: '教學空間', description: '合成測試',
+      building: '示意乙館', floor: '3F', lat: 24.2262, lng: 120.5802 },
+  ]);
+  const sceneLabels = new Map([
+    ['sample-east', { visual: '1／2 · 共用空間', accessible: '共用空間（建築：示意甲館 · 樓層：2F · 同名地點 1／2）' }],
+    ['sample-west', { visual: '2／2 · 共用空間', accessible: '共用空間（建築：示意乙館 · 樓層：3F · 同名地點 2／2）' }],
+  ]);
+  const { container, onSelect } = setup(rooms, undefined, [], sceneLabels);
+  const east = container.querySelector<HTMLButtonElement>('[data-spatial-marker="sample-east"]');
+  const west = container.querySelector<HTMLButtonElement>('[data-spatial-marker="sample-west"]');
+  expect(east?.textContent).toBe('1／2 · 共用空間');
+  expect(west?.textContent).toBe('2／2 · 共用空間');
+  expect(east?.getAttribute('aria-label')).toBe('聚焦' + sceneLabels.get('sample-east')!.accessible);
+  expect(west?.getAttribute('aria-label')).toBe('聚焦' + sceneLabels.get('sample-west')!.accessible);
+  west?.click();
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith('sample-west');
+});
 
 function setupControlled(source = model) {
   let current: CampusSpatialView = {

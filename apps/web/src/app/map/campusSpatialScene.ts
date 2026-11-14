@@ -53,6 +53,7 @@ type Options = {
   onError: () => void;
   onCameraChange?: (camera: CampusSpatialCamera) => void;
   footprints?: readonly ProvidenceFootprint[];
+  sceneLabels?: ReadonlyMap<string, { visual: string; accessible: string }>;
 };
 type Pose = { position: Vector3; target: Vector3 };
 type Transition = { from: Pose; to: Pose; start: number };
@@ -714,9 +715,10 @@ export function createCampusSpatialScene(
       }
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = point.name;
-      button.title = point.name;
-      button.setAttribute('aria-label', `聚焦${point.name}`);
+      const label = options.sceneLabels?.get(point.id);
+      button.textContent = label?.visual ?? point.name;
+      button.title = label?.accessible ?? point.name;
+      button.setAttribute('aria-label', `聚焦${label?.accessible ?? point.name}`);
       button.dataset.spatialMarker = point.id;
       Object.assign(button.style, {
         position: 'absolute', left: '0', top: '0', minHeight: '44px', boxSizing: 'border-box',
