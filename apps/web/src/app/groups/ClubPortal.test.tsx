@@ -175,7 +175,7 @@ test('一般社員載入超過三場活動後保留全部活動並可報名第�
     groupId: 'club',
     eventCursor: 'event-3',
   });
-  fireEvent.click(screen.getAllByRole('button', { name: '報名', exact: true })[4]);
+  fireEvent.click(screen.getAllByRole('button', { name: /^報名$/ })[4]);
   await waitFor(() =>
     expect(callClubPortal).toHaveBeenLastCalledWith('one', 'pu', {
       action: 'register',

@@ -30,7 +30,10 @@ export function ClubCheckIn({
     [queue, setQueue] = useState<string[]>([]),
     [failures, setFailures] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(''),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [loadedKey, setLoadedKey] = useState<string | null>(null),
+    [loadAttempt, setLoadAttempt] = useState(0);
+  const ready = useRef<string | null>(null);
   const sending = useRef(false);
   const key = JSON.stringify(['club-check-in', uid, schoolId, groupId, eventId]);
   useEffect(() => {
@@ -39,22 +42,35 @@ export function ClubCheckIn({
       void QRCode.toDataURL(myCode).then((url) => {
         if (current) setQr(url);
       });
-    try {
-      const saved = JSON.parse(localStorage.getItem(key) || '[]');
-      const entries = Array.isArray(saved) ? saved.filter((s) => typeof s === 'string') : [];
-      setQueue(entries);
-      if (officer && navigator.onLine && entries.length) void send(entries);
-    } catch {}
     return () => {
       current = false;
     };
-  }, [key, myCode]);
+  }, [myCode]);
+  useEffect(() => {
+    ready.current = null;
+    setLoadedKey(null);
+    setQueue([]);
+    setFailures({});
+    setMessage('');
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) || '[]');
+      if (!Array.isArray(saved)) throw new Error('Invalid queue');
+      const entries = saved.filter((s) => typeof s === 'string');
+      ready.current = key;
+      setLoadedKey(key);
+      setQueue(entries);
+      if (officer && navigator.onLine && entries.length) void send(entries);
+    } catch {
+      setMessage('無法讀取暫存，請重新讀取後再操作');
+    }
+  }, [key, loadAttempt]);
   function save(next: string[]) {
+    if (ready.current !== key) return;
     localStorage.setItem(key, JSON.stringify(next));
     setQueue(next);
   }
   async function send(entries: string[]) {
-    if (sending.current) return;
+    if (ready.current !== key || sending.current) return;
     sending.current = true;
     setBusy(true);
     let remaining = entries;
@@ -116,17 +132,24 @@ export function ClubCheckIn({
       {officer && (
         <details>
           <summary>{acceptingCheckIns ? '開始簽到' : '管理待送出簽到'}</summary>
+          {loadedKey !== key && (
+            <button className="btn" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+              重新讀取暫存
+            </button>
+          )}
           {acceptingCheckIns && (
             <>
-              <ClubScanner
-                onCode={(value) => {
-                  setCode(value);
-                }}
-              />
+              {loadedKey === key && (
+                <ClubScanner
+                  onCode={(value) => {
+                    setCode(value);
+                  }}
+                />
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (!acceptingCheckIns) return;
+                  if (ready.current !== key || !acceptingCheckIns) return;
                   const next = [...new Set([...queue, code.trim()])];
                   try {
                     save(next);
@@ -141,7 +164,7 @@ export function ClubCheckIn({
                   掃描器輸入 QR 或學號後四碼
                   <input value={code} onChange={(e) => setCode(e.target.value)} required />
                 </label>
-                <button className="btn" disabled={busy}>
+                <button className="btn" disabled={busy || loadedKey !== key}>
                   確認簽到
                 </button>
               </form>
@@ -157,7 +180,7 @@ export function ClubCheckIn({
                   </span>
                   <button
                     className="btn"
-                    disabled={busy}
+                    disabled={busy || loadedKey !== key}
                     onClick={() => save(queue.filter((value) => value !== entry))}
                   >
                     刪除第 {index + 1} 筆失敗簽到
@@ -165,13 +188,17 @@ export function ClubCheckIn({
                 </div>
               ),
           )}
-          <button className="btn" disabled={busy || !queue.length} onClick={() => void send(queue)}>
+          <button
+            className="btn"
+            disabled={busy || loadedKey !== key || !queue.length}
+            onClick={() => void send(queue)}
+          >
             重送待送出簽到
           </button>
           {queue.length > 0 && (
             <button
               className="btn"
-              disabled={busy}
+              disabled={busy || loadedKey !== key}
               onClick={() => {
                 if (window.confirm('確定清除尚未送出的簽到？')) save([]);
               }}

@@ -196,3 +196,54 @@ test('活動結束時關閉新增與相機，重載仍可重送、查看拒絕�
   await screen.findByText('0 筆待送出');
   expect(localStorage.getItem(key)).toBe('[]');
 });
+
+test.each(['讀取例外', '損壞資料'])(
+  '%s 時保護既有暫存，重新讀取成功後才開放操作',
+  async (failure) => {
+    const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+    localStorage.setItem(key, '["old-code"]');
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    if (failure === '讀取例外') {
+      getItem.mockImplementationOnce(() => {
+        throw new Error('讀取失敗');
+      });
+    } else {
+      getItem.mockReturnValueOnce('{invalid');
+    }
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    vi.mocked(callClubPortal).mockResolvedValue({ success: true, office: false });
+    render(
+      <ClubCheckIn
+        uid="one"
+        schoolId="pu"
+        groupId="club"
+        eventId="event"
+        officer
+        onConfirmed={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('status').textContent).toBe('無法讀取暫存，請重新讀取後再操作');
+    expect((screen.getByRole('button', { name: '確認簽到' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole('button', { name: '重送待送出簽到' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.queryByText('相機掃描 QR')).toBeNull();
+    fireEvent.change(screen.getByLabelText('掃描器輸入 QR 或學號後四碼'), {
+      target: { value: 'new-code' },
+    });
+    fireEvent.submit(screen.getByRole('button', { name: '確認簽到' }).closest('form')!);
+    fireEvent(window, new Event('online'));
+    expect(write).not.toHaveBeenCalled();
+    expect(callClubPortal).not.toHaveBeenCalled();
+    expect(localStorage.getItem(key)).toBe('["old-code"]');
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取暫存' }));
+    expect(screen.getByText('1 筆待送出')).toBeTruthy();
+    expect(screen.getByText('相機掃描 QR')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '確認簽到' }));
+    expect(localStorage.getItem(key)).toBe('["old-code","new-code"]');
+    getItem.mockRestore();
+    write.mockRestore();
+  },
+);
