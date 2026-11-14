@@ -5,6 +5,8 @@ import { RealtimeTab } from './RealtimeTab';
 const mocks = vi.hoisted(() => ({
   auth: { user: { uid: 'student' } },
   peers: vi.fn(),
+  stories: vi.fn(),
+  groupStories: vi.fn(),
   checkIn: vi.fn(),
   clear: vi.fn(),
 }));
@@ -22,12 +24,17 @@ vi.mock('@/lib/community/firestore', () => ({
   heartbeatCheckIn: mocks.checkIn,
   clearPresence: mocks.clear,
   peersAtPoi: mocks.peers,
-  listActiveStoriesForSchool: vi.fn().mockResolvedValue([]),
-  groupStoriesByAuthor: () => [],
+  listActiveStoriesForSchool: mocks.stories,
+  groupStoriesByAuthor: mocks.groupStories,
   fetchSchoolDirectoryProfiles: (_school: string, uids: string[]) => Promise.resolve(uids.map((uid) => ({ uid, displayName: uid }))),
-  markStoryViewed: vi.fn(),
+  markStoryViewed: vi.fn().mockResolvedValue(undefined),
 }));
 beforeEach(() => {
+  mocks.stories.mockReset().mockResolvedValue([]);
+  for (const method of ['showModal', 'close'] as const) {
+    Object.defineProperty(HTMLDialogElement.prototype, method, { configurable: true, value(this: HTMLDialogElement) { this.open = method === 'showModal'; } });
+  }
+  mocks.groupStories.mockReset().mockReturnValue([]);
   mocks.peers.mockReset().mockResolvedValue([]);
   mocks.checkIn.mockReset().mockResolvedValue('session');
   mocks.clear.mockReset().mockResolvedValue(undefined);
@@ -60,4 +67,42 @@ it('does not show a delayed peer response from the previously selected location'
   await act(async () => finishLibrary([{ uid: '圖書館同學' }]));
   expect(screen.queryByText('圖書館同學')).toBeNull();
   expect(screen.getByText('教室同學')).toBeTruthy();
+});
+
+it('labels the newest story as a video without mounting a player in the grid', async () => {
+  mocks.groupStories.mockReturnValue([{
+    authorUid: '阿杰', latestAt: Date.now(), stories: [{
+      id: 'club-clip', schoolId: 'pu', authorUid: '阿杰', kind: 'video',
+      text: '校隊今天練這一球', mediaUrl: '/practice.mp4', expiresAt: Date.now() + 60_000,
+    }],
+  }]);
+  const { container } = render(<RealtimeTab schoolId="pu" />);
+  const card = await screen.findByRole('button', { name: '查看 阿杰 的限時動態，最新一則是影片' });
+  expect(card.textContent).toContain('校隊今天練這一球');
+  expect(container.querySelector('video')).toBeNull();
+});
+
+it.each(['stories', 'peers'] as const)('preserves the open text story during refresh and a %s network failure, but clears denied stories', async (source) => {
+  const story = { id: 'text', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
+    text: '校園近況', expiresAt: Date.now() + 120_000 };
+  mocks.stories.mockResolvedValue([story]);
+  mocks.groupStories.mockImplementation((rows) => rows.length ? [{ authorUid: 'bob', latestAt: 0, stories: rows }] : []);
+  render(<RealtimeTab schoolId="pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看 bob 的限時動態' }));
+  const viewer = screen.getByRole('dialog', { name: '限時動態' });
+  let fail!: (error: unknown) => void;
+  mocks[source].mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+  // Changing location refreshes the realtime page while the story stays open.
+  fireEvent.click(screen.getByRole('button', { name: /教室/ }));
+  await waitFor(() => expect(fail).toBeTypeOf('function'));
+  expect(screen.getByRole('dialog', { name: '限時動態' })).toBe(viewer);
+  expect(screen.getByRole('button', { name: '查看 bob 的限時動態' })).toBeTruthy();
+  await act(async () => fail(new Error('offline')));
+  await screen.findByRole('alert');
+  expect(screen.getByRole('dialog', { name: '限時動態' })).toBe(viewer);
+  expect(screen.getByRole('button', { name: '查看 bob 的限時動態' })).toBeTruthy();
+  mocks.stories.mockRejectedValueOnce({ code: 'permission-denied' });
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '限時動態' })).toBeNull());
+  expect(screen.queryByRole('button', { name: '查看 bob 的限時動態' })).toBeNull();
 });

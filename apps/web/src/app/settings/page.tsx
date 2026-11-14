@@ -34,7 +34,6 @@ import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
-import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { useSignInOptions } from '@/lib/signInOptions';
@@ -59,6 +58,8 @@ import {
   type StoredWebPreferences,
   type ThemePreference,
 } from '@/lib/webPreferences';
+import { PlatformServiceControls } from './PlatformServiceControls';
+import { PlatformAssistantPermissions } from './PlatformAssistantPermissions';
 import styles from './settings.module.css';
 import {
   currentSettingsSection,
@@ -90,6 +91,7 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
   { id: 'account', label: '帳號', description: '個人資料與登入' },
   { id: 'notifications', label: '通知', description: '接收類型與勿擾時段' },
   { id: 'assistant', label: '助理權限', description: '助理可執行的寫入動作' },
+  { id: 'platform', label: '平台權限', description: 'Google 帳號的服務使用範圍' },
   { id: 'appearance', label: '外觀', description: '色彩、字級與閱讀方式' },
   { id: 'privacy', label: '隱私', description: '個人資料與存取範圍' },
 ];
@@ -218,7 +220,6 @@ function SettingsContent({
 }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
-  const assistantEnabled = useAssistantEnabled();
   const schoolLoginReady = useSignInOptions().studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
@@ -816,24 +817,17 @@ function SettingsContent({
   }
 
   function renderAssistant() {
+    const showPlatform = !user || !!nuni.session || nuni.loading || !!nuni.error || nuni.pendingLogout;
     const updateAssistantPermission = (key: AssistantWritePermissionKey, value: boolean) => {
       setAssistantWritePrefs((prev) => ({ ...prev, [key]: value }));
     };
     return (
       <div className={styles.stack}>
         <SectionHeading title="助理權限">
-          控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。涵蓋需確認的服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列。
+          設定助理可以代你完成哪些事。每項動作獨立授權，開啟後仍需每次確認。
         </SectionHeading>
-        {assistantEnabled && nuni.session && <p role="note">nuni 校園助理目前僅提供公開資訊，尚未支援代辦寫入；下方設定不會開啟 nuni 助理寫入功能。</p>}
-        {!user && (
-          <div className={styles.notice}>
-            <h3>登入後設定助理權限</h3>
-            <p>權限會跟著帳號保留，網頁與手機共用同一份設定。</p>
-            <Link href={`/login${schoolSearch}`} className="btn primary">
-              前往登入
-            </Link>
-          </div>
-        )}
+        {showPlatform && <PlatformAssistantPermissions />}
+        {user && <>
         {user && !isFirebaseConfigured() && (
           <div className={styles.notice} role="status">
             <h3>目前無法連線帳號服務</h3>
@@ -848,7 +842,7 @@ function SettingsContent({
         </div>
         <section aria-labelledby="assistant-write-permissions">
           <h3 className={styles.groupHeading} id="assistant-write-permissions">
-            寫入動作
+            校內助理寫入動作
           </h3>
           <div className={styles.group}>
             {ASSISTANT_WRITE_PERMISSION_DEFINITIONS.map((row) => (
@@ -874,6 +868,7 @@ function SettingsContent({
             {savingAssistantPermissions ? '儲存中…' : '儲存助理權限'}
           </button>
         </div>
+        </>}
       </div>
     );
   }
@@ -1259,6 +1254,7 @@ function SettingsContent({
     general: renderGeneral,
     notifications: renderNotifications,
     assistant: renderAssistant,
+    platform: () => <PlatformServiceControls onManageAssistant={() => openSection('assistant')} />,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,

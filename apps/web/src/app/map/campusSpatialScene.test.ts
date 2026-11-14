@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BufferGeometry, Camera, InstancedMesh, Material, Matrix4, Scene, Vector3 } from 'three';
+import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, PlaneGeometry, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
+import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
+import { parseProvidenceOsmFootprints, parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
 import { createCampusSpatialScene, type CampusSpatialScene, type CampusSpatialView } from './campusSpatialScene';
 import {
   DEFAULT_SPATIAL_BEARING,
@@ -98,7 +100,8 @@ function drawFrame(elapsed = 16) {
   for (const callback of pending) callback(time);
 }
 
-function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) => void) {
+function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) => void,
+  footprints: readonly ProvidenceFootprint[] = []) {
   const container = document.createElement('div');
   container.tabIndex = -1;
   const bounds = { width: 800, height: 480 };
@@ -109,7 +112,7 @@ function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) =>
   document.body.append(container);
   const onSelect = vi.fn();
   const onError = vi.fn();
-  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange });
+  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange, footprints });
   scenes.push(scene);
   return { scene, container, bounds, onSelect, onError, renderer: webgl.renderers.at(-1)! };
 }
@@ -746,4 +749,245 @@ describe('controlled spatial camera input', () => {
     expect(onCameraChange).not.toHaveBeenCalled();
     expect(frames.size).toBe(0);
   });
+});
+
+it('extrudes OSM footprints in geographically aligned meters only for known spatial points', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const outlines = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  const { renderer } = setup(campus, undefined, outlines);
+  drawFrame();
+  const graph = renderer.render.mock.calls.at(-1)?.[0] as Scene;
+  const volumes: Mesh[] = [];
+  graph.traverse((object) => {
+    if (object instanceof Mesh && object.geometry instanceof ExtrudeGeometry) volumes.push(object);
+  });
+  expect(volumes).toHaveLength(1);
+  const volume = volumes[0];
+  volume.geometry.computeBoundingBox();
+  const bounds = volume.geometry.boundingBox!;
+  expect(bounds.max.z - bounds.min.z).toBeCloseTo(12, 6); // not a measured building height
+  expect(bounds.max.x - bounds.min.x).toBeGreaterThan(10); // geographic longitude span in meters
+  expect(bounds.max.y - bounds.min.y).toBeGreaterThan(10); // geographic latitude span in meters
+  const otherSchool = buildCampusSpatialModel(locations);
+  const other = setup(otherSchool, undefined, outlines);
+  drawFrame();
+  const otherGraph = other.renderer.render.mock.calls.at(-1)?.[0] as Scene;
+  let otherVolumes = 0;
+  otherGraph.traverse((object) => {
+    if (object instanceof Mesh && object.geometry instanceof ExtrudeGeometry) otherVolumes += 1;
+  });
+  expect(otherVolumes).toBe(0);
+});
+
+
+it('does not zoom out for a tall building whose POI is absent from the current campus view', () => {
+  // A filtering change can keep an older API footprint in memory. It must not
+  // make an unrelated map look tiny despite that building never being drawn.
+  const unrelated: ProvidenceFootprint = {
+    poiId: 'pu-library', name: '測試用建築', sourceUrl: 'https://www.openstreetmap.org/way/255784049',
+    outline: [[120.58131, 24.22624], [120.58143, 24.22624],
+      [120.58143, 24.22634], [120.58131, 24.22634]],
+    heightMeters: 100, heightBasis: 'osm-tag',
+  };
+  const without = setup(model);
+  drawFrame();
+  const expected = lastCamera(without.renderer).position.clone();
+  const withUnrelated = setup(model, undefined, [unrelated]);
+  drawFrame();
+  const actual = lastCamera(withUnrelated.renderer).position;
+  expect(actual.distanceTo(expected)).toBeLessThan(1e-6);
+  const graph = withUnrelated.renderer.render.mock.calls.at(-1)?.[0] as Scene;
+  let volumes = 0;
+  graph.traverse((object) => {
+    if (object instanceof Mesh && object.geometry instanceof ExtrudeGeometry) volumes += 1;
+  });
+  expect(volumes).toBe(0);
+});
+
+it('frames an explicitly selected short building without zooming out for a different tall campus building', () => {
+  // Both POIs remain visible in the model. Heights and outlines here are
+  // synthetic renderer fixtures, not observed Providence building dimensions.
+  const footprintAt = (point: (typeof model.points)[number], heightMeters: number): ProvidenceFootprint => ({
+    poiId: point.id,
+    name: point.name,
+    sourceUrl: 'https://www.openstreetmap.org/way/255784049',
+    outline: [
+      [point.location.lng - 0.00003, point.location.lat - 0.00003],
+      [point.location.lng + 0.00003, point.location.lat - 0.00003],
+      [point.location.lng + 0.00003, point.location.lat + 0.00003],
+      [point.location.lng - 0.00003, point.location.lat + 0.00003],
+    ],
+    heightMeters,
+    heightBasis: 'osm-tag',
+  });
+  const selectedBuilding = footprintAt(model.points[0], 12);
+  const otherTallBuilding = footprintAt(model.points[1], 100);
+  const shortOnly = setup(model, undefined, [selectedBuilding]);
+  const withTall = setup(model, undefined, [selectedBuilding, otherTallBuilding]);
+
+  const selectedView = { selectedId: model.points[0].id, overhead: false, motion: false, dark: false };
+  shortOnly.scene.setView(selectedView);
+  withTall.scene.setView(selectedView);
+  drawFrame();
+  const focusedShortOnly = lastCamera(shortOnly.renderer).position.clone();
+  const focusedWithTall = lastCamera(withTall.renderer).position.clone();
+  expect(focusedWithTall.distanceTo(focusedShortOnly)).toBeLessThan(1e-6);
+
+  // The overview must still fit the taller *visible* building; only the
+  // explicitly focused camera should be independent of other building heights.
+  const overview = { ...selectedView, selectedId: null };
+  shortOnly.scene.setView(overview);
+  withTall.scene.setView(overview);
+  drawFrame();
+  expect(lastCamera(withTall.renderer).position.length())
+    .toBeGreaterThan(lastCamera(shortOnly.renderer).position.length());
+});
+
+
+it('fits an elongated OSM building when its selected POI is near an end', () => {
+  // Synthetic footprint, not a claimed Providence measurement. The old
+  // fixed 140-260 m framing clipped this outline on narrow viewports.
+  const point = model.points[0];
+  const footprintAt = (halfLongitude: number): ProvidenceFootprint => ({
+    poiId: point.id,
+    name: point.name,
+    sourceUrl: 'https://www.openstreetmap.org/way/255784049',
+    outline: [
+      [point.location.lng - 0.00002, point.location.lat - 0.00003],
+      [point.location.lng + halfLongitude, point.location.lat - 0.00003],
+      [point.location.lng + halfLongitude, point.location.lat + 0.00003],
+      [point.location.lng - 0.00002, point.location.lat + 0.00003],
+    ],
+    heightMeters: 12,
+    heightBasis: 'illustrative',
+  });
+  const compact = setup(model, undefined, [footprintAt(0.00004)]);
+  const elongated = setup(model, undefined, [footprintAt(0.0024)]);
+  compact.bounds.width = 320;
+  elongated.bounds.width = 320;
+  for (const resize of observers) resize.callback([], resize as unknown as ResizeObserver);
+  const selectedView = { selectedId: point.id, overhead: false, motion: false, dark: false };
+  compact.scene.setView(selectedView);
+  elongated.scene.setView(selectedView);
+  drawFrame();
+  const poi = new Vector3(point.x, 0, point.z);
+  const compactDistance = lastCamera(compact.renderer).position.distanceTo(poi);
+  const elongatedDistance = lastCamera(elongated.renderer).position.distanceTo(poi);
+  expect(elongatedDistance).toBeGreaterThan(compactDistance * 1.5);
+});
+
+it('fits a long accepted OSM footprint in the campus overview and ground plane', () => {
+  // Synthetic outline deliberately extends well past its POI; it is NOT a
+  // measured Providence building. The overview previously used only POIs
+  // to size the ground and camera, clipping long source-checked footprints.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const point = campus.points[0];
+  const longOutline: ProvidenceFootprint = {
+    poiId: point.id,
+    name: point.name,
+    sourceUrl: library.sourceUrl,
+    outline: [
+      [point.location.lng - 0.00002, point.location.lat - 0.00003],
+      [point.location.lng + 0.0024, point.location.lat - 0.00003],
+      [point.location.lng + 0.0024, point.location.lat + 0.00003],
+      [point.location.lng - 0.00002, point.location.lat + 0.00003],
+    ],
+    heightMeters: 12,
+    heightBasis: 'illustrative',
+  };
+  const without = setup(campus);
+  const withLongOutline = setup(campus, undefined, [longOutline]);
+  without.bounds.width = 320;
+  withLongOutline.bounds.width = 320;
+  for (const observer of observers) observer.callback([], observer as unknown as ResizeObserver);
+  drawFrame();
+
+  const groundWidth = (renderer: (typeof webgl.renderers)[number]) => {
+    const graph = renderer.render.mock.calls.at(-1)?.[0] as Scene;
+    let width = 0;
+    graph.traverse((object) => {
+      if (object instanceof Mesh && object.geometry instanceof PlaneGeometry) {
+        width = Math.max(width, object.geometry.parameters.width);
+      }
+    });
+    return width;
+  };
+  // Include both ends of the footprint without inventing a new POI, ground
+  // polygon, or a building dimension for any actual Providence campus block.
+  expect(groundWidth(withLongOutline.renderer))
+    .toBeGreaterThan(groundWidth(without.renderer) + 250);
+  expect(lastCamera(withLongOutline.renderer).position.length())
+    .toBeGreaterThan(lastCamera(without.renderer).position.length() * 1.5);
+});
+
+it('keeps a nearby but off-outline POI on the ground instead of inventing a rooftop marker', () => {
+  // A cross-checked POI may be up to 30m from the verified OSM ring.
+  // The following geometry is deliberately synthetic, not a surveyed building.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const [inside] = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes', height: '18 m' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(inside).toBeDefined();
+  const exterior: ProvidenceFootprint = {
+    ...inside,
+    // Moving the outline 22m north leaves the POI about 18m outside.
+    // It remains a permitted proximity match, not a proven roof/entrance.
+    outline: inside.outline.map(([lon, lat]) => [lon, lat + 0.0002] as [number, number]),
+  };
+  expect(parseProvidenceFootprintResponse({
+    schoolId: 'pu', buildings: [exterior],
+  })).toHaveLength(1);
+
+  const markerHeight = (footprint: ProvidenceFootprint) => {
+    const { renderer } = setup(campus, undefined, [footprint]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = graph.children.find((item): item is InstancedMesh =>
+      item instanceof InstancedMesh && item.geometry.type === 'SphereGeometry')!;
+    const matrix = new Matrix4();
+    caps.getMatrixAt(0, matrix);
+    let buildingVolumes = 0;
+    graph.traverse((item) => {
+      if (item instanceof Mesh && item.geometry instanceof ExtrudeGeometry) buildingVolumes += 1;
+    });
+    return { y: new Vector3().setFromMatrixPosition(matrix).y, buildingVolumes };
+  };
+
+  const onRoof = markerHeight(inside);
+  const onGround = markerHeight(exterior);
+  const illustrative = markerHeight({
+    ...inside,
+    heightMeters: 12,
+    heightBasis: 'illustrative',
+  });
+  expect(onRoof.y).toBeGreaterThan(inside.heightMeters);
+  expect(onGround.y).toBeLessThan(inside.heightMeters);
+  // A POI inside an OSM polygon is not proof of a 12m roof elevation.
+  // Missing height tags may extrude an explicitly illustrative volume, but
+  // the POI must not be lifted onto that invented roof.
+  expect(illustrative.y).toBeCloseTo(onGround.y, 6);
+  // The accepted sourced/illustrative outline is still drawn; only the
+  // misleading floating POI is corrected, never moving it to a guessed entrance.
+  expect(onRoof.buildingVolumes).toBe(1);
+  expect(onGround.buildingVolumes).toBe(1);
+  expect(illustrative.buildingVolumes).toBe(1);
 });

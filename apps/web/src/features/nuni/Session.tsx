@@ -17,6 +17,7 @@ import {
   parseNuniPrincipal,
   type NuniPrincipal,
 } from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS } from '@campus/shared/src/wakeAwareRequest';
 
 type Session = NuniPrincipal & { context: string; assignmentFileSubmit?: boolean };
 type SessionState = {
@@ -61,6 +62,8 @@ const Context = createContext<{
 } | null>(null);
 const LOGOUT_KEY = 'campus-one.nuni.logout-pending';
 const CHANGE_KEY = 'campus-one.nuni.session-change';
+// The BFF allows one upstream wake retry; leave five seconds for the browser/BFF round trip.
+const READ_REQUEST_TIMEOUT_MS = WAKE_REQUEST_TIMEOUT_MS * 2 + 5000;
 
 export async function browserUpload(
   path: string,
@@ -121,7 +124,7 @@ export async function browserRequest(
     cache: 'no-store',
     credentials: 'same-origin',
     redirect: 'error',
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(verb === 'GET' ? READ_REQUEST_TIMEOUT_MS : 12000),
     headers: {
       ...(context ? { 'X-Campus-Session': context } : {}),
       ...(sendJson ? { 'Content-Type': 'application/json' } : {}),

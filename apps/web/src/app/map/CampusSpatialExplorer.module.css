@@ -73,6 +73,63 @@
 .viewTools > span { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
 .viewTools button[aria-pressed='true'] { color: var(--brand); border-color: currentColor; }
 .note { margin: 12px 0 0; color: var(--muted); font-size: 0.8125rem; line-height: 1.8; }
+.footprintInfo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--bg));
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.footprintInfo strong { color: var(--text); font-weight: 650; }
+.footprintInfo span { flex: 1 1 100%; }
+.footprintInfo small { color: var(--muted); font-size: 0.75rem; }
+.footprintInfo .retryFootprints {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface, var(--bg));
+  font: inherit;
+  cursor: pointer;
+}
+.footprintInfo .retryFootprints:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.footprintInfo a, .officialFloors a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  color: var(--brand);
+  text-underline-offset: 3px;
+}
+.officialFloors {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, var(--bg));
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+.officialFloors strong { font-weight: 650; }
+.officialFloors p { margin: 0; }
+.officialFloors small { color: var(--muted); }
+
 .details { display: grid; gap: 24px; }
 .selectField { display: grid; gap: 8px; }
 .selectField label, .progress label { font-size: 0.8125rem; color: var(--muted); }

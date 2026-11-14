@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { NuniStudyTask } from '@campus/shared/src/nuniStudyAgenda';
+import { studyCalendarKey } from '@campus/shared/src/studyAgendaCalendar';
+import type { StudyDeadlineSource } from '@campus/shared/src/studyDeadlineConflicts';
 import { StudyDeadlineExport } from './StudyDeadlineExport';
 
 const task = (overrides: Partial<NuniStudyTask> = {}): NuniStudyTask => ({
@@ -93,4 +95,65 @@ it('gives an actionable empty state and revalidates eligibility after a submissi
   );
   expect(screen.queryByRole('button', { name: '下載 ICS' })).toBeNull();
   expect(screen.getByText(/目前沒有可匯出的未繳期限/)).toBeTruthy();
+});
+it('keeps conflict copy, grades and student identifiers out of the downloaded ICS', async () => {
+  vi.useRealTimers();
+  const blobs: Blob[] = [];
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: (blob: Blob) => {
+      blobs.push(blob);
+      return 'blob:ics';
+    },
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const conflictSources: StudyDeadlineSource[] = [
+    {
+      kind: 'events',
+      schoolId: 's',
+      termKey: '115|1',
+      start: '2026-11-01',
+      end: '2026-11-30',
+      status: 'complete',
+      records: [
+        {
+          id: 'secret',
+          batchId: 'b',
+          importedAt: '',
+          kind: 'events',
+          title: '學號A12345678的補考',
+          schoolId: 's',
+          academicYear: '115',
+          semester: '1',
+          grade: '99',
+          source: { type: 'paste', line: 1, rawText: '學號A12345678 grade=99' },
+          date: '2026-11-02',
+          startTime: '00:00',
+          endTime: '01:00',
+        },
+      ],
+    },
+  ];
+  render(
+    <StudyDeadlineExport
+      tasks={[task()]}
+      partial={false}
+      retry={vi.fn()}
+      conflictSources={conflictSources}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: '預覽已選 1 項' }));
+  expect(screen.getByLabelText('期限匯出預覽').textContent).toContain(
+    '與個人事件衝突：學號A12345678的補考',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '下載 ICS' }));
+  expect(blobs).toHaveLength(1);
+  const content = await blobs[0].text();
+  expect(content).toContain(`UID:study-${studyCalendarKey(task())}@nuni.tw`);
+  expect(content).toContain('DTSTART:20261101T163000Z');
+  expect(content).toContain('DTEND:20261101T163000Z');
+  expect(content).not.toMatch(/學號A12345678|grade=99|衝突|未知|\b99\b/);
 });

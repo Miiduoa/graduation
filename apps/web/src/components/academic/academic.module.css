@@ -371,6 +371,21 @@
   font-size: 13px;
   color: var(--muted);
 }
+.friendActions {
+  flex: 0 1 55%;
+  justify-content: flex-end;
+}
+@media (max-width: 600px) {
+  .list > li.friendRow {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .friendActions {
+    flex: none;
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
 .score {
   max-width: 40%;
   overflow-wrap: anywhere;

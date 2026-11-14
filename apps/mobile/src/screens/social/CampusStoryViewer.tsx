@@ -1,4 +1,3 @@
-import { Video, ResizeMode } from 'expo-av';
 import { usePrivateMedia } from '../../services/usePrivateMedia';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -14,6 +13,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { StoryVideoPlayer, supportsStoryVideo } from './StoryVideoPlayer';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isFirebaseMockMode } from '../../firebase';
@@ -23,6 +23,10 @@ import {
   type CampusStoryDoc,
   type StoryAuthorGroup,
 } from '../../services/stories';
+import { isDemoUid } from '../../services/demoSession';
+import { useCampusSocialStackNav } from './CampusSocialNavContext';
+import { StoryAudiencePanel } from './StoryAudiencePanel';
+import { StoryReplyPanel } from './StoryReplyPanel';
 
 const STORY_DURATION = 7000;
 
@@ -30,6 +34,7 @@ const STORY_DURATION = 7000;
 export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?: string) {
   const [clock, setClock] = useState(Date.now);
   const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
+  const recorded = React.useRef(new Set<string>());
   const [selectedId, selectStory] = useState<string | null>(null);
   const groups = useMemo(() => {
     const now = Math.max(clock, Date.now());
@@ -70,19 +75,23 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
   const group = groups[groupIndex];
   const index = group?.stories.findIndex((s) => s.id === selectedId) ?? -1;
   const story = group?.stories[index];
+  const storyId = story?.id;
+  const authorUid = story?.authorUid;
+  const expiresAt = story?.expiresAt;
   useEffect(() => {
-    if (selectedId && !story) selectStory(null);
-    if (
-      story &&
-      uid &&
-      !seen.has(story.id) &&
-      story.expiresAt! > Date.now() &&
-      !isFirebaseMockMode()
-    ) {
-      setSeen((previous) => new Set(previous).add(story.id));
-      void markStoryViewed(story.id, uid).catch(() => {});
+    if (!storyId) {
+      if (selectedId) selectStory(null);
+      return;
     }
-  }, [selectedId, story, uid, seen]);
+    if (!uid || !schoolId || !authorUid || !expiresAt || expiresAt <= Date.now()) return;
+    setSeen((previous) => (previous.has(storyId) ? previous : new Set(previous).add(storyId)));
+    if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(storyId)) return;
+    recorded.current.add(storyId);
+    void markStoryViewed({ id: storyId, schoolId, authorUid }, uid).catch(() => {
+      // Reopen to retry. A network failure should not reset the local reading position.
+      recorded.current.delete(storyId);
+    });
+  }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId]);
 
   const openGroup = useCallback(
     (g: StoryAuthorGroup) => {
@@ -91,7 +100,7 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
     },
     [schoolId, seen],
   );
-  return { groups, groupIndex, index, openGroup, selectStory, seen };
+  return { groups, groupIndex, index, openGroup, selectStory, seen, viewerUid: uid };
 }
 
 export function CampusStoryViewer({
@@ -104,10 +113,12 @@ export function CampusStoryViewer({
   const { groups, groupIndex, index, selectStory } = deck;
   const group = groups[groupIndex];
   const story = group?.stories[index];
-  if (!story || story.expiresAt! <= Date.now()) return null;
+  if (!deck.viewerUid || !story || story.expiresAt! <= Date.now()) return null;
   const previousGroup = groups[groupIndex - 1];
   return (
     <StorySlide
+      key={JSON.stringify([deck.viewerUid, story.schoolId])}
+      viewerUid={deck.viewerUid}
       story={story}
       group={group}
       index={index}
@@ -124,6 +135,7 @@ export function CampusStoryViewer({
 }
 
 type SlideProps = {
+  viewerUid: string;
   story: CampusStoryDoc;
   group: StoryAuthorGroup;
   index: number;
@@ -136,6 +148,7 @@ type SlideProps = {
 };
 
 function StorySlide({
+  viewerUid,
   story,
   group,
   index,
@@ -146,21 +159,35 @@ function StorySlide({
   nextAuthorId,
   selectStory,
 }: SlideProps) {
+  const [panelFor, setPanelFor] = useState<string | null>(null);
+  const navigation = useCampusSocialStackNav();
+  const [receipt, setReceipt] = useState<{ scope: string; conversationId: string } | null>(null);
+  const scope = JSON.stringify([story.authorUid, story.id]);
+  const canReply =
+    story.allowReplies !== false &&
+    !group.isMine &&
+    !isDemoUid(viewerUid) &&
+    !isDemoUid(story.authorUid) &&
+    !isFirebaseMockMode();
+  const inspecting = group.isMine && panelFor === scope;
+  const replying = canReply && panelFor === scope;
+  if (panelFor !== null && panelFor !== scope) setPanelFor(null);
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
+  const playbackActive = playing && !inspecting && !replying;
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
   const mediaUrl = usePrivateMedia(story.mediaUrl);
-  const hasImage = (story.kind === 'image' || story.kind === 'video') && !!story.mediaUrl;
+  const hasVideo = story.kind === 'video';
+  const hasImage = story.kind === 'image' && !!story.mediaUrl;
   const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
   const ready = !hasImage || loadedImage === story.id || imageFailed;
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
-  const [fill] = useState(() => new Animated.Value(0));
+  const fill = useMemo(() => new Animated.Value(0), [story.id]);
   useEffect(() => {
     remaining.current = STORY_DURATION;
-    fill.setValue(0);
-  }, [story.id, fill]);
+  }, [story.id]);
 
   useEffect(() => {
     if (!playing) return;
@@ -170,7 +197,7 @@ function StorySlide({
     return () => subscription.remove();
   }, [playing]);
   useEffect(() => {
-    if (!playing || !ready) return;
+    if (!playbackActive || !ready || hasVideo) return;
     const start = Date.now();
     const duration = remaining.current;
     const progress = Animated.timing(fill, {
@@ -187,7 +214,7 @@ function StorySlide({
       progress.stop();
       remaining.current = Math.max(0, duration - (Date.now() - start));
     };
-  }, [playing, ready, story.id, nextId, selectStory, fill]);
+  }, [playbackActive, ready, story.id, nextId, selectStory, fill, hasVideo]);
 
   const swipe = useMemo(
     () =>
@@ -204,17 +231,23 @@ function StorySlide({
   );
   const total = group.stories.length;
   const nextLabel = nextId ? '下一則' : '看完了';
-  const playLabel = playing ? '暫停播放' : '自動播放';
+  const playLabel = playing ? '暫停播放' : hasVideo ? '播放影片' : '自動播放';
+
+  const back = () => setPanelFor(null);
+  const safeArea = {
+    paddingTop: Math.max(12, insets.top),
+    paddingBottom: Math.max(12, insets.bottom),
+  };
 
   return (
-    <Modal visible animationType="fade" onRequestClose={close}>
+    <Modal visible animationType="fade" onRequestClose={inspecting || replying ? back : close}>
       <View
-        accessibilityViewIsModal
+        pointerEvents={replying ? 'none' : 'auto'}
+        accessibilityViewIsModal={!inspecting && !replying}
+        accessibilityElementsHidden={inspecting || replying}
+        importantForAccessibility={inspecting || replying ? 'no-hide-descendants' : 'auto'}
         onAccessibilityEscape={close}
-        style={[
-          styles.shell,
-          { paddingTop: Math.max(12, insets.top), paddingBottom: Math.max(12, insets.bottom) },
-        ]}
+        style={[styles.shell, safeArea, inspecting && styles.hidden]}
       >
         <View style={[styles.progress, total > 16 && { gap: 1 }]}>
           {group.stories.map((s, i) => (
@@ -255,19 +288,20 @@ function StorySlide({
           </Pressable>
         </View>
         <View
-          style={[styles.canvas, !hasImage && { backgroundColor: story.bgColor || '#243b35' }]}
+          style={[
+            styles.canvas,
+            !hasImage && !hasVideo && { backgroundColor: story.bgColor || '#243b35' },
+          ]}
           {...swipe.panHandlers}
         >
-          {story.kind === 'video' && mediaUrl && !imageFailed ? (
-            <Video
+          {hasVideo ? (
+            <StoryClip
               key={story.id}
-              source={{ uri: mediaUrl }}
-              style={styles.photo}
-              resizeMode={ResizeMode.CONTAIN}
-              useNativeControls
-              shouldPlay
-              onLoad={() => setLoadedImage(story.id)}
-              onError={() => setFailedImage(story.id)}
+              uri={mediaUrl}
+              playing={playbackActive}
+              fill={fill}
+              onEnd={() => selectStory(nextId ?? null)}
+              onPause={() => setPlaying(false)}
             />
           ) : hasImage && !imageFailed ? (
             <Image
@@ -300,16 +334,63 @@ function StorySlide({
             onPress={() => selectStory(nextId ?? null)}
           />
         </View>
-        {(hasImage && story.text) || story.poiName ? (
+        {((hasImage || hasVideo) && story.text) || story.poiName ? (
           <ScrollView
             key={story.id}
             style={styles.details}
             contentContainerStyle={styles.detailContent}
           >
-            {hasImage && !!story.text && <Text style={styles.caption}>{story.text}</Text>}
+            {(hasImage || hasVideo) && !!story.text && (
+              <Text style={styles.caption}>{story.text}</Text>
+            )}
             {!!story.poiName && <Text style={styles.counter}>{story.poiName}</Text>}
           </ScrollView>
         ) : null}
+        {group.isMine ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.audienceButton}
+            onPress={() => setPanelFor(scope)}
+          >
+            <Ionicons name="eye-outline" color="#b8e7d4" size={18} />
+            <Text style={styles.stepText}>誰看過</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.replyActions}>
+            <Text style={styles.audienceNotice}>作者可查看誰看過</Text>
+            {canReply && receipt?.scope === scope && navigation && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="已送出私訊，查看對話"
+                style={styles.replyButton}
+                onPress={() => {
+                  close();
+                  navigation.navigate('訊息', {
+                    screen: 'Chat',
+                    params: { peerId: story.authorUid, conversationId: receipt.conversationId },
+                  });
+                }}
+              >
+                <Text accessibilityLiveRegion="polite" style={styles.stepText}>
+                  已送出 · 查看私訊
+                </Text>
+              </Pressable>
+            )}
+            {canReply && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`私訊回覆給${author}`}
+                style={styles.replyButton}
+                onPress={() => setPanelFor(scope)}
+              >
+                <Ionicons name="chatbubble-outline" color="#b8e7d4" size={16} />
+                <Text accessibilityLiveRegion="polite" style={styles.stepText}>
+                  {receipt?.scope === scope ? '再回覆' : '私訊回覆'}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
         <View style={styles.controls}>
           <Pressable
             accessibilityRole="button"
@@ -331,7 +412,126 @@ function StorySlide({
           </Pressable>
         </View>
       </View>
+      {canReply && (
+        <StoryReplyPanel
+          key={scope}
+          open={replying}
+          story={story}
+          viewerUid={viewerUid}
+          author={author}
+          onBack={back}
+          onSent={(conversationId) => {
+            setReceipt({ scope, conversationId });
+            back();
+          }}
+        />
+      )}
+      {inspecting && (
+        <View
+          style={[styles.shell, safeArea]}
+          accessibilityViewIsModal
+          onAccessibilityEscape={back}
+        >
+          <StoryAudiencePanel key={story.id} story={story} onBack={back} />
+        </View>
+      )}
     </Modal>
+  );
+}
+
+function StoryClip({
+  uri,
+  playing,
+  fill,
+  onEnd,
+  onPause,
+}: {
+  uri?: string | null;
+  playing: boolean;
+  fill: Animated.Value;
+  onEnd: () => void;
+  onPause: () => void;
+}) {
+  const [muted, setMuted] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const [positionSeconds, setPositionSeconds] = useState(0);
+  // Native callbacks may arrive after a swipe, close or pause.
+  const session = useMemo(() => ({ playing }), [playing]);
+  const current = React.useRef<typeof session | null>(null);
+  React.useLayoutEffect(() => {
+    current.current = session;
+    return () => {
+      current.current = null;
+    };
+  }, [session]);
+  if (failed || !uri || !supportsStoryVideo) {
+    return (
+      <View style={styles.clipStatus}>
+        <Text style={styles.stepText}>影片暫時無法播放</Text>
+        {uri && supportsStoryVideo && (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.step}
+            onPress={() => setFailed(false)}
+          >
+            <Text style={styles.stepText}>重新載入影片</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.photo}>
+      <StoryVideoPlayer
+        source={{ uri, overrideFileExtensionAndroid: 'mp4' }}
+        style={styles.photo}
+        accessibilityLabel="限時動態影片"
+        shouldPlay={playing}
+        isMuted={muted}
+        isLooping={false}
+        onError={() => {
+          if (!current.current) return;
+          setMuted(true);
+          setPositionSeconds(0);
+          setDurationSeconds(0);
+          setFailed(true);
+          onPause();
+        }}
+        onReadyForDisplay={({ status }) => {
+          if (current.current && status?.isLoaded && status.durationMillis)
+            setDurationSeconds(Math.ceil(status.durationMillis / 1000));
+        }}
+        onPlaybackStatusUpdate={(status) => {
+          if (
+            current.current !== session ||
+            !status.isLoaded ||
+            !playing ||
+            AppState.currentState === 'background' ||
+            AppState.currentState === 'inactive'
+          )
+            return;
+          if (status.durationMillis) {
+            setPositionSeconds(Math.floor(status.positionMillis / 1000));
+            fill.setValue(Math.min(1, status.positionMillis / status.durationMillis));
+          }
+          if (status.didJustFinish) onEnd();
+        }}
+      />
+      <View style={styles.clipTools}>
+        <Text style={styles.clipTime}>
+          {durationSeconds ? `${positionSeconds} / ${durationSeconds} 秒` : '載入影片…'}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={muted ? '開啟影片聲音' : '將影片靜音'}
+          style={styles.sound}
+          onPress={() => setMuted(!muted)}
+        >
+          <Ionicons name={muted ? 'volume-mute' : 'volume-high'} color="white" size={20} />
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -352,6 +552,19 @@ const styles = StyleSheet.create({
   counter: { color: '#c2cbc8', fontSize: 13 },
   iconButton: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   canvas: { flex: 1, overflow: 'hidden', borderRadius: 16, backgroundColor: '#000' },
+  clipTools: {
+    position: 'absolute',
+    bottom: 8,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#242928',
+    borderRadius: 22,
+    paddingLeft: 12,
+  },
+  clipTime: { color: '#fff', fontSize: 13, fontVariant: ['tabular-nums'] },
+  sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
@@ -374,6 +587,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  hidden: { display: 'none' },
+  replyActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  replyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    backgroundColor: '#20342d',
+    borderRadius: 22,
+  },
+  audienceNotice: { color: '#c2cbc8', fontSize: 13 },
+  audienceButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    borderRadius: 12,
+    backgroundColor: '#20342d',
   },
   disabled: { opacity: 0.4 },
   stepText: { color: '#fff', fontSize: 14, fontWeight: '600' },

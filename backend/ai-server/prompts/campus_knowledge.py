@@ -214,7 +214,7 @@ PU_DINING_INFO = """
 """
 
 
-def get_full_knowledge_text() -> str:
+def get_full_knowledge_text(school_id: str | None = None) -> str:
     """Produce a compact textual summary for system prompts."""
     lines: list[str] = ["【APP 功能與操作指南】"]
     for name, info in SCREEN_KNOWLEDGE.items():
@@ -226,11 +226,12 @@ def get_full_knowledge_text() -> str:
             + (f"入口：{guide}" if guide else "")
         )
 
-    lines.append("")
-    lines.append("【靜宜大學校園建築】")
-    lines.append(PU_CAMPUS_INFO.strip())
-    lines.append("")
-    lines.append("【靜宜大學餐廳完整資訊】")
-    lines.append(PU_DINING_INFO.strip())
+    if school_id in ("pu", "tw-pu"):
+        lines.append("")
+        lines.append("【靜宜大學校園建築】")
+        lines.append(PU_CAMPUS_INFO.strip())
+        lines.append("")
+        lines.append("【靜宜大學餐廳完整資訊】")
+        lines.append(PU_DINING_INFO.strip())
 
     return "\n".join(lines)

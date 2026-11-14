@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { createNuniClasses, parseNuniWorkspace } from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS } from '@campus/shared/src/wakeAwareRequest';
 import { handleNuni } from './api';
 import { finishGoogle, startGoogle } from './oauth';
 import {
@@ -56,9 +57,38 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+function useFakeRequestTimeouts() {
+  vi.useFakeTimers();
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+    const controller = new AbortController();
+    setTimeout(
+      () => controller.abort(new DOMException('Upstream timed out.', 'TimeoutError')),
+      milliseconds,
+    );
+    return controller.signal;
+  });
+}
+
+function responseWithPendingBody(signal: AbortSignal, status = 200) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        signal.addEventListener(
+          'abort',
+          () => controller.error(new DOMException('Body read aborted.', 'AbortError')),
+          { once: true },
+        );
+      },
+    }),
+    { status, headers: { 'Content-Type': 'application/json' } },
+  );
+}
 
 it('waits at least ten seconds and retries a waking API once', async () => {
   fetcher
@@ -75,6 +105,70 @@ it('does not retry a 4xx API failure', async () => {
   await expect(fetchJson('https://api.nuni.tw/v1/public/schools/pu/cafeterias', {})).rejects.toMatchObject({
     status: 401,
   });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('retries a GET when headers arrived but its first response body timed out', async () => {
+  useFakeRequestTimeouts();
+  fetcher
+    .mockImplementationOnce((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!),
+    )
+    .mockResolvedValueOnce(response({ workspaces: [workspace] }));
+  const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS - 1);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await expect(outcome).resolves.toEqual({ value: { workspaces: [workspace] } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it.each(['POST', 'PUT'])(
+  'does not add a %s retry when its response body is aborted',
+  async (method) => {
+    useFakeRequestTimeouts();
+    fetcher.mockImplementation((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!),
+    );
+    const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {
+      method,
+      body: '{}',
+    }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS);
+    await expect(outcome).resolves.toMatchObject({ status: 502, code: 'INVALID_RESPONSE' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([401, 403])(
+  'does not retry HTTP %s when reading its error body times out',
+  async (status) => {
+    useFakeRequestTimeouts();
+    fetcher.mockImplementation((_url: string, init: RequestInit) =>
+      responseWithPendingBody(init.signal!, status),
+    );
+    const outcome = fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(WAKE_REQUEST_TIMEOUT_MS);
+    await expect(outcome).resolves.toMatchObject({ status });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
+  ['malformed JSON', '{broken', 1024, 502, 'INVALID_RESPONSE'],
+  ['oversized body', '123456789', 4, 413, 'BODY_TOO_LARGE'],
+] as const)('does not retry a GET with %s', async (_kind, body, limit, status, code) => {
+  fetcher.mockResolvedValueOnce(
+    new Response(body, { headers: { 'Content-Type': 'application/json' } }),
+  );
+  await expect(
+    fetchJson('https://api.nuni.tw/v1/auth/platform/class-workspaces', {}, limit),
+  ).rejects.toMatchObject({ status, code });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
@@ -446,6 +540,24 @@ describe('Nuni Google authorization code flow', () => {
   it.each([
     '/social?campus=tw-pu',
     '/merchant',
+    '/merchant/apply',
+    '/merchant/workspace',
+    '/auth/platform/class-workspace/join',
+    '/auth/platform/class-workspace/new',
+    '/timetable?schoolId=ntu#today',
+    '/calendar?campus=nthu#week',
+    '/import?schoolId=pu',
+    '/dormitory?schoolId=ntu',
+    '/food?tenant=pu&order=order-1',
+    '/food?school=PU&schoolId=pu&campus=nthu',
+    '/shops/?campus=all',
+    '/shops?schoolId=pu&campus=nthu',
+    '/lost-found?schoolId=pu',
+    '/lost-found/platform?schoolId=nthu&mine=1',
+    '/lost-found/platform/post?schoolId=pu',
+    '/lost-found/platform/plf_11111111-1111-4111-8111-111111111111?schoolId=pu#contact',
+    '/grades',
+    '/classroom/material-bookmarks?campus=pu',
     '/map?school=pu&focus=library#route',
     '/bus?school=pu',
     '/announcements/news-123?schoolId=tw-pu',
@@ -477,11 +589,12 @@ describe('Nuni Google authorization code flow', () => {
       request('auth/platform/start?returnUrl=%2Fmerchant', { post: {} }),
     );
     const location = new URL(result.headers.get('location')!);
+    expect(location.pathname).toBe('/login');
     expect(location.searchParams.get('returnUrl')).toBe('/merchant');
     expect(location.searchParams.get('issue')).toBe('unavailable');
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it.each(['/merchant?application=current', 'https://attacker.example'])(
+  it.each(['/merchant?application=current', '/merchant/workspace', '/merchant/apply', 'https://attacker.example'])(
     'only keeps the trusted safe transaction destination after cancellation: %s',
     async (target) => {
       const login = {
@@ -500,6 +613,7 @@ describe('Nuni Google authorization code flow', () => {
       );
       const destination = new URL(result.headers.get('location')!);
       expect(destination.origin).toBe('https://nuni.tw');
+      expect(destination.pathname).toBe(target.startsWith('/') ? '/login' : '/classroom/login');
       expect(destination.searchParams.get('returnUrl')).toBe(
         target.startsWith('/') ? target : null,
       );
@@ -507,7 +621,11 @@ describe('Nuni Google authorization code flow', () => {
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
-  it.each(['https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades'])(
+  it.each([
+    'https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades?tab=semester',
+    '/lost-found?source=school&schoolId=pu', '/lost-found/post', '/lost-found/legacy-item',
+    '/lost-found/platform/legacy-item', '/lost-found/platform/post/extra',
+  ])(
     'does not carry an external or school-only destination into the login transaction: %s',
     async (target) => {
       fetcher.mockResolvedValue(response(tx()));

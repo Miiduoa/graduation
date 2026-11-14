@@ -2,12 +2,12 @@
 
 /**
  * Server-owned public school identity for assistant web/route/weather fallbacks.
- * Labels come from the announcements catalog; weather coordinates are only the
+ * Labels come from the shared public school directory; weather coordinates are only the
  * localities already verified in assistantAgent (no newly invented campus coords).
  * Short aliases mirror packages/shared/src/schools.ts for the same schoolIds.
  */
 
-const { SCHOOLS, schoolConfig } = require('../campusAnnouncements/catalog');
+const { getPublicSchoolInfo, publicSchoolInfoDirectory } = require('../generated/shared/publicSchoolInfo');
 
 const SCHOOL_ID_ALIASES = Object.freeze({
   'tw-pu': 'pu',
@@ -18,7 +18,7 @@ const SCHOOL_ID_ALIASES = Object.freeze({
  * Used only to detect explicit school mentions in user text — not as authority claims.
  */
 const SHARED_SCHOOL_SHORT_ALIASES = Object.freeze({
-  'tw-nchu': Object.freeze(['中興', '中興大學']),
+  nchu: Object.freeze(['中興', '中興大學']),
   ntu: Object.freeze(['台大', '臺大', '台灣大學', '臺灣大學']),
   nthu: Object.freeze(['清大']),
   ncku: Object.freeze(['成大']),
@@ -159,18 +159,18 @@ const SCHOOL_TOPIC_RE =
 function canonicalizeSchoolId(schoolId) {
   const raw = String(schoolId ?? '').trim();
   if (!raw) return null;
-  return SCHOOL_ID_ALIASES[raw] || raw;
+  return Object.hasOwn(SCHOOL_ID_ALIASES, raw) ? SCHOOL_ID_ALIASES[raw] : raw;
 }
 
 function resolvePublicSchoolRecord(schoolId) {
   const canonical = canonicalizeSchoolId(schoolId);
   if (!canonical) return null;
-  const entry = schoolConfig(canonical);
-  if (!entry || !entry.name) return null;
+  const entry = getPublicSchoolInfo(canonical);
+  if (!entry) return null;
   return {
-    schoolId: entry.schoolId,
+    schoolId: entry.id,
     name: entry.name,
-    weatherLocation: SCHOOL_DEFAULT_WEATHER[entry.schoolId] || null,
+    weatherLocation: SCHOOL_DEFAULT_WEATHER[entry.id] || null,
   };
 }
 
@@ -190,7 +190,7 @@ function mentionTokensForSchool(entry) {
     .trim();
   addScriptVariants(rawName, tokens);
   addScriptVariants(rawName.replace(/^國立/, ''), tokens);
-  for (const alias of SHARED_SCHOOL_SHORT_ALIASES[entry.schoolId] || []) {
+  for (const alias of SHARED_SCHOOL_SHORT_ALIASES[entry.id] || []) {
     addScriptVariants(alias, tokens);
   }
   return [...tokens].filter(Boolean).sort((a, b) => b.length - a.length);
@@ -200,13 +200,11 @@ let cachedSchoolMentionIndex = null;
 
 function getSchoolMentionIndex() {
   if (cachedSchoolMentionIndex) return cachedSchoolMentionIndex;
-  cachedSchoolMentionIndex = (SCHOOLS || [])
-    .filter((entry) => entry?.schoolId && entry?.name && entry.demo !== true)
-    .map((entry) => ({
-      schoolId: entry.schoolId,
-      name: entry.name,
-      tokens: mentionTokensForSchool(entry),
-    }));
+  cachedSchoolMentionIndex = Object.values(publicSchoolInfoDirectory).map((entry) => ({
+    schoolId: entry.id,
+    name: entry.name,
+    tokens: mentionTokensForSchool(entry),
+  }));
   return cachedSchoolMentionIndex;
 }
 

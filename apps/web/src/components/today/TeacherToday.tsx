@@ -1,9 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import type { ReactNode } from 'react';
+import { TodayClassRows } from './TodayClassRows';
 import { buildPersonalToday } from '@campus/shared';
 import {
-  formatClassMeta,
+  formatTodayHeaderDate,
+  TODAY_COPY,
   formatTodoDueLine,
   sortTodayClasses,
   sortTodayTodos,
@@ -23,19 +26,14 @@ import {
 import { assignmentHref, courseWeekHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 
-const TEACHING_ROLES = new Set([
-  'owner',
-  'instructor',
-  'moderator',
-  'owner-teacher',
-  'co-teacher',
-]);
+const TEACHING_ROLES = new Set(['owner', 'instructor', 'moderator', 'owner-teacher', 'co-teacher']);
 
 export function isTeachingCourse(course: Pick<HomeCourse, 'role'>): boolean {
   return TEACHING_ROLES.has(course.role);
 }
 
 type Props = {
+  assistant?: ReactNode;
   now: Date;
   unsigned: boolean;
   classes: TodayClass[];
@@ -47,6 +45,7 @@ type Props = {
 
 /** Teacher-facing today stream: classes, grading entry points, upcoming student work. */
 export function TeacherToday({
+  assistant,
   now,
   unsigned,
   classes,
@@ -55,47 +54,39 @@ export function TeacherToday({
   timetableHref,
   importHref,
 }: Props) {
-  const sortedClasses = sortTodayClasses(classes, now).slice(0, 4);
+  const sortedClasses = sortTodayClasses(classes, now);
   const todos = sortTodayTodos(upcomingTodos).slice(0, 5);
 
   return (
     <div className={styles.screen} data-testid="teacher-today">
       <header className={styles.header}>
         <h1 className={styles.title}>今天</h1>
-        <p className={styles.updated}>授課視角：今天的課、待批改入口與即將到期作業。</p>
+        <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
       </header>
       {unsigned ? (
-        <p className={styles.empty}>{TEACHER_TODAY_UNSIGNED}</p>
+        <>
+          <p className={styles.empty}>{TEACHER_TODAY_UNSIGNED}</p>
+          {assistant}
+        </>
       ) : (
         <div className={styles.flow}>
           <section className={styles.section} aria-labelledby="teacher-class-title">
-            <h2 id="teacher-class-title" className={styles.sectionTitle}>
-              {TODAY_FLOW_CLASS_TITLE}
-            </h2>
+            <div className={styles.sectionHeading}>
+              <h2 id="teacher-class-title" className={styles.sectionTitle}>
+                {TODAY_FLOW_CLASS_TITLE}
+              </h2>
+              <Link className={styles.sectionLink} href={timetableHref}>
+                {TODAY_COPY.viewFullTimetable}
+              </Link>
+            </div>
             {sortedClasses.length === 0 ? (
               <p className={styles.empty}>
-                今天沒有排課。{' '}
-                <Link href={timetableHref}>查看課表</Link>
+                今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
                 {' · '}
                 <Link href={importHref}>整理課表</Link>
               </p>
             ) : (
-              <ul className={styles.list}>
-                {sortedClasses.map((item) => {
-                  const href = courseWeekHref(item.courseId);
-                  return (
-                    <li key={item.id}>
-                      <Link href={href} className={`${styles.row} ${styles.withTime}`}>
-                        <span className={styles.time}>{formatClassMeta(item).split('・')[0]}</span>
-                        <span className={styles.rowBody}>
-                          <span className={styles.rowTitle}>{item.title}</span>
-                          <span className={styles.rowMeta}>{item.location || '教室未填'}</span>
-                        </span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
+              <TodayClassRows classes={sortedClasses} now={now} timetableHref={timetableHref} />
             )}
           </section>
 
@@ -108,16 +99,18 @@ export function TeacherToday({
             ) : (
               <ul className={styles.list}>
                 {teachingCourses.map((course) => {
-                  const href =
-                    course.href ||
-                    courseWeekHref(course.id).replace(/#week$/, '') ||
-                    `/teacher/course/${encodeURIComponent(course.id)}`;
+                  // School LMS workspaces keep their own destination. nuni courses
+                  // open the teacher workspace with assignment management.
+                  const courseHref = course.href || courseWeekHref(course.id).replace(/#week$/, '');
+                  const href = courseHref.replace(/^\/course\//, '/teacher/course/');
                   return (
                     <li key={course.id}>
                       <Link href={href} className={styles.row}>
                         <span className={styles.rowBody}>
                           <span className={styles.rowTitle}>{course.name}</span>
-                          <span className={styles.rowMeta}>查看繳交、教材與作業</span>
+                          <span className={styles.rowMeta}>
+                            開啟課程工作台 · 查看繳交、教材與作業
+                          </span>
                         </span>
                       </Link>
                     </li>
@@ -150,6 +143,7 @@ export function TeacherToday({
               </ul>
             )}
           </section>
+          {assistant}
         </div>
       )}
     </div>
@@ -157,6 +151,7 @@ export function TeacherToday({
 }
 
 type BoundProps = {
+  assistant?: ReactNode;
   now: Date | null;
   unsigned: boolean;
   teachingCourses: readonly HomeCourse[];
@@ -182,6 +177,7 @@ export function TeacherTodayPage(props: BoundProps) {
   const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <TeacherToday
+      assistant={props.assistant}
       now={now}
       unsigned={props.unsigned}
       classes={classes}
