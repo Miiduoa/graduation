@@ -171,6 +171,8 @@ function createClubAdmin({
                     : 0),
             });
           tx.set(registrationRef, {
+            ...old,
+            studentSuffix: old.studentSuffix || String(schoolDoc.data().studentId || '').slice(-4),
             status: action === 'register' ? 'registered' : 'cancelled',
             checkedInAt: null,
           });

@@ -440,6 +440,38 @@ export function createClubPortal({
               const matches = records.filter(
                 (r) => r.data().status === 'registered' && r.data().studentSuffix === code,
               );
+              // Older registrations may predate studentSuffix. Read bounded pages and
+              // resolve only those records on the server, including duplicate suffixes.
+              let after: string | undefined;
+              while (matches.length < 2) {
+                let query = (ref.collection('registrations') as any)
+                  .where('status', '==', 'registered')
+                  .orderBy('__name__')
+                  .limit(100);
+                if (after) query = query.startAfter(after);
+                const page = (await tx.get(query)).docs as any[];
+                const legacy = page.filter((row) => !row.data().studentSuffix);
+                if (legacy.length) {
+                  const identities = await tx.getAll(
+                    ...legacy.flatMap((row) => [
+                      school.collection('members').doc(row.id),
+                      db.collection('users').doc(row.id),
+                    ]),
+                  );
+                  legacy.forEach((row, index) => {
+                    const seat = identities[index * 2].data();
+                    const account = identities[index * 2 + 1].data();
+                    const suffix = String(
+                      seat?.studentId ||
+                        (account?.schoolId === schoolId ? account?.studentId : '') ||
+                        '',
+                    ).slice(-4);
+                    if (suffix === code) matches.push(row);
+                  });
+                }
+                if (page.length < 100) break;
+                after = page[page.length - 1].id;
+              }
               if (matches.length !== 1)
                 throw new HttpsError(
                   'failed-precondition',

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createClubAdmin } from '../../../../../backend/functions/clubAdmin';
 import { beforeEach, expect, test } from 'vitest';
 import { clubRosterCsv } from '@campus/shared/src/clubExport';
 import { createClubPortal } from './clubPortalHandlers';
@@ -692,4 +693,70 @@ test('即時與歷史頁交界不漏資料，游標固定時間邊界且拒絕�
     'code',
     'invalid-argument',
   );
+});
+
+test('新舊報名重送及取消重報保留後四碼與擴充欄位', async () => {
+  await event();
+  await call('student', { action: 'join' });
+  await call('student', { action: 'register', eventId: 'event' });
+  const path = 'groups/club/clubEvents/event/registrations/student';
+  store.docs.get(path)!.custom = '保留';
+  const legacy = createClubAdmin({
+    db: store.db,
+    enabled: () => true,
+    pilotGroupId: 'club',
+    now: () => time,
+  });
+  for (const action of ['register', 'cancel', 'register']) {
+    await legacy({
+      auth: { uid: 'student' },
+      data: { schoolId: 'school', groupId: 'club', eventId: 'event', action },
+    });
+    expect(store.docs.get(path)).toMatchObject({ studentSuffix: '5678', custom: '保留' });
+  }
+  time = 5500;
+  await call('officer', { action: 'checkIn', eventId: 'event', checkInCode: '5678' });
+  expect(store.docs.get(path)?.checkedInAt).toBe(time);
+});
+
+test('舊報名缺少後四碼時在伺服器補足，跨頁重複須使用 QR', async () => {
+  await event();
+  const path = 'groups/club/clubEvents/event/registrations/';
+  store.docs.set(path + 'student', { status: 'registered' });
+  for (let n = 0; n < 101; n++)
+    store.docs.set(path + `a${String(n).padStart(3, '0')}`, { status: 'registered' });
+  time = 5500;
+  await call('officer', { action: 'checkIn', eventId: 'event', checkInCode: '5678' });
+  expect(store.docs.get(path + 'student')).toMatchObject({
+    studentSuffix: '5678',
+    checkedInAt: time,
+  });
+  expect(
+    reads
+      .filter((r) => r.path.endsWith('/registrations') && !r.aggregate)
+      .every((r) => r.maximum <= 100),
+  ).toBe(true);
+  // A legacy duplicate must also be detected when the indexed record already matches.
+  store.docs.set('schools/school/members/zzduplicate', {
+    status: 'active',
+    studentId: 'S99995678',
+  });
+  store.docs.set(path + 'zzduplicate', { status: 'registered' });
+  await expect(
+    call('officer', { action: 'checkIn', eventId: 'event', checkInCode: '5678' }),
+  ).rejects.toThrow('學號後四碼重複，請改掃 QR');
+  expect(store.docs.get(path + 'zzduplicate')?.checkedInAt).toBeUndefined();
+});
+
+test.each(['school', 'another'])('舊報名備援學號僅採用同校帳號：%s', async (schoolId) => {
+  await event();
+  delete store.docs.get('schools/school/members/student')!.studentId;
+  store.docs.set('users/student', { schoolId, studentId: 'S12345678' });
+  store.docs.set('groups/club/clubEvents/event/registrations/student', { status: 'registered' });
+  store.docs.set('groups/club/clubEvents/event/registrations/cancelled', { status: 'cancelled' });
+  store.docs.set('schools/school/members/cancelled', { studentId: 'S12345678' });
+  time = 5500;
+  const result = call('officer', { action: 'checkIn', eventId: 'event', checkInCode: '5678' });
+  if (schoolId === 'school') await expect(result).resolves.toMatchObject({ success: true });
+  else await expect(result).rejects.toThrow('這位不在報名名單');
 });

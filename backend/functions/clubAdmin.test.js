@@ -185,3 +185,28 @@ describe('社團後台授權與統計', () => {
     });
   });
 });
+
+test('舊流程新建報名保存學校後四碼，重送及取消保留擴充資料', async () => {
+  const store = transactionStore([
+    ['groups/club', { type: 'club', schoolId: 'school' }],
+    ['schools/school/members/student', { status: 'active', studentId: 'S12345678' }],
+    ['groups/club/members/student', { status: 'active', role: 'member' }],
+    ['groups/club/clubEvents/event', { startsAt: 2000, endsAt: 3000 }],
+  ]);
+  const run = createClubAdmin({
+    db: store.db,
+    enabled: () => true,
+    pilotGroupId: 'club',
+    now: () => 1000,
+  });
+  const path = 'groups/club/clubEvents/event/registrations/student';
+  for (const action of ['register', 'register', 'cancel', 'register']) {
+    await run({
+      auth: { uid: 'student' },
+      data: { schoolId: 'school', groupId: 'club', eventId: 'event', action },
+    });
+    expect(store.docs.get(path).studentSuffix).toBe('5678');
+    if (action === 'register') store.docs.get(path).custom = '保留';
+    expect(store.docs.get(path).custom).toBe('保留');
+  }
+});
