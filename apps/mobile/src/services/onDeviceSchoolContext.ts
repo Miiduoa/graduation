@@ -236,14 +236,15 @@ export function formatOnDeviceSchoolPrompt(
     (timetable.source === 'saved-device-copy' ||
       (timetable.updatedAt === null && timetable.courses.length === 0)) &&
     timetable.courses.every((course) => !!course &&
-      typeof course.name === 'string' && !!course.name.trim() && course.name.length <= 48 &&
+      // The offline copy may bypass the regular title parser. Newline or
+      // line-separator controls in a course name can masquerade as model instructions.
+      safePromptEvidenceText(course.name, 48) &&
       Number.isInteger(course.day) && course.day >= 0 && course.day <= 5 &&
       Number.isInteger(course.start) && Number.isInteger(course.end) &&
       (course.day === 0
         ? course.start === 0 && course.end === 0
         : course.start >= 1 && course.end >= course.start && course.end <= MAX_PERIOD_SLOTS) &&
-      (course.room === undefined ||
-        (typeof course.room === 'string' && course.room.length <= 40)));
+      (course.room === undefined || safePromptEvidenceText(course.room, 40, true)));
   const owned = verifiedClock && validTimetable && !!schoolId &&
     !!expectedOwnerUid && context?.ownerUid === expectedOwnerUid;
   // An otherwise valid JSON-restored course can carry arbitrary extra fields.
