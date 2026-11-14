@@ -96,7 +96,6 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   const [retry, setRetry] = useState(0);
   const active = useRef(true);
   const writing = useRef(false);
-  const loadTicket = useRef(0);
   const createId = useRef(newId());
   const [organization, setOrganization] = useState('');
   const [teacher, setTeacher] = useState('');
@@ -111,19 +110,33 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   useEffect(() => {
     if (!uid) return;
     let live = true;
+    let controller: AbortController | null = null;
+    let readTimeout: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
-      const ticket = ++loadTicket.current;
+      if (controller) return;
+      const current = new AbortController();
+      controller = current;
+      const timeout = (readTimeout = setTimeout(() => {
+        current.abort();
+        if (live) {
+          setError('讀取實習進度逾時，請重新整理。');
+          controller = null;
+        }
+      }, 15000));
       try {
-        const result = await service.load(audience);
-        if (live && ticket === loadTicket.current) {
+        const result = await service.load(audience, { signal: current.signal });
+        if (live && !current.signal.aborted) {
           setSnapshot(result);
           setError('');
         }
       } catch (e) {
-        if (live) {
+        if (live && !current.signal.aborted) {
           setSnapshot(null);
           setError(e instanceof Error ? e.message : '暫時讀不到實習進度，請重試。');
         }
+      } finally {
+        clearTimeout(timeout);
+        if (controller === current) controller = null;
       }
     };
     void load();
@@ -132,6 +145,8 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
     }, 10000);
     return () => {
       live = false;
+      controller?.abort();
+      clearTimeout(readTimeout);
       clearInterval(timer);
     };
   }, [service, uid, audience, retry]);

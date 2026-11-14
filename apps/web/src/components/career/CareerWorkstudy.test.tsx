@@ -349,36 +349,50 @@ test('a write cancels a hanging read before refreshing the saved snapshot', asyn
   expect(view.getByText('已儲存。')).toBeTruthy();
 });
 
-test.each(['success', 'failure'] as const)(
-  'a coalesced refresh ignores an old %s while the follow-up stays pending',
-  async (outcome) => {
-    const { view, service, changed } = setup();
-    await view.findByText('測試用工讀');
-    let finish!: (value: WorkstudySnapshot) => void;
-    let fail!: (reason: Error) => void;
-    vi.mocked(service.load)
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve, reject) => {
-            finish = resolve;
-            fail = reject;
-          }),
-      )
-      .mockImplementationOnce(() => new Promise<WorkstudySnapshot>(() => {}));
-    act(() => changed());
-    act(() => changed());
-    expect(service.load).toHaveBeenCalledTimes(2);
-    await act(async () => {
-      if (outcome === 'success') {
-        finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
-      } else {
-        fail(new Error('過期讀取錯誤'));
-      }
+test('continuous refresh triggers allow each serialized read to commit without starvation', async () => {
+  const { view, service, changed } = setup();
+  await view.findByText('測試用工讀');
+  let finish!: (value: WorkstudySnapshot) => void;
+  vi.mocked(service.load).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => changed());
+  for (let i = 0; i < 4; i++) {
+    act(() => {
+      changed();
+      changed();
     });
-    expect(service.load).toHaveBeenCalledTimes(3);
-    expect(view.queryByText('過期讀取結果')).toBeNull();
-    expect(view.queryByText('過期讀取錯誤')).toBeNull();
-    expect(view.getByText('測試用工讀')).toBeTruthy();
-    view.unmount();
-  },
-);
+    await act(async () => {
+      finish({ ...snapshot(), opportunities: [{ ...opportunity, title: `讀取結果${i}` }] });
+    });
+    expect(view.getByText(`讀取結果${i}`)).toBeTruthy();
+    if (i > 0) expect(view.queryByText(`讀取結果${i - 1}`)).toBeNull();
+    expect(service.load).toHaveBeenCalledTimes(i + 3);
+  }
+  view.unmount();
+});
+
+test('a cancelled read cannot overwrite the newer result after a write', async () => {
+  const { view, service, changed } = setup('staff');
+  await view.findByText('測試用工讀');
+  let finish!: (value: WorkstudySnapshot) => void;
+  vi.mocked(service.load).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => changed());
+  fireEvent.click(view.getByRole('button', { name: '編輯測試用工讀' }));
+  fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+  await act(async () => {});
+  await act(async () => {
+    finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '已取消的舊結果' }] });
+  });
+  expect(view.getByText('測試用工讀')).toBeTruthy();
+  expect(view.queryByText('已取消的舊結果')).toBeNull();
+  expect(service.load).toHaveBeenCalledTimes(3);
+});
