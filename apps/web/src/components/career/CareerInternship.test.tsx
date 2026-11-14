@@ -1,6 +1,6 @@
 import React from 'react';
 import { it, expect, vi } from 'vitest';
-import { render, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, fireEvent, waitFor } from '@testing-library/react';
 import { CareerInternship } from './CareerInternship';
 import { internshipRecord } from '@campus/shared/testFixtures/careerInternship';
 import type { InternshipAudience } from '@campus/shared/src/careerInternship';
@@ -94,4 +94,75 @@ it('keeps student records out of the operations view', async () => {
   const { view } = setup('ops', 'admin');
   await waitFor(() => expect(view.getByText(/營運檢視不顯示學生名冊/)).toBeTruthy());
   expect(view.queryByText(/測試用機構/)).toBeNull();
+});
+
+it('aborts scoped polling, times out hanging reads and ignores late success and failure', async () => {
+  vi.useFakeTimers();
+  try {
+    const record = internshipRecord();
+    const snapshot = { rules: [record.rule], records: [record], audit: [] };
+    const reads: {
+      signal?: AbortSignal;
+      resolve: (value: typeof snapshot) => void;
+      reject: (error: Error) => void;
+    }[] = [];
+    const service = {
+      load: vi.fn(
+        (_audience: InternshipAudience, options?: { signal?: AbortSignal }) =>
+          new Promise<typeof snapshot>((resolve, reject) =>
+            reads.push({ signal: options?.signal, resolve, reject }),
+          ),
+      ),
+      execute: vi.fn(async () => ({})),
+    };
+    const props = {
+      schoolId: 'pu',
+      ownerKey: 'student',
+      uid: 'student',
+      audience: 'student' as const,
+      service,
+      onLogin: vi.fn(),
+      onAddCalendar: async () => undefined,
+    };
+    const view = render(<CareerInternship {...props} />);
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(reads).toHaveLength(1);
+    view.rerender(<CareerInternship {...props} schoolId="other" />);
+    expect(reads[0].signal?.aborted).toBe(true);
+    await act(async () => {
+      reads[0].reject(new Error('舊學校錯誤'));
+    });
+    expect(view.queryByText('舊學校錯誤')).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+    });
+    expect(reads[1].signal?.aborted).toBe(true);
+    expect(view.getByText('讀取實習進度逾時，請重新整理。')).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    await act(async () => {
+      reads[2].resolve(snapshot);
+    });
+    expect(view.getByText(/測試用機構/)).toBeTruthy();
+    await act(async () => {
+      reads[1].resolve({ ...snapshot, records: [{ ...record, organization: '逾時舊結果' }] });
+    });
+    expect(view.queryByText(/逾時舊結果/)).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    view.unmount();
+    expect(reads[3].signal?.aborted).toBe(true);
+    const count = reads.length;
+    await act(async () => {
+      reads[3].reject(new Error('卸載錯誤'));
+      vi.advanceTimersByTime(60000);
+    });
+    expect(reads).toHaveLength(count);
+  } finally {
+    vi.useRealTimers();
+  }
 });

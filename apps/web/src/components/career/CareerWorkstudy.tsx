@@ -156,8 +156,7 @@ function Workspace({
   function refresh(): Promise<void> {
     if (!alive.current) return Promise.resolve();
     if (readTask.current) {
-      // A newer refresh makes the active read stale, even while the next read waits.
-      generation.current++;
+      // Queue one follow-up; triggers alone must not starve the active read.
       pendingRefresh.current = true;
       return readTask.current;
     }

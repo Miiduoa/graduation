@@ -5,6 +5,7 @@ import {
   internshipDeadlineState,
   internshipProgress,
   createInternshipCallableTransport,
+  createInternshipService,
 } from '@campus/shared/src/careerInternship';
 import { internshipPersonalEvent } from '@campus/shared/src/careerInternshipCalendar';
 import { createCareerInternshipPorts } from './careerInternshipPorts';
@@ -109,4 +110,41 @@ it('uses the existing authenticated callable envelope and preserves errors', asy
     fetcher: async () => Response.json({ error: { message: '請重新整理' } }, { status: 409 }),
   });
   await expect(failed('pu', { action: 'list', audience: 'student' })).rejects.toThrow('請重新整理');
+});
+
+it('forwards read cancellation and bounds even an uncooperative fetch or auth provider', async () => {
+  vi.useFakeTimers();
+  try {
+    const controller = new AbortController();
+    const fetcher = vi.fn<typeof fetch>(() => new Promise(() => {}));
+    const service = createInternshipService(
+      'pu',
+      createInternshipCallableTransport({
+        endpoint: '/internship',
+        authHeaders: async () => ({}),
+        fetcher,
+        timeoutMs: 100,
+      }),
+    );
+    const read = service.load('student', { signal: controller.signal });
+    const rejected = expect(read).rejects.toThrow('取消或等候逾時');
+    await Promise.resolve();
+    controller.abort();
+    await rejected;
+    expect((fetcher.mock.calls[0][1]?.signal as AbortSignal).aborted).toBe(true);
+    const transport = createInternshipCallableTransport({
+      endpoint: '/internship',
+      authHeaders: () => new Promise(() => {}),
+      fetcher,
+      timeoutMs: 100,
+    });
+    const hanging = transport('pu', { action: 'list', audience: 'student' });
+    const timedOut = expect(hanging).rejects.toThrow('取消或等候逾時');
+    await vi.advanceTimersByTimeAsync(100);
+    await timedOut;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });

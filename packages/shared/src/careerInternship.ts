@@ -78,11 +78,12 @@ export type InternshipReply = { snapshot?: InternshipSnapshot; id?: string };
 export type InternshipTransport = (
   schoolId: string,
   command: InternshipCommand,
+  options?: { signal?: AbortSignal },
 ) => Promise<InternshipReply>;
 export function createInternshipService(schoolId: string, transport: InternshipTransport) {
   return {
-    async load(audience: InternshipAudience) {
-      const reply = await transport(schoolId, { action: 'list', audience });
+    async load(audience: InternshipAudience, options?: { signal?: AbortSignal }) {
+      const reply = await transport(schoolId, { action: 'list', audience }, options);
       if (!reply.snapshot) throw new Error('實習資料不完整，請重新整理。');
       return reply.snapshot;
     },
@@ -138,23 +139,54 @@ export function createInternshipCallableTransport({
   endpoint,
   authHeaders,
   fetcher = fetch,
+  timeoutMs = 15000,
 }: {
   endpoint: string;
   authHeaders: () => Promise<Record<string, string>>;
   fetcher?: typeof fetch;
+  timeoutMs?: number;
 }): InternshipTransport {
-  return async (schoolId, command) => {
-    const response = await fetcher(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-      body: JSON.stringify({ data: { ...command, schoolId } }),
+  return async (schoolId, command, options) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const signal = options?.signal;
+    const timeout = setTimeout(
+      abort,
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000,
+    );
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    let rejectAbort = () => {};
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectAbort = () => reject(new Error('職涯操作已取消或等候逾時，請重新整理後重試。'));
+      controller.signal.addEventListener('abort', rejectAbort, { once: true });
+      if (controller.signal.aborted) rejectAbort();
     });
-    const body = (await response.json()) as {
-      result?: InternshipReply;
-      error?: { message?: string };
-    };
-    if (!response.ok || body.error || !body.result)
-      throw new Error(body.error?.message || '實習服務暫時無法使用，請稍後重試。');
-    return body.result;
+    try {
+      return await Promise.race([
+        cancelled,
+        (async () => {
+          const headers = await authHeaders();
+          if (controller.signal.aborted) return await cancelled;
+          const response = await fetcher(endpoint, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ data: { ...command, schoolId } }),
+          });
+          const body = (await response.json()) as {
+            result?: InternshipReply;
+            error?: { message?: string };
+          };
+          if (!response.ok || body.error || !body.result)
+            throw new Error(body.error?.message || '實習服務暫時無法使用，請稍後重試。');
+          return body.result;
+        })(),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+      controller.signal.removeEventListener('abort', rejectAbort);
+    }
   };
 }
