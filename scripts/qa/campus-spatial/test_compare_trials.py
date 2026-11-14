@@ -163,6 +163,41 @@ class AuditTrialsTests(unittest.TestCase):
                 self.assertTrue(any("expected a nonnegative integer" in error
                                     for error in report["errors"]))
 
+    def test_failed_attempts_do_not_win_on_fast_failure(self):
+        records = complete()
+        for entry in records:
+            if entry["product"] == "google-maps":
+                entry.update(result="failure", steps="2", seconds="1")
+        completed_trial = next(entry for entry in records
+                               if entry["product"] == "google-maps" and entry["repeat"] == "1")
+        completed_trial.update(result="success", steps="7", seconds="80")
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["pending"], [])
+        metrics = report["ready"][0]["metrics"]["google-maps"]
+        self.assertEqual(metrics["successes"], 1)
+        self.assertEqual(metrics["trials"], 3)
+        self.assertEqual(metrics["median_steps"], 7)
+        self.assertEqual(metrics["median_seconds"], 80)
+        self.assertEqual(metrics["median_attempt_steps"], 2)
+        self.assertEqual(metrics["median_attempt_seconds"], 1)
+
+    def test_zero_successes_has_no_fictitious_completion_time(self):
+        records = complete()
+        for entry in records:
+            if entry["product"] == "apple-maps":
+                entry["result"] = "failure"
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["pending"], [])
+        metrics = report["ready"][0]["metrics"]["apple-maps"]
+        self.assertEqual(metrics["successes"], 0)
+        self.assertEqual(metrics["trials"], 3)
+        self.assertIsNone(metrics["median_steps"])
+        self.assertIsNone(metrics["median_seconds"])
+        self.assertEqual(metrics["median_attempt_steps"], 4)
+        self.assertEqual(metrics["median_attempt_seconds"], 12.5)
+
     def test_pending_when_only_two_repeats(self):
         result = audit_rows(complete(2))
         self.assertEqual(result["ready"], [])

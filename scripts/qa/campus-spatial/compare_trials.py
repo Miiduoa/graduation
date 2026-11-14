@@ -189,11 +189,16 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
         for product in PRODUCTS:
             entries = [next(record for record in batch if record["product"] == product)
                        for batch in repeats.values()]
+            # A fast failure is not a fast completion. Keep failure attempts in
+            # the success rate and diagnostics, not time-to-success statistics.
+            completed = [record for record in entries if record["result"] == "success"]
             metrics[product] = {
-                "successes": sum(record["result"] == "success" for record in entries),
+                "successes": len(completed),
                 "trials": len(entries),
-                "median_steps": median(int(record["steps"]) for record in entries),
-                "median_seconds": median(float(record["seconds"]) for record in entries),
+                "median_steps": median(int(record["steps"]) for record in completed) if completed else None,
+                "median_seconds": median(float(record["seconds"]) for record in completed) if completed else None,
+                "median_attempt_steps": median(int(record["steps"]) for record in entries),
+                "median_attempt_seconds": median(float(record["seconds"]) for record in entries),
                 "median_fps": median(float(record["fps"]) for record in entries) if paired_fps else None,
                 "median_visual_rating": median(int(record["visual_rating"]) for record in entries)
                 if paired_visual else None,
