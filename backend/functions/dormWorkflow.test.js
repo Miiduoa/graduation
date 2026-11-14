@@ -1372,3 +1372,33 @@ test('stored applicant IDs are masked again and unauthorized photo sources fail 
     }),
   ).rejects.toMatchObject({ code: 'invalid-argument' });
 });
+
+
+test.each(['missing', 'inactive'])('legacy parcels remain available with %s membership while workspace stays protected', async (status) => {
+  const { call, data } = fixture();
+  if (status === 'missing') data.delete('schools/pu/members/student');
+  else data.set('schools/pu/members/student', { status: 'inactive' });
+  data.set('schools/pu', { dormWorkflowEnabled: false });
+  data.set('schools/pu/packages/private_student_id', { recipientId: 'student', description: '本人包裹', studentId: 'PRIVATE' });
+  data.set('schools/pu/packages/other', { recipientId: 'other', description: '不可見' });
+  const result = await call('student', { action: 'parcels' });
+  expect(result.rows).toEqual([{ id: expect.stringMatching(/^dw_/), data: { description: '本人包裹' } }]);
+  await expect(call('student', { action: 'workspace' })).rejects.toHaveProperty('code', 'permission-denied');
+  await expect(call(null, { action: 'parcels' })).rejects.toHaveProperty('code', 'unauthenticated');
+});
+
+test('roster reimport preserves selected handles and page cursors', async () => {
+  const { call, data } = fixture();
+  for (let n = 0; n < 51; n++) {
+    data.set('schools/pu/dormResidents/' + n, { studentId: String(n), userId: 'student', building: 'A', room: '101', bed: '1', updatedAt: n });
+  }
+  const first = await call('staff', { action: 'workspace' });
+  const cursor = first.nextCursors[JSON.stringify(['dormResidents', 'A'])];
+  const original = [...data.entries()].find(([, row]) => row.publicId === cursor);
+  data.set('schools/pu/dormSsoIdentities/student', { studentId: original[1].studentId });
+  await call('staff', { action: 'importResidents', rows: [{ studentId: original[1].studentId, building: 'A', room: '102', bed: '1' }] });
+  expect(data.get(original[0]).publicId).toBe(cursor);
+  await expect(call('staff', { action: 'workspace', cursors: first.nextCursors })).resolves.toHaveProperty('residents');
+  await call('staff', { action: 'deactivateResident', studentId: cursor });
+  expect(data.get(original[0]).active).toBe(false);
+});

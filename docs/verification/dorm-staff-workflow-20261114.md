@@ -152,3 +152,11 @@
 - Web：DormWorkflow、cloud、cloudPrivacy、dormitory 工具，40 項通過。
 - Mobile：DormWorkflow、DormStaffHome、DormParcelPrivacy、dormitoryWorkspace，22 項通過。
 - Web／Mobile／shared 全專案 typecheck、變更後端模組 ESLint、index.js 語法及 git diff --check 通過。沿用外部 node_modules symlink，以既有 /tmp 設定指向本工作樹 shared；沒有安裝依賴、更換 symlink、排除檢查檔案或新增依賴。Node 24 仍有專案 Node 20／22 引擎提示。
+
+## review-dorm-r1.out 本輪修正（2026-11-14）
+
+- P1：既有 `parcels` 相容讀取獨立於宿舍 membership 與學校開通設定，僅允許已登入者依 `recipientId` 讀取本人包裹；仍回傳白名單欄位與隨機代碼。無 membership／停用 membership 皆有回歸測試；新工作台仍需原宿舍授權。
+- P2：名冊匯入在同一交易保留既有 `publicId`，僅缺少代碼時產生新值。測試驗證重新匯入後，原本載入的代碼仍可移出住宿生，原分頁游標仍可解析。
+- P2：宿舍刪帳 helper 在刪除照片授權或工單文件前，先刪除所記錄的私有 Storage 物件與同 bucket 的本人舊照片。不存在物件視為重試成功；其他 Storage 錯誤向上傳遞並保留對應文件。測試覆蓋刪除順序、重複路徑、三個失敗時點與重試、他人與非學校路徑隔離。
+- 有登入權限migration變更：依本次 P1 審查要求，僅隔離既有包裹本人讀取條件，並依 P2 修正宿舍刪帳照片清理；未修改登入、sessions、共用 authz、Firestore／Storage rules 或 migration，未部署、合併或操作正式資料。
+- 驗證：後端 4 檔 116 項、網頁 3 檔 30 項、手機 3 檔 18 項通過；後端變更檔案 ESLint、web／mobile typecheck 與 git diff --check 通過。型別增量檔與 Jest 快取置於 `/tmp`，結束後清除。

@@ -38,38 +38,8 @@ function createDormWorkflowHandler({
     const schoolId = required(input.schoolId, 100);
     if (!/^[a-zA-Z0-9_-]+$/.test(schoolId))
       throw new HttpsError('invalid-argument', '學校代碼錯誤');
-    const membership = await authz.assertActiveSchoolMember(schoolId, uid);
     const school = db.collection('schools').doc(schoolId);
-    const [schoolDoc, dormRolesDoc] = await Promise.all([
-      school.get(),
-      school.collection('dormStaffRoles').doc(uid).get(),
-    ]);
-    const roles = dormRolesDoc.data() || {};
-    const scoped = Array.isArray(roles.buildings) && roles.buildings.length > 0;
-    const admin = membership.role === 'admin';
-    const repairs = admin || (scoped && roles.status === 'active' && roles.repairs === true);
-    const packages = admin || (scoped && roles.status === 'active' && roles.packages === true);
-    const enabled = schoolDoc.data()?.dormWorkflowEnabled === true;
-    if (input.action === 'config')
-      return {
-        enabled,
-        repairs,
-        packages,
-        admin,
-        role: repairs || packages ? 'dorm_staff' : 'student',
-      };
-    if (!enabled && !['mine', 'parcels'].includes(input.action))
-      throw new HttpsError('failed-precondition', '這所學校尚未開通宿舍工作流程');
     const action = input.action;
-    const staff = (domain) => {
-      if (!(domain === 'packages' ? packages : repairs))
-        throw new HttpsError('permission-denied', '需要宿舍服務權限');
-    };
-    const canAccessBuilding = (row) =>
-      admin || (scoped && roles.buildings.includes(row.building || row.dormitory));
-    const inBuilding = (row) => {
-      if (!canAccessBuilding(row)) throw new HttpsError('permission-denied', '不屬於值班棟別');
-    };
     // Public handles never contain account IDs; legacy documents receive a lookup field lazily.
     const handles = new Map();
     const publicId = (name, id) => handles.get(name + '/' + id);
@@ -119,6 +89,7 @@ function createDormWorkflowHandler({
         history: (row.history || []).map(({ status, at }) => ({ status, at })),
       };
     };
+    // Legacy recipient access is independent of school membership and workflow enablement.
     if (action === 'parcels') {
       const snap = await school.collection('packages').where('recipientId', '==', uid).get();
       const rows = [];
@@ -145,6 +116,36 @@ function createDormWorkflowHandler({
       }
       return { rows };
     }
+    const membership = await authz.assertActiveSchoolMember(schoolId, uid);
+    const [schoolDoc, dormRolesDoc] = await Promise.all([
+      school.get(),
+      school.collection('dormStaffRoles').doc(uid).get(),
+    ]);
+    const roles = dormRolesDoc.data() || {};
+    const scoped = Array.isArray(roles.buildings) && roles.buildings.length > 0;
+    const admin = membership.role === 'admin';
+    const repairs = admin || (scoped && roles.status === 'active' && roles.repairs === true);
+    const packages = admin || (scoped && roles.status === 'active' && roles.packages === true);
+    const enabled = schoolDoc.data()?.dormWorkflowEnabled === true;
+    if (input.action === 'config')
+      return {
+        enabled,
+        repairs,
+        packages,
+        admin,
+        role: repairs || packages ? 'dorm_staff' : 'student',
+      };
+    if (!enabled && !['mine', 'parcels'].includes(input.action))
+      throw new HttpsError('failed-precondition', '這所學校尚未開通宿舍工作流程');
+    const staff = (domain) => {
+      if (!(domain === 'packages' ? packages : repairs))
+        throw new HttpsError('permission-denied', '需要宿舍服務權限');
+    };
+    const canAccessBuilding = (row) =>
+      admin || (scoped && roles.buildings.includes(row.building || row.dormitory));
+    const inBuilding = (row) => {
+      if (!canAccessBuilding(row)) throw new HttpsError('permission-denied', '不屬於值班棟別');
+    };
     if (action === 'uploadPhoto') {
       const contentType = required(input.contentType, 40);
       if (
@@ -729,7 +730,12 @@ function createDormWorkflowHandler({
           if (!admin && snap.data().building !== rows[index].building)
             throw new HttpsError('permission-denied', '跨棟移轉需要學校管理員處理');
         });
-        rows.forEach((row, index) => tx.set(refs[index], row));
+        rows.forEach((row, index) =>
+          tx.set(refs[index], {
+            ...row,
+            publicId: existing[index].data()?.publicId || 'dw_' + randomUUID(),
+          }),
+        );
       });
       return { success: true };
     }
