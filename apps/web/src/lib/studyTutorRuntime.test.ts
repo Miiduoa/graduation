@@ -1057,6 +1057,11 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'nested HTML tags with attributes', question: 'What? Answer: <span class="hint"><em data-key=answer>SQL</em></span>', answer: 'SQL' },
     { label: 'single-quoted HTML title attribute', question: "參考答案：<span title='要複習'>主鍵</span>", answer: '主鍵' },
     { label: 'numeric answer with HTML attributes', question: "解答：<span class='value'>1.2</span>", answer: '1.2' },
+    { label: 'HTML entity strong answer', question: 'What? Answer: &lt;strong&gt;SQL&lt;/strong&gt;', answer: 'SQL' },
+    { label: 'decimal HTML entity code answer', question: '參考答案：&#60;code&#62;主鍵&#60;/code&#62;', answer: '主鍵' },
+    { label: 'hex HTML entity answer', question: '解答：&#x3C;span class="value"&#x3E;1.2&#x3C;/span&#x3E;', answer: '1.2' },
+    { label: 'Chinese book title brackets', question: '答案：《主鍵》', answer: '主鍵' },
+    { label: 'Chinese angle quote brackets', question: 'Answer: 〈SQL〉', answer: 'SQL' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1109,6 +1114,9 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '答案：\n> - 12', answer: '1' },
     { question: 'Answer:\n> - SQL_joins', answer: 'SQL' },
     { question: 'Answer: <strong>SQLServer</strong> 有何用途？', answer: 'SQL' },
+    { question: 'Answer: &lt;strong&gt;SQLServer&lt;/strong&gt; 有何用途？', answer: 'SQL' },
+    { question: '正解：&#60;code&#62;B2&#60;/code&#62; 是什麼？', answer: 'B' },
+    { question: '答案：《12》是不是太大？', answer: '1' },
     { question: 'Answer: <strong class="name">SQLServer</strong> 有何用途？', answer: 'SQL' },
     { question: '正解：<code lang="en">B2</code> 是哪個選項？', answer: 'B' },
     { question: "答案：<span class='number'>12</span> 是否正確？", answer: '1' },

@@ -141,10 +141,17 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // Generated Markdown may wrap a disclosed key in inline code or emphasis.
     // Strip only opening presentation marks for comparison, never displayed text.
     const rawDisclosed = question.slice(label.index + label[0].length);
+    // HTML-escaped display tags are still visible answers to the learner.
+    // Decode only angle brackets in this temporary comparison copy, so
+    // &lt;strong&gt;SQL&lt;/strong&gt; cannot bypass the answer-key check.
+    // Never decode/render the original question or execute arbitrary HTML.
+    const decodedDisclosed = rawDisclosed
+      .replace(/&(?:lt|#0*60|#x0*3c);/giu, '<')
+      .replace(/&(?:gt|#0*62|#x0*3e);/giu, '>');
     // Answer keys may place blank lines or Markdown quote markers before bullets.
     // Only remove markers after a NEW line: "- 1" on the same line remains
     // negative-number notation, not a Markdown answer list.
-    const revealedItem = rawDisclosed.replace(
+    const revealedItem = decodedDisclosed.replace(
       /^(?:[ \t]*\r?\n){1,3}[ \t]*(?:>[ \t]*){0,2}(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)?/u, '',
     );
     // An opening _ or __ is presentation markup, not part of a leaked answer.
@@ -155,9 +162,9 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     const answerPresentation = revealedItem.replace(
       /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
     );
-    const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
     const disclosed = answerPresentation
-      .replace(/^[\s"'“”‘’「『（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
+      .replace(/^[\s"'“”‘’「『《〈（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
     // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
     // Keep decimal points and mathematical operators significant.
