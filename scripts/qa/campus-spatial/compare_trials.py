@@ -24,7 +24,7 @@ FIELDS = (
 )
 TASKS = {"building", "classroom", "route", "accessibility", "visual"}
 RESULTS = {"success", "failure", "unverified"}
-TARGETS = {"building", "classroom", "route", "not-verified"}
+TARGETS = {"building", "classroom", "route", "ui", "not-verified"}
 COHORT_FIELDS = (
     "scenario_id", "task", "school_id", "device_id", "os_version",
     "network", "setup_state", "ground_truth_ref", "ground_truth_date",
@@ -99,9 +99,12 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             errors.append(f"{label}: duplicate scenario/repeat/product {key}")
             continue
         unique.add(key)
-        if row["result"] == "success" and row["task"] in {"building", "classroom", "route"}:
-            if row["verified_target"] != row["task"]:
-                errors.append(f"{label}: success cannot exceed verified target level")
+        # Even a reported failure needs an independently verified target;
+        # otherwise we might unfairly count a competitor as wrong.
+        if row["result"] != "unverified":
+            expected_target = row["task"] if row["task"] in {"building", "classroom", "route"} else "ui"
+            if row["verified_target"] != expected_target:
+                errors.append(f"{label}: result cannot exceed verified target level for {row['task']}")
                 continue
         trials[(row["scenario_id"], str(repetition))].append(row)
 
