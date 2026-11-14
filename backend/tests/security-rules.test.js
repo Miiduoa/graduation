@@ -1554,6 +1554,56 @@ describe('firestore security rules', () => {
     await assertFails(db.collection('messages').doc('message-1').get());
   });
 
+  test('DM read receipts cannot impersonate members or replay revoked access', async () => {
+    const path = 'conversations/dm_pu_read_receipts';
+    const messagePath = path + '/messages/first';
+    const nextPath = path + '/messages/next';
+    const original = { senderId: 'alice', content: 'Private', type: 'text', readBy: ['alice'] };
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc('users/' + uid).set({ schoolId: 'pu', status: 'active' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+      }
+      await db.doc('users/mallory').set({ schoolId: 'ncku', status: 'active' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active' });
+      await db.doc(path).set({ schoolId: 'pu', type: 'group', memberIds: ['alice', 'bob', 'charlie'] });
+      await db.doc(messagePath).set(original);
+      await db.doc(nextPath).set(original);
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const first = bob.doc(messagePath);
+    // Existing clients use arrayUnion(uid); it appends only the current reader.
+    await assertSucceeds(first.update({ readBy: ['alice', 'bob'] }));
+    await assertSucceeds(first.update({ readBy: ['alice', 'bob'] })); // idempotent retry
+    await assertFails(first.update({ readBy: ['bob'] })); // cannot erase sender's read
+    await assertFails(first.update({ readBy: ['alice', 'bob', 'mallory'] }));
+    await assertFails(first.update({ readBy: ['alice', 'bob', 'bob'] }));
+    await assertFails(first.update({ readBy: ['alice', 'bob'], content: 'forged' }));
+    await assertFails(alice.doc(messagePath).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(mallory.doc(messagePath).update({ readBy: ['alice', 'bob', 'mallory'] }));
+    await assertSucceeds(charlie.doc(messagePath).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(alice.doc(path + '/messages/forged-create').set({
+      senderId: 'alice', content: 'Pretend all read', readBy: ['alice', 'bob'],
+    }));
+    await assertSucceeds(alice.doc(path + '/messages/normal-create').set({
+      senderId: 'alice', content: 'Initial self receipt', readBy: ['alice'],
+    }));
+    await assertSucceeds(alice.doc(path + '/messages/legacy-create').set({
+      senderId: 'alice', content: 'Legacy client without readBy',
+    }));
+    // Same authenticated context must be denied immediately after membership revocation.
+    await seedFirestore(db => db.doc(path).update({ memberIds: ['alice', 'charlie'] }));
+    await assertFails(bob.doc(nextPath).update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore(db => db.doc(path).update({ memberIds: ['alice', 'bob', 'charlie'] }));
+    await seedFirestore(db => db.doc('users/bob').update({ status: 'suspended' }));
+    await assertFails(bob.doc(nextPath).update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore(db => db.doc('users/bob').update({ status: 'active' }));
+    await assertSucceeds(bob.doc(nextPath).update({ readBy: ['alice', 'bob'] }));
+  });
+
   test('only the server can attach story reply provenance to private messages', async () => {
     const path = 'conversations/dm_pu_alice_bob';
     const message = { senderId: 'alice', content: '哈囉', type: 'text' };
@@ -1577,7 +1627,7 @@ describe('firestore security rules', () => {
     await assertFails(alice.doc(path + '/messages/fake-photo').set({ ...message, ...forgedPhoto }));
     await assertFails(plain.update(forgedPhoto));
     const photoPath = path + '/messages/published-photo';
-    await seedFirestore(db => db.doc(photoPath).set({ ...message, ...forgedPhoto }));
+    await seedFirestore(db => db.doc(photoPath).set({ ...message, ...forgedPhoto, readBy: ['alice'] }));
     const published = alice.doc(photoPath);
     await assertFails(published.update({ recalledAt: null }));
     await assertSucceeds(published.update({ recalledAt: require('firebase/firestore').serverTimestamp() }));

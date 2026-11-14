@@ -188,6 +188,18 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
     }
 
+    // Read receipts can only add the authenticated reader. Never permit
+    // overwriting or removing another participant's acknowledgement.
+    function onlyOwnMessageReadReceipt() {
+      let before = resource.data.get('readBy', []);
+      let after = request.resource.data.get('readBy', null);
+      return before is list && after is list
+        && (
+          (request.auth.uid in before && after == before)
+          || (!(request.auth.uid in before) && after == before.concat([request.auth.uid]))
+        );
+    }
+
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
     function profileName(uid) {
       return exists(/databases/$(database)/documents/users/$(uid))
@@ -968,13 +980,15 @@ service cloud.firestore {
         allow read: if isConversationMember(conversationId);
         allow create: if isConversationMember(conversationId)
           && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          // A sender cannot declare that other participants already read a new message.
+          && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid];
         allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
           && (
             (
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy'])
-              && request.auth.uid in request.resource.data.readBy
+              && onlyOwnMessageReadReceipt()
             )
             || (
               resource.data.senderId == request.auth.uid

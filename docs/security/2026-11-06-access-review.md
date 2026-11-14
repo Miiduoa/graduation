@@ -704,3 +704,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增合成 Firebase Emulator 回歸：同組合法讀票、跨帳號與跨校直接 GET 拒絕、匿名拒絕、缺失 parent 拒絕、無條件或過濾後全域 list 拒絕、合法建立／刪除、冒刪拒絕、跨校建立拒絕，以及同登入 context 在群組與校籍撤銷後的重放拒絕和恢復成功。**本輪程式碼及測試已提交的狀態不代表新精確 head CI 已通過；以 GitHub 新工作流驗證為準。**
 
 本變更不處理 `groups/{groupId}/posts/{postId}` 未發布父貼文的 get/list 曝光；該高優先項仍需 Web/Mobile feed 查詢、歷史欄位與索引配套改造。GCS/Supabase 已發網址撤權、真隔離 Storage CAS 競態、歷史可信附件引用、minimatch 雙鎖檔與正式發布/回復驗收仍未完成。PR 維持 Draft，指定 nuni-merge-gate App 5504170 核可前不合併或部署；沒有操作正式資料、金鑰、token、migration、E 校園或執行受限制的 npm/pnpm audit。
+
+## 2026-11-14：私訊 readBy 冒名已讀／清除他人回條的資料完整性漏洞（PR #577）
+
+本輪以 PR #577 前一精確 head `736dd8b6dd90d3563dfc0af39123db8a6ade1ea8` 核對：主 CI #43577396054、CodeQL #43577396162、Course access #43577396040 已 completed/success，主 CI 全部已執行 job（含 Firebase Rules、Web、Mobile、Functions、Lint、Build）成功，Preview Deploy skipped。PR reviews 及未解決 review threads 均為 0，未見指定 App 5504170 的對應 APPROVED。Supabase permissions、Python security、Mobile Agent Regression、Maestro 在這個精確 head 未獨立觸發，舊結果不得套用。查核期間 main 是 `e4446262880c3d8188e0741f185d7aeebc3f944f`，PR ahead 25／behind 6；未合併主線。
+
+另外檢查到直接 SDK 建立 `conversations/{conversationId}/messages/{messageId}` 時僅驗證 senderId，客戶端可預填其他收件人 `readBy`；而原 update 只確認「更新後的 readBy 包含自己的 UID」，導致有效對話成員可直接替其他成員標記已讀、刪除既有已讀紀錄或植入重複 UID。這可能讓私訊已讀狀態不可信，但目前沒有正式資料遭利用的證據。
+
+最小修補：客戶端新增訊息時 `readBy` 只能缺省（舊客戶端）或 `[senderUid]`；讀取者的後續更新僅能在既有陣列尾端追加自己的 UID，已讀過者重試必須保持原陣列不變，禁止更動其他欄位。現有 Mobile `arrayUnion(myUid)` 與伺服器 `[uid]` 初始化皆相容。原先的合成照片讀取測試調整為真實伺服器已初始化 `readBy:['alice']` 的形狀。新增 Firebase Emulator 合成回歸涵蓋正常已讀、冪等重放、跨帳號偽造／清除、重複回條、跨校非會員、帶內容竄改、對話成員撤銷、停權與恢復。正式 CI 必須以本次新提交精確 head 重新驗證，以上不預先宣稱通過。
+
+**未解除風險：** 未發布群組父貼文的 `get/list` 直接曝光（需 Web／Mobile 查詢與歷史補齊共同改造）、已發 GCS／Supabase URL 撤權、真隔離 Storage CAS 競態、歷史可信附件、DM reaction 完整性與其他訊息欄位策略、minimatch 雙鎖檔相容及正式發布回復驗收。App 5504170 精確 head 核可前保持 Draft，不合併／部署。不修改正式資料／憑證／token、不執行 migration、不連 E 校園、不重跑受限制的 pnpm/npm audit。
