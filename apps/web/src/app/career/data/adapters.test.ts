@@ -104,6 +104,18 @@ it.each([
   '2026/12/8 徵才博覽會停辦',
   '2026/12/8 說明會改期，日期另行通知',
   '2026/12/8 講座延 後',
+  '2026/12/8至翌日實習說明會',
+  '2026/12/8至月底實習申請',
+  '2026/12/8 實習講座至活動結束',
+  '2026/12/8 實習講座迄翌日',
+  '2026/12/8～翌日實習說明會',
+  '2026/12/8 實習講座到活動結束',
+  '2026/12/8 起實習申請，月底截止',
+  '2026/12/8 徵才講座至隔日',
+  '2026/12/8 起至次日實習說明會',
+  '2026/12/8 講座到本月底',
+  '2026/12/8 實習申請至本學期末',
+  '2026/12/8 實習申請截止至另行通知',
 ])('keeps ambiguous title out of calendar timeline: %s', (title) => {
   expect(careerTitleDate(title)).toBe('');
   expect(
@@ -254,6 +266,29 @@ it.each([
   '均分 95',
   '總分 95',
   '總評 A+',
+  ...['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'E', 'F'].flatMap((grade) => [
+    `等第 ${grade}`,
+    `等 第：${grade}`,
+    grade,
+    `測試同學${grade}`,
+  ]),
+  'Test Student A+',
+  'TestStudent95',
+  '等第 Ａ ＋',
+  '等&#x7b2c; A+',
+  '等<span>第</span> A+',
+  '等\u200b第 A+',
+  '成 绩 9 5 分',
+  '分 数 9 5',
+  'Ｇ Ｐ Ａ 3 . 9 5',
+  '学 号 TEST-0001',
+  '9 5',
+  '95.5',
+  '95 請確認結果',
+  '95.5 請確認結果',
+  '95/100',
+  '9 5 分',
+  '說明'.repeat(160) + '等 第 A+',
   '說明'.repeat(160) + 'GPA 3.95',
 ])('public API omits the entire academic-result title from both sources: %s', async (result) => {
   vi.useFakeTimers();
@@ -278,6 +313,12 @@ it.each([
   ]);
   expect(JSON.stringify(feed)).not.toContain('王測試');
   expect(feed.announcementsUnavailable).toBe(false);
+  // The cacheable API body and every calendar export must contain only safe records.
+  expect(response.headers.get('Cache-Control')).toContain('public');
+  for (const item of feed.timeline) {
+    expect(new URL(careerCalendarUrl(item)).searchParams.get('text')).toBe('實習申請2026/12/8截止');
+    expect(decodeURIComponent(careerCalendarUrl(item))).not.toContain('王測試');
+  }
 });
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
   const records = Array.from({ length: 8 }, (_, i) => ({
@@ -358,3 +399,25 @@ it('retains ordinary dated career announcements and event durations', () => {
     ).toBe(title);
   }
 });
+
+it.each(['2026/12/8至翌日實習說明會', '2026/12/8至月底實習申請'])(
+  'keeps an undetermined text range in public announcements without calendar items: %s',
+  async (title) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        text: async () =>
+          url === TAIWANJOBS_URL
+            ? '<DataList></DataList>'
+            : html.replace('實習申請2026/12/8截止', title),
+      })),
+    );
+    const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+    const feed = await response.json();
+    expect(feed.announcements.map((a: { title: string }) => a.title)).toEqual([title, title]);
+    expect(feed.timeline).toEqual([]);
+  },
+);

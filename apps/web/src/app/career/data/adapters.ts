@@ -47,19 +47,32 @@ function hasPersonalAcademicData(title: string): boolean {
     .replace(/学/g, '學')
     .replace(/号/g, '號')
     .replace(/绩/g, '績')
+    .replace(/数/g, '數')
     .replace(/[^\p{L}\p{N}]/gu, '');
   // Conservatively omit the whole announcement, never publish a partially redacted title.
   if (
-    /學號|成績|評分|評量|分數|績點|平均|均分|總分|總評|名單|名冊|錄取|榜單|student(?:id|number)|grades?|scores?|gpa|gradepointaverage|academicaverage|weightedaverage|average\d/.test(
+    /學號|成績|等第|評分|評量|分數|績點|平均|均分|總分|總評|名單|名冊|錄取|榜單|student(?:id|number)|grades?|scores?|gpa|gradepointaverage|academicaverage|weightedaverage|average\d/.test(
       normalized,
     )
   )
     return true;
-  // Dates are public metadata; other long numeric identifiers may be student IDs.
-  const withoutDates = title
+  // Remove public dates first. A standalone letter grade is withheld even without
+  // a result label: identifying names are not limited to a fixed surname list.
+  const dateFree = title
     .normalize('NFKC')
-    .replace(/(?<!\d)(?:20\d{2}|1[01]\d)[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?!\d)/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '');
+    .replace(/(?<!\d)(?:20\d{2}|1[01]\d)[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?!\d)/g, '');
+  const compact = dateFree.toLowerCase().replace(/[\s\p{Cf}]/gu, '');
+  if (/(?<![a-z0-9])[a-f][+-]?(?![a-z0-9])/i.test(dateFree)) return true;
+  // Name-like text immediately followed by a numeric result is also private,
+  // including spaced digits, decimal results and fractions. Do not treat event
+  // durations such as「30 分鐘」as grades.
+  const nameAndScore = compact
+    .replace(/[^\p{L}\p{N}./]/gu, '')
+    .replace(/\d+(?:\.\d+)?(?:分鐘|小時|學分|場|名|人|元|年度|年|月|日|天|週|周|時)/g, '');
+  if (/(?:[\p{Script=Han}]{2,}|[a-z]{2,})\d{1,3}(?:\.\d+)?(?:分)?(?!\d)/u.test(nameAndScore))
+    return true;
+  // Dates are public metadata; other long numeric identifiers may be student IDs.
+  const withoutDates = dateFree.replace(/[^\p{L}\p{N}]/gu, '');
   return /\d{8,}/.test(withoutDates) || /\d+(?:[.．]\d+)?\s*分(?!鐘)/.test(title.normalize('NFKC'));
 }
 

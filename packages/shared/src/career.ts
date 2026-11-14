@@ -70,6 +70,11 @@ export function careerTitleDate(title: string) {
   const before = title.slice(0, match.index);
   const after = title.slice(match.index! + match[0].length);
   const remainder = before + ' ' + after;
+  // Textual endpoints (翌日、月底、學期末…) are ranges too. Without an
+  // explicit end date, retain the announcement but do not invent a one-day event.
+  const rangeEnd = after.normalize('NFKC').replace(/[\s\p{Cf}]/gu, '');
+  if (/(?:至|到|迄|翌日|隔日|次日|月底|月末|年底|年末|學期末|学期末)|[~～]/.test(rangeEnd))
+    return '';
   // A second date without a year, or a shortened range endpoint, is still
   // ambiguous. Never turn the first date into a single-day calendar event.
   if (
