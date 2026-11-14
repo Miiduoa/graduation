@@ -714,3 +714,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 最小修補：客戶端新增訊息時 `readBy` 只能缺省（舊客戶端）或 `[senderUid]`；讀取者的後續更新僅能在既有陣列尾端追加自己的 UID，已讀過者重試必須保持原陣列不變，禁止更動其他欄位。現有 Mobile `arrayUnion(myUid)` 與伺服器 `[uid]` 初始化皆相容。原先的合成照片讀取測試調整為真實伺服器已初始化 `readBy:['alice']` 的形狀。新增 Firebase Emulator 合成回歸涵蓋正常已讀、冪等重放、跨帳號偽造／清除、重複回條、跨校非會員、帶內容竄改、對話成員撤銷、停權與恢復。正式 CI 必須以本次新提交精確 head 重新驗證，以上不預先宣稱通過。
 
 **未解除風險：** 未發布群組父貼文的 `get/list` 直接曝光（需 Web／Mobile 查詢與歷史補齊共同改造）、已發 GCS／Supabase URL 撤權、真隔離 Storage CAS 競態、歷史可信附件、DM reaction 完整性與其他訊息欄位策略、minimatch 雙鎖檔相容及正式發布回復驗收。App 5504170 精確 head 核可前保持 Draft，不合併／部署。不修改正式資料／憑證／token、不執行 migration、不連 E 校園、不重跑受限制的 pnpm/npm audit。
+
+## 2026-11-15：私訊 reactions 防止跨帳號偽造／清除（PR #577，待精確新 head 回歸）
+
+最新審視前一 head `1ff5a9f11a2e5090a4aa2b1ad55b795354caab35`：主 CI #43597013821、CodeQL #43597013811、Course access #43597013797 已全部 completed/success；Firestore Rules、Web、Mobile、Functions、Build、Security Gates、Lint/Type 等 CI jobs 皆成功。15 個該 head check runs 未見指定 nuni-merge-gate App 5504170，PR reviews／未解決 threads 均為 0。Supabase permissions、Python security、Mobile Agent Regression、Maestro 未在該 head 獨立觸發，不能沿用舊 head 證據。主線查核 `65e07a31f6cac87c6075496fdba74dd3307e56c1`，PR ahead 26／behind 7；主線新增 7 commits 與目前資安 PR 八個修改檔不重疊。
+
+**新發現的獨立缺口**：Firestore `conversations/{conversationId}/messages/{messageId}` 原本允許任何有效對話成員直接覆寫整個 `reactions` map（只限制頂層變更欄位），或在 create 預填任意人的表情。可以偽造他人對訊息的反應、刪除他人表情及覆寫其他人的 emoji，屬資料完整性缺口；目前沒有正式資料遭利用證據。
+
+**最小修補**：新訊息 `reactions` 必須缺省或空 map；更新須為 map，且 `MapDiff.affectedKeys()` 僅含目前登入 UID，新增／更換本人 emoji 須為 1–32 字元字串；刪除本人反應與合法重試保留。沿用舊訊息缺少 `reactions` 的相容形狀；一般 readBy、撤回與訊息內容規則不放寬。新增合成 Firebase Emulator 回歸涵蓋正常反應、冒名、清票、數值／過長（需後續補驗）及其他欄位竄改、跨校非成員、同一上下文撤權／停權及恢復、競態下舊反應快照拒絕。
+
+**驗證界線**：本項程式碼及回歸提交後，精確新 head 的 GitHub CI／CodeQL 須另行驗證，不以父 head 成功結果代替。仍未完成未發布群組父貼文 Firestore get/list 與 Web/Mobile 查詢過渡、GCS/Supabase 已簽 URL 撤權、真隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔相容與正式發布／回復。持續遵守禁用 E 校園連線、正式資料／token／migration／部署未授權不動，以及不重跑未授權 npm/pnpm audit。指定 App 5504170 對精確 head 未 APPROVED 前不得合併 main。

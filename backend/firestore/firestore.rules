@@ -200,6 +200,22 @@ service cloud.firestore {
         );
     }
 
+    // Each private-message reaction belongs to one participant. A member may
+    // add, change or remove their own emoji, never anyone else's reaction.
+    // Missing reactions on historical messages are treated as an empty map.
+    function onlyOwnMessageReaction() {
+      let uid = request.auth.uid;
+      let before = resource.data.get('reactions', {});
+      let after = request.resource.data.get('reactions', {});
+      return before is map && after is map
+        && after.diff(before).affectedKeys().hasOnly([uid])
+        && (!(uid in after) || (
+          after[uid] is string
+          && after[uid].size() > 0
+          && after[uid].size() <= 32
+        ));
+    }
+
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
     function profileName(uid) {
       return exists(/databases/$(database)/documents/users/$(uid))
@@ -982,7 +998,9 @@ service cloud.firestore {
           && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
           && request.resource.data.senderId == request.auth.uid
           // A sender cannot declare that other participants already read a new message.
-          && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid];
+          && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid]
+          // Reactions are only produced through per-member updates, not forged on send.
+          && request.resource.data.get('reactions', {}) == {};
         allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
           && (
@@ -997,7 +1015,10 @@ service cloud.firestore {
                 !('recalledAt' in resource.data) && request.resource.data.recalledAt == request.time
               ))
             )
-            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'updatedAt'])
+            || (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'updatedAt'])
+              && onlyOwnMessageReaction()
+            )
           );
         allow delete: if false;
       }

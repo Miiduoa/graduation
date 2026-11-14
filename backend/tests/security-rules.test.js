@@ -1554,6 +1554,85 @@ describe('firestore security rules', () => {
     await assertFails(db.collection('messages').doc('message-1').get());
   });
 
+  test('DM reactions cannot alter other members or survive revoked access', async () => {
+    const parent = 'conversations/dm_pu_reaction_boundary';
+    const path = parent + '/messages/first';
+    const second = parent + '/messages/second';
+    const original = {
+      senderId: 'alice', type: 'text', content: 'Hello',
+      reactions: { alice: '❤️' }, readBy: ['alice'],
+    };
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc('users/' + uid).set({ schoolId: 'pu', status: 'active' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+      }
+      await db.doc('users/mallory').set({ schoolId: 'ncku', status: 'active' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active' });
+      await db.doc(parent).set({
+        type: 'group', schoolId: 'pu', memberIds: ['alice', 'bob', 'charlie'],
+      });
+      await db.doc(path).set(original);
+      await db.doc(second).set(original);
+      await db.doc(parent + '/messages/legacy').set({
+        senderId: 'alice', type: 'text', content: 'Old message',
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const message = bob.doc(path);
+
+    // A normal member can add, retry, change and remove only their own emoji.
+    await assertSucceeds(message.update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await assertSucceeds(message.update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await assertSucceeds(message.update({ reactions: { alice: '❤️', bob: '😆' } }));
+    await assertFails(message.update({ reactions: { bob: '😆' } }));
+    await assertFails(message.update({ reactions: { alice: '💯', bob: '😆' } }));
+    await assertFails(message.update({ reactions: { alice: '❤️', bob: '😆', charlie: '🎉' } }));
+    await assertFails(message.update({ reactions: { alice: '❤️', bob: '' } }));
+    await assertFails(message.update({ reactions: { alice: '❤️', bob: 100 } }));
+    await assertFails(message.update({ reactions: 'unexpected' }));
+    await assertFails(message.update({ reactions: { alice: '❤️', bob: '😆' }, content: 'forged' }));
+    await assertFails(mallory.doc(path).update({ reactions: { alice: '❤️', bob: '😆' } }));
+    await assertSucceeds(message.update({ reactions: { alice: '❤️' } }));
+
+    // Simulate concurrent updates: the second participant cannot send an old
+    // snapshot that would silently erase a reaction committed by the first.
+    await assertSucceeds(message.update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await assertFails(charlie.doc(path).update({ reactions: { alice: '❤️', charlie: '🎉' } }));
+    await assertSucceeds(charlie.doc(path).update({
+      reactions: { alice: '❤️', bob: '👍', charlie: '🎉' },
+    }));
+
+    // Creation cannot spoof peer votes, including the creator's own vote.
+    await assertFails(alice.doc(parent + '/messages/forged-peer').set({
+      senderId: 'alice', content: 'Hello', reactions: { bob: '❤️' },
+    }));
+    await assertFails(alice.doc(parent + '/messages/forged-own').set({
+      senderId: 'alice', content: 'Hello', reactions: { alice: '❤️' },
+    }));
+    await assertSucceeds(alice.doc(parent + '/messages/empty').set({
+      senderId: 'alice', content: 'Hello', reactions: {},
+    }));
+    await assertSucceeds(alice.doc(parent + '/messages/absent').set({
+      senderId: 'alice', content: 'Hello',
+    }));
+    await assertSucceeds(bob.doc(parent + '/messages/legacy').update({
+      reactions: { bob: '❤️' },
+    }));
+
+    // Same authenticated context is denied after member revocation or suspension.
+    await seedFirestore((db) => db.doc(parent).update({ memberIds: ['alice', 'charlie'] }));
+    await assertFails(bob.doc(second).update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await seedFirestore((db) => db.doc(parent).update({ memberIds: ['alice', 'bob', 'charlie'] }));
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'disabled' }));
+    await assertFails(bob.doc(second).update({ reactions: { alice: '❤️', bob: '👍' } }));
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'active' }));
+    await assertSucceeds(bob.doc(second).update({ reactions: { alice: '❤️', bob: '👍' } }));
+  });
+
   test('DM read receipts cannot impersonate members or replay revoked access', async () => {
     const path = 'conversations/dm_pu_read_receipts';
     const messagePath = path + '/messages/first';
