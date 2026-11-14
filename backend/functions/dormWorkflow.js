@@ -125,13 +125,25 @@ function createDormWorkflowHandler({
       return { rows };
     }
     const membership = await authz.assertActiveSchoolMember(schoolId, uid);
-    const [schoolDoc, dormRolesDoc] = await Promise.all([
+    const [schoolDoc, dormRolesDoc, accountDoc] = await Promise.all([
       school.get(),
       school.collection('dormStaffRoles').doc(uid).get(),
+      db.collection('users').doc(uid).get(),
     ]);
+    const account = accountDoc.data() || {};
+    if ((account.status && account.status !== 'active') || account.accountDeletionInProgress)
+      throw new HttpsError('failed-precondition', '帳號已停用');
     const roles = dormRolesDoc.data() || {};
-    const scoped = Array.isArray(roles.buildings) && roles.buildings.length > 0;
+    const scoped =
+      dormRolesDoc.exists &&
+      Array.isArray(roles.buildings) &&
+      roles.buildings.length > 0 &&
+      roles.buildings.every(
+        (building) =>
+          typeof building === 'string' && building.trim().length > 0 && building.length <= 70,
+      );
     const admin = membership.role === 'admin';
+    if (admin) await authz.assertSchoolAdmin(schoolId, uid);
     const repairs = admin || (scoped && roles.status === 'active' && roles.repairs === true);
     const packages = admin || (scoped && roles.status === 'active' && roles.packages === true);
     const enabled = schoolDoc.data()?.dormWorkflowEnabled === true;
@@ -358,7 +370,7 @@ function createDormWorkflowHandler({
           throw new HttpsError('permission-denied', '帳號不是本校啟用成員');
         if (
           !account.exists ||
-          account.data()?.status === 'deleted' ||
+          (account.data()?.status && account.data().status !== 'active') ||
           account.data()?.accountDeletionInProgress
         )
           throw new HttpsError('failed-precondition', '帳號已停用');
@@ -447,7 +459,9 @@ function createDormWorkflowHandler({
           nextCursors[key] = snap.docs.length > pageSize ? publicId(name, docs.at(-1).id) : null;
           rows.push(...docs.map((d) => ({ id: d.id, ...serialize(d.data()) })));
         }
-        return rows.filter((row) => name !== 'dormResidents' || row.active !== false);
+        return rows
+          .filter(canAccessBuilding)
+          .filter((row) => name !== 'dormResidents' || row.active !== false);
       };
       const result = {
         repairs: repairs

@@ -1791,3 +1791,225 @@ it('核銷回傳實際更新及跳過件數，零筆不回報成功', async () =
   });
   expect(data.get('schools/pu/dormPackages/post').status).toBe('waiting');
 });
+
+test.each(['student', 'staff'])(
+  'ordinary %s cannot grant or revoke dorm permissions',
+  async (actor) => {
+    const { call, data } = fixture();
+    data.set('users/staff', { status: 'active' });
+    const before = { ...data.get('schools/pu/dormStaffRoles/staff') };
+    for (const granting of [true, false]) {
+      await expect(
+        call(actor, {
+          action: 'setStaff',
+          targetUid: 'staff',
+          packages: granting,
+          repairs: granting,
+          buildings: granting ? ['A'] : [],
+        }),
+      ).rejects.toMatchObject({ code: 'permission-denied' });
+      expect(data.get('schools/pu/dormStaffRoles/staff')).toEqual(before);
+      expect([...data.keys()].some((path) => path.includes('/adminLogs/'))).toBe(false);
+    }
+  },
+);
+
+test.each(['missing', 'inactive', 'deleted', 'suspended', 'deleting', 'inactive-member'])(
+  'setStaff rejects an unavailable target: %s',
+  async (state) => {
+    const { call, data } = fixture();
+    if (state !== 'missing')
+      data.set(
+        'users/staff',
+        state === 'deleting'
+          ? { status: 'active', accountDeletionInProgress: true }
+          : { status: state === 'inactive-member' ? 'active' : state },
+      );
+    if (state === 'inactive-member')
+      data.set('schools/pu/members/staff', { role: 'staff', status: 'inactive' });
+    const before = { ...data.get('schools/pu/dormStaffRoles/staff') };
+    await expect(
+      call('admin', {
+        action: 'setStaff',
+        targetUid: 'staff',
+        repairs: true,
+        buildings: ['A'],
+      }),
+    ).rejects.toMatchObject({
+      code: state === 'inactive-member' ? 'permission-denied' : 'failed-precondition',
+    });
+    expect(data.get('schools/pu/dormStaffRoles/staff')).toEqual(before);
+    expect([...data.keys()].some((path) => path.includes('/adminLogs/'))).toBe(false);
+  },
+);
+
+test.each(['packages', 'repairs'])(
+  '%s access requires an active explicit role and valid building scope for reads and writes',
+  async (domain) => {
+    for (const change of [
+      { status: 'inactive' },
+      { status: undefined },
+      { [domain]: false },
+      { buildings: [] },
+      { buildings: [''] },
+      { buildings: [null] },
+      { buildings: ['A', ' '] },
+      { buildings: 'A' },
+    ]) {
+      const { call, data } = fixture();
+      data.set('schools/pu/dormStaffRoles/staff', {
+        status: 'active',
+        packages: false,
+        repairs: false,
+        [domain]: true,
+        buildings: ['A'],
+        ...change,
+      });
+      data.set('schools/pu/serviceRoles/staff', {
+        status: 'active',
+        packages: true,
+        repairs: true,
+      });
+      expect(await call('staff', { action: 'config' })).toMatchObject({
+        packages: false,
+        repairs: false,
+      });
+      await expect(call('staff', { action: 'workspace' })).rejects.toMatchObject({
+        code: 'permission-denied',
+      });
+      const { id } = await call('student', repair);
+      await expect(
+        call(
+          'staff',
+          domain === 'repairs'
+            ? { action: 'repairStatus', id, status: 'received' }
+            : { action: 'announce', building: 'A', title: '公告', body: '內容' },
+        ),
+      ).rejects.toMatchObject({ code: 'permission-denied' });
+    }
+  },
+);
+
+test.each(['packages', 'repairs'])(
+  '%s staff only read and write assigned buildings and cannot use the other domain',
+  async (domain) => {
+    const { call, data } = fixture();
+    data.set('schools/pu/dormStaffRoles/staff', {
+      status: 'active',
+      packages: false,
+      repairs: false,
+      [domain]: true,
+      buildings: ['A'],
+    });
+    const ids = {};
+    for (const building of ['A', 'B']) {
+      ids[building] = (
+        await call('student', {
+          ...repair,
+          key: building,
+          building,
+        })
+      ).id;
+      data.set('schools/pu/dormPackages/' + building, {
+        building,
+        status: 'waiting',
+        arrivedAt: 1,
+      });
+    }
+    const rows = await call('staff', { action: 'workspace' });
+    expect(rows[domain].map((row) => row.building)).toEqual(['A']);
+    expect(rows[domain === 'packages' ? 'repairs' : 'packages']).toEqual([]);
+    await expect(
+      call('staff', {
+        action: 'repairStatus',
+        id: ids.B,
+        status: 'received',
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(
+      call('staff', {
+        action: 'announce',
+        building: 'B',
+        title: '公告',
+        body: '內容',
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(
+      call(
+        'staff',
+        domain === 'packages'
+          ? { action: 'repairStatus', id: ids.A, status: 'received' }
+          : { action: 'announce', building: 'A', title: '公告', body: '內容' },
+      ),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(
+      call(
+        'staff',
+        domain === 'repairs'
+          ? { action: 'repairStatus', id: ids.A, status: 'received' }
+          : { action: 'announce', building: 'A', title: '公告', body: '內容' },
+      ),
+    ).resolves.toMatchObject({ success: true });
+  },
+);
+
+test.each(['admin', 'staff'])(
+  'inactive or deleting %s accounts cannot use staff access or grant roles',
+  async (actor) => {
+    for (const account of [
+      { status: 'inactive' },
+      { status: 'deleted' },
+      { accountDeletionInProgress: true },
+    ]) {
+      const { call, data } = fixture();
+      data.set('users/' + actor, account);
+      for (const action of ['config', 'workspace', 'setStaff'])
+        await expect(
+          call(actor, {
+            action,
+            targetUid: 'student',
+            packages: true,
+            buildings: ['A'],
+          }),
+        ).rejects.toMatchObject({ code: 'failed-precondition' });
+    }
+  },
+);
+
+test.each(['packages', 'repairs'])(
+  'setStaff rejects empty or malformed building grants for %s',
+  async (domain) => {
+    for (const buildings of [[], [''], [' '], [null], 'A']) {
+      const { call, data } = fixture();
+      data.set('users/staff', { status: 'active' });
+      const before = { ...data.get('schools/pu/dormStaffRoles/staff') };
+      await expect(
+        call('admin', {
+          action: 'setStaff',
+          targetUid: 'staff',
+          [domain]: true,
+          buildings,
+        }),
+      ).rejects.toMatchObject({ code: 'invalid-argument' });
+      expect(data.get('schools/pu/dormStaffRoles/staff')).toEqual(before);
+    }
+  },
+);
+
+test.each(['inactive', 'missing'])(
+  'inactive or missing administrator membership cannot grant roles: %s',
+  async (state) => {
+    const { call, data } = fixture();
+    if (state === 'missing') data.delete('schools/pu/members/admin');
+    else data.set('schools/pu/members/admin', { role: 'admin', status: state });
+    data.set('users/staff', { status: 'active' });
+    await expect(
+      call('admin', {
+        action: 'setStaff',
+        targetUid: 'staff',
+        packages: true,
+        buildings: ['A'],
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+  },
+);

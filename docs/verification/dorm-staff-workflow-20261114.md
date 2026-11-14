@@ -192,3 +192,13 @@
 - Web／Mobile 明示私有包裹保留上次紀錄、可能尚未更新；下一次端點成功後清除異常狀態並使用新投影。回歸測試涵蓋失敗後即時更新已領狀態、去重、刪除舊包裹時保留私有包裹、端點恢復及停止輪詢。
 - 本輪無登入權限migration變更，僅修改宿舍共用訂閱、兩端提示及測試。原 PR 的宿舍授權變更仍保留原審查與核准要求，未部署或合併。
 - 驗證：Web 3 檔 22 項、Mobile 2 檔 9 項通過；web／mobile／shared 全專案 typecheck 通過。型別增量檔與 Jest 快取置於 `/tmp` 並於完成後刪除；Vitest 停用快取。沿用既有依賴及 node_modules，執行環境 Node 24 有專案 Node 20／22 引擎提示。
+
+## 第三輪授權審查修正與主線合併（2026-11-14）
+
+- 以一般 merge 合併 `origin/main`；唯一內容衝突保留主線原文「門禁：24 小時以學生證刷卡進出，00:00–06:00 須刷卡登記」。該檔與主線相同，其他主線變更完整保留。
+- 保留獨立 `dormStaffRoles` 模型，不使用 `serviceRoles` 備援。非管理員須有明確存在、`status: active`、對應 packages／repairs 為 true 的角色，且棟別清單非空、所有項目均為有效字串。工作台查詢結果再次使用與寫入相同的棟別判斷。
+- 宿舍成員操作額外拒絕已標記停用、刪除或刪帳中的呼叫者；管理員也須通過既有 `assertSchoolAdmin`。既有包裹本人相容讀取仍維持原本收件人限定路徑。
+- `setStaff` 保留交易內 `assertSchoolAdmin`、有效本校成員與帳號存在檢查，並拒絕任何已標記非 active 的目標帳號或刪帳中帳號。packages／repairs 任一授權為 true 時，棟別不得空白或為空清單；學生與一般職員均不能授權或撤銷。
+- 相較修正前僅收緊驗證；未刪除或放寬主線既有管理員／成員限制。未修改共用 authz、登入、session、ACL writers、Firestore／Storage rules 或 migration；未安裝依賴、替換 node_modules、部署或操作正式資料。
+- 驗證：沿用後端既有 Jest／Babel 設定，dormWorkflow、authz、dormAccountDeletion、dormLoginIsolation、accountDeletion 共 5 檔 160 項通過；兩個變更後端檔案 ESLint、Prettier 與 git diff --check 通過。最初使用臨時簡化 Jest 設定時遇到 jose ESM 轉譯錯誤，改回專案設定即通過，無依賴變更。暫存輸出與測試快取位於 `/tmp`，完成後移除。
+- 仍需晉瑋說「上」：新宿舍角色與棟別授權模型、管理員授權入口的上線，以及本分支原有登入隔離同步／刪帳整合等權限範圍變更；本次修正未改寫這些既有登入流程。既有包裹 Firestore 直讀封閉方案、客戶端版本協調、照片簽署權限與舊照片 token 限制仍依 `docs/approval/dorm-privacy-20261114.md` 核准驗收。本次沒有套用規則或執行 migration，不代表已核准開通。
