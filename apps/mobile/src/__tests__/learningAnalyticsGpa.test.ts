@@ -45,6 +45,15 @@ describe.each(['pu', 'tw-pu'])('Providence %s', (schoolId) => {
     expect(calculateGpa([row(0)])?.overall).toBe(0);
   });
 
+  test('includes failed course credits in overall and semester weighting', () => {
+    const result = calculateGpa([row(90, 1), row(0, 3), row(85, 2, '114_2')]);
+    expect(result?.overall).toBeCloseTo((4.3 + 4 * 2) / 6);
+    expect(result?.semesters).toEqual([
+      { sem: '114_2', gpa: 4 },
+      { sem: '115_1', gpa: 4.3 / 4 },
+    ]);
+  });
+
   test('excludes text, pass/fail and invalid scores from both averages without changing records', () => {
     const excluded = [
       '通過',
