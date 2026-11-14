@@ -32,10 +32,11 @@ test('guests see real public resources and exact empty text without personal wri
   const view = render(<CareerScreen />);
   await view.findByText('目前沒有可確認日期的近期截止日或活動。');
   expect(view.getByText(CAREER_EMPTY)).toBeTruthy();
+  expect(view.getByText(/個人職涯資料尚未連結到校方系統/)).toBeTruthy();
   expect(view.queryByText('新增紀錄')).toBeNull();
   expect(view.queryByText('登入以使用個人工作區')).toBeNull();
   await act(async () =>
-    fireEvent.press(view.getByRole('button', { name: '靜宜職涯發展暨產業促進處 ↗' })),
+    fireEvent.press(view.getByRole('button', { name: '前往靜宜職涯發展暨產業促進處' })),
   );
   expect(Linking.openURL).toHaveBeenCalledWith('https://cdif.pu.edu.tw/');
   expect(fetch).toHaveBeenCalledWith('https://nuni.tw/career/data?school=pu', expect.anything());
@@ -90,8 +91,8 @@ test('switching school drops PU information and does not fetch Shalu for other c
   mockSchool = { id: 'ntu', name: '臺灣大學' };
   view.rerender(<CareerScreen />);
   expect(await view.findByText(/目前尚未接上這所學校的公告來源/)).toBeTruthy();
-  expect(view.queryByRole('button', { name: '靜宜職涯發展暨產業促進處 ↗' })).toBeNull();
-  expect(view.getByRole('button', { name: '臺大學生專區（職涯資訊入口） ↗' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '前往靜宜職涯發展暨產業促進處' })).toBeNull();
+  expect(view.getByRole('button', { name: '前往臺大學生專區（職涯資訊入口）' })).toBeTruthy();
   expect(fetch).not.toHaveBeenCalled();
 });
 test('external jobs only link out with approved labels', async () => {

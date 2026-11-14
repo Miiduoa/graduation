@@ -96,9 +96,9 @@ function Content({ schoolId }: { schoolId: string }) {
       </AICard>
       <AICard title="校內工讀與實習">
         <Body>{CAREER_EMPTY}</Body>
-        {official && <AIButton label={`${official.label} ↗`} onPress={() => open(official.url)} />}
+        {official && <AIButton label={`前往${official.label}`} onPress={() => open(official.url)} />}
         <Body>
-          此頁提供公開資訊，尚未接上校內工讀申請及實習學分系統。申請、權益說明與學分認定請洽校方；這裡不受理投遞或登錄時數。
+          個人職涯資料尚未連結到校方系統。此頁提供公開資訊，尚未接上校內工讀申請及實習學分系統。申請、權益說明與學分認定請洽校方；這裡不受理投遞或登錄時數。
         </Body>
       </AICard>
       <AICard title="校方職涯公告">
