@@ -57,9 +57,7 @@ export function parseCareerHtml(
       );
       if (!link) return [];
       const url = announcementUrl(attr(link, 'href'), source);
-      // Inspect the complete decoded title before truncation so sensitive fields
-      // cannot slip into the public feed (including its timeline and cache).
-      // Reject grade-related titles regardless of punctuation, names or score format.
+      // Apply the shared defense-in-depth policy before truncation and public caching.
       const fullTitle = text(link).normalize('NFKC');
       if (careerHasSensitiveContent(fullTitle)) return [];
       const title = fullTitle.slice(0, 300);

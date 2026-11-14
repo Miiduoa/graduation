@@ -177,204 +177,6 @@ it.each(['取消', '延期', '延 後', '停辦', '改期', '取消通知'])(
     }
   },
 );
-it('public API excludes sensitive titles from announcements and calendar items for both sources', async () => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
-  const sensitiveTitles = [
-    '2026/12/8 實習錄取名單 410123456 王測試',
-    '2026/12/8 實習評分 王測試 95 分',
-    '2026/12/8 實習 410123456 王測試',
-    '2026/12/8 實習 A410123456 王測試',
-    '2026/12/8 實習 ４１０１２３４５６ 王測試',
-    '2026/12/8 實習 410-123-456 王測試',
-    '2026/12/8 實習 王測試 95 分',
-    '2026/12/8 實習名冊 王測試',
-    '2026/12/8 實習甄選榜單',
-    '2026/12/8 實習' + '說明'.repeat(160) + '410123456',
-    '2026/12/8 實習 学号：TEST-0001',
-    '2026/12/8 實習 學 號：TEST-0001',
-    '2026/12/8 實習 学・号：TEST-0001',
-    '2026/12/8 實習 學\u200b號：TEST-0001',
-    '2026/12/8 實習 成 績 為 95 分',
-    '2026/12/8 實習 成／绩：95 分',
-    '2026/12/8 實習 STUDENT-ID：TEST-0001',
-    '2026/12/8 實習 S.t.u.d.e.n.t I.D.：TEST-0001',
-    '2026/12/8 實習 student_number：TEST-0001',
-    '2026/12/8 實習 g.r.a.d.e／s.c.o.r.e：95',
-    '2026/12/8 實習 Ｇ Ｒ Ａ Ｄ Ｅ：95',
-    '2026/12/8 實習 成<span>績</span>：95',
-    '2026/12/8 實習 学&#x53f7;：TEST-0001',
-    '2026/12/8 實習' + '說明'.repeat(160) + '学 号：TEST-0001',
-    '2026/12/8 實習錄取 學號：TEST-STUDENT-ID 成績：TEST-GRADE',
-    '2026/12/8 實習成績：TEST-GRADE',
-    '2026/12/8 實習成績 95 分',
-    '2026/12/8 實習申請 成績為 95 分',
-    '2026/12/8 實習成績 王測試 95 分',
-    '2026/12/8 实习成绩为 95 分',
-    '2026/12/8 實習 Score 95',
-    '2026/12/8 實習 score for Test Student is 95',
-    '2026/12/8 實習 Grades Test Student 95',
-    '2026/12/8 實習 ＳＣＯＲＥ 95',
-    '2026/12/8 實習' + '說明'.repeat(160) + '成績為 95 分',
-    '2026/12/8 實習 Student ID: TEST-STUDENT-ID',
-    '2026/12/8 實習 Grade: TEST-GRADE',
-    '2026/12/8 實習 Ｓｔｕｄｅｎｔ ＩＤ：TEST-STUDENT-ID',
-    '2026/12/8 實習' + '說明'.repeat(160) + '學號：TEST-STUDENT-ID',
-  ];
-  const sensitiveHtml = sensitiveTitles
-    .map((title, i) => `<div class="d-txt"><a href="/p/406-1102-${i + 10}.php">${title}</a></div>`)
-    .join('');
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string) => ({
-      ok: true,
-      text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : html + sensitiveHtml),
-    })),
-  );
-  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
-  const feed = await response.json();
-  expect(feed.announcements).toHaveLength(2);
-  expect(
-    feed.announcements.every((item: { title: string }) => item.title === '實習申請2026/12/8截止'),
-  ).toBe(true);
-  expect(feed.timeline).toHaveLength(2);
-  expect(
-    feed.timeline.every(
-      (item: { title: string; date: string }) =>
-        item.title === '實習申請2026/12/8截止' && item.date === '2026-12-08',
-    ),
-  ).toBe(true);
-  expect(feed.announcementsUnavailable).toBe(false);
-  expect(JSON.stringify(feed)).not.toMatch(
-    /TEST-0001|TEST-STUDENT-ID|TEST-GRADE|成績|成绩|Student|Grades?|Scores?|學號/i,
-  );
-});
-it.each([
-  'GPA 3.95',
-  'CGPA 3.95',
-  'ＧＰＡ：３．９５',
-  'G. P. A.：3.95',
-  'G<span>P</span>A 3.95',
-  'G&#80;A 3.95',
-  'grade point average 3.95',
-  'academic average 95',
-  'weighted average 95',
-  'Average: 95',
-  '平均 95',
-  '平\u200b均：９５',
-  '加權平均 95',
-  '均分 95',
-  '總分 95',
-  '總評 A+',
-  ...['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'E', 'F'].flatMap((grade) => [
-    `等第 ${grade}`,
-    `等 第：${grade}`,
-    grade,
-    `測試同學${grade}`,
-  ]),
-  'Test Student A+',
-  'TestStudent95',
-  '等第 Ａ ＋',
-  '等&#x7b2c; A+',
-  '等<span>第</span> A+',
-  '等\u200b第 A+',
-  '成 绩 9 5 分',
-  '分 数 9 5',
-  'Ｇ Ｐ Ａ 3 . 9 5',
-  '学 号 TEST-0001',
-  '9 5',
-  '95.5',
-  '95 請確認結果',
-  '95.5 請確認結果',
-  '95/100',
-  '9 5 分',
-  '說明'.repeat(160) + '等 第 A+',
-  '說明'.repeat(160) + 'GPA 3.95',
-])('public API omits the entire academic-result title from both sources: %s', async (result) => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
-  const sensitive = `<div class="d-txt"><a href="/p/406-1102-2.php">2026/12/8 實習申請 王測試 ${result}</a></div>`;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string) => ({
-      ok: true,
-      text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : sensitive + html),
-    })),
-  );
-  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
-  const feed = await response.json();
-  expect(feed.announcements.map((item: { title: string }) => item.title)).toEqual([
-    '實習申請2026/12/8截止',
-    '實習申請2026/12/8截止',
-  ]);
-  expect(feed.timeline.map((item: { title: string }) => item.title)).toEqual([
-    '實習申請2026/12/8截止',
-    '實習申請2026/12/8截止',
-  ]);
-  expect(JSON.stringify(feed)).not.toContain('王測試');
-  expect(feed.announcementsUnavailable).toBe(false);
-  // The cacheable API body and every calendar export must contain only safe records.
-  expect(response.headers.get('Cache-Control')).toContain('public');
-  for (const item of feed.timeline) {
-    expect(new URL(careerCalendarUrl(item)).searchParams.get('text')).toBe('實習申請2026/12/8截止');
-    expect(decodeURIComponent(careerCalendarUrl(item))).not.toContain('王測試');
-  }
-});
-it.each([
-  '95 王測試 實習申請',
-  '95.5 王測試 實習申請',
-  '９５．５ 王測試 實習申請',
-  '9 5 王測試 實習申請',
-  '95/100 王測試 實習申請',
-  '95 Test Student 實習申請',
-  '實習申請 王測試 S411A1234',
-  ...['.', '．', '/', '・', '_', '\u200b', ' - '].map(
-    (separator) => `實習申請 王測試 S411${separator}A1234`,
-  ),
-  '實習申請 王測試 九十五分',
-  '實習申請 王測試 九十五點五分',
-  '實習申請 王測試 玖拾伍分',
-  '實習申請 王測試 九 五 分',
-  '九十五分 王測試 實習申請',
-  ...['優', '優等', '甲', '乙等', '丙', '丁等', '及格', '不及格'].map(
-    (grade) => `實習申請 王測試 ${grade}`,
-  ),
-])(
-  'withholds reversed results and mixed student identifiers before public caching: %s',
-  async (suffix) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
-    const title = `2026/12/8 ${suffix}`;
-    const sensitiveHtml = `<div class="d-txt"><a href="/p/406-1102-2.php">${title}</a></div>`;
-    for (const source of CAREER_HTML_SOURCES) {
-      expect(parseCareerHtml(sensitiveHtml, source)).toEqual([]);
-    }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => ({
-        ok: true,
-        text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : sensitiveHtml + html),
-      })),
-    );
-    const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
-    const feed = await response.json();
-    expect(response.headers.get('Cache-Control')).toContain('public');
-    expect(feed.announcements).toHaveLength(2);
-    expect(feed.timeline).toHaveLength(2);
-    expect(JSON.stringify(feed)).not.toMatch(/王測試|Test Student|S411A1234/);
-    for (const item of [...feed.announcements, ...feed.timeline]) {
-      expect(item.title).toBe('實習申請2026/12/8截止');
-    }
-    for (const item of feed.timeline) {
-      expect(new URL(careerCalendarUrl(item)).searchParams.get('text')).toBe(
-        '實習申請2026/12/8截止',
-      );
-      expect(decodeURIComponent(careerCalendarUrl(item))).not.toMatch(
-        /王測試|Test Student|S411A1234/,
-      );
-    }
-  },
-);
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
   const records = Array.from({ length: 8 }, (_, i) => ({
     title: `2026/11/${15 + i} ${i === 1 ? '校園徵才' : '實習申請截止'}`,
@@ -483,27 +285,41 @@ it.each(['2026/12/8至翌日實習說明會', '2026/12/8至月底實習申請'])
   },
 );
 
+// Only the maintainer-approved labels and letter-grade tokens are denied.
 const policySensitiveTitles = [
   ...[
-    '4111234A',
-    '４１１１２３４Ａ',
-    '4 1 1 1 2 3 4 A',
-    '411A1234',
-    '九十五',
-    '九 十 五',
-    '玖拾伍',
-    '九十五點五',
-  ].map((result) => `2026/12/8 實習申請 王測試 ${result}`),
-  '2026/12/8 實習講座 地點：管理大樓201教室 王測試95',
-  '2026/12/8 實習講座 地點：管理大樓201教室 王測試九十五',
-  '2026/12/8 實習講座 地點：管理大樓201教室 王測試4111234A',
-  ...['優', '甲', '乙', '丙', '丁', '戊', '优'].flatMap((grade) => [
-    `2026/12/8 實習申請 王測試${grade}`,
-    `2026/12/8 第10屆實習講座 王測試${grade}`,
-    `2026/12/8 甲公司說明會 王測試${grade}，請確認`,
-  ]),
-  '2026/12/8 第10屆實習講座 王測試95',
-  '2026/12/8 第10屆實習講座 王測試 S411A1234',
+    '成績',
+    '等第',
+    '分數',
+    '學號',
+    '学号',
+    '不及格',
+    '及格',
+    '優等',
+    '甲等',
+    '乙等',
+    '丙等',
+    '丁等',
+    '名次',
+    '排名',
+    '錄取名單',
+    '榜單',
+    '個資',
+    'gpa',
+    'studentid',
+    'grade',
+    'score',
+    '成／绩',
+    '分 数',
+    '个 资',
+    '录取名单',
+    'G. P. A.',
+    'ＳＴＵＤＥＮＴ ＩＤ',
+    '說明'.repeat(160) + '成績',
+  ].map((label) => `2026/12/8 實習申請 ${label}`),
+  ...['A+', 'A', 'A-', 'B+', 'B-', 'C+', 'C-', 'D+', 'D-', 'E+', 'E-', 'F+', 'F-'].flatMap(
+    (grade) => [`2026/12/8 實習申請 王測試${grade}`, `2026/12/8 實習申請 ${grade} 說明`],
+  ),
   '2026/12/8 實習申請 王測試不及格',
   '2026/12/8 實習申請 王測試優等',
   '2026/12/8 實習申請 等第 A+',
@@ -578,6 +394,9 @@ it.each([
   '丁公司說明會',
   '企業參訪',
   '履歷工作坊',
+  '管理大樓201教室實習講座',
+  '面試',
+  '面試技巧',
 ])(
   'keeps a public compound and career keyword through the API, cache and calendar: %s',
   async (event) => {
@@ -630,3 +449,43 @@ it('keeps a general announcement without allowing a generic application date int
   expect(feed.announcements.map((a: { title: string }) => a.title)).toEqual([title]);
   expect(feed.timeline).toEqual([]);
 });
+
+it.each([
+  '管理大樓201教室',
+  '資訊館302教室',
+  '九十分鐘',
+  '第10屆',
+  '4111234A',
+  '王測試95',
+  '王測試九十五分',
+])('relays public text without guessing numeric personal data: %s', async (detail) => {
+  const title = `2026/12/8 ${detail}`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      text: async () =>
+        url === TAIWANJOBS_URL
+          ? '<DataList></DataList>'
+          : html.replace('實習申請2026/12/8截止', title),
+    })),
+  );
+  const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+  expect(response.headers.get('Cache-Control')).toContain('public');
+  const feed = await response.json();
+  expect(feed.announcements.map((a: { title: string }) => a.title)).toEqual([title]);
+  expect(feed.announcements[0].url).toBe('https://cdif.pu.edu.tw/p/406-1102-1.php');
+  expect(feed.timeline).toEqual([]);
+  expect(careerCalendarUrl({ ...feed.announcements[0], date: '2026-12-08' })).toBe('');
+});
+
+it.each(['成<span>績</span>', '学&#x53f7;'])(
+  'checks decoded HTML title labels before exposing announcement metadata: %s',
+  (label) => {
+    for (const source of CAREER_HTML_SOURCES) {
+      expect(
+        parseCareerHtml(html.replace('實習申請2026/12/8截止', `2026/12/8 實習 ${label}`), source),
+      ).toEqual([]);
+    }
+  },
+);

@@ -73,39 +73,11 @@ const careerSensitiveTerms = [
   '排名',
   '錄取名單',
   '榜單',
-  '名單',
   '個資',
   'gpa',
   'studentid',
   'grade',
   'score',
-  // Preserve the existing conservative treatment of result and roster labels.
-  '評分',
-  '評量',
-  '績點',
-  '平均',
-  '均分',
-  '總分',
-  '總評',
-  '名冊',
-  '錄取',
-  'studentnumber',
-  'academicaverage',
-  'weightedaverage',
-  'average',
-];
-const careerExactPublicCompounds = [
-  '優良企業',
-  '甲公司',
-  '乙公司',
-  '丙公司',
-  '丁公司',
-  '戊公司',
-  '己公司',
-  '庚公司',
-  '辛公司',
-  '壬公司',
-  '癸公司',
 ];
 const careerTraditionalCharacters: Record<string, string> = {
   学: '學',
@@ -117,94 +89,24 @@ const careerTraditionalCharacters: Record<string, string> = {
   单: '單',
   个: '個',
   资: '資',
-  评: '評',
-  点: '點',
-  总: '總',
-  册: '冊',
-  两: '兩',
-  权: '權',
 };
 function careerFold(title: string) {
   return title
     .normalize('NFKC')
     .toLowerCase()
-    .replace(
-      /[学号绩数优录单个资评点总册两权]/g,
-      (character) => careerTraditionalCharacters[character],
-    );
+    .replace(/[学号绩数优录单个资]/g, (character) => careerTraditionalCharacters[character]);
 }
+// 僅轉介校方官方網站與台灣就業通已公開的標題。此處是額外防護，
+// 不是完整個資偵測器；不以姓名、數字或中文數字推測成績，避免誤擋教室等公開資訊。
 export function careerHasSensitiveContent(title: string): boolean {
-  let folded = careerFold(title);
-  // Exempt exact public compounds only, never the rest of a title containing them.
-  for (const word of careerExactPublicCompounds) folded = folded.replaceAll(word, '');
+  const folded = careerFold(title);
   const normalized = folded.replace(/[^\p{L}\p{N}]/gu, '');
-  if (careerSensitiveTerms.some((term) => normalized.includes(term))) return true;
-  // Remove public dates first. A standalone letter grade is withheld even without
-  // a result label: identifying names are not limited to a fixed surname list.
-  const dateFree = folded.replace(
-    /(?<!\d)(?:20\d{2}|1[01]\d)[年/.-]\d{1,2}[月/.-]\d{1,2}日?(?!\d)/g,
-    '',
-  );
-  // Exempt only a short numeric room explicitly attached to a building or a
-  // location label and 教室. Keep the rest of the title under the privacy policy.
-  const resultText = dateFree.replace(
-    /((?:[\p{Script=Han}]{1,20}(?:大樓|館|樓))|(?:地點\s*[:：]\s*))\s*\d{1,4}\s*教室/gu,
-    '$1教室',
-  );
-  const compact = resultText.toLowerCase().replace(/[\s\p{Cf}]/gu, '');
-  if (/(?<![a-z0-9])[a-f][+-]?(?![a-z0-9])/i.test(dateFree)) return true;
-  // Name-like text immediately followed by a numeric result is also private,
-  // including spaced digits, decimal results and fractions. Do not treat event
-  // durations such as「30 分鐘」as grades.
-  const nameAndScore = compact
-    // Only remove a complete public event ordinal; adjacent results still undergo
-    // the same checks (for example「第10屆實習 王測試95」).
-    .replace(/第[0-9零〇一二三四五六七八九十百千兩壹貳參肆伍陸柒捌玖拾佰]+屆/gu, '')
-    .replace(/[^\p{L}\p{N}./]/gu, '')
-    .replace(/\d+(?:\.\d+)?(?:分鐘|小時|學分|場|名|人|元|年度|年|月|日|天|週|周|時)/g, '');
-  if (/(?:[\p{Script=Han}]{2,}|[a-z]{2,})\d{1,3}(?:\.\d+)?(?:分)?(?!\d)/u.test(nameAndScore))
-    return true;
-  // Results may precede the identifying name as well. Use the same unit-stripped
-  // text so ordinary public quantities (30 分鐘、500 元、104 人) stay readable.
-  if (/(?<!\d)\d{1,3}(?:\.\d+)?(?:分)?(?:[\p{Script=Han}]{2,}|[a-z]{2,})/u.test(nameAndScore))
-    return true;
-  // Chinese numeric scores and standalone Chinese result levels are private too.
-  // Strip separators consistently, but keep duration units such as「九十分鐘」public.
-  if (
-    /[零〇一二三四五六七八九十百兩壹貳參肆伍陸柒捌玖拾佰]+(?:點[零〇一二三四五六七八九]+)?分(?!鐘)/u.test(
-      compact,
+  return (
+    careerSensitiveTerms.some((term) => normalized.includes(term)) ||
+    /(?:^|[^\p{L}\p{N}]|[\p{Script=Han}])[a-f](?:\s*[+-])?(?=$|[^\p{L}\p{N}]|[\p{Script=Han}])/u.test(
+      folded,
     )
-  )
-    return true;
-  // Unitless Chinese results may follow a name, including separated digits.
-  // Require a complete result token; public durations and quantities retain units.
-  const chineseResultText = compact.replace(
-    /第[零〇一二三四五六七八九十百千兩壹貳參肆伍陸柒捌玖拾佰]+屆/gu,
-    '',
   );
-  if (
-    /[\p{Script=Han}]{2,}[零〇一二三四五六七八九十百兩壹貳參肆伍陸柒捌玖拾佰]+(?:點[零〇一二三四五六七八九]+)?(?=$|[^\p{L}\p{N}])/u.test(
-      chineseResultText,
-    )
-  )
-    return true;
-  // A Chinese grade may directly follow a name. Exact public compounds were
-  // removed above, so「甲公司」stays public while「王測試甲」is withheld.
-  if (
-    /(?:^|[^\p{L}\p{N}]|[\p{Script=Han}]{2,})(?:優|甲|乙|丙|丁|戊)(?=$|[^\p{L}\p{N}])/u.test(
-      dateFree,
-    )
-  )
-    return true;
-  // Student identifiers can mix letters and digits rather than contain eight
-  // consecutive digits, with either a letter or digit first.
-  const identifiers = dateFree
-    .replace(/[^\p{L}\p{N}]/gu, '')
-    .match(/(?<![a-z0-9])[a-z0-9]{8,}(?![a-z0-9])/gi);
-  if (identifiers?.some((value) => /[a-z]/i.test(value) && /\d/.test(value))) return true;
-  // Dates are public metadata; other long numeric identifiers may be student IDs.
-  const withoutDates = dateFree.replace(/[^\p{L}\p{N}]/gu, '');
-  return /\d{8,}/.test(withoutDates) || /\d+(?:[.．]\d+)?\s*分(?!鐘)/.test(folded);
 }
 export const CAREER_TIMELINE_KEYWORDS = [
   '徵才',
@@ -217,7 +119,7 @@ export const CAREER_TIMELINE_KEYWORDS = [
   '就業',
   '企業參訪',
   '履歷',
-  '面試技巧',
+  '面試',
   '求職',
 ];
 export function careerHasTimelineKeyword(title: string) {
