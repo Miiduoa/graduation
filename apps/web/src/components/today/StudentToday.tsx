@@ -36,6 +36,7 @@ export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigne
 
 type Props = {
   assistant?: ReactNode;
+  agent?: ReactNode;
   personalization?: ReactNode;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
@@ -60,6 +61,7 @@ type Props = {
 
 type BoundProps = {
   assistant?: ReactNode;
+  agent?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
   signedIn: boolean;
@@ -150,6 +152,7 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
+      {props.agent}
       {!props.skeleton && props.unsigned && action.type !== 'class' && (
         <TodayWelcome
           importHref={props.importHref}
@@ -450,6 +453,7 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      agent={props.agent}
       personalization={!scope.loading && props.now ? (
         <CampusPersonalizationSection
           key={scope.scopeKey}

@@ -46,6 +46,7 @@ import { parseCampusAnnouncementSource } from '../services/campusAnnouncementSou
 import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
+import { campusEventDetailPath } from '@campus/shared/src/campusEventLinks';
 import type { AnnouncementCategory } from '../data/types';
 import { matchesCampusContent } from '../utils/campusContentList';
 import {
@@ -1022,6 +1023,7 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
     setBusyScope(content.scope);
     setActionError(null);
     try {
+      const detailUrl = `https://nuni.tw${campusEventDetailPath(event)}`;
       if (action === 'share') {
         await Share.share({
           title: event.title,
@@ -1031,6 +1033,7 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
             event.location,
             event.organizer,
             event.description,
+            detailUrl,
           ]
             .filter(Boolean)
             .join('\n'),
@@ -1045,7 +1048,14 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
             {
               id: `campus-event-${event.schoolId}-${event.source}-${event.id}`,
               title: event.title,
-              description: event.description,
+              description: [
+                event.description,
+                '這是匯出當下的活動資訊；報名與時間異動請回到活動頁確認。',
+                detailUrl,
+              ]
+                .filter(Boolean)
+                .join('\n\n'),
+              url: detailUrl,
               location: event.location,
               startDate,
               endDate: endDate && endDate > startDate ? endDate : undefined,
@@ -1114,7 +1124,7 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
           <AICard title="安排參加">
             <View style={{ gap: 12 }}>
               <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-                將活動分享給朋友，或匯出檔案後加入自己的行事曆。加入行事曆不代表完成報名。
+                將活動分享給朋友，或匯出檔案後加入自己的行事曆。加入行事曆不代表完成報名；報名與時間異動請從檔案內的連結回到活動頁確認。
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <AIButton
