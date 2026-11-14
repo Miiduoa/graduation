@@ -182,7 +182,7 @@ describe('NCNU public guest catalog', () => {
     vi.stubGlobal('fetch', fetchSource);
     const { GET: discover } = await import('./operations/route');
     const { GET } = await import('./route');
-    const directory = await (await discover()).json();
+    const directory = await (await discover(new Request('https://example.test/api/public-course-catalog/operations'))).json();
     expect(fetchSource).not.toHaveBeenCalled();
     const operation = directory.operations.find((item: { id: string }) => item.id === 'ncnu.courses.search');
     const url = new URL(operation.endpoint.path, 'https://example.test');

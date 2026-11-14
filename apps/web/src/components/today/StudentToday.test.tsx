@@ -101,6 +101,20 @@ it('keeps the assistant mounted after the planner while the day finishes loading
   expect((draft as HTMLInputElement).value).toBe('下一堂課在哪裡？');
 });
 
+it('keeps immediate coursework before personalized suggestions and preserves the assistant draft', () => {
+  const assistant = <input aria-label="助理草稿測試" defaultValue="請幫我安排今天" />;
+  const personalization = <section aria-label="個人化安排">依年級與生活需求安排</section>;
+  const result = view({ classes: [klass()], todos: [todo()], assistant, personalization });
+  const next = screen.getByTestId('next-action');
+  const suggestions = screen.getByRole('region', { name: '個人化安排' });
+  expect(next.compareDocumentPosition(suggestions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const draft = screen.getByRole('textbox');
+  result.rerender(todayElement({ classes: [klass()], todos: [todo()], assistant,
+    personalization: <section aria-label="個人化安排">改成期末準備</section> }));
+  expect(screen.getByRole('textbox')).toBe(draft);
+  expect((draft as HTMLInputElement).value).toBe('請幫我安排今天');
+});
+
 it('marks a class in progress and expands the rest of the day without leaving Today', () => {
   const classes = Array.from({ length: 5 }, (_, i) => klass({
     id: 'class-' + i, title: '課程 ' + i,
@@ -493,5 +507,21 @@ it('keeps one welcome area without duplicate login copy when the guest campus ch
   } finally {
     error.mockRestore();
     warning.mockRestore();
+  }
+});
+
+it.each(['pending', 'empty', 'error'] as const)('keeps the calendar reachable from %s coursework', (state) => {
+  view({
+    todos: state === 'pending' ? [todo()] : [],
+    todosError: state === 'error' ? '作業暫時讀不到' : '',
+  });
+  const work = within(screen.getByTestId('today-work'));
+  const calendar = work.getByRole('link', { name: '查看行事曆' });
+  expect(calendar.getAttribute('href')).toBe('/calendar');
+  calendar.focus();
+  expect(document.activeElement).toBe(calendar);
+  if (state === 'pending') {
+    expect(work.getByRole('link', { name: /作業三 繳交/ }).getAttribute('href'))
+      .toBe('/course/cs-db#assignment-hw-3');
   }
 });
