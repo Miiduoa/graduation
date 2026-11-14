@@ -212,6 +212,8 @@ export type Adapter = {
   course?(courseId: string): Promise<Course | null>;
   work(courseId: string): Promise<Task[]>;
   materials(courseId: string, cursor?: string): Promise<unknown>;
+  /** Reviewed anonymous catalogs; this never changes the private school binding. */
+  publicCourses?(search: import('@campus/shared/src/publicCourseAssistant').PublicCourseAssistantSearch): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,

@@ -11,6 +11,10 @@ import {
 import { createTransitService } from '../../transit-server';
 import { apiOrigin, boundedJson, type PlatformSession } from '../server';
 import { readPlatformAssistantPermissions } from '../platformAssistantPermissionStore';
+import { executePublicCourseOperation } from '../../server/publicCourseOperations';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
+import { hasPublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
+import { parsePublicCourseArguments, publicCourseArguments, PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { bounded, id, object, V2Error, type Adapter, type Obj } from './contracts';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
@@ -145,6 +149,20 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
     },
     simulation: false,
     remainingApiCalls: () => Math.max(0, 12 - apiCalls),
+    publicCourses: async (requested) => {
+      const search = parsePublicCourseArguments(publicCourseArguments(requested));
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+      const version = hasPublicCourseFilters(search.filters ?? {}) ? 2 : 1;
+      const operation = resolvePublicCourseOperation(search.schoolId, version)!;
+      // Only the public query enters this shared cache. Never pass the account,
+      // private campus, session, history, headers or a caller-controlled URL.
+      const result = await bounded(() => executePublicCourseOperation(operation.id,
+        { query: search.query, ...search.filters }, version), active, PUBLIC_COURSE_TOOL_TIMEOUT_MS);
+      active.throwIfAborted();
+      return result;
+    },
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),
     course: async (courseId) => {
@@ -308,6 +326,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           };
         }),
         source: 'social/feed; untrusted content',
+        nextCursor: value(object(raw).nextCursor, 500) || undefined,
+        truncated: Array.isArray(object(raw).items) && (object(raw).items as unknown[]).length > 5,
       };
     },
     dining: async (locationId) => {
@@ -338,6 +358,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
             })
           : [],
         source: 'public cafeteria catalog; 價格/菜單可能缺漏',
+        truncated: !locationId && Array.isArray(object(raw).cafeterias) &&
+          (object(raw).cafeterias as unknown[]).length > 5,
       };
     },
     transit: async (args) => transit(args),

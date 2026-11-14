@@ -307,7 +307,7 @@ jobs:
         run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
 
       - name: Test assistant services, academic data and verified execution contracts
-        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/assistantTaskPlan.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
 
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
