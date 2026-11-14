@@ -285,6 +285,60 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])(
+    'respects Retry-After when a 200 identity transfer has contradictory Content-Length (stale: %s)',
+    async (withStaleCache) => {
+      // A syntactically valid JSON body can still be an invalid partial HTTP
+      // representation. The stated pause applies even when body validation
+      // rejects it before JSON.parse. Synthetic network failure, not live OSM.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn();
+        if (withStaleCache) {
+          upstream.mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        }
+        upstream
+          .mockResolvedValueOnce(new Response(osmPayload, {
+            status: 200,
+            headers: { 'Content-Length': '1', 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const original = withStaleCache ? await (await GET()).json() : null;
+        const failureTime = start + (withStaleCache ? 25 * 60 * 60 * 1000 : 0);
+        clock.mockReturnValue(failureTime);
+        const rejected = await GET();
+        expect(rejected.status).toBe(withStaleCache ? 200 : 503);
+        expect(rejected.headers.get('Cache-Control'))
+          .toBe(withStaleCache ? 'private, no-store' : 'no-store');
+        expect(rejected.headers.get('Retry-After')).toBe('3600');
+        if (withStaleCache) {
+          expect(await rejected.json()).toMatchObject({
+            stale: true, fetchedAt: original.fetchedAt, buildings: original.buildings,
+          });
+        } else {
+          expect((await rejected.json()).error).toMatch(/temporarily unavailable/);
+        }
+        clock.mockReturnValue(failureTime + 11 * 60 * 1000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(withStaleCache ? 200 : 503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(withStaleCache ? 2 : 1);
+
+        clock.mockReturnValue(failureTime + 60 * 60 * 1000 + 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(withStaleCache ? 3 : 2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it.each([
     { label: 'zero bytes', declared: '0', firstChunk: new TextEncoder().encode(osmPayload) },
     { label: 'fewer bytes than the first chunk', declared: '1',

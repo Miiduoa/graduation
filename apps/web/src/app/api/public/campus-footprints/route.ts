@@ -263,7 +263,21 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response advertised partial content');
   }
-  const raw = await readBoundedResponse(response, signal);
+  let raw: string;
+  try {
+    raw = await readBoundedResponse(response, signal);
+  } catch (error) {
+    // A public Overpass proxy can include Retry-After with HTTP 200 even when
+    // its transfer is invalid (truncated Content-Length, invalid encoding or
+    // a body over our safety limit). Reject the body as before, but respect
+    // the explicit operator cooldown instead of retrying after ten minutes.
+    // An aborted request follows the independent deadline, not this header.
+    const retryAfter = response.headers.get('retry-after');
+    if (!signal.aborted && retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(retryAfter, Date.now()));
+    }
+    throw error;
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(raw) as unknown;
