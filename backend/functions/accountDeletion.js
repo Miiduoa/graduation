@@ -3,6 +3,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { assertPrivacyRequestOwner } = require('./userDataExport');
 const { releaseDeletedUserEventRegistration } = require('./eventRegistration');
 const { closeCampusStoryAccess } = require('./campusStoryAccessBinding');
+const { closeTronClassOwner } = require('./tronClassAccountLifecycle');
 
 const PAGE_SIZE = 200;
 // Account closure removes access and private account data. These shared records
@@ -193,6 +194,10 @@ function createDeleteUserAccountHandler({
         campusStoryBindingHaltAt: FieldValue.delete(),
       },
     });
+
+    // Independent LMS bindings use provider-qualified owners, not ownerUid.
+    // Close their write barrier before erasing credentials and private ledgers.
+    await closeTronClassOwner({ db, ownerKey: `firebase:${uid}`, now: () => currentTime });
 
     // Remove school authority first so ordinary membership-checked writes stop.
     for (const collection of ['members', 'directory', 'serviceRoles', 'operators']) {

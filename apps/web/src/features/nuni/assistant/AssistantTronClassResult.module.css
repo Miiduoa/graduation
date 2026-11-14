@@ -1,0 +1,23 @@
+.result { margin-top: 18px; min-width: 0; }
+.meta { color: var(--muted); font-size: 13px; line-height: 1.8; margin: 8px 0; overflow-wrap: anywhere; }
+.choices { display: grid; gap: 10px; margin-block: 16px; }
+.choice { display: grid; gap: 6px; width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--surface); padding: 15px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.choice span { font-size: 13px; color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }
+.choice:hover { border-color: var(--brand); }
+.choice:disabled { cursor: not-allowed; opacity: .6; }
+.items { list-style: none; padding: 0; margin: 16px 0; }
+.items > li { border-top: 1px solid var(--border); padding-block: 18px; }
+.items h4 { font-size: 15px; line-height: 1.8; margin: 0; overflow-wrap: anywhere; }
+.items details { margin-block: 12px; font-size: 14px; }
+.literal { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.9; }
+.notice { border-left: 3px solid var(--brand); background: var(--bg); padding: 12px 15px; font-size: 14px; line-height: 1.8; }
+.record { border-top: 1px solid var(--border); padding-top: 15px; margin-top: 18px; font-size: 13px; line-height: 1.9; }
+.record summary, .items summary { cursor: pointer; color: var(--muted); }
+.record ul, .record ol { padding-left: 22px; }
+.record li { margin-block: 6px; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.textButton { font: inherit; font-size: 13px; background: transparent; color: var(--muted); border: 0; padding: 10px 0; min-height: 44px; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
+.download { margin-block: 12px; }
+.download button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.error { color: var(--danger, #b94131); font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.result button:focus-visible, .result a:focus-visible, .result summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }

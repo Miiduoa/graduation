@@ -1,5 +1,9 @@
 const { FieldValue } = require('firebase-admin/firestore');
+const { createHash } = require('node:crypto');
 const { createDeleteUserAccountHandler, RETAINED_CATEGORIES } = require('./accountDeletion');
+const { closeTronClassOwner } = require('./tronClassAccountLifecycle');
+
+const bindingPath = (owner) => `_tronClassBindings/${createHash('sha256').update(owner).digest('hex')}`;
 
 function isDeleteSentinel(value) {
   return Boolean(value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete()));
@@ -26,6 +30,7 @@ function store(seed = []) {
   const docs = new Map(seed);
   const operations = [];
   let failure;
+  let afterQuery;
   function check(operation, path) {
     operations.push([operation, path]);
     if (failure?.[0] === operation && failure[1] === path) {
@@ -89,7 +94,9 @@ function store(seed = []) {
       startAfter: (cursor) => query(path, { ...options, cursor: cursor.ref.path }),
       get: async () => {
         check('query', path);
-        return results(value);
+        const result = results(value);
+        if (afterQuery) afterQuery(path, result);
+        return result;
       },
       listDocuments: async () => {
         check('listDocuments', path);
@@ -165,6 +172,7 @@ function store(seed = []) {
     fail: (operation, path) => {
       failure = [operation, path];
     },
+    afterQuery: (visit) => { afterQuery = visit; },
     handler: createDeleteUserAccountHandler({ db, auth, now: () => NOW }),
   };
 }
@@ -229,6 +237,7 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
   expect([...state.docs.keys()].sort()).toEqual([
     '_puSessions/bob',
     '_studentCardPresentations/bob',
+    bindingPath('firebase:alice'),
     'notifications/bob',
     'users/alice',
     'users/bob/private/one',
@@ -240,6 +249,73 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
     deletedAt: expect.anything(),
   });
   expect(state.operations.at(-1)).toEqual(['deleteAuth', 'alice']);
+});
+
+test('closes the independent LMS barrier, erases paginated private operations and retains only opaque blocking slots', async () => {
+  const ownerKey = 'firebase:alice';
+  const seed = [
+    ['users/alice', { name: 'Private name' }],
+    [bindingPath(ownerKey), { ownerKey, revision: 'a'.repeat(32), state: 'connected', sealedCookies: 'secret-cookies', purgeAt: new Date(NOW + 1000) }],
+    [bindingPath('firebase:bob'), { ownerKey: 'firebase:bob', state: 'connected', sealedCookies: 'bob-secret' }],
+    ['_tronClassLoginAttempts/alice', { ownerKey, scope: 'owner', timestamps: [NOW] }],
+    ['_tronClassLoginAttempts/shared', { scope: 'account', timestamps: [NOW], purgeAt: new Date(NOW + 900000) }],
+    ['_tronClassLoginAttempts/bob', { ownerKey: 'firebase:bob', scope: 'owner', timestamps: [NOW] }],
+    ['_tronClassSubmissionOperations/bob', { ownerKey: 'firebase:bob', receipt: { content: 'keep' } }],
+    ['_tronClassSubmissionLocks/unsent', { ownerKey, state: 'not-sent', studentId: 1 }],
+    ['_tronClassSubmissionLocks/bob', { ownerKey: 'firebase:bob', state: 'unknown', studentId: 2 }],
+  ];
+  for (const kind of ['submitting', 'unknown', 'submitted']) {
+    seed.push([`_tronClassSubmissionLocks/${kind}`, { ownerKey, state: kind, studentId: 1, courseId: 2, operationId: 'private-operation' }]);
+  }
+  for (let index = 0; index < 205; index++) {
+    seed.push([`_tronClassSubmissionOperations/${index}`, { ownerKey, state: 'unknown', files: [{ name: 'private.pdf' }], receipt: { content: 'private-work' } }]);
+  }
+  const state = store(seed);
+  await state.handler(request());
+  const barrier = state.docs.get(bindingPath(ownerKey));
+  expect(barrier).toEqual({ schoolId: 'pu', state: 'closed', ownerHash: createHash('sha256').update(ownerKey).digest('hex'),
+    revision: expect.stringMatching(/^[a-f0-9]{32}$/), updatedAt: NOW });
+  expect([...state.docs].filter(([path]) => path.startsWith('_tronClassSubmissionOperations/')))
+    .toEqual([['_tronClassSubmissionOperations/bob', { ownerKey: 'firebase:bob', receipt: { content: 'keep' } }]]);
+  expect(state.docs.has('_tronClassLoginAttempts/alice')).toBe(false);
+  expect(state.docs.get('_tronClassLoginAttempts/shared').timestamps).toEqual([NOW]);
+  expect(state.docs.has('_tronClassLoginAttempts/bob')).toBe(true);
+  expect(state.docs.has('_tronClassSubmissionLocks/unsent')).toBe(false);
+  for (const kind of ['submitting', 'unknown', 'submitted']) {
+    expect(state.docs.get(`_tronClassSubmissionLocks/${kind}`)).toEqual({ version: 1, state: 'owner-deleted', updatedAt: NOW });
+  }
+  expect(state.docs.get('_tronClassSubmissionLocks/bob').ownerKey).toBe('firebase:bob');
+  expect(state.docs.get(bindingPath('firebase:bob')).sealedCookies).toBe('bob-secret');
+  await state.handler(request());
+  expect(state.docs.get(bindingPath(ownerKey))).toEqual(barrier);
+});
+
+test('does not release a shared slot acquired by another owner after the cleanup query', async () => {
+  const ownerKey = 'platform:pa_alice';
+  const path = '_tronClassSubmissionLocks/shared';
+  const state = store([[path, { ownerKey, state: 'not-sent' }]]);
+  state.afterQuery((collection) => {
+    if (collection === '_tronClassSubmissionLocks') {
+      state.docs.set(path, { ownerKey: 'platform:pa_bob', state: 'submitting', operationId: 'bobs-request' });
+    }
+  });
+  await closeTronClassOwner({ db: state.db, ownerKey, now: () => NOW });
+  expect(state.docs.get(path)).toEqual({ ownerKey: 'platform:pa_bob', state: 'submitting', operationId: 'bobs-request' });
+  expect(state.docs.get(bindingPath(ownerKey)).state).toBe('closed');
+});
+
+test('keeps a credential-free closure barrier after a cleanup failure and finishes on retry', async () => {
+  const state = store([
+    ['users/alice', { name: 'Private name' }],
+    ['_tronClassSubmissionOperations/one', { ownerKey: 'firebase:alice', receipt: { content: 'private-work' } }],
+  ]);
+  state.fail('query', '_tronClassSubmissionOperations');
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect(state.docs.get(bindingPath('firebase:alice')).state).toBe('closed');
+  await state.handler(request());
+  expect(state.docs.has('_tronClassSubmissionOperations/one')).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
 });
 
 test('scans full-path membership pages, maintains counters and ignores noncanonical same-ID documents', async () => {

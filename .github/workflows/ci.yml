@@ -194,6 +194,9 @@ jobs:
       - name: Test platform public Agent admission contracts
         run: node scripts/test-platform-public-agent.mjs
 
+      - name: Test offline TronClass contract report privacy
+        run: node --test scripts/tronclass/analyze-har.test.mjs
+
   test-mobile:
     name: Mobile Tests
     runs-on: ubuntu-latest
