@@ -67,6 +67,29 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('accepts unambiguous, spelled-out OSM metre aliases without guessing other units', () => {
+    // The OSM units guide discourages these aliases but defines them as metres.
+    // A tagged building must not disappear solely due to an unambiguous alias.
+    for (const height of ['18 metre', '18 metres', '18 meter', '18 meters']) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height })],
+      });
+      expect(buildings, height).toHaveLength(1);
+      expect(buildings[0], height).toMatchObject({
+        poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag',
+      });
+      expect(parseProvidenceFootprintResponse({
+        schoolId: 'pu', buildings,
+      }), height).toEqual(buildings);
+    }
+    for (const height of ['18metres', '18meters', '18 kilometres', '18 km',
+      '18 centimetres', '18 metres approx', '18 metres;20 metres']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', height })],
+      }), height).toEqual([]);
+    }
+  });
+
   it('converts unambiguous OSM feet and inches without inventing a height', () => {
     // OSM's ft/in convention: 1 foot is exactly 0.3048 metres;
     // 1 inch is exactly 0.0254 metres. No levels-based estimates.
