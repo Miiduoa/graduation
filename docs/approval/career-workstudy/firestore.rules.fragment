@@ -1,0 +1,19 @@
+// Review-only fragment. Not referenced by firebase.json or any release script.
+// Insert ONLY after approval into schools/{schoolId}; no client writes.
+function careerReviewer(schoolId) {
+  return isSchoolMember(schoolId) && (
+    hasRole(schoolId, 'admin') || (
+      exists(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)) &&
+      get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)).data.status == 'active' &&
+      get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)).data.get('career_staff', false) == true
+    )
+  );
+}
+match /careerOpportunities/{opportunityId} {
+  allow read: if resource.data.published == true || careerReviewer(schoolId);
+  allow write: if false;
+}
+match /careerApplications/{applicationId} {
+  allow read: if isSignedIn() && (resource.data.uid == request.auth.uid || careerReviewer(schoolId));
+  allow write: if false;
+}

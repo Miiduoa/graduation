@@ -22,6 +22,15 @@ type LifeService = {
 
 const ITEMS: LifeService[] = [
   {
+    href: '/career',
+    title: '職涯',
+    text: '查看職涯截止日、校方公告與附近職缺來源。',
+    action: '看職涯',
+    icon: 'calendar',
+    group: 'public',
+    keywords: '職涯 校內工讀 實習 學分 校園徵才 就業 career internship',
+  },
+  {
     href: '/map',
     title: '校園地圖',
     text: '找教室、行政單位和地點。',
