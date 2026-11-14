@@ -18,6 +18,7 @@ it('uses existing callable envelopes and supplied auth headers without storing c
   expect((await service.load('student')).opportunities).toHaveLength(1);
   expect(fetcher).toHaveBeenCalledWith('/_fn/careerWorkstudy', {
     method: 'POST',
+    signal: expect.any(AbortSignal),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data: { action: 'list', audience: 'student', schoolId: 'pu' } }),
   });

@@ -106,3 +106,12 @@ pnpm exec firebase emulators:exec --config firebase.career-emulator.json --proje
 - 網頁相關測試 7 個檔案、187 項通過；手機相關測試 3 個套件、24 項通過。兩端 `tsconfig.career.json` typecheck、變更程式 ESLint 及 `git diff --check` 通過。
 - 本次僅修改此分線的元件、測試與本驗證紀錄，未修改登入、auth、session、ACL、Firestore 規則或 migration，也未修改原先隔離的 handler／規則片段。未新增依賴、未更動 node_modules symlink，未建立測試暫存檔。
 - 執行環境 Node 24.22.1 仍有專案指定 Node 20／22 的版本警告；上述檢查均通過。
+
+## v191 隔離元件讀取競態後續修正
+
+- 兩端讀取共用單一進行中任務，訂閱、輪詢及手動更新合併為至多一次待更新；保留 generation 檢查。寫入優先時中止舊讀取，卸載／換學校、帳號或 audience 時中止請求並清除待更新；手動課表讀取也會忽略卸載後結果。
+- 隔離 callable transport 新增可選 AbortSignal 與 timeoutMs，預設 15 秒逾時；逾時涵蓋 headers、fetch 與回覆解析，會中止 fetch 並回傳可重試的繁體中文錯誤，完成後清除計時器與監聽器。沒有新增依賴或正式入口接線。
+- 新增兩端讀取合併、換帳號／卸載取消、寫入中止懸置讀取，以及 shared transport 取消、預設／自訂逾時、headers 懸置取消回歸測試。網頁修改範圍 2 個檔案 24 項、手機元件 15 項通過；shared 與兩端職涯專用 typecheck、變更程式 ESLint 通過。未執行 emulator 或完整套件。
+- 已獲准修改 `careerTransport.test.ts`，fetch 參數斷言補上 `signal: expect.any(AbortSignal)`；取消、自訂／預設逾時及 headers 懸置取消已由 `careerWorkstudy.test.ts` 覆蓋，未重複新增。
+- 收尾重新執行指定網頁測試（`CareerWorkstudy`、`careerWorkstudy`、`careerWorkstudyPorts`、`careerTransport`）：4 個檔案、30 項全部通過；指定手機 `CareerWorkstudy` 測試：1 個套件、15 項全部通過。變更程式依各自 ESLint 設定檢查通過，`git diff --check` 通過。最初從根目錄檢查 web 時因該設定未載入 web 的 hooks 規則而失敗，改用 web 專屬設定後通過。
+- 未修改 #628／#629／#633 所屬檔案、handler、正式路由、隔離／模擬器測試、登入、規則或 migration；未接上正式入口。未安裝依賴或替換 node_modules symlink。測試環境 Node 24.22.1 仍有專案指定 Node 20／22 的版本警告。

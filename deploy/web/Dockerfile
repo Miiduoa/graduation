@@ -42,6 +42,10 @@ ENV NEXT_PUBLIC_DEFAULT_SCHOOL_ID=pu
 ENV NEXT_PUBLIC_ALLOW_LOCAL_MOCK_AUTH=false
 ENV NEXT_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS=false
 RUN node -e "for(const name of ['API_KEY','AUTH_DOMAIN','PROJECT_ID','STORAGE_BUCKET','MESSAGING_SENDER_ID','APP_ID'])if(!process.env['NEXT_PUBLIC_FIREBASE_'+name])throw new Error('Missing public Firebase build setting: '+name)"
+# Keep test-only imports out of the standalone production typecheck.
+RUN find apps/web -path '*/node_modules' -prune -o -type f \
+    \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.spec.ts' -o -name '*.spec.tsx' \) \
+    -exec rm -f {} +
 RUN pnpm --filter web build
 
 FROM base AS runtime
