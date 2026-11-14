@@ -1,3 +1,4 @@
+import type { CareerWorkstudyProps } from '../components/career/CareerWorkstudy';
 import { getDocFromServer } from 'firebase/firestore';
 import { loadPersonalTimetable } from '../services/personalTimetable';
 import { createCareerWorkstudyPorts } from '../components/career/careerWorkstudyPorts';
@@ -5,7 +6,12 @@ import { courses } from '../../../../packages/shared/testFixtures/careerWorkstud
 jest.mock('firebase/firestore', () => ({ getDocFromServer: jest.fn(), doc: jest.fn() }));
 jest.mock('../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('../services/personalTimetable', () => ({ loadPersonalTimetable: jest.fn() }));
-const load = () => createCareerWorkstudyPorts({ schoolId: 'pu', uid: 'student', transport: jest.fn() }).loadCourses();
+const load = () =>
+  createCareerWorkstudyPorts({
+    schoolId: 'pu',
+    uid: 'student',
+    transport: jest.fn(),
+  }).loadCourses();
 beforeEach(() => jest.resetAllMocks());
 test('missing cloud timetable stays unknown', async () => {
   (getDocFromServer as jest.Mock).mockResolvedValue({ exists: () => false });
@@ -19,11 +25,30 @@ test('cloud failure stays unknown even if the general loader has cached courses'
   expect(getDocFromServer).toHaveBeenCalledTimes(1);
   expect(loadPersonalTimetable).not.toHaveBeenCalled();
 });
-test.each([{ saved: [] }, { saved: courses }])('confirmed cloud courses are available only when nonempty (%j)', async ({ saved }) => {
-  (getDocFromServer as jest.Mock).mockResolvedValue({ exists: () => true, data: () => ({ schoolId: 'pu', courses: saved }) });
-  expect(await load()).toEqual(saved.length ? saved : null);
-});
+test.each([{ saved: [] }, { saved: courses }])(
+  'confirmed cloud courses are available only when nonempty (%j)',
+  async ({ saved }) => {
+    (getDocFromServer as jest.Mock).mockResolvedValue({
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', courses: saved }),
+    });
+    expect(await load()).toEqual(saved.length ? saved : null);
+  },
+);
 test('missing local timetable stays unknown', async () => {
   (loadPersonalTimetable as jest.Mock).mockResolvedValue({ courses: [] });
-  expect(await createCareerWorkstudyPorts({ schoolId: 'pu', uid: null, transport: jest.fn() }).loadCourses()).toBeNull();
+  expect(
+    await createCareerWorkstudyPorts({
+      schoolId: 'pu',
+      uid: null,
+      transport: jest.fn(),
+    }).loadCourses(),
+  ).toBeNull();
+});
+
+// Compile the actual adapter result against the component contract.
+const compatiblePorts: Pick<CareerWorkstudyProps, 'service' | 'loadCourses'> =
+  createCareerWorkstudyPorts({ schoolId: 'pu', uid: null, transport: jest.fn() });
+test('adapter satisfies the component ports contract', () => {
+  expect(compatiblePorts.loadCourses).toBeInstanceOf(Function);
 });

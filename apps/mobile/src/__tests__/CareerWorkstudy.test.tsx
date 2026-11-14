@@ -7,6 +7,7 @@ import { CareerWorkstudy } from '../components/career/CareerWorkstudy';
 import type {
   CareerCommand,
   WorkstudyService,
+  WorkstudySnapshot,
 } from '../../../../packages/shared/src/careerWorkstudy';
 import {
   application,
@@ -33,7 +34,12 @@ function setup(
     execute: jest.fn(async (command: Exclude<CareerCommand, { action: 'list' }>) => {
       if (command.action === 'apply') data.applications = [application];
       if (command.action === 'review')
-        data.applications = [{ ...application, state: command.state, message: command.message ?? application.message }];
+        data.applications = data.applications.map((a) => ({
+          ...a,
+          revision: a.revision + 1,
+          state: command.state,
+          message: command.message ?? a.message,
+        }));
       return { id: application.id };
     }),
     subscribe: jest.fn((_audience, callback) => {
@@ -194,17 +200,65 @@ test('ops sees source choices and audits, without a career-off switch or student
   expect(view.queryByText('聯絡方式')).toBeNull();
 });
 
-test.each([false, true])('reopened staff workbench preserves replies unless explicitly cleared (%s)', async (clear) => {
-  const { view, data, service, changed } = setup('staff');
-  await view.findByRole('button', { name: '新增機會' });
-  data.applications = [{ ...application, state: 'interview', message: '12/1 職產處，請洽承辦' }];
-  await act(async () => changed());
-  fireEvent.press(view.getByRole('button', { name: '申請' }));
-  await view.findByText('單位回覆：12/1 職產處，請洽承辦');
-  if (clear) fireEvent.press(view.getByRole('button', { name: '清除回覆（隨狀態更新儲存）' }));
-  fireEvent.press(view.getByRole('button', { name: '改為錄取' }));
-  await waitFor(() => expect(service.execute).toHaveBeenCalledWith({
-    action: 'review', applicationId: application.id, revision: application.revision,
-    state: 'accepted', ...(clear ? { message: '' } : {}),
-  }));
-});
+test.each([false, true])(
+  'reopened staff workbench preserves replies unless explicitly cleared (%s)',
+  async (clear) => {
+    const { view, data, service, changed } = setup('staff');
+    await view.findByRole('button', { name: '新增機會' });
+    data.applications = [{ ...application, state: 'interview', message: '12/1 職產處，請洽承辦' }];
+    await act(async () => changed());
+    fireEvent.press(view.getByRole('button', { name: '申請' }));
+    await view.findByText('單位回覆：12/1 職產處，請洽承辦');
+    if (clear) fireEvent.press(view.getByRole('button', { name: '清除回覆（隨狀態更新儲存）' }));
+    fireEvent.press(view.getByRole('button', { name: '改為錄取' }));
+    await waitFor(() =>
+      expect(service.execute).toHaveBeenCalledWith({
+        action: 'review',
+        applicationId: application.id,
+        revision: application.revision,
+        state: 'accepted',
+        ...(clear ? { message: '' } : {}),
+      }),
+    );
+  },
+);
+
+test.each([false, true])(
+  'remote updates cannot submit a stale reply draft (saved: %s)',
+  async (save) => {
+    const { view, data, service, changed } = setup('staff');
+    data.applications = [{ ...application, state: 'read' }];
+    await view.findByRole('button', { name: '新增機會' });
+    fireEvent.press(view.getByRole('button', { name: '申請' }));
+    fireEvent.changeText(view.getByLabelText(/給測試用工讀申請人的回覆/), '我的草稿');
+    if (save) {
+      fireEvent.press(view.getByRole('button', { name: '改為約面談' }));
+      await view.findByText('測試單位 · 約面談');
+      await waitFor(() => expect(view.queryByText('已儲存。')).toBeTruthy());
+    }
+    data.applications = [
+      { ...application, revision: 3, state: 'interview', message: '其他承辦的新回覆' },
+    ];
+    await act(async () => changed());
+    await view.findByText('單位回覆：其他承辦的新回覆');
+    if (!save) {
+      expect(
+        view.getByText('這筆申請已由其他承辦更新，請捨棄草稿並確認最新回覆後再操作。'),
+      ).toBeTruthy();
+      expect(view.getByRole('button', { name: '改為錄取' })).toBeDisabled();
+      fireEvent.press(view.getByRole('button', { name: '改為錄取' }));
+      expect(service.execute).not.toHaveBeenCalled();
+      fireEvent.press(view.getByRole('button', { name: '捨棄草稿，使用最新回覆' }));
+    }
+    expect(view.getByLabelText(/給測試用工讀申請人的回覆/)).toHaveProp('value', '其他承辦的新回覆');
+    fireEvent.press(view.getByRole('button', { name: '改為錄取' }));
+    await waitFor(() =>
+      expect(service.execute).toHaveBeenLastCalledWith({
+        action: 'review',
+        applicationId: application.id,
+        revision: 3,
+        state: 'accepted',
+      }),
+    );
+  },
+);

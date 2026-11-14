@@ -1,3 +1,4 @@
+import type { CareerWorkstudyProps } from './CareerWorkstudy';
 import { expect, test, vi } from 'vitest';
 import { loadPersonalTimetable } from '@/lib/timetable/store';
 import { createCareerWorkstudyPorts } from './careerWorkstudyPorts';
@@ -16,4 +17,11 @@ test('saved courses remain available for conflict checks', async () => {
 test('read failure propagates so the view shows unknown', async () => {
   vi.mocked(loadPersonalTimetable).mockRejectedValue(new Error('offline'));
   await expect(ports.loadCourses()).rejects.toThrow('offline');
+});
+
+// Compile the actual adapter result against the component contract.
+const compatiblePorts: Pick<CareerWorkstudyProps, 'service' | 'loadCourses'> =
+  createCareerWorkstudyPorts({ schoolId: 'pu', uid: null, transport: vi.fn() });
+test('adapter satisfies the component ports contract', () => {
+  expect(compatiblePorts.loadCourses).toBeInstanceOf(Function);
 });

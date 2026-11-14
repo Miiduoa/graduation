@@ -98,3 +98,11 @@ pnpm exec firebase emulators:exec --config firebase.career-emulator.json --proje
 - 新增兩端 adapter、重開承辦工作台保留／清除回覆，以及模擬器交易回歸測試。網頁 8 個檔案 185 項、手機 3 個套件 21 項、Firestore 模擬器 2 個檔案 26 項全部通過。網頁／手機職涯 typecheck、shared typecheck 及變更程式 ESLint 通過。
 - 本次未修改登入、session、ACL、Firestore 規則或 migration；只修正原先已隔離 handler 的回覆更新邏輯，既有隔離權限判斷及規則片段均未更動。未接入正式入口。
 - 執行環境為 Node 24.22.1，pnpm 提示專案指定 Node 20／22 的版本警告；上述檢查仍全部通過。
+
+## 第二輪審查修正
+
+- 修正兩項 P2，審查未列 P0／P1。兩端回覆草稿綁定開始編輯時的申請版本，成功儲存後移除；收到其他承辦的新版本時保留草稿、顯示衝突提示，須明確捨棄草稿並確認最新回覆後才能更新狀態，避免覆寫遠端回覆。
+- 兩端元件的課表 loader 型別接受 `null`，與實際 adapter 的未知課表語意一致；測試以真實 adapter 回傳型別檢查元件 ports 契約。
+- 網頁相關測試 7 個檔案、187 項通過；手機相關測試 3 個套件、24 項通過。兩端 `tsconfig.career.json` typecheck、變更程式 ESLint 及 `git diff --check` 通過。
+- 本次僅修改此分線的元件、測試與本驗證紀錄，未修改登入、auth、session、ACL、Firestore 規則或 migration，也未修改原先隔離的 handler／規則片段。未新增依賴、未更動 node_modules symlink，未建立測試暫存檔。
+- 執行環境 Node 24.22.1 仍有專案指定 Node 20／22 的版本警告；上述檢查均通過。

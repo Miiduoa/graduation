@@ -170,7 +170,7 @@ export type CareerWorkstudyProps = {
   /** Identity key must change on sign-out/account change. No auth/session code lives here. */
   ownerKey: string | null;
   service: WorkstudyService;
-  loadCourses: () => Promise<PersonalCourse[]>;
+  loadCourses: () => Promise<PersonalCourse[] | null>;
   onLogin: () => void;
   audience?: 'student' | 'staff' | 'ops';
   onCareerEvents: (filter: { category: 'career'; event?: CareerWorkbenchEvent }) => void;
@@ -202,7 +202,7 @@ function Workspace({
   const [draft, setDraft] = useState<CareerOpportunity | null>(null);
   const [slotsText, setSlotsText] = useState('');
   const [deadline, setDeadline] = useState('');
-  const [message, setMessage] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<Record<string, { value: string; revision: number }>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -270,6 +270,13 @@ function Workspace({
     try {
       await service.execute(command);
       if (!alive.current) return;
+      if (command.action === 'review') {
+        setMessage((previous) => {
+          const next = { ...previous };
+          delete next[command.applicationId];
+          return next;
+        });
+      }
       setSelected(null);
       setConfirmed(false);
       setDraft(null);
@@ -558,16 +565,42 @@ function Workspace({
                 <Box>
                   <Body>聯絡方式：{a.contact}</Body>
                   <Body>{a.introduction || '未填補充說明'}</Body>
+                  {message[a.id] !== undefined && message[a.id].revision !== a.revision && (
+                    <Box>
+                      <Body>這筆申請已由其他承辦更新，請捨棄草稿並確認最新回覆後再操作。</Body>
+                      <Button
+                        label="捨棄草稿，使用最新回覆"
+                        disabled={busy}
+                        onPress={() =>
+                          setMessage((previous) => {
+                            const next = { ...previous };
+                            delete next[a.id];
+                            return next;
+                          })
+                        }
+                      />
+                    </Box>
+                  )}
                   <Field
                     label={`給${a.opportunityTitle}申請人的回覆（面談請填時間、地點與聯絡人）`}
-                    value={message[a.id] ?? a.message}
-                    onChange={(value) => setMessage({ ...message, [a.id]: value })}
+                    value={message[a.id]?.value ?? a.message}
+                    onChange={(value) =>
+                      setMessage({
+                        ...message,
+                        [a.id]: { value, revision: message[a.id]?.revision ?? a.revision },
+                      })
+                    }
                     multiline
                   />
                   <Button
                     label="清除回覆（隨狀態更新儲存）"
-                    disabled={busy || !(message[a.id] ?? a.message)}
-                    onPress={() => setMessage({ ...message, [a.id]: '' })}
+                    disabled={busy || !(message[a.id]?.value ?? a.message)}
+                    onPress={() =>
+                      setMessage({
+                        ...message,
+                        [a.id]: { value: '', revision: message[a.id]?.revision ?? a.revision },
+                      })
+                    }
                   />
                   <Row>
                     {APPLICATION_STATES.filter((s) => transitionAllowed(a.state, s)).map(
@@ -576,7 +609,10 @@ function Workspace({
                           key={state}
                           label={`改為${APPLICATION_LABELS[state]}`}
                           disabled={
-                            busy || (state === 'interview' && !(message[a.id] ?? a.message).trim())
+                            busy ||
+                            (message[a.id] !== undefined &&
+                              message[a.id].revision !== a.revision) ||
+                            (state === 'interview' && !(message[a.id]?.value ?? a.message).trim())
                           }
                           onPress={() =>
                             void execute({
@@ -584,7 +620,9 @@ function Workspace({
                               applicationId: a.id,
                               revision: a.revision,
                               state,
-                              ...(message[a.id] !== undefined ? { message: message[a.id] } : {}),
+                              ...(message[a.id] !== undefined
+                                ? { message: message[a.id].value }
+                                : {}),
                             })
                           }
                         />
