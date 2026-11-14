@@ -348,3 +348,37 @@ test('a write cancels a hanging read before refreshing the saved snapshot', asyn
   expect(view.queryByText('讀取已取消')).toBeNull();
   expect(view.getByText('已儲存。')).toBeTruthy();
 });
+
+test.each(['success', 'failure'] as const)(
+  'a coalesced refresh ignores an old %s while the follow-up stays pending',
+  async (outcome) => {
+    const { view, service, changed } = setup();
+    await view.findByText('測試用工讀');
+    let finish!: (value: WorkstudySnapshot) => void;
+    let fail!: (reason: Error) => void;
+    vi.mocked(service.load)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            finish = resolve;
+            fail = reject;
+          }),
+      )
+      .mockImplementationOnce(() => new Promise<WorkstudySnapshot>(() => {}));
+    act(() => changed());
+    act(() => changed());
+    expect(service.load).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      if (outcome === 'success') {
+        finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
+      } else {
+        fail(new Error('過期讀取錯誤'));
+      }
+    });
+    expect(service.load).toHaveBeenCalledTimes(3);
+    expect(view.queryByText('過期讀取結果')).toBeNull();
+    expect(view.queryByText('過期讀取錯誤')).toBeNull();
+    expect(view.getByText('測試用工讀')).toBeTruthy();
+    view.unmount();
+  },
+);
