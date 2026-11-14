@@ -39,6 +39,55 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   return rows.some((row) => row.amount > 0) ? rows : null;
 }
 
+/**
+ * Only an explicitly percentage-labelled column containing literal 0–100%
+ * source values can be shown on a fixed 100% scale. Do not reinterpret raw
+ * scores, relative growth over 100%, dates, IDs or unit-bearing quantities.
+ */
+function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
+  if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
+  if (!/(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|[%％])/u.test(table.headers[1])) return null;
+  const rows: SourceValueRow[] = [];
+  const labels = new Set<string>();
+  for (const [label, original] of table.rows) {
+    if (!label?.trim() || !original ||
+        !/^(?:0|[1-9]\\d?|100)(?:\\.\\d{1,2})?[%％]$/u.test(original) ||
+        labels.has(label.trim())) return null;
+    const amount = Number(original.slice(0, -1));
+    if (!Number.isFinite(amount) || amount > 100) return null;
+    labels.add(label.trim());
+    rows.push({ label, original, amount });
+  }
+  return rows;
+}
+
+function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
+  const rows = sourcePercentRows(table);
+  if (!rows) return null;
+  return (
+    <details className={styles.sourceValueComparison}>
+      <summary>展開第 2 欄「{table.headers[1]}」的原文百分比（100% 滿格）</summary>
+      <p className={styles.note}>
+        僅顯示原表格明確標示的 0–100% 百分比，滿格固定為 100%，不是以最高一筆重新縮放。
+        不補值、不推斷成績好壞或圖像內容，請對照上方教材原文。
+      </p>
+      <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文百分比'}>
+        {rows.map((row) => (
+          <li key={row.label}>
+            <div className={styles.sourceValueRow}>
+              <span>{row.label}</span>
+              <span>{row.original}</span>
+            </div>
+            <meter min={0} max={100} value={row.amount}
+              aria-label={row.label + '：' + row.original}
+              aria-valuetext={row.original + '；滿格 100%'} />
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 /** Keep the original table visible; numeric bars are an opt-in derived view. */
 function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
   const rows = sourceValueRows(table);
@@ -100,6 +149,7 @@ export function StudySourceTables({ text }: { text: string }) {
             </tbody>
           </table>
           <StudySourceValueComparison table={table} />
+          <StudySourcePercentComparison table={table} />
         </div>
       ))}
     </section>

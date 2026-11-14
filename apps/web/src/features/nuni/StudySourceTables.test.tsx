@@ -681,3 +681,54 @@ it('reads the exact source numeric spelling, rather than inferring a percentage'
   expect(Array.from(container.querySelectorAll('meter')).map((bar) => bar.getAttribute('aria-valuetext')))
     .toEqual(['3.00；本欄最大值 3.00', '2.50；本欄最大值 3.00']);
 });
+
+it('visualizes exact source percentages on a fixed 100% scale without changing source cells', () => {
+  const material = [
+    '| 練習 | 完成率 |',
+    '| --- | --- |',
+    '| 資料庫 | 75% |',
+    '| 網路 | 0％ |',
+    '| 程式設計 | 100.00% |',
+  ].join('\\n');
+  const { container, rerender } = render(<StudySourceTables text={material} />);
+  expect(screen.getByText('展開第 2 欄「完成率」的原文百分比（100% 滿格）')).toBeTruthy();
+  expect(Array.from(container.querySelectorAll('meter')).map((meter) => ({
+    max: meter.getAttribute('max'),
+    value: meter.getAttribute('value'),
+    label: meter.getAttribute('aria-label'),
+    reading: meter.getAttribute('aria-valuetext'),
+  }))).toEqual([
+    { max: '100', value: '75', label: '資料庫：75%', reading: '75%；滿格 100%' },
+    { max: '100', value: '0', label: '網路：0％', reading: '0％；滿格 100%' },
+    { max: '100', value: '100', label: '程式設計：100.00%', reading: '100.00%；滿格 100%' },
+  ]);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['75%', '0％', '100.00%']);
+  rerender(<StudySourceTables text="這段文字沒有表格。" />);
+  expect(container.querySelector('meter')).toBeNull();
+});
+
+it('does not infer percentage charts from ambiguous headers or out-of-range source', () => {
+  const examples = [
+    { header: '分數', values: ['75%', '100%'] },
+    { header: '完成率', values: ['75', '100'] },
+    { header: '完成率', values: ['120%', '90%'] },
+    { header: '完成率', values: ['100.01%', '99%'] },
+    { header: '正確率', values: ['-1%', '25%'] },
+    { header: '出席率', values: ['50.123%', '75%'] },
+    { header: '通過率', values: ['50 %', '75%'] },
+    { header: '完成率', values: ['50%', '25 公斤'] },
+  ];
+  for (const { header, values } of examples) {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    unmount();
+  }
+  const repeated = ['| 項目 | 完成率 |', '| --- | --- |',
+    '| 甲 | 20% |', '| 甲 | 30% |'].join('\\n');
+  const { container } = render(<StudySourceTables text={repeated} />);
+  expect(container.querySelector('details')).toBeNull();
+});
