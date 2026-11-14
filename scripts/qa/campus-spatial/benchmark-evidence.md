@@ -10,6 +10,8 @@ CSV 欄位（**只有欄名，沒有實測數據**）：
 
 > scenario_id,repeat,product,task,school_id,device_id,os_version,network,setup_state,ground_truth_ref,ground_truth_date,tested_on,app_version,result,verified_target,steps,seconds,fps,visual_rating,evidence_ref
 
+- CSV 標題列須**恰好包含每個規定欄位一次**，不得重複欄名、插入未定義欄位，或在資料列末尾多塞儲存格；多出的值不得由 CSV 讀取器默默忽略。
+- repeat、steps、visual_rating 採**十進位整數字串**（例如 `1`、`4`），不接受 `1.0`、`1e0` 等易混淆寫法。大型重測編號保留整數精度，不會經過浮點數四捨五入而合併不同重測。
 - product：nuni、google-maps、apple-maps、providence-official、unitable。
 - task：building、classroom、route、accessibility、visual。
 - result：success、failure、unverified。教室未核對門口前不得把建築辨識成功算作教室成功。
