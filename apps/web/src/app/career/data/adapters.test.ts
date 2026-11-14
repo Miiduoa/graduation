@@ -114,6 +114,8 @@ it.each([
   '2026/12/8 徵才講座至隔日',
   '2026/12/8 起至次日實習說明會',
   '2026/12/8 講座到本月底',
+  '2026/12/8 講座迄12月9日',
+  '2026/12/8 實習講座到十八時',
   '2026/12/8 實習申請至本學期末',
   '2026/12/8 實習申請截止至另行通知',
 ])('keeps ambiguous title out of calendar timeline: %s', (title) => {
@@ -134,10 +136,26 @@ it.each([
 });
 it.each([
   ['2026/12/8 實習申請截止', '2026-12-08'],
+  ['2026/12/8 實習說明會，請提前報到', '2026-12-08'],
+  ['2026/12/8 實習說明會，請準時到場', '2026-12-08'],
+  ['2026/12/8 實習說明會，歡迎蒞臨指導', '2026-12-08'],
   ['實習申請至2026年12月8日截止', '2026-12-08'],
   ['公告：2026/12/8 校園徵才博覽會', '2026-12-08'],
 ])('accepts an explicit single event/deadline date: %s', (title, date) => {
   expect(careerTitleDate(title)).toBe(date);
+  expect(
+    careerTimeline(
+      [
+        {
+          title,
+          date: '2026-11-01',
+          url: 'https://cdif.pu.edu.tw/p/406-1102-1.php',
+          source: '職產處',
+        },
+      ],
+      '2026-11-01',
+    ).map((item) => item.date),
+  ).toEqual([date]);
 });
 it.each(['取消', '延期', '延 後', '停辦', '改期', '取消通知'])(
   'suppresses the exact original event for a separate %s notice, regardless of input order',

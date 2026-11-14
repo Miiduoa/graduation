@@ -144,7 +144,13 @@ export function careerTitleDate(title: string) {
   // Textual endpoints (翌日、月底、學期末…) are ranges too. Without an
   // explicit end date, retain the announcement but do not invent a one-day event.
   const rangeEnd = after.normalize('NFKC').replace(/[\s\p{Cf}]/gu, '');
-  if (/(?:至|到|迄|翌日|隔日|次日|月底|月末|年底|年末|學期末|学期末)|[~～]/.test(rangeEnd))
+  // Range connectors must introduce an endpoint; ordinary words such as 報到
+  // and 到場 do not describe a second date.
+  if (
+    /(?:至|到|迄)(?:[0-9一二三四五六七八九十兩]+|活動結束|本?(?:日|週|周|月|年|學期|学期)(?:底|末|結束))|翌日|隔日|次日|月底|月末|年底|年末|學期末|学期末|[~～]/.test(
+      rangeEnd,
+    )
+  )
     return '';
   // A second date without a year, or a shortened range endpoint, is still
   // ambiguous. Never turn the first date into a single-day calendar event.
