@@ -2207,10 +2207,101 @@ describe('firestore security rules', () => {
     );
   });
 
+
+  test('lost-found contact reports reject cross-campus reads, forged owners and revoked access', async () => {
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active', role: 'student' });
+      }
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'ncku' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active', role: 'student' });
+      // Simulate a stale old-school membership after campus transfer.
+      await db.doc('schools/pu/members/mallory').set({ status: 'active', role: 'student' });
+      await db.doc('schools/pu/lostFound/p1').set({
+        schoolId: 'pu', userId: 'alice', reporterId: 'alice', contactInfo: 'private-pu-phone',
+      });
+      await db.doc('schools/ncku/lostFound/n1').set({
+        schoolId: 'ncku', userId: 'mallory', contactInfo: 'private-ncku-phone',
+      });
+      await db.doc('lostFoundItems/old-pu').set({
+        schoolId: 'pu', userId: 'alice', contactInfo: 'legacy-pu-phone',
+      });
+      await db.doc('lostFoundItems/old-ncku').set({
+        schoolId: 'ncku', userId: 'mallory', contactInfo: 'legacy-ncku-phone',
+      });
+      await db.doc('lostFoundItems/no-school').set({
+        userId: 'alice', contactInfo: 'orphaned-contact',
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(alice.doc('schools/pu/lostFound/p1').get());
+    await assertSucceeds(bob.doc('schools/pu/lostFound/p1').get());
+    await assertSucceeds(alice.collection('schools/pu/lostFound').get());
+    await assertSucceeds(alice.doc('lostFoundItems/old-pu').get());
+    await assertSucceeds(alice.collection('lostFoundItems').where('schoolId', '==', 'pu').get());
+    await assertSucceeds(mallory.collection('lostFoundItems').where('schoolId', '==', 'ncku').get());
+
+    await assertFails(mallory.doc('schools/pu/lostFound/p1').get());
+    await assertFails(mallory.collection('schools/pu/lostFound').get());
+    await assertFails(alice.doc('schools/ncku/lostFound/n1').get());
+    await assertFails(mallory.doc('lostFoundItems/old-pu').get());
+    await assertFails(alice.doc('lostFoundItems/old-ncku').get());
+    await assertFails(alice.doc('lostFoundItems/no-school').get());
+    await assertFails(alice.collection('lostFoundItems').get());
+    await assertFails(mallory.collection('lostFoundItems').where('schoolId', '==', 'pu').get());
+    await assertFails(guest.doc('schools/pu/lostFound/p1').get());
+
+    const report = { schoolId: 'pu', userId: 'alice', reporterId: 'alice', title: 'Notebook' };
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').set(report));
+    await assertSucceeds(alice.doc('lostFoundItems/new').set(report));
+    await assertFails(mallory.doc('schools/pu/lostFound/outside').set({
+      ...report, userId: 'mallory', reporterId: 'mallory',
+    }));
+    await assertFails(alice.doc('schools/ncku/lostFound/outside').set(report));
+    await assertFails(alice.doc('schools/pu/lostFound/impersonate').set({ ...report, userId: 'bob' }));
+    await assertFails(alice.doc('lostFoundItems/other-campus').set({ ...report, schoolId: 'ncku' }));
+    await assertFails(alice.doc('schools/pu/lostFound/new').update({ userId: 'bob' }));
+    await assertFails(alice.doc('schools/pu/lostFound/new').update({ reporterId: 'bob' }));
+    await assertFails(alice.doc('schools/pu/lostFound/new').update({ schoolId: 'ncku' }));
+    await assertFails(alice.doc('lostFoundItems/new').update({ userId: 'bob' }));
+    await assertFails(alice.doc('lostFoundItems/new').update({ schoolId: 'ncku' }));
+    await assertFails(bob.doc('schools/pu/lostFound/new').delete());
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').update({ title: 'Updated notebook' }));
+    await assertSucceeds(alice.doc('lostFoundItems/new').update({ title: 'Updated notebook' }));
+
+    // Same SDK token must stop working immediately when enrolment is revoked.
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc('schools/pu/lostFound/new').get());
+    await assertFails(alice.doc('lostFoundItems/new').get());
+    await assertFails(alice.doc('schools/pu/lostFound/new').delete());
+    await assertFails(alice.doc('lostFoundItems/new').update({ title: 'Replay' }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('users/alice').update({ schoolId: 'ncku' });
+    });
+    await assertFails(alice.doc('schools/pu/lostFound/new').get());
+    await assertFails(alice.collection('lostFoundItems').where('schoolId', '==', 'pu').get());
+    await seedFirestore(async (db) => db.doc('users/alice').update({ schoolId: 'pu' }));
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').get());
+    await assertSucceeds(alice.doc('lostFoundItems/new').delete());
+    await assertSucceeds(alice.doc('schools/pu/lostFound/new').delete());
+  });
+
   test('guests can read campus announcements but not lost-and-found or reviews', async () => {
     await seedFirestore(async (db) => {
       const school = db.collection('schools').doc('pu');
       await school.set({ name: '靜宜大學' });
+      await db.doc('users/alice').set({ status: 'active', schoolId: 'pu' });
+      await school.collection('members').doc('alice').set({ status: 'active', role: 'student' });
       await school.collection('announcements').doc('notice-1').set({
         title: '停課通知',
         schoolId: 'pu',
@@ -2259,6 +2350,7 @@ describe('firestore security rules', () => {
       await db.collection('courses').doc('cs101').set({ name: '程式設計' });
       await db.collection('lostFoundItems').doc('item-2').set({
         userId: 'alice',
+        schoolId: 'pu',
         title: '雨傘',
       });
       await db.collection('menuRatings').doc('rate-1').set({

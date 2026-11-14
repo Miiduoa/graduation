@@ -743,3 +743,16 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增 `backend/tests/security-rules.test.js` Firebase Emulator 合成回歸：本人與另一帳號各自合法 GET、跨帳號／跨校／匿名讀取拒絕、無條件與過濾查詢 list 拒絕、本人追蹤／取消後復原、他人冒刪／冒寫拒絕。**本輪原始碼與測試完成並不代表新 head CI 已通過**，須重新核對精確提交 Rules、主 CI、CodeQL 與相容性。此修補不回收先前已被下載的追蹤資料，也不處理尚未解除的群組未發布父貼文 get/list、已發 GCS/Supabase URL 撤銷、真隔離 Storage 競態、歷史可信附件引用、minimatch 雙鎖檔及正式發布回復驗證。
 
 沿用資安 Draft PR，不觸碰主線、正式資料／憑證／token／migration、部署、E 校園，也不重新執行未取得授權的 npm/pnpm audit；指定 nuni-merge-gate App 5504170 對精確 head 的「審查通過」仍是主線合併必要條件。
+
+
+## 2026-11-15：失物招領聯絡資料跨校讀取及冒名欄位修補（PR #577）
+
+前一精確 head `8a8a3a6d430590d290fa7f8c6099dbde087bcf12` 的 [主 CI #43620085955](https://github.com/Miiduoa/graduation/actions/runs/43620085955)、[CodeQL #43620085873](https://github.com/Miiduoa/graduation/actions/runs/43620085873) 與 [Course access #43620085884](https://github.com/Miiduoa/graduation/actions/runs/43620085884) 均已 completed/success；Firestore 333/333、Web emulator 51/51。此前結果不可冒充本輪新提交的驗證。指定 App 5504170 無精確 head APPROVED，reviews 與 unresolved threads 均為 0；Supabase permissions、Python security、Mobile Agent Regression 與 Maestro 沒有這個父 head 的獨立觸發證據。
+
+可利用邊界：`schools/{schoolId}/lostFound/{docId}` 與全域舊集合 `lostFoundItems/{docId}` 原本允許任意已登入帳號讀取或列舉，不要求目前校籍，可能跨校讀到 `contactInfo` 等當事人聯絡資訊；前端學校過濾擋不住直接 SDK。原 create/update 也未對路徑校籍或新 `userId/reporterId/schoolId` 欄位保持一致。沒有正式站曾遭利用的證據。
+
+開發分支最小修補：兩條路徑讀寫改用 `isCurrentSchoolMember`（active membership + canonical `users/{uid}.schoolId`），拒絕停權、退學、跨校以及保留舊 membership 的轉校帳號。新資料必須屬於本人、正確校園，現有資料 update 不得改寫作者、報告者或校園。全域舊集合以文件 `schoolId` 定界，Web 與 Mobile 已採 `where('schoolId','==',schoolId)`；不帶學校條件的查詢不應通過。無 `schoolId` 的舊文件 fail-closed，需依正式資料盤點與受控修復流程處理，不執行即時 migration。
+
+已將合成 Firebase Emulator 回歸加入 `backend/tests/security-rules.test.js`，涵蓋同校 GET/list、Web/Mobile 舊集合限定查詢、跨帳號/跨校、匿名、缺校園文件、跨校或冒名建立、owner/reporter/school 欄位竄改、正常改名/刪除、資格撤銷後相同 token 重放、殘留校籍與恢復。已補正既有訪客案例的合法 synthetic 校籍及歷史 `schoolId` fixture。**本輪新增測試仍須在新精確 head CI 實際跑完後，才能標記隔離驗證通過**；不能用掃描綠燈替代。
+
+仍未完成未發布群組父貼文 Firestore read/list 及 Web/Mobile feed 相容性、GCS/Supabase 已發 URL 撤銷、真隔離 Storage CAS／競態、歷史附件引用、minimatch 雙鎖檔相容、最新 main 整合與正式發布／回復驗收。保持 PR Draft，無指定 App 5504170 核可不得合併。沒有操作正式資料、金鑰、token、migration、部署、E 校園連線，也未重送受限制的 npm/pnpm audit。
