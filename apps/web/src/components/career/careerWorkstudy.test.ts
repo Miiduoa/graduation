@@ -30,6 +30,7 @@ describe('work-study conflicts use the actual school period table', () => {
   it('does not invent free time when course data or school times are unknown', () => {
     expect(workstudyConflicts('unknown', [], courses).known).toBe(false);
     expect(workstudyConflicts('pu', [], null).known).toBe(false);
+    expect(workstudyConflicts('pu', [], []).known).toBe(false);
     expect(workstudyConflicts('pu', [], [{ ...courses[0], day: 0 }]).known).toBe(false);
     expect(workstudyConflicts('pu', [], [{ ...courses[0], start: 30 }]).known).toBe(false);
   });

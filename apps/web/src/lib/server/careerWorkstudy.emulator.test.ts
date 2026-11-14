@@ -38,6 +38,18 @@ suite('career transactions against the real Firestore emulator', () => {
     await db.doc('schools/pu/serviceRoles/staff').set({ status: 'active', career_staff: true });
     await db.doc(`schools/pu/careerOpportunities/${opportunity.id}`).set(opportunity);
   });
+  it.each([false, true])('preserves an omitted reply and only clears an explicit empty reply (%s)', async (clear) => {
+    const created = await command('student', apply());
+    const ref = db.doc(`schools/pu/careerApplications/${created.id}`);
+    await ref.update({ state: 'interview', message: '12/1 職產處，請洽承辦' });
+    await command('staff', {
+      action: 'review', applicationId: created.id!, revision: 1, state: 'accepted',
+      ...(clear ? { message: '' } : {}),
+    });
+    expect((await ref.get()).data()).toMatchObject({
+      state: 'accepted', message: clear ? '' : '12/1 職產處，請洽承辦', revision: 2,
+    });
+  });
   it('runs service -> apply -> review -> refreshed student receipt; retains exact confirmed rights', async () => {
     const student = createWorkstudyService('pu', (schoolId, data) =>
       handler({ auth: { uid: 'student' }, data: { ...data, schoolId } }),

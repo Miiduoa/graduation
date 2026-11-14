@@ -560,9 +560,14 @@ function Workspace({
                   <Body>{a.introduction || '未填補充說明'}</Body>
                   <Field
                     label={`給${a.opportunityTitle}申請人的回覆（面談請填時間、地點與聯絡人）`}
-                    value={message[a.id] ?? ''}
+                    value={message[a.id] ?? a.message}
                     onChange={(value) => setMessage({ ...message, [a.id]: value })}
                     multiline
+                  />
+                  <Button
+                    label="清除回覆（隨狀態更新儲存）"
+                    disabled={busy || !(message[a.id] ?? a.message)}
+                    onPress={() => setMessage({ ...message, [a.id]: '' })}
                   />
                   <Row>
                     {APPLICATION_STATES.filter((s) => transitionAllowed(a.state, s)).map(
@@ -570,14 +575,16 @@ function Workspace({
                         <Button
                           key={state}
                           label={`改為${APPLICATION_LABELS[state]}`}
-                          disabled={busy || (state === 'interview' && !message[a.id]?.trim())}
+                          disabled={
+                            busy || (state === 'interview' && !(message[a.id] ?? a.message).trim())
+                          }
                           onPress={() =>
                             void execute({
                               action: 'review',
                               applicationId: a.id,
                               revision: a.revision,
                               state,
-                              message: message[a.id] ?? '',
+                              ...(message[a.id] !== undefined ? { message: message[a.id] } : {}),
                             })
                           }
                         />

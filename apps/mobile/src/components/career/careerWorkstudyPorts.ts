@@ -1,5 +1,7 @@
 /** Approval-isolated adapters: no production screen imports this module. */
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDocFromServer, onSnapshot, query, where } from 'firebase/firestore';
+import { cleanCourses } from '@campus/shared';
+import { toPublicSchoolId } from '../../data/schoolIds';
 import { getDb } from '../../firebase';
 import { loadPersonalTimetable } from '../../services/personalTimetable';
 import {
@@ -43,6 +45,29 @@ export function createCareerWorkstudyPorts({
   };
   return {
     service,
-    loadCourses: async () => (await loadPersonalTimetable(uid, schoolId, localOwner)).courses,
+    // The general loader silently falls back to cached data on cloud errors.
+    // Conflict checks need a confirmed read, so keep that fallback out of this adapter.
+    loadCourses: async () => {
+      try {
+        if (!uid || localOwner) {
+          const { courses } = await loadPersonalTimetable(uid, schoolId, localOwner);
+          return courses.length ? courses : null;
+        }
+        const canonical = toPublicSchoolId(schoolId) ?? schoolId;
+        const db = getDb();
+        let snap = await getDocFromServer(
+          doc(db, 'users', uid, 'schools', canonical, 'personalTimetable', 'current'),
+        );
+        if (!snap.exists())
+          snap = await getDocFromServer(doc(db, 'users', uid, 'personalTimetable', 'current'));
+        if (!snap.exists()) return null;
+        const data = snap.data();
+        if ((toPublicSchoolId(data.schoolId) ?? data.schoolId) !== canonical) return null;
+        const courses = cleanCourses(data.courses);
+        return courses.length ? courses : null;
+      } catch {
+        return null;
+      }
+    },
   };
 }

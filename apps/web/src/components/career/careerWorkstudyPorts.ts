@@ -40,6 +40,9 @@ export function createCareerWorkstudyPorts({
   };
   return {
     service,
-    loadCourses: async () => (await loadPersonalTimetable(uid, schoolId, localOwner)).courses,
+    loadCourses: async () => {
+      const { courses } = await loadPersonalTimetable(uid, schoolId, localOwner);
+      return courses.length ? courses : null;
+    },
   };
 }

@@ -289,7 +289,11 @@ export function createCareerWorkstudyHandlers({
         if (command.revision !== app.revision) fail('aborted', '其他承辦已更新，請重新整理。');
         if (!transitionAllowed(app.state, command.state))
           fail('failed-precondition', '請依申請順序更新狀態。');
-        const message = text(command.message, 1000, command.state === 'interview');
+        const message = text(
+          command.message === undefined ? app.message : command.message,
+          1000,
+          command.state === 'interview',
+        );
         tx.update(ref, {
           state: command.state,
           message,

@@ -33,7 +33,7 @@ function setup(
     execute: jest.fn(async (command: Exclude<CareerCommand, { action: 'list' }>) => {
       if (command.action === 'apply') data.applications = [application];
       if (command.action === 'review')
-        data.applications = [{ ...application, state: command.state, message: command.message }];
+        data.applications = [{ ...application, state: command.state, message: command.message ?? application.message }];
       return { id: application.id };
     }),
     subscribe: jest.fn((_audience, callback) => {
@@ -192,4 +192,19 @@ test('ops sees source choices and audits, without a career-off switch or student
   );
   expect(view.queryByText('關閉職涯')).toBeNull();
   expect(view.queryByText('聯絡方式')).toBeNull();
+});
+
+test.each([false, true])('reopened staff workbench preserves replies unless explicitly cleared (%s)', async (clear) => {
+  const { view, data, service, changed } = setup('staff');
+  await view.findByRole('button', { name: '新增機會' });
+  data.applications = [{ ...application, state: 'interview', message: '12/1 職產處，請洽承辦' }];
+  await act(async () => changed());
+  fireEvent.press(view.getByRole('button', { name: '申請' }));
+  await view.findByText('單位回覆：12/1 職產處，請洽承辦');
+  if (clear) fireEvent.press(view.getByRole('button', { name: '清除回覆（隨狀態更新儲存）' }));
+  fireEvent.press(view.getByRole('button', { name: '改為錄取' }));
+  await waitFor(() => expect(service.execute).toHaveBeenCalledWith({
+    action: 'review', applicationId: application.id, revision: application.revision,
+    state: 'accepted', ...(clear ? { message: '' } : {}),
+  }));
 });

@@ -94,7 +94,8 @@ export type CareerCommand =
       applicationId: string;
       revision: number;
       state: ApplicationState;
-      message: string;
+      /** Omit to preserve the saved reply; an explicit empty string clears it. */
+      message?: string;
     }
   | { action: 'sources'; sources: CareerSources };
 export type CareerReply = { snapshot?: WorkstudySnapshot; id?: string };
@@ -142,7 +143,7 @@ export function workstudyConflicts(
   courses: PersonalCourse[] | null,
 ) {
   const profile = periodProfileForSchool(schoolId);
-  if (!profile || courses === null) return { known: false, names: [] as string[] };
+  if (!profile || !courses?.length) return { known: false, names: [] as string[] };
   const periods = periodSlots(profile);
   const names = new Set<string>();
   let known = true;

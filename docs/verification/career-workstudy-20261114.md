@@ -89,3 +89,12 @@ pnpm exec firebase emulators:exec --config firebase.career-emulator.json --proje
 - 真實 Firestore 模擬器交易與隔離規則：2 個檔案、24 項通過；測到併發重送、併發審查、撤銷承辦、跨校、權益版本、上下架、來源設定及既有職涯活動篩選。
 - 網頁、手機專用 typecheck 及 shared typecheck 通過；修改範圍的 web／mobile／shared ESLint 通過。
 - PR #627、#628、#629 的檔案範圍已透過 GitHub 查核；未修改其擁有的檔案。
+
+
+## 第一輪審查修正
+
+- 修正兩項 P2；審查未列 P0／P1。未建立或空課表回傳未知，不顯示「沒有衝堂」。手機職涯 adapter 對雲端課表使用伺服器確認讀取；讀取失敗回傳未知，不沿用一般課表 loader 的靜默快取 fallback。既有課表儲存模組未修改。
+- 狀態更新的 `message` 改為可省略，伺服器在同一交易內保留原回覆；兩端編輯欄帶入原值，只有編輯過才送出回覆，另提供明確清除按鈕（隨狀態更新儲存）。面談仍須有有效回覆。
+- 新增兩端 adapter、重開承辦工作台保留／清除回覆，以及模擬器交易回歸測試。網頁 8 個檔案 185 項、手機 3 個套件 21 項、Firestore 模擬器 2 個檔案 26 項全部通過。網頁／手機職涯 typecheck、shared typecheck 及變更程式 ESLint 通過。
+- 本次未修改登入、session、ACL、Firestore 規則或 migration；只修正原先已隔離 handler 的回覆更新邏輯，既有隔離權限判斷及規則片段均未更動。未接入正式入口。
+- 執行環境為 Node 24.22.1，pnpm 提示專案指定 Node 20／22 的版本警告；上述檢查仍全部通過。
