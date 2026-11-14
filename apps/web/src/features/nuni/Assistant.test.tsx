@@ -139,6 +139,22 @@ it('v2 opens a scoped service while the provider is unavailable and without mode
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 });
 
+it.each([1, 2])('opens the public career page without a model request or application in assistant version %i', async (version) => {
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version }));
+  vi.stubGlobal('fetch', fetch);
+  state.school = 'nthu';
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: '打開校內工讀頁' } });
+  fireEvent.click(screen.getByText('送出'));
+  const career = await screen.findByRole('link', { name: /開啟職涯/ });
+  expect(career.getAttribute('href')).toBe('/career?schoolId=nthu');
+  expect(career.textContent).toContain('申請請依原始公告另行辦理');
+  expect(screen.queryByText(/已(?:完成|申請|送出).*工讀|工讀申請成功/)).toBeNull();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(browserRequest).not.toHaveBeenCalled();
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
 function savePrivateLesson() {
   localStorage.setItem(personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' }), JSON.stringify({
     version: 1, records: [{ id: 'direct-class', kind: 'timetable', title: '實際資料庫課程',

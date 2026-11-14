@@ -11,6 +11,8 @@ import { Alert } from 'react-native';
 import { isRouteRegistered, resolveTabForRoute } from './routeRegistry';
 
 export interface SafeNavigateOptions {
+  /** 首次開啟跨分頁堆疊時，從首頁或目的頁開始；不重設已開啟的堆疊。 */
+  crossTabInitialRoute?: 'home' | 'destination';
   fallbackRoute?: string;
   fallbackParams?: Record<string, unknown>;
   /** 找不到 route 時顯示的提示文字；給 null 表示靜默 */
@@ -65,8 +67,13 @@ export function safeNavigate(
   if (targetTab) {
     try {
       // navigate('TabName', { screen: 'RouteName', params: {...} })
-      // 首次開啟分頁時先保留其首頁；已存在的 stack 沿用原來的狀態。
-      navigate(targetTab, { screen: route, params, initial: false });
+      // 預設保留分頁首頁；明確的往返任務可讓首次返回直接回到來源。
+      // 兩種模式都沿用已存在的 stack，不重設其路由、參數或返回順序。
+      navigate(targetTab, {
+        screen: route,
+        params,
+        initial: options.crossTabInitialRoute === 'destination',
+      });
       return true;
     } catch {
       // fallback
@@ -81,7 +88,7 @@ export function safeNavigate(
         navigate(fbTab, {
           screen: options.fallbackRoute,
           params: options.fallbackParams,
-          initial: false,
+          initial: options.crossTabInitialRoute === 'destination',
         });
       } else {
         navigate(options.fallbackRoute, options.fallbackParams);

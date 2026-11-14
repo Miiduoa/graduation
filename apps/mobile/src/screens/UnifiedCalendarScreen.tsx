@@ -45,6 +45,7 @@ export function UnifiedCalendarScreen(props: CalendarScreenProps) {
                       const destination = calendarScopeDestination('campus', scope.id);
                       if (destination) {
                         safeNavigate(props.navigation, destination, undefined, {
+                          crossTabInitialRoute: 'destination',
                           fallbackMessage: `「${scope.label}」目前無法開啟，請返回後再試一次。`,
                         });
                       }
@@ -68,7 +69,10 @@ export function UnifiedCalendarScreen(props: CalendarScreenProps) {
                 另外查看個人行程
               </Text>
               <Text style={styles.description}>自己新增或匯入的活動與考試，請開啟個人行事曆。</Text>
-              <PersonalImportSummary kind="events" />
+              <PersonalImportSummary
+                kind="events"
+                navigationOptions={{ crossTabInitialRoute: 'destination' }}
+              />
             </View>
           </View>
         }

@@ -1,4 +1,20 @@
-import { mobileAssistantServiceDestination, navigateMobileAssistantService } from '../../services/assistantServiceNavigation';
+import React from 'react';
+import { Button, Text } from 'react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import {
+  NavigationContainer,
+  createNavigationContainerRef,
+  useNavigation,
+} from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { RootTabParamList } from '../../app/rootNavigation';
+import {
+  mobileAssistantServiceDestination,
+  navigateMobileAssistantService,
+} from '../../services/assistantServiceNavigation';
+
+jest.mock('@react-navigation/native', () => jest.requireActual('@react-navigation/native'));
 
 function navigator(routes: string[]) {
   return { navigate: jest.fn(), getState: () => ({ routeNames: routes }) };
@@ -6,31 +22,148 @@ function navigator(routes: string[]) {
 
 test('platform assistant selects the actual public map and bus routes, not school-only aliases', () => {
   const nav = navigator(['Map', 'BusSchedule', 'NuniWorkspace']);
-  expect(mobileAssistantServiceDestination('map', 'platform', nav)).toEqual({ kind: 'native', route: 'Map' });
-  expect(mobileAssistantServiceDestination('bus', 'platform', nav)).toEqual({ kind: 'native', route: 'BusSchedule' });
+  expect(mobileAssistantServiceDestination('map', 'platform', nav)).toEqual({
+    kind: 'native',
+    route: 'Map',
+  });
+  expect(mobileAssistantServiceDestination('bus', 'platform', nav)).toEqual({
+    kind: 'native',
+    route: 'BusSchedule',
+  });
   expect(navigateMobileAssistantService('map', 'platform', nav)).toBe(true);
   expect(nav.navigate).toHaveBeenCalledWith('Map', undefined);
 });
 
 test.each([
-  ['classroom', 'courses'], ['attendance', 'courses'], ['cafeteria', 'food'],
-  ['orders', 'food'], ['merchant', 'merchant'], ['account', 'account'],
+  ['classroom', 'courses'],
+  ['attendance', 'courses'],
+  ['cafeteria', 'food'],
+  ['orders', 'food'],
+  ['merchant', 'merchant'],
+  ['account', 'account'],
 ])('platform %s keeps the existing nuni workspace %s tab and its authorization', (id, tab) => {
   const nav = navigator(['NuniWorkspace']);
   expect(navigateMobileAssistantService(id, 'platform', nav)).toBe(true);
   expect(nav.navigate).toHaveBeenCalledWith('NuniWorkspace', { tab });
 });
 
-test('a mounted school tab can be reached through its real parent navigator', () => {
-  const root = navigator(['Today', '學習', '校園', '訊息', '我的']);
-  const child = { ...navigator(['AIChat']), getParent: () => root };
-  expect(navigateMobileAssistantService('community', 'campus', child)).toBe(true);
-  expect(child.navigate).toHaveBeenCalledWith('訊息', {
-    initial: false,
-    screen: 'CampusSocialScreen',
-    params: undefined,
+test.each([
+  ['community', '訊息', 'CampusSocialScreen'],
+  ['career', '校園', 'Career'],
+])(
+  'the %s service reaches its registered parent tab with a return anchor',
+  (service, tab, screen) => {
+    const root = navigator(['Today', '學習', '校園', '訊息', '我的']);
+    const child = { ...navigator(['AIChat']), getParent: () => root };
+    expect(navigateMobileAssistantService(service, 'campus', child)).toBe(true);
+    expect(child.navigate).toHaveBeenCalledWith(tab, {
+      initial: false,
+      screen,
+      params: undefined,
+    });
+  },
+);
+
+test.each(['campus', 'platform', 'guest'] as const)(
+  'the public career service opens its mounted native page for %s',
+  (audience) => {
+    const nav = navigator(['Career', 'NuniWorkspace']);
+    expect(mobileAssistantServiceDestination('career', audience, nav)).toEqual({
+      kind: 'native',
+      route: 'Career',
+    });
+    expect(navigateMobileAssistantService('career', audience, nav)).toBe(true);
+    expect(nav.navigate).toHaveBeenCalledWith('Career', undefined);
+  },
+);
+
+test('opening career from the assistant initializes the actual life tab with a home to return to', async () => {
+  const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
+  const Home = createNativeStackNavigator<{ AIChat: undefined }, undefined>();
+  const Life = createNativeStackNavigator<
+    { CampusHome: undefined; Career: undefined },
+    undefined
+  >();
+  const navigation = createNavigationContainerRef<RootTabParamList>();
+  const onUnhandledAction = jest.fn();
+  const Screen = ({ route }: { route: { name: string } }) =>
+    React.createElement(Text, null, route.name);
+  const Assistant = () => {
+    const screenNavigation = useNavigation();
+    return React.createElement(Button, {
+      title: '開啟職涯',
+      onPress: () => navigateMobileAssistantService('career', 'campus', screenNavigation),
+    });
+  };
+  const HomeStack = () =>
+    React.createElement(Home.Navigator, {
+      id: undefined,
+      screenOptions: { headerShown: false },
+      children: React.createElement(Home.Screen, { name: 'AIChat', component: Assistant }),
+    });
+  const LifeStack = () =>
+    React.createElement(Life.Navigator, {
+      id: undefined,
+      initialRouteName: 'CampusHome',
+      screenOptions: { headerShown: false },
+      children: [
+        React.createElement(Life.Screen, {
+          key: 'CampusHome',
+          name: 'CampusHome',
+          component: Screen,
+        }),
+        React.createElement(Life.Screen, { key: 'Career', name: 'Career', component: Screen }),
+      ],
+    });
+  const view = render(
+    React.createElement(NavigationContainer, {
+      ref: navigation,
+      onUnhandledAction,
+      children: React.createElement(Tabs.Navigator, {
+        id: undefined,
+        screenOptions: { headerShown: false },
+        children: (['Today', '學習', '校園', '訊息', '我的'] as const).map((name) =>
+          React.createElement(Tabs.Screen, {
+            key: name,
+            name,
+            component: name === '校園' ? LifeStack : name === 'Today' ? HomeStack : Screen,
+          }),
+        ),
+      }),
+    }),
+  );
+  await waitFor(() => expect(navigation.isReady()).toBe(true));
+  expect(
+    navigation.getRootState().routes.find((route) => route.name === '校園')?.state,
+  ).toBeUndefined();
+  fireEvent.press(view.getByRole('button', { name: '開啟職涯' }));
+  const state = navigation.getRootState();
+  expect(state.routes[state.index]).toMatchObject({
+    name: '校園',
+    state: { index: 1, routes: [{ name: 'CampusHome' }, { name: 'Career' }] },
   });
+  expect(navigation.getCurrentRoute()?.name).toBe('Career');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(navigation.getRootState().routes[navigation.getRootState().index].name).toBe('校園');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
 });
+
+test.each(['campus', 'platform', 'guest'] as const)(
+  'career rechecks the mounted page for %s and keeps its exact public fallback',
+  (audience) => {
+    const routes = ['Career', 'NuniWorkspace'];
+    const nav = navigator(routes);
+    expect(mobileAssistantServiceDestination('career', audience, nav)?.kind).toBe('native');
+    routes.splice(0, 1);
+    expect(mobileAssistantServiceDestination('career', audience, nav)).toEqual({
+      kind: 'web',
+      url: 'https://nuni.tw/career',
+    });
+    expect(navigateMobileAssistantService('career', audience, nav)).toBe(false);
+    expect(nav.navigate).not.toHaveBeenCalled();
+  },
+);
 
 test('platform private services never borrow Firebase tabs even if both navigators are present', () => {
   const nav = navigator(['Today', '學習', '校園', '訊息', '我的', 'NuniWorkspace']);

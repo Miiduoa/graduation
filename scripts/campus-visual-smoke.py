@@ -440,6 +440,28 @@ async def check_deep_link_login_scope(page, preference):
     key = 'campus.browse-school.v1:guest'
     previous = await page.evaluate('key => localStorage.getItem(key)', key)
     saved_school = None if preference == 'all' else preference
+
+    async def expect_saved_school(school_id):
+        try:
+            await page.wait_for_function('''({key, schoolId}) => {
+                const stored = localStorage.getItem(key);
+                return stored !== null && JSON.parse(stored).schoolId === schoolId;
+            }''', arg={'key': key, 'schoolId': school_id})
+            assert await page.evaluate('key => JSON.parse(localStorage.getItem(key))', key) == {
+                'schoolId': school_id,
+            }
+        except Exception as error:
+            # Capture only this fixture preference before finally restores it.
+            state = await page.evaluate('''key => ({
+                url: location.href,
+                stored: localStorage.getItem(key),
+                picker: document.querySelector('header select')?.value ?? null,
+            })''', key)
+            raise AssertionError(
+                f'Expected saved campus {school_id!r}; actual state: '
+                + json.dumps(state, ensure_ascii=False)
+            ) from error
+
     try:
         await goto_path(page, '/?campus=pu')
         campus = page.locator('header summary[aria-label^="切換校園："]')
@@ -448,15 +470,29 @@ async def check_deep_link_login_scope(page, preference):
         await campus.press('Enter')
         picker = page.get_by_role('combobox', name='瀏覽校園', exact=True)
         await expect(picker).to_be_visible()
+        await expect(picker).to_be_enabled()
+        await expect(picker).to_have_value('pu')
+        if preference == 'all':
+            # Establish an actual saved campus before clearing it. A missing
+            # preference must not stand in for the explicit {schoolId: null} case.
+            await picker.select_option('nthu')
+            await expect(picker).not_to_be_visible()
+            await page.wait_for_url(
+                lambda value: parse_qs(urlparse(value).query).get('campus') == ['nthu']
+            )
+            await expect_saved_school('nthu')
+            await expect(campus).to_contain_text('國立清華大學')
+            await campus.focus()
+            await campus.press('Enter')
+            await expect(picker).to_be_visible()
+            await expect(picker).to_be_enabled()
+            await expect(picker).to_have_value('nthu')
         await picker.select_option('' if preference == 'all' else preference)
         await expect(picker).not_to_be_visible()
-        await page.wait_for_function('''({key, schoolId}) => {
-            const stored = localStorage.getItem(key);
-            return stored !== null && JSON.parse(stored).schoolId === schoolId;
-        }''', arg={'key': key, 'schoolId': saved_school})
-        assert await page.evaluate('key => JSON.parse(localStorage.getItem(key))', key) == {
-            'schoolId': saved_school,
-        }
+        await page.wait_for_url(
+            lambda value: parse_qs(urlparse(value).query).get('campus') == [preference]
+        )
+        await expect_saved_school(saved_school)
 
         target = '/school-info?school=PU&schoolId=pu&campus=pu&token=discard-me#contact'
         await goto_path(page, target)

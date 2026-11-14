@@ -4,12 +4,18 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { PersonalImportKind, PersonalImportRecord } from '@campus/shared';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
-import { safeNavigate } from '../utils/safeNavigate';
+import { safeNavigate, type SafeNavigateOptions } from '../utils/safeNavigate';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
 
 /** Personal records stay visibly separate from official grades and calendar feeds. */
-export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
+export function PersonalImportSummary({
+  kind,
+  navigationOptions,
+}: {
+  kind: PersonalImportKind;
+  navigationOptions?: SafeNavigateOptions;
+}) {
   const navigation = useNavigation();
   const scope = usePersonalImportScope();
   const key = scope ? JSON.stringify([scope, kind]) : '';
@@ -42,24 +48,20 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
   return (
     <View style={{ gap: 8, paddingVertical: 10 }}>
       <Button
-        text={
-          kind === 'events'
-            ? '開啟個人行事曆'
-            : `匯入${names[kind]}／查看個人紀錄`
-        }
+        text={kind === 'events' ? '開啟個人行事曆' : `匯入${names[kind]}／查看個人紀錄`}
         onPress={() => {
           if (kind === 'events') {
-            safeNavigate(navigation, 'PersonalCalendar');
+            safeNavigate(navigation, 'PersonalCalendar', undefined, navigationOptions);
             return;
           }
-          safeNavigate(navigation, 'PersonalImport', { kind });
+          safeNavigate(navigation, 'PersonalImport', { kind }, navigationOptions);
         }}
       />
       {kind === 'events' ? (
         <Button
           text="從截圖或檔案匯入行程"
           onPress={() => {
-            safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
+            safeNavigate(navigation, 'PersonalImport', { kind: 'events' }, navigationOptions);
           }}
         />
       ) : null}
@@ -77,8 +79,21 @@ export function PersonalImportSummary({ kind }: { kind: PersonalImportKind }) {
             .slice(-3)
             .reverse()
             .map((row) => (
-              <Text key={row.id} accessibilityRole="link" onPress={() => safeNavigate(navigation, 'PersonalImport', { kind, recordId: row.id })} style={{ color: theme.colors.text }}>
-                {row.title} · 來源：個人匯入 · 匯入時間：{new Date(row.importedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })} ·{' '}
+              <Text
+                key={row.id}
+                accessibilityRole="link"
+                onPress={() =>
+                  safeNavigate(
+                    navigation,
+                    'PersonalImport',
+                    { kind, recordId: row.id },
+                    navigationOptions,
+                  )
+                }
+                style={{ color: theme.colors.text }}
+              >
+                {row.title} · 來源：個人匯入 · 匯入時間：
+                {new Date(row.importedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })} ·{' '}
                 {kind === 'grades'
                   ? `${row.credits} 學分／${row.grade}（${row.academicYear}／${row.semester}）`
                   : `${row.date} ${row.allDay ? '全天' : row.startTime || ''}`}

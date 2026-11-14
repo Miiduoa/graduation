@@ -44,9 +44,9 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
-  // These directory entries have not been added to the shared Web/native voice
-  // navigation contract. Publishing a Web service does not create a native route
-  // or authorize an authenticated action through speech.
+  // These entries are outside the legacy destination suggestion list of 34.
+  // Explicit service-open requests are covered separately by assistantServices;
+  // publishing a directory entry does not authorize a mutation through speech.
   expect(serviceRoutes.filter(href => !shortcutSet.has(href)).sort()).toEqual([
     '/career', '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms', '/social', '/student-card',
   ]);
