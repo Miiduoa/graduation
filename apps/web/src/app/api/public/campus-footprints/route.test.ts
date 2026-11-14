@@ -205,6 +205,44 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each([408, 500, 520])(
+    'respects Retry-After after a transient HTTP %i without repeatedly hitting public Overpass',
+    async (status) => {
+      // Synthetic proxy/upstream statuses, not a report of a live OSM outage.
+      // All must honor the operator's one-hour pause, even if not 429/503.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('temporarily busy', {
+            status, headers: { 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+        expect(rejected.headers.get('Retry-After')).toBe('3600');
+
+        clock.mockReturnValue(start + 11 * 60 * 1000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + 60 * 60 * 1000 + 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it('rejects a 200 response advertising Content-Range instead of caching an incomplete map', async () => {
     // Even with a valid JSON body, Content-Range denotes a byte-range
     // representation, not proof of a complete OSM export.

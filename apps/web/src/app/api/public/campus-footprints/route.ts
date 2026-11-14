@@ -245,10 +245,11 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.status === 400 || response.status === 403 || response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
-    // Public Overpass gateways also report overload through 502/504.
-    // Honour Retry-After for these transient gateway failures as for 429/503;
-    // otherwise a ten-minute backoff may violate the operator's requested pause.
-    if ([429, 502, 503, 504].includes(response.status)) {
+    // Overpass or an intermediary may report transient overload as 408,
+    // 429, 500 or an uncommon 5xx gateway code, not only 502/503/504.
+    // Respect Retry-After across these statuses without reading their bodies.
+    // Permanent query/permission failures above keep their full-day cooldown.
+    if (response.status === 408 || response.status === 429 || response.status >= 500) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
         response.headers.get('retry-after'), Date.now(),
       ));
