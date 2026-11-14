@@ -218,26 +218,27 @@ service cloud.firestore {
     function onlyOwnMessageReaction() {
       let before = resource.data.get('reactions', {});
       let after = request.resource.data.get('reactions', {});
+      // Evaluate only emoji keys actually changed. Checking all supported
+      // emojis on every write exceeds Firestore's 1000-expression ceiling.
+      let changed = after.diff(before).affectedKeys();
       return before is map && after is map
-        // Firestore Rules cannot iterate arbitrary map keys. Unknown emoji
-        // remain read-only until an independently reviewed write path exists.
-        && after.diff(before).affectedKeys().hasOnly(['👍', '❤️', '😂', '😆', '😮', '😢', '🙏', '🎉', '🔥', '👏', '👎', '😍', '😡', '🤯', '💯', '💪'])
-        && onlyOwnReactionEmoji(before, after, '👍')
-        && onlyOwnReactionEmoji(before, after, '❤️')
-        && onlyOwnReactionEmoji(before, after, '😂')
-        && onlyOwnReactionEmoji(before, after, '😆')
-        && onlyOwnReactionEmoji(before, after, '😮')
-        && onlyOwnReactionEmoji(before, after, '😢')
-        && onlyOwnReactionEmoji(before, after, '🙏')
-        && onlyOwnReactionEmoji(before, after, '🎉')
-        && onlyOwnReactionEmoji(before, after, '🔥')
-        && onlyOwnReactionEmoji(before, after, '👏')
-        && onlyOwnReactionEmoji(before, after, '👎')
-        && onlyOwnReactionEmoji(before, after, '😍')
-        && onlyOwnReactionEmoji(before, after, '😡')
-        && onlyOwnReactionEmoji(before, after, '🤯')
-        && onlyOwnReactionEmoji(before, after, '💯')
-        && onlyOwnReactionEmoji(before, after, '💪');
+        && changed.hasOnly(['👍', '❤️', '😂', '😆', '😮', '😢', '🙏', '🎉', '🔥', '👏', '👎', '😍', '😡', '🤯', '💯', '💪'])
+        && (!changed.hasAny(['👍']) || onlyOwnReactionEmoji(before, after, '👍'))
+        && (!changed.hasAny(['❤️']) || onlyOwnReactionEmoji(before, after, '❤️'))
+        && (!changed.hasAny(['😂']) || onlyOwnReactionEmoji(before, after, '😂'))
+        && (!changed.hasAny(['😆']) || onlyOwnReactionEmoji(before, after, '😆'))
+        && (!changed.hasAny(['😮']) || onlyOwnReactionEmoji(before, after, '😮'))
+        && (!changed.hasAny(['😢']) || onlyOwnReactionEmoji(before, after, '😢'))
+        && (!changed.hasAny(['🙏']) || onlyOwnReactionEmoji(before, after, '🙏'))
+        && (!changed.hasAny(['🎉']) || onlyOwnReactionEmoji(before, after, '🎉'))
+        && (!changed.hasAny(['🔥']) || onlyOwnReactionEmoji(before, after, '🔥'))
+        && (!changed.hasAny(['👏']) || onlyOwnReactionEmoji(before, after, '👏'))
+        && (!changed.hasAny(['👎']) || onlyOwnReactionEmoji(before, after, '👎'))
+        && (!changed.hasAny(['😍']) || onlyOwnReactionEmoji(before, after, '😍'))
+        && (!changed.hasAny(['😡']) || onlyOwnReactionEmoji(before, after, '😡'))
+        && (!changed.hasAny(['🤯']) || onlyOwnReactionEmoji(before, after, '🤯'))
+        && (!changed.hasAny(['💯']) || onlyOwnReactionEmoji(before, after, '💯'))
+        && (!changed.hasAny(['💪']) || onlyOwnReactionEmoji(before, after, '💪'));
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
