@@ -39,3 +39,18 @@ nuni 要勝出的地方：明說官方查件需回校方管道，不仿造包裹
 既有 packages 登錄 callable 已呼叫 sendPushToUser，本 PR 不建立第二套到件推播；也不承諾未部署的職員流程已能登錄。實際到件推播仍依既有服務人員登錄與裝置通知設定。
 
 權限盤點：目前 `repairRequests`／`packages` 已允許本人讀取，無須改規則。`updateRepairStatus` 仍限定 repairs 服務角色，學生端不能直接重開／結案；`settings` 只能學校管理員讀取，未找到既有學生可讀的開通名單。這些是後端實際缺口，不能用本機改狀態冒充雲端成功；需先確認來源或另案取得明確授權。本 PR 不新增 dorm_staff、serviceRoles、集合、ACL 或 migration。輔導員工作台另開 PR，需負責人說「上」。
+
+## 正式工單與輔導員工作台（規格 PR 2，2026-11-14）
+
+比較仍限公開官方說明，沒有實際登入或效能實測；不能把「公開資料未描述」解讀成競品沒有功能。
+
+| 系統與官方來源 | 已有能力 | nuni 此次可驗收差異 |
+| --- | --- | --- |
+| [亞洲大學住宿須知](https://ds.asia.edu.tw/zh_tw/Wintersummervacationform/HousingInformation)、[中正大學學務系統說明](https://it.ccu.edu.tw/p/426-1009-39.php?Lang=zh-tw) | 校園入口報修、查詢進度；亞大說明緊急或逾五日向櫃台詢問 | 學生原備忘表單直接轉正式工單、不需再到另一入口重填；五階段逐步時間、學生可重開同單、逾三工作天未安排在值班清單以主色標記 |
+| [屏東大學住宿申請手冊](https://staf-life.nptu.edu.tw/var/file/74/1074/attach/51/pta_161909_6821384_41683.pdf) | 手冊列有外宿登記查詢與報修模組 | 外宿日期／原因及待核可、已核可、不核可，在同一個宿舍服務畫面查看，不把申請當成核可 |
+| [StarRez Go](https://www.starrez.com/starrez-go-mobile-app)、[StarRez higher education](https://www.starrez.com/solutions/higher-education) | 手機維修、點檢、入住作業、住民入口及資料報表 | 不以「支援手機」作勝出宣稱；具體驗收為備忘直接轉單、學生確認或重開原單、包裹連續登錄保留焦點、學號一次核銷、手機／網頁一致的五階段文字 |
+| [Ready Education Campus App](https://resources.readyeducation.com/landing/campusapp)、[通知官方說明](https://helpcenter.readyeducation.com/user-notifications) | 校園資訊整合、App 內通知及推播，使用者可調整通知偏好 | 每個工單狀態有持久紀錄，失去推播仍能查；本棟公告必須先預覽，對象從匯入住宿生名冊產生，不讓職員任選全校學生 |
+
+沿用[靜宜新鮮人住宿 Q&A](https://freshman.pu.edu.tw/p/405-1118-9935%2Cc2049.php?Lang=zh-tw)的 24 小時刷學生證出入說法，依鎖定規格把離線回答改成「24 小時刷學生證進出，00:00–06:00 要刷卡登記」，移除錯誤的「通常 23:00」。
+
+規格中的十秒登錄與一分鐘推播是待真實值班人員／裝置量測的驗收目標，單元及元件測試不能證明速度超越上述系統。部署、角色與回滾清單見 [驗證說明](../verification/dorm-staff-workflow-20261114.md)。

@@ -1,3 +1,4 @@
+import { DORM_TICKET_LABELS } from './dormWorkflow';
 /** Student projection of the existing school packages and repairRequests collections.
  * No IDs used by school repair systems or staff-only notes leave this projection.
  */
@@ -10,6 +11,7 @@ export type DormCloudParcel = {
   postal: boolean;
 };
 export const DORM_CLOUD_REPAIR_LABELS = {
+  ...DORM_TICKET_LABELS,
   pending: '備忘待處理',
   assigned: '備忘標記：已指派',
   in_progress: '備忘標記：處理中',
@@ -19,6 +21,7 @@ export const DORM_CLOUD_REPAIR_LABELS = {
 } as const;
 export type DormCloudRepairStatus = keyof typeof DORM_CLOUD_REPAIR_LABELS;
 export type DormCloudRepair = {
+  official?: boolean;
   id: string;
   title: string;
   location: string;
@@ -86,8 +89,9 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
   };
 }
 export function projectDormRepair(id: string, row: Record<string, unknown>): DormCloudRepair {
-  const raw = row.status === 'inProgress' ? 'in_progress' : row.status;
-  // Stored states describe app memos, not school receipt or repair progress.
+  const official = row.workflow === 'dorm_staff';
+  const raw = official ? row.dormStatus : row.status === 'inProgress' ? 'in_progress' : row.status;
+  // Only workflow-tagged rows represent actual staff tickets; legacy states remain memo labels.
   const status =
     typeof raw === 'string' && Object.prototype.hasOwnProperty.call(DORM_CLOUD_REPAIR_LABELS, raw)
       ? (raw as DormCloudRepairStatus)
@@ -107,10 +111,20 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
   });
   return {
     id,
+    ...(official ? { official: true } : {}),
     title: text(row.title || row.description, 1000) || '設備問題',
     location: [text(row.dormitory), text(row.room)].filter(Boolean).join(' '),
     status,
-    steps,
+    steps:
+      official && Array.isArray(row.history)
+        ? row.history.flatMap((h) =>
+            h &&
+            typeof h.status === 'string' &&
+            Object.prototype.hasOwnProperty.call(DORM_TICKET_LABELS, h.status)
+              ? [{ status: h.status as DormCloudRepairStatus, at: dormCloudTime(h.at) }]
+              : [],
+          )
+        : steps,
   };
 }
 export function dormCloudDate(value: number | null): string {
@@ -164,9 +178,9 @@ export function watchDormCloud(
               .map((r) => projectDormParcel(r.id, r.data))
               .sort((a, b) => (a.arrivedAt ?? Infinity) - (b.arrivedAt ?? Infinity)),
           }),
-        () => change({ packagesState: 'error', packages: [] }),
+        () => change({ packagesState: 'error' }),
       ),
-    () => change({ packagesState: 'error', packages: [] }),
+    () => change({ packagesState: 'error' }),
   );
   register(
     () =>
@@ -199,3 +213,97 @@ export function watchDormCloud(
     });
   };
 }
+
+/** Poll the recipient projection independently of staff workflow enablement. */
+export function pollDormParcels(
+  load: () => Promise<{ rows: Array<{ id: string; data: Record<string, unknown> }> }>,
+  rows: (value: Array<{ id: string; data: Record<string, unknown> }>) => void,
+  error: () => void,
+): () => void {
+  let active = true;
+  let pending = false;
+  const refresh = async () => {
+    if (pending) return;
+    pending = true;
+    try {
+      const result = await load();
+      if (active) rows(result.rows);
+    } catch {
+      if (active) error();
+    } finally {
+      pending = false;
+    }
+  };
+  void refresh();
+  const timer = setInterval(() => void refresh(), 60000);
+  return () => {
+    active = false;
+    clearInterval(timer);
+  };
+}
+
+/** Keep the legacy subscription available even when the optional endpoint is unavailable. */
+export function watchDormParcels(
+  legacy: (rows: (value: ParcelRows) => void, error: () => void) => () => void,
+  available: (change: (value: boolean) => void) => () => void,
+  load: () => Promise<{ rows: ParcelRows }>,
+  rows: (value: ParcelRows) => void,
+  error: () => void,
+): () => void {
+  let cached: ParcelRows | undefined;
+  let projection: ParcelRows | undefined;
+  let stale = false;
+  // Remember aliases even after a legacy parcel is removed from the subscription.
+  const legacyIds = new Set<string>();
+  let stopPoll: (() => void) | undefined;
+  const publishFallback = () => {
+    if (projection) {
+      const privateRows = projection.filter((row) => !legacyIds.has(row.id));
+      rows([...(cached ?? []), ...privateRows]);
+      // Publishing rows marks the feed ready; report staleness afterwards.
+      error();
+    } else if (cached) rows(cached);
+    else error();
+  };
+  const fallback = () => {
+    stale = true;
+    publishFallback();
+  };
+  const stopLegacy = legacy(
+    (value) => {
+      cached = value.map((row) => {
+        legacyIds.add(row.id);
+        const id = typeof row.data.publicId === 'string' ? row.data.publicId : row.id;
+        legacyIds.add(id);
+        return { ...row, id };
+      });
+      if (stale || !projection) publishFallback();
+    },
+    () => {
+      if (stale || !projection) error();
+    },
+  );
+  const stopAvailable = available((value) => {
+    if (!value) {
+      stopPoll?.();
+      stopPoll = undefined;
+      fallback();
+    } else if (!stopPoll) {
+      stopPoll = pollDormParcels(
+        load,
+        (value) => {
+          projection = value;
+          stale = false;
+          rows(value);
+        },
+        fallback,
+      );
+    }
+  });
+  return () => {
+    stopPoll?.();
+    stopAvailable();
+    stopLegacy();
+  };
+}
+type ParcelRows = Array<{ id: string; data: Record<string, unknown> }>;
