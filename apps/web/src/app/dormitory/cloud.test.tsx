@@ -206,3 +206,15 @@ it.each(['pending', 'assigned', 'in_progress', 'completed', 'closed', 'cancelled
   expect(document.body.textContent).toContain('備忘');
   expect(document.body.textContent).not.toMatch(/已送給輔導員|輔導員已收到|已安排維修|已修好/);
 });
+
+it('projects formal tickets distinctly and retains every reopen timestamp', () => {
+  const ticket = projectDormRepair('formal', {
+    workflow: 'dorm_staff', status: 'pending', dormStatus: 'sent', title: '燈不亮',
+    history: [{ status: 'sent', at: 1000 }, { status: 'fixed', at: 2000 }, { status: 'sent', at: 3000 }],
+    schoolReference: 'A123', vendor: '維修人員',
+  });
+  expect(ticket.official).toBe(true);
+  expect(ticket.status).toBe('sent');
+  expect(ticket.steps.map(h => h.at)).toEqual([1000, 2000, 3000]);
+  expect(ticket).not.toHaveProperty('vendor');
+});

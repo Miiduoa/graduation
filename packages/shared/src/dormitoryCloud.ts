@@ -1,3 +1,4 @@
+import { DORM_TICKET_LABELS } from './dormWorkflow';
 /** Student projection of the existing school packages and repairRequests collections.
  * No IDs used by school repair systems or staff-only notes leave this projection.
  */
@@ -10,6 +11,7 @@ export type DormCloudParcel = {
   postal: boolean;
 };
 export const DORM_CLOUD_REPAIR_LABELS = {
+  ...DORM_TICKET_LABELS,
   pending: '備忘待處理',
   assigned: '備忘標記：已指派',
   in_progress: '備忘標記：處理中',
@@ -19,6 +21,7 @@ export const DORM_CLOUD_REPAIR_LABELS = {
 } as const;
 export type DormCloudRepairStatus = keyof typeof DORM_CLOUD_REPAIR_LABELS;
 export type DormCloudRepair = {
+  official?: boolean;
   id: string;
   title: string;
   location: string;
@@ -86,8 +89,9 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
   };
 }
 export function projectDormRepair(id: string, row: Record<string, unknown>): DormCloudRepair {
-  const raw = row.status === 'inProgress' ? 'in_progress' : row.status;
-  // Stored states describe app memos, not school receipt or repair progress.
+  const official = row.workflow === 'dorm_staff';
+  const raw = official ? row.dormStatus : row.status === 'inProgress' ? 'in_progress' : row.status;
+  // Only workflow-tagged rows represent actual staff tickets; legacy states remain memo labels.
   const status =
     typeof raw === 'string' && Object.prototype.hasOwnProperty.call(DORM_CLOUD_REPAIR_LABELS, raw)
       ? (raw as DormCloudRepairStatus)
@@ -107,10 +111,20 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
   });
   return {
     id,
+    ...(official ? { official: true } : {}),
     title: text(row.title || row.description, 1000) || '設備問題',
     location: [text(row.dormitory), text(row.room)].filter(Boolean).join(' '),
     status,
-    steps,
+    steps:
+      official && Array.isArray(row.history)
+        ? row.history.flatMap((h) =>
+            h &&
+            typeof h.status === 'string' &&
+            Object.prototype.hasOwnProperty.call(DORM_TICKET_LABELS, h.status)
+              ? [{ status: h.status as DormCloudRepairStatus, at: dormCloudTime(h.at) }]
+              : [],
+          )
+        : steps,
   };
 }
 export function dormCloudDate(value: number | null): string {

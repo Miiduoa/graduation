@@ -1,5 +1,6 @@
 import React, { useSyncExternalStore } from 'react';
 import { ActivityIndicator } from 'react-native';
+import { DormStaffHome } from './DormStaffHome';
 import ShopDockScreen from './ShopDockScreen';
 import StudentTodayScreen from './StudentTodayScreen';
 import TeacherTodayScreen from './TeacherTodayScreen';
@@ -24,7 +25,7 @@ export function RoleWorkspaceScreen({
   ...props
 }: ServiceScreenProps & { role: ResolvedDashboardRole }) {
   if (role === 'vendor') return <ShopDockScreen navigation={props.navigation} />;
-  return (
+  const workspace = (
     <UnavailableFeatureScreen
       {...props}
       title={roleTitles[role] ?? '校園服務'}
@@ -45,6 +46,14 @@ export function RoleWorkspaceScreen({
       }
     />
   );
+  return role === 'staff' ? (
+    <DormStaffHome
+      fallback={workspace}
+      onOpen={(route) => props.navigation?.navigate?.(route as never)}
+    />
+  ) : (
+    workspace
+  );
 }
 export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -64,9 +73,7 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
         title="確認帳號身分"
         description="目前無法確認帳號身分。請到登入頁重新確認；也可以先查看公開公告。"
         actions={[
-          ...(isSchoolLoginEntryAvailable()
-            ? [{ label: '前往學校登入', route: 'SSOLogin' }]
-            : []),
+          ...(isSchoolLoginEntryAvailable() ? [{ label: '前往學校登入', route: 'SSOLogin' }] : []),
           { label: '查看校方公告', route: '公告總覽' },
         ]}
       />
