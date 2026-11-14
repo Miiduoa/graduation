@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { ClubScanner } from './ClubScanner';
 import { callClubPortal } from './clubPortalService';
@@ -29,6 +29,7 @@ export function ClubCheckIn({
     [failures, setFailures] = useState<Record<string, string>>({}),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false);
+  const sending = useRef(false);
   const key = JSON.stringify(['club-check-in', uid, schoolId, groupId, eventId]);
   useEffect(() => {
     let current = true;
@@ -38,7 +39,9 @@ export function ClubCheckIn({
       });
     try {
       const saved = JSON.parse(localStorage.getItem(key) || '[]');
-      if (Array.isArray(saved)) setQueue(saved.filter((s) => typeof s === 'string'));
+      const entries = Array.isArray(saved) ? saved.filter((s) => typeof s === 'string') : [];
+      setQueue(entries);
+      if (officer && navigator.onLine && entries.length) void send(entries);
     } catch {}
     return () => {
       current = false;
@@ -49,7 +52,8 @@ export function ClubCheckIn({
     setQueue(next);
   }
   async function send(entries: string[]) {
-    if (busy) return;
+    if (sending.current) return;
+    sending.current = true;
     setBusy(true);
     let remaining = entries;
     let confirmedMessage = '';
@@ -81,6 +85,7 @@ export function ClubCheckIn({
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '尚未送出');
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }

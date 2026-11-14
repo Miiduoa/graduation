@@ -215,6 +215,37 @@ const event = () =>
     capacity: 1,
     visibility: 'public',
   });
+test('建立活動逾期後相同操作仍確認成功，衝突與首次逾期建立仍拒絕', async () => {
+  await event();
+  const original = { ...store.docs.get('groups/club/clubEvents/event')! };
+  time = 7000;
+  await expect(event()).resolves.toMatchObject({ success: true });
+  expect(store.docs.get('groups/club/clubEvents/event')).toEqual(original);
+  await expect(
+    call('officer', {
+      action: 'createEvent',
+      operationId: 'event',
+      ...original,
+      title: '不同活動',
+    }),
+  ).rejects.toHaveProperty('code', 'already-exists');
+  store.docs.set('groups/club/members/other', { status: 'active', role: 'admin' });
+  await expect(
+    call('other', {
+      action: 'createEvent',
+      operationId: 'event',
+      ...original,
+    }),
+  ).rejects.toHaveProperty('code', 'already-exists');
+  await expect(
+    call('officer', {
+      action: 'createEvent',
+      operationId: 'new-event',
+      ...original,
+    }),
+  ).rejects.toHaveProperty('code', 'invalid-argument');
+  expect(store.docs.has('groups/club/clubEvents/new-event')).toBe(false);
+});
 test('活動有名額、兩個截止、公開範圍；報名簽到重送不重複', async () => {
   await event();
   await event();

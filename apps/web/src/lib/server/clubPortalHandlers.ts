@@ -372,27 +372,6 @@ export function createClubPortal({
         if (!officer) denied();
         const title = text(input.title, 120),
           location = text(input.location, 200);
-        if (
-          !title ||
-          !location ||
-          ![
-            input.startsAt,
-            input.endsAt,
-            input.registrationDeadline,
-            input.cancellationDeadline,
-            input.capacity,
-          ].every(Number.isSafeInteger) ||
-          input.startsAt <= now() ||
-          input.endsAt <= input.startsAt ||
-          input.registrationDeadline > input.startsAt ||
-          input.cancellationDeadline > input.startsAt ||
-          input.registrationDeadline <= now() ||
-          input.cancellationDeadline <= now() ||
-          input.capacity < 1 ||
-          input.capacity > 1000 ||
-          !['members', 'public'].includes(input.visibility)
-        )
-          throw new HttpsError('invalid-argument', '請確認活動時間、截止時間、地點與名額');
         const ref = eventRef.doc(id(input.operationId)),
           prior = await tx.get(ref);
         const payload = {
@@ -409,7 +388,30 @@ export function createClubPortal({
         if (prior.exists) {
           if (Object.entries(payload).some(([key, value]) => prior.data()[key] !== value))
             throw new HttpsError('already-exists', '操作代碼已使用');
-        } else tx.create(ref, { ...payload, registeredCount: 0, checkedInCount: 0 });
+        } else {
+          if (
+            !title ||
+            !location ||
+            ![
+              input.startsAt,
+              input.endsAt,
+              input.registrationDeadline,
+              input.cancellationDeadline,
+              input.capacity,
+            ].every(Number.isSafeInteger) ||
+            input.startsAt <= now() ||
+            input.endsAt <= input.startsAt ||
+            input.registrationDeadline > input.startsAt ||
+            input.cancellationDeadline > input.startsAt ||
+            input.registrationDeadline <= now() ||
+            input.cancellationDeadline <= now() ||
+            input.capacity < 1 ||
+            input.capacity > 1000 ||
+            !['members', 'public'].includes(input.visibility)
+          )
+            throw new HttpsError('invalid-argument', '請確認活動時間、截止時間、地點與名額');
+          tx.create(ref, { ...payload, registeredCount: 0, checkedInCount: 0 });
+        }
         return { success: true, office };
       }
       if (['register', 'cancel', 'checkIn'].includes(action)) {

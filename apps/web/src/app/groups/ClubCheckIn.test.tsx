@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { ClubCheckIn } from './ClubCheckIn';
@@ -122,4 +123,39 @@ test('暫時失敗紀錄可在重載後重送成功', async () => {
   fireEvent.click(screen.getByRole('button', { name: '重送待送出簽到' }));
   await waitFor(() => expect(props.onConfirmed).toHaveBeenCalledOnce());
   expect(localStorage.getItem(key)).toBe('[]');
+});
+
+test('已連線開頁自動送出既存佇列，同步期間重複連線事件不重送', async () => {
+  const key = JSON.stringify(['club-check-in', 'one', 'pu', 'club', 'event']);
+  localStorage.setItem(key, '["1234"]');
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+  let finish!: (value: { success: true; office: false }) => void;
+  vi.mocked(callClubPortal).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const confirmed = vi.fn();
+  render(
+    <StrictMode>
+      <ClubCheckIn
+        uid="one"
+        schoolId="pu"
+        groupId="club"
+        eventId="event"
+        officer
+        onConfirmed={confirmed}
+      />
+    </StrictMode>,
+  );
+  await waitFor(() => expect(callClubPortal).toHaveBeenCalledOnce());
+  fireEvent(window, new Event('online'));
+  fireEvent(window, new Event('online'));
+  expect(callClubPortal).toHaveBeenCalledOnce();
+  expect(localStorage.getItem(key)).toBe('["1234"]');
+  finish({ success: true, office: false });
+  await waitFor(() => expect(confirmed).toHaveBeenCalledOnce());
+  expect(localStorage.getItem(key)).toBe('[]');
+  expect(screen.getByText('0 筆待送出')).toBeTruthy();
 });
