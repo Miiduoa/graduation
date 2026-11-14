@@ -6,6 +6,30 @@ describe.each(['pu', 'tw-pu'])('Providence %s', (schoolId) => {
   const calculateGpa = (grades: Parameters<typeof calculateLearningAnalyticsGpa>[0]) =>
     calculateLearningAnalyticsGpa(grades, schoolId);
 
+  test.each([
+    [50, 0.7, 0],
+    [53, 1, 0.7],
+    [57, 1.3, 1],
+    [60, 1.7, 1.3],
+    [63, 2, 1.7],
+    [67, 2.3, 2],
+    [70, 2.7, 2.3],
+    [73, 3, 2.7],
+    [77, 3.3, 3],
+    [80, 3.7, 3.3],
+    [85, 4, 3.7],
+    [90, 4.3, 4],
+  ])('uses the correct grade points at and below %s', (score, points, belowPoints) => {
+    for (const [grade, expected] of [
+      [score, points],
+      [score - 0.01, belowPoints],
+    ]) {
+      const result = calculateGpa([row(grade)]);
+      expect(result?.overall).toBeCloseTo(expected);
+      expect(result?.semesters[0].gpa).toBeCloseTo(expected);
+    }
+  });
+
   test('converts each course before credit weighting, overall and by semester', () => {
     const result = calculateGpa([row(90, 3), row(60, 1), row(85, 2, '114_2')]);
     expect(result?.overall).toBeCloseTo((4.3 * 3 + 1.7 + 4 * 2) / 6);
@@ -51,6 +75,18 @@ describe.each(['pu', 'tw-pu'])('Providence %s', (schoolId) => {
     expect(calculateGpa([])).toBeNull();
     expect(calculateGpa([0, -1, NaN, Infinity].map((credits) => row(90, credits)))).toBeNull();
   });
+});
+
+test('switching schools recalculates the same records without retaining the PU scale', () => {
+  const grades = Object.freeze([Object.freeze(row(90))]);
+  for (const schoolId of ['pu', 'nthu', 'tw-pu', 'ntunhs']) {
+    const expected = schoolId === 'pu' || schoolId === 'tw-pu' ? 4.3 : 3.6;
+    expect(calculateLearningAnalyticsGpa(grades, schoolId)).toEqual({
+      overall: expected,
+      semesters: [{ sem: '115_1', gpa: expected }],
+    });
+  }
+  expect(grades[0].grade).toBe(90);
 });
 
 describe.each(['ntunhs', 'nthu', 'other'])('other school %s', (schoolId) => {
