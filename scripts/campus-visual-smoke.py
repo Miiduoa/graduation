@@ -442,11 +442,14 @@ async def check_deep_link_login_scope(page, preference):
     saved_school = None if preference == 'all' else preference
 
     async def expect_saved_school(school_id):
+        expected = json.dumps({'schoolId': school_id}, separators=(',', ':'))
         try:
-            await page.wait_for_function('''({key, schoolId}) => {
-                const stored = localStorage.getItem(key);
-                return stored !== null && JSON.parse(stored).schoolId === schoolId;
-            }''', arg={'key': key, 'schoolId': school_id})
+            # wait_for_function can omit a nested Python None argument. Pass the
+            # exact expected JSON as a string so explicit null is still required.
+            await page.wait_for_function(
+                '({key, expected}) => localStorage.getItem(key) === expected',
+                arg={'key': key, 'expected': expected},
+            )
             assert await page.evaluate('key => JSON.parse(localStorage.getItem(key))', key) == {
                 'schoolId': school_id,
             }
