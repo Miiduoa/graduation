@@ -78,3 +78,12 @@
 - 既有 confirmPackagePickup 在單一 transaction 內檢查收件人並更新 packages 與存在的 dormPackages，保留舊包裹支援；已退件包裹不可再領取。回歸涵蓋既有入口領取、工作台狀態、禁止事後退件、非本人拒絕及舊包裹。
 - 更正前述 R1／R2「未改共用角色解析」的記錄：該描述僅適用當輪新增修正，不適用整份 PR。本 PR 原有 postLoginRoles／roles 的 dorm_staff → staff 解析變更仍存在，必須如實列為權限相關範圍；本輪未修改該映射、登入、rules 或 migration，也未部署。
 - 驗證：後端 dormWorkflow／authz 30 項、web DormWorkflow／dormitory 47 項、mobile DormWorkflow／DormStaffHome／dormitoryWorkspace 14 項通過；web、mobile、shared 全專案 typecheck、變更後端模組 ESLint、index.js 語法與 git diff --check 通過。沿用 /tmp 驗證設定修正共享 node_modules 的 workspace 解析，未排除檔案、安裝依賴或更換 symlink。
+
+## 指定審查修正（2026-11-14）
+
+- P1：撤回 shared roles／postLoginRoles 的 `dorm_staff → staff` 共用映射；宿舍頁面的職員工作台繼續依 callable capability 判斷，不擴大全域職員身分。
+- P2：外宿新增時在 transaction 以登入 UID 查啟用住宿名冊，由伺服器決定棟房；無名冊、停用或多筆有效住宿紀錄時拒絕建立。審核 transaction 再讀取名冊，棟房異動或停用後不可核准原申請。
+- P2：既有包裹領取只在有對應 dormPackages 時套用退件限制；舊包裹維持原收件人確認領取行為，新宿舍包裹仍同步更新兩份紀錄。
+- 有登入權限migration變更：本輪依指定審查要求，僅撤回兩行共用角色映射並在宿舍外宿流程內加入名冊檢查；未修改登入、sessions、共用 authz、ACL／Firestore／Storage rules 或 migration，未部署與操作正式資料。宿舍新增集合及授權仍屬需晉瑋說「上」的部署範圍。
+- 新增角色隔離、偽造棟房、缺漏／停用／重複名冊、審核前棟房異動、舊退件包裹相容與新流程退件限制的回歸測試。
+- 驗證：後端 dormWorkflow／authz 36 項、shared 角色解析 14 項、Web DormWorkflow／cloud 21 項測試通過；shared、mobile、web 全專案 typecheck、變更後端檔案 ESLint、JS 語法與 git diff --check 通過。首次直接執行的 Jest 因 ESM 相依套件失敗，改用既有 backend Jest 設定即通過；直接 typecheck 的共享套件解析問題，使用 /tmp 設定指向此工作樹修正，未排除檔案。暫存設定與輸出已刪除。沿用 Node 24 與現有依賴，未安裝套件或更動 node_modules symlink。

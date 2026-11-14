@@ -45,7 +45,7 @@ function fixture() {
     },
   });
   const writer = () => ({
-    get: async (ref) => snapshot(ref.path),
+    get: async (ref) => (ref.path ? snapshot(ref.path) : ref.get()),
     getAll: async (...refs) => refs.map((r) => snapshot(r.path)),
     create: (ref, row) => data.set(ref.path, row),
     set: (ref, row, opts) =>
@@ -110,7 +110,13 @@ test('feature gate, school membership, service domain and building enforced', as
   await expect(call('student', repair)).rejects.toMatchObject({ code: 'failed-precondition' });
 });
 test('leave is owner-only, requires one staff decision and validates real dates', async () => {
-  const { call } = fixture();
+  const { call, data } = fixture();
+  data.set('schools/pu/dormResidents/123', {
+    userId: 'student',
+    building: 'A',
+    room: '101',
+    active: true,
+  });
   const request = {
     action: 'requestLeave',
     key: 'leave1',
@@ -412,4 +418,84 @@ test('legacy pickup keeps recipient authorization and supports legacy-only parce
   await confirmPackagePickup({ db, schoolId: 'pu', packageId: 'legacy', uid: 'student' });
   expect(data.get('schools/pu/packages/legacy').status).toBe('picked_up');
   expect(data.has('schools/pu/dormPackages/legacy')).toBe(false);
+});
+
+const leaveRequest = {
+  action: 'requestLeave',
+  key: 'roster',
+  date: '2099-01-01',
+  reason: '返家',
+  building: '偽造棟',
+  room: '999',
+};
+test('leave uses server roster and rejects missing, inactive or ambiguous residence', async () => {
+  const { call, data } = fixture();
+  for (const active of [null, false]) {
+    if (active === false)
+      data.set('schools/pu/dormResidents/123', {
+        userId: 'student',
+        building: 'A',
+        room: '101',
+        active,
+      });
+    await expect(call('student', leaveRequest)).rejects.toMatchObject({
+      code: 'failed-precondition',
+    });
+    expect(data.has('schools/pu/dormLeaves/student_roster')).toBe(false);
+  }
+  data.set('schools/pu/dormResidents/123', {
+    userId: 'student',
+    building: 'A',
+    room: '101',
+    active: true,
+  });
+  const { id } = await call('student', leaveRequest);
+  expect(data.get('schools/pu/dormLeaves/' + id)).toMatchObject({ building: 'A', room: '101' });
+  data.set('schools/pu/dormResidents/456', {
+    userId: 'student',
+    building: 'B',
+    room: '201',
+    active: true,
+  });
+  await expect(call('student', { ...leaveRequest, key: 'duplicate' })).rejects.toMatchObject({
+    code: 'failed-precondition',
+  });
+});
+test.each(['inactive', 'building', 'room', 'missing'])(
+  'leave review rechecks residence: %s',
+  async (change) => {
+    const { call, data } = fixture();
+    const path = 'schools/pu/dormResidents/123';
+    const resident = { userId: 'student', building: 'A', room: '101', active: true };
+    data.set(path, resident);
+    const { id } = await call('student', leaveRequest);
+    if (change === 'missing') data.delete(path);
+    else
+      data.set(path, {
+        ...resident,
+        ...(change === 'inactive' ? { active: false } : { [change]: 'B' }),
+      });
+    await expect(
+      call('staff', { action: 'decideLeave', id, status: 'approved' }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(data.get('schools/pu/dormLeaves/' + id).status).toBe('pending');
+  },
+);
+test('returned legacy parcels retain pickup behavior, dorm parcels reject returned status in either feed', async () => {
+  const { confirmPackagePickup } = require('./packagePickup');
+  const { data, db } = fixture();
+  data.set('schools/pu/packages/legacy', { recipientId: 'student', status: 'returned' });
+  await confirmPackagePickup({ db, schoolId: 'pu', packageId: 'legacy', uid: 'student' });
+  expect(data.get('schools/pu/packages/legacy').status).toBe('picked_up');
+  for (const returnedFeed of ['packages', 'dormPackages']) {
+    for (const feed of ['packages', 'dormPackages'])
+      data.set(`schools/pu/${feed}/new`, {
+        recipientId: 'student',
+        status: feed === returnedFeed ? 'returned' : 'waiting',
+      });
+    await expect(
+      confirmPackagePickup({ db, schoolId: 'pu', packageId: 'new', uid: 'student' }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(data.get(`schools/pu/${returnedFeed}/new`).status).toBe('returned');
+  }
 });

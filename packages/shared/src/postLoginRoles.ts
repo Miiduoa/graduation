@@ -87,7 +87,6 @@ function toResolvedAppRole(role: string): ResolvedAppRole {
     'vendor',
   ]);
   if (allowed.has(r as ResolvedAppRole)) return r as ResolvedAppRole;
-  if (r === 'dorm_staff') return 'staff';
   if (r === 'faculty') return 'teacher';
   return 'student';
 }

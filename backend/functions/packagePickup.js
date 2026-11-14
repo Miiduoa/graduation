@@ -13,7 +13,7 @@ async function confirmPackagePickup({ db, schoolId, packageId, uid }) {
     const dorm = await tx.get(dormRef);
     if (dorm.exists && dorm.data().recipientId !== uid)
       throw new HttpsError('permission-denied', 'This is not your package');
-    if (parcel.data().status === 'returned' || (dorm.exists && dorm.data().status === 'returned'))
+    if (dorm.exists && (parcel.data().status === 'returned' || dorm.data().status === 'returned'))
       throw new HttpsError('failed-precondition', 'Package already returned');
     tx.update(packageRef, { status: 'picked_up', pickedUpAt: FieldValue.serverTimestamp() });
     if (dorm.exists)

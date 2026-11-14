@@ -191,9 +191,19 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         residents: packages ? await list('dormResidents') : [],
       };
     }
+    const activeResidence = async (tx, userId) => {
+      const roster = await tx.get(school.collection('dormResidents').where('userId', '==', userId));
+      const active = roster.docs.map((d) => d.data()).filter((r) => r.active !== false);
+      if (active.length !== 1)
+        throw new HttpsError('failed-precondition', '請先向宿舍服務台確認啟用住宿名冊');
+      return {
+        building: required(active[0].building, 70),
+        room: required(active[0].room, 50),
+      };
+    };
     if (action === 'submitRepair' || action === 'requestLeave') {
-      const building = required(input.building, 70),
-        room = required(input.room, 50);
+      const building = action === 'submitRepair' ? required(input.building, 70) : undefined,
+        room = action === 'submitRepair' ? required(input.room, 50) : undefined;
       const key = required(input.key, 100);
       if (!/^[a-zA-Z0-9_-]+$/.test(key)) throw new HttpsError('invalid-argument', '重試代碼錯誤');
       let row;
@@ -243,7 +253,10 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         .doc(uid + '_' + key);
       await db.runTransaction(async (tx) => {
         const old = await tx.get(ref);
-        if (!old.exists) tx.create(ref, { ...row, createdAt: FieldValue.serverTimestamp() });
+        if (!old.exists) {
+          if (action === 'requestLeave') Object.assign(row, await activeResidence(tx, uid));
+          tx.create(ref, { ...row, createdAt: FieldValue.serverTimestamp() });
+        }
       });
       return { success: true, id: ref.id };
     }
@@ -302,6 +315,9 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
         } else {
           staff('repairs');
           inBuilding(row);
+          const residence = await activeResidence(tx, row.userId);
+          if (residence.building !== row.building || residence.room !== row.room)
+            throw new HttpsError('failed-precondition', '住宿名冊已變更，請重新申請');
           if (row.status !== 'pending' || !['approved', 'rejected'].includes(next))
             throw new HttpsError('failed-precondition', '申請已審核');
           tx.update(ref, {

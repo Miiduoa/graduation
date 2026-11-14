@@ -78,7 +78,6 @@ const LEGACY_CAMPUS_ALIAS: Record<string, CampusRole> = {
   owner: 'teacher',
   instructor: 'teacher',
   assistant: 'ta',
-  dorm_staff: 'staff',
   moderator: 'staff',
   // 中文 / 縮寫
   '學生': 'student',
