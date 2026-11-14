@@ -249,7 +249,41 @@ it('disambiguates identical POI names for screen readers and mobile destinations
     .toBe('sample-west');
   expect(within(dialog).getByRole('heading', { name: '共用空間' })).toBeTruthy();
   expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
+  // The range and next/previous accessible names must identify a *specific*
+  // destination, not two indistinguishable "共用空間" markers.
+  expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain(labelWest);
+  fireEvent.click(within(dialog).getByRole('button', { name: `上一個地點：${labelEast}` }));
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-east');
+  expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain(labelEast);
+  fireEvent.click(within(dialog).getByRole('button', { name: `下一個地點：${labelWest}` }));
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('sample-west');
   expect(onSelect).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('groups equivalent full-width and standard Unicode POI names without merging their identities', async () => {
+  const rooms: MapLocation[] = [
+    { id: 'full-width', name: 'Ａ館教室', category: '教室', building: '示意甲館',
+      floor: '1F', lat: 24.2261, lng: 120.5801 },
+    { id: 'standard', name: 'A館教室', category: '教室', building: '示意乙館',
+      floor: '2F', lat: 24.2262, lng: 120.5802 },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={rooms}
+    selected={null} onSelect={vi.fn()} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: '搜尋地點' }),
+    { target: { value: 'A館教室' } });
+  const options = within(dialog).getAllByRole('option');
+  expect(options).toHaveLength(3); // Placeholder and two independent POIs.
+  expect(options[1].textContent).toContain('同名地點 1／2');
+  expect(options[2].textContent).toContain('同名地點 2／2');
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
+    { target: { value: 'standard' } });
+  expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
+    .toBe('standard');
+  expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain('同名地點 2／2');
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
@@ -297,10 +331,10 @@ it('connects scene markers, the progress control, directions and the original ma
   expect(appleDirections.searchParams.get('dirflg')).toBe('w');
   expect(appleLink.getAttribute('aria-describedby')).toBe(warning.id);
   expect(appleLink.getAttribute('rel')).toBe('noopener noreferrer');
-  expect(within(dialog).getByRole('button', { name: '下一個地點' }).hasAttribute('disabled')).toBe(true);
+  expect(within(dialog).getByRole('button', { name: /^下一個地點/ }).hasAttribute('disabled')).toBe(true);
   fireEvent.change(within(dialog).getByRole('slider'), { target: { value: '0' } });
   expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain('本校圖書館');
-  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^下一個地點/ }));
   fireEvent.click(within(dialog).getByRole('button', { name: '俯視' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', overhead: true }));
   fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
@@ -317,7 +351,7 @@ it('controls camera without changing the place or recreating its context and res
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^下一個地點/ }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '看全部地點' }));
@@ -396,7 +430,7 @@ it('applies live system and site motion preferences without recreating the graph
     reduced.matches = true;
     reduced.listeners.forEach((notify) => notify());
   });
-  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^下一個地點/ }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', motion: false }));
   await act(async () => { document.documentElement.dataset.theme = 'dark'; });
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ dark: true, motion: false }));
@@ -429,7 +463,7 @@ it('preserves single-source warnings and their exact source links', async () => 
   expect(within(dialog).getByText(/僅有單一資料來源/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '查看地點資料來源 ↗' }).getAttribute('href')).toBe(parking.sourceUrl);
   expect(within(dialog).getByRole('slider').hasAttribute('disabled')).toBe(true);
-  expect(within(dialog).getByRole('button', { name: '上一個地點' }).hasAttribute('disabled')).toBe(true);
+  expect(within(dialog).getByRole('button', { name: /^上一個地點/ }).hasAttribute('disabled')).toBe(true);
 });
 
 it('does not offer an empty tour and rejects points spread across distant campuses', async () => {

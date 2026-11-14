@@ -256,14 +256,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // to the wrong POI. Distinguish only duplicates using *existing* metadata;
   // the ordinal is a list identifier, never a claimed physical entrance.
   const pointDisplayLabels = useMemo(() => {
+    // Visually equivalent Unicode and full-width names must also be
+    // disambiguated. This groups labels only; it never rewrites the POI ID,
+    // coordinate, audited name or building metadata.
+    const nameKey = (name: string) =>
+      name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('zh-TW');
     const counts = new Map<string, number>();
-    for (const point of model.points) counts.set(point.name, (counts.get(point.name) ?? 0) + 1);
+    for (const point of model.points) {
+      const key = nameKey(point.name);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
     const ordinals = new Map<string, number>();
     return new Map(model.points.map((point) => {
-      const count = counts.get(point.name) ?? 1;
+      const key = nameKey(point.name);
+      const count = counts.get(key) ?? 1;
       if (count === 1) return [point.id, point.name] as const;
-      const ordinal = (ordinals.get(point.name) ?? 0) + 1;
-      ordinals.set(point.name, ordinal);
+      const ordinal = (ordinals.get(key) ?? 0) + 1;
+      ordinals.set(key, ordinal);
       const details = [
         point.location.building?.trim() ? `建築：${point.location.building.trim()}` : null,
         point.location.floor?.trim() ? `樓層：${point.location.floor.trim()}` : null,
@@ -285,6 +294,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
+  const previousPoint = index > 0 ? model.points[index - 1] : null;
+  const nextPoint = index >= 0 && index < model.points.length - 1 ? model.points[index + 1] : null;
   const searchId = useId();
   const selectId = useId();
   const progressId = useId();
@@ -630,15 +641,19 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   max={Math.max(0, model.points.length - 1)}
                   value={Math.max(0, index)}
                   disabled={model.points.length < 2}
-                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${place.name}`}
+                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${pointDisplayLabels.get(place.id) ?? place.name}`}
                   onChange={(event) => {
                     const point = model.points[Number(event.target.value)];
                     if (point) selectPlace(point.id);
                   }}
                 />
                 <div className={styles.steps}>
-                  <button className="btn" type="button" disabled={index <= 0} onClick={() => selectPlace(model.points[index - 1].id)}>上一個地點</button>
-                  <button className="btn" type="button" disabled={index >= model.points.length - 1} onClick={() => selectPlace(model.points[index + 1].id)}>下一個地點</button>
+                  <button className="btn" type="button" disabled={!previousPoint}
+                    aria-label={previousPoint ? `上一個地點：${pointDisplayLabels.get(previousPoint.id) ?? previousPoint.name}` : '上一個地點'}
+                    onClick={() => { if (previousPoint) selectPlace(previousPoint.id); }}>上一個地點</button>
+                  <button className="btn" type="button" disabled={!nextPoint}
+                    aria-label={nextPoint ? `下一個地點：${pointDisplayLabels.get(nextPoint.id) ?? nextPoint.name}` : '下一個地點'}
+                    onClick={() => { if (nextPoint) selectPlace(nextPoint.id); }}>下一個地點</button>
                 </div>
               </div>
               <section className={styles.place} aria-label="導覽地點資訊">
