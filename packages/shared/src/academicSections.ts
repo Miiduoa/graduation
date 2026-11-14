@@ -57,7 +57,7 @@ export const MESSAGING_NAV_SECTIONS = [
     id: 'notifications',
     label: '通知',
     webPath: '/messages',
-    mobileTab: '我的',
+    mobileTab: '訊息',
     mobileScreen: 'Notifications',
   },
   {

@@ -1,4 +1,5 @@
 import { CAMPUS_SERVICES } from './campusServices';
+import { campusServicePathname } from './campusNavigationLinks';
 import { PRIMARY_DESTINATIONS as SHARED_DESTINATIONS } from '@campus/shared/src/primaryDestinations';
 
 const icons = {
@@ -47,8 +48,9 @@ export function primaryNavigationSection(
     return 'study';
   }
 
+  const servicePathname = campusServicePathname(pathname);
   const service = CAMPUS_SERVICES.filter((item) =>
-    includesRoute(pathname, item.href.split(/[?#]/, 1)[0]),
+    includesRoute(servicePathname, item.href.split(/[?#]/, 1)[0]),
   ).sort((first, second) => second.href.length - first.href.length)[0];
   if (!service) return null;
   if (standaloneServices.has(service.href)) return 'more';

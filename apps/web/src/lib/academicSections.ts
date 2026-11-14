@@ -1,4 +1,5 @@
 import { STUDENT_ACADEMIC_SECTIONS } from '@campus/shared/src/academicSections';
+import { campusServicePathname } from './campusNavigationLinks';
 
 /** 課務次級導覽：主 Tab／AcademicNav／服務目錄共用同一套名稱（來源：packages/shared）。 */
 export const ACADEMIC_SECTIONS = STUDENT_ACADEMIC_SECTIONS.map((section) => ({
@@ -24,6 +25,7 @@ export function academicNavigationPath(
   pathname: string | null | undefined,
 ): AcademicSectionPath | null {
   if (!pathname) return null;
+  if (campusServicePathname(pathname) === '/clubs') return null;
   if (pathname === '/credit-planner/review') return '/credit-planner';
   if (pathname.startsWith('/school-lms/')) return '/school-lms';
   if (

@@ -699,6 +699,42 @@ async def main():
             results.append('service search, empty recovery and category filtering work on mobile')
 
             await page.set_viewport_size({'width': 390, 'height': 844})
+            club_path = '/groups/journey-club/club/overview'
+            await goto_path(page, club_path + '?campus=pu&schoolId=pu')
+            await expect(page.get_by_role('heading', name='社團', exact=True)).to_be_visible()
+            await check_primary_navigation(page, '生活')
+            club_breadcrumb = page.get_by_role('navigation', name='目前位置').get_by_role(
+                'link', name='社團活動', exact=True
+            )
+            await expect(club_breadcrumb).to_be_visible()
+            club_destination = urlparse(await club_breadcrumb.get_attribute('href'))
+            assert club_destination.path == '/clubs'
+            club_scope = parse_qs(club_destination.query)
+            assert club_scope.get('campus') == ['pu']
+            assert club_scope.get('schoolId') == ['pu']
+            await expect(page.get_by_role(
+                'navigation', name='課務導覽', exact=True, include_hidden=True
+            )).to_have_count(0)
+            club_login = page.get_by_role('link', name='登入後查看社團', exact=True)
+            await expect(club_login).to_be_visible()
+            login_destination = urlparse(await club_login.get_attribute('href'))
+            assert login_destination.path == '/login'
+            assert parse_qs(login_destination.query) == {'returnUrl': [club_path + '?schoolId=pu']}
+            assert urlparse(page.url).path == club_path
+            # Correcting the navigation category must not expose the members-only profile.
+            await expect(page.get_by_role(
+                'region', name='社團頁', exact=True, include_hidden=True
+            )).to_have_count(0)
+            await expect(page.get_by_role('button', name='重新讀取社團資料', exact=True)).to_have_count(0)
+            await expect(page.get_by_role('link', name='查看社團討論與更多公告', exact=True)).to_have_count(0)
+            await no_overflow(page)
+            await page.screenshot(
+                path=str(OUT / 'club-overview-unsigned-mobile.png'),
+                full_page=True,
+                animations='disabled',
+            )
+            results.append('unsigned club overview stays in life with a campus-scoped clubs breadcrumb and keeps member data gated')
+
             await goto_path(page, '/?campus=all')
             await check_unsigned_today(page, 'all')
             await no_overflow(page)

@@ -61,6 +61,41 @@ it('returns a personal document to the account center', () => {
   );
 });
 
+it.each(['/groups/club-1/club', '/groups/club-1/club/overview', '/groups/club-1/club/members'])(
+  'returns the club route %s to life and the club directory with the browsing campus',
+  (pathname) => {
+    navigation.pathname = pathname;
+    navigation.search = 'schoolId=pu&campus=pu&school=PU&session=private';
+    render(<ServiceBreadcrumbs title="攝影社" />);
+    const nav = screen.getByRole('navigation', { name: '目前位置' });
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      '生活',
+      '社團活動',
+    ]);
+    expect(within(nav).getByRole('link', { name: '生活' }).getAttribute('href')).toBe(
+      '/life?school=PU&schoolId=pu&campus=pu',
+    );
+    expect(within(nav).getByRole('link', { name: '社團活動' }).getAttribute('href')).toBe(
+      '/clubs?school=PU&schoolId=pu&campus=pu',
+    );
+    expect(within(nav).queryByRole('link', { name: '課務' })).toBeNull();
+    expect(within(nav).queryByRole('link', { name: '課程與作業' })).toBeNull();
+    expect(within(nav).getByText('攝影社').getAttribute('aria-current')).toBe('page');
+  },
+);
+
+it('keeps ordinary group pages inside the coursework journey', () => {
+  navigation.pathname = '/groups/group-1';
+  render(<ServiceBreadcrumbs title="讀書群" />);
+  expect(screen.getByRole('link', { name: '課務' }).getAttribute('href')).toBe(
+    '/timetable?campus=nthu',
+  );
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('href')).toBe(
+    '/classroom?campus=nthu',
+  );
+  expect(screen.queryByRole('link', { name: '社團活動' })).toBeNull();
+});
+
 it.each(['feedback', 'semester'])(
   'does not turn the %s grade tab into a school-account detour',
   (tab) => {
