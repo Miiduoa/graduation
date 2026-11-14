@@ -71,6 +71,16 @@ function hasPersonalAcademicData(title: string): boolean {
     .replace(/\d+(?:\.\d+)?(?:分鐘|小時|學分|場|名|人|元|年度|年|月|日|天|週|周|時)/g, '');
   if (/(?:[\p{Script=Han}]{2,}|[a-z]{2,})\d{1,3}(?:\.\d+)?(?:分)?(?!\d)/u.test(nameAndScore))
     return true;
+  // Results may precede the identifying name as well. Use the same unit-stripped
+  // text so ordinary public quantities (30 分鐘、500 元、104 人) stay readable.
+  if (/(?<!\d)\d{1,3}(?:\.\d+)?(?:分)?(?:[\p{Script=Han}]{2,}|[a-z]{2,})/u.test(nameAndScore))
+    return true;
+  // Student identifiers can mix letters and digits rather than contain eight
+  // consecutive digits (for example S411A1234).
+  const identifiers = dateFree
+    .replace(/[\s\p{Cf}-]/gu, '')
+    .match(/(?<![a-z0-9])[a-z][a-z0-9]{7,}(?![a-z0-9])/gi);
+  if (identifiers?.some((value) => /\d/.test(value))) return true;
   // Dates are public metadata; other long numeric identifiers may be student IDs.
   const withoutDates = dateFree.replace(/[^\p{L}\p{N}]/gu, '');
   return /\d{8,}/.test(withoutDates) || /\d+(?:[.．]\d+)?\s*分(?!鐘)/.test(title.normalize('NFKC'));

@@ -320,6 +320,50 @@ it.each([
     expect(decodeURIComponent(careerCalendarUrl(item))).not.toContain('王測試');
   }
 });
+it.each([
+  '95 王測試 實習申請',
+  '95.5 王測試 實習申請',
+  '９５．５ 王測試 實習申請',
+  '9 5 王測試 實習申請',
+  '95/100 王測試 實習申請',
+  '95 Test Student 實習申請',
+  '實習申請 王測試 S411A1234',
+])(
+  'withholds reversed results and mixed student identifiers before public caching: %s',
+  async (suffix) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+    const title = `2026/12/8 ${suffix}`;
+    const sensitiveHtml = `<div class="d-txt"><a href="/p/406-1102-2.php">${title}</a></div>`;
+    for (const source of CAREER_HTML_SOURCES) {
+      expect(parseCareerHtml(sensitiveHtml, source)).toEqual([]);
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : sensitiveHtml + html),
+      })),
+    );
+    const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
+    const feed = await response.json();
+    expect(response.headers.get('Cache-Control')).toContain('public');
+    expect(feed.announcements).toHaveLength(2);
+    expect(feed.timeline).toHaveLength(2);
+    expect(JSON.stringify(feed)).not.toMatch(/王測試|Test Student|S411A1234/);
+    for (const item of [...feed.announcements, ...feed.timeline]) {
+      expect(item.title).toBe('實習申請2026/12/8截止');
+    }
+    for (const item of feed.timeline) {
+      expect(new URL(careerCalendarUrl(item)).searchParams.get('text')).toBe(
+        '實習申請2026/12/8截止',
+      );
+      expect(decodeURIComponent(careerCalendarUrl(item))).not.toMatch(
+        /王測試|Test Student|S411A1234/,
+      );
+    }
+  },
+);
 it('mixes department, career-office and recruiting entries chronologically, caps at five and highlights seven days without red', () => {
   const records = Array.from({ length: 8 }, (_, i) => ({
     title: `2026/11/${15 + i} ${i === 1 ? '校園徵才' : '實習申請截止'}`,
@@ -392,6 +436,9 @@ it('retains ordinary dated career announcements and event durations', () => {
     '2026/11/20 徵才講座',
     '115年11月20日實習申請截止',
     '2026/12/8 履歷講座 30 分鐘',
+    '2026/12/8 履歷講座 104人力銀行',
+    '2026/12/8 實習說明會 教室B201',
+    '2026/12/8 實習講座 報名費500元',
   ]) {
     expect(
       parseCareerHtml(html.replace('實習申請2026/12/8截止', title), CAREER_HTML_SOURCES[0])[0]
