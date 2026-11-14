@@ -120,9 +120,13 @@ function isRealTimestamp(value: unknown): value is string {
 // JSON-restored snapshot may bypass it; do not let an empty title or control
 // separator become model evidence or impersonate a new prompt line.
 function safePromptEvidenceText(value: unknown, maxLength: number, optional = false): value is string {
-  return typeof value === 'string' && value.length <= maxLength &&
-    (optional || !!value.trim()) &&
-    !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(value);
+  if (typeof value !== 'string' || value.length > maxLength ||
+      (!optional && !value.trim())) return false;
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code !== undefined && (code < 32 || code === 127 || code === 0x2028 || code === 0x2029)) return false;
+  }
+  return true;
 }
 
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
