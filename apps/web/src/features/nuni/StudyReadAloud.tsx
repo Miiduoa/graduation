@@ -67,6 +67,14 @@ function isStudySpeechNaturalPause(units: string[], index: number): boolean {
       /^[0-9]$/u.test(previous) && /^[0-9]$/u.test(next)) return false;
   if (token === '.' &&
       /^[A-Za-z0-9]$/u.test(previous) && /^[A-Za-z0-9]$/u.test(next)) return false;
+  // Time notation and ratios such as 12:30 or 3：2 are not sentence
+  // pauses. Keep the source bytes unchanged, including full-width colons.
+  if ((token === ':' || token === '：') &&
+      /^[0-9]$/u.test(previous) && /^[0-9]$/u.test(next)) return false;
+  // A scheme delimiter in an explicitly written URL is not a speech pause.
+  // Do not suppress normal Chinese explanatory colons (例如：說明：內容).
+  if (token === ':' && /^[A-Za-z]$/u.test(previous) &&
+      next === '/' && units[index + 2] === '/') return false;
   return true;
 }
 
