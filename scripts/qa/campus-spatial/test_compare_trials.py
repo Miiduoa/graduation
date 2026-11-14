@@ -60,7 +60,7 @@ class AuditTrialsTests(unittest.TestCase):
     def test_duplicate_trial_is_rejected(self):
         records = complete()
         records.append(dict(records[0]))
-        self.assertTrue(any("duplicate" in err for err in audit_rows(records)["errors"])
+        self.assertTrue(any("duplicate" in err for err in audit_rows(records)["errors"]))
 
     def test_invalid_numeric_and_dates_are_rejected(self):
         for mutation in ({"seconds": "nan"}, {"steps": "-1"}, {"visual_rating": "8"},
