@@ -91,7 +91,9 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             if repetition is None or repetition < 1:
                 raise ValueError(f"{label} repeat: must be at least 1")
             for key in ("steps", "seconds", "fps", "visual_rating"):
-                _number(row[key], f"{label} {key}", integer=key in ("steps", "visual_rating"))
+                observed = _number(row[key], f"{label} {key}", integer=key in ("steps", "visual_rating"))
+                if key == "seconds" and observed == 0:
+                    raise ValueError(f"{label} seconds: recorded duration must be greater than zero")
             rating = _number(row["visual_rating"], f"{label} visual_rating", integer=True)
             if rating is not None and not 1 <= rating <= 5:
                 raise ValueError(f"{label} visual_rating: use 1..5 or blank")
@@ -143,6 +145,10 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
             pending.append({"scenario_id": metadata[0], "repeats": sorted(repeats),
                             "reasons": [f"only {len(repeats)} complete repeats; need {MIN_REPEATS}"]})
             continue
+        # Performance and visual medians are comparable only when every product
+        # has measured the metric in every repeat; do not cherry-pick samples.
+        paired_fps = all(entry["fps"].strip() for batch in repeats.values() for entry in batch)
+        paired_visual = all(entry["visual_rating"].strip() for batch in repeats.values() for entry in batch)
         metrics = {}
         for product in PRODUCTS:
             entries = [next(record for record in batch if record["product"] == product)
@@ -152,14 +158,14 @@ def audit_rows(rows: list[dict[str, str]]) -> dict:
                 "trials": len(entries),
                 "median_steps": median(int(record["steps"]) for record in entries),
                 "median_seconds": median(float(record["seconds"]) for record in entries),
-                "median_fps": median(float(record["fps"]) for record in entries if record["fps"].strip())
-                if any(record["fps"].strip() for record in entries) else None,
-                "median_visual_rating": median(int(record["visual_rating"]) for record in entries
-                                               if record["visual_rating"].strip())
-                if any(record["visual_rating"].strip() for record in entries) else None,
+                "median_fps": median(float(record["fps"]) for record in entries) if paired_fps else None,
+                "median_visual_rating": median(int(record["visual_rating"]) for record in entries)
+                if paired_visual else None,
             }
         ready.append({"conditions": dict(zip(COHORT_FIELDS, metadata)),
-                      "repeats": sorted(repeats), "metrics": metrics})
+                      "repeats": sorted(repeats),
+                      "paired_optional_metrics": {"fps": paired_fps, "visual_rating": paired_visual},
+                      "metrics": metrics})
     return {"errors": errors, "ready": ready, "pending": pending,
             "note": "Completeness and paired conditions only; independent evidence and site verification remain required. No automatic competitor winner."}
 

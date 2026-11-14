@@ -15,7 +15,8 @@ CSV 欄位（**只有欄名，沒有實測數據**）：
 - result：success、failure、unverified。教室未核對門口前不得把建築辨識成功算作教室成功。
 - verified_target：building、classroom、route、ui、not-verified。地點結果須有對應層級的合法來源／現地核對，visual 與 accessibility 需以 ui 表示已完成該任務的實機操作驗證；這項工具只能查完整性，無法替證據背書。
 - steps、seconds：實際操作步數與秒數（包含失敗紀錄）；未知時可空白，但不可進入可比較結果。
-- fps、visual_rating：選填，評分 1–5 須先定義共同標準；沒有量測不能宣稱效能優勢。
+- fps、visual_rating：選填，評分 1–5 須先定義共同標準。**只有同一組完整重測的所有五項產品、每一輪都具備該項量測**，才會提供跨產品可比較的 FPS 或視覺分數中位數；有任一缺漏則全組該指標皆為 null，並在 paired_optional_metrics 明示缺少配對，不以局部樣本製造優勢。
+- seconds：有紀錄時必須大於 0，避免零秒操作造成不可能的最快成績；未知可留空，但該輪不能進入 ready。
 - evidence_ref：錄影、截圖或證據檔的可查位置，勿存放學生個資。ground_truth_ref 為合法來源 URL，並提供 ground_truth_date；來源本身不能代替現地查證。
 
 ## 執行

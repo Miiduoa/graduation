@@ -59,6 +59,39 @@ class AuditTrialsTests(unittest.TestCase):
         self.assertEqual(result["ready"], [])
         self.assertTrue(any("different dates" in str(item) for item in result["pending"]))
 
+    def test_partial_fps_or_visual_ratings_never_create_unpaired_medians(self):
+        records = complete()
+        for entry in records:
+            entry.update(fps="60", visual_rating="4")
+        records[0]["fps"] = ""
+        records[1]["visual_rating"] = ""
+        report = audit_rows(records)
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["pending"], [])
+        cohort = report["ready"][0]
+        self.assertEqual(cohort["paired_optional_metrics"], {"fps": False, "visual_rating": False})
+        for product in PRODUCTS:
+            self.assertIsNone(cohort["metrics"][product]["median_fps"])
+            self.assertIsNone(cohort["metrics"][product]["median_visual_rating"])
+            self.assertEqual(cohort["metrics"][product]["median_seconds"], 12.5)
+
+    def test_fully_paired_optional_metrics_can_be_reported(self):
+        records = complete()
+        for entry in records:
+            entry.update(fps="48.5", visual_rating="3")
+        cohort = audit_rows(records)["ready"][0]
+        self.assertEqual(cohort["paired_optional_metrics"], {"fps": True, "visual_rating": True})
+        for product in PRODUCTS:
+            self.assertEqual(cohort["metrics"][product]["median_fps"], 48.5)
+            self.assertEqual(cohort["metrics"][product]["median_visual_rating"], 3)
+
+    def test_zero_second_trial_cannot_create_impossible_fastest_result(self):
+        records = complete()
+        records[0]["seconds"] = "0"
+        report = audit_rows(records)
+        self.assertTrue(any("greater than zero" in err for err in report["errors"]))
+        self.assertEqual(report["ready"], [])
+
     def test_pending_when_only_two_repeats(self):
         result = audit_rows(complete(2))
         self.assertEqual(result["ready"], [])
