@@ -5,7 +5,9 @@ export function ClubScanner({ onCode }: { onCode: (code: string) => void }) {
     [error, setError] = useState('');
   const video = useRef<HTMLVideoElement>(null),
     callback = useRef(onCode);
-  callback.current = onCode;
+  useEffect(() => {
+    callback.current = onCode;
+  }, [onCode]);
   useEffect(() => {
     if (!running) return;
     let cancelled = false,
