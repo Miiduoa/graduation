@@ -68,7 +68,8 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
     }, AUDIENCE_READ_TIMEOUT_MS);
     void listStoryViewers({ id, schoolId, authorUid }, request.cursor)
       .then((next) => {
-        if (!active) return;
+        // AppState events invalidate reads before React runs passive cleanup.
+        if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
         clearTimeout(timeout);
         setPage((previous) => {
           // A live audience can change between cursor reads. Keep one visible
@@ -87,7 +88,8 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
         setStatus('ready');
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        // AppState events invalidate reads before React runs passive cleanup.
+        if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
         clearTimeout(timeout);
         if ((error as { code?: string } | null)?.code === 'permission-denied') {
           setPage({ viewers: [], nextCursor: null });

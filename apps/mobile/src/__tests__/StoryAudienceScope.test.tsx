@@ -491,4 +491,45 @@ describe('story audience scope transitions', () => {
     subscription.mockRestore();
   });
 
+  test('a response settling in the same turn as backgrounding cannot restore private viewers', async () => {
+    let notifyState: ((state: AppStateStatus) => void) | undefined;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      if (event === 'change') notifyState = listener as (state: AppStateStatus) => void;
+      return { remove: jest.fn() } as ReturnType<typeof AppState.addEventListener>;
+    });
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'fresh', displayName: '重新驗證後的學生' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    expect(notifyState).toBeDefined();
+    expect(fetchViewers).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      // The event synchronously invalidates the old read; its Promise settles
+      // before this act batch commits React's passive effect cleanup.
+      notifyState?.('background');
+      pending.resolve({
+        viewers: [{ uid: 'old', displayName: '背景切換瞬間的舊名單' }],
+        nextCursor: null,
+      });
+      await pending.promise;
+    });
+    expect(view.queryByText('背景切換瞬間的舊名單')).toBeNull();
+    expect(fetchViewers).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      notifyState?.('active');
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null]);
+    expect(view.getByText('重新驗證後的學生')).toBeTruthy();
+    expect(view.queryByText('背景切換瞬間的舊名單')).toBeNull();
+    view.unmount();
+    subscription.mockRestore();
+  });
+
 });
