@@ -13,8 +13,9 @@ import {
   parseCareerHtml,
   parseTaiwanJobs,
 } from './adapters';
-import { GET } from './route';
+const GET = async (request: Request) => (await import('./route')).GET(request);
 afterEach(() => {
+  vi.resetModules();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -68,10 +69,10 @@ it.each(CAREER_HTML_SOURCES)(
     ]);
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => ({
-        ok: true,
-        text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : input),
-      })),
+      vi.fn(
+        async (url: string) =>
+          new Response(url === TAIWANJOBS_URL ? '<DataList></DataList>' : input),
+      ),
     );
     const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
     const feed = await response.json();
@@ -225,7 +226,7 @@ it('reads official TaiwanJobs CDATA, rejects injected URLs, excludes bodies', ()
 it('fails sources independently and queries ZIP 433 without third-party scraping', async () => {
   const fetcher = vi.fn(async (url: string) => {
     if (url === TAIWANJOBS_URL) throw Error('down');
-    return { ok: true, text: async () => html };
+    return new Response(html);
   });
   vi.stubGlobal('fetch', fetcher);
   const feed = await loadCareerFeed();
@@ -248,13 +249,14 @@ it('keeps cancellation notices readable without offering a calendar event', asyn
   const title = '2026/12/8 實習講座延期';
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => ({
-      ok: true,
-      text: async () =>
-        url === TAIWANJOBS_URL
-          ? '<DataList></DataList>'
-          : html.replace('實習申請2026/12/8截止', title),
-    })),
+    vi.fn(
+      async (url: string) =>
+        new Response(
+          url === TAIWANJOBS_URL
+            ? '<DataList></DataList>'
+            : html.replace('實習申請2026/12/8截止', title),
+        ),
+    ),
   );
   const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
   const feed = await response.json();
@@ -288,13 +290,14 @@ it.each(['2026/12/8至翌日實習說明會', '2026/12/8至月底實習申請'])
     vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => ({
-        ok: true,
-        text: async () =>
-          url === TAIWANJOBS_URL
-            ? '<DataList></DataList>'
-            : html.replace('實習申請2026/12/8截止', title),
-      })),
+      vi.fn(
+        async (url: string) =>
+          new Response(
+            url === TAIWANJOBS_URL
+              ? '<DataList></DataList>'
+              : html.replace('實習申請2026/12/8截止', title),
+          ),
+      ),
     );
     const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
     const feed = await response.json();
@@ -373,10 +376,10 @@ it.each(policySensitiveTitles)(
     const input = `<div class="d-txt"><a href="/p/406-1102-2.php">${title}</a></div>` + html;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => ({
-        ok: true,
-        text: async () => (url === TAIWANJOBS_URL ? '<DataList></DataList>' : input),
-      })),
+      vi.fn(
+        async (url: string) =>
+          new Response(url === TAIWANJOBS_URL ? '<DataList></DataList>' : input),
+      ),
     );
     const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
     expect(response.headers.get('Cache-Control')).toContain('public');
@@ -423,13 +426,14 @@ it.each([
     const title = `2026/12/8 ${event}`.normalize('NFKC');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => ({
-        ok: true,
-        text: async () =>
-          url === TAIWANJOBS_URL
-            ? '<DataList></DataList>'
-            : html.replace('實習申請2026/12/8截止', title),
-      })),
+      vi.fn(
+        async (url: string) =>
+          new Response(
+            url === TAIWANJOBS_URL
+              ? '<DataList></DataList>'
+              : html.replace('實習申請2026/12/8截止', title),
+          ),
+      ),
     );
     const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
     expect(response.headers.get('Cache-Control')).toContain('public');
@@ -453,13 +457,14 @@ it('keeps a general announcement without allowing a generic application date int
   expect(careerCalendarUrl(item)).toBe('');
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => ({
-      ok: true,
-      text: async () =>
-        url === TAIWANJOBS_URL
-          ? '<DataList></DataList>'
-          : html.replace('實習申請2026/12/8截止', title),
-    })),
+    vi.fn(
+      async (url: string) =>
+        new Response(
+          url === TAIWANJOBS_URL
+            ? '<DataList></DataList>'
+            : html.replace('實習申請2026/12/8截止', title),
+        ),
+    ),
   );
   const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
   expect(response.headers.get('Cache-Control')).toContain('public');
@@ -480,13 +485,14 @@ it.each([
   const title = `2026/12/8 ${detail}`;
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => ({
-      ok: true,
-      text: async () =>
-        url === TAIWANJOBS_URL
-          ? '<DataList></DataList>'
-          : html.replace('實習申請2026/12/8截止', title),
-    })),
+    vi.fn(
+      async (url: string) =>
+        new Response(
+          url === TAIWANJOBS_URL
+            ? '<DataList></DataList>'
+            : html.replace('實習申請2026/12/8截止', title),
+        ),
+    ),
   );
   const response = await GET(new Request('https://nuni.tw/career/data?school=pu'));
   expect(response.headers.get('Cache-Control')).toContain('public');
