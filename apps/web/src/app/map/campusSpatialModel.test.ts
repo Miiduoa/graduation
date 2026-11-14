@@ -56,6 +56,35 @@ describe('campus spatial coordinates', () => {
     expect(model.points[0].z).toBe(0);
   });
 
+  it('ignores a zero-origin placeholder without hiding real campus places', () => {
+    const nearby = [
+      place('library', 24.226282, 120.581377),
+      place('admin', 24.226939, 120.583587),
+    ];
+    const original = buildCampusSpatialModel(nearby);
+    const withPlaceholder = buildCampusSpatialModel([place('unlocated', 0, 0), ...nearby]);
+    expect(withPlaceholder.unavailableReason).toBeNull();
+    expect(withPlaceholder.excludedCount).toBe(1);
+    // A missing-GPS placeholder must not shift the geographic center, camera
+    // framing or measured position of any sourced campus marker.
+    expect(withPlaceholder.points).toEqual(original.points);
+    expect(withPlaceholder.extent).toEqual(original.extent);
+    expect(withPlaceholder.radius).toBe(original.radius);
+    expect(buildCampusSpatialModel([place('unlocated', 0, 0)])).toEqual({
+      points: [], extent: { width: 0, depth: 0 }, radius: 0,
+      excludedCount: 1, unavailableReason: 'no-locations',
+    });
+  });
+
+  it('retains real near-equatorial or near-prime-meridian coordinates', () => {
+    const model = buildCampusSpatialModel([
+      place('equator', 0, 0.001), place('meridian', 0.001, 0),
+    ]);
+    expect(model.unavailableReason).toBeNull();
+    expect(model.excludedCount).toBe(0);
+    expect(model.points).toHaveLength(2);
+  });
+
   it('does not stretch an existing pair of places to fill the view when another place arrives', () => {
     const original = [place('a', 24, 120), place('b', 24.002, 120.002)];
     const pair = buildCampusSpatialModel(original).points;
