@@ -7,9 +7,9 @@ import styles from './CourseStudyPanel.module.css';
 
 type SourceValueRow = { label: string; original: string; amount: number };
 
-const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|[%％])/u;
+const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|達成率|合格率|參與率|缺席率|進度|完成度|[%％])/u;
 const ENGLISH_PERCENT_COLUMN =
-  /\b(?:percent(?:age)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
+  /\b(?:percent(?:age)?|progress(?:\s+rate)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|participation\s+rate|retention\s+rate|conversion\s+rate|error\s+rate|dropout\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
 
 // An English rate header must not quietly use max-of-column scaling, and
 // raw numbers without an explicit percent sign remain ambiguous.

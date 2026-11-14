@@ -810,3 +810,50 @@ it('does not compare unlabeled English rates as quantities or block real numeric
   expect(Array.from(container.querySelectorAll('meter')).map((bar) => bar.getAttribute('max')))
     .toEqual(['75', '75']);
 });
+
+it('guards progress and additional rate headers with source-grounded 100% scaling', () => {
+  const columns = [
+    '學習進度', '完成度', '達成率', '合格率', '參與率', '缺席率',
+    'Progress', 'Progress Rate', 'Participation Rate', 'Retention Rate',
+    'Conversion Rate', 'Error Rate', 'Dropout Rate',
+  ];
+  for (const column of columns) {
+    const material = [
+      '| 項目 | ' + column + ' |',
+      '| --- | --- |',
+      '| 甲 | 75% |',
+      '| 乙 | 25% |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('summary')?.textContent).toContain('原文百分比（100% 滿格）');
+    expect(Array.from(container.querySelectorAll('meter')).map((meter) => [
+      meter.getAttribute('value'), meter.getAttribute('max'),
+    ])).toEqual([['75', '100'], ['25', '100']]);
+    unmount();
+  }
+});
+
+it('does not misrepresent bare progress or rate numbers as max-relative percentages', () => {
+  for (const column of ['學習進度', '完成度', '達成率', '參與率', '缺席率',
+    'Progress', 'Participation Rate', 'Retention Rate', 'Conversion Rate',
+    'Error Rate', 'Dropout Rate']) {
+    const material = [
+      '| 項目 | ' + column + ' |',
+      '| --- | --- |',
+      '| 甲 | 75 |',
+      '| 乙 | 25 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+  // A genuinely quantified budget remains eligible for a max-relative comparison.
+  const budget = ['| 項目 | Yearly Budget |', '| --- | --- |',
+    '| 甲 | 75 |', '| 乙 | 25 |'].join('\n');
+  const { container } = render(<StudySourceTables text={budget} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
+    .toEqual(['75', '75']);
+});
