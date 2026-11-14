@@ -1125,3 +1125,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 原共用檔名規則雖依 Unicode code point 截至 48 個，但可能留下國旗的一半 regional indicator、Emoji ZWJ 的前半、重音組合符號或韓文 Jamo 的不完整字形。現在保留既有檔名淨化與 48 code point 上限，在支援的瀏覽器使用裝置內建 Intl.Segmenter 選完整字素；舊版／異常 WebView 使用有限的本機邊界回退，不跳過超出上限字素之後的字串。
 - 同時涵蓋 TXT 筆記、閱讀 JSON、逐題練習 JSON。新增 Vitest 正反案例檢查 Emoji／國旗／重音／韓文在上限內及上限邊緣的檔名，以及沒有或異常 Segmenter 的退路。教材文字、JSON 備份格式、跨帳號／課程 scope、E 校園資料界線均不變，不新增套件或付費服務。
 - 本輪僅完成程式與有限邊界檢查；Web/Mobile 全套 CI、CodeQL、App 5504170 APPROVED、iOS Safari／Android Chrome 真機、Maestro、WebGPU 繁體中文教學可靠性及 Ahaboard 同教材同機比較必須依新 SHA 另驗。PR 保留 Draft，不合併、不部署。
+
+### 2026-11-14：異常手機字素分段器不得截斷備份檔名
+
+- 部分異常 `Intl.Segmenter` 即使依序回傳全部原文字元，仍可能把同一面國旗、ZWJ Emoji、重音、膚色修飾或韓文 Jamo 拆開；僅驗證來源字串連續不足以保證 48 字元截斷點安全。現在額外以既有的有限本機續接規則驗證最終截斷邊界，必要時向前退至安全位置。正常瀏覽器已確認完整的複合字形仍照原有順序保存。
+- 新增故意將 Unicode 字元逐 code point 回傳、但內容連續完整的模擬 WebView 測試，涵蓋筆記 TXT、閱讀 JSON、練習 JSON 三種匯出；保留完整字形能放入上限的正例。不更動教材、匯出內容／格式、帳號 scope，不新增依賴或私人資料傳輸。
+- 這些僅為純 JS 煙測與新增 Vitest 案例，不能替代正式 CI/CodeQL、App 5504170 APPROVED、Maestro、iOS／Android 真機或 Ahaboard 同教材同裝置對照；PR 維持 Draft，未合併、未部署。

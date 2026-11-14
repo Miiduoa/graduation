@@ -14,12 +14,12 @@ function isFilenameRegionalIndicator(character: string): boolean {
   return point >= 0x1f1e6 && point <= 0x1f1ff;
 }
 
-function fallbackFilenameBoundary(value: string): string {
+function fallbackFilenameBoundary(value: string, requestedEnd = MAX_FILENAME_CODE_POINTS): string {
   // Older WebViews do not always expose Intl.Segmenter. Conservatively
   // retract a cut in the middle of common emoji, accents and Hangul Jamo.
   // This is bounded by the filename cap, not a complete UAX #29 parser.
   const points = Array.from(value);
-  let end = Math.min(MAX_FILENAME_CODE_POINTS, points.length);
+  let end = Math.min(requestedEnd, points.length);
   if (end === points.length) return value;
   while (end > 0) {
     const next = points[end];
@@ -88,7 +88,11 @@ function truncateFilenameStem(value: string): string {
         }
       }
       if (offset !== value.length) throw new Error('incomplete filename segmentation');
-      return result;
+      // Some faulty WebViews return every code point in order but claim that
+      // a flag, combining accent or joined emoji ends halfway through.
+      // Validate the final cut independently before trusting that boundary.
+      const safeCut = fallbackFilenameBoundary(value, Array.from(result).length);
+      return safeCut.length < result.length ? safeCut : result;
     } catch {
       // The original title remains untouched; use the bounded local fallback.
     }

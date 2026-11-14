@@ -64,4 +64,32 @@ describe('mobile backup filename grapheme boundaries', () => {
       else Reflect.deleteProperty(Intl, 'Segmenter');
     }
   });
+  it('rejects contiguous but non-grapheme WebView segments at the filename cut', () => {
+    const original = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', {
+      configurable: true,
+      value: class {
+        // All source code points are present, but the stated cluster breaks
+        // are false. The output must never end with half a combined glyph.
+        segment(value: string) {
+          return Array.from(value, (segment) => ({ segment }));
+        }
+      },
+    });
+    try {
+      for (const [, cluster] of partialClusters) {
+        const title = prefix + cluster + '後續文字.md';
+        expect(courseStudyBackupFilenameStem(title)).toBe(prefix);
+        expect(courseStudyNotesFilename(title)).toBe(prefix + '-學習筆記.txt');
+        expect(courseStudyProgressFilename(title)).toBe(prefix + '-閱讀進度.campus-study.json');
+        expect(courseStudyPracticeCheckpointFilename(title)).toBe(prefix + '-逐題練習.campus-practice.json');
+      }
+      const complete = '課'.repeat(45) + '👩‍💻';
+      expect(courseStudyBackupFilenameStem(complete + '後續.md')).toBe(complete);
+    } finally {
+      if (original) Object.defineProperty(Intl, 'Segmenter', original);
+      else Reflect.deleteProperty(Intl, 'Segmenter');
+    }
+  });
+
 });
