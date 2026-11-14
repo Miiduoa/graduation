@@ -198,9 +198,12 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
-    // 429 and 503 can contain a server-provided cooldown. Do not retry against
-    // the public endpoint every ten minutes when it explicitly requests longer.
-    if (response.status === 429 || response.status === 503) {
+    // Public Overpass and intermediaries may request an extended cooldown for
+    // partial replies, request timeouts and gateway/server failures as well as
+    // ordinary 429 limits. All these responses are rejected without reading a
+    // body, but their Retry-After must still protect the upstream service.
+    if (response.status === 206 || response.status === 408 ||
+        response.status === 429 || response.status >= 500) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
         response.headers.get('retry-after'), Date.now(),
       ));
@@ -212,7 +215,11 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // even when the returned fragment happens to be syntactically valid JSON.
   if (response.headers.get('content-range') !== null) {
     if (response.body) void response.body.cancel().catch(() => {});
-    throw new Error('OSM response advertised partial content');
+    // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
+    // Retain any upstream cooldown instead of retrying a partial response at 10m.
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(),
+    ));
   }
   const raw = await readBoundedResponse(response, signal);
   const payload = JSON.parse(raw) as unknown;
