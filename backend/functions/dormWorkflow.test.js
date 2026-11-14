@@ -3,7 +3,7 @@ const { createDormWorkflowHandler, transition } = require('./dormWorkflow');
 function fixture() {
   const data = new Map([
     ['schools/pu', { dormWorkflowEnabled: true }],
-    ['schools/pu/members/student', { role: 'student' }],
+    ['schools/pu/members/student', { role: 'student', studentId: '123', displayName: '同學' }],
     ['schools/pu/members/staff', { role: 'staff' }],
     ['schools/pu/members/admin', { role: 'admin' }],
     [
@@ -498,4 +498,96 @@ test('returned legacy parcels retain pickup behavior, dorm parcels reject return
     ).rejects.toMatchObject({ code: 'failed-precondition' });
     expect(data.get(`schools/pu/${returnedFeed}/new`).status).toBe('returned');
   }
+});
+
+test('roster identity uses server-owned membership and ignores forged or duplicate profile IDs', async () => {
+  const { call, data } = fixture();
+  data.set('users/forged', { studentId: '123', displayName: '冒用者' });
+  data.set('schools/pu/members/forged', { role: 'student' });
+  data.set('users/student', { studentId: 'edited', displayName: '自行修改' });
+  await call('staff', {
+    action: 'importResidents',
+    rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+  });
+  expect(data.get('schools/pu/dormResidents/123')).toMatchObject({
+    userId: 'student',
+    name: '同學',
+  });
+  data.delete('schools/pu/members/student');
+  await expect(
+    call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '102', bed: '1' }],
+    }),
+  ).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(data.get('schools/pu/dormResidents/123').room).toBe('101');
+});
+
+test('duplicate verified membership IDs fail without partially importing the roster', async () => {
+  const { call, data } = fixture();
+  data.set('schools/pu/members/other', { role: 'student', studentId: '123' });
+  await expect(
+    call('staff', {
+      action: 'importResidents',
+      rows: [{ studentId: '123', building: 'A', room: '101', bed: '1' }],
+    }),
+  ).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(data.has('schools/pu/dormResidents/123')).toBe(false);
+});
+
+test.each([
+  [{ active: false }, 'failed-precondition'],
+  [{ building: 'B' }, 'permission-denied'],
+])(
+  'parcel registration checks concurrent roster change %j inside transaction',
+  async (change, code) => {
+    const { call, data, db, sendPushToUser } = fixture();
+    const residentPath = 'schools/pu/dormResidents/123';
+    data.set(residentPath, { studentId: '123', userId: 'student', building: 'A', active: true });
+    const runTransaction = db.runTransaction;
+    db.runTransaction = async (fn) => {
+      data.set(residentPath, { ...data.get(residentPath), ...change });
+      return runTransaction(fn);
+    };
+    await expect(
+      call('staff', {
+        action: 'registerPackage',
+        studentId: '123',
+        key: 'race',
+        description: '書',
+        location: '服務台',
+      }),
+    ).rejects.toMatchObject({ code });
+    expect([...data.keys()].some((path) => /\/(dormPackages|packages)\//.test(path))).toBe(false);
+    expect(sendPushToUser).not.toHaveBeenCalled();
+  },
+);
+
+test('parcel transaction retry notifies only the committed recipient and keeps retries idempotent', async () => {
+  const { call, data, db, sendPushToUser } = fixture();
+  const residentPath = 'schools/pu/dormResidents/123';
+  data.set(residentPath, { studentId: '123', userId: 'student', building: 'A', active: true });
+  const runTransaction = db.runTransaction;
+  db.runTransaction = async (fn) => {
+    // Simulate a Firestore attempt aborted by a concurrent resident rebind.
+    await runTransaction((tx) => fn({ ...tx, create: () => {} }));
+    data.set(residentPath, { ...data.get(residentPath), userId: 'new-student' });
+    return runTransaction(fn);
+  };
+  const request = {
+    action: 'registerPackage',
+    studentId: '123',
+    key: 'race',
+    description: '書',
+    location: '服務台',
+  };
+  const { id } = await call('staff', request);
+  expect(data.get('schools/pu/dormPackages/' + id).recipientId).toBe('new-student');
+  expect(data.get('schools/pu/packages/' + id).recipientId).toBe('new-student');
+  expect(sendPushToUser).toHaveBeenCalledTimes(1);
+  expect(sendPushToUser.mock.calls[0][0]).toBe('new-student');
+  db.runTransaction = runTransaction;
+  data.get(residentPath).active = false;
+  await call('staff', request);
+  expect(sendPushToUser).toHaveBeenCalledTimes(1);
 });

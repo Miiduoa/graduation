@@ -375,10 +375,15 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           bed: required(r.bed, 30),
         };
         inBuilding(row);
-        const users = await db.collection('users').where('studentId', '==', studentId).get();
+        // School membership studentId is maintained by verified school login;
+        // users.studentId is client-editable and must never establish identity.
+        const members = await school
+          .collection('members')
+          .where('studentId', '==', studentId)
+          .get();
         const matches = [];
-        for (const user of users.docs)
-          if (await authz.getActiveSchoolMembership(schoolId, user.id)) matches.push(user);
+        for (const member of members.docs)
+          if (await authz.getActiveSchoolMembership(schoolId, member.id)) matches.push(member);
         if (matches.length !== 1)
           throw new HttpsError(
             'failed-precondition',
@@ -388,7 +393,7 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
           ...row,
           active: true,
           userId: matches[0].id,
-          name: matches[0].data().displayName || matches[0].data().name || '',
+          name: matches[0].data().displayName || '',
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
@@ -408,48 +413,45 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
     }
     if (action === 'registerPackage') {
       staff('packages');
-      const resident = await school
-        .collection('dormResidents')
-        .doc(required(input.studentId, 50))
-        .get();
-      if (!resident.exists || resident.data().active === false)
-        throw new HttpsError('failed-precondition', '學號不在住宿生名單');
-      const r = resident.data();
-      inBuilding(r);
+      const residentRef = school.collection('dormResidents').doc(required(input.studentId, 50));
       const packageKey = required(input.key, 100);
       if (!/^[a-zA-Z0-9_-]+$/.test(packageKey))
         throw new HttpsError('invalid-argument', '重試代碼錯誤');
       const ref = school.collection('dormPackages').doc(uid + '_' + packageKey);
-      const parcel = {
-        recipientId: r.userId,
-        studentId: r.studentId,
-        building: r.building,
-        description: required(input.description, 120),
-        location: required(input.location, 120),
-        status: 'waiting',
-        arrivedAt: FieldValue.serverTimestamp(),
-      };
-      let created = false;
-      await db.runTransaction(async (tx) => {
-        const old = await tx.get(ref);
-        if (!old.exists) {
-          tx.create(ref, parcel);
-          // Existing student feed contains only the legacy parcel fields.
-          tx.create(school.collection('packages').doc(ref.id), {
-            recipientId: parcel.recipientId,
-            description: parcel.description,
-            location: parcel.location,
-            status: parcel.status,
-            arrivedAt: parcel.arrivedAt,
-          });
-          created = true;
-        }
+      const description = required(input.description, 120);
+      const location = required(input.location, 120);
+      const parcel = await db.runTransaction(async (tx) => {
+        const [old, resident] = await tx.getAll(ref, residentRef);
+        if (old.exists) return null;
+        if (!resident.exists || resident.data().active === false)
+          throw new HttpsError('failed-precondition', '學號不在住宿生名單');
+        const r = resident.data();
+        inBuilding(r);
+        const parcel = {
+          recipientId: r.userId,
+          studentId: r.studentId,
+          building: r.building,
+          description,
+          location,
+          status: 'waiting',
+          arrivedAt: FieldValue.serverTimestamp(),
+        };
+        tx.create(ref, parcel);
+        // Existing student feed contains only the legacy parcel fields.
+        tx.create(school.collection('packages').doc(ref.id), {
+          recipientId: parcel.recipientId,
+          description: parcel.description,
+          location: parcel.location,
+          status: parcel.status,
+          arrivedAt: parcel.arrivedAt,
+        });
+        return parcel;
       });
-      if (!created) return { success: true, id: ref.id };
+      if (!parcel) return { success: true, id: ref.id };
       try {
         await sendPushToUser(
-          r.userId,
-          { title: '包裹到了・' + input.location, body: '請出示學號及姓名領取。' },
+          parcel.recipientId,
+          { title: '包裹到了・' + parcel.location, body: '請出示學號及姓名領取。' },
           { type: 'package', schoolId, channel: 'dormitory' },
         );
       } catch {

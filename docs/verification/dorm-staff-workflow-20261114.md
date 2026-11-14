@@ -87,3 +87,11 @@
 - 有登入權限migration變更：本輪依指定審查要求，僅撤回兩行共用角色映射並在宿舍外宿流程內加入名冊檢查；未修改登入、sessions、共用 authz、ACL／Firestore／Storage rules 或 migration，未部署與操作正式資料。宿舍新增集合及授權仍屬需晉瑋說「上」的部署範圍。
 - 新增角色隔離、偽造棟房、缺漏／停用／重複名冊、審核前棟房異動、舊退件包裹相容與新流程退件限制的回歸測試。
 - 驗證：後端 dormWorkflow／authz 36 項、shared 角色解析 14 項、Web DormWorkflow／cloud 21 項測試通過；shared、mobile、web 全專案 typecheck、變更後端檔案 ESLint、JS 語法與 git diff --check 通過。首次直接執行的 Jest 因 ESM 相依套件失敗，改用既有 backend Jest 設定即通過；直接 typecheck 的共享套件解析問題，使用 /tmp 設定指向此工作樹修正，未排除檔案。暫存設定與輸出已刪除。沿用 Node 24 與現有依賴，未安裝套件或更動 node_modules symlink。
+
+## 指定 R2 審查結果修正（學號綁定與包裹競態）
+
+- P1：名冊匯入不再查詢客戶端可修改的 users.studentId，改用既有 schools/{schoolId}/members 的伺服器維護學號映射，並要求唯一且啟用的本校成員。名冊姓名同樣取自成員紀錄。缺少已驗證映射或存在重複映射時拒絕匯入，不能退回可修改的個人資料；須由既有已驗證校務登入／校方維護流程補齊成員學號。
+- P2：包裹及名冊在同一 transaction 讀取，於建立兩份包裹紀錄前驗證最新啟用狀態及棟別。transaction 回傳成功提交的包裹，推播只使用該收件人；重試不沿用失敗嘗試的收件人。已成功的相同重試代碼直接回傳成功，不重複通知。
+- 本輪涉及審查要求的狹義身分綁定修正，隔離在宿舍 handler；未改登入、sessions、共用 authz、ACL、Firestore／Storage rules 或 migration，未新增集合、依賴或部署。既有 PR 的宿舍授權部署範圍仍須依原流程核准。
+- 新增 5 項回歸案例，涵蓋個人資料偽造／重複學號、重複伺服器映射、並行停用／移棟，以及 transaction 重試更換收件人與冪等通知。
+- 驗證：dormWorkflow.test.js、authz.test.js 共 41 項通過；shared typecheck、兩個變更 JS 檔案 ESLint、handler 語法檢查及 git diff --check 通過。只修改後端 JS 與本驗證文件，未變更前端型別。使用既有 Node 24（套件引擎為 20／22，工具有警告）；未安裝依賴、更換 node_modules symlink或建立暫存檔。
