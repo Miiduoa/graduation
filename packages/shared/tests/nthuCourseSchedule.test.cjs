@@ -160,9 +160,28 @@ test('duplicate weekday-periods across official room/time pairs require manual r
   const valid = [{ time: 'M3M4', room: 'A' }, { time: 'M5', room: 'B' }, { time: 'T3', room: 'C' }];
   assert.deepEqual(nthuCourseMeetings(valid, '1151').map(({ dayOfWeek, room }) => [dayOfWeek, room]),
     [[1, 'A'], [1, 'B'], [2, 'C']]);
-  assert.equal(parsePersonalImport(nthuTimetableImportCsv({ ...chemistry, meetings: valid }), {
+  const matchedCourse = { ...chemistry, meetings: valid,
+    time: valid.map(pair => pair.time).join('\n'), room: valid.map(pair => pair.room).join('\n'),
+  };
+  assert.equal(parsePersonalImport(nthuTimetableImportCsv(matchedCourse), {
     kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
   }).rows.length, 3);
+});
+
+test('import rejects mismatched public display and actual meeting pairs', () => {
+  // Catalog parsers create both fields from the same official room/time pairs.
+  // Reject a malformed or stale response instead of silently importing a
+  // different weekday, classroom or number of meetings than was displayed.
+  assert.ok(nthuTimetableImportCsv(chemistry));
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, time: 'M3M4' }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, room: 'BMES醫環618' }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: [chemistry.meetings[0]] }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: [
+    { ...chemistry.meetings[0], time: 'T3T4' }, chemistry.meetings[1],
+  ] }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: [
+    { ...chemistry.meetings[0], room: '錯誤教室' }, chemistry.meetings[1],
+  ] }), null);
 });
 
 // Keep the exhaustive clock/CSV matrix in the existing fixed CI test selection.

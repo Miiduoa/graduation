@@ -84,7 +84,13 @@ export function nthuCourseMeetings(
 
 export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | null {
   const identity = nthuCourseIdentity(course.code);
-  const meetings = nthuCourseMeetings(course.meetings ?? [], course.semester);
+  const pairs = course.meetings ?? [];
+  // The official JSON represents each time and room both as a display list and
+  // as structured meeting pairs. Never import a different timetable than the
+  // one shown in the public course result (e.g. after a malformed response).
+  if (pairs.map(pair => pair.time).join('\n') !== course.time ||
+      pairs.map(pair => pair.room).join('\n') !== course.room) return null;
+  const meetings = nthuCourseMeetings(pairs, course.semester);
   if (!identity || !meetings || identity.semester !== course.semester || identity.section !== course.section) return null;
   // Multiple official room/time pairs may describe one course. A repeated
   // weekday/period would duplicate or overlap the student's imported timetable;
