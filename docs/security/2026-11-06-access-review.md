@@ -676,3 +676,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 這四個案例是 main `75bda317cdbac687ce14899736186eda07e9754a` 新增的案例，原 PR head 尚未包含，只有 GitHub 合併預覽 `63c20294d4b39e63669089bce6ec9197f4b2f895` 會執行。測試固定合成校園 `pu` 的課表，但 `saveTodayLesson()` 以 CI 真實日期產生星期六的課程。該校課表的 `periodProfileForSchool` 正確拒絕週末星期六／日資料，原本測試期待的「入口測試資料庫」因此無法讀取，UI 返回裝置資料不可用提示。此情境屬於**合成測試時間依賴**，不是應放寬正式資料驗證的理由。
 - 本次在整合 main 的 PR 開發分支，僅讓此四個案例共用的合成課表建立器固定在 2026-11-12（台灣星期四），只 fake `Date` 不假造 `setTimeout` 等 React 非同步時鐘，並於 `afterEach` 復原真實計時器，保留校籍／本機來源拒絕規則不變。這是解決既有 CI 失敗的最小測試修正，**尚待精確新 head 的 Web CI 證實**。PR branch 合併 main 不等於主線合併，仍保持 Draft。
 - 不涉及正式資料、GCS/Supabase token、migration、部署、E 校園或手動 npm/pnpm audit。未發布群組父貼文直接讀取、已發網址撤權、真隔離 GCS CAS、歷史可信附件、minimatch 雙鎖檔與發布驗收仍是待辦。沒有指定 App 5504170 對新精確 head 的「審查通過」，不得合併 main 或部署。
+
+## 2026-11-14：Firestore SDK 直接繳交不能繞過非開放作業狀態（PR #577）
+
+前一精確 head `7c37ad76560c74a63171f5435490f54ce497cdfe` 的 [主 CI #43503880571](https://github.com/Miiduoa/graduation/actions/runs/43503880571)、[CodeQL #43503880641](https://github.com/Miiduoa/graduation/actions/runs/43503880641) 與 [Course access #43503880532](https://github.com/Miiduoa/graduation/actions/runs/43503880532) 均 completed/success。主 CI 含 Web、Mobile、Functions、Rules、Build、Lint 全部成功；15 項 check runs 未見指定 App 5504170，reviews／未解決討論為零。Supabase permissions、Python security、Mobile Agent Regression、Maestro 於此 head 沒有獨立執行。當時 main `75bda317cdbac687ce14899736186eda07e9754a`，PR ahead 21／behind 0。
+
+發現 Firestore 規則的 `acceptsStudentSubmission()` 僅阻擋 `draft/closed`，直接 Firestore SDK 建立 `groups/{groupId}/assignments/{assignmentId}/submissions/{uid}` 收據時，`scheduled/pending/unpublished/archived/cancelled/canceled/deleted` 仍可能通過狀態檢查；這與先前 HTTP 附件上傳授權的明確非開放狀態判定不一致。本次只收緊同一個 Firestore helper 的狀態清單，保留正常開放繳交、期限與合法晚交、送出後禁止覆寫及教師評分權限。這是可在合成資料下推導的授權漏洞，並未取得正式環境實際遭利用證據。
+
+擴充 `backend/tests/security-rules.test.js` 的作業與測驗非開放狀態矩陣，加入 `allowLateSubmission:true` 仍拒絕撤回／封存的案例，以及沿用同一登入 context 檢驗「封存→開放、校籍撤銷→恢復、首次提交→重放」。原跨帳號／跨校與正常繳交案例保留。此為開發分支程式碼與可重跑回歸，**新精確 head 的 Rules、完整 CI、CodeQL 仍須以 GitHub 實際結果驗證，不沿用父 head 通過結果**。
+
+未發布群組父貼文 get/list、GCS／Supabase 已發網址撤銷、真隔離 Storage CAS／競態、舊附件可信引用、minimatch 雙鎖檔與正式發布／回復仍待。新直接寫入拒絕不撤銷既有簽發 URL。保持 Draft，未取得 nuni-merge-gate App 5504170 對精確 head 的 APPROVED 不合併／部署；不觸碰正式資料、金鑰、token、migration、E 校園或重跑受限 npm/pnpm audit。

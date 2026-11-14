@@ -305,7 +305,10 @@ service cloud.firestore {
       let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
       let due = assignment.get('dueAt', null);
       return assignment.get('published', true) != false
-        && !(assignment.get('status', '') in ['draft', 'closed'])
+        && !(assignment.get('status', '') in [
+          'draft', 'closed', 'scheduled', 'pending', 'unpublished',
+          'archived', 'cancelled', 'canceled', 'deleted'
+        ])
         && (due == null || assignment.get('allowLateSubmission', false) == true
           || (due is timestamp && request.time <= due)
           || (due is string && request.time <= timestamp.value(due)));

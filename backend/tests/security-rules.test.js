@@ -3528,7 +3528,12 @@ describe('course assignment submissions', () => {
     await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
   });
   test('unpublished, closed and overdue assignments reject submissions', async () => {
-    for (const overrides of [{ published: false }, { status: 'draft' }, { status: 'closed' }, { dueAt: Timestamp.fromMillis(0) }, { dueAt: '2000-01-01T00:00:00Z' }]) {
+    for (const overrides of [
+      { published: false },
+      ...["draft","closed","scheduled","pending","unpublished","archived","cancelled","canceled","deleted"].map((status) => ({ status })),
+      { dueAt: Timestamp.fromMillis(0) },
+      { dueAt: '2000-01-01T00:00:00Z' },
+    ]) {
       await seedAssignment(overrides);
       await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(answer()));
     }
@@ -3537,14 +3542,38 @@ describe('course assignment submissions', () => {
     const quizAnswer = answer({ content: '', answers: { q1: 'b' } });
     for (const overrides of [
       { type: 'quiz', published: false },
-      { type: 'quiz', status: 'draft' },
-      { type: 'quiz', status: 'closed' },
+      ...["draft","closed","scheduled","pending","unpublished","archived","cancelled","canceled","deleted"].map((status) => ({ type: 'quiz', status })),
       { type: 'quiz', dueAt: Timestamp.fromMillis(0) },
       { type: 'quiz', dueAt: '2000-01-01T00:00:00Z' },
     ]) {
       await seedAssignment(overrides);
       await assertFails(pathTo(testEnv.authenticatedContext('alice').firestore()).set(quizAnswer));
     }
+  });
+  test('late allowance cannot reopen withdrawn assignments or quizzes', async () => {
+    const student = testEnv.authenticatedContext('alice').firestore();
+    for (const type of ['assignment', 'quiz']) {
+      for (const status of ['scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']) {
+        await seedAssignment({
+          type, status, published: true, dueAt: Timestamp.fromMillis(0), allowLateSubmission: true,
+        });
+        const payload = type === 'quiz' ? answer({ content: '', answers: { q1: 'b' } }) : answer();
+        await assertFails(pathTo(student).set(payload));
+      }
+    }
+  });
+  test('submission status and enrollment revocation apply to a reused auth context', async () => {
+    await seedAssignment({ status: 'published' });
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const assignmentRef = 'groups/course-1/assignments/work-1';
+    await seedFirestore((db) => db.doc(assignmentRef).update({ status: 'archived' }));
+    await assertFails(pathTo(student).set(answer()));
+    await seedFirestore((db) => db.doc(assignmentRef).update({ status: 'published' }));
+    await seedFirestore((db) => db.doc('schools/school-1/members/alice').update({ status: 'removed' }));
+    await assertFails(pathTo(student).set(answer()));
+    await seedFirestore((db) => db.doc('schools/school-1/members/alice').update({ status: 'active' }));
+    await assertSucceeds(pathTo(student).set(answer()));
+    await assertFails(pathTo(student).set(answer({ content: 'Replay after submission' })));
   });
   test('explicit late allowance accepts an overdue submission', async () => {
     await seedAssignment({ dueAt: Timestamp.fromMillis(0), allowLateSubmission: true });
