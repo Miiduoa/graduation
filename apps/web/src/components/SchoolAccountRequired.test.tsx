@@ -47,9 +47,8 @@ it('tells a Google account user what switching to the school account keeps', () 
   expect(
     screen.getByText('改用學校帳號登入不會登出你的 Google 帳號，這台瀏覽器上的課表也會留著。'),
   ).toBeTruthy();
-  expect(screen.getByRole('link', { name: '改用學校帳號登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fappeals',
-  );
+  const login = new URL(screen.getByRole('link', { name: '改用學校帳號登入' }).getAttribute('href')!, 'https://campus.local');
+  expect(Object.fromEntries(login.searchParams)).toEqual({ reconnect: 'school', returnUrl: '/appeals' });
 });
 
 it('offers the school login without the switch note when nobody is signed in', () => {
@@ -59,9 +58,8 @@ it('offers the school login without the switch note when nobody is signed in', (
   );
   expect(screen.getByRole('heading', { name: '這個功能要用學校帳號登入才能用' })).toBeTruthy();
   expect(screen.queryByText(/不會登出你的 Google 帳號/)).toBeNull();
-  expect(screen.getByRole('link', { name: '用學校帳號登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Ffriends',
-  );
+  const login = new URL(screen.getByRole('link', { name: '用學校帳號登入' }).getAttribute('href')!, 'https://campus.local');
+  expect(Object.fromEntries(login.searchParams)).toEqual({ reconnect: 'school', returnUrl: '/friends' });
 });
 
 it('preserves the school course destination and campus when opening school login', () => {
@@ -69,5 +67,7 @@ it('preserves the school course destination and campus when opening school login
   const returnUrl = '/school-courses?school=pu&schoolId=pu&campus=pu';
   render(<SchoolAccountRequired returnUrl={returnUrl} alternative="請先至 WOW Class 查看課程。" />);
   const href = screen.getByRole('link', { name: '用學校帳號登入' }).getAttribute('href');
-  expect(href).toBe(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+  expect(Object.fromEntries(new URL(href!, 'https://campus.local').searchParams)).toEqual({
+    reconnect: 'school', returnUrl, school: 'pu', schoolId: 'pu', campus: 'pu',
+  });
 });

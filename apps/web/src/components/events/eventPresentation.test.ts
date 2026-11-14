@@ -48,16 +48,16 @@ it('preserves school context and source on detail and login URLs', () => {
   expect(
     buildCampusEventDetailHref('evt-1', 'school-club-events', '?schoolId=nthu&campus=nthu'),
   ).toBe('/events/evt-1?schoolId=nthu&campus=nthu&source=school-club-events');
-  expect(
+  const destination = new URL(
     buildCampusEventLoginHref('/events/evt-1?schoolId=nthu&source=school-club-events'),
-  ).toContain('reconnect=school');
-  expect(
-    decodeURIComponent(
-      buildCampusEventLoginHref('/events/evt-1?schoolId=nthu&source=school-club-events').split(
-        'returnUrl=',
-      )[1]!,
-    ),
-  ).toBe('/events/evt-1?schoolId=nthu&source=school-club-events');
+    'https://campus.local',
+  );
+  expect(destination.pathname).toBe('/login');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    reconnect: 'school',
+    returnUrl: '/events/evt-1?schoolId=nthu&source=school-club-events',
+    schoolId: 'nthu',
+  });
 });
 
 it('rejects invalid sources and treats missing dates as unknown', () => {

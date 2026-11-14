@@ -64,7 +64,9 @@ test('opens only the verified homework page, with no prefills or automatic write
   expect(navigate).not.toHaveBeenCalled();
   fireEvent.press(view.getByText('查看這份作業'));
   expect(navigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'course_1', assignmentId: 'work_1' },
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });
@@ -119,12 +121,16 @@ test('daily and undated task entries retain exact assignment navigation', () => 
     navigation={{ navigate }} reminderContext={context(value)} />);
   fireEvent.press(view.getByText('查看這份作業'));
   expect(navigate).toHaveBeenLastCalledWith('學習', {
-    screen: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'course_1', assignmentId: 'work_1' },
   });
   fireEvent.press(view.getByText('查看其他 1 項作業'));
   fireEvent.press(view.getAllByText('查看這份作業')[1]);
   expect(navigate).toHaveBeenLastCalledWith('學習', {
-    screen: 'HomeworkSubmit', params: { groupId: 'course_2', assignmentId: 'work_2' },
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'course_2', assignmentId: 'work_2' },
   });
 });
 
@@ -139,7 +145,9 @@ test('the full assistant wires sync, local plan and exact homework handoff', asy
   await act(async () => fireEvent.press(view.getByText('今日重點')));
   fireEvent.press(view.getByText('查看這份作業'));
   expect(navigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'course_1', assignmentId: 'work_1' },
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
   mockSchool = 'other';

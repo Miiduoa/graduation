@@ -9,9 +9,22 @@ import {
 } from '@campus/shared/src/career';
 import CareerPage from './page';
 const campus = vi.hoisted(() => ({ schoolId: 'pu' }));
-vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/career',
+  useSearchParams: () => new URLSearchParams(`schoolId=${campus.schoolId}&campus=${campus.schoolId}&token=private`),
 }));
+vi.mock('@/components/SiteShell', async () => {
+  const { ServiceBreadcrumbs } = await import('@/components/ServiceBreadcrumbs');
+  return {
+    SiteShell: ({ children, title }: { children: ReactNode; title?: string }) => (
+      <main>
+        <ServiceBreadcrumbs title={title} />
+        {title && <h1>{title}</h1>}
+        {children}
+      </main>
+    ),
+  };
+});
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => ({
     status: 'ready',
@@ -29,6 +42,19 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+it('uses one page title and one campus-preserving route back to life', async () => {
+  render(<CareerPage />);
+  await screen.findByText('目前沒有可確認日期的近期截止日或活動。');
+  expect(screen.getAllByRole('heading', { name: '職涯', level: 1 })).toHaveLength(1);
+  const links = screen.getAllByRole('link', { name: '生活' });
+  expect(links).toHaveLength(1);
+  const target = new URL(links[0].getAttribute('href')!, 'https://nuni.tw');
+  expect(target.pathname).toBe('/life');
+  expect([...target.searchParams.entries()]).toEqual([
+    ['schoolId', 'pu'],
+    ['campus', 'pu'],
+  ]);
 });
 it('opens the public career page with locked empty copy and official link without requiring login', async () => {
   render(<CareerPage />);

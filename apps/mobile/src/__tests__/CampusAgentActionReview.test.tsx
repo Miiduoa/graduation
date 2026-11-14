@@ -73,6 +73,7 @@ test.each(['Today', '學習', '我的'])(
       expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions', undefined);
     } else {
       expect(navigation.navigate).toHaveBeenCalledWith('我的', {
+        initial: false,
         screen: 'AssistantPermissions',
         params: undefined,
       });

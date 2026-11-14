@@ -18,6 +18,7 @@ import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import SchoolInfoScreen from './SchoolInfoScreen';
 import { DormitoryScreen } from './DormitoryScreen';
+import { CareerScreen } from './CareerScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
 import { LibraryCatalogScreen } from './LibraryCatalogScreen';
@@ -47,7 +48,7 @@ export function MapStack() {
       <Stack.Screen
         name="CampusHome"
         component={CampusHubScreen}
-        options={{ title: '校園', headerShown: false }}
+        options={{ title: '生活', headerShown: false }}
       />
       {/* Map 保留為舊連結的相容入口。 */}
       <Stack.Screen
@@ -151,7 +152,16 @@ export function MapStack() {
         component={LibraryAiFirstScreen}
         options={{ title: '圖書館', headerShown: false }}
       />
-      <Stack.Screen name="Dormitory" component={DormitoryScreen} options={{ title: '宿舍', headerShown: false }} />
+      <Stack.Screen
+        name="Dormitory"
+        component={DormitoryScreen}
+        options={{ title: '宿舍', headerShown: false }}
+      />
+      <Stack.Screen
+        name="Career"
+        component={CareerScreen}
+        options={{ title: '職涯', headerShown: false }}
+      />
       <Stack.Screen
         name="SchoolInfo"
         component={SchoolInfoScreen}
@@ -173,7 +183,11 @@ export function MapStack() {
         options={{ title: '列印服務' }}
       />
       <Stack.Screen name="LostFound" component={LostFoundScreen} options={{ title: '失物招領' }} />
-      <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '平台失物招領' }} />
+      <Stack.Screen
+        name="PlatformLostFound"
+        component={PlatformLostFoundScreen}
+        options={{ title: '平台失物招領' }}
+      />
       <Stack.Screen
         name="LostFoundDetail"
         component={LostFoundDetailScreen}

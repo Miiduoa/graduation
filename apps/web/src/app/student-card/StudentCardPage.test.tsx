@@ -230,3 +230,38 @@ it('leaves school services available to visitors and other roles', async () => {
   expect(await screen.findByText('學生帳號專用')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '取得驗證碼' })).toBeNull();
 });
+
+it.each(['pu', 'thu'])('opens school sign-in for the displayed %s student card', (schoolId) => {
+  state.signedIn = false;
+  state.schoolId = schoolId;
+  render(<StudentCardPage />);
+
+  const link = screen.getByRole('link', { name: '登入學校帳號' });
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/login');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    reconnect: 'school',
+    returnUrl: `/student-card?campus=${schoolId}`,
+    campus: schoolId,
+  });
+  expect(state.read).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  'opens the displayed card’s account settings when the profile exists: %s',
+  async (exists) => {
+    state.read.mockResolvedValue({ exists: () => exists, data: () => state.profile });
+    render(<StudentCardPage />);
+
+    const link = await screen.findByRole('link', {
+      name: exists ? '更新個人資料' : '開啟帳號設定',
+    });
+    const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+    expect(destination.pathname).toBe('/settings');
+    expect(Object.fromEntries(destination.searchParams)).toMatchObject({
+      section: 'account',
+      campus: 'pu',
+      schoolId: 'pu',
+    });
+  },
+);

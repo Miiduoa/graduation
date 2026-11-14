@@ -22,6 +22,7 @@ type ServiceItem = {
   screen: string;
   params?: { tab: 'food' };
   keywords: string[];
+  secondary?: boolean;
 };
 const frequentServices: ServiceItem[] = [
   {
@@ -53,151 +54,151 @@ const frequentServices: ServiceItem[] = [
     keywords: ['借書', '還書', '自習', '蓋夏', '館藏'],
   },
 ];
-const sections: Array<{ title: string; items: ServiceItem[] }> = [
+const sections: Array<{ title: string; searchOnly?: boolean; items: ServiceItem[] }> = [
   {
-    title: '校園動態',
+    title: '餐飲與住宿',
     items: [
-      {
-        icon: 'ic_notifications',
-        label: '校方公告',
-        description: '學校最新消息',
-        screen: '公告總覽',
-        keywords: ['消息', '新聞', '通知'],
-      },
-      {
-        icon: 'ic_tab_today',
-        label: '校園活動',
-        description: '找活動與報名',
-        screen: '活動總覽',
-        keywords: ['活動', '報名', '社團'],
-      },
-      {
-        icon: 'ic_people_community',
-        label: '校園社群',
-        description: '看板與近況',
-        screen: 'CampusSocialScreen',
-        keywords: ['社群', '看板', '動態', '發文', '學伴'],
-      },
-      {
-        icon: 'ic_tab_today',
-        label: '校園行事曆',
-        description: '校園活動與作業截止；個人行程、課表另開',
-        screen: 'SmartCalendarScreen',
-        keywords: ['今天', '時間', '行程', '日曆'],
-      },
-    ],
-  },
-  {
-    title: '辦事與服務',
-    items: [
-      {
-        icon: 'ic_school',
-        label: '學校資訊',
-        description: '總機、官網與校方服務',
-        screen: 'SchoolInfo',
-        keywords: [
-          '總機',
-          '官網',
-          '地址',
-          '名錄',
-          '聯絡',
-          '宿舍',
-          '住宿',
-          '職涯',
-          '實習',
-          '寢室',
-          '入住',
-          '就業',
-          '工作',
-        ],
-      },
       {
         icon: 'ic_dorm',
         label: '宿舍',
-        description: '入住安排、設備問題與洗衣計時',
         screen: 'Dormitory',
+        description: '入住安排、設備問題與洗衣計時',
         keywords: ['住宿', '寢室', '床位', '入住', '退宿', '報修', '維修', '洗衣'],
-      },
-      {
-        icon: 'ic_health_heart',
-        label: '健康',
-        description: '校園健康與諮商服務',
-        screen: 'Health',
-        keywords: ['醫療', '診所', '保健', '諮商'],
-      },
-      {
-        icon: 'ic_lost_found',
-        label: '失物招領',
-        description: '找回遺失物品',
-        screen: 'PlatformLostFound',
-        keywords: ['失物', '招領', '撿到', '遺失'],
-      },
-      {
-        icon: 'ic_print',
-        label: '列印',
-        description: '準備列印文件',
-        screen: 'PrintService',
-        keywords: ['印表機', '影印', '掃描', '文件'],
       },
       {
         icon: 'ic_restaurant',
         label: '我的訂單',
-        description: '查看 App 校園餐廳的取餐號碼、進度與訂餐紀錄',
         screen: 'StudentOrders',
+        description: '查看 App 校園餐廳的取餐號碼、進度與訂餐紀錄',
         keywords: ['取餐', '訂單狀態', '訂單紀錄', '訂單進度', '餐點訂單'],
       },
       {
         icon: 'ic_store_merchant',
         label: '站內點餐',
-        description: '查看 nuni 平台的門市與訂單紀錄',
         screen: 'NuniWorkspace',
         params: { tab: 'food' },
+        description: '查看 nuni 平台的門市與訂單紀錄',
         keywords: ['站內訂單', '站內取餐', '平台點餐', '平台訂單'],
       },
       {
         icon: 'ic_payment_card',
         label: '校園錢包',
-        description: '餘額與交易紀錄',
         screen: 'Payment',
+        secondary: true,
+        description: '餘額與交易紀錄',
         keywords: ['付款', '支付', '繳費', '儲值'],
       },
     ],
   },
   {
-    title: '交通與設施',
+    title: '校園資源',
+    items: [
+      {
+        icon: 'ic_notifications',
+        label: '校方公告',
+        screen: '公告總覽',
+        description: '學校最新消息',
+        keywords: ['消息', '新聞', '通知'],
+      },
+      {
+        icon: 'ic_tab_today',
+        label: '校園活動',
+        screen: '活動總覽',
+        description: '找活動與報名',
+        keywords: ['活動', '報名', '社團'],
+      },
+      {
+        icon: 'ic_lost_found',
+        label: '失物招領',
+        screen: 'PlatformLostFound',
+        description: '找回遺失物品',
+        keywords: ['失物', '招領', '撿到', '遺失'],
+      },
+      {
+        icon: 'ic_school',
+        label: '職涯',
+        screen: 'Career',
+        description: '找實習、工讀與校方職涯資訊',
+        keywords: ['職涯', '實習', '工讀', '就業', '工作', '徵才', '履歷', '求職'],
+      },
+      {
+        icon: 'ic_school',
+        label: '學校資訊',
+        screen: 'SchoolInfo',
+        description: '總機、官網與校方服務',
+        keywords: ['總機', '官網', '地址', '名錄', '聯絡', '宿舍', '住宿', '寢室', '入住'],
+      },
+      {
+        icon: 'ic_health_heart',
+        label: '健康',
+        screen: 'Health',
+        secondary: true,
+        description: '校園健康與諮商服務',
+        keywords: ['醫療', '診所', '保健', '諮商'],
+      },
+      {
+        icon: 'ic_print',
+        label: '列印',
+        screen: 'PrintService',
+        secondary: true,
+        description: '準備列印文件',
+        keywords: ['印表機', '影印', '掃描', '文件'],
+      },
+    ],
+  },
+  {
+    title: '出行與設施',
     items: [
       {
         icon: 'ic_navigate_pin',
         label: '路線規劃',
-        description: '步行與轉乘',
         screen: 'TripPlanner',
+        secondary: true,
+        description: '步行與轉乘',
         keywords: ['導航', '怎麼去', 'directions'],
       },
       {
         icon: 'ic_bus',
         label: '台中交通',
-        description: '高鐵、火車與轉乘',
         screen: 'TransportHub',
+        secondary: true,
+        description: '高鐵、火車與轉乘',
         keywords: ['交通', '車站', '高鐵', '台鐵', 'youbike'],
       },
       {
         icon: 'ic_accessibility',
         label: '無障礙設施',
-        description: '電梯與坡道',
         screen: 'AccessibleRoute',
+        secondary: true,
+        description: '電梯與坡道',
         keywords: ['輪椅', '電梯', '坡道'],
       },
     ],
   },
   {
-    title: '和同學一起',
+    title: '交流與課務',
+    searchOnly: true,
     items: [
       {
         icon: 'ic_people_community',
+        label: '校園社群',
+        screen: 'CampusSocialScreen',
+        description: '交流裡的校園看板與近況',
+        keywords: ['社群', '看板', '動態', '發文', '學伴'],
+      },
+      {
+        icon: 'ic_people_community',
         label: '找人',
-        description: '加好友後，分享課表與查看共同空堂。',
         screen: 'FriendSearch',
+        description: '加好友後，分享課表與查看共同空堂。',
         keywords: ['找同學', '找朋友', '同校成員'],
+      },
+      {
+        icon: 'ic_tab_today',
+        label: '校園行事曆',
+        screen: 'SmartCalendarScreen',
+        description: '校園活動與作業截止；個人行程、課表另開',
+        keywords: ['今天', '時間', '行程', '日曆'],
       },
     ],
   },
@@ -213,15 +214,18 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const s = useThemeStyleSheet(createStyles);
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const keyword = query.normalize('NFKC').trim().toLowerCase();
   const paymentsEnabled = isFeatureEnabled('payments');
   const filtered = useMemo(() => {
     const isProvidence = supportsLegacyTransportHub(schoolId);
     const terms = keyword.split(/\s+/);
-    return [{ title: '常用服務', items: frequentServices }, ...sections]
+    return [{ title: '常用服務', searchOnly: false, items: frequentServices }, ...sections]
+      .filter((section) => keyword || !section.searchOnly)
       .map((section) => ({
         ...section,
         items: section.items.filter((item) => {
+          if (!keyword && !expanded && item.secondary) return false;
           if (!isProvidence && item.screen === 'TransportHub') return false;
           if (!paymentsEnabled && item.screen === 'Payment') return false;
           const keywords =
@@ -233,12 +237,14 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
         }),
       }))
       .filter((section) => section.items.length > 0);
-  }, [keyword, schoolId, paymentsEnabled]);
+  }, [keyword, schoolId, paymentsEnabled, expanded]);
   const matchCount = filtered.reduce((count, section) => count + section.items.length, 0);
   const quickActions = keyword
     ? getMobileQuickActions(query).filter(
-        (action) => !filtered.some((section) =>
-          section.items.some((item) => item.screen === action.route && !item.params)),
+        (action) =>
+          !filtered.some((section) =>
+            section.items.some((item) => item.screen === action.route && !item.params),
+          ),
       )
     : [];
   const openService = (item: ServiceItem) => {
@@ -296,7 +302,8 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
       </View>
       {keyword ? (
         <Text accessibilityLiveRegion="polite" style={s.searchCaption}>
-          找到 {matchCount} 項清單服務{quickActions.length ? '，另有 ' + quickActions.length + ' 項捷徑' : ''}
+          找到 {matchCount} 項清單服務
+          {quickActions.length ? '，另有 ' + quickActions.length + ' 項捷徑' : ''}
         </Text>
       ) : (
         <OpenOrderCard navigation={navigation} />
@@ -349,9 +356,30 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
           </View>
         );
       })}
+      {!keyword ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={expanded ? '收合更多生活服務' : '顯示更多生活服務'}
+          onPress={() => setExpanded((current) => !current)}
+          style={({ pressed }) => [s.moreServices, pressed && s.pressed]}
+        >
+          <View style={s.serviceCopy}>
+            <Text style={s.serviceTitle}>{expanded ? '收合更多服務' : '更多生活服務'}</Text>
+            <Text style={s.serviceDetail}>交通設施、健康與列印</Text>
+          </View>
+          <Ionicons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={theme.colors.muted}
+          />
+        </Pressable>
+      ) : null}
       {quickActions.length > 0 ? (
         <View style={s.section}>
-          <Text accessibilityRole="header" style={s.sectionTitle}>可以直接做</Text>
+          <Text accessibilityRole="header" style={s.sectionTitle}>
+            可以直接做
+          </Text>
           <View style={s.serviceList}>
             {quickActions.map((action) => (
               <Pressable
@@ -428,7 +456,7 @@ const createStyles = () =>
       fontSize: 15,
       paddingVertical: 12,
     },
-    clearSearch: { minHeight: 44, minWidth: 36, alignItems: 'center', justifyContent: 'center' },
+    clearSearch: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
     searchCaption: { color: theme.colors.muted, fontSize: 12, lineHeight: 20, paddingTop: 12 },
     section: { marginTop: 24 },
     sectionTitle: {
@@ -472,6 +500,15 @@ const createStyles = () =>
     serviceCopy: { flex: 1, minWidth: 0, gap: 3 },
     serviceTitle: { color: theme.colors.text, fontSize: 15, lineHeight: 22, fontWeight: '600' },
     serviceDetail: { color: theme.colors.muted, fontSize: 12, lineHeight: 20 },
+    moreServices: {
+      marginTop: 20,
+      minHeight: 60,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 4,
+    },
     pressed: { backgroundColor: theme.colors.surfaceInteractive },
     emptyState: { paddingVertical: 36, alignItems: 'center', gap: 12 },
     emptyTitle: {

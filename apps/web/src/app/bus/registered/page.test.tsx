@@ -70,7 +70,7 @@ it('offers login and public arrivals while pausing unauthorized polling', async 
   expect(screen.getByText(/此站點的到站查詢需要登入/)).toBeTruthy();
   expect(screen.queryByText(/無法連線/)).toBeNull();
   expect(screen.getByRole('link', { name: '登入後查詢' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fbus%2Fregistered%3FschoolId%3Dpu',
+    '/login?returnUrl=%2Fbus%2Fregistered%3FschoolId%3Dpu&schoolId=pu',
   );
   expect(screen.getByRole('link', { name: '查看公開站牌' }).getAttribute('href')).toBe(
     '/bus?campus=pu',

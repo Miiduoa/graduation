@@ -2,6 +2,11 @@ import { findSchoolById } from '@campus/shared/src/schools';
 
 type SearchLike = { get(key: string): string | null } | null | undefined;
 
+/** Club detail routes use group IDs, but their service directory is campus life. */
+export function campusServicePathname(pathname: string): string {
+  return /^\/groups\/[^/]+\/club(?:\/|$)/u.test(pathname) ? '/clubs' : pathname;
+}
+
 export function buildCampusNavigationSearch(
   params: SearchLike,
   selected?: { id: string; code?: string } | null,
@@ -47,7 +52,11 @@ export function campusServiceMatches(
 ): boolean {
   if (!pathname) return false;
   const destination = new URL(href, 'https://campus.local');
-  if (pathname !== destination.pathname && !pathname.startsWith(`${destination.pathname}/`))
+  const servicePathname = campusServicePathname(pathname);
+  if (
+    servicePathname !== destination.pathname &&
+    !servicePathname.startsWith(`${destination.pathname}/`)
+  )
     return false;
   return [...destination.searchParams].every(([key, value]) => params?.get(key) === value);
 }

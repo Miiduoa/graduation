@@ -63,6 +63,7 @@ beforeEach(() => {
 
 it('lets a Google account configure its homepage and read its own dated exam without school login', () => {
   render(section());
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
   fireEvent.change(screen.getByLabelText('你目前的階段'), { target: { value: 'year-4' } });
   fireEvent.click(screen.getByLabelText('生活優先'));
   fireEvent.click(screen.getByRole('button', { name: '套用首頁安排' }));
@@ -109,6 +110,8 @@ it('hides old-account data immediately even if its caller briefly retains the pr
   rerender(section({ scope: { ...scope, owner: 'platform:bob' }, events: [] }));
   expect(screen.getByRole('heading', { name: '讓首頁更適合你' })).toBeTruthy();
   expect(screen.queryByText(/資料庫期中考/)).toBeNull();
+  expect(screen.queryByRole('form', { name: '首頁安排偏好' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
   expect((screen.getByLabelText('你目前的階段') as HTMLSelectElement).value).toBe('unspecified');
 });
 
@@ -127,8 +130,11 @@ it('never uses event data from a failed or still loading read as current evidenc
 
 it('removes a previous campus draft and ignores events from that campus on a switch', () => {
   const { rerender } = render(section());
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
   fireEvent.change(screen.getByLabelText('你目前的階段'), { target: { value: 'year-4' } });
   rerender(section({ scope: { ...scope, schoolId: 'nthu' }, schoolName: '清華大學' }));
+  expect(screen.queryByRole('form', { name: '首頁安排偏好' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
   expect((screen.getByLabelText('你目前的階段') as HTMLSelectElement).value).toBe('unspecified');
   fireEvent.click(screen.getByRole('button', { name: '先略過' }));
   expect(screen.getByRole('heading', { name: '日常安排' })).toBeTruthy();
@@ -140,6 +146,7 @@ it('allows a confirmed school account and keeps guest preferences in a separate 
   identity.user = { uid: 'school-alice' };
   const schoolScope = { owner: 'school:school-alice', schoolId: 'pu' };
   const { rerender } = render(section({ scope: schoolScope, events: [] }));
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
   fireEvent.change(screen.getByLabelText('你目前的階段'), { target: { value: 'year-1' } });
   fireEvent.click(screen.getByRole('button', { name: '套用首頁安排' }));
   expect(JSON.parse(localStorage.getItem(campusPreferencesStorageKey(schoolScope))!).stage).toBe(
@@ -147,5 +154,19 @@ it('allows a confirmed school account and keeps guest preferences in a separate 
   );
   identity.user = null;
   act(() => rerender(section({ scope: { owner: 'guest', schoolId: 'pu' }, events: [] })));
+  expect(screen.queryByRole('form', { name: '首頁安排偏好' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
   expect((screen.getByLabelText('你目前的階段') as HTMLSelectElement).value).toBe('unspecified');
+});
+
+it('keeps optional first-use personalization compact without saving or assuming a stage', () => {
+  render(section());
+  expect(screen.queryByRole('form', { name: '首頁安排偏好' })).toBeNull();
+  expect(screen.queryByRole('list', { name: '為你推薦的下一步' })).toBeNull();
+  expect(localStorage.getItem(campusPreferencesStorageKey(scope))).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '設定首頁安排' }));
+  expect(screen.getByRole('form', { name: '首頁安排偏好' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByLabelText('你目前的階段'));
+  expect((screen.getByLabelText('你目前的階段') as HTMLSelectElement).value).toBe('unspecified');
+  expect(localStorage.getItem(campusPreferencesStorageKey(scope))).toBeNull();
 });

@@ -33,6 +33,16 @@ it('lists lost-found as a Google platform service', () => {
   expect(lostFound?.text).toContain('Google');
 });
 
+it('keeps student identity and the shared school/Google assistant under the account section', () => {
+  const card = CAMPUS_SERVICES.find((service) => service.href === '/student-card');
+  const assistant = CAMPUS_SERVICES.find((service) => service.href === '/ai-assistant');
+  expect(card?.category).toBe('account');
+  expect(card?.access).toBe('account');
+  expect(assistant?.category).toBe('account');
+  expect(assistant?.access).toBe('account');
+  expect(serviceAccessLabel(assistant!.access, { loading: false, studentId: false })).toBe('依帳號查看');
+});
+
 it.each(['Google', '公開 貼文', '跨校'])(
   'finds public exchange through %s without requiring school sign-in availability',
   (query) => {
@@ -60,11 +70,24 @@ it('lists the read-only homework surface as a searchable secondary', () => {
   expect(service?.access).toBe('public');
 });
 
-it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
+it.each(['總機', '地址', '聯絡'])('finds school contact information through %s', (query) => {
   const services = searchCampusServices(query);
   expect(services.some((service) => service.href === '/school-info')).toBe(true);
   expect(services.some((service) => service.href.includes('career'))).toBe(false);
 });
+
+it.each(['職涯', '實習', '校內工讀', '徵才', 'career'])(
+  'finds the public career workspace through %s instead of a school-info detour',
+  (query) => {
+    const services = searchCampusServices(query, 'campus');
+    expect(services.find((service) => service.href === '/career')).toMatchObject({
+      name: '職涯',
+      access: 'public',
+      category: 'campus',
+    });
+    expect(services.some((service) => service.href === '/school-info')).toBe(false);
+  },
+);
 
 it('exposes a separate public campus-events entry beside clubs', () => {
   const events = searchCampusServices('講座').find((service) => service.href === '/events');

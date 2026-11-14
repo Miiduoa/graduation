@@ -7,7 +7,7 @@ export const APP = 'nuni-web';
 export const ORIGIN = 'https://nuni.tw';
 export const REPOSITORY = 'Miiduoa/graduation';
 export const EXPECTED_MACHINES = ['683e513be2d358', '80e447b6140178'];
-export const PUBLIC_RELEASE_PAGES = ['/', '/bus', '/login', '/life', '/privacy'];
+export const PUBLIC_RELEASE_PAGES = ['/', '/bus', '/login', '/life', '/connect', '/privacy'];
 const SHA = /^[a-f0-9]{40}$/;
 const IMAGE = /^registry\.fly\.io\/nuni-web@sha256:[a-f0-9]{64}$/;
 const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);

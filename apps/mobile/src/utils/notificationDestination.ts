@@ -342,7 +342,7 @@ export function resolveNotificationDestination(
       return {
         ok: true,
         mode: 'nested',
-        tab: '我的',
+        tab: '訊息',
         screen: 'Notifications',
         summary: '開啟通知中心',
       };

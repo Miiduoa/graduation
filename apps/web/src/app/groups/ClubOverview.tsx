@@ -5,6 +5,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
+import { loginHref } from '@/lib/navigation';
 import { ClubProfile } from './ClubProfile';
 
 export function ClubOverview({
@@ -25,7 +26,7 @@ export function ClubOverview({
         <p role="status">正在確認帳號…</p>
       ) : !user ? (
         <Link
-          href={`/login?returnUrl=${encodeURIComponent(`/groups/${encodeURIComponent(groupId)}/club/overview?schoolId=${encodeURIComponent(school.id)}`)}`}
+          href={loginHref(`/groups/${encodeURIComponent(groupId)}/club/overview?schoolId=${encodeURIComponent(school.id)}`)}
         >
           登入後查看社團
         </Link>

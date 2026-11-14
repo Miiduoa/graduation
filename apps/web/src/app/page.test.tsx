@@ -9,7 +9,6 @@ import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { FirebaseError } from 'firebase/app';
 import { NuniError } from '@campus/shared/src/nuni';
 import * as nuniMessages from '@campus/shared/src/nuni';
-import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 import { TODAY_COPY } from '@campus/shared/src/pickNextAction';
 import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todaySense';
 
@@ -46,7 +45,11 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/components/AppHeader', () => ({
   AppHeader: ({ onOpenVoice }: { onOpenVoice: () => void }) => (
-    <header><button type="button" onClick={onOpenVoice}>頁首語音</button></header>
+    <header>
+      <button type="button" onClick={onOpenVoice}>
+        頁首語音
+      </button>
+    </header>
   ),
 }));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
@@ -212,7 +215,7 @@ it('uses the Nuni account for home and links directly to pending work', async ()
     ],
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '我的身分' })).toBeNull();
   const taskLinks = await screen.findAllByRole('link', { name: /週五提案/ });
   expect(
     taskLinks.some(
@@ -223,7 +226,7 @@ it('uses the Nuni account for home and links directly to pending work', async ()
   expect(screen.getAllByText(/已逾期 \d+ 天/).length).toBeGreaterThan(0);
 });
 
-it('uses the same identity lookup copy as the account page when the lookup fails', async () => {
+it('leaves merchant and teacher identity lookups in the account center', async () => {
   state.uid = null;
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
   vi.mocked(loadNuniHomeSections).mockResolvedValue({
@@ -235,9 +238,11 @@ it('uses the same identity lookup copy as the account page when the lookup fails
     throw new Error('offline');
   });
   render(<HomePage />);
-  expect(await screen.findByText(IDENTITY_LOOKUP_FAILED_COPY)).toBeTruthy();
-  expect(screen.getByText(IDENTITY_LOOKUP_FAILED_HINT)).toBeTruthy();
-  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
+  await waitFor(() => expect(loadNuniHomeSections).toHaveBeenCalled());
+  expect(screen.queryByRole('heading', { name: '我的身分' })).toBeNull();
+  for (const [path] of state.request.mock.calls) {
+    expect(['merchant-applications', 'merchant-workspaces']).not.toContain(path);
+  }
 });
 
 it('keeps teaching courses on today and no longer lists studying courses as a grid', async () => {
@@ -268,7 +273,9 @@ it('does not tell a teacher they have no homework and opens the teacher course w
   expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
   // The teacher workspace manages assignments; /course/teach remains the content page.
   expect(
-    within(teacherToday).getByRole('link', { name: /教學實習/ }).getAttribute('href'),
+    within(teacherToday)
+      .getByRole('link', { name: /教學實習/ })
+      .getAttribute('href'),
   ).toBe('/teacher/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
   expect(screen.queryByTestId('student-today')).toBeNull();
@@ -354,7 +361,8 @@ it('keeps the session error visible when the course session is unavailable', () 
 it('lets a guest browse before signing in and never loads personal courses', () => {
   state.uid = null;
   render(<HomePage />);
-  expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole('link', { name: '登入查看作業與通知' })).toHaveLength(1);
+  expect(screen.queryByTestId('today-work')).toBeNull();
   expect(loadHomeData).not.toHaveBeenCalled();
   expect(loadNuniHomeSections).not.toHaveBeenCalled();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
@@ -405,7 +413,7 @@ it.each([
     render(<HomePage />);
     expect(screen.getByRole('heading', { name: '先把課表放進來。' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '課表準備好了。' })).toBeNull();
-    expect(screen.getByText(TODAY_COPY.noTimetable)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: '匯入我的課表' })).toHaveLength(1);
   },
 );
 
@@ -948,7 +956,13 @@ it.each([
 it('starts Today dictation from the header and keeps an active recording running', async () => {
   state.uid = null;
   const start = vi.fn();
-  vi.stubGlobal('SpeechRecognition', class { start = start; abort = vi.fn(); });
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
+    },
+  );
   try {
     render(<HomePage />);
     const panel = screen.getByText('打字或語音詢問').closest('details')!;
@@ -977,15 +991,23 @@ it('focuses the Today input from the header when the browser lacks speech recogn
 
 it('keeps the active question on screen while a late course load resolves the teacher view', async () => {
   let finish!: (result: HomeData) => void;
-  vi.mocked(loadHomeData).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  vi.mocked(loadHomeData).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
   render(<HomePage />);
   fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
   const question = await screen.findByRole('searchbox');
   fireEvent.change(question, { target: { value: '我今天要去哪間教室？' } });
-  await act(async () => finish(data('資料庫', {
-    courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
-    tasks: [],
-  })));
+  await act(async () =>
+    finish(
+      data('資料庫', {
+        courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
+        tasks: [],
+      }),
+    ),
+  );
   expect(screen.getByRole('searchbox')).toBe(question);
   expect((question as HTMLInputElement).value).toBe('我今天要去哪間教室？');
   const summary = screen.getByText('打字或語音詢問').closest('summary')!;
@@ -996,16 +1018,35 @@ it('keeps the active question on screen while a late course load resolves the te
 
 it('gives the homepage agent only platform tasks, retaining their exact source IDs', async () => {
   state.session = { context: 'a'.repeat(43), platformAccountId: 'alice-platform' };
-  const platform = data('平台課程', { courses: [{ id: 'platform-course', name: '平台課程', role: 'student', unreadCount: 0 }],
-    tasks: [{ kind: 'quiz', id: 'source-task-id', courseId: 'platform-course', courseName: '平台課程',
-      title: '平台未完成測驗', dueAt: '2099-01-02T12:00:00+08:00' }] });
+  const platform = data('平台課程', {
+    courses: [{ id: 'platform-course', name: '平台課程', role: 'student', unreadCount: 0 }],
+    tasks: [
+      {
+        kind: 'quiz',
+        id: 'source-task-id',
+        courseId: 'platform-course',
+        courseName: '平台課程',
+        title: '平台未完成測驗',
+        dueAt: '2099-01-02T12:00:00+08:00',
+      },
+    ],
+  });
   vi.mocked(loadHomeData).mockResolvedValue(data('學校課程'));
   vi.mocked(loadNuniHomeSections).mockResolvedValue(platform);
   render(<HomePage />);
-  await waitFor(() => expect(vi.mocked(TodayAgent).mock.calls.some(([input]) =>
-    input.tasks.some((task) => task.id === 'source-task-id'))).toBe(true));
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(TodayAgent)
+        .mock.calls.some(([input]) => input.tasks.some((task) => task.id === 'source-task-id')),
+    ).toBe(true),
+  );
   const input = vi.mocked(TodayAgent).mock.calls.at(-1)![0];
-  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false });
+  expect(input).toMatchObject({
+    context: state.session.context,
+    accountId: 'alice-platform',
+    loading: false,
+  });
   expect(input.tasks).toEqual(platform.tasks);
   expect(input.tasks.some((task) => task.courseName === '學校課程')).toBe(false);
 });

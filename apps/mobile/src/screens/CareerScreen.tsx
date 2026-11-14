@@ -13,6 +13,7 @@ import {
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { useSchool } from '../state/school';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { safeNavigate } from '../utils/safeNavigate';
 function Body({ children }: { children: React.ReactNode }) {
   return <Text style={{ color: aiTokens.text, fontSize: 16, lineHeight: 25 }}>{children}</Text>;
 }
@@ -96,7 +97,9 @@ function Content({ schoolId }: { schoolId: string }) {
       </AICard>
       <AICard title="校內工讀與實習">
         <Body>{CAREER_EMPTY}</Body>
-        {official && <AIButton label={`前往${official.label}`} onPress={() => open(official.url)} />}
+        {official && (
+          <AIButton label={`前往${official.label}`} onPress={() => open(official.url)} />
+        )}
         <Body>
           個人職涯資料尚未連結到校方系統。此頁提供公開資訊，尚未接上校內工讀申請及實習學分系統。申請、權益說明與學分認定請洽校方；這裡不受理投遞或登錄時數。
         </Body>
@@ -162,7 +165,7 @@ function Content({ schoolId }: { schoolId: string }) {
 export function CareerScreen({
   navigation,
 }: {
-  navigation?: { goBack?: () => void; navigate?: (route: '公告總覽') => void };
+  navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
 }) {
   const { school, selectionReady } = useSchool();
   return (
@@ -171,7 +174,7 @@ export function CareerScreen({
       subtitle={`生活 › 職涯 · ${school.name}`}
       onBack={() => navigation?.goBack?.()}
     >
-      <AIButton label="查看校方公告" onPress={() => navigation?.navigate?.('公告總覽')} />
+      <AIButton label="查看校方公告" onPress={() => safeNavigate(navigation, '公告總覽')} />
       {selectionReady !== false && school.id ? (
         <Content key={school.id} schoolId={school.id} />
       ) : (

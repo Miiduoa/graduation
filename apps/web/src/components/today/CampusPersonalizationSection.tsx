@@ -53,6 +53,7 @@ export function CampusPersonalizationSection(props: Props) {
         storageError={storageError}
         schoolName={props.schoolName}
         now={props.now}
+        compactSetup
       />
       {props.scope.schoolId === 'personal' ? <p>選擇校園後，可以另外設定該校的首頁安排。</p> : null}
       {props.eventsError ? (

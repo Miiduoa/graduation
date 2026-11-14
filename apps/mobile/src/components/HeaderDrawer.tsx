@@ -348,7 +348,10 @@ export function HeaderDrawerHost() {
                 label="通知中心"
                 badge={notifs.unreadCount > 0 ? `${notifs.unreadCount}` : undefined}
                 tint={theme.colors.warning}
-                onPress={() => go('Notifications')}
+                onPress={() => {
+                  handleClose();
+                  setTimeout(() => rootNavigateNested('訊息', 'Notifications'), 220);
+                }}
               />
               <DrawerRow
                 icon="ic_options"

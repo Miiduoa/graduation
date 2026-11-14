@@ -84,16 +84,69 @@ test('platform account can discover every catalog destination and select a publi
 test.each([
   ['打開App餐廳訂單', 'app-orders'],
   ['打開教材收藏', 'material-bookmarks'],
-])('explicit %s retains its distinct service ID across platform and school assistants', async (content, id) => {
-  for (const args of [platform(content), { ...input(content), mode: 'campus' as const }]) {
-    const reply = await askCampusAssistant(args);
-    expect(reply).toMatchObject({ source: 'device', tool: 'open-service', hasActions: false,
-      serviceSelection: { kind: 'open', serviceIds: [id] } });
-  }
+  ['開啟職涯', 'career'],
+  ['打開實習資訊', 'career'],
+  ['前往校內工讀', 'career'],
+])(
+  'explicit %s retains its distinct service ID across platform and school assistants',
+  async (content, id) => {
+    for (const args of [platform(content), { ...input(content), mode: 'campus' as const }]) {
+      const reply = await askCampusAssistant(args);
+      expect(reply).toMatchObject({
+        source: 'device',
+        tool: 'open-service',
+        hasActions: false,
+        serviceSelection: { kind: 'open', serviceIds: [id] },
+      });
+    }
+    expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+    expect(mockCollect).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+  },
+);
+
+test('a guest can select public career information without reading account or school data', async () => {
+  mockUid = null;
+  const answer = await askCampusAssistant({
+    ...input('開啟職涯'),
+    scope: { uid: '', schoolId: 'pu' },
+  });
+  expect(answer).toMatchObject({
+    source: 'device',
+    tool: 'open-service',
+    hasActions: false,
+    serviceSelection: { kind: 'open', serviceIds: ['career'] },
+  });
+  expect(jest.requireMock('../../firebase').getAuthInstance).not.toHaveBeenCalled();
   expect(AsyncStorage.getItem).not.toHaveBeenCalled();
   expect(mockCollect).not.toHaveBeenCalled();
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+test.each(['school', 'platform'] as const)(
+  'applying for work study is not a completed operation or an open-service shortcut for %s',
+  async (audience) => {
+    const args = audience === 'school' ? input('申請工讀') : platform('申請工讀');
+    if (audience === 'school') {
+      // An ordinary request still needs a model; the public service cannot apply.
+      await expect(askCampusAssistant(args)).rejects.toMatchObject({ code: 'native-unavailable' });
+    } else {
+      const answer = await askCampusAssistant(args);
+      expect(answer).toMatchObject({
+        source: 'device',
+        tool: 'saved-timetable',
+        hasActions: false,
+      });
+      expect(answer.serviceSelection).toBeUndefined();
+      expect(answer.content).not.toMatch(/已(?:完成|送出|申請)/);
+    }
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(
+      jest.requireMock('../../services/localLLMInference').localLLM.generate,
+    ).not.toHaveBeenCalled();
+  },
+);
 
 test('existing assignment lookup remains a data query, not an open-service shortcut', async () => {
   const answer = await askCampusAssistant(input('我還有哪些作業待交？'));

@@ -45,7 +45,7 @@ export function navigateFromNotificationData(
       'type' in rawData && rawData.type === 'local_assignment_due_v2' ? { uid } : {}) },
   );
   if (!destination.ok) {
-    rootNavigateNested('我的', 'Notifications');
+    rootNavigateNested('訊息', 'Notifications');
     return false;
   }
   return applyNotificationDestination(destination, { role: profileRole });

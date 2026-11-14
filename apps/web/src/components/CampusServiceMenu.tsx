@@ -83,9 +83,9 @@ export function CampusServiceMenu() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const pathname = usePathname();
   const params = useSearchParams();
-  const currentService = visibleCampusServices(schoolLmsEnabled).filter((service) =>
-    campusServiceMatches(service.href, pathname, params),
-  ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
+  const currentService = visibleCampusServices(schoolLmsEnabled)
+    .filter((service) => campusServiceMatches(service.href, pathname, params))
+    .sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
@@ -232,12 +232,9 @@ export function CampusServiceMenu() {
           if (menu.current?.open) forgetDirectorySearch('menu');
         }}
       >
-        <CampusIcon name="services" size={17} />
+        <CampusIcon name="search" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">
           所有服務
-        </span>
-        <span className={styles.mobileLabel} aria-hidden="true">
-          更多
         </span>
       </summary>
       <div className={styles.menuPanel} id={`${id}-services`}>

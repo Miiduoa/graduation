@@ -8,7 +8,6 @@ import { StudentCardEntry } from '@/components/StudentCardEntry';
 import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
-import { AccountIdentity } from '@/components/AccountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { TodayAgent } from '@/features/nuni/TodayAgent';
 import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
@@ -46,9 +45,12 @@ export default function HomePage() {
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
   const assistantScope = JSON.stringify([owner, school?.selectedSchoolId, blocked]);
   const [openAssistantScope, setOpenAssistantScope] = useState<string | null>(null);
-  const handleAssistantToggle = useCallback((open: boolean) => {
-    setOpenAssistantScope(open ? assistantScope : null);
-  }, [assistantScope]);
+  const handleAssistantToggle = useCallback(
+    (open: boolean) => {
+      setOpenAssistantScope(open ? assistantScope : null);
+    },
+    [assistantScope],
+  );
   if (openAssistantScope !== null && openAssistantScope !== assistantScope) {
     setOpenAssistantScope(null);
   }
@@ -255,18 +257,19 @@ export default function HomePage() {
       onOpenChange={handleAssistantToggle}
     />
   );
-  const agent = context && accountId && !sessionLoading && !blocked && !nuni.error ? (
-    <TodayAgent
-      key={assistantScope}
-      context={context}
-      accountId={accountId}
-      tasks={rows.nuni?.data?.tasks ?? []}
-      now={now}
-      loading={!rows.nuni || rows.nuni.loading}
-      error={rows.nuni?.error || rows.nuni?.data?.tasksError || ''}
-      onRetry={() => void readSource('nuni', generation.current)}
-    />
-  ) : null;
+  const agent =
+    context && accountId && !sessionLoading && !blocked && !nuni.error ? (
+      <TodayAgent
+        key={assistantScope}
+        context={context}
+        accountId={accountId}
+        tasks={rows.nuni?.data?.tasks ?? []}
+        now={now}
+        loading={!rows.nuni || rows.nuni.loading}
+        error={rows.nuni?.error || rows.nuni?.data?.tasksError || ''}
+        onRetry={() => void readSource('nuni', generation.current)}
+      />
+    ) : null;
   return (
     <div className={styles.page + ' ' + styles.todayPage}>
       <a href="#today-content" className={styles.skip}>
@@ -416,13 +419,6 @@ export default function HomePage() {
               ))}
             </div>
           </section>
-        ) : null}
-        {signedIn && context && accountId ? (
-          <AccountIdentity
-            key={`identity:${accountId}:${context}`}
-            context={context}
-            accountId={accountId}
-          />
         ) : null}
         <details className={styles.siteInformation}>
           <summary>關於 nuni</summary>

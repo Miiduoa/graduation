@@ -483,6 +483,19 @@ it('provides service handoffs even when cloud functions are unavailable', async 
   expect(callCampusAssistant).not.toHaveBeenCalled();
 });
 
+it('opens scoped career information without submitting a work-study application', async () => {
+  state.functionsConfigured = false;
+  state.query = 'schoolId=nthu';
+  render(<AssistantPage />);
+  ask('開啟職涯');
+  const career = await screen.findByRole('link', { name: /開啟職涯/ });
+  expect(career.getAttribute('href')).toBe('/career?schoolId=nthu');
+  expect(career.textContent).toContain('申請請依原始公告另行辦理');
+  expect(screen.queryByText(/已(?:完成|申請|送出).*工讀|工讀申請成功/)).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
 it('does not send local service questions into later cloud conversation history', async () => {
   vi.mocked(callCampusAssistant).mockResolvedValue({ content: '接續一般查詢' });
   render(<AssistantPage />);

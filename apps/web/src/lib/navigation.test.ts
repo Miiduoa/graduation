@@ -85,18 +85,56 @@ it('preserves a course destination and its query and fragment', () => {
 
 it('builds a login href that returns to the original storefront', () => {
   expect(loginHref('/cafeteria/stall?schoolId=pu')).toBe(
-    '/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
+    '/login?returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu&schoolId=pu',
   );
 });
 
 it('builds a school login href with reconnect before returnUrl and preserves schoolId', () => {
   expect(schoolLoginHref('/lost-found?schoolId=pu')).toBe(
-    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu',
+    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu&schoolId=pu',
   );
   expect(loginHref('/lost-found?schoolId=pu', { reconnect: 'school' })).toBe(
-    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu',
+    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu&schoolId=pu',
   );
   expect(loginHref('/grades')).toBe('/login?returnUrl=%2Fgrades');
+});
+
+it('keeps the browsing campus on login without forwarding task, session or authorization parameters', () => {
+  const destination = '/groups/club-1/club/overview?school=PU&schoolId=pu&campus=pu&token=private&session=old&reconnect=school&returnUrl=%2Fadmin#announcements';
+  const url = new URL(loginHref(destination), 'https://campus.local');
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    returnUrl: destination,
+    school: 'PU',
+    schoolId: 'pu',
+    campus: 'pu',
+  });
+  expect(loginHref(destination).endsWith('#')).toBe(true);
+});
+
+it.each([
+  '/life?campus=all&schoolId=pu&school=PU',
+  '/life?schoolId=all&school=PU',
+  '/profile?campus=personal&schoolId=pu&school=PU',
+  '/profile?schoolId=personal&school=PU',
+])('keeps an explicit all-campus selection instead of an old school: %s', (destination) => {
+  const url = new URL(loginHref(destination), 'https://campus.local');
+  expect(Object.fromEntries(url.searchParams)).toEqual({ returnUrl: destination, campus: 'all' });
+});
+
+it.each([
+  '/profile?schoolId=..%2Fpu&campus=https%3A%2F%2Foutside.test&school=PU%0A',
+  `/profile?schoolId=${'a'.repeat(81)}&school=${'A'.repeat(81)}`,
+])('does not expose invalid campus selectors on the login URL: %s', (destination) => {
+  const url = new URL(loginHref(destination), 'https://campus.local');
+  expect(Object.fromEntries(url.searchParams)).toEqual({ returnUrl: destination });
+});
+
+it('retains an explicit valid but unlisted school so the live directory can reject it', () => {
+  const destination = '/profile?campus=tw-new-university&schoolId=pu';
+  const url = new URL(loginHref(destination), 'https://campus.local');
+  expect(url.searchParams.get('campus')).toBe('tw-new-university');
+  expect(url.searchParams.get('schoolId')).toBe('pu');
+  expect(url.searchParams.get('returnUrl')).toBe(destination);
 });
 
 it('collapses stacked fragments on school login href and ends with #', () => {

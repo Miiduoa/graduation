@@ -89,6 +89,8 @@ test('shows registration semantics and catches a failed sign-in instead of leavi
   mockAuth.signIn.mockRejectedValueOnce(new Error('native failure'));
   const view = render(<NuniWorkspaceScreen />);
   expect(view.getByText(/首次使用 Google 繼續時會建立帳號/)).toBeTruthy();
+  expect(view.getByText('從你的課程開始')).toBeTruthy();
+  expect(view.queryByText('點餐與訂單')).toBeNull();
   await act(async () => fireEvent.press(view.getByText('使用 Google 繼續')));
   expect(mockAuth.signIn).toHaveBeenCalledTimes(1);
   expect(view.getByRole('alert')).toHaveTextContent(/操作未完成/);
@@ -560,6 +562,7 @@ test('keeps the merchant destination through native sign-in', async () => {
   const screen = () => <NuniWorkspaceScreen route={{ params: { tab: 'merchant' } }} />;
   const view = render(screen());
   expect(view.getByText('店家進駐與門市管理')).toBeTruthy();
+  expect(view.queryByText('點餐與訂單')).toBeNull();
   expect(mockAuth.request).not.toHaveBeenCalled();
   await act(async () => fireEvent.press(view.getByRole('button', { name: '使用 Google 繼續' })));
   expect(mockAuth.signIn).toHaveBeenCalledTimes(1);
@@ -568,6 +571,22 @@ test('keeps the merchant destination through native sign-in', async () => {
   await view.findByText('我的店家資料');
   expect(view.getByRole('tab', { name: '店家' }).props.accessibilityState.selected).toBe(true);
   expect(view.queryByText('開啟網頁管理工作台')).toBeNull();
+});
+
+test('explains the food task and resumes its tab after native sign-in', async () => {
+  const screen = () => <NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />;
+  const view = render(screen());
+  expect(view.getByText('點餐與訂單')).toBeTruthy();
+  expect(view.getByText('登入後回到點餐頁；可用服務依店家實際開放狀態顯示。')).toBeTruthy();
+  expect(view.queryByText('從你的課程開始')).toBeNull();
+  expect(view.queryByText(/學生可加入老師的課程與繳交作業/)).toBeNull();
+  expect(mockAuth.request).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '使用 Google 繼續' })));
+  expect(mockAuth.signIn).toHaveBeenCalledTimes(1);
+  mockAuth.session = principal;
+  view.rerender(screen());
+  await view.findByTestId('food-intent');
+  expect(view.getByRole('tab', { name: '點餐' }).props.accessibilityState.selected).toBe(true);
 });
 
 test.each([{}, { error: '無法確認帳號' }])('preserves merchant intent on browser fallback (%p)', async (change) => {
@@ -579,6 +598,42 @@ test.each([{}, { error: '無法確認帳號' }])('preserves merchant intent on b
   expect(open).toHaveBeenCalledWith('https://nuni.tw/merchant');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
+
+test.each([{}, { error: '無法確認帳號' }, { pendingLogout: true }])(
+  'preserves food intent through the existing browser login contract (%p)',
+  async (change) => {
+    Object.assign(mockAuth, change);
+    mockCapability.mockReturnValue({ available: false });
+    const open = jest.spyOn(Linking, 'openURL').mockReset().mockResolvedValue(undefined);
+    const view = render(<NuniWorkspaceScreen route={{ params: { tab: 'food' } }} />);
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '開啟網頁版登入' })));
+    expect(open).toHaveBeenCalledWith('https://nuni.tw/login?returnUrl=%2Ffood');
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(mockAuth.signIn).not.toHaveBeenCalled();
+    expect(mockAuth.request).not.toHaveBeenCalled();
+    expect(mockAuth.session).toBeNull();
+  },
+);
+
+test.each([null, principal])(
+  'drops a previous account food intent before opening browser login (%p)',
+  async (session) => {
+    mockAuth.session = session;
+    mockAuth.error = '無法確認帳號';
+    mockCapability.mockReturnValue({ available: false });
+    const open = jest.spyOn(Linking, 'openURL').mockReset().mockResolvedValue(undefined);
+    const view = render(
+      <NuniWorkspaceScreen
+        route={{ params: { tab: 'food', assistantAccountId: 'pa_previous' } }}
+      />,
+    );
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '開啟網頁版登入' })));
+    expect(open).toHaveBeenCalledWith('https://nuni.tw/login');
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(mockAuth.signIn).not.toHaveBeenCalled();
+    expect(mockAuth.request).not.toHaveBeenCalled();
+  },
+);
 
 test('opens the operator audit log directly and offers the same action after a browser failure', async () => {
   mockAuth.session = { ...principal, isPlatformOperator: true };

@@ -6,14 +6,21 @@
  * 改由 NavigationContainer ref + CommonActions 一致地派送巢狀路由。
  */
 
-import { CommonActions, createNavigationContainerRef } from '@react-navigation/native';
+import {
+  CommonActions,
+  createNavigationContainerRef,
+  type NavigatorScreenParams,
+  type ParamListBase,
+} from '@react-navigation/native';
+
+type NestedStackParams = NavigatorScreenParams<ParamListBase> | undefined;
 
 export type RootTabParamList = {
-  Today: undefined;
-  學習: undefined;
-  校園: undefined;
-  訊息: undefined;
-  我的: undefined;
+  Today: NestedStackParams;
+  學習: NestedStackParams;
+  校園: NestedStackParams;
+  訊息: NestedStackParams;
+  我的: NestedStackParams;
 };
 
 export type RootTabName = keyof RootTabParamList;
@@ -79,7 +86,9 @@ export function rootNavigateNested(
 ) {
   return dispatchWhenReady(() => {
     const nestPayload =
-      params !== undefined && Object.keys(params).length > 0 ? { screen, params } : { screen };
+      params !== undefined && Object.keys(params).length > 0
+        ? { screen, params, initial: false }
+        : { screen, initial: false };
     rootNavigationRef.dispatch(
       CommonActions.navigate({
         name: tab as any,
@@ -94,7 +103,7 @@ export function rootNavigateMeScreen(screen: string, screenParams?: Record<strin
   return rootNavigateNested('我的', screen, screenParams);
 }
 
-/** Today Tab → CampusSocialScreen */
+/** 交流 → 校園社群；Today 內的舊路由繼續支援既有程式導覽。 */
 export function rootNavigateCampusCommunity() {
-  return rootNavigateNested('Today', 'CampusSocialScreen');
+  return rootNavigateNested('訊息', 'CampusSocialScreen');
 }

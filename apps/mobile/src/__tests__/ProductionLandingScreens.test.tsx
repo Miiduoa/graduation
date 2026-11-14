@@ -259,8 +259,9 @@ test('my account uses the signed-in profile without invented grades, identity or
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
   expect(view.queryByText('開啟課表助理')).toBeNull();
   expect(view.queryByText(/王小明|3\.63|61%|78|明年 6 月|seed|示範工具|12 場/)).toBeNull();
-  fireEvent.press(view.getByText('課程與成績'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'LearnHome');
+  expect(view.queryByText('課程與成績')).toBeNull();
+  fireEvent.press(view.getByText('使用設定'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Settings');
   fireEvent.press(view.getByText('個人資料'));
   expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'ProfileEdit');
 });
@@ -301,4 +302,21 @@ test('a rejected sign-out stays on the account page and reports the failure', as
   expect(alert).toHaveBeenLastCalledWith('無法登出', '請稍後重試。');
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(safeNavigate).not.toHaveBeenCalled();
+});
+
+
+test('我的將帳號連線與設定分開，保留內容管理而不重複整份服務目錄', () => {
+  const view = render(<MeAiFirstScreen />);
+  fireEvent.press(view.getByText('Google 帳號與連線'));
+  expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'NuniWorkspace', {
+    tab: 'account',
+  });
+  fireEvent.press(view.getByText('個人社群首頁'));
+  expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'MySocialProfile');
+  expect(view.queryByText('社群經營')).toBeNull();
+  expect(view.queryByText('通知與私訊')).toBeNull();
+  expect(view.queryByText('課務與生活')).toBeNull();
+  expect(view.queryByText('刪除帳號')).toBeNull();
+  fireEvent.press(view.getByText('使用設定'));
+  expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'Settings');
 });

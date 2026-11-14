@@ -37,6 +37,20 @@
   font-size: calc(var(--font-body-sm-size) - 0.0625rem);
 }
 
+.guestAccess {
+  margin: 0;
+  font-size: var(--font-body-sm-size);
+}
+
+.guestAccess a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .dayStatus {
   display: flex;
   flex-wrap: wrap;

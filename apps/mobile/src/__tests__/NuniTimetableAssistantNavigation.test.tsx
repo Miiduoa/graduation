@@ -1179,16 +1179,33 @@ test('campus me stack opens the same verified timetable assistant', async () => 
   expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
 });
 
-test('campus me stack workspace header opens the assistant', async () => {
+test('campus me stack account connection opens the assistant and returns to the same account page', async () => {
   mockAuthUser = { uid: 'firebase-a', displayName: '同學' };
   const navigation = createNavigationContainerRef();
   const screen = render(
-    <NuniSessionProvider><NavigationContainer ref={navigation}><MeStack /></NavigationContainer></NuniSessionProvider>,
+    <NuniSessionProvider>
+      <NavigationContainer ref={navigation}>
+        <MeStack />
+      </NavigationContainer>
+    </NuniSessionProvider>,
   );
-  fireEvent.press(await screen.findByText('課程、店家與 Google 帳號'));
+  fireEvent.press(await screen.findByRole('button', { name: /Google 帳號與連線/ }));
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'NuniWorkspace',
+    params: { tab: 'account' },
+  });
   fireEvent.press(await screen.findByRole('button', { name: '問課表' }));
   expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
   await screen.findByText('資料庫管理');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'NuniWorkspace',
+    params: { tab: 'account' },
+  });
+  await screen.findByRole('button', { name: '問課表' });
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('MeHome');
+  expect(screen.getByRole('button', { name: /Google 帳號與連線/ })).toBeTruthy();
 });
 
 test('campus me stack requires a verified nuni session for the timetable assistant', async () => {
@@ -1196,9 +1213,13 @@ test('campus me stack requires a verified nuni session for the timetable assista
   mockStored = null;
   const navigation = createNavigationContainerRef();
   const screen = render(
-    <NuniSessionProvider><NavigationContainer ref={navigation}><MeStack /></NavigationContainer></NuniSessionProvider>,
+    <NuniSessionProvider>
+      <NavigationContainer ref={navigation}>
+        <MeStack />
+      </NavigationContainer>
+    </NuniSessionProvider>,
   );
-  await screen.findByText('課程、店家與 Google 帳號');
+  await screen.findByRole('button', { name: /Google 帳號與連線/ });
   expect(screen.queryByText('開啟課表助理')).toBeNull();
   act(() => navigation.navigate('NuniTimetableAssistant' as never));
   await screen.findByRole('button', { name: '前往 nuni 帳號' });

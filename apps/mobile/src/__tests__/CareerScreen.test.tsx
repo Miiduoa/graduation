@@ -104,11 +104,33 @@ test('external jobs only link out with approved labels', async () => {
   expect(view.queryByText('一鍵應徵')).toBeNull();
 });
 
-test('preserves the school-announcements entry even when career sources are unavailable', async () => {
+test('guest announcements stay in the public stack even when career sources are unavailable', async () => {
   respond(emptyCareerFeed());
-  const navigation = { navigate: jest.fn() };
+  const navigation = {
+    navigate: jest.fn(),
+    getState: () => ({ routeNames: ['LoginLanding', 'Career', '公告總覽'] }),
+  };
   const view = render(<CareerScreen navigation={navigation} />);
   await view.findByText(CAREER_JOBS_UNAVAILABLE);
   fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
-  expect(navigation.navigate).toHaveBeenCalledWith('公告總覽');
+  expect(navigation.navigate).toHaveBeenCalledWith('公告總覽', undefined);
+});
+
+test('school-session announcements cross from life to the registered Today stack', async () => {
+  respond(emptyCareerFeed());
+  const navigation = {
+    navigate: jest.fn(),
+    getState: () => ({ routeNames: ['CampusHome', 'Career'] }),
+    getParent: () => ({
+      getState: () => ({ routeNames: ['Today', '學習', '校園', '訊息', '我的'] }),
+    }),
+  };
+  const view = render(<CareerScreen navigation={navigation} />);
+  await view.findByText(CAREER_JOBS_UNAVAILABLE);
+  fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
+  expect(navigation.navigate).toHaveBeenCalledWith('Today', {
+    screen: '公告總覽',
+    params: undefined,
+    initial: false,
+  });
 });
