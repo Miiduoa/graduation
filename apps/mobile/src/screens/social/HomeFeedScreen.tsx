@@ -215,11 +215,11 @@ function HomeFeedContent() {
     } catch (cause) {
       if (loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
+        setStories([]);
         setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
-        setStories([]);
         setNameByUid({});
         setAvatarByUid({});
         setHasMore(false);

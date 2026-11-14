@@ -30,10 +30,10 @@ const SchoolConversation = lazy(async () => ({
 
 type Account = { kind: 'nuni'; context: string; accountId: string } | { kind: 'school'; uid: string; localOwner: string };
 
-function TodayConversation({ account, schoolId }: { account: Account; schoolId: string }) {
+function TodayConversation({ account, schoolId, cloudEnabled }: { account: Account; schoolId: string; cloudEnabled: boolean }) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
-  const canAsk = account.kind === 'school' ? areFunctionsConfigured() : nuniFreeform;
+  const canAsk = account.kind === 'school' ? areFunctionsConfigured() : !cloudEnabled || nuniFreeform;
   const [searchOpen, setSearchOpen] = useState(false);
   const conversation = useRef<HTMLDivElement>(null);
   const searchId = useId();
@@ -77,6 +77,7 @@ function TodayConversation({ account, schoolId }: { account: Account; schoolId: 
               context={account.context}
               accountId={account.accountId}
               schoolId={schoolId}
+              cloudEnabled={cloudEnabled}
               inlineDraft={draft}
               onFreeformReady={setNuniFreeform}
             />
@@ -122,10 +123,14 @@ export function TodayCampusEntry() {
   const campus = useCampusBrowseContext();
   const session = nuni.session;
   const uid = auth.user?.uid;
-  if (!hydrated || auth.loading || nuni.loading) return <p role="status">正在確認登入狀態…</p>;
+  const functionsConfigured = areFunctionsConfigured();
+  const platformAvailable = !!session && !nuni.error;
+  if (!hydrated || nuni.loading || (auth.loading && !(platformAvailable && (enabled || !functionsConfigured))))
+    return <p role="status">正在確認登入狀態…</p>;
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
+  const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
   const account: Account | null =
-    enabled && session && !nuni.error
+    session && !nuni.error && !preferSchoolEngine
       ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
       : uid && !auth.error
         ? { kind: 'school', uid, localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid }
@@ -156,9 +161,12 @@ export function TodayCampusEntry() {
         session?.platformAccountId,
         account.kind,
         campus.schoolId,
+        enabled,
+        functionsConfigured,
       ])}
       account={account}
       schoolId={campus.schoolId}
+      cloudEnabled={enabled}
     />
   );
 }

@@ -145,12 +145,21 @@ export function resolveNotificationDestination(
     case 'announcement': {
       const id = requireId(data.announcementId, '公告編號');
       if (id.ok === false) return id.destination;
+      const school = data.schoolId == null || data.schoolId === ''
+        ? null
+        : requireId(data.schoolId, '學校編號');
+      if (school && school.ok === false) return school.destination;
       return {
         ok: true,
         mode: 'nested',
         tab: 'Today',
         screen: '公告詳情',
-        params: { id: id.id },
+        params: {
+          id: id.id,
+          ...(school && school.ok
+            ? { schoolId: school.id, sourceKind: 'school-announcement' }
+            : {}),
+        },
         summary: '開啟公告',
       };
     }
