@@ -159,6 +159,69 @@ test('packages require roster, retry is idempotent, all waiting packages are col
   await call('staff', { action: 'collectPackages', studentId: '123' });
   expect(data.get('schools/pu/packages/' + id).status).toBe('picked_up');
 });
+test('batch pickup selects only waiting parcels in authorized buildings after a student moves', async () => {
+  const { call, data, db } = fixture();
+  data.get('schools/pu/dormStaffRoles/staff').buildings = ['B'];
+  const parcels = {
+    historical: { studentId: '123', building: 'A', status: 'picked_up' },
+    oldWaiting: { studentId: '123', building: 'A', status: 'waiting' },
+    current: { studentId: '123', building: 'B', status: 'waiting' },
+    returned: { studentId: '123', building: 'B', status: 'returned' },
+    otherStudent: { studentId: '456', building: 'B', status: 'waiting' },
+  };
+  for (const [id, row] of Object.entries(parcels)) {
+    data.set('schools/pu/dormPackages/' + id, { ...row, location: '服務台' });
+    data.set('schools/pu/packages/' + id, { recipientId: 'student', status: row.status });
+  }
+  const read = jest.fn();
+  const runTransaction = db.runTransaction;
+  db.runTransaction = (fn) =>
+    runTransaction((tx) =>
+      fn({
+        ...tx,
+        get: (ref) => {
+          read(ref.path);
+          return tx.get(ref);
+        },
+      }),
+    );
+  await expect(call('staff', { action: 'collectPackages', studentId: '123' })).resolves.toEqual({
+    success: true,
+  });
+  expect(read.mock.calls).toEqual([['schools/pu/dormPackages/current']]);
+  for (const [id, row] of Object.entries(parcels)) {
+    const status = id === 'current' ? 'picked_up' : row.status;
+    for (const collection of ['dormPackages', 'packages'])
+      expect(data.get(`schools/pu/${collection}/${id}`).status).toBe(status);
+  }
+});
+
+test.each([
+  [{ status: 'picked_up' }, null],
+  [{ status: 'returned' }, null],
+  [{ building: 'B' }, 'permission-denied'],
+])(
+  'batch pickup rechecks concurrent parcel change %j inside the transaction',
+  async (change, code) => {
+    const { call, data, db } = fixture();
+    const path = 'schools/pu/dormPackages/current';
+    data.set(path, { studentId: '123', building: 'A', status: 'waiting', location: '服務台' });
+    data.set('schools/pu/packages/current', { recipientId: 'student', status: 'waiting' });
+    const runTransaction = db.runTransaction;
+    const update = jest.fn();
+    db.runTransaction = (fn) => {
+      data.set(path, { ...data.get(path), ...change });
+      return runTransaction((tx) => fn({ ...tx, update }));
+    };
+    const result = call('staff', { action: 'collectPackages', studentId: '123' });
+    if (code) await expect(result).rejects.toMatchObject({ code });
+    else await expect(result).resolves.toEqual({ success: true });
+    expect(update).not.toHaveBeenCalled();
+    expect(data.get(path)).toMatchObject(change);
+    expect(data.get('schools/pu/packages/current').status).toBe('waiting');
+  },
+);
+
 test('push failure does not report a committed ticket transition as failed', async () => {
   const { call, sendPushToUser } = fixture();
   const { id } = await call('student', repair);

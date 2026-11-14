@@ -60,14 +60,13 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
       if (!(domain === 'packages' ? packages : repairs))
         throw new HttpsError('permission-denied', '需要宿舍服務權限');
     };
+    const canAccessBuilding = (row) =>
+      admin ||
+      !Array.isArray(roles.buildings) ||
+      !roles.buildings.length ||
+      roles.buildings.includes(row.building || row.dormitory);
     const inBuilding = (row) => {
-      if (
-        !admin &&
-        Array.isArray(roles.buildings) &&
-        roles.buildings.length &&
-        !roles.buildings.includes(row.building || row.dormitory)
-      )
-        throw new HttpsError('permission-denied', '不屬於值班棟別');
+      if (!canAccessBuilding(row)) throw new HttpsError('permission-denied', '不屬於值班棟別');
     };
     const list = async (name, own = false) => {
       let q = school.collection(name);
@@ -469,12 +468,15 @@ function createDormWorkflowHandler({ db, sendPushToUser }) {
                 .collection('dormPackages')
                 .where('studentId', '==', required(input.studentId, 50))
                 .get()
-            ).docs.map((d) => d.ref);
+            ).docs
+              .filter((d) => d.data().status === 'waiting' && canAccessBuilding(d.data()))
+              .map((d) => d.ref);
       await db.runTransaction(async (tx) => {
         const snaps = await Promise.all(refs.map((r) => tx.get(r)));
         for (const snap of snaps) {
           if (!snap.exists) continue;
           const row = snap.data();
+          if (action === 'collectPackages' && row.status !== 'waiting') continue;
           inBuilding(row);
           if (/郵局|掛號|收發室/.test(row.location || '')) continue;
           if (row.status === 'waiting') {
