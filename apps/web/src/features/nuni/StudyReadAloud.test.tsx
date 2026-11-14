@@ -739,6 +739,35 @@ it.each([
   expect(chunks.every((part) => part.length > 0 && part.length <= 160)).toBe(true);
 });
 
+it.each([
+  { label: 'a lesson query', token: 'https://nuni.tw/course?tab=review' },
+  { label: 'a URL path parameter', token: 'https://nuni.tw/lesson;v=2' },
+  { label: 'a URL path colon', token: 'https://nuni.tw/lesson:part2' },
+  { label: 'a query with more than one separator', token: 'https://nuni.tw/course?tab=1;lang=zh' },
+])('does not pause at an internal delimiter in $label', ({ token }) => {
+  const original = '課'.repeat(120) + token + '後'.repeat(80);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks = speak.mock.calls.map(([utterance]) => (utterance as Utterance).text);
+  expect(chunks.join('')).toBe(original);
+  expect(chunks[0]?.length).toBe(160);
+  expect(chunks.every((part) => part.length > 0 && part.length <= 160)).toBe(true);
+});
+
+it.each([
+  { label: 'a normal question', clause: '問題? ' },
+  { label: 'a normal semicolon', clause: '第一部分; ' },
+])('keeps the sentence pause for $label outside a URL', ({ clause }) => {
+  const original = '課'.repeat(120) + clause + '後'.repeat(80);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks = speak.mock.calls.map(([utterance]) => (utterance as Utterance).text);
+  expect(chunks[0]).toBe('課'.repeat(120) + clause.trimEnd());
+  expect(chunks.join('')).toBe(original);
+});
+
 it('still prefers the teaching sentence colon between two Chinese clauses', () => {
   const original = '課'.repeat(145) + '說明：' + '後'.repeat(80);
   speak.mockImplementation((utterance: Utterance) => utterance.onend?.());

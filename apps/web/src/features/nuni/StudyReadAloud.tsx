@@ -75,6 +75,13 @@ function isStudySpeechNaturalPause(units: string[], index: number): boolean {
   // Do not suppress normal Chinese explanatory colons (例如：說明：內容).
   if (token === ':' && /^[A-Za-z]$/u.test(previous) &&
       next === '/' && units[index + 2] === '/') return false;
+  // A punctuation mark inside an explicit HTTP(S) URL query or path is
+  // not a preferred speech pause. Ordinary questions and sentence endings
+  // still pause normally; the 160-unit hard cap remains unchanged.
+  if (/^[?!;:]$/u.test(token) && /^[A-Za-z0-9_/#%=&+?!.~-]$/u.test(next)) {
+    const left = units.slice(Math.max(0, index - 512), index).join('');
+    if (/https?:\/\/[^\s<>，。！？；、：]*$/iu.test(left)) return false;
+  }
   return true;
 }
 
