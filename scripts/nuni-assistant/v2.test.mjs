@@ -116,7 +116,9 @@ test('fake model failures recover, flatten the last request, sanitize args and b
     usage: { prompt_tokens: 300, completion_tokens: 80, total_tokens: 380 },
   });
   const base = {
-    question: '規劃明天作業與交通',
+    // Strategy comparison stays conversational; the simpler compound request
+    // now deliberately uses the source-backed task runner without a model.
+    question: '幫我比較兩種讀書策略，規劃明天作業與交通',
     history: [],
     binding: m.fixtureBinding,
     adapter: m.fixtureAdapter().adapter,
