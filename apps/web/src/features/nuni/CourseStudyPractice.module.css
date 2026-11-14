@@ -1,0 +1,107 @@
+.root {
+  box-sizing: border-box;
+  min-width: 0;
+  margin-top: 24px;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--border-strong);
+  border-top: 4px solid var(--brand);
+  background: var(--surface);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.toolbar, .questionHeading, .actions, .navigation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.toolbar, .questionHeading, .navigation { justify-content: space-between; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 13px; }
+.note { margin: 12px 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.position { margin: 24px 0 14px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.button {
+  box-sizing: border-box;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.button:disabled { opacity: .5; cursor: not-allowed; }
+.primary { border-color: var(--brand); background: var(--brand); color: var(--on-brand); }
+.root :is(button, textarea, h4):focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; }
+.card, .summary { min-width: 0; padding-top: 20px; border-top: 1px solid var(--border); }
+.card { animation: reveal .16s ease-out; }
+.root h4 { margin: 0; font-size: 20px; line-height: 1.6; }
+.root h5 { margin: 0 0 12px; font-size: 15px; line-height: 1.7; }
+.questionHeading > span { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.question { margin: 20px 0; font-size: 18px; line-height: 1.9; white-space: pre-wrap; }
+.field { display: grid; min-width: 0; gap: 10px; margin-top: 24px; font-size: 14px; line-height: 1.7; }
+.field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 140px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.hint, .answer { min-width: 0; margin-top: 18px; padding: 18px; border: 1px solid var(--border); background: var(--bg); }
+.source { margin: 0; padding-left: 14px; border-left: 2px solid var(--border-strong); font-size: 16px; line-height: 1.9; white-space: pre-wrap; }
+.highlight { border-radius: 2px; background: color-mix(in srgb, var(--brand) 19%, var(--surface)); color: var(--text); }
+.answerText { white-space: pre-wrap; line-height: 1.9; }
+.answer .actions { margin-top: 18px; }
+.navigation { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 22px 0; }
+.facts > div { min-width: 0; padding: 14px; border: 1px solid var(--border); background: var(--bg); }
+.facts dt { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.facts dd { margin: 8px 0 0; font-size: 24px; font-variant-numeric: tabular-nums; }
+.overview { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); }
+.cardList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.cardList > li { min-width: 0; }
+.cardButton {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 12px;
+  width: 100%;
+  min-height: 44px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.cardButton[aria-current="step"] { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); }
+.cardNumber { grid-row: span 2; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cardLabel { min-width: 0; }
+.cardOutcome { color: var(--muted); font-size: 12px; }
+@keyframes reveal { from { opacity: .6; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+@media (max-width: 680px) { .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+  .root, .hint, .answer { padding: 14px; }
+  .field textarea { font-size: 16px; }
+  .question { font-size: 17px; }
+  .cardList { grid-template-columns: minmax(0, 1fr); }
+  .actions > .button { flex: 1 1 140px; }
+}

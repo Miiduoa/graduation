@@ -1,0 +1,389 @@
+'use client';
+
+import { getPersonalImportAiAvailability } from './personalImportAiLocal';
+import type { PersonalImportAiWorkerRequest } from './personalImportAiConfig';
+import {
+  buildStudyTutorPrompt,
+  parseTutorExplanation,
+  type StudyMode,
+  type StudyPassage,
+  type StudyTutorHistory,
+  type TutorExplanation,
+} from './studyTutor';
+
+export const STUDY_TUTOR_TIMEOUT_MS = 10 * 60_000;
+export const STUDY_TUTOR_GENERATION_TIMEOUT_MS = 120_000;
+
+export function getStudyTutorAvailability(): {
+  available: boolean;
+  reason?: string;
+  downloadLabel: string;
+} {
+  const availability = getPersonalImportAiAvailability();
+  return availability.available ? availability : {
+    ...availability,
+    reason: '這個瀏覽器目前無法執行裝置端 AI。仍可閱讀原文與自行複習，或改用支援 WebGPU 的瀏覽器開啟講解。',
+  };
+}
+
+/** Browser-observed wall time for one local worker run. No cold/warm or quality inference. */
+export type StudyTutorTiming = {
+  preparationMs: number;
+  generationMs: number | null;
+  totalMs: number;
+  outcome: 'success' | 'failed' | 'cancelled';
+};
+
+export type StudyTutorRequest = {
+  passage: StudyPassage;
+  mode: StudyMode;
+  question?: string;
+  history?: StudyTutorHistory;
+  signal: AbortSignal;
+  onProgress?: (message: string) => void;
+  onTiming?: (timing: StudyTutorTiming) => void;
+};
+
+let sequence = 0;
+let running = false;
+
+function aborted() {
+  return new DOMException('已停止這次講解，原文仍保留。', 'AbortError');
+}
+
+function workerError(code: unknown): Error {
+  const messages: Record<string, string> = {
+    unsupported: '這台裝置無法執行講解模型，仍可使用白板閱讀原文。',
+    input_limit: '原文與追問超過模型能處理的範圍，請縮短提問，或不帶追問紀錄重新講解。',
+    output_limit: '這次講解沒有完整產生，請重試或縮小問題範圍。',
+    memory: '裝置記憶體不足，講解已停止。請關閉其他分頁後重試，或先閱讀原文。',
+    download: '講解模型尚未下載完成，請確認網路後重試。教材內容仍在本機。',
+    runtime: '裝置端 AI 暫時無法啟動，請稍後重試；原文仍可閱讀。',
+    busy: '上一段講解仍在處理，請等候完成或先停止。',
+    invalid_response: '這次講解無法對照原文，請重試。',
+  };
+  return new Error(typeof code === 'string' && Object.hasOwn(messages, code)
+    ? messages[code] : messages.invalid_response);
+}
+
+// An exact substring can be just a period or operator: matching the source is
+// necessary, but punctuation alone does not identify what the lesson explains.
+function generatedEvidenceQuotes(explanation: TutorExplanation): string[] {
+  return [explanation.sourceQuote, ...(explanation.steps?.map((step) => step.sourceQuote) ?? [])];
+}
+// Enforce this only for NEW worker results. Saved v1/v2 explanations continue
+// to use their original schema so old offline study backups remain readable.
+function hasSubstantiveGeneratedEvidence(explanation: TutorExplanation): boolean {
+  return generatedEvidenceQuotes(explanation).every((quote) => /[\p{L}\p{N}]/u.test(quote));
+}
+
+// The prompt asks for at most 60 Unicode characters per quote; the generic
+// parser keeps its older 400-code-unit allowance for saved v1/v2 backups.
+// Enforce the tighter bound only when accepting new worker-generated lessons.
+function hasBoundedGeneratedEvidence(explanation: TutorExplanation): boolean {
+  return generatedEvidenceQuotes(explanation).every((quote) => Array.from(quote).length <= 60);
+}
+
+// Normalize only a temporary comparison copy: never rewrite source quotes,
+// displayed explanations or existing offline backups. Keep ZWJ/ZWNJ because
+// they can carry meaning in other scripts and emoji.
+function comparableGeneratedTeaching(text: string, preserveLineBreaks = false): string {
+  return text.normalize('NFC')
+    .replace(/[\u00ad\u034f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, '')
+    // Answer-key list markers must remain on their own line for validation.
+    // Other comparisons deliberately retain the existing collapsed whitespace.
+    .replace(preserveLineBreaks ? /[^\S\r\n]+/gu : /\s+/gu, ' ').trim();
+}
+
+// A valid source quote is not enough if the model leaves the explanation itself
+// as punctuation or mathematical operators. Require visible letters or digits
+// in the NEW generated summary and each instructional step, not in saved data.
+function hasSubstantiveGeneratedTeaching(explanation: TutorExplanation): boolean {
+  return [explanation.explanation, ...(explanation.steps?.map((step) => step.explanation) ?? [])]
+    .every((text) => /[\p{L}\p{N}]/u.test(comparableGeneratedTeaching(text)));
+}
+
+// A valid quote and visible explanation do not make a punctuation-only
+// self-check usable. Keep the legacy parser unchanged for saved lessons.
+function hasSubstantiveGeneratedReview(explanation: TutorExplanation): boolean {
+  return [explanation.question, explanation.answer]
+    .every((text) => /[\p{L}\p{N}]/u.test(comparableGeneratedTeaching(text)));
+}
+
+// If the model repeats its answer as the question, there is nothing for the
+// student to recall. Ignore only whitespace, punctuation and display-only
+// characters for this NEW-output comparison; retain mathematical operators.
+function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
+  const comparable = (value: string) => comparableGeneratedTeaching(value)
+    // Only drop sentence/quote marks at the ends. Generic punctuation includes
+    // grouping brackets and leading decimal points: (a+b) is NOT a+b, and
+    // .5 is NOT 5. Neither should trigger an unnecessary AI regeneration.
+    .replace(/\s+/gu, '')
+    .replace(/^[?!？!。；;：:，、"'“”‘’「」『』…]+|[.!?。！？；;：:，、"'“”‘’「」『』…]+$/gu, '')
+    .toLowerCase();
+  return comparable(explanation.question) !== comparable(explanation.answer);
+}
+
+// A self-check cannot test recall if it prints its own reference answer in
+// an explicit answer key. Only reject a labelled disclosure that actually
+// matches the generated answer; ordinary questions may contain the same
+// technical terms or mathematical givens without revealing the answer.
+// Validate NEW local generation only; saved v1/v2 lessons remain readable.
+function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
+  const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase();
+  const answer = comparableGeneratedTeaching(explanation.answer)
+    .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
+  // Generated answer keys also use 是／為, 就是, equals signs, or English labels.
+  // This is only a conservative disclosure check, not a semantic answer judge.
+  const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer|ans\.?|solution)\s*(?:[:：=＝]|\bis\b\s*[:：=＝]?)/giu;
+  let label: RegExpExecArray | null;
+  while ((label = labels.exec(question)) !== null) {
+    // Generated Markdown may wrap a disclosed key in inline code or emphasis.
+    // Strip only opening presentation marks for comparison, never displayed text.
+    const rawDisclosed = question.slice(label.index + label[0].length);
+    // Answer keys may place blank lines or Markdown quote markers before bullets.
+    // Only remove markers after a NEW line: "- 1" on the same line remains
+    // negative-number notation, not a Markdown answer list.
+    const revealedItem = rawDisclosed.replace(
+      /^(?:[ \t]*\r?\n){1,3}[ \t]*(?:>[ \t]*){0,2}(?:[-+*•][ \t]+|\d{1,2}[.)、][ \t]+)?/u, '',
+    );
+    // An opening _ or __ is presentation markup, not part of a leaked answer.
+    // Remember its length so a closing underscore is not mistaken for an identifier.
+    // Local models sometimes print a literal HTML-formatted answer key.
+    // Match up to three short literal style tags with bounded attributes in
+    // the comparison copy. Never parse/execute HTML or rewrite displayed text.
+    const answerPresentation = revealedItem.replace(
+      /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
+    );
+    const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const disclosed = answerPresentation
+      .replace(/^[\s"'“”‘’「『（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
+    if (!disclosed.startsWith(answer)) continue;
+    // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
+    // Keep decimal points and mathematical operators significant.
+    const finalAnswerCharacter = Array.from(answer).at(-1) ?? '';
+    const followingCharacter = disclosed.slice(answer.length).charAt(0);
+    if (/[\p{N}]/u.test(finalAnswerCharacter) && /[\p{N}.]/u.test(followingCharacter))
+      continue;
+    // SQL is not SQLServer; likewise, option B is not option B2.
+    // Avoid rejecting a genuine question for a longer Latin identifier.
+    const remaining = disclosed.slice(answer.length);
+    const closesEmphasis = emphasisPrefix.length > 0 &&
+      remaining.startsWith(emphasisPrefix) &&
+      !/^[\p{L}\p{N}_]/u.test(remaining.slice(emphasisPrefix.length));
+    // SQL_joins remains distinct from SQL, but _SQL_ and __SQL__ reveal SQL.
+    if (/[a-z]/u.test(finalAnswerCharacter) && /[a-z0-9_]/u.test(followingCharacter) &&
+      !(followingCharacter === '_' && closesEmphasis)) continue;
+    return false;
+  }
+  return true;
+}
+
+// Distinct titles, source lines or whitespace cannot turn the SAME explanation
+// into two instructional steps. Keep citations and displayed text untouched.
+function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
+  if (!explanation.steps) return false;
+  const seen = new Set<string>();
+  for (const step of explanation.steps) {
+    // A new step that only changes the closing punctuation does not give the
+    // student another explanation. Leave internal punctuation untouched:
+    // operators, decimal points and formula syntax can change the meaning.
+    const content = comparableGeneratedTeaching(step.explanation)
+      .replace(/[.!?。！？；;：:，、]+$/gu, '').trim();
+    if (!content || seen.has(content)) return false;
+    seen.add(content);
+  }
+  return true;
+}
+
+// An exact source citation is evidence, not a teaching explanation. A new
+// on-device lesson must add information beyond copying its own quote. Keep
+// the saved v1/v2 parser unchanged for earlier offline study records.
+function hasExplainedGeneratedEvidence(explanation: TutorExplanation): boolean {
+  const pairs: Array<[string, string]> = [
+    [explanation.explanation, explanation.sourceQuote],
+    ...(explanation.steps?.map((step): [string, string] => [step.explanation, step.sourceQuote]) ?? []),
+  ];
+  const comparable = (text: string) => comparableGeneratedTeaching(text)
+    // Ignore closing sentence punctuation, but retain internal operators and
+    // decimals: an equation and a changed equation must not compare equal.
+    .replace(/[.!?。！？；;：:，、]+$/gu, '').trim();
+  return pairs.every(([teaching, quote]) => comparable(teaching) !== comparable(quote));
+}
+
+function progressMessage(message: unknown, phase: unknown): string {
+  if (phase === 'generating') return '正在依本段原文準備講解與自我檢查題…';
+  const download = typeof message === 'string' && message.length <= 300
+    ? /已接收 (\d{1,6}) MB/.exec(message) : null;
+  return download ? `正在下載講解模型（已接收 ${download[1]} MB）`
+    : '正在準備裝置端 AI；已下載的模型會使用本機快取。';
+}
+
+/** Only an explicit call starts a worker. Closing the session cancels actual GPU work. */
+export async function runStudyTutor({
+  passage,
+  mode,
+  question,
+  history,
+  signal,
+  onProgress,
+  onTiming,
+}: StudyTutorRequest): Promise<TutorExplanation> {
+  if (signal.aborted) throw aborted();
+  // Snapshot the source before awaiting the worker so a later selection cannot change validation.
+  const source = { ...passage };
+  const prompt = buildStudyTutorPrompt(source, mode, question, history);
+  if (running) throw new Error('另一段講解正在進行，請先停止或等完成後再試。');
+  const availability = getStudyTutorAvailability();
+  if (!availability.available) throw new Error(availability.reason);
+  running = true;
+  try {
+    const startedAt = performance.now();
+    const reportTiming = (generationStartedAt: number | null, outcome: StudyTutorTiming['outcome']) => {
+      const endedAt = performance.now();
+      try {
+        onTiming?.({
+          preparationMs: Math.max(0, (generationStartedAt ?? endedAt) - startedAt),
+          generationMs: generationStartedAt === null ? null : Math.max(0, endedAt - generationStartedAt),
+          totalMs: Math.max(0, endedAt - startedAt),
+          outcome,
+        });
+      } catch {
+        // A timing display failure must never replace the worker outcome.
+      }
+    };
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL('./personalImportAi.worker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      // A constructor failure occurs before the Promise and would otherwise skip timing.
+      reportTiming(null, 'failed');
+      throw new Error('無法啟動裝置端 AI，請重新整理後再試；原文仍可閱讀。');
+    }
+    return await new Promise<TutorExplanation>((resolve, reject) => {
+      const id = ++sequence;
+      let settled = false;
+      let generating = false;
+      let generationStartedAt: number | null = null;
+      const finish = (error?: Error, explanation?: TutorExplanation) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+        worker.onmessage = null;
+        worker.onerror = null;
+        worker.onmessageerror = null;
+        try {
+          worker.terminate();
+        } catch {
+          // Some browsers throw after a worker crash. Still release the UI and settle the request.
+        }
+        reportTiming(generationStartedAt, error?.name === 'AbortError' ? 'cancelled' : error ? 'failed' : 'success');
+        if (error) reject(error);
+        else resolve(explanation!);
+      };
+      const abort = () => finish(aborted());
+      const report = (message: string) => {
+        try {
+          onProgress?.(message);
+        } catch {
+          finish(new Error('白板無法更新講解進度，工作已停止。請重試。'));
+        }
+      };
+      let timer = setTimeout(
+        () => finish(new Error('模型準備逾時，下載與講解已停止。請確認網路後重試。')),
+        STUDY_TUTOR_TIMEOUT_MS,
+      );
+      worker.onmessage = (event: MessageEvent<unknown>) => {
+        if (settled || signal.aborted) return;
+        const value = event.data;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          // This dedicated worker must send an object envelope. Waiting for the
+          // preparation timeout would leave the student stuck for ten minutes.
+          finish(workerError('invalid_response'));
+          return;
+        }
+        const data = value as Record<string, unknown>;
+        if (data.id !== id) {
+          // Older numeric requests can finish late. An id from the future
+          // cannot belong to this dedicated worker, so fail fast instead of
+          // leaving the learner waiting for the preparation timeout.
+          if (typeof data.id !== 'number' || !Number.isSafeInteger(data.id) ||
+            data.id <= 0 || data.id > id)
+            finish(workerError('invalid_response'));
+          return;
+        }
+        if (data.type === 'progress') {
+          // A corrupted phase or a return to loading after generation indicates
+          // a broken worker protocol, not useful progress. Fail immediately so
+          // students can retry instead of waiting for the long model timeout.
+          if (
+            (data.phase !== undefined && data.phase !== 'loading' && data.phase !== 'generating')
+            || (generating && data.phase === 'loading')
+          ) {
+            finish(workerError('invalid_response'));
+            return;
+          }
+          if (data.phase === 'generating' && !generating) {
+            generating = true;
+            generationStartedAt = performance.now();
+            clearTimeout(timer);
+            timer = setTimeout(
+              () => finish(new Error('這段講解逾時，工作已停止。可縮短問題後重試。')),
+              STUDY_TUTOR_GENERATION_TIMEOUT_MS,
+            );
+          }
+          // Legacy unphased progress remains valid. Once generation has started,
+          // do not mistake a late unphased download message for a new loading phase.
+          report(progressMessage(data.message, generating ? 'generating' : data.phase));
+        } else if (data.type === 'result') {
+          try {
+            if (typeof data.raw !== 'string') throw workerError('invalid_response');
+            const explanation = parseTutorExplanation(data.raw, source);
+            // Saved older lessons may omit steps, but every NEW local lesson
+            // promises a usable 2–4-step explanation, not just a generic summary.
+            if (!explanation.steps)
+              throw new Error('這次講解缺少分步步驟，無法完成逐步學習。請重新講解。');
+            if (!hasDistinctGeneratedSteps(explanation))
+              throw new Error('這次講解有空白或重複相同的教學步驟，請重新講解。');
+            if (!hasSubstantiveGeneratedTeaching(explanation))
+              throw new Error('這次講解的說明只有標點或符號，無法作為教學內容。請重新講解。');
+            if (!hasExplainedGeneratedEvidence(explanation))
+              throw new Error('這次講解只是照抄原文引句，沒有額外解釋。請重新講解。');
+            if (!hasSubstantiveGeneratedReview(explanation))
+              throw new Error('這次講解的複習題或參考回答只有標點或符號，無法用來練習。請重新講解。');
+            if (!hasDistinctGeneratedReview(explanation))
+              throw new Error('這次講解的複習題和參考回答內容相同，無法進行自我檢查。請重新講解。');
+            if (!hasUnrevealedGeneratedReview(explanation))
+              throw new Error('這次複習題直接寫出參考答案，無法練習回想。請重新講解。');
+            if (!hasSubstantiveGeneratedEvidence(explanation))
+              throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
+            if (!hasBoundedGeneratedEvidence(explanation))
+              throw new Error('這次講解的原文引句超過 60 字，無法精準核對教材重點。請重新講解。');
+            finish(undefined, explanation);
+          } catch (error) {
+            finish(error instanceof Error ? error : workerError('invalid_response'));
+          }
+        } else {
+          finish(workerError(data.type === 'error' ? data.code : 'invalid_response'));
+        }
+      };
+      worker.onerror = () => finish(workerError('runtime'));
+      worker.onmessageerror = () => finish(workerError('invalid_response'));
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      report('正在準備裝置端 AI；首次使用會下載模型，教材不會上傳。');
+      if (settled || signal.aborted) return;
+      try {
+        worker.postMessage({ type: 'recognize', id, prompt } satisfies PersonalImportAiWorkerRequest);
+      } catch {
+        finish(new Error('無法把本段交給裝置端 AI，工作已停止。請重試。'));
+      }
+    });
+  } finally {
+    running = false;
+  }
+}

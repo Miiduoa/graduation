@@ -34,6 +34,7 @@ import {
 } from '@/lib/useMaterialClientState';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
+import { CourseStudyPanel } from './CourseStudyPanel';
 import { selectCourseUnit } from './courseOutline';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
@@ -117,6 +118,11 @@ function Materials({
   const [readingMore, setReadingMore] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [query, setQuery] = useState('');
+  const [study, setStudy] = useState<{ material?: NuniMaterial; version: number; selectionSerial: number } | null>(null);
+  const studyVersion = useRef(0);
+  const studyTrigger = useRef<HTMLButtonElement | null>(null);
+  const studyOpenButton = useRef<HTMLButtonElement | null>(null);
+  const cabinetHeading = useRef<HTMLHeadingElement | null>(null);
   const now = useClientNow();
   const readIds = useMaterialReadIds(accountId);
   const bookmarks = useMaterialBookmarks(accountId);
@@ -278,6 +284,19 @@ function Materials({
     !!linkedMaterial &&
     !items.some((item) => item.id === linkedMaterial);
 
+  // Do not silently imply an old open copy is still in the course cabinet.
+  // Wait until the refreshed listing is complete: an older material may simply
+  // be on a subsequent page. A failed refresh must not invent a deletion.
+  const selectedMaterialMissing = !!study?.material && !reading && !error && !moreError &&
+    items !== null && !nextCursor &&
+    !items.some((item) => item.id === study.material?.id);
+
+  // An incomplete refresh cannot prove that the lecture was removed; help
+  // learners find the older page without replacing their unsaved board.
+  const selectedMaterialOnOlderPage = !!study?.material && !reading && !error && !moreError &&
+    items !== null && !!nextCursor &&
+    !items.some((item) => item.id === study.material?.id);
+
   useEffect(() => {
     if (!linkedMaterial || (!accessDenied && !missingLinked)) return;
     // Keep the explanation visible while removing the unavailable target from the address.
@@ -289,7 +308,7 @@ function Materials({
       <div className={styles.heading}>
         <div>
           <p className={shared.eyebrow}>課程內容</p>
-          <h2 id={`materials-${workspace.id}`}>教材櫃</h2>
+          <h2 id={`materials-${workspace.id}`} ref={cabinetHeading} tabIndex={-1}>教材櫃</h2>
         </div>
         <button
           type="button"
@@ -307,8 +326,44 @@ function Materials({
       <div className={shared.actions}>
         <a href={classroomCourseHref(workspace.id, context)}>回課程首頁</a>
         <a href={classroomDirectoryHref(context, 'bookmarks')}>此裝置收藏</a>
+        <button ref={studyOpenButton} type="button" className={`${shared.button} ${shared.secondary}`}
+          disabled={reading || accessDenied || items === null}
+          onClick={(event) => {
+            studyTrigger.current = event.currentTarget;
+            // Opening the already visible board must not discard its draft.
+            if (!study) {
+              const serial = ++studyVersion.current;
+              setStudy({ version: serial, selectionSerial: serial });
+            }
+          }}>讀講義</button>
       </div>
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
+      {study && !accessDenied && selectedMaterialOnOlderPage && (
+        <p role="status" className={shared.notice}>
+          正在閱讀的「{study.material?.title}」尚未出現在這次載入的教材頁面。教材櫃尚有較早的教材未載入，請使用「載入較早教材」核對；白板中的筆記與練習會先保留。
+        </p>
+      )}
+      {study && !accessDenied && selectedMaterialMissing && (
+        <p role="status" className={shared.notice}>
+          先前開啟的「{study.material?.title}」目前不在已載入的教材清單。白板仍保留先前內容與私人筆記，但不能因此判定教材仍可存取或已是最新版本；請對照課程教材並確認權限，必要時先儲存進度。
+        </p>
+      )}
+      {study && !accessDenied && items !== null && (
+        <CourseStudyPanel key={study.version} courseTitle={workspace.title}
+          material={study.material ? items.find((item) => item.id === study.material?.id) ?? study.material : undefined}
+          selectionSerial={study.selectionSerial}
+          scope={{ platformAccountId: accountId, workspaceId: workspace.id }}
+          onClose={() => {
+            setStudy(null);
+            // A refresh can remove the original lecture-card button while the
+            // learner is writing. Never focus a detached or disabled control.
+            const trigger = studyTrigger.current;
+            if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+            else if (studyOpenButton.current?.isConnected && !studyOpenButton.current.disabled)
+              studyOpenButton.current.focus();
+            else cabinetHeading.current?.focus();
+          }} />
+      )}
       {bookmarks.error && (
         <div role="alert" className={shared.notice}>
           <p>{bookmarks.error}</p>
@@ -388,6 +443,16 @@ function Materials({
                             </div>
                             <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
                             <CourseText text={item.body} />
+                            <button type="button" className={`${shared.button} ${shared.secondary}`}
+                              aria-label={`陪我讀「${item.title}」`} disabled={reading || accessDenied}
+                              onClick={(event) => {
+                                studyTrigger.current = event.currentTarget;
+                                // Keep the same board instance; it will confirm replacing saved/unsaved work.
+                                const serial = ++studyVersion.current;
+                                setStudy((current) => current
+                                  ? { ...current, material: item, selectionSerial: serial }
+                                  : { material: item, version: serial, selectionSerial: serial });
+                              }}>陪我讀這份教材</button>
                             <button
                               type="button"
                               className={`${shared.button} ${shared.secondary} ${styles.bookmarkButton}`}
