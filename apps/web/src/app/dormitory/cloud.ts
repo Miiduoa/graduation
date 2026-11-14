@@ -1,10 +1,10 @@
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { getDb, getFunctionsInstance } from '@/lib/firebase';
+import { getDb, getFunctionsInstance, areFunctionsConfigured } from '@/lib/firebase';
 import {
   watchDormCloud,
-  pollDormParcels,
+  watchDormParcels,
   type DormCloudState,
 } from '@campus/shared/src/dormitoryCloud';
 
@@ -17,9 +17,24 @@ export function subscribeDormCloud(
   const canonicalSchoolId = toPublicSchoolId(schoolId) ?? schoolId;
   return watchDormCloud(
     {
-      watch: (name, field, rows, error) =>
-        name === 'packages'
-          ? pollDormParcels(
+      watch: (name, field, rows, error) => {
+        const legacy = (onRows: typeof rows, onError: typeof error) =>
+          onSnapshot(
+            query(collection(db, 'schools', canonicalSchoolId, name), where(field, '==', uid)),
+            (snap) => onRows(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+            onError,
+          );
+        return name === 'packages'
+          ? watchDormParcels(
+              legacy,
+              (change) => {
+                if (!areFunctionsConfigured()) return () => {};
+                return onSnapshot(
+                  doc(db, 'schools', canonicalSchoolId),
+                  (snap) => change(snap.data()?.dormWorkflowEnabled === true),
+                  () => change(false),
+                );
+              },
               async () =>
                 (
                   await httpsCallable<
@@ -33,11 +48,8 @@ export function subscribeDormCloud(
               rows,
               error,
             )
-          : onSnapshot(
-              query(collection(db, 'schools', canonicalSchoolId, name), where(field, '==', uid)),
-              (snap) => rows(snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
-              error,
-            ),
+          : legacy(rows, error);
+      },
       identity: (callback) =>
         onSnapshot(
           doc(db, 'users', uid),

@@ -214,7 +214,7 @@ export function watchDormCloud(
   };
 }
 
-/** Packages must be projected by the backend: legacy document IDs may contain another user's ID. */
+/** Poll the private workflow projection when the school supports it. */
 export function pollDormParcels(
   load: () => Promise<{ rows: Array<{ id: string; data: Record<string, unknown> }> }>,
   rows: (value: Array<{ id: string; data: Record<string, unknown> }>) => void,
@@ -241,3 +241,53 @@ export function pollDormParcels(
     clearInterval(timer);
   };
 }
+
+/** Keep the legacy subscription available even when the optional endpoint is unavailable. */
+export function watchDormParcels(
+  legacy: (rows: (value: ParcelRows) => void, error: () => void) => () => void,
+  enabled: (change: (value: boolean) => void) => () => void,
+  load: () => Promise<{ rows: ParcelRows }>,
+  rows: (value: ParcelRows) => void,
+  error: () => void,
+): () => void {
+  let cached: ParcelRows | undefined;
+  let projected = false;
+  let stopPoll: (() => void) | undefined;
+  const fallback = () => {
+    projected = false;
+    if (cached) rows(cached);
+    else error();
+  };
+  const stopLegacy = legacy(
+    (value) => {
+      cached = value;
+      if (!projected) rows(value);
+    },
+    () => {
+      if (!projected) error();
+    },
+  );
+  const stopEnabled = enabled((value) => {
+    if (!value) {
+      stopPoll?.();
+      stopPoll = undefined;
+      projected = false;
+      if (cached) rows(cached);
+    } else if (!stopPoll) {
+      stopPoll = pollDormParcels(
+        load,
+        (value) => {
+          projected = true;
+          rows(value);
+        },
+        fallback,
+      );
+    }
+  });
+  return () => {
+    stopPoll?.();
+    stopEnabled();
+    stopLegacy();
+  };
+}
+type ParcelRows = Array<{ id: string; data: Record<string, unknown> }>;

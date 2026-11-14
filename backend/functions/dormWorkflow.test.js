@@ -1573,3 +1573,121 @@ test('mixed legacy and private parcel feed preserves old parcels and deduplicate
   expect(rows.map((row) => row.data.description).sort()).toEqual(['私有來源', '舊包裹'].sort());
   expect(rows.find((row) => row.data.description === '私有來源').data.status).toBe('returned');
 });
+
+test.each([false, true])(
+  'concurrent legacy photo copies clean up losers and survive account deletion (%s)',
+  async (closeAccount) => {
+    const bucket = photoBucket();
+    const { call, data, db } = fixture({ getBucket: () => bucket });
+    const oldPath = 'temp/student/dorm_old';
+    data.set('schools/pu/dormRepairs/legacy', {
+      userId: 'student',
+      workflow: 'dorm_staff',
+      building: 'A',
+      images: [
+        'https://firebasestorage.googleapis.com/v0/b/synthetic-bucket/o/' +
+          encodeURIComponent(oldPath),
+      ],
+    });
+    db.collectionGroup = (name) => name;
+    db.recursiveDelete = async (ref) => data.delete(ref.path);
+    const scanPages = async (name, visit) => {
+      for (const [path, row] of [...data])
+        if (path.split('/').at(-2) === name)
+          await visit({ id: path.split('/').at(-1), ref: { path }, data: () => row });
+    };
+    const cleanup = () =>
+      require('./dormAccountDeletion').clearDormAccountData({
+        db,
+        uid: 'student',
+        scanPages,
+        getBucket: () => bucket,
+      });
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    let copying = 0;
+    const originalFile = bucket.file;
+    bucket.file = (path) => ({
+      ...originalFile(path),
+      copy: async (target) => {
+        const journals = [...data.values()].filter((row) => row.state === 'uploading');
+        expect(journals.length).toBeGreaterThan(0);
+        if (++copying === 2) {
+          if (closeAccount) {
+            data.set('users/student', { accountDeletionInProgress: true });
+            await expect(cleanup()).rejects.toThrow('仍在上傳');
+            expect([...data.values()].filter((row) => row.state === 'uploading')).toHaveLength(2);
+          }
+          release();
+        }
+        await gate;
+        await originalFile(path).copy(target);
+      },
+    });
+    // Serialize fake transactions to model Firestore's conflict retries at adoption.
+    const run = db.runTransaction;
+    let queue = Promise.resolve();
+    db.runTransaction = (fn) => {
+      const result = queue.then(() => run(fn));
+      queue = result.catch(() => {});
+      return result;
+    };
+    const results = await Promise.allSettled(
+      [1, 2].map(() => call('staff', { action: 'repairPhoto', id: 'legacy', index: 0 })),
+    );
+    const journals = [...data].filter(([path]) => path.includes('/dormPhotoUploads/'));
+    if (closeAccount) {
+      expect(results.every((r) => r.status === 'rejected')).toBe(true);
+      expect(journals).toHaveLength(0);
+      expect([...bucket.objects.keys()].filter((p) => p.startsWith('dorm-private/'))).toHaveLength(
+        0,
+      );
+      await cleanup();
+    } else {
+      expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+      const adopted = data.get('schools/pu/dormRepairs/legacy').images[0];
+      expect([...bucket.objects.keys()].filter((p) => p.startsWith('dorm-private/'))).toEqual([
+        adopted,
+      ]);
+      expect(journals).toHaveLength(1);
+      expect(journals[0][1]).toMatchObject({ path: adopted, state: 'ready', userId: 'student' });
+    }
+  },
+);
+
+test.each([false, true])(
+  'legacy copy metadata failure compensates bytes and preserves failed cleanup journal (%s)',
+  async (deleteFails) => {
+    const bucket = photoBucket();
+    const { call, data } = fixture({ getBucket: () => bucket });
+    const legacy =
+      'https://firebasestorage.googleapis.com/v0/b/synthetic-bucket/o/temp%2Fstudent%2Fdorm_old';
+    data.set('schools/pu/dormRepairs/legacy', {
+      userId: 'student',
+      workflow: 'dorm_staff',
+      building: 'A',
+      images: [legacy],
+    });
+    const originalFile = bucket.file;
+    bucket.file = (path) => ({
+      ...originalFile(path),
+      setMetadata: async () => {
+        throw new Error('metadata unavailable');
+      },
+      delete: async () => {
+        if (deleteFails) throw new Error('delete unavailable');
+        await originalFile(path).delete();
+      },
+    });
+    await expect(call('staff', { action: 'repairPhoto', id: 'legacy', index: 0 })).rejects.toThrow(
+      'metadata unavailable',
+    );
+    expect(data.get('schools/pu/dormRepairs/legacy').images).toEqual([legacy]);
+    const journals = [...data.values()].filter((row) => row.path?.startsWith('dorm-private/'));
+    expect(journals).toHaveLength(deleteFails ? 1 : 0);
+    expect(bucket.objects.size).toBe(deleteFails ? 1 : 0);
+    if (deleteFails) expect(journals[0]).toMatchObject({ userId: 'student', state: 'uploading' });
+  },
+);

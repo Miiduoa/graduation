@@ -6,7 +6,7 @@ const calls = vi.hoisted(() => ({
   paths: [] as unknown[][],
   stop: vi.fn(),
 }));
-vi.mock('@/lib/firebase', () => ({ getDb: () => 'db' }));
+vi.mock('@/lib/firebase', () => ({ getDb: () => 'db', areFunctionsConfigured: () => false }));
 vi.mock('firebase/firestore', () => ({
   collection: (...args: unknown[]) => {
     calls.paths.push(args);

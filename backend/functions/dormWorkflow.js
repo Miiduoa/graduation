@@ -239,20 +239,64 @@ function createDormWorkflowHandler({
           throw new HttpsError('permission-denied', '照片不屬於工單');
         const source = bucket.file(oldPath);
         path = 'dorm-private/' + randomUUID();
-        await source.copy(bucket.file(path));
-        // Do not copy legacy public download tokens to the private object.
-        await bucket
-          .file(path)
-          .setMetadata({ metadata: null, cacheControl: 'private, no-store, max-age=0' });
-        await source.setMetadata({ metadata: { firebaseStorageDownloadTokens: null } });
+        const copyPath = path;
+        const uploadRef = school.collection('dormPhotoUploads').doc(path.split('/')[1]);
+        // Share the upload journal protocol with account deletion. Register against
+        // the photo owner (which may differ from the staff member making this request).
         await db.runTransaction(async (tx) => {
-          const current = await tx.get(ticket.ref);
-          if (current.data()?.images?.[input.index] === row.images[input.index]) {
-            const images = [...current.data().images];
-            images[input.index] = path;
-            tx.update(ticket.ref, { images });
-          }
+          const account = await tx.get(db.collection('users').doc(row.userId));
+          if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
+            throw new HttpsError('failed-precondition', '帳號已停用');
+          tx.create(uploadRef, {
+            userId: row.userId,
+            path: copyPath,
+            state: 'uploading',
+            leaseUntil: Date.now() + 60 * 60 * 1000,
+            createdAt: FieldValue.serverTimestamp(),
+          });
         });
+        let adopted = false;
+        const cleanup = async () => {
+          await bucket.file(copyPath).delete({ ignoreNotFound: true });
+          await db.runTransaction(async (tx) => tx.delete(uploadRef));
+        };
+        try {
+          await source.copy(bucket.file(copyPath));
+          // Never retain legacy public download tokens on the private object.
+          await bucket.file(copyPath).setMetadata({
+            metadata: null,
+            cacheControl: 'private, no-store, max-age=0',
+          });
+          await source.setMetadata({ metadata: { firebaseStorageDownloadTokens: null } });
+          const selected = await db.runTransaction(async (tx) => {
+            const account = await tx.get(db.collection('users').doc(row.userId));
+            const current = await tx.get(ticket.ref);
+            if (account.data()?.status === 'deleted' || account.data()?.accountDeletionInProgress)
+              throw new HttpsError('failed-precondition', '帳號已停用');
+            if (!current.exists) throw new HttpsError('not-found', '找不到工單');
+            if (current.data().images?.[input.index] !== row.images[input.index])
+              return { adopted: false, path: current.data().images?.[input.index] };
+            const images = [...current.data().images];
+            images[input.index] = copyPath;
+            tx.update(ticket.ref, { images });
+            tx.update(uploadRef, { state: 'ready' });
+            return { adopted: true, path: copyPath };
+          });
+          adopted = selected.adopted;
+          path = selected.path;
+          if (!adopted) await cleanup();
+        } catch (error) {
+          if (!adopted) {
+            try {
+              await cleanup();
+            } catch {
+              /* retain journal for account deletion */
+            }
+          }
+          throw error;
+        }
+        if (typeof path !== 'string' || !/^dorm-private\/[0-9a-f-]{36}$/.test(path))
+          throw new HttpsError('not-found', '照片已更新，請重試');
       }
       const [url] = await bucket
         .file(path)
