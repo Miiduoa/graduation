@@ -6,6 +6,55 @@ import styles from './CourseStudyPanel.module.css';
 // Mobile speech engines can stop unexpectedly on a long single utterance.
 // Split on natural punctuation where possible, preserving every source character.
 const STUDY_SPEECH_CHUNK_LENGTH = 160;
+// Some older WebViews lack a functioning grapheme segmenter. Preserve common
+// multi-code-point characters in the local fallback, within the speech cap.
+// This is intentionally bounded and not a replacement for Unicode UAX #29.
+function isRegionalIndicator(character: string): boolean {
+  const point = character.codePointAt(0) ?? 0;
+  return point >= 0x1f1e6 && point <= 0x1f1ff;
+}
+
+function isStudySpeechContinuation(current: string, previous: string, regionalRun: number): boolean {
+  if (current === '\n' && previous === '\r') return true;
+  if (!previous || previous === '\r' || previous === '\n') return false;
+  const point = current.codePointAt(0) ?? 0;
+  const prior = previous.codePointAt(0) ?? 0;
+  // Combining accents, variation selectors, emoji modifiers/tags and ZWJ
+  // sequences should not begin a new mobile utterance.
+  if (/^\p{Mark}$/u.test(current) || current === '\u200d' || previous === '\u200d' ||
+      (point >= 0x1f3fb && point <= 0x1f3ff) ||
+      (point >= 0xe0020 && point <= 0xe007f)) return true;
+  // Pairs of regional indicators form one flag; the next pair is independent.
+  if (isRegionalIndicator(current) && regionalRun % 2 === 1) return true;
+  // Common decomposed Hangul L+V+T syllables.
+  const isL = (value: number) =>
+    (value >= 0x1100 && value <= 0x115f) || (value >= 0xa960 && value <= 0xa97f);
+  const isV = (value: number) =>
+    (value >= 0x1160 && value <= 0x11a7) || (value >= 0xd7b0 && value <= 0xd7c6);
+  const isT = (value: number) =>
+    (value >= 0x11a8 && value <= 0x11ff) || (value >= 0xd7cb && value <= 0xd7fb);
+  return (isV(point) && (isL(prior) || isV(prior))) ||
+    (isT(point) && (isV(prior) || isT(prior)));
+}
+
+function fallbackStudySpeechUnits(text: string): string[] {
+  const result: string[] = [];
+  let previous = '';
+  let regionalRun = 0;
+  for (const character of text) {
+    const last = result.length - 1;
+    if (last >= 0 && result[last].length + character.length <= STUDY_SPEECH_CHUNK_LENGTH &&
+        isStudySpeechContinuation(character, previous, regionalRun)) {
+      result[last] += character;
+    } else {
+      result.push(character);
+    }
+    regionalRun = isRegionalIndicator(character) ? regionalRun + 1 : 0;
+    previous = character;
+  }
+  return result;
+}
+
 function splitStudySpeech(text: string): string[] {
   // Code-point slicing keeps surrogate pairs but can split a Chinese combining
   // character, Korean Jamo syllable or emoji ZWJ/flag in mid-utterance.
@@ -20,12 +69,22 @@ function splitStudySpeech(text: string): string[] {
     try {
       const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
       let verifiedOffset = 0;
+      let previousCharacter = '';
+      let regionalRun = 0;
       for (const { segment } of segmenter.segment(text)) {
         // Some WebViews return a partial, duplicated or corrupted iterator
         // without throwing. Verify every unit against the original text so
         // fallback never silently skips or repeats private lesson content.
-        if (!segment || !text.startsWith(segment, verifiedOffset)) {
+        if (typeof segment !== 'string' || !segment || !text.startsWith(segment, verifiedOffset)) {
           throw new Error('invalid on-device grapheme segmentation');
+        }
+        // A faulty iterator can reproduce the original text yet claim that
+        // an accent, ZWJ emoji, flag pair or Hangul syllable ends mid-grapheme.
+        // Such boundaries are unsafe even when the UTF-16 content matches.
+        const firstCharacter = Array.from(segment)[0];
+        if (verifiedOffset > 0 &&
+            isStudySpeechContinuation(firstCharacter, previousCharacter, regionalRun)) {
+          throw new Error('broken on-device grapheme boundary');
         }
         // A damaged WebView can yield individual UTF-16 code units while
         // still concatenating back to the full source. Never trust a segment
@@ -38,6 +97,10 @@ function splitStudySpeech(text: string): string[] {
           throw new Error('broken surrogate pair in on-device grapheme segmentation');
         }
         verifiedOffset += segment.length;
+        for (const character of segment) {
+          regionalRun = isRegionalIndicator(character) ? regionalRun + 1 : 0;
+          previousCharacter = character;
+        }
         if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
           units.push(segment);
           continue;
@@ -64,7 +127,7 @@ function splitStudySpeech(text: string): string[] {
   }
   if (!segmented) {
     // Older or partially broken engines use the previous code-point-safe path.
-    for (const character of text) units.push(character);
+    units.push(...fallbackStudySpeechUnits(text));
   }
 
   const chunks: string[] = [];

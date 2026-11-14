@@ -595,3 +595,59 @@ it('rejects a silent WebView grapheme iterator that splits an emoji into UTF-16 
   expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
   expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
 });
+
+
+it.each([
+  { label: 'a combining accent', cluster: 'e\u0301' },
+  { label: 'an emoji ZWJ sequence', cluster: '👩‍💻' },
+  { label: 'an emoji skin-tone modifier', cluster: '👍🏽' },
+  { label: 'a regional-indicator flag', cluster: '🇹🇼' },
+  { label: 'a decomposed Hangul syllable', cluster: '각' },
+])('keeps $label together even when a WebView silently returns code points', ({ cluster }) => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), {
+    Segmenter: class {
+      segment(text: string) {
+        // All source text is present, but the claimed grapheme boundaries
+        // are broken. A substring-only verifier would accept this iterator.
+        return Array.from(text).map((segment) => ({ segment }));
+      }
+    },
+  }));
+  const prefix = '甲'.repeat(159);
+  const original = prefix + cluster + '乙'.repeat(175);
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 12; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    expect(utterance.voice).toBe(local);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks[0]).toBe(prefix);
+  expect(chunks[1].startsWith(cluster)).toBe(true);
+  expect(chunks.join('')).toBe(original);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
+
+it('uses the bounded local grapheme fallback when Intl.Segmenter is missing', () => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), { Segmenter: undefined }));
+  const cluster = '🇹🇼👩‍💻e\u0301';
+  const prefix = '甲'.repeat(159);
+  const original = prefix + cluster + '乙'.repeat(175);
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks: string[] = [];
+  for (let index = 0; index < speak.mock.calls.length && index < 12; index += 1) {
+    const utterance = speak.mock.calls[index][0] as Utterance;
+    chunks.push(utterance.text);
+    act(() => utterance.onend?.());
+  }
+  expect(chunks[0]).toBe(prefix);
+  expect(chunks[1].startsWith(cluster)).toBe(true);
+  expect(chunks.join('')).toBe(original);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+});
