@@ -668,7 +668,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
               </div>
               <section className={styles.place} aria-label="導覽地點資訊">
                 <p className={styles.category}>{place.category}</p>
-                <h3 aria-live="polite" aria-atomic="true">{place.name}</h3>
+                <h3 aria-live="polite" aria-atomic="true"
+                  aria-label={pointDisplayLabels.get(place.id) ?? place.name}>
+                  {sceneLabels.get(place.id)?.visual ?? place.name}
+                </h3>
                 {place.description && <p>{place.description}</p>}
                 {(place.building || place.floor) && <p>{[place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>}
                 {Boolean(place.facilities?.length) && <p>設施：{place.facilities!.join('、')}</p>}

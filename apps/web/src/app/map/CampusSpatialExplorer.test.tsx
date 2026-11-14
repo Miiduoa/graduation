@@ -251,7 +251,11 @@ it('disambiguates identical POI names for screen readers and mobile destinations
   fireEvent.click(second);
   expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
     .toBe('sample-west');
-  expect(within(dialog).getByRole('heading', { name: '共用空間' })).toBeTruthy();
+  // The live heading must change *text* even when two POIs share a name;
+  // changing only the selection ID leaves screen-reader announcements ambiguous.
+  const heading = within(dialog).getByRole('heading', { name: labelWest });
+  expect(heading.textContent).toBe('2／2 · 共用空間');
+  expect(heading.getAttribute('aria-live')).toBe('polite');
   expect(within(shortcuts).getByRole('button', { name: `在空間圖查看「${labelEast}」` })).toBeTruthy();
   // The range and next/previous accessible names must identify a *specific*
   // destination, not two indistinguishable "共用空間" markers.
@@ -260,9 +264,13 @@ it('disambiguates identical POI names for screen readers and mobile destinations
   expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
     .toBe('sample-east');
   expect(within(dialog).getByRole('slider').getAttribute('aria-valuetext')).toContain(labelEast);
+  expect(within(dialog).getByRole('heading', { name: labelEast }).textContent)
+    .toBe('1／2 · 共用空間');
   fireEvent.click(within(dialog).getByRole('button', { name: `下一個地點：${labelWest}` }));
   expect((within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement).value)
     .toBe('sample-west');
+  expect(within(dialog).getByRole('heading', { name: labelWest }).textContent)
+    .toBe('2／2 · 共用空間');
   expect(onSelect).not.toHaveBeenCalled();
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
