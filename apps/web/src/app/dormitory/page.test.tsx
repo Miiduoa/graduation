@@ -122,6 +122,27 @@ it('restores saved local references for viewing, copying and editing', async () 
   Reflect.deleteProperty(navigator, 'clipboard');
 });
 
+it('clears stale copy feedback across success, failure and retry', async () => {
+  const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied')).mockResolvedValueOnce(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    localStorage.setItem(dormStorageKey('guest', 'pu'), JSON.stringify({ repairs: [{ id: 'copy', title: '燈泡故障', reference: 'LOCAL-1' }] }));
+    render(<DormitoryPage />);
+    fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+    const copy = screen.getByRole('button', { name: '複製編號' });
+    fireEvent.click(copy);
+    expect(await screen.findByText('已複製編號。')).toBeTruthy();
+    fireEvent.click(copy);
+    expect(await screen.findByText('無法複製，請手動選取編號。')).toBeTruthy();
+    expect(screen.queryByText('已複製編號。')).toBeNull();
+    fireEvent.click(copy);
+    expect(await screen.findByText('已複製編號。')).toBeTruthy();
+    expect(screen.queryByText('無法複製，請手動選取編號。')).toBeNull();
+  } finally {
+    Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
 it('refuses stale writes from another browser tab instead of overwriting changes', () => {
   render(<DormitoryPage />);
   fireEvent.change(screen.getByRole('textbox', { name: '宿舍或學苑名稱' }), { target: { value: '本頁草稿' } });

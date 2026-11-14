@@ -464,7 +464,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
           <p className={styles.note}>目前是訪客模式。紀錄只保存在此瀏覽器，不會在登入後自動轉到其他帳號，也不會同步到手機。</p>
         )}
         {!guest && (
-          <p className={styles.note}>此處是個人管理工具，「我自己記的」僅存在這台裝置；校方登錄的包裹與報修紀錄從目前帳號的雲端資料讀取。</p>
+          <p className={styles.note}>此處是個人管理工具，「我自己記的」僅存在這台裝置；登錄的包裹與報修備忘紀錄從目前帳號的雲端資料讀取。</p>
         )}
         {conflict && (
           <section className={styles.warning} role="alert">
@@ -484,7 +484,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}
           </button>}
           {cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('repairs')}>
-            報修處理中 {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}
+            報修備忘待辦 {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}
           </button>}
           {!!data.laundryEndAt && remaining > 0 && <button type="button" style={{ height: 56, display: 'block', width: '100%', textAlign: 'left' }} onClick={() => setView('laundry')}>洗衣倒數 {remaining} 分鐘</button>}
           {!cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <p>今晚沒有待辦。</p>}
@@ -581,14 +581,15 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
               <p>漏水、斷電或受困請先聯絡現場人員，勿等待報修紀錄。</p>
               {guide ? <a href={'tel:' + guide.officePhone}>{guide.officePhone} 轉 {guide.officeExtensions}</a> : <p>請依住宿指南或宿舍現場公告撥打服務台電話。</p>}
             </div>
-            <h3>雲端報修紀錄</h3>
+            <h3>雲端報修備忘</h3>
+            <p>此應用沒有將備忘送到學校。以下狀態僅是備忘標記，無法據此確認校方收件或設備修復；請依校方正式管道通報並確認。</p>
             {cloud.repairsState === 'loading' && <p role="status">正在讀取報修紀錄…</p>}
-            {cloud.repairsState === 'guest' && <p>登入校園帳號後可讀取自己的雲端報修紀錄。</p>}
+            {cloud.repairsState === 'guest' && <p>登入校園帳號後可讀取自己的雲端報修備忘。</p>}
             {cloud.repairsState === 'error' && <p role="alert">報修紀錄讀取失敗，請確認帳號及網路。<button type="button" onClick={() => setCloudRetry(n => n + 1)}>重試雲端紀錄</button></p>}
-            {cloud.repairsState === 'ready' && !cloud.repairs.length && <p>目前沒有雲端報修紀錄。</p>}
+            {cloud.repairsState === 'ready' && !cloud.repairs.length && <p>目前沒有雲端報修備忘。</p>}
             <ul className={styles.repairs}>{cloud.repairs.map(item => <li key={item.id}>
               <h4>{item.title}</h4><p>{item.location}</p>
-              {!item.status && <p>這是先前存下的雲端備忘，尚未確認輔導員接手，請依校方正式管道通報。</p>}
+              {!item.status && <p>備忘狀態不明，請確認原始紀錄。</p>}
               <ol>{item.steps.map(step => <li key={step.status}>{DORM_CLOUD_REPAIR_LABELS[step.status]} · {dormCloudDate(step.at)}</li>)}</ol>
             </li>)}</ul>
             <h3>我自己記的</h3>
@@ -670,8 +671,8 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                       <button type="button" onClick={() => beginRepair(item)}>編輯</button>
                       <button type="button" onClick={() => void copyRepair(item)}>複製內容</button>
                       {item.reference && <button type="button" onClick={async () => {
-                        try { await navigator.clipboard.writeText(item.reference!); setNotice('已複製編號。'); }
-                        catch { setSaveError('無法複製，請手動選取編號。'); }
+                        try { await navigator.clipboard.writeText(item.reference!); setSaveError(''); setNotice('已複製編號。'); }
+                        catch { setNotice(''); setSaveError('無法複製，請手動選取編號。'); }
                       }}>複製編號</button>}
                       {item.status === 'draft' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'reported', updatedAt: Date.now() } : r) })}>我已自行通報</button>}
                       {item.status !== 'resolved' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'resolved', updatedAt: Date.now() } : r) })}>我已確認修復</button>}

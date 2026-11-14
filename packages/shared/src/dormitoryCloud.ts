@@ -10,12 +10,12 @@ export type DormCloudParcel = {
   postal: boolean;
 };
 export const DORM_CLOUD_REPAIR_LABELS = {
-  pending: '已送給輔導員',
-  assigned: '輔導員已收到',
-  in_progress: '已安排維修',
-  completed: '已修好，請確認',
-  closed: '已結案',
-  cancelled: '已取消',
+  pending: '備忘待處理',
+  assigned: '備忘標記：已指派',
+  in_progress: '備忘標記：處理中',
+  completed: '備忘標記：已完成',
+  closed: '備忘標記：已結案',
+  cancelled: '備忘標記：已取消',
 } as const;
 export type DormCloudRepairStatus = keyof typeof DORM_CLOUD_REPAIR_LABELS;
 export type DormCloudRepair = {
@@ -87,13 +87,9 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
 }
 export function projectDormRepair(id: string, row: Record<string, unknown>): DormCloudRepair {
   const raw = row.status === 'inProgress' ? 'in_progress' : row.status;
-  const counselorActivity =
-    raw !== 'pending' ||
-    ['assignedAt', 'in_progressAt', 'completedAt', 'closedAt', 'cancelledAt'].some(
-      (key) => dormCloudTime(row[key]) !== null,
-    );
+  // Stored states describe app memos, not school receipt or repair progress.
   const status =
-    counselorActivity && typeof raw === 'string' && raw in DORM_CLOUD_REPAIR_LABELS
+    typeof raw === 'string' && Object.prototype.hasOwnProperty.call(DORM_CLOUD_REPAIR_LABELS, raw)
       ? (raw as DormCloudRepairStatus)
       : null;
   const order: DormCloudRepairStatus[] = [

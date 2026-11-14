@@ -106,9 +106,9 @@ it('updates repair status timestamps live, keeps private staff references out an
   ];
   act(() => mock.listeners[0](next));
   fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
-  expect(screen.getByText(/已送給輔導員 ·/)).toBeTruthy();
-  expect(screen.getByText(/輔導員已收到 ·/)).toBeTruthy();
-  expect(screen.getByText(/已安排維修 ·/)).toBeTruthy();
+  expect(screen.getByText(/備忘待處理 ·/)).toBeTruthy();
+  expect(screen.getByText(/備忘標記：已指派 ·/)).toBeTruthy();
+  expect(screen.getByText(/備忘標記：處理中 ·/)).toBeTruthy();
   expect(screen.queryByText(/SECRET-REF|PRIVATE/)).toBeNull();
   expect(document.body.textContent).not.toMatch(/已送出|單號/);
   mock.school = 'nthu';
@@ -170,8 +170,8 @@ it('does not relabel a preexisting server-side personal memo as delivered to a c
     status: 'pending',
     createdAt: 1700000000000,
   });
-  expect(memo.status).toBeNull();
-  expect(memo.steps).toEqual([]);
+  expect(memo.status).toBe('pending');
+  expect(memo.steps).toEqual([{ status: 'pending', at: 1700000000000 }]);
   const reopened = projectDormRepair('reopened', {
     description: '同一問題',
     status: 'pending',
@@ -189,9 +189,20 @@ it('shows cancellation time and excludes cancelled repairs from tonight tasks', 
   expect(repair.status).toBe('cancelled');
   expect(repair.steps).toContainEqual({ status: 'cancelled', at: cancelledAt });
   act(() => mock.listeners[0]({ ...state(), repairs: [repair] }));
-  expect(screen.queryByText(/報修處理中/)).toBeNull();
+  expect(screen.queryByText(/報修備忘待辦/)).toBeNull();
   expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
-  expect(screen.getByText(/已取消 ·/)).toBeTruthy();
+  expect(screen.getByText(/備忘標記：已取消 ·/)).toBeTruthy();
   expect(screen.queryByText(/尚未確認輔導員接手|STAFF-ONLY/)).toBeNull();
+});
+
+it.each(['pending', 'assigned', 'in_progress', 'completed', 'closed', 'cancelled'])('presents %s as a memo even with status timestamps', (status) => {
+  render(<DormitoryPage />);
+  act(() => mock.listeners[0]({ ...state(), repairs: [projectDormRepair('memo', {
+    status, createdAt: 1700000000000, [status + 'At']: 1700000060000,
+  })] }));
+  fireEvent.click(screen.getByRole('button', { name: '設備問題' }));
+  expect(screen.getByText(/此應用沒有將備忘送到學校/)).toBeTruthy();
+  expect(document.body.textContent).toContain('備忘');
+  expect(document.body.textContent).not.toMatch(/已送給輔導員|輔導員已收到|已安排維修|已修好/);
 });

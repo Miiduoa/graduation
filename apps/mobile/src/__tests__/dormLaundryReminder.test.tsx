@@ -262,7 +262,7 @@ test('cloud parcels show arrival and identity, keep postal items separate, and p
   expect(screen.getByText('林同學')).toHaveStyle({ fontSize: 34 });
   fireEvent.press(screen.getByText('關閉領取碼'));
   fireEvent.press(screen.getByText('設備問題'));
-  expect(screen.getByText(/已修好，請確認 ·/)).toBeTruthy();
+  expect(screen.getByText(/備忘標記：已完成 ·/)).toBeTruthy();
   expect(screen.queryByText(/PRIVATE-REF|已送出|單號|你抽中了|通行證|已扣款/)).toBeNull();
   expect(screen.getByText('緊急請直接打服務台')).toBeTruthy();
 });
@@ -290,9 +290,9 @@ test('cancelled repairs show their timestamp without counting as pending tasks',
   });
   const screen = render(<DormApp />);
   await screen.findByText('我的住宿備忘');
-  expect(screen.queryByText(/報修處理中/)).toBeNull();
+  expect(screen.queryByText(/報修備忘待辦/)).toBeNull();
   expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
   fireEvent.press(screen.getByText('設備問題'));
-  expect(screen.getByText(`已取消 · ${dormCloudDate(cancelledAt)}`)).toBeTruthy();
+  expect(screen.getByText(`備忘標記：已取消 · ${dormCloudDate(cancelledAt)}`)).toBeTruthy();
   expect(screen.queryByText(/尚未確認輔導員接手/)).toBeNull();
 });

@@ -558,7 +558,7 @@ function DormitoryBody({
         </ScrollView>
         <Body muted>{guest
           ? '訪客紀錄只存在此裝置，不會在登入後自動移到帳號，也不會同步到其他裝置。'
-          : '「我自己記的」只存在此裝置，依帳號及校園分開；校方登錄的包裹與報修從目前帳號的雲端資料讀取。'}</Body>
+          : '「我自己記的」只存在此裝置，依帳號及校園分開；登錄的包裹與報修備忘從目前帳號的雲端資料讀取。'}</Body>
         {loading && <AICard><Body>正在讀取住宿紀錄…</Body></AICard>}
         {!!failure && <AICard badge="讀取失敗" badgeTone="danger"><Body>{failure}</Body></AICard>}
         {!!notice && <Text accessibilityRole="alert" style={{ color: aiTokens.text, lineHeight: 22 }}>{notice}</Text>}
@@ -573,7 +573,7 @@ function DormitoryBody({
                 <Text style={{ color: aiTokens.text }}>待領包裹 {cloud.packages.filter(p => p.status === 'waiting' && !p.postal).length} 件 · 最早到件 {dormCloudDate(cloud.packages.find(p => p.status === 'waiting' && !p.postal)?.arrivedAt ?? null)}</Text>
               </Pressable>}
               {cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('repairs')}>
-                <Text style={{ color: aiTokens.text }}>報修處理中 {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}</Text>
+                <Text style={{ color: aiTokens.text }}>報修備忘待辦 {cloud.repairs.filter(r => r.status && r.status !== 'closed' && r.status !== 'cancelled').length} 件 · {DORM_CLOUD_REPAIR_LABELS[cloud.repairs.find(r => r.status && r.status !== 'closed' && r.status !== 'cancelled')!.status!]}</Text>
               </Pressable>}
               {!!data.laundryEndAt && remaining > 0 && <Pressable accessibilityRole="button" style={{ height: 56, justifyContent: 'center' }} onPress={() => setView('laundry')}><Text style={{ color: aiTokens.text }}>洗衣倒數 {remaining} 分鐘</Text></Pressable>}
               {!cloud.packages.some(p => p.status === 'waiting' && !p.postal) && !cloud.repairs.some(r => r.status && r.status !== 'closed' && r.status !== 'cancelled') && !(data.laundryEndAt && remaining > 0) && !['loading', 'error'].includes(cloud.packagesState) && !['loading', 'error'].includes(cloud.repairsState) && <Body>今晚沒有待辦。</Body>}
@@ -666,14 +666,15 @@ function DormitoryBody({
               <Body>漏水、斷電或受困請先聯絡現場人員，勿等待報修紀錄。</Body>
               {guide ? <><Body>{guide.officePhone} 轉 {guide.officeExtensions}</Body><AIButton variant="ghost" label="致電服務台" onPress={() => void openPublicLink('tel:' + guide.officePhone)} /></> : <Body>請依住宿指南或宿舍現場公告撥打服務台電話。</Body>}
             </AICard>
-            <AICard title="雲端報修紀錄">
+            <AICard title="雲端報修備忘">
+              <Body>此應用沒有將備忘送到學校。以下狀態僅是備忘標記，無法據此確認校方收件或設備修復；請依校方正式管道通報並確認。</Body>
               {cloud.repairsState === 'loading' && <Body>正在讀取報修紀錄…</Body>}
-              {cloud.repairsState === 'guest' && <Body>登入校園帳號後可讀取自己的雲端報修紀錄。</Body>}
+              {cloud.repairsState === 'guest' && <Body>登入校園帳號後可讀取自己的雲端報修備忘。</Body>}
               {cloud.repairsState === 'error' && <><Body>報修紀錄讀取失敗，請確認帳號及網路。</Body><AIButton label="重試雲端紀錄" onPress={() => setCloudRetry(n => n + 1)} /></>}
-              {cloud.repairsState === 'ready' && !cloud.repairs.length && <Body>目前沒有雲端報修紀錄。</Body>}
+              {cloud.repairsState === 'ready' && !cloud.repairs.length && <Body>目前沒有雲端報修備忘。</Body>}
               {cloud.repairs.map(item => <View key={item.id} style={{ gap: 8, marginTop: 14 }}>
                 <Body>{item.title}</Body><Body muted>{item.location}</Body>
-                {!item.status && <Body>這是先前存下的雲端備忘，尚未確認輔導員接手，請依校方正式管道通報。</Body>}
+                {!item.status && <Body>備忘狀態不明，請確認原始紀錄。</Body>}
                 {item.steps.map(step => <Body key={step.status}>{DORM_CLOUD_REPAIR_LABELS[step.status]} · {dormCloudDate(step.at)}</Body>)}
               </View>)}
             </AICard>
