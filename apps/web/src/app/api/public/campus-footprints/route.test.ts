@@ -243,6 +243,65 @@ describe('public Providence building geometry route', () => {
     },
   );
 
+  it.each([
+    [200, false], [206, false], [200, true], [206, true],
+  ] as const)(
+    'honors Retry-After on partial HTTP %i with prior snapshot: %s',
+    async (status, withStaleCache) => {
+      // Synthetic partial responses: 206 and a mislabeled 200 range both
+      // require rejection. An upstream one-hour pause is still binding.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn();
+        if (withStaleCache) {
+          upstream.mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        }
+        upstream
+          .mockResolvedValueOnce(new Response(osmPayload, {
+            status,
+            headers: {
+              ...(status === 200 ? { 'Content-Range': 'bytes 0-99/200' } : {}),
+              'Retry-After': '3600',
+            },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const previous = withStaleCache ? await (await GET()).json() : null;
+        const failureAt = start + (withStaleCache ? 25 * 60 * 60 * 1000 : 0);
+        clock.mockReturnValue(failureAt);
+        const rejected = await GET();
+        expect(rejected.status).toBe(withStaleCache ? 200 : 503);
+        expect(rejected.headers.get('Cache-Control'))
+          .toBe(withStaleCache ? 'private, no-store' : 'no-store');
+        expect(rejected.headers.get('Retry-After')).toBe('3600');
+        if (withStaleCache) {
+          expect(await rejected.json()).toMatchObject({
+            stale: true, fetchedAt: previous.fetchedAt, buildings: previous.buildings,
+          });
+        } else {
+          expect((await rejected.json()).error).toMatch(/temporarily unavailable/);
+        }
+
+        clock.mockReturnValue(failureAt + 11 * 60 * 1000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(withStaleCache ? 200 : 503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(withStaleCache ? 2 : 1);
+
+        clock.mockReturnValue(failureAt + 60 * 60 * 1000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(withStaleCache ? 3 : 2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it('rejects a 200 response advertising Content-Range instead of caching an incomplete map', async () => {
     // Even with a valid JSON body, Content-Range denotes a byte-range
     // representation, not proof of a complete OSM export.

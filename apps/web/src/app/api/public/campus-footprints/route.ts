@@ -249,7 +249,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // 429, 500 or an uncommon 5xx gateway code, not only 502/503/504.
     // Respect Retry-After across these statuses without reading their bodies.
     // Permanent query/permission failures above keep their full-day cooldown.
-    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+    if (response.status === 206 || response.status === 408 || response.status === 429 || response.status >= 500) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
         response.headers.get('retry-after'), Date.now(),
       ));
@@ -261,7 +261,12 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // even when the returned fragment happens to be syntactically valid JSON.
   if (response.headers.get('content-range') !== null) {
     if (response.body) void response.body.cancel().catch(() => {});
-    throw new Error('OSM response advertised partial content');
+    // A 200 response with Content-Range is still a partial representation.
+    // Reject it without reading, but honor an explicit public-API pause just
+    // like an HTTP 206 reply so an overloaded proxy is not retried too soon.
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(),
+    ));
   }
   let raw: string;
   try {
