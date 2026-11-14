@@ -166,9 +166,13 @@ async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份')
   } catch {
     return readStudyStrictUtf8Bytes(file, purpose);
   }
-  // File.text() replaces malformed bytes with U+FFFD. Verify the original
-  // bytes while preserving any intentionally authored replacement character.
-  if (text.includes('\uFFFD')) await readStudyStrictUtf8Bytes(file, purpose);
+  // A broken WebView may insert U+FFFD even when the original file has
+  // valid UTF-8 bytes. Return the verified byte decoding, not the damaged
+  // File.text() result. Preserve a genuinely authored U+FFFD in those bytes.
+  // Some buggy bridges also resolve to a non-string despite their API typing.
+  if (typeof text !== 'string' || text.includes('\uFFFD')) {
+    return readStudyStrictUtf8Bytes(file, purpose);
+  }
   return text;
 }
 // Legacy Taiwanese course notes may use Big5. Decode only when the student

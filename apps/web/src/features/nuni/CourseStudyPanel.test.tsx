@@ -749,6 +749,69 @@ it('does not mistake a literal valid Unicode replacement glyph for a corrupted U
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('recovers a valid UTF-8 lesson when a mobile File.text result contains a spurious replacement glyph', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = 'UTF-8 教材：😀 用主鍵唯一識別一筆資料。';
+  const bytes = new TextEncoder().encode(content);
+  const file = new File([bytes], '原始講義.markdown', { type: 'text/markdown' });
+  const damagedText = vi.fn().mockResolvedValue('UTF-8 教材：� 用主鍵唯一識別一筆資料。');
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: damagedText });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(screen.queryByText('UTF-8 教材：� 用主鍵唯一識別一筆資料。')).toBeNull();
+  expect(damagedText).toHaveBeenCalledOnce();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('reads real UTF-8 bytes when a buggy WebView File.text promise resolves to a non-string', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '本機驗證繁體中文教材，避免遺失段落。';
+  const bytes = new TextEncoder().encode(content);
+  const file = new File([bytes], '教材.txt', { type: 'text/plain' });
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(undefined) });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('restores the exact private note from JSON bytes when mobile File.text silently replaces a valid emoji', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '原來的😀筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const saved = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    expect(saved).toContain('原來的😀筆記');
+    fireEvent.change(note, { target: { value: '新的尚未備份草稿' } });
+
+    const bytes = new TextEncoder().encode(saved);
+    const file = new File([bytes], '上次練習.json', { type: 'application/json' });
+    const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(saved.replace('原來的😀筆記', '原來的�筆記')) });
+    Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    expect(await screen.findByRole('region', { name: '閱讀進度預覽' })).toBeTruthy();
+    expect(note.value).toBe('新的尚未備份草稿');
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+    expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+      .toBe('原來的😀筆記');
+    expect(readBytes).toHaveBeenCalledOnce();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('rejects malformed UTF-8 progress bytes before offering restore, preserving private notes', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;

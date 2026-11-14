@@ -1,3 +1,9 @@
+## 2026-11-15：手機檔案讀取錯字不再污染課程講義與備份
+
+- 修正少數不相容 WebView 的 `File.text()` 會將**有效 UTF-8** 的表情符號／文字錯誤轉成 U+FFFD，舊版雖已比對本機原始位元組能嚴格解碼，最後卻仍回傳含錯字的 `File.text()` 結果。現在只要文字含 U+FFFD，就使用原始位元組的嚴格 UTF-8 解碼結果；若原始文字本來就有合法 U+FFFD 仍原樣保留，損壞位元組仍拒收。對宣告 `File.text()` 卻異常回傳非字串的 WebView，也改走現有裝置端位元組備援。
+- 新增三項模擬 DOM 回歸，核對繁體中文與 Emoji 講義、非字串 API 回應，以及 JSON 進度中私人筆記的**原始內容與還原前確認**。未調整 v1/v2 閱讀進度或 v1 練習 checkpoint、不上傳私人教材、不新增套件／付費 API；此為本機資料完整性修補，不代表已完成正式 Vitest、完整 CI/CodeQL、App 5504170 APPROVED、Maestro／手機真機或 Ahaboard 同題同機對照。
+- 只更新課程白板相關程式與測試，PR 繼續 Draft，未合併／部署。
+
 ## 2026-11-15：舊版手機 WebView 缺少 File.text() 時仍可安全載入講義與進度
 
 - 一些內嵌 WebView 支援本機 `File.arrayBuffer()`，卻沒有 `File.text()`；原本選取有效 UTF-8 Markdown／TXT 或 JSON 備份會直接拋錯，學生無法讀課或恢復練習。現在僅在 `File.text` 不可用時，改由本機 `TextDecoder('utf-8', { fatal: true })` 解碼 `arrayBuffer()`，不傳輸教材，不把損壞位元組默默變成 U+FFFD。若兩種讀取方式都不可用，顯示明確錯誤並保留現有學習內容。
