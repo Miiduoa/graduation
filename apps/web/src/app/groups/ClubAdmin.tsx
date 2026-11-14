@@ -291,7 +291,7 @@ export function ClubAdmin({
   return (
     <SiteShell title="社團後台" schoolName={ready ? school.name : undefined}>
       {!clubEnabled() ? (
-        <p>社團後台尚未啟用</p>
+        <p>這所學校還沒開放社團管理。</p>
       ) : !ready ? (
         <SchoolScopePlaceholder />
       ) : loading ? (
