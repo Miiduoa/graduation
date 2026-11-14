@@ -142,9 +142,20 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
                 <Text style={styles.status}>正在載入觀看名單…</Text>
               </View>
             ) : status === 'denied' ? (
-              <Text accessibilityLiveRegion="polite" style={styles.status}>
-                目前無法存取這則限時動態的觀看名單
-              </Text>
+              <>
+                <Text accessibilityLiveRegion="polite" style={styles.status}>
+                  目前無法存取這則限時動態的觀看名單
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新檢查存取權限"
+                  accessibilityHint="校籍資格恢復後，重新從第一頁向伺服器確認"
+                  style={styles.action}
+                  onPress={refresh}
+                >
+                  <Text style={styles.actionText}>重新檢查權限</Text>
+                </Pressable>
+              </>
             ) : status === 'error' ? (
               <>
                 <Text accessibilityLiveRegion="polite" style={styles.status}>

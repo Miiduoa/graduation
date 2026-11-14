@@ -119,6 +119,38 @@ describe('story audience scope transitions', () => {
     expect(view.queryByText('上一校觀看者')).toBeNull();
     view.unmount();
   });
+  test('denied audience provides a visible accessible recheck and starts over after membership restoration', async () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '重新取得資格的觀看者' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.getByText('重新檢查權限')).toBeTruthy();
+    const recheck = view.getByLabelText('重新檢查存取權限');
+    expect(recheck.props.accessibilityRole).toBe('button');
+    expect(fetchViewers).toHaveBeenCalledWith(
+      { id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner' }, null,
+    );
+
+    await act(async () => {
+      fireEvent.press(recheck);
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenCalledTimes(2);
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, null);
+    expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
+    expect(view.getByText('重新取得資格的觀看者')).toBeTruthy();
+    view.unmount();
+  });
+
   test('a stalled first page offers an explicit retry and ignores its late response', async () => {
     jest.useFakeTimers();
     const stale = deferred<Page>();
