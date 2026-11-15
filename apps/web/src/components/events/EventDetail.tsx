@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadCampusEvent, type CampusEvent, type CampusEventSource } from '@/lib/campusEvents';
 import { buildCampusEventCalendar, canExportCampusEvent } from '@/lib/campusEventCalendar';
 import { campusEventPhase, campusEventPhaseLabel } from '@campus/shared/src/campusEventTime';
+import { campusEventDetailPath } from '@campus/shared/src/campusEventLinks';
 import { useEventClock } from './useEventClock';
 import { EventRegistrationPanel } from './EventRegistrationPanel';
 import {
@@ -118,7 +119,7 @@ export function EventDetail({
     if (!source) return;
     const request = generation.current;
     const url = new URL(
-      buildCampusEventDetailHref(eventId, source, schoolSearch),
+      campusEventDetailPath({ id: eventId, schoolId, source }),
       window.location.origin,
     );
     setNotice('');
@@ -138,7 +139,7 @@ export function EventDetail({
     let url: string | undefined;
     const anchor = document.createElement('a');
     try {
-      const detailUrl = new URL(buildCampusEventDetailHref(eventId, source, schoolSearch), window.location.origin);
+      const detailUrl = new URL(campusEventDetailPath(view.event), window.location.origin);
       const calendar = buildCampusEventCalendar(view.event, detailUrl.href);
       url = URL.createObjectURL(new Blob([calendar.content], { type: 'text/calendar;charset=utf-8' }));
       anchor.href = url;

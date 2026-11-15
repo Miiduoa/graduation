@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // 「我」入口：個人資料、課表、訊息、設定
 import MeAiFirstScreen from './MeAiFirstScreen';
+import MySocialProfileScreen from './MySocialProfileScreen';
 import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
 import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
 import SettingsAiFirstScreen from './SettingsAiFirstScreen';
@@ -180,6 +181,7 @@ export function MeStack() {
         component={ProfileEditAiFirstScreen}
         options={{ title: '編輯個人資料', headerShown: false }}
       />
+      <Stack.Screen name="MySocialProfile" component={MySocialProfileScreen} options={{ title: '我的社群', headerShown: false }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="NuniTimetableAssistant"

@@ -32,6 +32,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   CampusGame: 'Today',
   BoardDetail: 'Today',
   PostCompose: 'Today',
+  CreatorPostCompose: 'Today',
   PostDetail: 'Today',
   StoryCompose: 'Today',
   SmartCalendarScreen: 'Today',
