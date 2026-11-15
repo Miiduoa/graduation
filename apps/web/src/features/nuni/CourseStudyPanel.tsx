@@ -111,13 +111,10 @@ function decodeStudyBackup(text: string, scope: CourseStudyProgressScope) {
 
 type StudyTextEncoding = 'utf-8' | 'big5';
 
-// File.text() uses replacement decoding. Malformed UTF-8 could otherwise
-// silently become U+FFFD inside a lesson or a personal progress backup.
-// Recheck the original bytes only when the decoded text contains U+FFFD:
-// a genuinely authored replacement glyph is still valid UTF-8 and must work.
-// Legacy iOS Safari/embedded WebViews can expose FileReader without either
-// Blob.text() or Blob.arrayBuffer(). Read actual bytes so UTF-8 decoding can
-// still reject corruption instead of silently changing course notes.
+// File.text() can silently replace or truncate characters while returning a
+// plausible, valid-looking paragraph. Always decode the original bytes for
+// both private lessons and progress backups. A genuine UTF-8 U+FFFD remains
+// valid, while legacy WebViews can use their on-device FileReader fallback.
 async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
   // A mobile WebView may advertise this API but reject an actual file read.
   if (typeof file.arrayBuffer === 'function') {
@@ -157,29 +154,10 @@ async function readStudyStrictUtf8Bytes(file: File, purpose: '教材' | '進度�
 }
 
 async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
-  // Checkpoint JSON contains private drafts and answers. Some mobile WebViews
-  // resolve File.text() with valid but silently altered or truncated JSON.
-  // Restore only from strict decoding of the original bytes, including the
-  // on-device FileReader fallback. If all binary reads fail, keep the current
-  // session instead of offering a misleading restore preview.
-  if (purpose === '進度備份') return readStudyStrictUtf8Bytes(file, purpose);
-  // File.text() can exist but reject on an actual selected file in a WebView.
-  // Recover via a strict local byte read rather than erasing the study session.
-  if (typeof file.text !== 'function') return readStudyStrictUtf8Bytes(file, purpose);
-  let text: string;
-  try {
-    text = await file.text();
-  } catch {
-    return readStudyStrictUtf8Bytes(file, purpose);
-  }
-  // A broken WebView may insert U+FFFD even when the original file has
-  // valid UTF-8 bytes. Return the verified byte decoding, not the damaged
-  // File.text() result. Preserve a genuinely authored U+FFFD in those bytes.
-  // Some buggy bridges also resolve to a non-string despite their API typing.
-  if (typeof text !== 'string' || text.includes('\uFFFD')) {
-    return readStudyStrictUtf8Bytes(file, purpose);
-  }
-  return text;
+  // Do not trust File.text() even when it has no replacement glyph: a broken
+  // WebView may return altered but syntactically valid lesson text. The native
+  // byte reader has a local FileReader fallback and never uploads the file.
+  return readStudyStrictUtf8Bytes(file, purpose);
 }
 // Legacy Taiwanese course notes may use Big5. Decode only when the student
 // explicitly selects it; do not guess and silently replace invalid bytes.

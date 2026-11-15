@@ -1272,3 +1272,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 手機 WebView 的 `File.text()` 可能回傳**語法仍合法、但內容遭截斷或偷換**的進度 JSON，舊版在沒有替代字元 `U+FFFD` 時會直接接受，可能讓學生看到被改動的舊筆記。進度 JSON 改為一律從實際位元組以嚴格 UTF-8 解碼，優先使用 `Blob.arrayBuffer()`，失敗則嘗試裝置本機 `FileReader.readAsArrayBuffer()`；兩條位元組路徑都失敗便拒絕還原，保留現有筆記與逐題草稿，可使用既有的貼上 JSON 備援。TXT／Markdown 教材的文字讀取路徑維持原樣。
 - 新增兩項模擬 WebView 回歸：File.text 回傳格式合法但換掉私人筆記時，還原必須以實際檔案原文為準；File.text 假造合法 JSON、檔案實際含非法 UTF-8 時拒收且不出現還原確認。備份格式 v1/v2、scope 和 8 MiB 上限不變，不新增依賴／遠端服務，不外傳私人教材。
 - 這是程式及模擬瀏覽器測試，正式 CI/CodeQL、指定 App 5504170 審查、Maestro、iOS/Android 真機與 Ahaboard 同教材同題同機對照都需以新精確 SHA 另行驗證；PR 維持 Draft、不合併、不部署。
+
+
+## 2026-11-15：TXT／Markdown 教材改用原始位元組嚴格解碼
+
+- 修復部分手機 WebView 的 `File.text()` 回傳**沒有替代字元、卻已被改寫的有效文字**時，讀書白板可能把錯誤教材當作原文引用的問題。UTF-8 TXT／Markdown 改為與進度 JSON 一樣，從本機檔案原始位元組以 `TextDecoder('utf-8', { fatal: true })` 解碼，當 `Blob.arrayBuffer()` 不可用／失敗時使用裝置內建 `FileReader.readAsArrayBuffer()`，不可讀或非法 UTF-8 時拒絕取代，保留目前教材、筆記與暫停練習。
+- 新增模擬 DOM 回歸：假 `File.text()` 回傳看似正確但改寫「主鍵」規則時仍只採用真實教材位元組；若檔案含非法 UTF-8、`File.text()` 偽造可讀文字，仍拒絕導入並保留私人筆記。並更新原有檔案讀取／WebView 失敗路徑的呼叫斷言。Big5 僅在手動指定時解碼；不新增套件、不改 JSON checkpoint 或外傳教材。
+- 這屬程式／模擬瀏覽器改善，需依新精確 SHA 完成正式 Vitest、CI／CodeQL、指定 App 5504170 APPROVED、Maestro 與 iOS/Android 真機驗收。沒有同教材同題同機 Ahaboard 實測前不宣稱超越競品，PR 維持 Draft，不合併、不部署。

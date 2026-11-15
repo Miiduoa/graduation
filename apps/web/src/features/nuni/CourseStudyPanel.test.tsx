@@ -477,7 +477,7 @@ it('rejects a definitely oversized UTF-8 lesson file before decoding, retaining 
 });
 
 
-it('imports .markdown handouts through the existing local-only reader, including uppercase extensions', async () => {
+it('imports .markdown handouts from exact local bytes, including uppercase extensions', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const picker = screen.getByLabelText('選擇講義') as HTMLInputElement;
   expect(picker.accept.split(',')).toContain('.markdown');
@@ -487,7 +487,7 @@ it('imports .markdown handouts through the existing local-only reader, including
   Object.defineProperty(file, 'text', { value: read });
   fireEvent.change(picker, { target: { files: [file] } });
   expect(await screen.findByText(source)).toBeTruthy();
-  expect(read).toHaveBeenCalledOnce();
+  expect(read).not.toHaveBeenCalled();
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
@@ -518,7 +518,7 @@ it('imports a private UTF-8 handout with the legacy FileReader-only mobile path'
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
-it('imports a UTF-8 lesson if mobile File.text rejects but Blob.arrayBuffer works', async () => {
+it('imports UTF-8 lesson bytes without depending on broken mobile File.text', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const content = '實作前先看主鍵與外鍵的教材原文。';
   const bytes = new TextEncoder().encode(content);
@@ -529,13 +529,13 @@ it('imports a UTF-8 lesson if mobile File.text rejects but Blob.arrayBuffer work
   Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
   fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
   expect(await screen.findByText(content)).toBeTruthy();
-  expect(failingText).toHaveBeenCalledOnce();
+  expect(failingText).not.toHaveBeenCalled();
   expect(readBytes).toHaveBeenCalledOnce();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
-it('uses native FileReader if both advertised mobile Blob APIs reject', async () => {
+it('uses native FileReader if mobile Blob.arrayBuffer rejects without using File.text', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const content = '保留有權使用的繁體中文課堂教材。';
   const file = new File([new TextEncoder().encode(content)], '學習教材.txt', { type: 'text/plain' });
@@ -545,7 +545,7 @@ it('uses native FileReader if both advertised mobile Blob APIs reject', async ()
   Object.defineProperty(file, 'arrayBuffer', { value: failingBytes });
   fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
   expect(await screen.findByText(content)).toBeTruthy();
-  expect(failingText).toHaveBeenCalledOnce();
+  expect(failingText).not.toHaveBeenCalled();
   expect(failingBytes).toHaveBeenCalledOnce();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(mocks.run).not.toHaveBeenCalled();
@@ -680,8 +680,8 @@ it('allows a valid 60,000-character multibyte lesson through file preflight', as
   Object.defineProperty(file, 'text', { value: read });
   expect(file.size).toBe(180_000);
   fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
-  await waitFor(() => expect(read).toHaveBeenCalledOnce());
   expect(await screen.findByText('中'.repeat(1_600))).toBeTruthy();
+  expect(read).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: '下一段' }).hasAttribute('disabled')).toBe(false);
   expect(screen.queryByRole('alert')).toBeNull();
 });
@@ -761,9 +761,46 @@ it('recovers a valid UTF-8 lesson when a mobile File.text result contains a spur
   fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
   expect(await screen.findByText(content)).toBeTruthy();
   expect(screen.queryByText('UTF-8 教材：� 用主鍵唯一識別一筆資料。')).toBeNull();
-  expect(damagedText).toHaveBeenCalledOnce();
+  expect(damagedText).not.toHaveBeenCalled();
   expect(readBytes).toHaveBeenCalledOnce();
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('keeps exact UTF-8 TXT lesson content when mobile File.text returns plausible altered text', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const exact = '主鍵必須唯一，外鍵可以參照另一個資料表。';
+  const altered = '主鍵可以重複，外鍵不需要參照任何資料表。';
+  const bytes = new TextEncoder().encode(exact);
+  const file = new File([bytes], '主外鍵教材.txt', { type: 'text/plain' });
+  const inaccurateText = vi.fn().mockResolvedValue(altered);
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: inaccurateText });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(exact)).toBeTruthy();
+  expect(screen.queryByText(altered)).toBeNull();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(inaccurateText).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('rejects invalid TXT bytes despite plausible File.text and preserves unsaved private notes', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '原本未匯出的筆記' } });
+  const invalid = Uint8Array.from([0xe4, 0xb8, 0xad, 0xff, 0xe6, 0x96, 0x87]);
+  const file = new File([invalid], '錯誤教材.md', { type: 'text/markdown' });
+  const inaccurateText = vi.fn().mockResolvedValue('中文教材內容完整');
+  const readBytes = vi.fn().mockResolvedValue(invalid.buffer);
+  Object.defineProperty(file, 'text', { value: inaccurateText });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(/這份教材含有無法解碼的 UTF-8 位元組/)).toBeTruthy();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(inaccurateText).not.toHaveBeenCalled();
+  expect(note.value).toBe('原本未匯出的筆記');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
 });
 
 it('reads real UTF-8 bytes when a buggy WebView File.text promise resolves to a non-string', async () => {
