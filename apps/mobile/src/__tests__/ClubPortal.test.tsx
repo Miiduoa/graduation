@@ -70,6 +70,22 @@ test('審核申請顯示等待回覆；學生不顯示管理', async () => {
   );
   expect(screen.queryByText('管理')).toBeNull();
 });
+test('待審中的入社申請可由學生自行取消', async () => {
+  jest.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    club: { ...profile.club!, joinPolicy: 'review' },
+    status: 'pending',
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('已送出申請，等幹部回覆');
+  fireEvent.press(screen.getByText('取消入社申請'));
+  await waitFor(() =>
+    expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+      action: 'cancelJoin',
+      groupId: 'club',
+    }),
+  );
+});
 test('手機幹部可審核社員及新增活動公告', async () => {
   jest.mocked(callClubPortal).mockResolvedValue({
     ...profile,

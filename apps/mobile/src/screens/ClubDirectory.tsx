@@ -1,5 +1,4 @@
 import { ClubPortal } from './ClubPortal';
-import { clubSummaryEnabled } from '../services/clubSummary';
 import React, { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { Button, Card } from '../ui/components';
@@ -70,7 +69,7 @@ export function ClubDirectory({
         visible.map((club) => (
           <View key={club.groupId} style={{ paddingVertical: 12, gap: 8 }}>
             <Text style={textStyle}>{club.name}</Text>
-            <Text style={textStyle}>已加入 · 下一場活動尚未串接 · 未讀公告數未提供</Text>
+            <Text style={textStyle}>已加入</Text>
             <Button text={`查看社團：${club.name}`} onPress={() => onOpen(club.groupId)} />
           </View>
         ))
@@ -78,7 +77,6 @@ export function ClubDirectory({
       <Text style={textStyle}>
         「我的社團」列出已加入的群組，是否為正式社團仍以課外組名單為準。
       </Text>
-      {!clubSummaryEnabled() && <Text style={textStyle}>這所學校還沒開放社團管理。</Text>}
     </Card>
   );
 }

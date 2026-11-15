@@ -31,6 +31,31 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(callClubPortal).mockResolvedValue(profile);
 });
+test('找社團清單可用連結進入明細，搜尋無結果時顯示空態', async () => {
+  vi.mocked(callClubPortal).mockResolvedValue({
+    success: true,
+    office: false,
+    clubs: [
+      {
+        id: 'club-a',
+        name: '攝影社',
+        category: '學藝',
+        meetingTime: '',
+        recruiting: false,
+        approval: 'approved',
+        joinPolicy: 'open',
+      },
+    ],
+  });
+  render(<ClubProfile uid="one" schoolId="pu" />);
+  await screen.findByRole('link', { name: '查看社團：攝影社' });
+  expect(screen.getByRole('link', { name: '查看社團：攝影社' }).getAttribute('href')).toBe(
+    '/clubs/club-a?schoolId=pu&tab=discover',
+  );
+  fireEvent.change(screen.getByLabelText('搜尋學校社團'), { target: { value: '不存在' } });
+  expect(screen.getByText('找不到符合「不存在」的社團，請試試其他關鍵字。')).toBeTruthy();
+});
+
 test('開放社團一鍵加入，伺服器確認後才呈現已加入', async () => {
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   await screen.findByRole('heading', { name: '攝影社' });
@@ -52,6 +77,22 @@ test('需審核社團送出後顯示鎖定文案，未核可不冒充正式社�
     expect(screen.getAllByText('已送出申請，等幹部回覆').length).toBeGreaterThan(0),
   );
 });
+test('待審中的入社申請可由學生自行取消', async () => {
+  vi.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    club: { ...profile.club!, joinPolicy: 'review' },
+    status: 'pending',
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('已送出申請，等幹部回覆');
+  fireEvent.click(screen.getByRole('button', { name: '取消入社申請' }));
+  await waitFor(() =>
+    expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+      action: 'cancelJoin',
+      groupId: 'club',
+    }),
+  );
+});
 test('幹部可審核、編輯、建立活動；學生看不到管理與電話', async () => {
   vi.mocked(callClubPortal).mockResolvedValue({
     ...profile,
@@ -65,6 +106,7 @@ test('幹部可審核、編輯、建立活動；學生看不到管理與電話',
   expect(screen.getByText('編輯社團介紹')).toBeTruthy();
   expect(screen.getByText('新增活動')).toBeTruthy();
   expect(screen.getByText(/電話 未提供/)).toBeTruthy();
+  expect(screen.getByText(/社員 · 電話 未提供/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '通過' }));
   await waitFor(() =>
     expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {

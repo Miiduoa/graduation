@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ClubDirectory } from './ClubDirectory';
 import { callClubPortal } from './clubPortalService';
 vi.mock('./clubPortalService', () => ({ callClubPortal: vi.fn() }));
-vi.mock('./clubService', () => ({ clubEnabled: () => false }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams('schoolId=pu&tab=mine'),
+}));
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();

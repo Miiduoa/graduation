@@ -5,12 +5,21 @@ import { Linking, Text, TextInput, View } from 'react-native';
 import { Button, Card } from '../ui/components';
 import { theme } from '../ui/theme';
 import { callClubPortal } from '../services/clubPortal';
+import { clubRoleLabel } from '../services/clubSummary';
 import type { ClubPortalView } from '@campus/shared/src/clubPortal';
 import {
   clubProfileFields,
   clubEventFields,
   clubEventInput,
 } from '../../../../packages/shared/src/clubForms';
+
+const MEETING_TIME_PLACEHOLDER = '社課時間未提供';
+const roleOfficeLabel = (role: string) =>
+  role === 'owner' ? '社長' : role === 'admin' ? '幹部' : clubRoleLabel(role);
+function displayMeetingTime(value?: string) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text && text !== MEETING_TIME_PLACEHOLDER ? text : '';
+}
 
 export function ClubPortal({
   uid,
@@ -183,7 +192,8 @@ export function ClubPortal({
       await callClubPortal(uid, schoolId, { ...input, groupId: selected });
       if (generation.current !== current) return;
       operation.current = null;
-      if (['join', 'leave', 'review', 'profile'].includes(String(input.action))) onChanged?.();
+      if (['join', 'leave', 'review', 'profile', 'cancelJoin'].includes(String(input.action)))
+        onChanged?.();
       if (input.action === 'leave') {
         setNotice('已退出社團');
         setSelected('');
@@ -193,7 +203,13 @@ export function ClubPortal({
       if (generation.current === current) {
         setView(next);
         setConfirmLeave(false);
-        setNotice(next.status === 'pending' ? '已送出申請，等幹部回覆' : '已由伺服器確認');
+        setNotice(
+          input.action === 'cancelJoin'
+            ? '已取消入社申請'
+            : next.status === 'pending'
+              ? '已送出申請，等幹部回覆'
+              : '已由伺服器確認',
+        );
       }
     } catch (err) {
       if (generation.current === current)
@@ -211,13 +227,15 @@ export function ClubPortal({
   const button = (label: string, input: Record<string, unknown>, disabled = false) => (
     <Button text={label} disabled={busy || disabled} onPress={() => void act(input)} />
   );
-  const field = (key: string, label: string, fallback = '') => (
+  const field = (key: string, label: string, fallback = '', placeholder?: string) => (
     <View key={key}>
       <Text style={style}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
         value={values[key] ?? fallback}
         onChangeText={(value) => setValues((v) => ({ ...v, [key]: value }))}
+        placeholder={placeholder}
+        placeholderTextColor={theme.colors.muted}
         style={{
           color: theme.colors.text,
           borderColor: theme.colors.border,
@@ -279,12 +297,18 @@ export function ClubPortal({
             .map((c) => (
               <View key={c.id} style={{ minHeight: 64, paddingVertical: 8 }}>
                 <Text style={style}>
-                  {c.name} · {c.category} · {c.meetingTime} · {c.recruiting ? '招新中' : ''}
-                  {office ? ` · ${c.approval}` : ''}
+                  {[c.name, c.category, displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER, c.recruiting ? '招新中' : '', office ? c.approval : '']
+                    .filter(Boolean)
+                    .join(' · ')}
                 </Text>
                 <Button text={`查看社團：${c.name}`} onPress={() => setSelected(c.id)} />
               </View>
             ))}
+          {!!view.clubs?.length &&
+            !view.clubs?.filter((c) => `${c.name} ${c.category}`.includes(search)).length &&
+            !!search.trim() && (
+              <Text style={style}>{`找不到符合「${search.trim()}」的社團，請試試其他關鍵字。`}</Text>
+            )}
           {office ? (
             <>
               {field('groupId', '待核可社團群組 ID')}
@@ -300,7 +324,9 @@ export function ClubPortal({
             {club.name}
           </Text>
           <Text style={style}>
-            {club.category} · {club.memberCount ?? '未提供'} 位社員 · {club.meetingTime}
+            {[club.category, `${club.memberCount ?? '未提供'} 位社員`, displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER, club.recruiting ? '招新中' : '']
+              .filter(Boolean)
+              .join(' · ')}
           </Text>
           {club.approval === 'approved' ? <Text style={style}>本校社團（課外組核可）</Text> : null}
           {officer ? <Button text="管理" onPress={() => setManage(!manage)} /> : null}
@@ -316,7 +342,10 @@ export function ClubPortal({
               ) : null}
             </>
           ) : view.status === 'pending' ? (
-            <Text style={style}>已送出申請，等幹部回覆</Text>
+            <>
+              <Text style={style}>已送出申請，等幹部回覆</Text>
+              {button('取消入社申請', { action: 'cancelJoin' })}
+            </>
           ) : (
             <>
               {view.status === 'declined' ? (
@@ -466,7 +495,7 @@ export function ClubPortal({
               {view.members?.map((m) => (
                 <View key={m.id} style={{ minHeight: 56 }}>
                   <Text style={style}>
-                    {m.name} · {m.role} · 電話 {m.phone || '未提供'}
+                    {m.name} · {clubRoleLabel(m.role)} · 電話 {m.phone || '未提供'}
                   </Text>
                   {button(m.duesPaid ? '社費已繳' : '社費未繳', {
                     action: 'dues',
@@ -476,7 +505,14 @@ export function ClubPortal({
                 </View>
               ))}
               <Text style={style}>編輯社團介紹</Text>
-              {clubProfileFields.map(([key, label]) => field(key, label))}
+              {clubProfileFields.map(([key, label]) =>
+                field(
+                  key,
+                  label,
+                  key === 'meetingTime' ? displayMeetingTime(club.meetingTime) : '',
+                  key === 'meetingTime' ? MEETING_TIME_PLACEHOLDER : undefined,
+                ),
+              )}
               <Button
                 text={
                   values.joinPolicy === 'review' ? '入社方式：需幹部審核' : '入社方式：開放入社'
@@ -550,7 +586,7 @@ export function ClubPortal({
             <View key={`official-${m.id}`}>
               <Text style={style}>
                 {view.members?.find((r) => r.id === m.id)?.name} ·{' '}
-                {m.role === 'owner' ? '社長' : '幹部'} ·{' '}
+                {roleOfficeLabel(m.role)} ·{' '}
                 {m.status === 'confirmed' ? '課外組已確認' : '待課外組確認'}
               </Text>
               {view.office && m.status === 'pending'
