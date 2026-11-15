@@ -4,7 +4,7 @@ import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
 import { loadOfflinePersonalTimetable } from './personalTimetable';
-import { CAMPUS_ASSIGNMENT_MAX_PAGES, validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
+import { CAMPUS_ASSIGNMENT_MAX_PAGES, CAMPUS_ASSIGNMENT_PAGE_SIZE, validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { SavedClassGapQuery } from './savedClassGapQuery';
 
 export type { SavedClassOccurrence } from './nextSavedClasses';
@@ -171,7 +171,11 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
       !Number.isSafeInteger(coverage.pages) || coverage.pages < 1 ||
       coverage.pages > CAMPUS_ASSIGNMENT_MAX_PAGES ||
       (coverage.complete
-        ? coverage.reason !== 'complete' || assignments.items.length !== assignments.count
+        ? coverage.reason !== 'complete' || assignments.items.length !== assignments.count ||
+          // A complete authorized read uses 50 rows per page, including one
+          // empty first page when the school has no assignments. Restored
+          // metadata cannot claim that 51 rows came from a single page.
+          coverage.pages !== Math.max(1, Math.ceil(assignments.items.length / CAMPUS_ASSIGNMENT_PAGE_SIZE))
         : coverage.reason === 'complete' || assignments.count === null ||
           assignments.items.length >= assignments.count))) return false;
   // The authorized paginated reader rejects duplicate assignment identities.
