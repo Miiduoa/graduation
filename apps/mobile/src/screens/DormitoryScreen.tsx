@@ -833,7 +833,7 @@ function DormitoryBody({
               {cloud.packages.filter(p => !p.postal).map(item => <View key={item.id} style={{ gap: 8, marginTop: 16 }}>
                 <Body>{item.title}</Body><Body>到件日：{dormCloudDate(item.arrivedAt)}</Body><Body>領取地點：{item.location}</Body>
                 <Body>{item.status === 'waiting' ? '待領取' : item.status === 'collected' ? '已領取' : '已退件'}</Body>
-                {dormParcelReturnNotice(item, clock) && <Body muted>明天起退件</Body>}
+                {dormParcelReturnNotice(item, clock) && <Body muted>{dormParcelReturnNotice(item, clock)}</Body>}
                 {item.status === 'waiting' && <AIButton label="領取碼" onPress={() => setShowIdentity(true)} />}
               </View>)}
             </AICard>
