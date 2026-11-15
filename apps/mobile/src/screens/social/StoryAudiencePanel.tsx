@@ -60,18 +60,20 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
     if (!inForeground) return;
     const epoch = readEpoch.current;
     let active = true;
+    let timedOut = false;
     // Firestore's server read may remain pending after a network interruption.
-    // Release the UI after a bounded wait. This does not cancel the SDK read:
-    // the inactive guard also excludes a late denial or successful result.
+    // Release the UI after a bounded wait without canceling the SDK read.
+    // Ignore late success, but keep a late server permission denial authoritative
+    // until another request or AppState/scope transition supersedes this read.
     const timeout = setTimeout(() => {
       if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
-      active = false;
+      timedOut = true;
       setStatus('error');
     }, AUDIENCE_READ_TIMEOUT_MS);
     void listStoryViewers({ id, schoolId, authorUid }, request.cursor)
       .then((next) => {
         // AppState events invalidate reads before React runs passive cleanup.
-        if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
+        if (!active || timedOut || !foregroundRef.current || readEpoch.current !== epoch) return;
         clearTimeout(timeout);
         setPage((previous) => {
           // A live audience can change between cursor reads. Keep one visible
@@ -102,6 +104,9 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
           }
           return;
         }
+        // After a UI timeout, a late denial must still hide already-rendered
+        // names; a late transient error must not override the retry affordance.
+        if (timedOut && !denied) return;
         clearTimeout(timeout);
         if (denied) {
           setPage({ viewers: [], nextCursor: null });
