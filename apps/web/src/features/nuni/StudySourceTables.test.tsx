@@ -1017,7 +1017,7 @@ it('preserves source scores, GPAs, ratings and indexes without implying ratio ma
     'Rating', 'Satisfaction', 'Likert Scale', 'IQ', 'Consumer Price Index',
   ]) {
     const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
-      '| 甲 | 2 |', '| 乙 | 4 |'].join('\\n');
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['2', '4']);
@@ -1033,7 +1033,7 @@ it('still compares actual counts of ratings and other measurable quantities', ()
     'Index Entries', '學分', 'Study Hours', 'Distance', 'Annual Budget',
   ]) {
     const material = ['| 名稱 | ' + header + ' |', '| --- | --- |',
-      '| 甲 | 2 |', '| 乙 | 4 |'].join('\\n');
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
       [bar.getAttribute('value'), bar.getAttribute('max')]))
