@@ -172,6 +172,14 @@ const LIFECYCLE_STATUS_TAGS = [
   'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
 ] as const;
 
+// A valid OSM building ID may later gain a condition tag. A full, intact 3D
+// solid is misleading for explicit ruins or ambiguous conditions. Keep the
+// verified POI marker rather than claiming a surveyed roof.
+// https://wiki.openstreetmap.org/wiki/Key:building:condition
+const STANDING_BUILDING_CONDITIONS = new Set([
+  'good', 'preserved', 'renovated', 'reconstructed',
+]);
+
 function isStandingBuilding(value: unknown): boolean {
   const tags = object(value);
   const classification = tags?.building;
@@ -212,6 +220,22 @@ function isStandingBuilding(value: unknown): boolean {
     const marker = tags?.[key];
     if (marker !== undefined && (typeof marker !== 'string' ||
         !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
+  }
+  // building:levels is the above-ground storey count, not a measured height.
+  // A zero, negative, composite, or implausible count is not evidence for the
+  // intact, ground-standing volume this renderer displays. Never multiply
+  // storeys by an assumed height.
+  const levelsTag = tags?.['building:levels'];
+  if (levelsTag !== undefined) {
+    if (typeof levelsTag !== 'string' || !/^\d+$/.test(levelsTag.trim())) return false;
+    const levels = Number(levelsTag.trim());
+    if (!Number.isFinite(levels) || levels < 1 || levels > 100) return false;
+  }
+  const condition = tags?.['building:condition'];
+  if (condition !== undefined) {
+    if (typeof condition !== 'string') return false;
+    const state = condition.trim().toLowerCase();
+    if (!state || /[;,|]/.test(state) || !STANDING_BUILDING_CONDITIONS.has(state)) return false;
   }
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
