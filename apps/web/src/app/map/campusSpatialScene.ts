@@ -245,6 +245,7 @@ export function createCampusSpatialScene(
       case '-':
       case '_': next = { ...requestedCamera, zoom: requestedCamera.zoom / SPATIAL_ZOOM_FACTOR }; break;
       case 'Home': next = { ...requestedCamera, bearing: 0 }; break;
+      case '0': next = { ...requestedCamera, zoom: 1 }; break;
       default: return;
     }
     event.preventDefault();
