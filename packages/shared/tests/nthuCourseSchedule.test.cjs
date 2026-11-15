@@ -98,6 +98,26 @@ test('a real two-room course keeps each room, weekday and verified clock through
   assert.ok(parsed.rows.every(row => row.startPeriod === undefined));
 });
 
+test('malformed public meeting pairs fail closed before direct CSV import', () => {
+  const malformed = [
+    null, {}, [], [null], [{ room: '教室', time: 3 }],
+    [{ room: 17, time: 'M3' }], [{ room: '教室', time: null }],
+    [{ room: '教室', time: 'M3' }, null],
+    Array(33).fill({ room: '教室', time: 'M3' }),
+  ];
+  for (const meetings of malformed) {
+    assert.equal(nthuCourseMeetings(meetings, '1151'), null);
+    assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings }), null);
+  }
+  for (const change of [{ time: null }, { room: 4 }, { meetings: undefined }]) {
+    assert.equal(nthuTimetableImportCsv({ ...chemistry, ...change }), null);
+  }
+  // Valid official data, including an unpublished room name, still imports.
+  const valid = [{ time: 'M3M4', room: '' }];
+  assert.deepEqual(nthuCourseMeetings(valid, '1151').map(row => row.periodLabel), ['34']);
+  assert.ok(nthuTimetableImportCsv({ ...chemistry, time: 'M3M4', room: '', meetings: valid }));
+});
+
 test('missing, partially missing and unfamiliar times cannot produce a partial timetable', () => {
   for (const meetings of [[], [{ room: 'SINICA中  研院', time: '' }],
     [{ room: '教室', time: 'M3M4' }, { room: '教室', time: '' }],

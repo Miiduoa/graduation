@@ -26,6 +26,16 @@ const clocks: Record<string, readonly [string, string]> = {
 const periodOrder = '1234n56789abcd';
 const weekdays = 'MTWRFSU';
 
+// Keep the direct-import boundary safe when a cached or external catalog
+// payload bypasses the typed API response validator.
+function validNthuMeetingPairs(value: unknown): value is readonly PublicCatalogMeeting[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= 32 &&
+    value.every(pair => pair !== null && typeof pair === 'object' &&
+      !Array.isArray(pair) && typeof pair.time === 'string' &&
+      typeof pair.room === 'string' &&
+      /^(?:[MTWRFSU][1-9nabcd])+$/.test(pair.time));
+}
+
 function clockMinutes(value: string): number {
   const [hours, minutes] = value.split(':').map(Number);
   return hours * 60 + minutes;
@@ -44,7 +54,7 @@ export function nthuCourseMeetings(
   meetings: readonly PublicCatalogMeeting[],
   semester?: string,
 ): NthuCourseMeeting[] | null {
-  if (!meetings.length || meetings.some(meeting => !/^(?:[MTWRFSU][1-9nabcd])+$/.test(meeting.time))) return null;
+  if (!validNthuMeetingPairs(meetings)) return null;
   // The published table was verified for the feed's 115-1 semester. Other terms
   // retain their own raw labels until their clock table has been checked.
   const verified = semester === '1151';
@@ -85,6 +95,8 @@ export function nthuCourseMeetings(
 export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | null {
   const identity = nthuCourseIdentity(course.code);
   const pairs = course.meetings ?? [];
+  if (!validNthuMeetingPairs(pairs) || typeof course.time !== 'string' ||
+      typeof course.room !== 'string') return null;
   // The official JSON represents each time and room both as a display list and
   // as structured meeting pairs. Never import a different timetable than the
   // one shown in the public course result (e.g. after a malformed response).
