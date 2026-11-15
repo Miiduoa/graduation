@@ -97,6 +97,69 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('legacy root message read receipts cannot impersonate peers or replay stale lists', async () => {
+    const conversationId = 'dm_pu_alice_bob';
+    const message = 'messages/read-receipt';
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie', 'mallory']) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: uid === 'mallory' ? 'other' : 'pu' });
+      }
+      await db.doc('conversations/' + conversationId).set({
+        type: 'group', schoolId: 'pu', memberIds: ['alice', 'bob', 'charlie'],
+      });
+      await db.doc(message).set({
+        conversationId, senderId: 'alice', text: 'Hello', readBy: ['alice'],
+      });
+      await db.doc('messages/after-revocation').set({
+        conversationId, senderId: 'alice', text: 'Unread', readBy: ['alice'],
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+    const original = { conversationId, senderId: 'alice', text: 'New message' };
+
+    // Legacy clients may omit readBy or initialize exactly the sender.
+    await assertSucceeds(alice.doc('messages/normal-no-receipt').set(original));
+    await assertSucceeds(alice.doc('messages/normal-self-receipt').set({
+      ...original, readBy: ['alice'],
+    }));
+    await assertFails(alice.doc('messages/forged-create').set({
+      ...original, readBy: ['alice', 'bob'],
+    }));
+    await assertFails(alice.doc('messages/peer-create').set({ ...original, readBy: ['bob'] }));
+    await assertFails(alice.doc('messages/invalid-create').set({ ...original, readBy: 'alice' }));
+    await assertFails(bob.doc('messages/forged-sender').set(original));
+
+    // Own receipt append and idempotent retry remain valid for a real member.
+    await assertSucceeds(bob.doc(message).update({
+      readBy: ['alice', 'bob'], updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(bob.doc(message).update({ readBy: ['alice', 'bob'] }));
+    await assertFails(bob.doc(message).update({ readBy: ['bob'] }));
+    await assertFails(bob.doc(message).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(bob.doc(message).update({ readBy: ['alice', 'bob', 'bob'] }));
+    await assertFails(alice.doc(message).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    await assertFails(mallory.doc(message).update({ readBy: ['alice', 'bob', 'mallory'] }));
+    await assertFails(guest.doc(message).get());
+    await assertSucceeds(charlie.doc(message).update({ readBy: ['alice', 'bob', 'charlie'] }));
+    // A stale client cannot overwrite Charlie's acknowledgement after his write.
+    await assertFails(bob.doc(message).update({ readBy: ['alice', 'bob'] }));
+
+    const unread = bob.doc('messages/after-revocation');
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'suspended' }));
+    await assertFails(unread.update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore((db) => db.doc('users/bob').update({ status: 'active' }));
+    await assertSucceeds(unread.update({ readBy: ['alice', 'bob'] }));
+    await seedFirestore((db) => db.doc('conversations/' + conversationId).update({
+      memberIds: ['alice', 'charlie'],
+    }));
+    await assertFails(bob.doc(message).get());
+    await assertFails(bob.doc('messages/normal-no-receipt').update({ readBy: ['alice', 'bob'] }));
+  });
+
   test('storefront comment author and moderation fields cannot be forged or replayed', async () => {
     const parent = 'schools/pu/cafeterias/cafe-1/posts/post-1';
     const comments = parent + '/comments';

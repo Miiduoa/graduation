@@ -2353,13 +2353,19 @@ service cloud.firestore {
 
     // Messages
     match /messages/{docId} {
+      // Legacy root messages are still used by older clients. Their read
+      // receipts must have the same owner-only semantics as nested messages.
       allow read: if isConversationMember(resource.data.conversationId);
       allow create: if isSignedIn()
         && request.resource.data.senderId == request.auth.uid
-        && isConversationMember(request.resource.data.conversationId);
+        && isConversationMember(request.resource.data.conversationId)
+        && request.resource.data.get('readBy', [request.auth.uid]) == [request.auth.uid];
       allow update: if isConversationMember(resource.data.conversationId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'updatedAt'])
-        && request.auth.uid in request.resource.data.readBy;
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['readBy'])
+          || onlyOwnMessageReadReceipt()
+        );
       allow delete: if false;
     }
 

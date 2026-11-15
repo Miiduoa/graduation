@@ -793,3 +793,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 **精確原 head：** `c8ebd45b7bbe50644e8c0ccd416d8317a07dc47f`；[CI #43696250184](https://github.com/Miiduoa/graduation/actions/runs/43696250184) 的 Firestore Rules job #132757315268 已 `completed/failure`，Node emulator 337 項中 336 pass／1 fail。失敗唯一案例 `storefront comment author and moderation fields cannot be forged or replayed`，log 指向 Firestore 規則第 681 行的 update 權限拒絕。原測試先用 `updatedAt: serverTimestamp()` 成功編輯，再於停權解除後只更新 `text`，沿用舊 `updatedAt`，未符合新安全規則的更新時間檢查。這是回歸 fixture 未符合規則，不應為測試放寬生產權限。
 
 **最小修補：** 只修改同一測試的停權後重放及恢復正常寫入，各自都附 `updatedAt: serverTimestamp()`；因此停權後拒絕不會被缺少時間戳的輸入預先拒絕所掩蓋，恢復後使用有效輸入。原規則、Web/Mobile 既有建立流程與所有其他安全案例維持不變。修補後 CI 結果須以**新精確 head**核對；沒有本地完整 emulator 套件，不宣稱修補後全綠。對指定 nuni-merge-gate App 5504170 核可、GCS/Supabase 舊 URL 撤銷、未發布群組父貼文、正式部署與 E 校園連線的限制不變。
+
+
+## 2026-11-15：歷史根集合私訊已讀收據跨帳號偽造（PR #577）
+
+**獨立發現與界線**：現行 `messages/{docId}`（不同於已修補的 `conversations/{id}/messages/{id}`）允許任一對話成員改寫整份 `readBy`，只檢查更新後包含自己的 UID。可藉直接 SDK 請求預先標記他人已讀、刪除他人的已讀收據、透過過期快照覆寫。其 `create` 也未限制初始 `readBy`，能在發送時偽造別人已讀。這是規則可推導的資料完整性缺口；尚無正式站已遭利用證據。
+
+**最小修補**：沿用巢狀訊息已經測試的 `onlyOwnMessageReadReceipt()`：根集合新訊息 `readBy` 可省略或只能為單一發送者 UID；更新只准既有讀者維持原列表、或新增目前讀者 UID 到陣列尾端。相同收據重試可成功；不可刪除、重排、重複或代加他人。若純更新 `updatedAt` 而不修改 `readBy`，為了歷史相容仍沿用舊行為；不在本輪擴大變更。保留原有既存對話跨校讀取與成員資格政策，未繞過帳號停權。
+
+**合成測試**：`backend/tests/security-rules.test.js` 新增專屬 Firebase Emulator 案例，涵蓋正常建立與本人已讀／冪等重試、偽造建立與代標、跨校非成員與訪客、停權／恢復、撤銷對話成員、重複 UID、別人已讀遭刪除及過時快照競態重放。對照舊規則，偽造建立與改寫他人 `readBy` 可直接由規則邏輯推導；新修補必須以此精確 head 的 Firebase CI 取得可重跑結果，不以靜態檢查代替。其他未發布群組父貼文讀取、已簽發 GCS/Supabase URL、真實 Storage CAS 競態、歷史附件可信引用、minimatch 雙圖與正式部署／回復驗證仍未解除。維持 Draft，不操作正式資料、金鑰、token、migration、E 校園，不進行未授權 npm/pnpm audit；未取得 App 5504170 對精確 head 的 APPROVED 前不合併。
