@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { listStoryViewers, type CampusStoryDoc } from '../../services/stories';
@@ -28,36 +28,72 @@ export function StoryAudiencePanel(props: StoryAudiencePanelProps) {
 }
 
 function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
+  const expiresAt = typeof story.expiresAt === 'number' && Number.isFinite(story.expiresAt)
+    ? story.expiresAt : null;
+  const initiallyExpired = expiresAt !== null && Date.now() >= expiresAt;
   const [page, setPage] = useState<ViewerPage>({ viewers: [], nextCursor: null });
   const [request, setRequest] = useState<{ cursor: Cursor }>({ cursor: null });
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'denied'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'denied' | 'expired'>(
+    initiallyExpired ? 'expired' : 'loading',
+  );
   const [inForeground, setInForeground] = useState(
     () => AppState.currentState !== 'background' && AppState.currentState !== 'inactive',
   );
   const foregroundRef = useRef(inForeground);
   const readEpoch = useRef(0);
   const cancelledPageEpoch = useRef<number | null>(null);
+  const expiredRef = useRef(initiallyExpired);
+
+  const expireAudience = useCallback(() => {
+    if (expiredRef.current) return;
+    expiredRef.current = true;
+    readEpoch.current += 1;
+    cancelledPageEpoch.current = null;
+    setPage({ viewers: [], nextCursor: null });
+    setStatus('expired');
+  }, []);
+
+  // The service/rules remain authoritative. This local deadline also closes
+  // an already-open list when no further server request is made.
+  useEffect(() => {
+    if (expiresAt === null || expiredRef.current) return;
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      expireAudience();
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (Date.now() >= expiresAt) expireAudience();
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [expiresAt, expireAudience]);
 
   // Returning from the app switcher cannot replay private viewer names from
   // a prior authorization. Stop reads while backgrounded and start at page one.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
+      // OS timers may be suspended in the background; recheck on every event.
+      if (expiresAt !== null && Date.now() >= expiresAt) expireAudience();
       const foreground = state === 'active';
       if (foreground === foregroundRef.current) return;
       foregroundRef.current = foreground;
       readEpoch.current += 1; // Invalidate promises before their effect cleanup.
       cancelledPageEpoch.current = null;
       setPage({ viewers: [], nextCursor: null });
-      setStatus('loading');
+      setStatus(expiredRef.current ? 'expired' : 'loading');
       setRequest({ cursor: null });
       setInForeground(foreground);
     });
     return () => subscription.remove();
-  }, []);
+  }, [expiresAt, expireAudience]);
 
   const { id, schoolId, authorUid } = story;
   useEffect(() => {
-    if (!inForeground) return;
+    if (!inForeground || expiredRef.current) return;
+    if (expiresAt !== null && Date.now() >= expiresAt) {
+      expireAudience();
+      return;
+    }
     const epoch = readEpoch.current;
     let active = true;
     let timedOut = false;
@@ -73,7 +109,12 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
     void listStoryViewers({ id, schoolId, authorUid }, request.cursor)
       .then((next) => {
         // AppState events invalidate reads before React runs passive cleanup.
-        if (!active || timedOut || !foregroundRef.current || readEpoch.current !== epoch) return;
+        if (!active || !foregroundRef.current || readEpoch.current !== epoch || expiredRef.current) return;
+        if (expiresAt !== null && Date.now() >= expiresAt) {
+          expireAudience();
+          return;
+        }
+        if (timedOut) return;
         clearTimeout(timeout);
         setPage((previous) => {
           // A live audience can change between cursor reads. Keep one visible
@@ -94,7 +135,11 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       .catch((error: unknown) => {
         // Cancellation discards late success, but a server permission denial
         // still clears private names unless another read supersedes it.
-        if (!active || !foregroundRef.current) return;
+        if (!active || !foregroundRef.current || expiredRef.current) return;
+        if (expiresAt !== null && Date.now() >= expiresAt) {
+          expireAudience();
+          return;
+        }
         const denied = (error as { code?: string } | null)?.code === 'permission-denied';
         if (readEpoch.current !== epoch) {
           if (denied && cancelledPageEpoch.current === epoch && readEpoch.current === epoch + 1) {
@@ -119,10 +164,14 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       active = false;
       clearTimeout(timeout);
     };
-  }, [id, schoolId, authorUid, request, inForeground]);
+  }, [id, schoolId, authorUid, request, inForeground, expiresAt, expireAudience]);
 
   function load(cursor: Cursor) {
-    if (!foregroundRef.current) return;
+    if (expiresAt !== null && Date.now() >= expiresAt) {
+      expireAudience();
+      return;
+    }
+    if (!foregroundRef.current || expiredRef.current) return;
     readEpoch.current += 1;
     cancelledPageEpoch.current = null;
     setStatus('loading');
@@ -130,7 +179,11 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   }
 
   function stopWaitingForNextPage() {
-    if (!foregroundRef.current || status !== 'loading' || request.cursor === null) return;
+    if (expiresAt !== null && Date.now() >= expiresAt) {
+      expireAudience();
+      return;
+    }
+    if (!foregroundRef.current || expiredRef.current || status !== 'loading' || request.cursor === null) return;
     // Stop this UI wait without claiming to cancel Firestore's transport.
     // Ignore late success, but still honor a late server permission denial
     // for this read until a newer request or scope transition supersedes it.
@@ -168,8 +221,8 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
           accessibilityRole="button"
           accessibilityLabel="重新整理觀看名單"
           accessibilityHint="重新向伺服器確認觀看者及目前權限"
-          accessibilityState={{ disabled: status === 'loading' }}
-          disabled={status === 'loading'}
+          accessibilityState={{ disabled: status === 'loading' || status === 'expired' }}
+          disabled={status === 'loading' || status === 'expired'}
           onPress={refresh}
           style={styles.refresh}
         >
@@ -201,7 +254,11 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
         }
         ListFooterComponent={
           <View style={styles.footer}>
-            {status === 'loading' ? (
+            {status === 'expired' ? (
+              <Text accessibilityLiveRegion="polite" style={styles.status}>
+                限時動態已到期，觀看名單已關閉
+              </Text>
+            ) : status === 'loading' ? (
               <View style={styles.loading} accessibilityLiveRegion="polite">
                 <ActivityIndicator color="#b8e7d4" />
                 <Text style={styles.status}>
