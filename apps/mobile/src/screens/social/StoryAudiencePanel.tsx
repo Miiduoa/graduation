@@ -111,6 +111,15 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
     setRequest({ cursor });
   }
 
+  function stopWaitingForNextPage() {
+    if (!foregroundRef.current || status !== 'loading' || request.cursor === null) return;
+    // Stop this UI wait without claiming to cancel Firestore's transport.
+    // Reject the still-pending response before it can update visible names.
+    // Keep the exact cursor so the student can retry this page explicitly.
+    readEpoch.current += 1;
+    setStatus('ready');
+  }
+
   function refresh() {
     // A fresh server read must not paint previously fetched private names
     // while membership or story visibility may have changed.
@@ -176,7 +185,20 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
             {status === 'loading' ? (
               <View style={styles.loading} accessibilityLiveRegion="polite">
                 <ActivityIndicator color="#b8e7d4" />
-                <Text style={styles.status}>正在載入觀看名單…</Text>
+                <Text style={styles.status}>
+                  {request.cursor ? '正在載入更多觀看者…' : '正在載入觀看名單…'}
+                </Text>
+                {request.cursor && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="停止等待下一頁"
+                    accessibilityHint="保留已顯示的觀看者，可稍後重新載入下一頁"
+                    style={styles.action}
+                    onPress={stopWaitingForNextPage}
+                  >
+                    <Text style={styles.actionText}>停止等待</Text>
+                  </Pressable>
+                )}
               </View>
             ) : status === 'denied' ? (
               <>
