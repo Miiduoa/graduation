@@ -1253,3 +1253,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 精確 head `7eeda364967a1a85c2d8b6154a156977f585b353` 的 [CI #43694880368](https://github.com/Miiduoa/graduation/actions/runs/43694880368) 已完成但失敗：`CourseStudyPracticeBoundaries.test.tsx` 共 5 項在取消／失敗的教材或進度讀取後，仍尋找舊版已停用的「略過這題」按鈕；新版已刻意將它替換成「取消略過，繼續作答」。同一 SHA 的 Build Web/Mobile、Lint/TypeCheck、Security Gates、Mobile Tests、Functions、Firestore、Assistant Tests 和 CodeQL 成功，不等於整體 CI 通過。
 - 將這五項共用邊界斷言改為核對「略過」狀態與撤銷按鈕仍存在，且沒有偷偷撤銷、清掉題目草稿或揭答；新增一個跨進度讀取取消的 DOM 情境，必須由學生明確按撤銷才把題目從「略過」恢復成「未完成」，並保留下一題草稿及已揭答案。
 - 僅修復測試與技術文件，不更動操作程式、v1/v2 閱讀進度、v1 練習 checkpoint、教材傳輸、套件或付費 API。新 SHA 的 Web Tests 與全套 CI／CodeQL 須重新完成；指定 App 5504170 APPROVED、Maestro、iOS／Android 真機、WebGPU 中文教學與 Ahaboard 同教材同題同機實測仍待驗收。PR 維持 Draft，不合併、不部署。
+
+## 2026-11-15：手機唯讀表格「全選」的 WebKit 失敗備援
+
+- 修復部分 iOS Safari／內嵌 WebView 對 readonly `textarea.select()` 拋錯時，點「全選第 N 張表格原文」會中斷選取的問題；先聚焦，再嘗試原生全選及明確 `setSelectionRange(0, value.length)`。任一 API 拒絕時不修改或移除原始教材文字，仍可長按選取。
+- 新增兩項模擬 DOM 回歸：模擬 `select()` 失敗仍能全選；模擬兩個選取 API 都失敗仍保留唯讀原文及焦點。這是 WebView API 失敗情境的程式修補，不等同 iOS Safari／Android Chrome 真機通過。
+- 不修改練習／閱讀進度 JSON、私人教材傳輸或其他模組；新精確 SHA CI／CodeQL、App 5504170 APPROVED、Maestro／實機及 Ahaboard 同教材同題同裝置對照須各自驗收，PR 維持 Draft，不合併、不部署。

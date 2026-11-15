@@ -223,6 +223,17 @@ function tableSourceSelection(lines: string[], table: StudySourceTable): string 
   return selected.join('\n');
 }
 
+// A few iOS Safari and in-app WebViews throw when select() is called on a
+// readonly textarea. Keep the original table text in place and try a precise
+// selection range too, so a failed browser selection never breaks copying.
+function selectOriginalTableText(field: HTMLTextAreaElement | null) {
+  if (!field) return;
+  try { field.focus(); } catch { /* The student can still long-press the source. */ }
+  try { field.select(); } catch { /* Try the explicit selection range below. */ }
+  try { field.setSelectionRange(0, field.value.length); }
+  catch { /* The unchanged source remains available for native selection. */ }
+}
+
 /** Optional accessible table layout derived solely from the exact source text. */
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
@@ -261,9 +272,8 @@ export function StudySourceTables({ text }: { text: string }) {
               可用手機長按或鍵盤選取複製，也能按下方「全選」後自行複製，不需剪貼簿權限。
             </p>
             <button type="button" onClick={(event) => {
-              const field = event.currentTarget.parentElement?.querySelector('textarea');
-              field?.focus();
-              field?.select();
+              const field = event.currentTarget.parentElement?.querySelector('textarea') ?? null;
+              selectOriginalTableText(field);
             }}>全選第 {index + 1} 張表格原文</button>
             <textarea
               aria-label={'原文表格 ' + (index + 1) + ' 的可選取文字'}

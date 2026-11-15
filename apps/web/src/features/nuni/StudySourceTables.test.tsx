@@ -1188,3 +1188,41 @@ it('select-all uses the replaced source and excludes HTML-hidden answers', () =>
   expect(field?.selectionEnd).toBe(field?.value.length);
   expect(comparisonSummaries(view.container)).toHaveLength(1);
 });
+
+it('selects all the readonly table source when a WebView rejects textarea.select()', () => {
+  const view = render(<StudySourceTables text={source} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const field = view.container.querySelector('textarea');
+  expect(field).not.toBeNull();
+  if (!field) return;
+  Object.defineProperty(field, 'select', {
+    configurable: true,
+    value: () => { throw new Error('mobile readonly selection blocked'); },
+  });
+  field.setSelectionRange(1, 2);
+  fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格原文' }));
+  expect(document.activeElement).toBe(field);
+  expect(field.selectionStart).toBe(0);
+  expect(field.selectionEnd).toBe(field.value.length);
+  expect(field.value).toContain('| 資料庫 | 3 | 301 |');
+});
+
+it('leaves the original text available if both selection APIs fail', () => {
+  const view = render(<StudySourceTables text={source} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const field = view.container.querySelector('textarea');
+  expect(field).not.toBeNull();
+  if (!field) return;
+  Object.defineProperty(field, 'select', {
+    configurable: true,
+    value: () => { throw new Error('select unavailable'); },
+  });
+  Object.defineProperty(field, 'setSelectionRange', {
+    configurable: true,
+    value: () => { throw new Error('selection range unavailable'); },
+  });
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格原文' }))).not.toThrow();
+  expect(field.readOnly).toBe(true);
+  expect(field.value).toContain('| 計算機概論 | 2 | 205 |');
+  expect(document.activeElement).toBe(field);
+});
