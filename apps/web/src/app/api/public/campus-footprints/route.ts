@@ -64,7 +64,13 @@ function overpassRetryAfterMs(header: string | null, now: number): number {
   const value = header.trim();
   let requestedMs: number;
   if (/^\d+$/.test(value)) {
-    requestedMs = Number(value) * 1000;
+    // HTTP delta-seconds may be arbitrarily long. Number(value) * 1000 can
+    // overflow to Infinity, which previously fell back to just ten minutes
+    // instead of respecting a public Overpass operator's longer pause.
+    // Strip leading zeros, then cap *before* numeric conversion.
+    const digits = value.replace(/^0+/, '') || '0';
+    requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
+      ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
     const dateMs = Date.parse(value);
     requestedMs = Number.isFinite(dateMs) ? dateMs - now : NaN;
@@ -109,14 +115,37 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // length header, so comparing those lengths would reject valid compressed
   // responses. Keep the decoded 500 KB cap for every encoding.
   const contentEncoding = response.headers.get('content-encoding');
-  const verifyIdentityLength = lengthHeader !== null &&
-    (contentEncoding === null || contentEncoding.trim().toLowerCase() === 'identity');
-  if (!Number.isSafeInteger(declared) || declared > MAX_RESPONSE_BYTES) {
+  const coding = contentEncoding?.trim().toLowerCase() ?? 'identity';
+  // Node Fetch transparently decodes these single HTTP content codings.
+  // A blank, unknown or stacked/mixed coding cannot safely tell us whether
+  // Content-Length measures the decoded bytes. Do not silently classify an
+  // ambiguous identity response as compressed and skip its length check.
+  if (!['identity', 'gzip', 'br', 'deflate'].includes(coding)) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('Unsupported OSM content encoding');
+  }
+  const identityEncoded = coding === 'identity';
+  const verifyIdentityLength = lengthHeader !== null && identityEncoded;
+  // Fetch delivers decoded bytes, while Content-Length for gzip/br describes
+  // compressed wire bytes. A valid compressed response can exceed the decoded
+  // cap on the wire (compression adds framing overhead), so do not reject it
+  // as if the header measured the decoded body. Still bound both the declared
+  // encoded transport (2x) and the streamed decoded payload (500 KB).
+  const declaredLimit = identityEncoded ? MAX_RESPONSE_BYTES : MAX_RESPONSE_BYTES * 2;
+  if (!Number.isSafeInteger(declared) || declared > declaredLimit) {
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
     if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response too large');
+  }
+  // Any HTTP 200 Overpass JSON snapshot requires a non-empty body. A declared
+  // zero-byte identity *or* compressed response cannot contain verified map
+  // data. Reject it before reading: even a stalled stream must not consume the
+  // full 12-second deadline when its header already contradicts the payload.
+  if (lengthHeader !== null && declared === 0) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('OSM response declares an empty body');
   }
   if (!response.body) {
     // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
@@ -148,6 +177,12 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
       size += value.byteLength;
+      // On identity responses, the first byte beyond Content-Length already
+      // proves truncation/overdelivery. Do not wait for EOF from an upstream
+      // stream that could stall indefinitely after sending too many bytes.
+      if (verifyIdentityLength && size > declared) {
+        throw new Error('OSM response length mismatch');
+      }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
     }
