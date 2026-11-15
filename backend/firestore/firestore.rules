@@ -659,13 +659,34 @@ service cloud.firestore {
           }
 
           match /comments/{commentId} {
+            // A comment is a user-authored public message, not a trusted
+            // moderation/merchant record. Protect both its identity and shape.
+            function storefrontCommentTextValid() {
+              return request.resource.data.get('text', null) is string
+                && request.resource.data.text.size() >= 1
+                && request.resource.data.text.size() <= 2000;
+            }
+
+            function storefrontPostExists() {
+              return exists(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/posts/$(postId));
+            }
+
             allow read: if isSignedIn();
             allow create: if isSignedIn()
+              && storefrontPostExists()
+              && request.resource.data.keys().hasOnly(['authorId', 'text', 'createdAt'])
               && request.resource.data.authorId == request.auth.uid
-              && request.resource.data.text is string
-              && request.resource.data.text.size() >= 1
-              && request.resource.data.text.size() <= 2000;
-            allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+              && storefrontCommentTextValid()
+              && request.resource.data.get('createdAt', request.time) == request.time;
+            allow update: if isSignedIn()
+              && storefrontPostExists()
+              && resource.data.authorId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'updatedAt'])
+              && storefrontCommentTextValid()
+              && request.resource.data.get('updatedAt', request.time) == request.time;
+            allow delete: if isSignedIn()
+              && storefrontPostExists()
+              && resource.data.authorId == request.auth.uid;
           }
         }
 

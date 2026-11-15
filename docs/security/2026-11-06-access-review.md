@@ -777,3 +777,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 **可重跑證據：** 新增 `backend/tests/security-rules.test.js` Firebase Emulator 合成案例，驗證本人、跨帳號、跨校、匿名直接 GET，無條件及加 UID 過濾的 list、本人正常 like/unlike、冒刪與冒寫，以及同一已登入 context 在停權後重放拒絕與恢復。舊規則的 `allow read` 可由原始碼確認允許跨帳號／列舉；新精確 head 的 Emulator、主 CI、CodeQL **須依 GitHub 實際執行結果判定**，不能預先宣稱已通過。
 
 **其餘風險及發布界線：** 最高影響尚未修補的是未發布群組父貼文 Firestore 直接 GET/list 曝光，須先協同 Web/Mobile feed 查詢、歷史 publication metadata 與索引過渡。GCS／Supabase 舊簽發 URL、真隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔及正式發布／回復驗收也仍未結案。Supabase permissions、Python security、Mobile Agent Regression、Maestro 未在本次新 head 觸發時不得沿用父版結果。PR 維持 Draft，指定 nuni-merge-gate App 5504170 對精確 head 核可前不合併；沒有使用正式資料、金鑰、token、migration、部署、E 校園，沒有重跑受限制的 npm／pnpm audit。
+
+## 2026-11-15：店家貼文留言作者與管理欄位不可被客戶端偽造（PR #577）
+
+**本輪新檢查：** `schools/{schoolId}/cafeterias/{cafeteriaId}/posts/{postId}/comments/{commentId}` 原有 `create` 僅核對作者及文字長度，允許夾帶 `isOfficial`、`pinnedBy` 等任意欄位或回填任意時間；`update` 則允許任意其他欄位變更（包括 `authorId`），使作者可透過 Firestore SDK 偽裝其他帳號或產生看似管理端認可的留言。此為規則可推導的資料完整性問題，**未取得正式站被利用證據**。
+
+**最小修補：** 新留言必須有真實父貼文、只接受 `authorId/text/createdAt`；作者綁目前 UID、非空文字不超過 2000 字，存在 `createdAt` 時必須等於伺服器 `request.time`。更新限原作者修改 `text/updatedAt`，保留其身分與原始建立時間，`updatedAt` 若存在須為伺服器時間。刪除仍限原作者並要求父貼文存在。Web 與 Mobile 現有 `addStorefrontComment` 都只送 `authorId/text/createdAt:serverTimestamp()`，不修改正常跨校公開店家留言的現行可讀政策。
+
+**隔離回歸：** 在 `backend/tests/security-rules.test.js` 新增 Firebase Emulator 合成案例，覆蓋正常建立與編輯、跨校公開留言與訪客拒絕、冒用作者、夾帶管理欄位、偽造建立時間、空字串與超長輸入、失聯父貼文、他人修改／刪除、停權後同一登入 context 重放及恢復。**新精確 head 的主 CI、CodeQL、相關工作流需依實際 GitHub 結果核對；本記錄不預先宣稱通過。**
+
+**截至變更前核對：** `cc7a0a2acbaf4ca551794810a55b08827c5d4fc3` 的主 CI #43678048016、CodeQL #43678048018、Course access #43678048047 均 completed/success；主線 `5d371af2e85a0e45cf8d05248d4a42ef847111a2`，PR 相對 main ahead 35/behind 13，reviews 0、未解決 threads 0，指定 nuni-merge-gate App 5504170 未有該 head 的 APPROVED。本變更不解決未發布群組父貼文 get/list、已簽發 GCS/Supabase URL 撤銷、真隔離 Storage CAS、歷史附件引用、minimatch 雙鎖檔及正式發布回復驗收。保持 Draft；不觸碰正式資料、憑證、token、migration、部署、E 校園，不執行受限的 npm/pnpm audit。

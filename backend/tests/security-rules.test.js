@@ -97,6 +97,63 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('storefront comment author and moderation fields cannot be forged or replayed', async () => {
+    const parent = 'schools/pu/cafeterias/cafe-1/posts/post-1';
+    const comments = parent + '/comments';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'another-campus' });
+      await db.doc(parent).set({ text: 'Today\'s menu', authorId: 'merchant' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+    const own = alice.doc(comments + '/alice-comment');
+    const normal = { authorId: 'alice', text: 'A good meal' };
+
+    // Existing Web/Mobile create with a server timestamp stays compatible.
+    await assertSucceeds(own.set(normal));
+    await assertSucceeds(alice.doc(comments + '/timestamped').set({
+      ...normal, createdAt: serverTimestamp(),
+    }));
+    // Public cross-campus storefront comments remain readable by signed-in
+    // accounts. This change does not add an unplanned campus restriction.
+    await assertSucceeds(mallory.doc(comments + '/alice-comment').get());
+    await assertFails(guest.doc(comments + '/alice-comment').get());
+    await assertFails(bob.doc(comments + '/impersonation').set(normal));
+    await assertFails(alice.doc(comments + '/fake-role').set({ ...normal, isOfficial: true }));
+    await assertFails(alice.doc(comments + '/fake-pinned').set({ ...normal, pinnedBy: 'admin' }));
+    await assertFails(alice.doc(comments + '/backdated').set({
+      ...normal, createdAt: new Date('2020-01-01T00:00:00Z'),
+    }));
+    await assertFails(alice.doc(comments + '/blank').set({ ...normal, text: '' }));
+    await assertFails(alice.doc(comments + '/oversized').set({ ...normal, text: 'x'.repeat(2001) }));
+    await assertFails(alice.doc('schools/pu/cafeterias/cafe-1/posts/missing/comments/orphan').set(normal));
+
+    await assertSucceeds(own.update({ text: 'Edited by author', updatedAt: serverTimestamp() }));
+    await assertFails(own.update({ authorId: 'bob' }));
+    await assertFails(own.update({ createdAt: serverTimestamp() }));
+    await assertFails(own.update({ isOfficial: true }));
+    await assertFails(own.update({ text: '' }));
+    await assertFails(own.update({ text: 'x'.repeat(2001) }));
+    await assertFails(bob.doc(own.path).update({ text: 'Peer changed the comment' }));
+    await assertFails(bob.doc(own.path).delete());
+    await assertSucceeds(mallory.doc(comments + '/cross-campus').set({
+      authorId: 'mallory', text: 'Visible public restaurant comment',
+    }));
+
+    // The same SDK identity cannot write after account suspension; a
+    // previously built request is not an authorization grant.
+    await seedFirestore(async (db) => db.doc('users/alice').update({ status: 'suspended' }));
+    await assertFails(own.update({ text: 'Stale replay' }));
+    await assertFails(own.delete());
+    await seedFirestore(async (db) => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(own.update({ text: 'Reactivated author' }));
+    await assertSucceeds(own.delete());
+  });
+
   test('conversation presence and read markers cannot impersonate a peer or overwrite races', async () => {
     const conversation = 'conversations/presence-pu';
     await seedFirestore(async (db) => {
