@@ -222,6 +222,51 @@ it('marks announcements incomplete when the general feed fails despite dedicated
   ]);
 });
 
+it('retries incomplete course content after one minute even when an old cache has a longer TTL', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: true, value: [LMS_FIXTURE_MATERIAL] }
+      : { ok: false, status: 503 });
+
+  const first = await (await request({ courseId: 10001 })).json();
+  expect(first.result.materials).toHaveLength(1);
+  expect(first.result.courseErrors).toEqual([
+    expect.objectContaining({ area: 'materials', status: 503 }),
+    expect.objectContaining({ area: 'announcements', status: 503 }),
+  ]);
+
+  type CachedExtra = { fetchedAt: string; expiresAt: string; errors: unknown[] };
+  const extras = store.docs.get(CACHE)!.extras as Record<string, CachedExtra>;
+  const partial = extras['10001'];
+  expect(partial.errors).toHaveLength(2);
+  const partialTtl = Date.parse(partial.expiresAt) - Date.parse(partial.fetchedAt);
+  expect(partialTtl).toBeGreaterThan(58_000);
+  expect(partialTtl).toBeLessThanOrEqual(60_000);
+  expect(Date.parse(first.result.cache.expiresAt) - Date.parse(partial.fetchedAt))
+    .toBeGreaterThan(60_000);
+
+  vi.mocked(source.fetchActivities).mockClear().mockResolvedValue({
+    ok: true, value: [LMS_FIXTURE_MATERIAL],
+  });
+  const cached = await (await request({ courseId: 10001 })).json();
+  expect(cached.result.cache.hit).toBe(true);
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+
+  // Simulate a legacy partial document that kept the full TTL. Even if its
+  // stored expiresAt is in the future, its 60-second retry window has elapsed.
+  partial.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  partial.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  const recovered = await (await request({ courseId: 10001 })).json();
+  expect(recovered.result.cache.hit).toBe(false);
+  expect(recovered.result.courseErrors).toEqual([]);
+  expect(recovered.result.materials).toHaveLength(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+  const fresh = (store.docs.get(CACHE)!.extras as Record<string, CachedExtra>)['10001'];
+  expect(fresh.errors).toEqual([]);
+  expect(Date.parse(fresh.expiresAt) - Date.parse(fresh.fetchedAt)).toBeGreaterThan(580_000);
+});
+
 it('does not cache partial materials when the filtered courseware feed rejects the session', async () => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
