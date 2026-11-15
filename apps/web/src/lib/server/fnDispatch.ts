@@ -35,6 +35,8 @@ const CORS_ALLOW_HEADERS =
 const dormRateLimit = createUidRateLimiter({ requestsPerMinute: 240 });
 
 const MAX_BODY_BYTES = 64 * 1024;
+// The photo handler accepts 8 MiB of base64; reserve a bounded JSON envelope.
+const DORM_MAX_BODY_BYTES = 8 * 1024 * 1024 + MAX_BODY_BYTES;
 
 export type FnRuntime = {
   db: import('./groupInviteHandlers').GroupFirestore;
@@ -105,7 +107,7 @@ async function verifyCallableAuth(
   }
 }
 
-async function readJsonBody(request: Request): Promise<unknown> {
+async function readJsonBody(request: Request, maxBodyBytes = MAX_BODY_BYTES): Promise<unknown> {
   const contentType = String(request.headers.get('content-type') || '')
     .split(';')[0]
     .trim()
@@ -116,7 +118,7 @@ async function readJsonBody(request: Request): Promise<unknown> {
   if (!request.body) return undefined;
   let raw: Buffer;
   try {
-    raw = await boundedBytes(request, MAX_BODY_BYTES);
+    raw = await boundedBytes(request, maxBodyBytes);
   } catch (error) {
     if (error instanceof NuniError && error.code === 'BODY_TOO_LARGE') {
       throw new HttpsError('invalid-argument', 'Request body too large');
@@ -278,7 +280,9 @@ export async function dispatchFnRequest(
 
   let uid: string | undefined;
   try {
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(
+      request, name === 'dormWorkflow' ? DORM_MAX_BODY_BYTES : MAX_BODY_BYTES,
+    );
     if (!body || typeof body !== 'object' || Array.isArray(body) || !('data' in body)) {
       throw new HttpsError('invalid-argument', 'Request body is missing data.');
     }

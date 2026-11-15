@@ -137,3 +137,55 @@ it('uses Admin Storage for authenticated uploads and owner-only signed photo rea
   expect((await call({ action: 'repairPhoto', id: 'photo-ticket', index: 0 })).status).toBe(403);
   expect(getSignedUrl).toHaveBeenCalledTimes(1);
 });
+
+it('accepts a 6 MiB photo plus its JSON envelope through the hosted entry', async () => {
+  const bytes = Buffer.alloc(6 * 1024 * 1024, 97);
+  const save = vi.fn(async (bytes: Buffer, options: unknown) => ({ bytes, options }));
+  const file = vi.fn(() => ({ save }));
+  const bucket = vi.fn(() => ({ file }));
+  storage.getStorage.mockReturnValueOnce({ bucket } as never);
+  const { call, verifyIdToken } = fixture();
+  const response = await call({
+    action: 'uploadPhoto', base64: bytes.toString('base64'), contentType: 'image/jpeg',
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ result: { path: expect.stringMatching(/^dorm-private\//) } });
+  expect(verifyIdToken).toHaveBeenCalledWith('fixture-token', true);
+  expect(save).toHaveBeenCalledOnce();
+  const [savedBytes, options] = save.mock.calls[0];
+  expect(savedBytes.equals(bytes)).toBe(true);
+  expect(options).toMatchObject({ resumable: false });
+});
+
+it('still requires auth for photo bodies larger than 64 KiB', async () => {
+  const { call, verifyIdToken } = fixture();
+  const response = await call({
+    action: 'uploadPhoto', base64: 'YWFh'.repeat(32 * 1024), contentType: 'image/jpeg',
+  }, 'invalid');
+  expect(response.status).toBe(401);
+  expect(verifyIdToken).toHaveBeenCalledWith('invalid', true);
+});
+
+it('cancels dorm bodies above 8 MiB plus 64 KiB before authenticating', async () => {
+  const { store, verifyIdToken } = fixture();
+  let chunksRead = 0;
+  const cancel = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      chunksRead += 1;
+      controller.enqueue(new Uint8Array(64 * 1024));
+    },
+    cancel,
+  }, { highWaterMark: 0 });
+  const response = await dispatchFnRequest('dormWorkflow', new Request('https://nuni.tw/api/fn/dormWorkflow', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer fixture-token' },
+    body: stream,
+    duplex: 'half',
+  } as RequestInit), { db: store.db as FnRuntime['db'], verifyIdToken });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { message: 'Request body too large' } });
+  expect(chunksRead).toBe(130);
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(verifyIdToken).not.toHaveBeenCalled();
+});
