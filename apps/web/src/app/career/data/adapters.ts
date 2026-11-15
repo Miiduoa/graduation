@@ -100,16 +100,54 @@ export function parseTaiwanJobs(xml: string): CareerJob[] {
     })
     .slice(0, 10);
 }
-async function getText(url: string) {
-  const response = await fetch(url, {
-    signal: AbortSignal.timeout(10000),
-    redirect: 'error',
-    cache: 'no-store',
-  });
-  if (!response.ok) throw new Error('source unavailable');
-  const raw = await response.text();
-  if (raw.length > 2_000_000) throw new Error('oversized source');
-  return raw;
+// Preserve the original response.text().length limit (UTF-16 code units).
+export const CAREER_SOURCE_LIMIT = 2_000_000;
+// UTF-8 needs at most three bytes per code unit, plus an optional stripped BOM.
+const CAREER_SOURCE_BYTE_LIMIT = CAREER_SOURCE_LIMIT * 3 + 3;
+export async function getText(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'error',
+      cache: 'no-store',
+    });
+    if (!response.ok || !response.body) throw new Error('source unavailable');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let size = 0;
+    let raw = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > CAREER_SOURCE_BYTE_LIMIT) {
+          controller.abort();
+          await reader.cancel();
+          throw new Error('oversized source');
+        }
+        raw += decoder.decode(value, { stream: true });
+        if (raw.length > CAREER_SOURCE_LIMIT) {
+          controller.abort();
+          await reader.cancel();
+          throw new Error('oversized source');
+        }
+      }
+      raw += decoder.decode();
+      if (raw.length > CAREER_SOURCE_LIMIT) {
+        controller.abort();
+        await reader.cancel();
+        throw new Error('oversized source');
+      }
+      return raw;
+    } finally {
+      reader.releaseLock();
+    }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 export async function loadCareerFeed(): Promise<CareerFeed> {
   const [results, jobs] = await Promise.all([
