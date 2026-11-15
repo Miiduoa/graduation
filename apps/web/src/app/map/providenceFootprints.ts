@@ -267,10 +267,38 @@ function heightFromOsmTags(value: unknown):
     ? { heightMeters: height, heightBasis: 'osm-tag' } : null;
 }
 
+/** A node ID identifies one global OSM coordinate, including when two
+ * separately audited campus building ways share a wall. An Overpass response
+ * assigning different positions to the same node cannot describe a valid map.
+ * Reject the whole inconsistent snapshot rather than selecting a building by
+ * response order. Unknown ways and legacy geometry-only ways are not promoted.
+ */
+function hasConsistentAuditedNodePositions(elements: unknown[]): boolean {
+  const positions = new Map<number, [number, number]>();
+  for (const candidate of elements) {
+    const way = object(candidate);
+    if (!way || way.type !== 'way' || typeof way.id !== 'number' ||
+        !knownWays.has(way.id) || way.nodes === undefined) continue;
+    if (!Array.isArray(way.nodes) || !Array.isArray(way.geometry) ||
+        way.nodes.length !== way.geometry.length) return false;
+    for (let index = 0; index < way.nodes.length; index += 1) {
+      const id = way.nodes[index];
+      const point = safeCoordinate(way.geometry[index]);
+      if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0 ||
+          !point) return false;
+      const previous = positions.get(id);
+      if (previous && (previous[0] !== point[0] || previous[1] !== point[1])) return false;
+      positions.set(id, point);
+    }
+  }
+  return true;
+}
+
 /** Overpass JSON：不接收動態 way ID、不猜位置、不補無來源的建築。 */
 export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
   if (!Array.isArray(data?.elements) || data.elements.length > MAX_WAYS) return [];
+  if (!hasConsistentAuditedNodePositions(data.elements)) return [];
   // A single OSM way cannot have two simultaneous outlines in one Overpass reply.
   // Failing closed avoids a forged/partial first entry winning merely by order,
   // even when its duplicate is missing tags or has invalid geometry.
