@@ -583,15 +583,18 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
 });
 
 it.each([
-  { status: 429, kind: 'delay-seconds' },
-  { status: 503, kind: 'HTTP-date' },
-])('does not repeatedly retry a rate-limited OSM source ($status, $kind)', async ({ status, kind }) => {
+  { status: 429, kind: 'delay-seconds', header: '600', minutes: 10 },
+  { status: 503, kind: 'HTTP-date', header: null, minutes: 10 },
+  { status: 429, kind: 'zero-padded delay-seconds', header: '00000600', minutes: 10 },
+  { status: 503, kind: 'long delay-seconds capped to 24h', header: '1000000', minutes: 1440 },
+])('does not repeatedly retry a rate-limited OSM source ($status, $kind)', async ({ status, kind, header, minutes }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-  // A gateway can respond with 429 rather than our API's usual 503, and an
-  // intermediary may format Retry-After as an HTTP-date. Both are synthetic.
+  // RFC 9110 permits leading zeroes and arbitrarily long digit strings.
+  // The client limits a genuine wait to 24h; these are synthetic responses,
+  // not observed Overpass headers.
   const retryAfter = kind === 'HTTP-date'
     ? new Date(Date.now() + 10 * 60_000).toUTCString()
-    : '600';
+    : header;
   const fetchMock = vi.fn().mockResolvedValue({
     ok: false, status,
     headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
@@ -601,7 +604,7 @@ it.each([
   const dialog = await open();
   const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
   await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-  expect(within(dialog).getByText(/約 10 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  expect(within(dialog).getByText(new RegExp(`約 ${minutes} 分鐘冷卻，到期後可再試`))).toBeTruthy();
   fireEvent.click(retry);
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).toHaveBeenCalledTimes(1);
