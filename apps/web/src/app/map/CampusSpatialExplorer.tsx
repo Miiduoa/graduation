@@ -180,6 +180,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           if (camera.zoom < MAX_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom * SPATIAL_ZOOM_FACTOR });
         }}>＋</button>
         <button className="btn" type="button" onClick={() => onCameraChange({ ...camera, bearing: 0 })}>回到北向</button>
+        <button className="btn" type="button" disabled={camera.zoom === 1}
+          onClick={() => onCameraChange({ ...camera, zoom: 1 })}>還原 100% 縮放</button>
         <span role="status" aria-live="polite" aria-atomic="true">縮放 {Math.round(camera.zoom * 100)}%</span>
         <span className={styles.compass}>
           <svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
@@ -190,7 +192,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           <span>畫面北向</span>
         </span>
       </div>
-      <p id={helpId} className={styles.note}>橫向拖曳旋轉；聚焦空間圖後，可用左右鍵旋轉、＋／− 縮放，Home 回到北向。</p>
+      <p id={helpId} className={styles.note}>橫向拖曳旋轉；聚焦空間圖後，可用左右鍵旋轉、＋／− 縮放，Home 回到北向，0 還原 100% 縮放。</p>
     </>}
     </>
   );
