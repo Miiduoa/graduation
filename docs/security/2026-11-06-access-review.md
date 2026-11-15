@@ -787,3 +787,9 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 **隔離回歸：** 在 `backend/tests/security-rules.test.js` 新增 Firebase Emulator 合成案例，覆蓋正常建立與編輯、跨校公開留言與訪客拒絕、冒用作者、夾帶管理欄位、偽造建立時間、空字串與超長輸入、失聯父貼文、他人修改／刪除、停權後同一登入 context 重放及恢復。**新精確 head 的主 CI、CodeQL、相關工作流需依實際 GitHub 結果核對；本記錄不預先宣稱通過。**
 
 **截至變更前核對：** `cc7a0a2acbaf4ca551794810a55b08827c5d4fc3` 的主 CI #43678048016、CodeQL #43678048018、Course access #43678048047 均 completed/success；主線 `5d371af2e85a0e45cf8d05248d4a42ef847111a2`，PR 相對 main ahead 35/behind 13，reviews 0、未解決 threads 0，指定 nuni-merge-gate App 5504170 未有該 head 的 APPROVED。本變更不解決未發布群組父貼文 get/list、已簽發 GCS/Supabase URL 撤銷、真隔離 Storage CAS、歷史附件引用、minimatch 雙鎖檔及正式發布回復驗收。保持 Draft；不觸碰正式資料、憑證、token、migration、部署、E 校園，不執行受限的 npm/pnpm audit。
+
+### 2026-11-15 08:53 UTC｜PR #577 新留言權限回歸 CI 修正
+
+**精確原 head：** `c8ebd45b7bbe50644e8c0ccd416d8317a07dc47f`；[CI #43696250184](https://github.com/Miiduoa/graduation/actions/runs/43696250184) 的 Firestore Rules job #132757315268 已 `completed/failure`，Node emulator 337 項中 336 pass／1 fail。失敗唯一案例 `storefront comment author and moderation fields cannot be forged or replayed`，log 指向 Firestore 規則第 681 行的 update 權限拒絕。原測試先用 `updatedAt: serverTimestamp()` 成功編輯，再於停權解除後只更新 `text`，沿用舊 `updatedAt`，未符合新安全規則的更新時間檢查。這是回歸 fixture 未符合規則，不應為測試放寬生產權限。
+
+**最小修補：** 只修改同一測試的停權後重放及恢復正常寫入，各自都附 `updatedAt: serverTimestamp()`；因此停權後拒絕不會被缺少時間戳的輸入預先拒絕所掩蓋，恢復後使用有效輸入。原規則、Web/Mobile 既有建立流程與所有其他安全案例維持不變。修補後 CI 結果須以**新精確 head**核對；沒有本地完整 emulator 套件，不宣稱修補後全綠。對指定 nuni-merge-gate App 5504170 核可、GCS/Supabase 舊 URL 撤銷、未發布群組父貼文、正式部署與 E 校園連線的限制不變。

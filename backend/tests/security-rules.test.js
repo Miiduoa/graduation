@@ -147,10 +147,10 @@ describe('firestore security rules', () => {
     // The same SDK identity cannot write after account suspension; a
     // previously built request is not an authorization grant.
     await seedFirestore(async (db) => db.doc('users/alice').update({ status: 'suspended' }));
-    await assertFails(own.update({ text: 'Stale replay' }));
+    await assertFails(own.update({ text: 'Stale replay', updatedAt: serverTimestamp() }));
     await assertFails(own.delete());
     await seedFirestore(async (db) => db.doc('users/alice').update({ status: 'active' }));
-    await assertSucceeds(own.update({ text: 'Reactivated author' }));
+    await assertSucceeds(own.update({ text: 'Reactivated author', updatedAt: serverTimestamp() }));
     await assertSucceeds(own.delete());
   });
 
