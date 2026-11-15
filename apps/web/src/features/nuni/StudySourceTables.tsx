@@ -198,10 +198,25 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
   );
 }
 
+/** Select only the source's original table lines; never reserialize hidden cells. */
+function tableSourceSelection(lines: string[], table: StudySourceTable): string {
+  const start = table.startLine - 1;
+  const end = start + table.rows.length + 2;
+  const selected = lines.slice(start, end);
+  // The final CR belongs to the CRLF *after* this table, not to its last cell.
+  // Keep the exact CRLF separators between the selected lines.
+  if (end < lines.length && selected.length) {
+    const last = selected.length - 1;
+    if (selected[last].endsWith('\r')) selected[last] = selected[last].slice(0, -1);
+  }
+  return selected.join('\n');
+}
+
 /** Optional accessible table layout derived solely from the exact source text. */
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   if (!tables.length) return null;
+  const sourceLines = text.split('\n');
 
   return (
     <section className={styles.sourceTableGroup} aria-label="教材原文表格">
@@ -228,6 +243,20 @@ export function StudySourceTables({ text }: { text: string }) {
                     : <td key={column}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
+          <details className={styles.sourceTableSelection}>
+            <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
+            <p className={styles.note}>
+              這是教材原始 Markdown 行，保留原本的欄名與換行。
+              可用手機長按或鍵盤選取複製，不需剪貼簿權限。
+            </p>
+            <textarea
+              aria-label={'原文表格 ' + (index + 1) + ' 的可選取文字'}
+              readOnly
+              spellCheck={false}
+              rows={Math.min(8, table.rows.length + 2)}
+              value={tableSourceSelection(sourceLines, table)}
+            />
+          </details>
           <StudySourceValueComparison table={table} />
           <StudySourcePercentComparison table={table} />
         </div>

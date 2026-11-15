@@ -1041,3 +1041,45 @@ it('still compares actual counts of ratings and other measurable quantities', ()
     unmount();
   }
 });
+
+
+it('lets students select verbatim Markdown table lines, including CRLF and escaped pipes', () => {
+  const original = [
+    '閱讀前言，這行不能加入複製範圍。',
+    '| 課程 | 學分 |',
+    '| :--- | ---: |',
+    '| SQL \\| NoSQL | 3 |',
+    '| 網頁程式 | 2 |',
+    '結尾不是表格。',
+  ].join('\r\n');
+  const { container } = render(<StudySourceTables text={original} />);
+  const field = container.querySelector('textarea');
+  expect(field?.readOnly).toBe(true);
+  expect(field?.getAttribute('aria-label')).toBe('原文表格 1 的可選取文字');
+  expect(field?.value).toBe([
+    '| 課程 | 學分 |',
+    '| :--- | ---: |',
+    '| SQL \\| NoSQL | 3 |',
+    '| 網頁程式 | 2 |',
+  ].join('\r\n'));
+  expect(field?.value).not.toContain('閱讀前言');
+  expect(field?.value).not.toContain('結尾');
+});
+
+it('selects only visible original Markdown, never HTML-hidden teacher answers', () => {
+  const material = [
+    '<div hidden>',
+    '| 未公布答案 | 分數 |',
+    '| --- | --- |',
+    '| 秘密 | 999 |',
+    '</div>',
+    '| 正式科目 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(container.querySelectorAll('textarea')).toHaveLength(1);
+  const field = container.querySelector('textarea');
+  expect(field?.value).toBe('| 正式科目 | 學分 |\n| --- | --- |\n| 資料庫 | 3 |');
+  expect(field?.value).not.toContain('秘密');
+});
