@@ -1109,3 +1109,33 @@ it('still compares explicitly named elapsed hours rather than disabling useful d
     unmount();
   }
 });
+
+it('keeps calendar dates, timestamps and time-zone positions as source text, not ratio bars', () => {
+  // The integer 20 can be a calendar date or an offset, not twice the date or
+  // time-zone position of 10. Preserve the original table and source values.
+  for (const header of [
+    '日期', '截止日期', '到期日', '時間戳', '時間戳記', '時區偏移',
+    'Date', 'Due Date', 'Datetime', 'Timestamp', 'Unix Time',
+    'Unix Timestamp', 'POSIX Time', 'Epoch Seconds',
+    'UTC Offset', 'GMT Offset', 'Time Zone', 'Timezone',
+    'Day', 'Day of Month', '時間（UTC）',
+  ]) {
+    const material = ['| 範例 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 10 |', '| 乙 | 20 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
+      .toEqual(['10', '20']);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+  // Quantities still have a meaningful zero, even if they use time units.
+  for (const header of ['學習時數', 'Study Hours', 'Duration Minutes', 'Elapsed Days', 'Event Count']) {
+    const material = ['| 範例 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 10 |', '| 乙 | 20 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map(meter => [
+      meter.getAttribute('value'), meter.getAttribute('max'),
+    ])).toEqual([['10', '20'], ['20', '20']]);
+    unmount();
+  }
+});

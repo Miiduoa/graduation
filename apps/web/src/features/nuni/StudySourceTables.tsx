@@ -41,17 +41,20 @@ const DECIBEL_UNIT_COLUMN = /\bdB(?:A|C|FS|m|W)?\b/u;
 // Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
 // are not ratios; retain the original table without a zero-based chart.
 // Do not blacklist elapsed study hours or distances, which can be quantities.
+// Calendar ordinals, Unix/POSIX timestamps and UTC offsets also have no
+// meaningful multiplicative zero. A "Due Date" of 20 is not twice a "Due Date"
+// of 10; elapsed days and explicit durations remain eligible.
 const NON_RATIO_CLOCK_POSITION_COLUMN =
-  /(?:時刻|時間點|鐘點|開課時間|上課時間|下課時間|開始時間|結束時間|發車時間|抵達時間|到站時間|經度|緯度|經緯度|座標|坐標|海拔|標高)/u;
+  /(?:時刻|時間點|鐘點|開課時間|上課時間|下課時間|開始時間|結束時間|發車時間|抵達時間|到站時間|截止時間|時間戳(?:記)?|時區(?:偏移)?|日期|截止日|到期日|經度|緯度|經緯度|座標|坐標|海拔|標高)/u;
 const ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN =
-  /\b(?:time\s+of\s+day|clock\s+time|(?:start|end|departure|arrival|class)\s+time|latitude|longitude|coordinates?|altitude|elevation)\b/iu;
+  /\b(?:time\s+of\s+day|clock\s+time|(?:start|end|departure|arrival|class|due)\s+time|day\s+of\s+month|dates?|datetime|timestamp|(?:unix|posix)\s+(?:time|timestamp|epoch)|epoch\s+(?:seconds?|milliseconds?|time)|(?:utc|gmt)\s+offset|time\s*zone|timezone|latitude|longitude|coordinates?|altitude|elevation)\b/iu;
 
 // An unqualified "時間" / "Time" column can mean a clock reading or elapsed
 // duration. A zero-based bar silently assumes duration, which the material
 // has not established. Only explicitly named durations (e.g. 學習時數,
 // Study Hours) are eligible for a quantitative comparison.
 const AMBIGUOUS_TIME_COLUMN =
-  /^(?:時間|時段|time)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+  /^(?:時間|時段|日|日期|日期時間|time|date|day)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
 // GPA, exam scores, Likert ratings, IQ and index numbers are scale readings,
 // not quantities with a meaningful ratio to zero. A 4.0 GPA does not indicate

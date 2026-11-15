@@ -1219,3 +1219,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 教材表格的「時間」「時間（UTC）」「時段」或 "Time (UTC)" 欄位，即使寫 8、12，也可能是上午 8 點與 12 點，而非可從零比較的 8／12 小時。這次在可選原文數值比較中保守停用這類模糊欄位的 meter；仍完整保留原始表格與可選取的教材原文。
 - 明確寫出「學習時數」「Study Hours」「Duration Minutes」的純數值仍可產生比較，不將所有時間相關學習資料一律隱藏。新增 DOM 模擬瀏覽器正反回歸，檢查原表存在、模糊欄位無比例圖、明確時長仍保留，無新依賴、外部教材傳輸或 checkpoint 格式異動。
 - 本輪提交僅為程式與測試變更；正式 Vitest、精確 SHA 的 CI／CodeQL／指定 App 5504170 APPROVED、iOS Safari／Android Chrome／Maestro 真機與 Ahaboard 同教材同裝置比較仍須單獨驗證。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-15：日曆日期、Unix 時戳與時區位移不再誤當倍數圖
+
+- 原文表格若以裸整數表示「日期、截止日、時間戳記、時區偏移、Date、Due Date、Timestamp、Unix/POSIX Time、Epoch Seconds、UTC Offset、Day of Month」等位置或序數，原可選 meter 可能把 10 和 20 畫成一半與滿格，錯誤暗示日期或時區存在兩倍關係。現在僅保留逐字原文表格、原數值與可手動選取的原始 Markdown，不再為這些欄位產生零起點比例圖。
+- 保留「學習時數、Study Hours、Duration Minutes、Elapsed Days、Event Count」等真正時長／計數數值比較；新增模擬 DOM 正反測試，不新增套件、不改教材內容、筆記、v1/v2 閱讀／逐題 checkpoint，也不外傳資料。這不是日期推理、圖像圖表理解或真機驗收。
+- 正式 Vitest、Web/Mobile CI、CodeQL、指定 GitHub App 5504170 的明確 APPROVED、Maestro、iOS Safari／Android Chrome，以及 Ahaboard 同教材同題同裝置驗收，仍需依此精確 SHA 重新確認。PR 保持 Draft，不合併、不部署。
