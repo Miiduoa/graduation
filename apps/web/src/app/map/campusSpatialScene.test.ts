@@ -613,6 +613,11 @@ describe('controlled spatial camera input', () => {
     expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(MIN_SPATIAL_ZOOM);
     keyboard(container, 'Home');
     expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: MIN_SPATIAL_ZOOM });
+    expect(keyboard(container, '0').defaultPrevented).toBe(true);
+    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: 1 });
+    const callsAtNormalZoom = onCameraChange.mock.calls.length;
+    keyboard(container, '0');
+    expect(onCameraChange).toHaveBeenCalledTimes(callsAtNormalZoom);
     drawFrame();
     expect(frames.size).toBe(0);
     expect(document.activeElement).toBe(container);
@@ -623,7 +628,7 @@ describe('controlled spatial camera input', () => {
     drawFrame();
     const button = [...container.querySelectorAll('button')].find((label) => !label.hidden)!;
     button.focus();
-    for (const key of ['ArrowLeft', '+', 'Home']) expect(keyboard(button, key).defaultPrevented).toBe(false);
+    for (const key of ['ArrowLeft', '+', 'Home', '0']) expect(keyboard(button, key).defaultPrevented).toBe(false);
     button.click();
     expect(onSelect).toHaveBeenCalledTimes(1);
     const select = document.createElement('select');
@@ -639,6 +644,7 @@ describe('controlled spatial camera input', () => {
     container.focus();
     for (const init of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
       expect(keyboard(container, '+', init).defaultPrevented).toBe(false);
+      expect(keyboard(container, '0', init).defaultPrevented).toBe(false);
     }
     for (const key of ['ArrowUp', 'ArrowDown', 'Escape', 'Tab']) {
       expect(keyboard(container, key).defaultPrevented).toBe(false);
