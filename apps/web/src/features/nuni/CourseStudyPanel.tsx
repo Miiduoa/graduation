@@ -115,7 +115,10 @@ type StudyTextEncoding = 'utf-8' | 'big5';
 // plausible, valid-looking paragraph. Always decode the original bytes for
 // both private lessons and progress backups. A genuine UTF-8 U+FFFD remains
 // valid, while legacy WebViews can use their on-device FileReader fallback.
-async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
+async function readStudyFileBytes(file: File, signal?: AbortSignal): Promise<ArrayBuffer> {
+  // A cancelled import must never start another on-device read, especially
+  // after a WebView's non-cancellable Blob.arrayBuffer() finally settles.
+  if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
   // A mobile WebView can resolve arrayBuffer() with valid UTF-8 that is
   // silently shorter than the chosen file. A plausible truncated lesson or
   // syntactically valid JSON must not replace the student's actual source.
@@ -123,34 +126,62 @@ async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
   if (typeof file.arrayBuffer === 'function') {
     try {
       const bytes = await file.arrayBuffer();
+      if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
       if (bytes instanceof ArrayBuffer && bytes.byteLength === file.size) return bytes;
     } catch { /* Fall through to the native on-device FileReader. */ }
   }
+  if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
   if (typeof FileReader !== 'function') throw new Error('No local binary file reader');
 
   return new Promise<ArrayBuffer>((resolve, reject) => {
+    let reader: FileReader;
     try {
-      const reader = new FileReader();
-      reader.onload = () => {
-        // FileReader is the final local fallback: never accept a short/extra
-        // buffer as if it were the complete on-disk lesson or progress JSON.
-        if (reader.result instanceof ArrayBuffer && reader.result.byteLength === file.size)
-          resolve(reader.result);
-        else reject(new Error('Incomplete local file reader result'));
-      };
-      reader.onerror = () => reject(reader.error ?? new Error('Local file reader failed'));
-      reader.onabort = () => reject(new Error('Local file reader aborted'));
-      reader.readAsArrayBuffer(file);
+      reader = new FileReader();
     } catch (error) {
       reject(error);
+      return;
     }
+    let settled = false;
+    const cleanup = () => {
+      signal?.removeEventListener('abort', cancel);
+      reader.onload = null;
+      reader.onerror = null;
+      reader.onabort = null;
+    };
+    const settle = (bytes?: ArrayBuffer, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(bytes!);
+    };
+    const cancel = () => {
+      // Abort the underlying local read, not just the React spinner. This
+      // prevents cancelled imports from consuming memory after a new choice.
+      try { if (reader.readyState === 1) reader.abort(); }
+      catch { /* A broken WebView abort must not strand the promise. */ }
+      settle(undefined, new DOMException('Local file read aborted', 'AbortError'));
+    };
+    reader.onload = () => {
+      // FileReader is the final local fallback: never accept a short/extra
+      // buffer as if it were the complete on-disk lesson or progress JSON.
+      if (reader.result instanceof ArrayBuffer && reader.result.byteLength === file.size)
+        settle(reader.result);
+      else settle(undefined, new Error('Incomplete local file reader result'));
+    };
+    reader.onerror = () => settle(undefined, reader.error ?? new Error('Local file reader failed'));
+    reader.onabort = () => settle(undefined, new DOMException('Local file read aborted', 'AbortError'));
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) { cancel(); return; }
+    try { reader.readAsArrayBuffer(file); }
+    catch (error) { settle(undefined, error instanceof Error ? error : new Error('Local file reader failed')); }
   });
 }
 
-async function readStudyStrictUtf8Bytes(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+async function readStudyStrictUtf8Bytes(file: File, purpose: '教材' | '進度備份', signal?: AbortSignal): Promise<string> {
   let raw: ArrayBuffer;
   try {
-    raw = await readStudyFileBytes(file);
+    raw = await readStudyFileBytes(file, signal);
   } catch {
     throw new Error(`這個瀏覽器無法讀取${purpose}，目前教材與筆記仍保留。請改用支援檔案讀取的瀏覽器。`);
   }
@@ -161,18 +192,18 @@ async function readStudyStrictUtf8Bytes(file: File, purpose: '教材' | '進度�
   }
 }
 
-async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份', signal?: AbortSignal): Promise<string> {
   // Do not trust File.text() even when it has no replacement glyph: a broken
   // WebView may return altered but syntactically valid lesson text. The native
   // byte reader has a local FileReader fallback and never uploads the file.
-  return readStudyStrictUtf8Bytes(file, purpose);
+  return readStudyStrictUtf8Bytes(file, purpose, signal);
 }
 // Legacy Taiwanese course notes may use Big5. Decode only when the student
 // explicitly selects it; do not guess and silently replace invalid bytes.
-async function readStudyTextFile(file: File, encoding: StudyTextEncoding): Promise<string> {
-  if (encoding === 'utf-8') return readStudyUtf8File(file, '教材');
+async function readStudyTextFile(file: File, encoding: StudyTextEncoding, signal?: AbortSignal): Promise<string> {
+  if (encoding === 'utf-8') return readStudyUtf8File(file, '教材', signal);
   try {
-    return new TextDecoder('big5', { fatal: true }).decode(await readStudyFileBytes(file));
+    return new TextDecoder('big5', { fatal: true }).decode(await readStudyFileBytes(file, signal));
   } catch {
     throw new Error('無法以繁體中文 Big5 讀取此檔案；原教材與筆記仍保留。請確認檔案編碼，或轉成 UTF-8 後重試。');
   }
@@ -761,7 +792,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       if (!/\.json$/i.test(file.name)) throw new Error('請選擇之前儲存的 nuni 讀書白板進度檔（JSON）。');
       if (!file.size || file.size > COURSE_STUDY_PROGRESS_LIMITS.bytes)
         throw new Error('請選擇有內容且不超過 8 MiB 的閱讀進度檔。');
-      const text = await readStudyUtf8File(file, '進度備份');
+      const text = await readStudyUtf8File(file, '進度備份', controller.signal);
       if (read.current !== controller || controller.signal.aborted) return;
       const { progress, round } = decodeStudyBackup(text, scope);
       setRestorePreview({ filename: file.name, progress, round, origin: 'file' });
@@ -867,7 +898,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         throw new Error('TXT／Markdown 檔案超過 60,000 字元的可讀取範圍，尚未載入內容。請分章後重試。');
       const value = /\.pdf$/i.test(file.name)
         ? studySourceFromDocument(await readPersonalImportDocumentFile(file, controller.signal))
-        : studySourceFromText({ id: 'local-text', title: file.name, text: await readStudyTextFile(file, textEncoding) });
+        : studySourceFromText({ id: 'local-text', title: file.name, text: await readStudyTextFile(file, textEncoding, controller.signal) });
       if (read.current !== controller || controller.signal.aborted) return;
       requestSourceReplacement(value, false);
     } catch (failure) {

@@ -2599,3 +2599,63 @@ it('uses full FileReader bytes when mobile arrayBuffer returns a shorter but val
     else Reflect.deleteProperty(window.navigator, 'clipboard');
   }
 });
+
+it('cancelling a native FileReader backup read aborts actual device work and keeps unsaved notes', async () => {
+  const nativeReader = globalThis.FileReader;
+  const abort = vi.fn();
+  class PendingReader {
+    readyState = 0;
+    result: ArrayBuffer | null = null;
+    error: Error | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    readAsArrayBuffer() { this.readyState = 1; }
+    abort() { abort(); this.readyState = 2; this.onabort?.(); }
+  }
+  vi.stubGlobal('FileReader', PendingReader);
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '手機讀檔前的未備份筆記' } });
+    const file = new File(['{"version":1}'], '等待中的進度.json', { type: 'application/json' });
+    Object.defineProperty(file, 'arrayBuffer', { value: undefined });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    expect(screen.getByRole('button', { name: '取消讀取' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    expect(abort).toHaveBeenCalledOnce();
+    expect(note.value).toBe('手機讀檔前的未備份筆記');
+    expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+    expect(screen.getByText(material.body)).toBeTruthy();
+  } finally {
+    vi.stubGlobal('FileReader', nativeReader);
+  }
+});
+
+it('cancelled Blob.arrayBuffer does not start a fallback FileReader after a late malformed response', async () => {
+  let release!: (buffer: ArrayBuffer) => void;
+  const nativeReader = globalThis.FileReader;
+  const newReader = vi.fn();
+  vi.stubGlobal('FileReader', class {
+    constructor() { newReader(); }
+  });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '切換檔案前的筆記' } });
+    const file = new File(['{"version":1}'], '等待中的進度.json', { type: 'application/json' });
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: () => new Promise<ArrayBuffer>((resolve) => { release = resolve; }),
+    });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    await act(async () => release(new TextEncoder().encode('short').buffer));
+    expect(newReader).not.toHaveBeenCalled();
+    expect(note.value).toBe('切換檔案前的筆記');
+    expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+  } finally {
+    vi.stubGlobal('FileReader', nativeReader);
+  }
+});

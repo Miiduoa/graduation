@@ -1286,3 +1286,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 若某些行動 WebView 的 `Blob.arrayBuffer()` **正常 resolve 但位元組少於原檔案**，縮短後的文字仍可能是合法 UTF-8，甚至是格式完整、內容卻已被截短或偷換的 JSON。現在會先將二進位結果長度與使用者選取的 `File.size` 精確比對，不相同則重新以裝置內建 `FileReader.readAsArrayBuffer()` 讀取**同一份檔案**；最後一條路徑長度也不符時拒收，不採用可疑資料，也不使用不可信的 `File.text()`。
 - 新增兩組模擬行動 WebView 的 DOM 回歸：UTF-8 教材只回傳合法但缺尾段的位元組時仍能載入真正全文；JSON 回傳**長度較短但語法合法的假筆記**時，還原預覽與明確確認後必須使用完整備份原文，並在確認前保留尚未備份的現有筆記。進度 v1/v2 與練習 checkpoint 不變，不新增套件／付費 API 或外傳私人教材。
 - 這項檢查僅能辨識位元組數量不一致，**不能證明相同長度的內容沒有遭改寫**，也不能代替真機驗收。精確新 SHA 的 CI/CodeQL、App 5504170 APPROVED、Maestro、iOS Safari／Android Chrome、WebGPU 中文教學及 Ahaboard 同題同教材同機對照仍須驗證；PR 繼續 Draft、不合併、不部署。
+
+
+### 2026-11-15：取消手機教材／進度讀取會真正停止 FileReader
+
+- 原本按「取消讀取」只停止顯示進度與忽略晚到結果，但舊版 WebView 的原生 `FileReader.readAsArrayBuffer()` 可能仍在背景讀取檔案。現在把每次來源與 JSON 進度選取的 `AbortSignal` 傳至本機位元組讀取，取消、切換來源或關閉白板時呼叫實際 `FileReader.abort()`，並清理事件監聽；即使 abort API 例外也會結束 Promise，不更動學生現有筆記。
+- 若 `Blob.arrayBuffer()` 本身不可取消，會在它完成後再次檢查 signal，避免已取消的短位元組結果啟動額外 FileReader 讀取。新增兩項 DOM／模擬 WebView 回歸，分別驗證真實原生讀取取消與晚到位元組不再啟動備援。這不是手機硬體性能或實機驗收結果。
+- 原文 UTF-8／手動 Big5、安全讀檔長度確認與備份格式維持不變。無新套件／遠端私人教材傳輸；新 head 的 CI／CodeQL、App 5504170、Maestro、iOS／Android 與 Ahaboard 仍需另驗，PR 維持 Draft、不合併、不部署。
