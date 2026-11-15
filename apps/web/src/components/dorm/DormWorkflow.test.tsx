@@ -22,11 +22,16 @@ const api = vi.hoisted(() => ({
     }[],
   },
 }));
-vi.mock('firebase/functions', () => ({
-  httpsCallable: () => async (data: Record<string, unknown>) => ({ data: await api.call(data) }),
+vi.mock('@/lib/firebase', () => ({
+  getAuth: () => ({ currentUser: { uid: 'fixture', getIdToken: async () => 'fixture-id-token' } }),
+  getCloudFunctionUrl: () => '/api/fn/dormWorkflow',
 }));
-vi.mock('@/lib/firebase', () => ({ getFunctionsInstance: () => ({}), getDb: () => ({ app: {} }) }));
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+    expect(url).toBe('/api/fn/dormWorkflow');
+    expect(init.headers.Authorization).toBe('Bearer fixture-id-token');
+    return { ok: true, json: async () => ({ result: await api.call(JSON.parse(init.body).data) }) };
+  }));
   api.config = { enabled: true, repairs: false, packages: false, admin: false };
   api.rows = { repairs: [], leaves: [], packages: [], residents: [] };
   api.call.mockImplementation(async (data) =>
@@ -40,6 +45,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 it('disabled school and guests have no submission or staff controls', async () => {
   api.config.enabled = false;
@@ -218,7 +224,8 @@ it('re-evaluates capabilities on account and school changes and ignores old resp
     return api.config;
   });
   view.rerender(<DormWorkflow schoolId="pu" uid="bob" />);
-  expect(screen.getByText('宿舍輔導員服務')).toBeTruthy();
+  expect(screen.queryByText('送給輔導員核可')).toBeNull();
+  await waitFor(() => expect(resolveOld).toBeTypeOf('function'));
   view.rerender(<DormWorkflow schoolId="ntnu" uid="bob" />);
   await waitFor(() => expect(api.call).toHaveBeenCalledWith({ action: 'mine', schoolId: 'ntnu' }));
   resolveOld({ enabled: false });
@@ -496,4 +503,32 @@ it('updates the overdue parcel list when a waiting parcel reaches three days', a
     clock.mockRestore();
     polling.mockRestore();
   }
+});
+
+it.each([false, true])('failed config hides all official forms (submitOnly=%s)', async (submitOnly) => {
+  api.call.mockRejectedValue(new Error('unavailable'));
+  render(<DormWorkflow schoolId="pu" uid="alice" submitOnly={submitOnly} />);
+  expect(await screen.findByText('宿舍服務暫時無法使用，請稍後再試。')).toBeTruthy();
+  expect(screen.queryByText('送給宿舍輔導員')).toBeNull();
+  expect(screen.queryByText('送給輔導員核可')).toBeNull();
+  expect(screen.queryByLabelText('外宿原因')).toBeNull();
+});
+
+it.each([0, 1])('reports announcement push delivery honestly (%i delivered)', async (delivered) => {
+  api.config.packages = true;
+  api.call.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? api.config
+      : ['mine', 'workspace'].includes(data.action)
+        ? api.rows
+        : { success: true, delivered, recipients: 1 },
+  );
+  render(<DormWorkflow schoolId="pu" uid="staff" />);
+  fireEvent.click(await screen.findByText('開啟輔導員工作台'));
+  fireEvent.click(await screen.findByText('住宿生'));
+  fireEvent.click(await screen.findByText('預覽公告'));
+  fireEvent.click(screen.getByText('確認發布本棟公告'));
+  expect(
+    await screen.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+  ).toBeTruthy();
 });

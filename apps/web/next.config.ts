@@ -69,7 +69,7 @@ const nextConfig: NextConfig = {
   // @huggingface/transformers 當 server external，不可再列入 transpilePackages，
   // 否則與 serverExternalPackages 衝突，Turbopack 建置會失敗。
   // 原生 Node 綁定不進瀏覽器包；權重也不進伺服器映像。
-  serverExternalPackages: ['onnxruntime-node', 'firebase-admin'],
+  serverExternalPackages: ['onnxruntime-node', 'firebase-admin', 'firebase-functions'],
   turbopack: {
     resolveAlias: {
       'onnxruntime-node': { browser: './src/lib/nodeNativeStub.ts' },
