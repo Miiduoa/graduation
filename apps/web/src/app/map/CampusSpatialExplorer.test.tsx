@@ -673,23 +673,33 @@ it.each([
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   });
 
-// These cases are synthetic proxy responses, not observations from Overpass.
+// These are synthetic intermediary 429s, not observations from Overpass.
+// 429 may omit Retry-After entirely; invalid/expired values also must not
+// invite a rapid manual retry loop. A one-minute client backoff protects the
+// API without treating malformed headers as arbitrary 24-hour lockouts.
 it.each([
   'Sun, 32 Nov 2026 01:02:03 GMT',
   'Sun, 01 Nov 2026 01:02:03 GMT',
   'not a date',
-])('ignores an invalid or expired HTTP-date Retry-After (%s)', async (retryAfter) => {
+  '0',
+  null,
+])('backs off a 429 without a usable Retry-After (%s)', async (retryAfter) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+  const fetchMock = vi.fn().mockResolvedValue({
     ok: false, status: 429,
     headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
-  }));
+  });
+  vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
-  expect(retry.hasAttribute('disabled')).toBe(false);
-  expect(within(dialog).queryByText(/分鐘冷卻/)).toBeNull();
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
 });
 
 it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
