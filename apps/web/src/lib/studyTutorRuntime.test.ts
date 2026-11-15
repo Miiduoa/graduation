@@ -1085,6 +1085,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'single-column Markdown answer table', question: '計算結果為何？\n| 正解 |\n| --- |\n| 1.2 |', answer: '1.2' },
     { label: 'bold key in a later table row', question: '請解釋。\n| 題型 | 參考回答 |\n| --- | --- |\n| 例題 | 其他 |\n| 練習 | **外鍵** |', answer: '外鍵' },
     { label: 'answer column on the left', question: '選哪個？\n| 正確選項 | 題號 |\n| --- | --- |\n| B | 第一題 |', answer: 'B' },
+    { label: 'Chinese heading without colon', question: '哪個欄位唯一識別紀錄？\n## 答案\n主鍵', answer: '主鍵' },
+    { label: 'English heading with CRLF and inline code', question: 'Which language?\r\n### Answer\r\n`SQL`', answer: 'SQL' },
+    { label: 'bold heading and blockquoted bullet', question: '哪種鍵連接另一張表？\n#### **參考回答**\n> - 外鍵', answer: '外鍵' },
+    { label: 'fenced answer under a Markdown heading', question: '選哪一項？\n## 正解\n~~~text\nB\n~~~', answer: 'B' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1166,6 +1170,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '是否正確？\n| 題目 | 正解 |\n| --- | --- |\n| 示例 | 12 |', answer: '1' },
     { question: '哪個欄位？\n| 題目 | Answer |\n| --- | --- |\n| 示例 | 主鍵 |', answer: '外鍵' },
     { question: '表格內容是什麼？\n| 術語 | 範例 |\n| --- | --- |\n| 語法 | SQL |', answer: 'SQL' },
+    { question: 'Which database?\n## Answer\nSQLServer', answer: 'SQL' },
+    { question: '算出哪個值？\n## 答案\n12', answer: '1' },
+    { question: '哪個概念？\n### **參考回答**\n其他概念', answer: '外鍵' },
+    { question: '標題中有 ## Answer 的例句如何理解？\nSQL', answer: 'SQL' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
     const valid = { ...lesson(), question, answer };
     const pending = runStudyTutor({

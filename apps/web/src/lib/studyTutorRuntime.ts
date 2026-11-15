@@ -175,7 +175,11 @@ function hasDisclosedGeneratedAnswerColumn(question: string, answer: string): bo
 // technical terms or mathematical givens without revealing the answer.
 // Validate NEW local generation only; saved v1/v2 lessons remain readable.
 function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
-  const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase();
+  // A heading such as "## 答案" without a colon is still an explicit
+  // answer key. Only rewrite exact standalone Markdown answer headings in
+  // this comparison copy; never mutate the learner-facing question or source.
+  const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase()
+    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：');
   const answer = comparableGeneratedTeaching(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
   // New Markdown tables may display an explicit answer key as "| 答案 | 主鍵 |".
