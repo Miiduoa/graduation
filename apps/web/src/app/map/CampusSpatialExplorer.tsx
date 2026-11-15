@@ -557,7 +557,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {footprintStatus === 'unavailable' && <>
                   <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
                   {footprintRetryAfter !== null && <span>
-                    來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
+                    為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
                   <button className={styles.retryFootprints} type="button"
                     disabled={footprintRetryAfter !== null}
@@ -574,7 +574,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     {footprintStale && <>
                       <span>目前使用有日期標註的舊輪廓，可手動檢查是否已有更新；原始地點與步行導航不受影響。</span>
                       {footprintRetryAfter !== null && <span>
-                        來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
+                        為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                       </span>}
                       {footprintRefreshing && <span>正在檢查更新，暫時保留舊輪廓。</span>}
                       {footprintRefreshFailed && !footprintRefreshing && <span>更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
