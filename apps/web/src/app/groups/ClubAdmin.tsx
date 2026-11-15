@@ -114,7 +114,7 @@ export function ClubBoard({
       {view && (
         <>
           <p>
-            身分：{view.role === 'owner' ? '會長' : officer ? '幹部' : '社員'} · 社員{' '}
+            身分：{view.role === 'owner' ? '社長' : officer ? '幹部' : '社員'} · 社員{' '}
             {view.members.length} 位{!view.rosterOnly && <> · 活動 {view.events.length} 場</>}
           </p>
           {officer && (
@@ -158,7 +158,7 @@ export function ClubBoard({
                       )}
                       {view.role === 'owner' && (
                         <td>
-                          {m.role !== '會長' && (
+                          {m.role !== '社長' && (
                             <button
                               className="btn"
                               disabled={busy}

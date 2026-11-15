@@ -72,6 +72,7 @@ export type CareerWorkbenchEvent = {
   source: 'school-club-events' | 'school-events';
 };
 export type WorkstudySnapshot = {
+  viewerRole?: string;
   events: CareerWorkbenchEvent[];
   opportunities: CareerOpportunity[];
   applications: CareerApplication[];

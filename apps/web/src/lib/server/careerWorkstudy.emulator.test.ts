@@ -236,17 +236,31 @@ suite('career transactions against the real Firestore emulator', () => {
         }),
       ).rejects.toMatchObject({ code: 'failed-precondition' });
       const reapplied = await command('student', apply());
-      expect(reapplied.id).toBe(created.id);
+      expect(reapplied.id).not.toBe(created.id);
+      expect((await command('student', apply())).id).toBe(reapplied.id);
+      expect(
+        (await command('student', { action: 'list', audience: 'student' })).snapshot?.applications,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: created.id,
+            state: 'withdrawn',
+            submittedAt: at,
+            updatedAt: at,
+          }),
+          expect.objectContaining({ id: reapplied.id, state: 'submitted', revision: 1 }),
+        ]),
+      );
       expect(
         (await db.doc(`schools/pu/careerApplications/${created.id}`).get()).data(),
-      ).toMatchObject({ state: 'submitted', revision: 3 });
+      ).toMatchObject({ state: 'withdrawn', revision: 2 });
       await db
-        .doc(`schools/pu/careerApplications/${created.id}`)
+        .doc(`schools/pu/careerApplications/${reapplied.id}`)
         .update({ state: 'interview', revision: 2 });
       await expect(
         command('student', {
           action: 'withdraw',
-          applicationId: created.id!,
+          applicationId: reapplied.id!,
           revision: 2,
         }),
       ).rejects.toMatchObject({ code: 'failed-precondition' });

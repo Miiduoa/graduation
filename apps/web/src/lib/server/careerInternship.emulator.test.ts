@@ -149,7 +149,7 @@ suite('internship real Firestore transactions', () => {
     await expect(
       call('student', { action: 'advisorSearch', keyword: '   ' }),
     ).rejects.toMatchObject({
-      message: '請輸入指導老師姓名或學校信箱。',
+      message: '請輸入指導老師姓名、學號或學校信箱。',
     });
     const search = await call('student', {
       action: 'advisorSearch',
@@ -160,6 +160,19 @@ suite('internship real Firestore transactions', () => {
         expect.objectContaining({ uid: 'advisor', name: '王指導', email: 'advisor@school.edu.tw' }),
       ]),
     );
+    await db.doc('users/advisor').set({ studentId: 'T0000001' });
+    await db.doc('schools/pu/members/student').update({ studentId: 'T0000001' });
+    const byId = await call('student', { action: 'advisorSearch', keyword: 'T0000001' });
+    expect(byId.snapshot?.advisors?.map((a) => a.uid)).toEqual(['advisor']);
+    for (const field of ['studentId', 'student_id', 'login']) {
+      for (const source of ['members', 'directory', 'users']) {
+        await db
+          .doc(source === 'users' ? 'users/advisor' : `schools/pu/${source}/advisor`)
+          .set({ [field]: 'T0000002' }, { merge: true });
+        const found = await call('student', { action: 'advisorSearch', keyword: 'T0000002' });
+        expect(found.snapshot?.advisors?.map((a) => a.uid)).toEqual(['advisor']);
+      }
+    }
     const byName = await call('student', { action: 'advisorSearch', keyword: '王' });
     expect(byName.snapshot?.advisors).toEqual(
       expect.arrayContaining([expect.objectContaining({ uid: 'advisor', name: '王指導' })]),
@@ -196,7 +209,7 @@ suite('internship real Firestore transactions', () => {
         teacherUid: 'other',
       }),
     ).rejects.toMatchObject({
-      message: '找不到這位本校指導老師，請改用姓名或學校信箱搜尋後選擇',
+      message: '找不到這位本校指導老師，請改用姓名、學號或學校信箱搜尋後選擇',
     });
   });
   it('revokes assigned teacher access after demotion while retaining own student access', async () => {

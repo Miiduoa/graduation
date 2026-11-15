@@ -449,3 +449,17 @@ test('withdrawn applications stay visible without staff review controls', async 
   expect(view.queryByText('改為單位已讀')).toBeNull();
   expect(view.queryByText('改為約面談')).toBeNull();
 });
+
+test('hides student work-study chrome for teachers without applications and keeps staff tools', async () => {
+  const { view, data, service } = setup();
+  data.viewerRole = 'teacher';
+  data.applications = [];
+  await waitFor(() => expect(service.load).toHaveBeenCalled());
+  await act(async () => {});
+  expect(view.queryByText('我的申請')).toBeNull();
+  expect(view.queryByText(/應徵/)).toBeNull();
+  view.unmount();
+  const staff = setup('staff');
+  staff.data.viewerRole = 'teacher';
+  await waitFor(() => expect(staff.view.getByText('新增機會')).toBeTruthy());
+});

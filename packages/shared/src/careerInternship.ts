@@ -35,6 +35,7 @@ export type InternshipRecord = {
 };
 export type InternshipAudit = { id: string; action: string; targetId: string; at: string };
 export type InternshipSnapshot = {
+  viewerRole?: string;
   rules: InternshipRule[];
   records: InternshipRecord[];
   audit: InternshipAudit[];

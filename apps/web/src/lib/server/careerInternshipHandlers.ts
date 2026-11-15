@@ -122,11 +122,16 @@ export function createCareerInternshipHandlers({
         uid: string,
         member: Record<string, unknown>,
         profile?: Record<string, unknown>,
+        user?: Record<string, unknown>,
       ) => ({
         uid,
         name: String(profile?.displayName || member.displayName || '').trim() || '姓名待確認',
         email: String(profile?.email || member.email || '').trim(),
         department: String(profile?.department || member.department || '').trim(),
+        identifier: [member, profile, user]
+          .flatMap((data) => [data?.studentId, data?.student_id, data?.login])
+          .filter(Boolean)
+          .join(' '),
       });
       const advisorRoles = ['teacher', 'staff', 'admin'];
       const isAdvisor = (data?: Record<string, unknown>) =>
@@ -141,6 +146,13 @@ export function createCareerInternshipHandlers({
           const snap = await tx.get(query.limit(20));
           snap.docs.forEach((doc) => ids.add(doc.id));
         };
+        for (const field of ['studentId', 'student_id', 'login']) {
+          for (const value of new Set([keyword, keyword.toUpperCase(), lowered])) {
+            await take(members.where(field, '==', value));
+            await take(directory.where(field, '==', value));
+            await take(db.collection('users').where(field, '==', value));
+          }
+        }
         if (isEmail) {
           const emails = Array.from(new Set([keyword, lowered]));
           for (const email of emails) {
@@ -167,27 +179,34 @@ export function createCareerInternshipHandlers({
         const refs = Array.from(ids).slice(0, 40);
         const memberDocs = await tx.getAll(...refs.map((id) => members.doc(id)));
         const profileDocs = await tx.getAll(...refs.map((id) => directory.doc(id)));
+        const userDocs = await tx.getAll(...refs.map((id) => db.collection('users').doc(id)));
         return memberDocs
           .map((doc, index) =>
             isAdvisor(doc.data())
               ? advisorView(
                   doc.id,
                   doc.data() as Record<string, unknown>,
-                  profileDocs[index]?.data(),
+                  {
+                    ...userDocs[index]?.data(),
+                    ...profileDocs[index]?.data(),
+                  },
+                  userDocs[index]?.data(),
                 )
               : null,
           )
           .filter((row): row is NonNullable<typeof row> => Boolean(row))
           .filter((row) => {
-            const haystack = `${row.name} ${row.email} ${row.department}`.toLocaleLowerCase(
-              'zh-TW',
-            );
+            const haystack =
+              `${row.name} ${row.email} ${row.department} ${row.identifier}`.toLocaleLowerCase(
+                'zh-TW',
+              );
             return isEmail
               ? haystack.includes(lowered)
               : haystack.includes(lowered) || row.name.startsWith(keyword);
           })
           .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
-          .slice(0, limit);
+          .slice(0, limit)
+          .map(({ uid, name, email, department }) => ({ uid, name, email, department }));
       };
       const audit = (action: string, targetId: string) =>
         tx.create(school.collection('adminLogs').doc(), {
@@ -258,19 +277,21 @@ export function createCareerInternshipHandlers({
             rules: ruleRows.docs.map((d) => ({ ...d.data(), id: d.id }) as InternshipRule),
             records: unique,
             audit: logs,
+            viewerRole: member.data()?.role,
             canManage: staff || departments.length > 0,
           },
         };
       }
       if (c.action === 'advisorSearch') {
         if (typeof c.keyword !== 'string' || !c.keyword.trim())
-          fail('invalid-argument', '請輸入指導老師姓名或學校信箱。');
+          fail('invalid-argument', '請輸入指導老師姓名、學號或學校信箱。');
         return {
           snapshot: {
             rules: [],
             records: [],
             audit: [],
             advisors: await loadAdvisors(c.keyword, Number(c.limit) || 20),
+            viewerRole: member.data()?.role,
             canManage: staff || departments.length > 0,
           },
         };
@@ -312,7 +333,7 @@ export function createCareerInternshipHandlers({
           teacher.data()?.status !== 'active' ||
           !['teacher', 'staff', 'admin'].includes(teacher.data()?.role)
         )
-          fail('invalid-argument', '找不到這位本校指導老師，請改用姓名或學校信箱搜尋後選擇');
+          fail('invalid-argument', '找不到這位本校指導老師，請改用姓名、學號或學校信箱搜尋後選擇');
         const record: InternshipRecord = {
           id: ref.id,
           uid,

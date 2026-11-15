@@ -370,6 +370,8 @@ function Workspace({
         </Card>
       </Box>
     );
+  if (audience === 'student' && snapshot?.viewerRole === 'teacher' && !snapshot.applications.length)
+    return null;
   return (
     <Box>
       <Heading>
