@@ -735,4 +735,78 @@ describe('story audience scope transitions', () => {
     view.unmount();
   });
 
+
+  test('an opened audience clears names and pagination once the story expires', async () => {
+    jest.useFakeTimers();
+    const cursor = { id: 'expiry-next-page' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers.mockResolvedValueOnce({
+      viewers: [{ uid: 'before-expiry', displayName: '到期前的觀看者' }],
+      nextCursor: cursor,
+    });
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt: Date.now() + 1_000 }} onBack={jest.fn()} />,
+    );
+    try {
+      await act(async () => { await Promise.resolve(); });
+      expect(view.getByText('到期前的觀看者')).toBeTruthy();
+      expect(view.getByText('載入更多觀看者')).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+        await Promise.resolve();
+      });
+      expect(view.queryByText('到期前的觀看者')).toBeNull();
+      expect(view.queryByText('載入更多觀看者')).toBeNull();
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+      expect(view.getByLabelText('重新整理觀看名單').props.disabled).toBe(true);
+      expect(fetchViewers).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      jest.useRealTimers();
+    }
+  });
+
+  test('an in-flight page cannot paint names after the story has expired', async () => {
+    jest.useFakeTimers();
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers.mockImplementationOnce(() => pending.promise);
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt: Date.now() + 1_000 }} onBack={jest.fn()} />,
+    );
+    try {
+      expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        pending.resolve({
+          viewers: [{ uid: 'late', displayName: '到期後才回應的姓名' }],
+          nextCursor: null,
+        });
+        await pending.promise;
+      });
+      expect(view.queryByText('到期後才回應的姓名')).toBeNull();
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+      expect(fetchViewers).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      jest.useRealTimers();
+    }
+  });
+
+  test('an already expired story never requests an audience page', () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt: Date.now() - 1_000 }} onBack={jest.fn()} />,
+    );
+    try {
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+      expect(fetchViewers).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+    }
+  });
+
 });
