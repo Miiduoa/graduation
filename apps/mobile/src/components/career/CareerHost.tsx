@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CAREER_EMPTY } from '@campus/shared/src/career';
 import { useAuth } from '../../state/auth';
 import { getAuthInstance as getAuth } from '../../firebase';
-import { Linking, Text } from 'react-native';
+import { Button, Linking, Text } from 'react-native';
 const getCloudFunctionUrl = (name: string) => `https://nuni.tw/api/fn/${name}`;
 import { loadPersonalTimetable } from '../../services/personalTimetable';
 import {
@@ -49,6 +49,8 @@ function Workspace({
   const [review, setReview] = useState(false);
   const [operate, setOperate] = useState(false);
   const [internshipStaff, setInternshipStaff] = useState(false);
+  const [staffProbeAttempt, setStaffProbeAttempt] = useState(0);
+  const [staffProbeRetryable, setStaffProbeRetryable] = useState(false);
   const ports = useMemo(
     () =>
       createPorts(uid, schoolId, (canReview, canOperate) => {
@@ -65,14 +67,21 @@ function Workspace({
       () => {
         if (live) setInternshipStaff(true);
       },
-      () => {},
+      (error: unknown) => {
+        if (live) {
+          setInternshipStaff(false);
+          setStaffProbeRetryable(
+            !(error instanceof Error && error.message === '目前沒有實習承辦權限。'),
+          );
+        }
+      },
     );
     return () => {
       live = false;
       controller.abort();
       ports.dispose();
     };
-  }, [ports]);
+  }, [ports, staffProbeAttempt]);
   const onLogin = () => {
     void Linking.openURL(`https://nuni.tw${loginUrl}`);
   };
@@ -85,7 +94,13 @@ function Workspace({
       audience={audience}
       loadCourses={ports.loadCourses}
       onLogin={onLogin}
-      onCareerEvents={() => {}}
+      onCareerEvents={({ event }) => {
+        const schoolSearch = `schoolId=${encodeURIComponent(schoolId)}`;
+        const path = event
+          ? `/events/${encodeURIComponent(event.id)}?${schoolSearch}&source=${event.source}`
+          : `/events?${schoolSearch}`;
+        void Linking.openURL(`https://nuni.tw${path}`);
+      }}
     />
   );
   const internship = (audience: 'student' | 'staff' | 'ops') => (
@@ -106,8 +121,17 @@ function Workspace({
       {internship('student')}
       {review && workstudy('staff')}
       {operate && workstudy('ops')}
+      {staffProbeRetryable && (
+        <Button
+          title="重新確認承辦權限"
+          onPress={() => {
+            setStaffProbeRetryable(false);
+            setStaffProbeAttempt((attempt) => attempt + 1);
+          }}
+        />
+      )}
       {internshipStaff && internship('staff')}
-      {operate && internship('ops')}
+      {internshipStaff && operate && internship('ops')}
     </>
   );
 }

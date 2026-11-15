@@ -12,6 +12,7 @@ import { createInternshipCallableTransport } from '@campus/shared/src/careerInte
 import { createCareerInternshipPorts } from './careerInternshipPorts';
 import { CareerWorkstudy } from './CareerWorkstudy';
 import { CareerInternship } from './CareerInternship';
+import { buildCampusEventListHref, buildCampusEventDetailHref } from '../events/eventPresentation';
 
 export function CareerHost({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
@@ -42,6 +43,8 @@ function Workspace({
   const [review, setReview] = useState(false);
   const [operate, setOperate] = useState(false);
   const [internshipStaff, setInternshipStaff] = useState(false);
+  const [staffProbeAttempt, setStaffProbeAttempt] = useState(0);
+  const [staffProbeRetryable, setStaffProbeRetryable] = useState(false);
   const ports = useMemo(
     () =>
       createPorts(uid, schoolId, (canReview, canOperate) => {
@@ -58,14 +61,21 @@ function Workspace({
       () => {
         if (live) setInternshipStaff(true);
       },
-      () => {},
+      (error: unknown) => {
+        if (live) {
+          setInternshipStaff(false);
+          setStaffProbeRetryable(
+            !(error instanceof Error && error.message === '目前沒有實習承辦權限。'),
+          );
+        }
+      },
     );
     return () => {
       live = false;
       controller.abort();
       ports.dispose();
     };
-  }, [ports]);
+  }, [ports, staffProbeAttempt]);
   const onLogin = () => {
     window.location.href = loginUrl;
   };
@@ -78,7 +88,12 @@ function Workspace({
       audience={audience}
       loadCourses={ports.loadCourses}
       onLogin={onLogin}
-      onCareerEvents={() => {}}
+      onCareerEvents={({ event }) => {
+        const schoolSearch = new URLSearchParams({ schoolId }).toString();
+        window.location.href = event
+          ? buildCampusEventDetailHref(event.id, event.source, schoolSearch)
+          : buildCampusEventListHref(schoolSearch);
+      }}
     />
   );
   const internship = (audience: 'student' | 'staff' | 'ops') => (
@@ -99,8 +114,19 @@ function Workspace({
       {internship('student')}
       {review && workstudy('staff')}
       {operate && workstudy('ops')}
+      {staffProbeRetryable && (
+        <button
+          type="button"
+          onClick={() => {
+            setStaffProbeRetryable(false);
+            setStaffProbeAttempt((attempt) => attempt + 1);
+          }}
+        >
+          重新確認承辦權限
+        </button>
+      )}
       {internshipStaff && internship('staff')}
-      {operate && internship('ops')}
+      {internshipStaff && operate && internship('ops')}
     </>
   );
 }
