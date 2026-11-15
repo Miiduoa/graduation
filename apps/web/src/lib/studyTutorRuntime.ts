@@ -179,7 +179,13 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   // answer key. Only rewrite exact standalone Markdown answer headings in
   // this comparison copy; never mutate the learner-facing question or source.
   const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase()
-    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：');
+    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
+    // A model can also place an unpunctuated key on its own line, inside a
+    // blockquote/list, or as "**答案** 主鍵". These still display the answer
+    // before the student can respond. Match only standalone answer-key labels,
+    // then use the same exact-answer boundary check below; a normal mention of
+    // "答案" in question prose must remain valid.
+    .replace(/(^|\r?\n)[ \t]*(?:>[ \t]*){0,2}(?:(?:[-+*•]|\d{1,2}[.)、])[ \t]+)?(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?(?=[ \t]*\r?\n|[ \t]+\S)/giu, '$1$2：');
   const answer = comparableGeneratedTeaching(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
   // New Markdown tables may display an explicit answer key as "| 答案 | 主鍵 |".

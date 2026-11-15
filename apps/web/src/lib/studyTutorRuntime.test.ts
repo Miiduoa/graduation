@@ -1089,6 +1089,12 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'English heading with CRLF and inline code', question: 'Which language?\r\n### Answer\r\n`SQL`', answer: 'SQL' },
     { label: 'bold heading and blockquoted bullet', question: '哪種鍵連接另一張表？\n#### **參考回答**\n> - 外鍵', answer: '外鍵' },
     { label: 'fenced answer under a Markdown heading', question: '選哪一項？\n## 正解\n~~~text\nB\n~~~', answer: 'B' },
+    { label: 'plain Chinese answer line without punctuation', question: '哪個鍵識別紀錄？\n答案\n主鍵', answer: '主鍵' },
+    { label: 'plain English answer line with CRLF', question: 'Which keyword?\r\nAnswer\r\nSQL', answer: 'SQL' },
+    { label: 'unordered bold key without a colon', question: '哪個欄位？\n- **答案** 主鍵', answer: '主鍵' },
+    { label: 'numbered reference key without a colon', question: '哪個欄位？\n1. 正確答案 外鍵', answer: '外鍵' },
+    { label: 'blockquote key without a colon', question: '哪個欄位？\n> 答案 主鍵', answer: '主鍵' },
+    { label: 'two-level blockquote key without punctuation', question: 'Which term?\n>> **Answer** SQL', answer: 'SQL' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1174,6 +1180,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '算出哪個值？\n## 答案\n12', answer: '1' },
     { question: '哪個概念？\n### **參考回答**\n其他概念', answer: '外鍵' },
     { question: '標題中有 ## Answer 的例句如何理解？\nSQL', answer: 'SQL' },
+    { question: '哪種資料庫？\n答案 SQLServer', answer: 'SQL' },
+    { question: '哪個數值？\n答案 12', answer: '1' },
+    { question: '哪個欄位？\n- **答案** 外鍵', answer: '主鍵' },
+    { question: '題目說「答案 主鍵」時代表什麼？', answer: '主鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
     const valid = { ...lesson(), question, answer };
     const pending = runStudyTutor({
