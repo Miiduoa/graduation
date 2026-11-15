@@ -810,6 +810,12 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
     // geometry stale AND start exactly one bounded revalidation, rather than
     // leaving the map stale until the user finds the manual retry action.
     clock += 2 * 60_000;
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    fireEvent(document, new Event('visibilitychange'));
+    // Do not spend public OSM quota refreshing an unseen, still-retainable map.
+    // The visible resume must do exactly one revalidation instead.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     fireEvent(document, new Event('visibilitychange'));
     expect(await within(dialog).findByText(/暫用舊快照/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
