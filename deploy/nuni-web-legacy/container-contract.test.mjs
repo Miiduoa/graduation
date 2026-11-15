@@ -73,7 +73,7 @@ async function readBody(response) {
   return { status: response.status, text, json, headers: response.headers };
 }
 
-test('rebuilt image exists for linux/amd64 with Next 16.4.2 and sharp 0.35.5 via next require', async (t) => {
+test('rebuilt image exists for linux/amd64 with Next 16.4.5 and sharp 0.35.5 via next require', async (t) => {
   if (!imageExists()) {
     t.skip(`local image ${image} not built yet — not a pass`);
     return;
@@ -118,7 +118,7 @@ console.log(JSON.stringify({next:next.version,sharp:ver(nextRequire,'sharp'),sha
   );
   assert.equal(pins.status, 0, pins.stderr);
   assert.deepEqual(JSON.parse(pins.stdout), {
-    next: '16.4.2',
+    next: '16.4.5',
     sharp: '0.35.5',
     sharpAll: ['0.35.5'],
     smAll: ['1.2.2'],
@@ -176,7 +176,7 @@ test('synthetic TLS upstream auth contract: start/exchange/session/logout + publ
     'SYNTHETIC_ADMIN_PORT=9080',
     '--workdir',
     '/scripts',
-    'node:24.22.3-alpine3.24@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5',
+    'node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5',
     'node',
     '/scripts/synthetic-upstream.mjs',
   );

@@ -166,11 +166,11 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const report = JSON.parse(fs.readFileSync('release-evidence/runtime-security.json', 'utf8'));
-          if (report.ok !== true || report.expectedVersion !== '16.4.2') {
+          if (report.ok !== true || report.expectedVersion !== '16.4.5') {
             throw new Error('Built image failed current/legacy Next runtime security check.');
           }
           if (
-            report.expectedPackages?.next !== '16.4.2' ||
+            report.expectedPackages?.next !== '16.4.5' ||
             report.expectedPackages?.sharp !== '0.35.5' ||
             report.expectedPackages?.['source-map-js'] !== '1.2.2'
           ) {
@@ -178,13 +178,13 @@ jobs:
           }
           for (const name of ['current', 'legacy']) {
             const runtime = report.runtimes?.[name];
-            if (runtime?.version !== '16.4.2') {
+            if (runtime?.version !== '16.4.5') {
               throw new Error(`Built image ${name} Next runtime is not the approved version.`);
             }
             const nextVersions = (runtime.packages?.next || []).map((item) => item.version);
             const sharpVersions = (runtime.packages?.sharp || []).map((item) => item.version);
             const sourceMapVersions = (runtime.packages?.['source-map-js'] || []).map((item) => item.version);
-            if (!nextVersions.length || nextVersions.some((version) => version !== '16.4.2')) {
+            if (!nextVersions.length || nextVersions.some((version) => version !== '16.4.5')) {
               throw new Error(`Built image ${name} next pin scan failed: ${JSON.stringify(nextVersions)}`);
             }
             if (!sharpVersions.length || sharpVersions.some((version) => version !== '0.35.5')) {
@@ -242,7 +242,7 @@ jobs:
           }
           // Afterdeploy: same immutable digest that passed runtime-security-check is live.
           const runtime = JSON.parse(fs.readFileSync('release-evidence/runtime-security.json', 'utf8'));
-          if (runtime.ok !== true || runtime.expectedVersion !== '16.4.2') {
+          if (runtime.ok !== true || runtime.expectedVersion !== '16.4.5') {
             throw new Error('Missing successful pre-rollout runtime security evidence for the released image.');
           }
           const image = JSON.parse(fs.readFileSync('release-evidence/image.json', 'utf8'));
