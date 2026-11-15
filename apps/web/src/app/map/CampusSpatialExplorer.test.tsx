@@ -806,12 +806,21 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
     expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
 
-    // No network event: a backgrounded modal must no longer advertise fresh data.
+    // Crossing the freshness boundary on tab resume must mark the saved
+    // geometry stale AND start exactly one bounded revalidation, rather than
+    // leaving the map stale until the user finds the manual retry action.
     clock += 2 * 60_000;
     fireEvent(document, new Event('visibilitychange'));
     expect(await within(dialog).findByText(/暫用舊快照/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    // A second resume event while the refresh is pending must not issue an
+    // extra request or recreate WebGL geometry.
+    const sceneCountWhileStale = scene.create.mock.calls.length;
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(scene.create).toHaveBeenCalledTimes(sceneCountWhileStale);
 
     // A suspended device can pass the seven-day deadline before timers fire.
     clock += 6 * day;
