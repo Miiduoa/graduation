@@ -91,7 +91,13 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   if (pairs.map(pair => pair.time).join('\n') !== course.time ||
       pairs.map(pair => pair.room).join('\n') !== course.room) return null;
   const meetings = nthuCourseMeetings(pairs, course.semester);
-  if (!identity || !meetings || identity.semester !== course.semester || identity.section !== course.section) return null;
+  if (!identity || !meetings || identity.semester !== course.semester ||
+      identity.section !== course.section || identity.departmentCode !== course.department) return null;
+  // Do not silently discard a malformed or out-of-range official credit value:
+  // students rely on imported credits for their personal academic planning.
+  const credits = course.credits;
+  if (credits !== '' && (!/^\d+(?:\.\d+)?$/.test(credits) ||
+      !Number.isFinite(Number(credits)) || Number(credits) > 40)) return null;
   // Multiple official room/time pairs may describe one course. A repeated
   // weekday/period would duplicate or overlap the student's imported timetable;
   // require manual verification rather than silently importing both rooms.
@@ -118,7 +124,7 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     periodLabel: meeting.periodLabel,
     startTime: meeting.startTime,
     endTime: meeting.endTime,
-    credits: /^\d+(\.\d+)?$/.test(course.credits) ? Number(course.credits) : undefined,
+    credits: credits === '' ? undefined : Number(credits),
     source: { type: 'paste', line: index + 1, rawText: course.time },
   })), ['schoolId', 'academicYear', 'semester', 'courseCode', 'className', 'title', 'teacher', 'location', 'credits', 'dayOfWeek', 'periodLabel', 'startTime', 'endTime']);
 }

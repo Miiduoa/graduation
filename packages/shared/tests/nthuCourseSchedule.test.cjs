@@ -126,6 +126,32 @@ test('the CSV handoff rejects mismatched course identities and preserves zero cr
   assert.equal(parsePersonalImport(nthuTimetableImportCsv({ ...chemistry, credits: '' }), options).rows[0].credits, undefined);
 });
 
+test('NTHU offering identity and credits must agree with the displayed official course', () => {
+  // Both fields are set by the official-feed parser. A malformed or stale
+  // response must remain review-only, not silently mislabel credits or department.
+  for (const course of [
+    { ...chemistry, department: 'CS' }, { ...chemistry, department: '' },
+    { ...chemistry, credits: '-1' }, { ...chemistry, credits: '3 學分' },
+    { ...chemistry, credits: '41' }, { ...chemistry, credits: '9'.repeat(400) },
+  ]) {
+    assert.equal(nthuTimetableImportCsv(course), null);
+  }
+  for (const credits of ['0', '0.5', '3', '3.0', '40']) {
+    const csv = nthuTimetableImportCsv({ ...chemistry, credits });
+    assert.ok(csv);
+    const parsed = parsePersonalImport(csv, {
+      kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+    });
+    assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+    assert.ok(parsed.rows.every(row => row.schoolId === 'nthu' && row.credits === Number(credits)));
+  }
+  const withoutCredits = nthuTimetableImportCsv({ ...chemistry, credits: '' });
+  assert.ok(withoutCredits);
+  assert.ok(parsePersonalImport(withoutCredits, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  }).rows.every(row => row.credits === undefined));
+});
+
 test('catalog responses require the expected campus and valid bounded room/time pairs', () => {
   const response = { schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json', courses: [chemistry], truncated: false };
   assert.equal(isPublicCourseCatalog(response, 'nthu'), true);
