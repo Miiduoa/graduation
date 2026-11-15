@@ -15,13 +15,13 @@ type StoryAudiencePanelProps = {
 /**
  * The viewer list is private to a story, school, and author. Keep its
  * pagination cursor and pending SDK reads inside that exact scope.
- * A new scope remounts the list before stale viewers can be painted.
+ * A new scope or story lifetime remounts the list before stale viewers can be painted.
  */
 export function StoryAudiencePanel(props: StoryAudiencePanelProps) {
-  const { id, schoolId, authorUid } = props.story;
+  const { id, schoolId, authorUid, expiresAt } = props.story;
   return (
     <StoryAudienceContents
-      key={JSON.stringify([schoolId, authorUid, id])}
+      key={JSON.stringify([schoolId, authorUid, id, expiresAt ?? null])}
       {...props}
     />
   );

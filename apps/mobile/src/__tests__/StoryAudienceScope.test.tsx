@@ -736,6 +736,63 @@ describe('story audience scope transitions', () => {
   });
 
 
+  test('a changed story lifetime never reuses the previous viewer list or pagination cursor', async () => {
+    const oldCursor = { id: 'previous-lifetime-cursor' } as Cursor;
+    const pendingOldPage = deferred<Page>();
+    const pendingNewFirstPage = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'previous-viewer', displayName: '上一段限動的同學' }],
+        nextCursor: oldCursor,
+      })
+      .mockImplementationOnce(() => pendingOldPage.promise)
+      .mockImplementationOnce(() => pendingNewFirstPage.promise);
+
+    const expiresAt = Date.now() + 120_000;
+    const onBack = jest.fn();
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt }} onBack={onBack} />,
+    );
+    try {
+      await act(async () => { await Promise.resolve(); });
+      expect(view.getByText('上一段限動的同學')).toBeTruthy();
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, oldCursor]);
+
+      // The host may reuse this panel when a story document is replaced or
+      // its lifetime metadata changes without changing school/author/ID.
+      view.rerender(
+        <StoryAudiencePanel story={{ ...puStory, expiresAt: expiresAt + 60_000 }} onBack={onBack} />,
+      );
+      expect(view.queryByText('上一段限動的同學')).toBeNull();
+      expect(view.queryByText('載入更多觀看者')).toBeNull();
+      expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+      expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, oldCursor, null]);
+
+      await act(async () => {
+        pendingOldPage.resolve({
+          viewers: [{ uid: 'stale-viewer', displayName: '前一段晚到的同學' }],
+          nextCursor: null,
+        });
+        await pendingOldPage.promise;
+      });
+      expect(view.queryByText('前一段晚到的同學')).toBeNull();
+
+      await act(async () => {
+        pendingNewFirstPage.resolve({
+          viewers: [{ uid: 'current-viewer', displayName: '這一段新查到的同學' }],
+          nextCursor: null,
+        });
+        await pendingNewFirstPage.promise;
+      });
+      expect(view.getByText('這一段新查到的同學')).toBeTruthy();
+      expect(view.queryByText('上一段限動的同學')).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
   test('an opened audience clears names and pagination once the story expires', async () => {
     jest.useFakeTimers();
     const cursor = { id: 'expiry-next-page' } as Cursor;
