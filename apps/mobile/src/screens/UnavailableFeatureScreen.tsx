@@ -219,7 +219,13 @@ export function UnavailableFeatureScreen({
   title,
   description,
   actions,
-}: ServiceScreenProps & { title?: string; description?: string; actions?: Action[] }) {
+  children,
+}: ServiceScreenProps & {
+  title?: string;
+  description?: string;
+  actions?: Action[];
+  children?: React.ReactNode;
+}) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { school } = useSchool();
   const feature = features[route?.name ?? ''] ?? {
@@ -257,6 +263,7 @@ export function UnavailableFeatureScreen({
           ))}
         </View>
       </AICard>
+      {children}
     </AIDetailScreen>
   );
 }
