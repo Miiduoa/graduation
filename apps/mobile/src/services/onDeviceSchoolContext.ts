@@ -177,7 +177,14 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
           // metadata cannot claim that 51 rows came from a single page.
           coverage.pages !== Math.max(1, Math.ceil(assignments.items.length / CAMPUS_ASSIGNMENT_PAGE_SIZE))
         : coverage.reason === 'complete' || assignments.count === null ||
-          assignments.items.length >= assignments.count))) return false;
+          assignments.items.length >= assignments.count ||
+          // A legacy server sends at most one 50-row page. The paginated
+          // reader reports a read-budget cutoff only after eight full pages.
+          // Restored metadata must not claim a different source/read shape.
+          (coverage.reason === 'legacy-partial'
+            ? coverage.pages !== 1 || assignments.items.length > CAMPUS_ASSIGNMENT_PAGE_SIZE
+            : coverage.pages !== CAMPUS_ASSIGNMENT_MAX_PAGES ||
+              assignments.items.length !== CAMPUS_ASSIGNMENT_MAX_PAGES * CAMPUS_ASSIGNMENT_PAGE_SIZE)))) return false;
   // The authorized paginated reader rejects duplicate assignment identities.
   // A JSON-restored snapshot can bypass that reader; two distinct titles with
   // the same original assignment ID are not two separate student tasks.
