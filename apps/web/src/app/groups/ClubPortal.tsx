@@ -60,8 +60,8 @@ export function ClubPortal({
       (data) => {
         if (generation.current === current) setView(data);
       },
-      (err) => {
-        if (generation.current === current) setError(err.message);
+      () => {
+        if (generation.current === current) setError('社團服務暫時無法使用，請稍後重試。');
       },
     );
     return () => {

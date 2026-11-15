@@ -20,6 +20,7 @@ vi.mock('./groupService', () => ({
   leaveMemberGroup: vi.fn(),
   loadMyGroups: vi.fn(),
 }));
+vi.mock('./clubPortalService', () => ({ callClubPortal: vi.fn(() => new Promise(() => {})) }));
 vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
 const course: MemberGroup = {
   id: 'firestore-course',
@@ -82,7 +83,7 @@ it('uses real group IDs for course navigation, actual counts only, and no fake u
   expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
 });
 
-it('社團分段只顯示真實會籍，找社團使用鎖定空態且沒有入社操作', async () => {
+it('社團分段保留真實會籍，找社團在載入成功前沒有入社操作', async () => {
   render(<ClubsPage />);
   await screen.findByText('本人社團');
   expect(screen.queryByText('本人課程群組 ↗')).toBeNull();
@@ -92,7 +93,7 @@ it('社團分段只顯示真實會籍，找社團使用鎖定空態且沒有入�
   );
   expect(screen.getByLabelText('邀請碼')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '找社團' }));
-  expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
+  expect(screen.getByText('正在讀取社團資料…')).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '本人社團' })).toBeNull();
   expect(screen.queryByRole('button', { name: '加入群組' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看社團' })).toBeNull();

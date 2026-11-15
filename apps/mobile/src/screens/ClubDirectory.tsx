@@ -1,3 +1,4 @@
+import { ClubPortal } from './ClubPortal';
 import { clubSummaryEnabled } from '../services/clubSummary';
 import React, { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
@@ -6,8 +7,12 @@ import { theme } from '../ui/theme';
 
 export function ClubDirectory({
   clubs,
+  uid,
+  schoolId,
   onOpen,
 }: {
+  uid?: string;
+  schoolId?: string;
   clubs: { groupId: string; name: string }[];
   onOpen: (groupId: string) => void;
 }) {
@@ -52,12 +57,11 @@ export function ClubDirectory({
         }}
       />
       {segment === 'discover' ? (
-        <>
-          <Text style={textStyle}>學校還沒提供社團名單。</Text>
-          <Text style={textStyle}>
-            尚未串接課外組核可名單，因此這裡不列出一般群組，也不提供入社或申請。
-          </Text>
-        </>
+        uid && schoolId ? (
+          <ClubPortal key={`${uid}:${schoolId}`} uid={uid} schoolId={schoolId} />
+        ) : (
+          <Text style={textStyle}>登入後查看學校社團。</Text>
+        )
       ) : !clubs.length ? (
         <Text style={textStyle}>還沒加入社團，可以到「找社團」看看。</Text>
       ) : !visible.length ? (
