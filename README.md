@@ -64,7 +64,7 @@ _手機畫面為 main 正式元件的 React Native Web 展示，使用合成資�
 
 ## 本機開發
 
-使用 [.nvmrc](.nvmrc) 指定的 **Node.js 22.23.4** 與 [package.json](package.json) 指定的 **pnpm 10.28.2**。以下以 nvm 管理 Node 的環境為例；若使用其他方式，先安裝相同 Node 版本：
+使用 [.nvmrc](.nvmrc) 指定的 **Node.js 22.23.5** 與 [package.json](package.json) 指定的 **pnpm 10.28.2**。以下以 nvm 管理 Node 的環境為例；若使用其他方式，先安裝相同 Node 版本：
 
 ```bash
 git clone https://github.com/Miiduoa/graduation.git
