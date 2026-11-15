@@ -394,6 +394,17 @@ async def camera_controls(page, _requests, _resources):
     await click_camera("放大空間圖")
     states["northReset"] = await click_camera("回到北向")
     assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 125}
+    states["restoreZoomButton"] = await click_camera("還原 100% 縮放")
+    assert states["restoreZoomButton"] == {"northDegrees": 0, "zoomPercent": 100}
+    await expect(dialog.get_by_role("button", name="還原 100% 縮放", exact=True)).to_be_disabled()
+    await click_camera("放大空間圖")
+    await host.focus()
+    before = await clears(page)
+    await page.keyboard.press("0")
+    await wait_for_repaint(page, before)
+    states["restoreZoomKey"] = await camera_readout(page)
+    assert states["restoreZoomKey"] == {"northDegrees": 0, "zoomPercent": 100}
+    await assert_same_scene(page, canvas, context, selected)
     idle = await assert_idle_renderer(page)
     await page.screenshot(path=str(OUT / "camera-controls.png"))
     await context.dispose()
