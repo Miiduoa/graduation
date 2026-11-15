@@ -136,6 +136,12 @@ it('controls camera without changing the place or recreating its context and res
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1.25 }));
   expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
   expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
+  const restoreZoom = within(dialog).getByRole('button', { name: '還原 100% 縮放' }) as HTMLButtonElement;
+  expect(restoreZoom.disabled).toBe(false);
+  fireEvent.click(restoreZoom);
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: 0, zoom: 1 }));
+  expect(within(dialog).getByText('縮放 100%')).toBeTruthy();
+  expect(restoreZoom.disabled).toBe(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
@@ -162,6 +168,11 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   const callsAtMinimum = scene.setView.mock.calls.length;
   fireEvent.click(zoomOut);
   expect(scene.setView).toHaveBeenCalledTimes(callsAtMinimum);
+  const restoreZoom = within(dialog).getByRole('button', { name: '還原 100% 縮放' }) as HTMLButtonElement;
+  expect(restoreZoom.disabled).toBe(false);
+  fireEvent.click(restoreZoom);
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: 300, zoom: 1 }));
+  expect(restoreZoom.disabled).toBe(true);
   expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
