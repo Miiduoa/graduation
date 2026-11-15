@@ -301,13 +301,24 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintBaseDate(null);
         setFootprintStale(false);
         setFootprintRefreshFailed(false);
-        setFootprintStatus('unavailable');
+        // A freshness refresh may already be in flight when a suspended tab
+        // resumes past the seven-day retention limit. Hide expired geometry,
+        // but keep the loading state until that bounded request finishes.
+        const refreshing = footprintRequestActiveRef.current;
+        setFootprintStatus(refreshing ? 'loading' : 'unavailable');
+        if (!refreshing && footprintRetryAfter === null) {
+          setFootprintAttempt((value) => value + 1);
+        }
+      } else if (now >= footprintClock.staleAt && !staleSnapshotRef.current) {
+        // Mark the dated source stale immediately on tab resume, and revalidate
+        // it once without making the user search for a manual retry button.
+        // The ref prevents duplicate network calls from timer/pageshow races.
+        // Do not bypass a server Retry-After or start concurrent requests.
+        staleSnapshotRef.current = true;
+        setFootprintStale(true);
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
-      } else if (now >= footprintClock.staleAt) {
-        staleSnapshotRef.current = true;
-        setFootprintStale(true);
       }
     };
     const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
