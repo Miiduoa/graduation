@@ -348,22 +348,25 @@ async def camera_controls(page, _requests, _resources):
         await assert_same_scene(page, canvas, context, selected)
         states[key] = state
 
-    # Check the actual displayed bounds and disabled controls, including a key
-    # that attempts to exceed each bound while the scene itself is focused.
-    for name, bound, key in [("放大空間圖", 250, "Shift+Equal"), ("縮小空間圖", 65, "Minus")]:
+    # Native disabled buttons leave the tab order. Verify both the displayed
+    # zoom bounds and the actual focus order, not stale aria-disabled semantics.
+    for name, bound, key, before_name, after_name in [
+        ("放大空間圖", 250, "Shift+Equal", "縮小空間圖", "回到北向"),
+        ("縮小空間圖", 65, "Minus", "向右旋轉", "放大空間圖"),
+    ]:
         button = dialog.get_by_role("button", name=name, exact=True)
         for _ in range(12):
-            if await button.get_attribute("aria-disabled") == "true":
+            if await button.is_disabled():
                 break
             await button.click()
-        await expect(button).to_have_attribute("aria-disabled", "true")
         await expect(button).to_be_disabled()
+        await expect(button).not_to_have_attribute("aria-disabled", "true")
         await expect(dialog.get_by_text(f"縮放 {bound}%", exact=True)).to_be_visible()
-        await expect(button).to_be_focused()
-        await page.keyboard.press("Enter")
+        await dialog.get_by_role("button", name=before_name, exact=True).focus()
+        await page.keyboard.press("Tab")
+        await expect(dialog.get_by_role("button", name=after_name, exact=True)).to_be_focused()
         assert (await camera_readout(page))["zoomPercent"] == bound
-        await expect(button).to_be_focused()
-        states[f"limit{bound}"] = {"zoomPercent": bound, "focusRetainedAfterEnter": True}
+        states[f"limit{bound}"] = {"zoomPercent": bound, "disabledSkippedByTab": True}
         await host.focus()
         await page.keyboard.press(key)
         assert (await camera_readout(page))["zoomPercent"] == bound
