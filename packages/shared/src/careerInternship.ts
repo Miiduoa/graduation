@@ -22,6 +22,8 @@ export type InternshipRecord = {
   id: string;
   revision: number;
   uid: string;
+  studentName?: string;
+  studentId?: string;
   rule: InternshipRule;
   organization: string;
   teacher: string;

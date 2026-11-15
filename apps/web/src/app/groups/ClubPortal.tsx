@@ -10,14 +10,19 @@ import { leaveMemberGroup } from './groupService';
 import { clubRoleLabel } from './clubService';
 
 const MEETING_TIME_PLACEHOLDER = '社課時間未提供';
-const roleOfficeLabel = (role: string) => (role === 'owner' ? '社長' : role === 'admin' ? '幹部' : clubRoleLabel(role));
+const roleOfficeLabel = (role: string) =>
+  role === 'owner' ? '社長' : role === 'admin' ? '幹部' : clubRoleLabel(role);
 function displayMeetingTime(value?: string) {
   const text = typeof value === 'string' ? value.trim() : '';
   return text && text !== MEETING_TIME_PLACEHOLDER ? text : '';
 }
 function clubSummary(club?: ClubPortalView['club']) {
   if (!club) return '';
-  const items = [club.category, `${club.memberCount ?? '未提供'} 位社員`, displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER];
+  const items = [
+    club.category,
+    `${club.memberCount ?? '未提供'} 位社員`,
+    displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
+  ];
   if (club.recruiting) items.push('招新中');
   return items.filter(Boolean).join(' · ');
 }
@@ -45,6 +50,7 @@ export function ClubPortal({
     [search, setSearch] = useState(''),
     [manage, setManage] = useState(false),
     [office, setOffice] = useState(false),
+    [confirmCancelJoin, setConfirmCancelJoin] = useState(false),
     [confirmLeave, setConfirmLeave] = useState(false),
     [revision, setRevision] = useState(0);
   const generation = useRef(0),
@@ -66,6 +72,7 @@ export function ClubPortal({
     setError('');
     setManage(false);
     setConfirmLeave(false);
+    setConfirmCancelJoin(false);
     operation.current = null;
     callClubPortal(
       uid,
@@ -197,15 +204,16 @@ export function ClubPortal({
       }
       setNotice(
         input.action === 'join' && view?.club?.joinPolicy === 'review'
-          ? '已送出申請，等幹部回覆'
+          ? ''
           : input.action === 'cancelJoin'
             ? '已取消入社申請'
-          : '已由伺服器確認',
+            : '已由伺服器確認',
       );
       const next = await callClubPortal(uid, schoolId, { action: 'read', groupId: selected });
       if (generation.current === current) {
         setView(next);
         setConfirmLeave(false);
+        setConfirmCancelJoin(false);
         if (input.action === 'leave') onLeft?.();
       }
     } catch (err) {
@@ -311,8 +319,20 @@ export function ClubPortal({
             return clubs.map((c) => (
               <article key={c.id} style={{ minHeight: 64 }}>
                 <strong>{c.name}</strong>
-                <p>{[c.category, displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER, c.recruiting ? '招新中' : '', office ? c.approval : ''].filter(Boolean).join(' · ')}</p>
-                <Link className="btn" href={`/clubs/${encodeURIComponent(c.id)}?schoolId=${encodeURIComponent(schoolId)}&tab=discover`}>
+                <p>
+                  {[
+                    c.category,
+                    displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
+                    c.recruiting ? '招新中' : '',
+                    office ? c.approval : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+                <Link
+                  className="btn"
+                  href={`/clubs/${encodeURIComponent(c.id)}?schoolId=${encodeURIComponent(schoolId)}&tab=discover`}
+                >
                   查看社團：{c.name}
                 </Link>
               </article>
@@ -339,9 +359,7 @@ export function ClubPortal({
         <>
           <header>
             <h1 style={{ fontSize: 28 }}>{club.name}</h1>
-            <p>
-              {clubSummary(club)}
-            </p>
+            <p>{clubSummary(club)}</p>
             {club.approval === 'approved' && <span>本校社團（課外組核可）</span>}
             {officer && (
               <button className="btn" onClick={() => setManage(!manage)}>
@@ -372,7 +390,18 @@ export function ClubPortal({
           ) : view.status === 'pending' ? (
             <>
               <p role="status">已送出申請，等幹部回覆</p>
-              {button('取消入社申請', { action: 'cancelJoin' })}
+              <button className="btn" disabled={busy} onClick={() => setConfirmCancelJoin(true)}>
+                取消入社申請
+              </button>
+              {confirmCancelJoin && (
+                <>
+                  <p>確定要取消入社申請嗎？</p>
+                  {button('確認取消入社申請', { action: 'cancelJoin' })}
+                  <button className="btn" onClick={() => setConfirmCancelJoin(false)}>
+                    取消
+                  </button>
+                </>
+              )}
             </>
           ) : (
             <>
@@ -545,7 +574,7 @@ export function ClubPortal({
               {view.members?.map((m) => (
                 <article key={m.id} style={{ minHeight: 56 }}>
                   <p>
-                    {m.name} · {clubRoleLabel(m.role)} · 電話 {m.phone || '未提供'}
+                    {m.name} · {roleOfficeLabel(m.role)} · 電話 {m.phone || '未提供'}
                   </p>
                   {button(m.duesPaid ? '社費已繳' : '社費未繳', {
                     action: 'dues',
@@ -562,9 +591,7 @@ export function ClubPortal({
                     <input
                       name={key}
                       defaultValue={
-                        key === 'meetingTime'
-                          ? displayMeetingTime(club.meetingTime)
-                          : club[key]
+                        key === 'meetingTime' ? displayMeetingTime(club.meetingTime) : club[key]
                       }
                       placeholder={key === 'meetingTime' ? MEETING_TIME_PLACEHOLDER : undefined}
                       maxLength={key === 'description' ? 2000 : 500}
@@ -642,8 +669,7 @@ export function ClubPortal({
           )}
           {view.officialOfficers?.map((m) => (
             <p key={`official-${m.id}`}>
-              {view.members?.find((r) => r.id === m.id)?.name} ·{' '}
-              {roleOfficeLabel(m.role)} ·{' '}
+              {view.members?.find((r) => r.id === m.id)?.name} · {roleOfficeLabel(m.role)} ·{' '}
               {m.status === 'confirmed' ? '課外組已確認' : '待課外組確認'}{' '}
               {view.office &&
                 m.status === 'pending' &&

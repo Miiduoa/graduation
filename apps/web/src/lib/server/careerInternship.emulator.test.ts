@@ -50,11 +50,7 @@ suite('internship real Firestore transactions', () => {
       await db.doc(`schools/pu/members/${uid}`).set({
         status: 'active',
         role:
-          uid === 'admin'
-            ? 'admin'
-            : uid === 'teacher' || uid === 'advisor'
-              ? 'teacher'
-              : 'member',
+          uid === 'admin' ? 'admin' : uid === 'teacher' || uid === 'advisor' ? 'teacher' : 'member',
         displayName: uid === 'advisor' ? '王指導' : uid,
       });
     await db.doc('schools/pu/serviceRoles/staff').set({ status: 'active', career_staff: true });
@@ -70,6 +66,37 @@ suite('internship real Firestore transactions', () => {
       department: '測試系',
     });
     await db.doc('schools/pu/internshipRules/rule').set(internshipRule);
+  });
+  it('enriches only authorized review records with student name and school ID', async () => {
+    await db
+      .doc('schools/pu/members/student')
+      .update({ displayName: '王小明', student_id: 'S123' });
+    await call('student', create());
+    for (const uid of ['teacher', 'staff', 'dept']) {
+      const result = await call(uid, {
+        action: 'list',
+        audience: uid === 'teacher' ? 'student' : 'staff',
+      });
+      expect(result.snapshot?.records[0]).toMatchObject({
+        studentName: '王小明',
+        studentId: 'S123',
+      });
+    }
+    const own = await call('student', { action: 'list', audience: 'student' });
+    expect(own.snapshot?.records[0]).not.toHaveProperty('studentName');
+    expect(own.snapshot?.records[0]).not.toHaveProperty('studentId');
+    expect(
+      (await call('other', { action: 'list', audience: 'student' })).snapshot?.records,
+    ).toEqual([]);
+    await db.doc('schools/pu/members/student').update({ displayName: '', student_id: '' });
+    await db.doc('users/student').set({ displayName: '陳同學', studentId: 'S456' });
+    try {
+      expect(
+        (await call('teacher', { action: 'list', audience: 'student' })).snapshot?.records[0],
+      ).toMatchObject({ studentName: '陳同學', studentId: 'S456' });
+    } finally {
+      await db.doc('users/student').delete();
+    }
   });
   it('runs student creation, hours, staff document review and teacher confirmation through service', async () => {
     const student = createInternshipService('pu', (s, c) => call('student', c, s));
@@ -119,10 +146,15 @@ suite('internship real Firestore transactions', () => {
     const list = await call('student', { action: 'list', audience: 'student' });
     expect(list.snapshot?.canManage).toBe(false);
     expect(list.snapshot?.advisors).toBeUndefined();
-    await expect(call('student', { action: 'advisorSearch', keyword: '   ' })).rejects.toMatchObject({
+    await expect(
+      call('student', { action: 'advisorSearch', keyword: '   ' }),
+    ).rejects.toMatchObject({
       message: '請輸入指導老師姓名或學校信箱。',
     });
-    const search = await call('student', { action: 'advisorSearch', keyword: 'advisor@school.edu.tw' });
+    const search = await call('student', {
+      action: 'advisorSearch',
+      keyword: 'advisor@school.edu.tw',
+    });
     expect(search.snapshot?.advisors).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ uid: 'advisor', name: '王指導', email: 'advisor@school.edu.tw' }),
@@ -130,12 +162,12 @@ suite('internship real Firestore transactions', () => {
     );
     const byName = await call('student', { action: 'advisorSearch', keyword: '王' });
     expect(byName.snapshot?.advisors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ uid: 'advisor', name: '王指導' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ uid: 'advisor', name: '王指導' })]),
     );
     const studentHits = await call('student', { action: 'advisorSearch', keyword: 'student' });
-    expect(studentHits.snapshot?.advisors?.some((advisor) => advisor.uid === 'student')).toBe(false);
+    expect(studentHits.snapshot?.advisors?.some((advisor) => advisor.uid === 'student')).toBe(
+      false,
+    );
     await expect(
       call('student', {
         ...create(),

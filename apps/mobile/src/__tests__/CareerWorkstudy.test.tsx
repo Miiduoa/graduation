@@ -94,6 +94,9 @@ test('student can withdraw early-stage applications and apply again later', asyn
   data.applications = [{ ...application, state: 'submitted' }];
   await view.findByText('我的申請');
   fireEvent.press(view.getByRole('button', { name: '撤回申請' }));
+  expect(service.execute).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '確認撤回申請' }));
+  data.applications = [{ ...application, state: 'withdrawn' }];
   await waitFor(() =>
     expect(service.execute).toHaveBeenCalledWith({
       action: 'withdraw',
@@ -101,6 +104,9 @@ test('student can withdraw early-stage applications and apply again later', asyn
       revision: application.revision,
     }),
   );
+  await waitFor(() => expect(view.getByText('已撤回申請。')).toBeTruthy());
+  expect(view.getByText(/已撤回$/)).toBeTruthy();
+  expect(view.getByRole('button', { name: `應徵${opportunity.title}` })).toBeTruthy();
 });
 
 test('work-study filters can narrow by unit, slot and credit with empty-state feedback', async () => {
@@ -432,4 +438,14 @@ test('a cancelled read cannot overwrite the newer result after a write', async (
   expect(view.getByText('測試用工讀')).toBeTruthy();
   expect(view.queryByText('已取消的舊結果')).toBeNull();
   expect(service.load).toHaveBeenCalledTimes(3);
+});
+
+test('withdrawn applications stay visible without staff review controls', async () => {
+  const { view, data } = setup('staff');
+  data.applications = [{ ...application, state: 'withdrawn' }];
+  await view.findByText('職涯工作台');
+  fireEvent.press(view.getByText('申請'));
+  await waitFor(() => expect(view.getByText(/已撤回$/)).toBeTruthy());
+  expect(view.queryByText('改為單位已讀')).toBeNull();
+  expect(view.queryByText('改為約面談')).toBeNull();
 });

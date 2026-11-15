@@ -41,6 +41,7 @@ export function ClubPortal({
     [notice, setNotice] = useState(''),
     [busy, setBusy] = useState(false),
     [revision, setRevision] = useState(0),
+    [confirmCancelJoin, setConfirmCancelJoin] = useState(false),
     [confirmLeave, setConfirmLeave] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({}),
     [clock, setClock] = useState(Date.now());
@@ -62,6 +63,7 @@ export function ClubPortal({
     setError('');
     setManage(false);
     setConfirmLeave(false);
+    setConfirmCancelJoin(false);
     setValues({});
     operation.current = null;
     callClubPortal(
@@ -203,11 +205,12 @@ export function ClubPortal({
       if (generation.current === current) {
         setView(next);
         setConfirmLeave(false);
+        setConfirmCancelJoin(false);
         setNotice(
           input.action === 'cancelJoin'
             ? '已取消入社申請'
             : next.status === 'pending'
-              ? '已送出申請，等幹部回覆'
+              ? ''
               : '已由伺服器確認',
         );
       }
@@ -297,7 +300,13 @@ export function ClubPortal({
             .map((c) => (
               <View key={c.id} style={{ minHeight: 64, paddingVertical: 8 }}>
                 <Text style={style}>
-                  {[c.name, c.category, displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER, c.recruiting ? '招新中' : '', office ? c.approval : '']
+                  {[
+                    c.name,
+                    c.category,
+                    displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
+                    c.recruiting ? '招新中' : '',
+                    office ? c.approval : '',
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </Text>
@@ -307,7 +316,9 @@ export function ClubPortal({
           {!!view.clubs?.length &&
             !view.clubs?.filter((c) => `${c.name} ${c.category}`.includes(search)).length &&
             !!search.trim() && (
-              <Text style={style}>{`找不到符合「${search.trim()}」的社團，請試試其他關鍵字。`}</Text>
+              <Text
+                style={style}
+              >{`找不到符合「${search.trim()}」的社團，請試試其他關鍵字。`}</Text>
             )}
           {office ? (
             <>
@@ -324,7 +335,12 @@ export function ClubPortal({
             {club.name}
           </Text>
           <Text style={style}>
-            {[club.category, `${club.memberCount ?? '未提供'} 位社員`, displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER, club.recruiting ? '招新中' : '']
+            {[
+              club.category,
+              `${club.memberCount ?? '未提供'} 位社員`,
+              displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
+              club.recruiting ? '招新中' : '',
+            ]
               .filter(Boolean)
               .join(' · ')}
           </Text>
@@ -344,7 +360,18 @@ export function ClubPortal({
           ) : view.status === 'pending' ? (
             <>
               <Text style={style}>已送出申請，等幹部回覆</Text>
-              {button('取消入社申請', { action: 'cancelJoin' })}
+              <Button
+                text="取消入社申請"
+                disabled={busy}
+                onPress={() => setConfirmCancelJoin(true)}
+              />
+              {confirmCancelJoin ? (
+                <>
+                  <Text style={style}>確定要取消入社申請嗎？</Text>
+                  {button('確認取消入社申請', { action: 'cancelJoin' })}
+                  <Button text="取消" onPress={() => setConfirmCancelJoin(false)} />
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -495,7 +522,7 @@ export function ClubPortal({
               {view.members?.map((m) => (
                 <View key={m.id} style={{ minHeight: 56 }}>
                   <Text style={style}>
-                    {m.name} · {clubRoleLabel(m.role)} · 電話 {m.phone || '未提供'}
+                    {m.name} · {roleOfficeLabel(m.role)} · 電話 {m.phone || '未提供'}
                   </Text>
                   {button(m.duesPaid ? '社費已繳' : '社費未繳', {
                     action: 'dues',
@@ -585,8 +612,7 @@ export function ClubPortal({
           {view.officialOfficers?.map((m) => (
             <View key={`official-${m.id}`}>
               <Text style={style}>
-                {view.members?.find((r) => r.id === m.id)?.name} ·{' '}
-                {roleOfficeLabel(m.role)} ·{' '}
+                {view.members?.find((r) => r.id === m.id)?.name} · {roleOfficeLabel(m.role)} ·{' '}
                 {m.status === 'confirmed' ? '課外組已確認' : '待課外組確認'}
               </Text>
               {view.office && m.status === 'pending'

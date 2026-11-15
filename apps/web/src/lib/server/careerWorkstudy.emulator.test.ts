@@ -38,18 +38,26 @@ suite('career transactions against the real Firestore emulator', () => {
     await db.doc('schools/pu/serviceRoles/staff').set({ status: 'active', career_staff: true });
     await db.doc(`schools/pu/careerOpportunities/${opportunity.id}`).set(opportunity);
   });
-  it.each([false, true])('preserves an omitted reply and only clears an explicit empty reply (%s)', async (clear) => {
-    const created = await command('student', apply());
-    const ref = db.doc(`schools/pu/careerApplications/${created.id}`);
-    await ref.update({ state: 'interview', message: '12/1 職產處，請洽承辦' });
-    await command('staff', {
-      action: 'review', applicationId: created.id!, revision: 1, state: 'accepted',
-      ...(clear ? { message: '' } : {}),
-    });
-    expect((await ref.get()).data()).toMatchObject({
-      state: 'accepted', message: clear ? '' : '12/1 職產處，請洽承辦', revision: 2,
-    });
-  });
+  it.each([false, true])(
+    'preserves an omitted reply and only clears an explicit empty reply (%s)',
+    async (clear) => {
+      const created = await command('student', apply());
+      const ref = db.doc(`schools/pu/careerApplications/${created.id}`);
+      await ref.update({ state: 'interview', message: '12/1 職產處，請洽承辦' });
+      await command('staff', {
+        action: 'review',
+        applicationId: created.id!,
+        revision: 1,
+        state: 'accepted',
+        ...(clear ? { message: '' } : {}),
+      });
+      expect((await ref.get()).data()).toMatchObject({
+        state: 'accepted',
+        message: clear ? '' : '12/1 職產處，請洽承辦',
+        revision: 2,
+      });
+    },
+  );
   it('runs service -> apply -> review -> refreshed student receipt; retains exact confirmed rights', async () => {
     const student = createWorkstudyService('pu', (schoolId, data) =>
       handler({ auth: { uid: 'student' }, data: { ...data, schoolId } }),
@@ -203,25 +211,47 @@ suite('career transactions against the real Firestore emulator', () => {
     await command('staff', { action: 'save', opportunity: { ...opportunity, revision: 2 } });
     expect((await db.collection('schools/pu/adminLogs').get()).size).toBe(3);
   });
-  it('allows students to withdraw early applications and apply again', async () => {
-    const created = await command('student', apply());
-    await command('student', {
-      action: 'withdraw',
-      applicationId: created.id!,
-      revision: 1,
-    });
-    expect((await db.doc(`schools/pu/careerApplications/${created.id}`).get()).exists).toBe(false);
-    const reapplied = await command('student', apply());
-    expect(reapplied.id).toBe(created.id);
-    await db.doc(`schools/pu/careerApplications/${created.id}`).update({ state: 'interview', revision: 2 });
-    await expect(
-      command('student', {
+  it.each(['submitted', 'read'])(
+    'allows only the applicant to withdraw %s applications and apply again',
+    async (state) => {
+      const created = await command('student', apply());
+      await db.doc(`schools/pu/careerApplications/${created.id}`).update({ state });
+      await expect(
+        command('other', { action: 'withdraw', applicationId: created.id!, revision: 1 }),
+      ).rejects.toMatchObject({ code: 'permission-denied' });
+      await command('student', {
         action: 'withdraw',
         applicationId: created.id!,
-        revision: 2,
-      }),
-    ).rejects.toMatchObject({ code: 'failed-precondition' });
-  });
+        revision: 1,
+      });
+      expect(
+        (await db.doc(`schools/pu/careerApplications/${created.id}`).get()).data(),
+      ).toMatchObject({ state: 'withdrawn', revision: 2 });
+      await expect(
+        command('staff', {
+          action: 'review',
+          applicationId: created.id!,
+          revision: 2,
+          state: 'read',
+        }),
+      ).rejects.toMatchObject({ code: 'failed-precondition' });
+      const reapplied = await command('student', apply());
+      expect(reapplied.id).toBe(created.id);
+      expect(
+        (await db.doc(`schools/pu/careerApplications/${created.id}`).get()).data(),
+      ).toMatchObject({ state: 'submitted', revision: 3 });
+      await db
+        .doc(`schools/pu/careerApplications/${created.id}`)
+        .update({ state: 'interview', revision: 2 });
+      await expect(
+        command('student', {
+          action: 'withdraw',
+          applicationId: created.id!,
+          revision: 2,
+        }),
+      ).rejects.toMatchObject({ code: 'failed-precondition' });
+    },
+  );
   it.each([
     { sourceUrl: 'https://evil.example/' },
     { rightsUrl: 'javascript:alert(1)' },

@@ -15,25 +15,34 @@ vi.mock('@/lib/useBrowsingSchoolPageContext', () => ({
   useBrowsingSchoolPageContext: () => ({ ready: true, school: { id: 'pu', name: '靜宜' } }),
 }));
 vi.mock('../../groups/ClubPortal', () => ({
-  ClubPortal: ({ uid, schoolId, groupId, listHref }: { uid: string; schoolId: string; groupId: string; listHref?: string }) => (
-    <p>{`${uid}:${schoolId}:${groupId}:${listHref}`}</p>
-  ),
+  ClubPortal: ({
+    uid,
+    schoolId,
+    groupId,
+    listHref,
+  }: {
+    uid: string;
+    schoolId: string;
+    groupId: string;
+    listHref?: string;
+  }) => <p>{`${uid}:${schoolId}:${groupId}:${listHref}`}</p>,
 }));
 
 afterEach(cleanup);
 
-it('renders club detail with list back URL that preserves tab', async () => {
-  await act(async () => {
-    render(
-      <Suspense>
-        <ClubDetailPage
-          params={Promise.resolve({ groupId: 'club' })}
-          searchParams={Promise.resolve({ schoolId: 'pu', tab: 'discover' })}
-        />
-      </Suspense>,
-    );
-  });
-  expect(
-    await screen.findByText('student:pu:club:/clubs?schoolId=pu&tab=discover'),
-  ).toBeTruthy();
-});
+it.each(['discover', 'mine', undefined])(
+  'returns detail opened from %s to the directory',
+  async (tab) => {
+    await act(async () => {
+      render(
+        <Suspense>
+          <ClubDetailPage
+            params={Promise.resolve({ groupId: 'club' })}
+            searchParams={Promise.resolve({ schoolId: 'pu', tab })}
+          />
+        </Suspense>,
+      );
+    });
+    expect(await screen.findByText('student:pu:club:/clubs?schoolId=pu&tab=discover')).toBeTruthy();
+  },
+);

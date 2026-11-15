@@ -7,6 +7,7 @@ export const APPLICATION_STATES = [
   'interview',
   'accepted',
   'rejected',
+  'withdrawn',
 ] as const;
 export type ApplicationState = (typeof APPLICATION_STATES)[number];
 export const APPLICATION_LABELS: Record<ApplicationState, string> = {
@@ -15,6 +16,7 @@ export const APPLICATION_LABELS: Record<ApplicationState, string> = {
   interview: '約面談',
   accepted: '錄取',
   rejected: '未錄取',
+  withdrawn: '已撤回',
 };
 export type WorkSlot = { day: number; start: string; end: string };
 export type CareerOpportunity = {
@@ -181,6 +183,7 @@ export function transitionAllowed(from: ApplicationState, to: ApplicationState) 
         interview: ['accepted', 'rejected'],
         accepted: [],
         rejected: [],
+        withdrawn: [],
       } as Record<ApplicationState, string[]>
     )[from]?.includes(to) ?? false
   );

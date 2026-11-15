@@ -14,13 +14,10 @@ export default function ClubDetailPage(props: {
 }) {
   const groupId = use(props.params).groupId;
   const params = props.searchParams ? use(props.searchParams) : undefined;
-  const tab = params?.tab === 'discover' ? 'discover' : 'mine';
   const { school, ready } = useBrowsingSchoolPageContext(params);
   const { user, loading } = useAuth();
   const listHref =
-    ready && school.id
-      ? `/clubs?schoolId=${encodeURIComponent(school.id)}&tab=${encodeURIComponent(tab)}`
-      : '/clubs';
+    ready && school.id ? `/clubs?schoolId=${encodeURIComponent(school.id)}&tab=discover` : '/clubs';
   return (
     <SiteShell title="社團" schoolName={ready ? school.name : undefined}>
       {!ready ? (
@@ -33,7 +30,7 @@ export default function ClubDetailPage(props: {
           <p>請先登入學校帳號，才能查看社團功能與權限。</p>
           <Link
             className="btn primary"
-            href={`/login?returnUrl=${encodeURIComponent(`/clubs/${encodeURIComponent(groupId)}?schoolId=${encodeURIComponent(school.id)}&tab=${encodeURIComponent(tab)}`)}`}
+            href={`/login?returnUrl=${encodeURIComponent(`/clubs/${encodeURIComponent(groupId)}?schoolId=${encodeURIComponent(school.id)}&tab=discover`)}`}
           >
             登入學校帳號
           </Link>

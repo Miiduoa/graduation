@@ -244,7 +244,7 @@ export function createCareerWorkstudyHandlers({
           tx.get(ref),
         ]);
         // Identical retry returns the original receipt, even after a deadline or revision change.
-        if (existing.exists) return { id: ref.id };
+        if (existing.exists && existing.data()?.state !== 'withdrawn') return { id: ref.id };
         if (
           !opp.exists ||
           !opp.data()?.published ||
@@ -264,7 +264,7 @@ export function createCareerWorkstudyHandlers({
           contact: text(command.contact, 200),
           introduction: text(command.introduction, 2000, false),
           state: 'submitted',
-          revision: 1,
+          revision: (existing.data()?.revision ?? 0) + 1,
           submittedAt: at,
           updatedAt: at,
           message: '',
@@ -276,7 +276,7 @@ export function createCareerWorkstudyHandlers({
             confirmedAt: at,
           },
         };
-        tx.create(ref, application);
+        tx.set(ref, application);
         log('apply', ref.id);
         return { id: ref.id };
       }
@@ -312,7 +312,7 @@ export function createCareerWorkstudyHandlers({
         if (command.revision !== app.revision) fail('aborted', '申請已更新，請重新整理。');
         if (!['submitted', 'read'].includes(app.state))
           fail('failed-precondition', '這筆申請目前不可撤回。');
-        tx.delete(ref);
+        tx.update(ref, { state: 'withdrawn', revision: app.revision + 1, updatedAt: at });
         log('withdraw', ref.id);
         return { id: ref.id };
       }

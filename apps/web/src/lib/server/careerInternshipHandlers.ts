@@ -154,9 +154,7 @@ export function createCareerInternshipHandlers({
             await take(members.where('displayName', '==', name));
             await take(directory.where('displayName', '==', name));
             await take(
-              members
-                .where('displayName', '>=', name)
-                .where('displayName', '<=', `${name}\uf8ff`),
+              members.where('displayName', '>=', name).where('displayName', '<=', `${name}\uf8ff`),
             );
             await take(
               directory
@@ -172,13 +170,21 @@ export function createCareerInternshipHandlers({
         return memberDocs
           .map((doc, index) =>
             isAdvisor(doc.data())
-              ? advisorView(doc.id, doc.data() as Record<string, unknown>, profileDocs[index]?.data())
+              ? advisorView(
+                  doc.id,
+                  doc.data() as Record<string, unknown>,
+                  profileDocs[index]?.data(),
+                )
               : null,
           )
           .filter((row): row is NonNullable<typeof row> => Boolean(row))
           .filter((row) => {
-            const haystack = `${row.name} ${row.email} ${row.department}`.toLocaleLowerCase('zh-TW');
-            return isEmail ? haystack.includes(lowered) : haystack.includes(lowered) || row.name.startsWith(keyword);
+            const haystack = `${row.name} ${row.email} ${row.department}`.toLocaleLowerCase(
+              'zh-TW',
+            );
+            return isEmail
+              ? haystack.includes(lowered)
+              : haystack.includes(lowered) || row.name.startsWith(keyword);
           })
           .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
           .slice(0, limit);
@@ -219,6 +225,20 @@ export function createCareerInternshipHandlers({
         const unique = [...new Map(all.map((r) => [r.id, r])).values()];
         if (ruleRows.size > 500 || unique.length > 500)
           fail('resource-exhausted', '資料超過單次範圍，請洽平台營運分批處理。');
+        for (const record of unique) {
+          // Only enrich records the viewer is already authorized to read.
+          delete record.studentName;
+          delete record.studentId;
+          if (record.uid === uid) continue;
+          const [member, profile] = await Promise.all([
+            tx.get(members.doc(record.uid)),
+            tx.get(db.collection('users').doc(record.uid)),
+          ]);
+          const m = member.data();
+          const u = profile.data();
+          record.studentName = m?.displayName || u?.displayName || '';
+          record.studentId = m?.studentId || m?.student_id || u?.studentId || u?.student_id || '';
+        }
         let logs: InternshipAudit[] = [];
         if (c.audience === 'ops') {
           const result = await tx.get(
