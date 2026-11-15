@@ -93,6 +93,35 @@ test('備援名單的社長與幹部角色以中文呈現', async () => {
   expect(screen.getByText('幹部')).toBeTruthy();
 });
 
+test('既有後端回傳會長或幹部時，社長列不顯示設為幹部，幹部列顯示改為社員', async () => {
+  vi.mocked(callClub).mockResolvedValue({
+    ...view,
+    role: '會長',
+    members: [
+      { id: 'one', name: '甲', role: '會長' },
+      { id: 'two', name: '乙', role: '幹部' },
+      { id: 'three', name: '丙', role: '社員' },
+    ],
+  });
+  render(<ClubBoard uid="one" schoolId="school" groupId="club" />);
+  await screen.findByText('甲');
+  const ownerRow = screen.getByText('甲').closest('tr')!;
+  const officerRow = screen.getByText('乙').closest('tr')!;
+  const memberRow = screen.getByText('丙').closest('tr')!;
+  expect(ownerRow.textContent).toContain('社長');
+  expect(ownerRow.querySelector('button')).toBeNull();
+  expect(officerRow.querySelector('button')?.textContent).toBe('改為社員');
+  expect(memberRow.querySelector('button')?.textContent).toBe('設為幹部');
+  fireEvent.click(officerRow.querySelector('button')!);
+  await waitFor(() =>
+    expect(callClub).toHaveBeenCalledWith('one', 'school', 'club', {
+      action: 'role',
+      targetUid: 'two',
+      role: 'member',
+    }),
+  );
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
