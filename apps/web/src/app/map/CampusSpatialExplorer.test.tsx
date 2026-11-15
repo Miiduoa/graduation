@@ -582,6 +582,51 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
   }
 });
 
+it.each([
+  { status: 429, kind: 'delay-seconds' },
+  { status: 503, kind: 'HTTP-date' },
+])('does not repeatedly retry a rate-limited OSM source ($status, $kind)', async ({ status, kind }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  // A gateway can respond with 429 rather than our API's usual 503, and an
+  // intermediary may format Retry-After as an HTTP-date. Both are synthetic.
+  const retryAfter = kind === 'HTTP-date'
+    ? new Date(Date.now() + 10 * 60_000).toUTCString()
+    : '600';
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status,
+    headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 10 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+});
+
+it.each([
+  'Sun, 32 Nov 2026 01:02:03 GMT',
+  'Sun, 01 Nov 2026 01:02:03 GMT',
+  'not a date',
+])('ignores an invalid or expired HTTP-date Retry-After (%s)', async (retryAfter) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: false, status: 429,
+    headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  expect(retry.hasAttribute('disabled')).toBe(false);
+  expect(within(dialog).queryByText(/分鐘冷卻/)).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
