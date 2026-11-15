@@ -899,8 +899,11 @@ it.each(['failure', 'timeout'])('does not resurrect a seven-day-old outline afte
 
     clock += 2 * 60_000;
     fireEvent(window, new Event('pageshow'));
+    // React removes the expired volume immediately, but SpatialCanvas creates
+    // its replacement Three.js scene after an asynchronous dynamic import.
+    // Await that new scene rather than inspecting the disposed previous scene.
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     if (outcome === 'timeout') {
       const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
