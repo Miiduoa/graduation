@@ -45,7 +45,10 @@ export function buildCampusSpatialModel(locations: readonly MapLocation[]): Camp
       typeof location.id !== 'string' || !location.id.trim() || seen.has(location.id) ||
       typeof location.name !== 'string' || !location.name.trim() ||
       !Number.isFinite(location.lat) || Math.abs(location.lat) > 90 ||
-      !Number.isFinite(location.lng) || Math.abs(location.lng) > 180
+      !Number.isFinite(location.lng) || Math.abs(location.lng) > 180 ||
+      // (0, 0) is the common missing-GPS sentinel (Null Island), not a
+      // verified campus POI. One such record must not hide nearby places.
+      (location.lat === 0 && location.lng === 0)
     ) {
       excludedCount += 1;
       continue;
