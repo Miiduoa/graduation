@@ -73,6 +73,10 @@ for (const name of ['Dockerfile', 'Dockerfile.nuni']) {
 
 // Web 的校務讀取共用這些純來源檔，不應把整個 Functions 部署內容帶進映像。
 const schoolReaderSources = [
+  'backend/functions/dormWorkflow.js',
+  'backend/functions/authz.js',
+  'backend/functions/dormName.js',
+  'backend/functions/dormSsoIdentity.js',
   'backend/functions/puScraper.js',
   'backend/functions/tronClassScraper.js',
   'backend/functions/campusStoryAccessBinding.js',

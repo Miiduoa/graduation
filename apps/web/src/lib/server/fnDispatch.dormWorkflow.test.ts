@@ -1,7 +1,15 @@
 // @vitest-environment node
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 import { createMemoryGroupStore } from './memoryGroupStore';
+
+const storage = vi.hoisted(() => ({
+  getStorage: vi.fn(() => {
+    throw new Error('no admin app');
+  }),
+}));
+vi.mock('firebase-admin/storage', () => storage);
+afterEach(() => vi.restoreAllMocks());
 
 function fixture(uid = 'student') {
   const store = createMemoryGroupStore([
@@ -92,4 +100,40 @@ it('has a dedicated bounded budget that allows polling beyond the default ten re
     expect((await call({ action: 'config' })).status).toBe(403);
   }
   expect((await call({ action: 'config' })).status).toBe(429);
+});
+
+it('uses Admin Storage for authenticated uploads and owner-only signed photo reads', async () => {
+  const save = vi.fn(async () => undefined);
+  const getSignedUrl = vi.fn(async () => ['https://storage.example/signed']);
+  const file = vi.fn(() => ({ save, getSignedUrl }));
+  const bucket = vi.fn(() => ({ file }));
+  storage.getStorage.mockReturnValueOnce({ bucket } as never);
+  const { call, store } = fixture();
+  const upload = await call({ action: 'uploadPhoto', base64: 'YQ==', contentType: 'image/png' });
+  expect(upload.status).toBe(200);
+  const {
+    result: { path },
+  } = await upload.json();
+  expect(path).toMatch(/^dorm-private\/[0-9a-f-]{36}$/);
+  expect(save).toHaveBeenCalledWith(
+    Buffer.from('a'),
+    expect.objectContaining({ resumable: false }),
+  );
+  store.docs.set('schools/pu/dormRepairs/photo-ticket', {
+    userId: 'student',
+    workflow: 'dorm_staff',
+    images: [path],
+  });
+  storage.getStorage.mockReturnValueOnce({ bucket } as never);
+  expect(
+    await (await call({ action: 'repairPhoto', id: 'photo-ticket', index: 0 })).json(),
+  ).toMatchObject({ result: { url: 'https://storage.example/signed' } });
+  expect(getSignedUrl).toHaveBeenCalledWith(expect.objectContaining({ action: 'read' }));
+  store.docs.set('schools/pu/dormRepairs/photo-ticket', {
+    userId: 'other',
+    workflow: 'dorm_staff',
+    images: [path],
+  });
+  expect((await call({ action: 'repairPhoto', id: 'photo-ticket', index: 0 })).status).toBe(403);
+  expect(getSignedUrl).toHaveBeenCalledTimes(1);
 });

@@ -415,3 +415,24 @@ test('failed config also hides the mobile memo submission form', async () => {
   expect(await view.findByText('宿舍服務暫時無法使用，請稍後再試。')).toBeTruthy();
   expect(view.queryByText('送給宿舍輔導員')).toBeNull();
 });
+
+test.each([0, 1])(
+  'reports announcement push delivery honestly (%i delivered)',
+  async (delivered) => {
+    mockCall.mockImplementation(async (data) =>
+      data.action === 'config'
+        ? { enabled: true, packages: true }
+        : ['mine', 'workspace'].includes(data.action)
+          ? { repairs: [], leaves: [], packages: [], residents: [] }
+          : { success: true, delivered, recipients: 1 },
+    );
+    const view = render(<DormWorkflow schoolId="pu" uid="staff" />);
+    fireEvent.press(await view.findByText('開啟輔導員工作台'));
+    fireEvent.press(await view.findByText('住宿生'));
+  fireEvent.press(await view.findByText('預覽公告'));
+    fireEvent.press(view.getByText('確認發布本棟公告'));
+    expect(
+      await view.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+    ).toBeTruthy();
+  },
+);

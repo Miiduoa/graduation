@@ -403,7 +403,9 @@ export function DormWorkflow({
         result.updated !== undefined
           ? `${result.updated ? `已更新 ${result.updated} 件包裹` : '未核銷任何包裹'}，跳過 ${result.skipped ?? 0} 件。`
           : result.recipients !== undefined
-            ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
+            ? result.delivered
+              ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
+              : '公告已發布，推播尚未送出。'
             : '紀錄已更新。',
       );
       await refresh();

@@ -513,3 +513,22 @@ it.each([false, true])('failed config hides all official forms (submitOnly=%s)',
   expect(screen.queryByText('送給輔導員核可')).toBeNull();
   expect(screen.queryByLabelText('外宿原因')).toBeNull();
 });
+
+it.each([0, 1])('reports announcement push delivery honestly (%i delivered)', async (delivered) => {
+  api.config.packages = true;
+  api.call.mockImplementation(async (data) =>
+    data.action === 'config'
+      ? api.config
+      : ['mine', 'workspace'].includes(data.action)
+        ? api.rows
+        : { success: true, delivered, recipients: 1 },
+  );
+  render(<DormWorkflow schoolId="pu" uid="staff" />);
+  fireEvent.click(await screen.findByText('開啟輔導員工作台'));
+  fireEvent.click(await screen.findByText('住宿生'));
+  fireEvent.click(await screen.findByText('預覽公告'));
+  fireEvent.click(screen.getByText('確認發布本棟公告'));
+  expect(
+    await screen.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+  ).toBeTruthy();
+});

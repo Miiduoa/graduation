@@ -2089,3 +2089,14 @@ test('workspace fails explicitly above the bounded authorized stream rather than
     q.orders.length === 0 && q.filters.length === 1 && q.filters[0][2] === 'A',
   )).toBe(true);
 });
+
+
+test('announcement push failure reports zero deliveries and preserves the published record', async () => {
+  const { call, data, sendPushToUser } = fixture();
+  data.set('schools/pu/dormResidents/123', { userId: 'student', building: 'A', active: true });
+  sendPushToUser.mockRejectedValue(new Error('推播服務暫不可用'));
+  expect(
+    await call('staff', { action: 'announce', building: 'A', title: '停水', body: '明日施工' }),
+  ).toMatchObject({ success: true, delivered: 0, recipients: 1 });
+  expect((await call('student', { action: 'mine' })).announcements).toHaveLength(1);
+});
