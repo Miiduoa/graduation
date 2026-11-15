@@ -355,6 +355,9 @@ importers:
       firebase-admin:
         specifier: 13.10.0
         version: 13.10.0(encoding@0.1.13)
+      firebase-functions:
+        specifier: 7.4.0
+        version: 7.4.0(firebase-admin@13.10.0(encoding@0.1.13))
       js-sha256:
         specifier: 0.11.1
         version: 0.11.1
@@ -16188,6 +16191,17 @@ snapshots:
     transitivePeerDependencies:
       - '@firebase/app'
       - '@firebase/app-compat'
+      - supports-color
+
+  firebase-functions@7.4.0(firebase-admin@13.10.0(encoding@0.1.13)):
+    dependencies:
+      '@types/cors': 2.8.19
+      '@types/express': 5.0.6
+      cors: 2.8.6
+      express: 5.2.1
+      firebase-admin: 13.10.0(encoding@0.1.13)
+      protobufjs: 7.6.6
+    transitivePeerDependencies:
       - supports-color
 
   firebase-functions@7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)):

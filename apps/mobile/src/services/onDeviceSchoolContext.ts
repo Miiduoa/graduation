@@ -174,14 +174,26 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
         ? coverage.reason !== 'complete' || assignments.items.length !== assignments.count
         : coverage.reason === 'complete' || assignments.count === null ||
           assignments.items.length >= assignments.count))) return false;
-  return assignments.items.every((item) => !!item &&
+  // The authorized paginated reader rejects duplicate assignment identities.
+  // A JSON-restored snapshot can bypass that reader; two distinct titles with
+  // the same original assignment ID are not two separate student tasks.
+  const seenAssignmentSources = new Set<string>();
+  const assignmentsValid = assignments.items.every((item) => {
+    if (!item || !safePromptEvidenceText(item.title, 140) ||
+        !safePromptEvidenceText(item.groupName, 100, true) ||
+        !(item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48))) return false;
+    if (item.source !== undefined) {
+      const source = parseCampusAssignmentSource(item.source);
+      if (!source) return false;
+      const identity = JSON.stringify([source.groupId, source.assignmentId]);
+      if (seenAssignmentSources.has(identity)) return false;
+      seenAssignmentSources.add(identity);
+    }
+    return true;
+  });
+  return assignmentsValid && announcements.items.every((item) => !!item &&
     safePromptEvidenceText(item.title, 140) &&
-    safePromptEvidenceText(item.groupName, 100, true) &&
-    (item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48)) &&
-    (item.source === undefined || !!parseCampusAssignmentSource(item.source))) &&
-    announcements.items.every((item) => !!item &&
-      safePromptEvidenceText(item.title, 140) &&
-      (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
+    (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
 
 function checkedSchoolLabel(value: unknown, maxLength: number): string {

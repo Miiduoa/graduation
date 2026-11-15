@@ -1,12 +1,11 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 const mockCall = jest.fn();
-jest.mock('firebase/functions', () => ({
-  httpsCallable: () => async (data: unknown) => ({ data: await mockCall(data) }),
-}));
 jest.mock('../firebase', () => ({
-  getFunctionsInstance: () => ({}),
-  getStorageInstance: () => ({}),
+  getAuthInstance: () => ({ currentUser: { uid: 'fixture' } }),
+}));
+jest.mock('../services/nuniWebFn', () => ({
+  postNuniWebFn: (_name: string, data: unknown) => mockCall(data),
 }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock('../ui/aiFirst', () => ({ aiTokens: { border: '#ddd', text: '#111', ai: '#355e52' } }));
@@ -153,11 +152,13 @@ test('mobile re-evaluates capabilities after account and school changes', async 
   await waitFor(() => expect(mockCall).toHaveBeenCalledWith({ action: 'mine', schoolId: 'ntnu' }));
   expect(view.getByText('宿舍輔導員服務')).toBeTruthy();
 });
-test('unknown capabilities keep the mobile workflow visible', async () => {
+test('unknown capabilities hide the mobile workflow forms', async () => {
   mockCall.mockRejectedValue(new Error('offline'));
   const view = render(<DormWorkflow schoolId="pu" uid="student" />);
-  expect(await view.findByText('宿舍服務暫時無法連線。')).toBeTruthy();
-  expect(view.getByText('宿舍輔導員服務')).toBeTruthy();
+  expect(await view.findByText('宿舍服務暫時無法使用，請稍後再試。')).toBeTruthy();
+  expect(view.queryByText('送給宿舍輔導員')).toBeNull();
+  expect(view.queryByText('送給輔導員核可')).toBeNull();
+  expect(view.queryByLabelText('外宿原因')).toBeNull();
 });
 
 test.each([false, true])(
@@ -407,3 +408,31 @@ it('完整學號查詢與零筆核銷提示', async () => {
   fireEvent.press(view.getByText('已核對姓名與學號・全部核銷'));
   expect(await view.findByText('未核銷任何包裹，跳過 1 件。')).toBeTruthy();
 });
+
+test('failed config also hides the mobile memo submission form', async () => {
+  mockCall.mockRejectedValue(new Error('unauthenticated'));
+  const view = render(<DormWorkflow schoolId="pu" uid="student" submitOnly />);
+  expect(await view.findByText('宿舍服務暫時無法使用，請稍後再試。')).toBeTruthy();
+  expect(view.queryByText('送給宿舍輔導員')).toBeNull();
+});
+
+test.each([0, 1])(
+  'reports announcement push delivery honestly (%i delivered)',
+  async (delivered) => {
+    mockCall.mockImplementation(async (data) =>
+      data.action === 'config'
+        ? { enabled: true, packages: true }
+        : ['mine', 'workspace'].includes(data.action)
+          ? { repairs: [], leaves: [], packages: [], residents: [] }
+          : { success: true, delivered, recipients: 1 },
+    );
+    const view = render(<DormWorkflow schoolId="pu" uid="staff" />);
+    fireEvent.press(await view.findByText('開啟輔導員工作台'));
+    fireEvent.press(await view.findByText('住宿生'));
+  fireEvent.press(await view.findByText('預覽公告'));
+    fireEvent.press(view.getByText('確認發布本棟公告'));
+    expect(
+      await view.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
+    ).toBeTruthy();
+  },
+);

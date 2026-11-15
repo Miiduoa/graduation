@@ -516,6 +516,48 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
   expect(unsupported).not.toContain('期中報告');
 });
 
+test('restored assignment snapshot cannot double count the same original student task', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const firstSource = { kind: 'group-assignment' as const, groupId: 'course-1', assignmentId: 'hw-17' };
+  const distinctSource = { ...firstSource, assignmentId: 'hw-18' };
+  const authorized: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 2,
+      items: [
+        { title: '資料庫期中報告', groupName: '資料庫', dueAt: null, source: firstSource },
+        { title: '資料庫期末報告', groupName: '資料庫', dueAt: null, source: distinctSource },
+      ],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const valid = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
+  expect(valid).toContain('資料庫期中報告');
+  expect(valid).toContain('資料庫期末報告');
+  expect(valid).toContain('來源已完整讀取');
+
+  // Same source identity with different display titles cannot be two tasks,
+  // even when the restored total/count/coverage claim is internally consistent.
+  const duplicated: CampusSenseSnapshot = {
+    ...authorized,
+    assignments: {
+      ...authorized.assignments,
+      items: [
+        authorized.assignments.items[0],
+        { ...authorized.assignments.items[1], source: { ...firstSource } },
+      ],
+    },
+  };
+  const rejected = formatOnDeviceSchoolPrompt(local, duplicated, 'alice');
+  expect(rejected).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(rejected).not.toContain('資料庫期中報告');
+  expect(rejected).not.toContain('資料庫期末報告');
+  expect(rejected).toContain('資料庫概論'); // Independent authorized offline timetable remains.
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });

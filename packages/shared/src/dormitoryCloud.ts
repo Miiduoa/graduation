@@ -130,12 +130,14 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
 export function dormCloudDate(value: number | null): string {
   return value === null ? '時間待確認' : new Date(value).toLocaleString('zh-TW', { hour12: false });
 }
-export function dormParcelReturnNotice(parcel: DormCloudParcel, now = Date.now()): boolean {
-  return (
-    parcel.status === 'waiting' &&
-    parcel.arrivedAt !== null &&
-    now - parcel.arrivedAt >= 3 * 86400000
-  );
+/** Arrival + three days is only an implied reminder, never an official school deadline. */
+export function dormParcelReturnNotice(parcel: DormCloudParcel, now = Date.now()): string {
+  if (parcel.status !== 'waiting' || parcel.arrivedAt === null) return '';
+  const day = (time: number) => Math.floor((time + 8 * 3600000) / 86400000);
+  const remainingDays = day(parcel.arrivedAt + 3 * 86400000) - day(now);
+  if (remainingDays === 1) return '明天起退件';
+  if (remainingDays <= 0) return '已到件多日，請確認領取期限';
+  return '';
 }
 export type DormCloudTransport = {
   watch: (
