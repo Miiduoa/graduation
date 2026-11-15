@@ -36,6 +36,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   );
   const foregroundRef = useRef(inForeground);
   const readEpoch = useRef(0);
+  const cancelledPageEpoch = useRef<number | null>(null);
 
   // Returning from the app switcher cannot replay private viewer names from
   // a prior authorization. Stop reads while backgrounded and start at page one.
@@ -45,6 +46,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
       if (foreground === foregroundRef.current) return;
       foregroundRef.current = foreground;
       readEpoch.current += 1; // Invalidate promises before their effect cleanup.
+      cancelledPageEpoch.current = null;
       setPage({ viewers: [], nextCursor: null });
       setStatus('loading');
       setRequest({ cursor: null });
@@ -88,10 +90,20 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
         setStatus('ready');
       })
       .catch((error: unknown) => {
-        // AppState events invalidate reads before React runs passive cleanup.
-        if (!active || !foregroundRef.current || readEpoch.current !== epoch) return;
+        // Cancellation discards late success, but a server permission denial
+        // still clears private names unless another read supersedes it.
+        if (!active || !foregroundRef.current) return;
+        const denied = (error as { code?: string } | null)?.code === 'permission-denied';
+        if (readEpoch.current !== epoch) {
+          if (denied && cancelledPageEpoch.current === epoch && readEpoch.current === epoch + 1) {
+            cancelledPageEpoch.current = null;
+            setPage({ viewers: [], nextCursor: null });
+            setStatus('denied');
+          }
+          return;
+        }
         clearTimeout(timeout);
-        if ((error as { code?: string } | null)?.code === 'permission-denied') {
+        if (denied) {
           setPage({ viewers: [], nextCursor: null });
           setStatus('denied');
         } else {
@@ -107,6 +119,7 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   function load(cursor: Cursor) {
     if (!foregroundRef.current) return;
     readEpoch.current += 1;
+    cancelledPageEpoch.current = null;
     setStatus('loading');
     setRequest({ cursor });
   }
@@ -114,8 +127,9 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
   function stopWaitingForNextPage() {
     if (!foregroundRef.current || status !== 'loading' || request.cursor === null) return;
     // Stop this UI wait without claiming to cancel Firestore's transport.
-    // Reject the still-pending response before it can update visible names.
-    // Keep the exact cursor so the student can retry this page explicitly.
+    // Ignore late success, but still honor a late server permission denial
+    // for this read until a newer request or scope transition supersedes it.
+    cancelledPageEpoch.current = readEpoch.current;
     readEpoch.current += 1;
     setStatus('ready');
   }

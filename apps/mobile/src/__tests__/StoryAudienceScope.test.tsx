@@ -537,7 +537,7 @@ describe('story audience scope transitions', () => {
     subscription.mockRestore();
   });
 
-  test('a viewer can stop waiting for a slow next page, ignore a late denial, and retry the exact cursor', async () => {
+  test('a viewer can stop waiting for a slow next page, ignore late success, and retry the exact cursor', async () => {
     const cursor = { id: 'slow-second-page' } as Cursor;
     const pending = deferred<Page>();
     const fetchViewers = jest.mocked(listStoryViewers);
@@ -569,9 +569,13 @@ describe('story audience scope transitions', () => {
     expect(view.getByText('已載入的同學')).toBeTruthy();
 
     await act(async () => {
-      pending.reject({ code: 'permission-denied' });
-      await pending.promise.catch(() => {});
+      pending.resolve({
+        viewers: [{ uid: 'late', displayName: '取消後晚到的同學' }],
+        nextCursor: null,
+      });
+      await pending.promise;
     });
+    expect(view.queryByText('取消後晚到的同學')).toBeNull();
     expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
     expect(view.getByText('已載入的同學')).toBeTruthy();
 
@@ -583,6 +587,45 @@ describe('story audience scope transitions', () => {
     expect(view.getByText('已載入的同學')).toBeTruthy();
     expect(view.getByText('重新載入的同學')).toBeTruthy();
     expect(view.queryByText('停止等待')).toBeNull();
+    view.unmount();
+  });
+
+  test('a canceled page still clears private names when the server denies access before any new read', async () => {
+    const cursor = { id: 'revoked-second-page' } as Cursor;
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '撤權前同學' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '重新驗證的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    fireEvent.press(view.getByLabelText('停止等待下一頁'));
+    expect(view.getByText('撤權前同學')).toBeTruthy();
+
+    await act(async () => {
+      pending.reject({ code: 'permission-denied' });
+      await pending.promise.catch(() => {});
+    });
+    expect(view.queryByText('撤權前同學')).toBeNull();
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新檢查存取權限'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('重新驗證的同學')).toBeTruthy();
+    expect(view.queryByText('撤權前同學')).toBeNull();
     view.unmount();
   });
 
