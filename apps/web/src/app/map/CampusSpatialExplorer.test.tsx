@@ -857,6 +857,59 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
   }
 });
 
+it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  const fetchedAt = new Date(clock - day + 60_000).toISOString();
+  const fetchMock = vi.fn().mockResolvedValueOnce({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+  }).mockReturnValueOnce(new Promise(() => {}));
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+
+    // Simulate the real timeout callback while the browser is backgrounded.
+    // No visibilitychange event should be needed to enforce hard retention.
+    const softTimer = timerSpy.mock.calls.find(([, delay]) => delay === 60_000);
+    expect(softTimer).toBeTruthy();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    clock += 90_000;
+    act(() => { (softTimer![0] as () => void)(); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+
+    // The soft timeout must schedule a *new* seven-day expiry timeout.
+    const deadline = Date.parse(fetchedAt) + 7 * day;
+    const hardTimer = timerSpy.mock.calls.find(([, delay]) => delay === deadline - clock);
+    expect(hardTimer).toBeTruthy();
+    clock = deadline + 1_000;
+    act(() => { (hardTimer![0] as () => void)(); });
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
 it.each(['visibilitychange', 'timer'])('drops geometry at the earlier OSM replication deadline via %s when the response is expired', async (trigger) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
