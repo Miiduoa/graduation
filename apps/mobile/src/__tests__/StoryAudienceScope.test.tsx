@@ -245,6 +245,53 @@ describe('story audience scope transitions', () => {
     jest.useRealTimers();
   });
 
+  test('a late permission denial after the next-page timeout clears old viewers before a manual retry', async () => {
+    jest.useFakeTimers();
+    const cursor = { id: 'expired-page-cursor' } as Cursor;
+    const stalled = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old-student', displayName: '逾時前的觀看者' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => stalled.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored-student', displayName: '恢復資格的新觀看者' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(view.getByText('逾時前的觀看者')).toBeTruthy();
+
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText('暫時無法載入觀看名單')).toBeTruthy();
+    expect(view.getByText('逾時前的觀看者')).toBeTruthy();
+
+    await act(async () => {
+      stalled.reject({ code: 'permission-denied' });
+      await stalled.promise.catch(() => {});
+    });
+    expect(view.queryByText('逾時前的觀看者')).toBeNull();
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新檢查存取權限'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('恢復資格的新觀看者')).toBeTruthy();
+    expect(view.queryByText('逾時前的觀看者')).toBeNull();
+    view.unmount();
+    jest.useRealTimers();
+  });
+
   test('an owner can refresh the current audience from the first page without replaying cached viewers or an old cursor', async () => {
     const pendingRefresh = deferred<Page>();
     const cursor = { id: 'old-cursor' } as Cursor;
