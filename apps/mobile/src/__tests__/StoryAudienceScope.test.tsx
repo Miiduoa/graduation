@@ -676,4 +676,63 @@ describe('story audience scope transitions', () => {
     view.unmount();
   });
 
+  test('a next-page network failure identifies the retry scope and preserves the original cursor', async () => {
+    const cursor = { id: 'accessibility-next-page' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'existing', displayName: '已看到的同學' }],
+        nextCursor: cursor,
+      })
+      .mockRejectedValueOnce({ code: 'unavailable' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '剛載入的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+
+    expect(view.getByText('已看到的同學')).toBeTruthy();
+    expect(view.getByText('下一頁讀取失敗，已顯示的觀看者會保留')).toBeTruthy();
+    const retry = view.getByLabelText('重試載入下一頁觀看者');
+    expect(retry.props.accessibilityHint).toContain('原本的分頁位置');
+
+    await act(async () => {
+      fireEvent.press(retry);
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, cursor]);
+    expect(view.getByText('已看到的同學')).toBeTruthy();
+    expect(view.getByText('剛載入的同學')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('a first-page network failure offers an explicitly labeled fresh retry', async () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockRejectedValueOnce({ code: 'unavailable' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '查詢成功的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.queryByText('下一頁讀取失敗，已顯示的觀看者會保留')).toBeNull();
+    const retry = view.getByLabelText('重新載入觀看名單');
+    expect(retry.props.accessibilityHint).toContain('從第一頁');
+    await act(async () => {
+      fireEvent.press(retry);
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null]);
+    expect(view.getByText('查詢成功的同學')).toBeTruthy();
+    view.unmount();
+  });
+
 });

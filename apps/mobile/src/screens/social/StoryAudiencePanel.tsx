@@ -239,8 +239,17 @@ function StoryAudienceContents({ story, onBack }: StoryAudiencePanelProps) {
                 <Text accessibilityLiveRegion="polite" style={styles.status}>
                   暫時無法載入觀看名單
                 </Text>
+                {request.cursor !== null && page.viewers.length > 0 && (
+                  <Text style={styles.retryScope}>
+                    下一頁讀取失敗，已顯示的觀看者會保留
+                  </Text>
+                )}
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel={request.cursor !== null ? '重試載入下一頁觀看者' : '重新載入觀看名單'}
+                  accessibilityHint={request.cursor !== null
+                    ? '從原本的分頁位置向伺服器重試，保留已顯示的觀看者'
+                    : '從第一頁重新向伺服器查詢觀看名單'}
                   style={styles.action}
                   onPress={() => load(request.cursor)}
                 >
@@ -308,6 +317,7 @@ const styles = StyleSheet.create({
   footer: { gap: 12, paddingVertical: 18 },
   loading: { alignItems: 'center', gap: 8 },
   status: { color: '#c2cbc8', fontSize: 16, textAlign: 'center', paddingVertical: 8 },
+  retryScope: { color: '#d6f4e7', fontSize: 14, textAlign: 'center' },
   action: {
     minHeight: 44,
     justifyContent: 'center',
