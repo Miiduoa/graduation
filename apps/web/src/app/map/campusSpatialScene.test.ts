@@ -612,7 +612,7 @@ describe('controlled spatial camera input', () => {
     for (let index = 0; index < 20; index += 1) keyboard(container, '-');
     expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(MIN_SPATIAL_ZOOM);
     keyboard(container, 'Home');
-    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: 1 });
+    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: MIN_SPATIAL_ZOOM });
     drawFrame();
     expect(frames.size).toBe(0);
     expect(document.activeElement).toBe(container);

@@ -130,8 +130,11 @@ it('controls camera without changing the place or recreating its context and res
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '看全部地點' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '回到北向' }));
-  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1 }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1.25 }));
+  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
   expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
   expect(scene.create).toHaveBeenCalledTimes(1);
 });

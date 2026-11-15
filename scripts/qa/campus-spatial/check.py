@@ -372,10 +372,10 @@ async def camera_controls(page, _requests, _resources):
         assert (await camera_readout(page))["zoomPercent"] == bound
         await assert_same_scene(page, canvas, context, selected)
 
-    # Home resets both a rotated view and a non-default zoom.
+    # Home restores north without losing the current (minimum) zoom.
     await page.keyboard.press("ArrowLeft")
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect(dialog.get_by_text("縮放 65%", exact=True)).to_be_visible()
     assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
     rotated = await click_camera("向右旋轉")
     await click_camera("放大空間圖")
@@ -393,7 +393,7 @@ async def camera_controls(page, _requests, _resources):
     await assert_idle_renderer(page)
     await click_camera("放大空間圖")
     states["northReset"] = await click_camera("回到北向")
-    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 100}
+    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 125}
     idle = await assert_idle_renderer(page)
     await page.screenshot(path=str(OUT / "camera-controls.png"))
     await context.dispose()
