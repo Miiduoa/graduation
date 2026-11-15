@@ -3,6 +3,9 @@ import { HttpsError } from './httpsError';
 import type { CallableRequest, GroupFirestore } from './groupInviteHandlers';
 import type { ClubListing, ClubPortalView } from '@campus/shared/src/clubPortal';
 
+// Includes registration documents and both identity lookups for legacy rows.
+export const CLUB_CHECK_IN_LEGACY_SCAN_LIMIT = 600;
+
 const record = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
 function text(value: unknown, max = 2000) {
@@ -440,17 +443,27 @@ export function createClubPortal({
               const matches = records.filter(
                 (r) => r.data().status === 'registered' && r.data().studentSuffix === code,
               );
-              // Older registrations may predate studentSuffix. Read bounded pages and
-              // resolve only those records on the server, including duplicate suffixes.
+              // Older registrations may predate studentSuffix. Budget registration and
+              // identity reads together; uniqueness requires reaching the end of the list.
               let after: string | undefined;
+              let scannedDocuments = 0;
               while (matches.length < 2) {
+                // Reserve two identity reads per row before issuing either read.
+                const pageSize = Math.min(
+                  100,
+                  Math.floor((CLUB_CHECK_IN_LEGACY_SCAN_LIMIT - scannedDocuments) / 3),
+                );
+                if (!pageSize)
+                  throw new HttpsError('failed-precondition', '簽到名單過長，請改掃 QR');
                 let query = (ref.collection('registrations') as any)
                   .where('status', '==', 'registered')
                   .orderBy('__name__')
-                  .limit(100);
+                  .limit(pageSize);
                 if (after) query = query.startAfter(after);
                 const page = (await tx.get(query)).docs as any[];
+                scannedDocuments += page.length;
                 const legacy = page.filter((row) => !row.data().studentSuffix);
+                scannedDocuments += legacy.length * 2;
                 if (legacy.length) {
                   const identities = await tx.getAll(
                     ...legacy.flatMap((row) => [
@@ -469,7 +482,7 @@ export function createClubPortal({
                     if (suffix === code) matches.push(row);
                   });
                 }
-                if (page.length < 100) break;
+                if (page.length < pageSize) break;
                 after = page[page.length - 1].id;
               }
               if (matches.length !== 1)
