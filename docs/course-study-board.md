@@ -1259,3 +1259,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修復部分 iOS Safari／內嵌 WebView 對 readonly `textarea.select()` 拋錯時，點「全選第 N 張表格原文」會中斷選取的問題；先聚焦，再嘗試原生全選及明確 `setSelectionRange(0, value.length)`。任一 API 拒絕時不修改或移除原始教材文字，仍可長按選取。
 - 新增兩項模擬 DOM 回歸：模擬 `select()` 失敗仍能全選；模擬兩個選取 API 都失敗仍保留唯讀原文及焦點。這是 WebView API 失敗情境的程式修補，不等同 iOS Safari／Android Chrome 真機通過。
 - 不修改練習／閱讀進度 JSON、私人教材傳輸或其他模組；新精確 SHA CI／CodeQL、App 5504170 APPROVED、Maestro／實機及 Ahaboard 同教材同題同裝置對照須各自驗收，PR 維持 Draft，不合併、不部署。
+
+
+## 2026-11-15：還原 JSON 僅信任實際檔案位元組
+
+- 手機 WebView 的 `File.text()` 可能回傳**語法仍合法、但內容遭截斷或偷換**的進度 JSON，舊版在沒有替代字元 `U+FFFD` 時會直接接受，可能讓學生看到被改動的舊筆記。進度 JSON 改為一律從實際位元組以嚴格 UTF-8 解碼，優先使用 `Blob.arrayBuffer()`，失敗則嘗試裝置本機 `FileReader.readAsArrayBuffer()`；兩條位元組路徑都失敗便拒絕還原，保留現有筆記與逐題草稿，可使用既有的貼上 JSON 備援。TXT／Markdown 教材的文字讀取路徑維持原樣。
+- 新增兩項模擬 WebView 回歸：File.text 回傳格式合法但換掉私人筆記時，還原必須以實際檔案原文為準；File.text 假造合法 JSON、檔案實際含非法 UTF-8 時拒收且不出現還原確認。備份格式 v1/v2、scope 和 8 MiB 上限不變，不新增依賴／遠端服務，不外傳私人教材。
+- 這是程式及模擬瀏覽器測試，正式 CI/CodeQL、指定 App 5504170 審查、Maestro、iOS/Android 真機與 Ahaboard 同教材同題同機對照都需以新精確 SHA 另行驗證；PR 維持 Draft、不合併、不部署。

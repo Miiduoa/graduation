@@ -157,6 +157,12 @@ async function readStudyStrictUtf8Bytes(file: File, purpose: '教材' | '進度�
 }
 
 async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+  // Checkpoint JSON contains private drafts and answers. Some mobile WebViews
+  // resolve File.text() with valid but silently altered or truncated JSON.
+  // Restore only from strict decoding of the original bytes, including the
+  // on-device FileReader fallback. If all binary reads fail, keep the current
+  // session instead of offering a misleading restore preview.
+  if (purpose === '進度備份') return readStudyStrictUtf8Bytes(file, purpose);
   // File.text() can exist but reject on an actual selected file in a WebView.
   // Recover via a strict local byte read rather than erasing the study session.
   if (typeof file.text !== 'function') return readStudyStrictUtf8Bytes(file, purpose);

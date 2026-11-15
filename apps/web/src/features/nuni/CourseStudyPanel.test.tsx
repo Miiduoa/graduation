@@ -812,6 +812,56 @@ it('restores the exact private note from JSON bytes when mobile File.text silent
   }
 });
 
+it('uses the actual JSON bytes when mobile File.text returns valid but silently altered private notes', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '備份中的正確筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+  const saved = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+  expect(saved).toContain('備份中的正確筆記');
+  fireEvent.change(note, { target: { value: '現在尚未備份的草稿' } });
+
+  const bytes = new TextEncoder().encode(saved);
+  const file = new File([bytes], '閱讀進度.json', { type: 'application/json' });
+  const inaccurateText = vi.fn().mockResolvedValue(saved.replace('備份中的正確筆記', '錯誤的替代筆記'));
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: inaccurateText });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+
+  expect(await screen.findByRole('region', { name: '閱讀進度預覽' })).toBeTruthy();
+  expect(note.value).toBe('現在尚未備份的草稿');
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(inaccurateText).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('備份中的正確筆記');
+});
+
+it('rejects corrupt backup bytes even if a WebView File.text fabricates valid JSON', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '目前未備份的個人筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+  const plausible = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+  const invalid = Uint8Array.from([0x7b, 0x22, 0xff, 0x22, 0x7d]);
+  const file = new File([invalid], '不完整備份.json', { type: 'application/json' });
+  const inaccurateText = vi.fn().mockResolvedValue(plausible);
+  const readBytes = vi.fn().mockResolvedValue(invalid.buffer);
+  Object.defineProperty(file, 'text', { value: inaccurateText });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent',
+    expect.stringContaining('進度備份含有無法解碼的 UTF-8 位元組'));
+  expect(inaccurateText).not.toHaveBeenCalled();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(note.value).toBe('目前未備份的個人筆記');
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+});
+
 it('rejects malformed UTF-8 progress bytes before offering restore, preserving private notes', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
