@@ -94,16 +94,21 @@ test('approved next+sharp on both pass; source-map-js optional on current', asyn
   );
 });
 
-test('legacy 16.2.11 is rejected even when current is approved', async (t) => {
-  const roots = await fixture(t, {
-    current: patched(),
-    legacy: patched({ next: '16.2.11' }),
-  });
-  const report = checkRuntimeSecurity({ roots });
-  assert.equal(report.ok, false);
-  assert.equal(report.error, 'version-mismatch');
-  assert.equal(report.runtimes.legacy.version, '16.2.11');
-});
+for (const staleVersion of ['16.2.11', '16.4.2', '16.4.4']) {
+  for (const staleRuntime of ['current', 'legacy']) {
+    test(`${staleRuntime} ${staleVersion} is rejected even when the other runtime is approved`, async (t) => {
+      const roots = await fixture(t, {
+        current: patched(),
+        legacy: patched(),
+        [staleRuntime]: patched({ next: staleVersion }),
+      });
+      const report = checkRuntimeSecurity({ roots });
+      assert.equal(report.ok, false);
+      assert.equal(report.error, 'version-mismatch');
+      assert.equal(report.runtimes[staleRuntime].version, staleVersion);
+    });
+  }
+}
 
 test('old sharp is rejected even when next is approved on both', async (t) => {
   const roots = await fixture(t, {

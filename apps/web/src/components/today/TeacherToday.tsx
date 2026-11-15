@@ -99,16 +99,18 @@ export function TeacherToday({
             ) : (
               <ul className={styles.list}>
                 {teachingCourses.map((course) => {
-                  const href =
-                    course.href ||
-                    courseWeekHref(course.id).replace(/#week$/, '') ||
-                    `/teacher/course/${encodeURIComponent(course.id)}`;
+                  // School LMS workspaces keep their own destination. nuni courses
+                  // open the teacher workspace with assignment management.
+                  const courseHref = course.href || courseWeekHref(course.id).replace(/#week$/, '');
+                  const href = courseHref.replace(/^\/course\//, '/teacher/course/');
                   return (
                     <li key={course.id}>
                       <Link href={href} className={styles.row}>
                         <span className={styles.rowBody}>
                           <span className={styles.rowTitle}>{course.name}</span>
-                          <span className={styles.rowMeta}>查看繳交、教材與作業</span>
+                          <span className={styles.rowMeta}>
+                            開啟課程工作台 · 查看繳交、教材與作業
+                          </span>
                         </span>
                       </Link>
                     </li>

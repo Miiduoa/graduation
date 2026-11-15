@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_MATERIAL } from '@/lib/courseWorkLanding';
 import { MATERIAL_READ_KEY_PREFIX, markMaterialRead } from '@/lib/courseMaterials';
-import { CourseMaterials } from './CourseMaterials';
+import { CourseMaterials, CourseText } from './CourseMaterials';
 
 const state = vi.hoisted(() => ({ context: 'session-a', request: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -585,4 +585,40 @@ it('stops automatic target lookup on a repeated cursor', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('較早教材未能繼續載入');
   expect(state.request).toHaveBeenCalledTimes(3);
   expect(screen.queryByText(COURSE_WORK_MISSING_MATERIAL)).toBeNull();
+});
+
+it.each(['student', 'owner-teacher'] as const)('lets %s open the same reading destinations as mobile and keeps unsafe URLs plain', async (memberRole) => {
+  state.request.mockResolvedValue({ materials: [{ ...material, body: '課前閱讀：https://example.test/reading。\n補充 HTTP://example.test/notes，\n請讀完。\nhttps://user:pass@example.test/private javascript:alert(1) https://' }], nextCursor: null });
+  render(<CourseMaterials workspace={{ ...workspace, memberRole }} />);
+  const reading = await screen.findByRole('link', { name: 'https://example.test/reading' });
+  expect(reading.getAttribute('href')).toBe('https://example.test/reading');
+  expect(reading.getAttribute('target')).toBe('_blank');
+  expect(screen.getByRole('link', { name: 'HTTP://example.test/notes' }).getAttribute('href'))
+    .toBe('http://example.test/notes');
+  expect(screen.queryByRole('link', { name: /user:pass|javascript|^https:\/\/$/ })).toBeNull();
+  expect(screen.getByText(/https:\/\/user:pass@example.test\/private/)).toBeTruthy();
+});
+
+const readingUrlCases = [
+  ['https://example.test/chapter：one?topics=a、b&next=c，d。e', ''],
+  ['https://example.test/reading', '。，）'],
+  ['https://example.test/chapter(one)', '）'],
+  ['https://example.test/chapter（one）', '。，）'],
+  ['https://example.test/chapter[one]', '].'],
+];
+
+it.each(readingUrlCases)('keeps the full web destination %s and trims only its suffix %s', (url, suffix) => {
+  const text = `閱讀：${url}${suffix}\n結束`;
+  const { container } = render(<CourseText text={text} />);
+  const link = screen.getByRole('link', { name: url });
+  expect(link.getAttribute('href')).toBe(new URL(url).href);
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(container.textContent).toBe(text);
+});
+
+it('preserves every character of web text without reading URLs', () => {
+  const text = '  課前閱讀：沒有網址。，）\nftp://example.test/file javascript:alert(1)  ';
+  const { container } = render(<CourseText text={text} />);
+  expect(screen.queryAllByRole('link')).toHaveLength(0);
+  expect(container.textContent).toBe(text);
 });

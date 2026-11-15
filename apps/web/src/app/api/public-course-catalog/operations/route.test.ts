@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GET } from './route';
 
+const discoveryRequest = () => new Request('https://example.test/api/public-course-catalog/operations');
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -12,7 +14,7 @@ describe('public course operation discovery', () => {
       throw new Error('Discovery must not fetch');
     });
     vi.stubGlobal('fetch', fetchSource);
-    const response = await GET();
+    const response = await GET(discoveryRequest());
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     const body = await response.json();
@@ -48,10 +50,10 @@ describe('public course operation discovery', () => {
   });
 
   it('does not persist changes made to a previous discovery response', async () => {
-    const first = await (await GET()).json();
+    const first = await (await GET(discoveryRequest())).json();
     first.operations[0].upstreamUrl = 'https://example.test/';
     first.operations[0].endpoint.fixedQuery.schoolId = 'pu';
-    const second = await (await GET()).json();
+    const second = await (await GET(discoveryRequest())).json();
     expect(second.operations[0].schoolId).toBe('ncnu');
     expect(second.operations[0].endpoint.fixedQuery.schoolId).toBe('ncnu');
     expect(second.operations[0].upstreamUrl).toBe(
@@ -63,7 +65,7 @@ describe('public course operation discovery', () => {
     const fetchSource = vi.fn(() => { throw new Error('Discovery must not fetch'); });
     vi.stubGlobal('fetch', fetchSource);
     const legacy = await (await GET(new Request('https://example.test/api/public-course-catalog/operations?version=1'))).json();
-    expect(legacy).toEqual(await (await GET()).json());
+    expect(legacy).toEqual(await (await GET(discoveryRequest())).json());
     const response = await GET(new Request('https://example.test/api/public-course-catalog/operations?version=2'));
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('no-store');

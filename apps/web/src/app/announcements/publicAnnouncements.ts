@@ -177,7 +177,11 @@ function normalizeAnnouncement(
   } as Announcement;
 }
 
-export async function loadAnnouncement(schoolId: string, id: string): Promise<Announcement | null> {
+export async function loadAnnouncement(
+  schoolId: string,
+  id: string,
+  schoolOnly = false,
+): Promise<Announcement | null> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv()))
     return null;
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
@@ -185,6 +189,7 @@ export async function loadAnnouncement(schoolId: string, id: string): Promise<An
   const db = getDb();
   let snapshot = await getDocFromServer(doc(db, 'schools', schoolId, 'announcements', id));
   if (!snapshot.exists()) {
+    if (schoolOnly) return null;
     snapshot = await getDocFromServer(doc(db, 'announcements', id));
     if (!snapshot.exists() || snapshot.data().schoolId !== schoolId) return null;
   }

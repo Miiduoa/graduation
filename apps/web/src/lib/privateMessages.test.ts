@@ -481,7 +481,7 @@ it('notification destinations only use supported local tasks and never arbitrary
       type: 'announcement',
       data: { announcementId: 'ann-9', schoolId: 'pu' },
     }),
-  ).toEqual({ href: '/announcements/ann-9?campus=pu&schoolId=pu', label: '查看公告' });
+  ).toEqual({ href: '/announcements/ann-9?campus=pu&schoolId=pu&source=school-announcement', label: '查看公告' });
   expect(
     notificationDestination({
       ...notice,

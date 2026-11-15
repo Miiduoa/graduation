@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { Button } from '@/components/ui/Button';
 import { adminAnnouncementsSection, canSeeSchoolAnnouncementAdmin } from '@/lib/adminNav';
+import { campusServiceHref } from '@/lib/campusNavigationLinks';
 import type { Announcement } from '@/lib/firebase';
 import {
   announcementPublicHref,
@@ -137,6 +138,14 @@ export function SchoolAnnouncementsAdmin() {
             <section className={styles.panel} aria-labelledby="announcement-list-heading">
               <div className={styles.toolbar}>
                 <h2 id="announcement-list-heading">本校公告</h2>
+                <Link
+                  href={campusServiceHref(
+                    '/announcements',
+                    new URLSearchParams({ schoolId: schoolId!, campus: schoolId! }).toString(),
+                  )}
+                >
+                  查看公開公告列表
+                </Link>
                 <Button
                   type="button"
                   variant="ghost"

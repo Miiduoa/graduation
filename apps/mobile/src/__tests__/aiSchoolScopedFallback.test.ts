@@ -18,6 +18,12 @@ test('PU weather and transport quick replies keep Providence facts', () => {
   expect(buildCheckBusOfflineMessage('pu')).toContain('台中公車');
 });
 
+test.each(['pu', 'tw-pu'])('PU dorm fallback states official card access hours for %s', (schoolId) => {
+  const reply = buildSchoolScopedEmergencyFallback({ schoolId, userText: '宿舍門禁時間' });
+  expect(reply?.content).toContain('24 小時以學生證刷卡進出，00:00–06:00 須刷卡登記');
+  expect(reply?.content).not.toContain('23:00');
+});
+
 test('non-PU weather/transport never invent Providence routes', () => {
   const weather = buildSchoolScopedWeatherQuickReply('ncku', '國立成功大學');
   expect(weather.content).toContain('國立成功大學');

@@ -91,3 +91,22 @@ it('asks guests to sign in before managing announcements', () => {
     '/login?returnUrl=%2Fadmin%2Fannouncements',
   );
 });
+
+it.each(['pu', 'nthu'])('opens the public list and announcement in the managed school %s', async (schoolId) => {
+  mocks.campus.schoolId = schoolId;
+  render(<SchoolAnnouncementsAdmin />);
+  expect(await screen.findByText('置頂 · 既有公告')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看公開公告列表' }).getAttribute('href')).toBe(
+    `/announcements?schoolId=${schoolId}&campus=${schoolId}`,
+  );
+  expect(screen.getByRole('link', { name: '查看公開頁' }).getAttribute('href')).toBe(
+    `/announcements/ann-1?schoolId=${schoolId}&campus=${schoolId}`,
+  );
+});
+
+it('keeps the public list reachable before the first announcement is published', async () => {
+  vi.mocked(listSchoolAnnouncementsForAdmin).mockResolvedValue([]);
+  render(<SchoolAnnouncementsAdmin />);
+  expect(await screen.findByText('尚無公告。可在左側表單發布第一則。')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看公開公告列表' })).toBeTruthy();
+});

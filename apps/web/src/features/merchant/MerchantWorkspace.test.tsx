@@ -436,3 +436,71 @@ it('retains an uncertain menu through a session network error, but clears it for
   await screen.findByLabelText('品項 1 名稱');
   expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('');
 });
+
+it.each(['approved', 'under-review'])(
+  'offers same-campus management from a %s application',
+  async (state) => {
+    const workspace = {
+      tenantId: 'campus-one',
+      tenantName: '第一校園',
+      merchantName: '餐坊',
+      locationId: 'location-1',
+      locationName: '第一門市',
+      campusName: '主校區',
+      merchantStatus: 'suspended',
+      locationStatus: 'suspended',
+      activated: false,
+      publicAccess: false,
+      missingRequirements: ['menu'],
+    };
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-applications')
+        return Promise.resolve({ applications: [{ ...application, state }] });
+      if (path === 'merchant-workspaces')
+        return Promise.resolve({
+          workspaces: [
+            { ...workspace, tenantId: 'campus-two', locationId: 'other', locationName: '第二門市' },
+            workspace,
+          ],
+        });
+      return respond(path, context, input);
+    });
+    render(<MerchantLocationsPage />);
+    await screen.findByText('測試餐坊／學生餐廳');
+    const applications = screen.getByRole('region', { name: '申請進度' });
+    expect(
+      within(applications).queryByRole('button', { name: '前往管理門市：第二門市' }),
+    ).toBeNull();
+    const link = within(applications).queryByRole('button', { name: '前往管理門市：第一門市' });
+    if (state !== 'approved') {
+      expect(link).toBeNull();
+      return;
+    }
+    fireEvent.click(link!);
+    await waitFor(() =>
+      expect(mocks.request).toHaveBeenCalledWith(
+        'merchant-workspaces/campus-one/location-1',
+        'context-a',
+        undefined,
+        undefined,
+      ),
+    );
+  },
+);
+
+it('explains how to continue when an approved application has no same-campus workspace', async () => {
+  mocks.request.mockImplementation((path, context, input) =>
+    path === 'merchant-applications'
+      ? Promise.resolve({ applications: [{ ...application, state: 'approved' }] })
+      : respond(path, context, input),
+  );
+  render(<MerchantLocationsPage />);
+  await screen.findByText('這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。');
+  expect(screen.queryByRole('button', { name: /前往管理門市/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await waitFor(() =>
+    expect(
+      mocks.request.mock.calls.filter(([path]) => path === 'merchant-workspaces'),
+    ).toHaveLength(2),
+  );
+});

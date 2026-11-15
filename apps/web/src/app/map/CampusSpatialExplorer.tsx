@@ -173,14 +173,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       <div className={styles.cameraTools} role="group" aria-label="調整空間視角">
         <button className="btn" type="button" aria-label="向左旋轉" title="向左旋轉" onClick={() => onCameraChange({ ...camera, bearing: camera.bearing - SPATIAL_ROTATION_STEP })}>↶</button>
         <button className="btn" type="button" aria-label="向右旋轉" title="向右旋轉" onClick={() => onCameraChange({ ...camera, bearing: camera.bearing + SPATIAL_ROTATION_STEP })}>↷</button>
-        <button className="btn" type="button" aria-label="縮小空間圖" title="縮小空間圖" aria-disabled={camera.zoom <= MIN_SPATIAL_ZOOM} onClick={() => {
+        <button className="btn" type="button" aria-label="縮小空間圖" title="縮小空間圖" disabled={camera.zoom <= MIN_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom > MIN_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom / SPATIAL_ZOOM_FACTOR });
         }}>−</button>
-        <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" aria-disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
+        <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom < MAX_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom * SPATIAL_ZOOM_FACTOR });
         }}>＋</button>
-        <button className="btn" type="button" onClick={() => onCameraChange({ bearing: 0, zoom: 1 })}>回到北向</button>
-        <span>縮放 {Math.round(camera.zoom * 100)}%</span>
+        <button className="btn" type="button" onClick={() => onCameraChange({ ...camera, bearing: 0 })}>回到北向</button>
+        <button className="btn" type="button" disabled={camera.zoom === 1}
+          onClick={() => onCameraChange({ ...camera, zoom: 1 })}>還原 100% 縮放</button>
+        <span role="status" aria-live="polite" aria-atomic="true">縮放 {Math.round(camera.zoom * 100)}%</span>
         <span className={styles.compass}>
           <svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
             <g transform={`rotate(${spatialNorthRotationDegrees(camera.bearing, overhead)} 20 20)`}>
@@ -190,7 +192,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           <span>畫面北向</span>
         </span>
       </div>
-      <p id={helpId} className={styles.note}>橫向拖曳旋轉；聚焦空間圖後，可用左右鍵旋轉、＋／− 縮放，Home 回到北向。</p>
+      <p id={helpId} className={styles.note}>橫向拖曳旋轉；聚焦空間圖後，可用左右鍵旋轉、＋／− 縮放，Home 回到北向，0 還原 100% 縮放。</p>
     </>}
     </>
   );
@@ -286,12 +288,20 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
       if (now >= footprintClock.expiresAt) {
-        // Refresh once at the deadline, retaining the verified geometry and dates.
-        // A pending refresh already serves this purpose; do not restart it on resume.
+        // Seven days is the source's *hard* retention limit, not a trigger to
+        // keep an unverified building on screen indefinitely during an outage.
+        // Discard the volume before attempting a refresh; POIs and external
+        // walking directions remain available even if the origin is offline.
+        // An already-running request may still install a *new* valid snapshot.
         footprintExpiresAtRef.current = null;
-        staleSnapshotRef.current = true;
+        staleSnapshotRef.current = false;
         setFootprintClock(null);
-        setFootprintStale(true);
+        setFootprints([]);
+        setFootprintDate(null);
+        setFootprintBaseDate(null);
+        setFootprintStale(false);
+        setFootprintRefreshFailed(false);
+        setFootprintStatus('unavailable');
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
@@ -318,7 +328,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
-    // A local age deadline must not discard a previously verified outline.
+    // A freshness deadline may retain a dated snapshot; the seven-day hard
+    // source expiry never may.
     const preserveStale = staleSnapshotRef.current;
     footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
@@ -333,7 +344,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale;
+      const keepStale = preserveStale && staleSnapshotRef.current;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
@@ -383,10 +394,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       })
       .catch(() => {
         if (!active || timedOut) return;
-        // Keep the previously verified snapshot even after its refresh deadline.
-        // Normal first-load failures remain marker-only.
+        // Preserve only a still-retainable dated snapshot on refresh failure.
+        // Once source retention expires, all failures stay marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale;
+        const keepStale = preserveStale && staleSnapshotRef.current;
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })

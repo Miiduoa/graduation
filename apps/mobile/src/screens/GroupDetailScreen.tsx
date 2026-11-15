@@ -14,6 +14,7 @@ import {
 } from '../services/privateFiles';
 import { PrivateImage } from '../ui/PrivateImage';
 import { PrivateAttachment } from '../ui/PrivateAttachment';
+import { ClubProfile } from './ClubProfile';
 import { ClubSummary, clubSummaryEnabled } from './ClubSummary';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
@@ -716,6 +717,14 @@ export function GroupDetailScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
+        {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && (
+          <ClubProfile
+            key={JSON.stringify([auth.user.uid, school.id, groupId])}
+            uid={auth.user.uid}
+            schoolId={school.id}
+            groupId={groupId}
+          />
+        )}
         {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && clubSummaryEnabled() && (
           <ClubSummary
             key={`${auth.user.uid}:${school.id}:${groupId}`}
