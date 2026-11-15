@@ -104,6 +104,8 @@ test('malformed public meeting pairs fail closed before direct CSV import', () =
     [{ room: 17, time: 'M3' }], [{ room: '教室', time: null }],
     [{ room: '教室', time: 'M3' }, null],
     Array(33).fill({ room: '教室', time: 'M3' }),
+    Array(1), // Array.every otherwise skips missing entries.
+    [{ room: '教室', time: 'M3'.repeat(99) }],
   ];
   for (const meetings of malformed) {
     assert.equal(nthuCourseMeetings(meetings, '1151'), null);
@@ -116,6 +118,17 @@ test('malformed public meeting pairs fail closed before direct CSV import', () =
   const valid = [{ time: 'M3M4', room: '' }];
   assert.deepEqual(nthuCourseMeetings(valid, '1151').map(row => row.periodLabel), ['34']);
   assert.ok(nthuTimetableImportCsv({ ...chemistry, time: 'M3M4', room: '', meetings: valid }));
+  const sparse = Array(1);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, time: '', room: '', meetings: sparse }), null);
+  const oversized = [{ time: 'M3'.repeat(99), room: '教室' }];
+  assert.equal(nthuTimetableImportCsv({
+    ...chemistry, time: oversized[0].time, room: '教室', meetings: oversized,
+  }), null);
+  // All 14 periods across seven weekdays are the maximum unique input.
+  const fullWeekTime = [...'MTWRFSU'].map(day =>
+    [...'1234n56789abcd'].map(period => day + period).join('')).join('');
+  assert.equal(fullWeekTime.length, 196);
+  assert.ok(nthuCourseMeetings([{ time: fullWeekTime, room: '教室' }], '1151'));
 });
 
 test('missing, partially missing and unfamiliar times cannot produce a partial timetable', () => {

@@ -29,10 +29,15 @@ const weekdays = 'MTWRFSU';
 // Keep the direct-import boundary safe when a cached or external catalog
 // payload bypasses the typed API response validator.
 function validNthuMeetingPairs(value: unknown): value is readonly PublicCatalogMeeting[] {
+  // Any string longer than one full week necessarily repeats a weekday/slot.
+  // Reject it before expanding a malformed cached result into many timetable rows.
+  // Sparse arrays must not silently mean "no class".
+  const maxTimeLength = weekdays.length * periodOrder.length * 2;
   return Array.isArray(value) && value.length > 0 && value.length <= 32 &&
-    value.every(pair => pair !== null && typeof pair === 'object' &&
+    value.every((pair, index) => Object.prototype.hasOwnProperty.call(value, index) &&
+      pair !== null && typeof pair === 'object' &&
       !Array.isArray(pair) && typeof pair.time === 'string' &&
-      typeof pair.room === 'string' &&
+      pair.time.length <= maxTimeLength && typeof pair.room === 'string' &&
       /^(?:[MTWRFSU][1-9nabcd])+$/.test(pair.time));
 }
 
