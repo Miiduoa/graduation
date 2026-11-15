@@ -258,8 +258,13 @@ export function StudySourceTables({ text }: { text: string }) {
             <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
             <p className={styles.note}>
               這是教材原始 Markdown 行，保留原本的欄名與換行。
-              可用手機長按或鍵盤選取複製，不需剪貼簿權限。
+              可用手機長按或鍵盤選取複製，也能按下方「全選」後自行複製，不需剪貼簿權限。
             </p>
+            <button type="button" onClick={(event) => {
+              const field = event.currentTarget.parentElement?.querySelector('textarea');
+              field?.focus();
+              field?.select();
+            }}>全選第 {index + 1} 張表格原文</button>
             <textarea
               aria-label={'原文表格 ' + (index + 1) + ' 的可選取文字'}
               readOnly

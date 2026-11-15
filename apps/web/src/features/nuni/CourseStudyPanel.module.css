@@ -171,3 +171,6 @@
 .sourceTableSelection summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 .sourceTableSelection textarea { display: block; width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; resize: vertical; font: 16px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); white-space: pre; overflow: auto; }
 .sourceTableSelection textarea:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.sourceTableSelection button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; margin: 6px 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; cursor: pointer; }
+.sourceTableSelection button:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }

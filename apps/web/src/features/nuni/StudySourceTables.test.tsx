@@ -1,7 +1,15 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { StudySourceTables } from './StudySourceTables';
 import { extractStudySourceTables } from './studySourceTables';
+
+// A read-only source disclosure exists even when no chart is justified.
+// Identify only derived comparisons when asserting that no meter is shown.
+function comparisonSummaries(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('details > summary'))
+    .map((node) => node.textContent ?? '')
+    .filter((value) => value.startsWith('展開第 2 欄'));
+}
 
 const source = [
   '課堂資料（數值請依原始教材核對）：',
@@ -590,7 +598,9 @@ it('offers an opt-in comparison with only exact, positive source table values', 
     '| 程式設計 | 0 |',
   ].join('\n');
   const { container, rerender } = render(<StudySourceTables text={material} />);
-  const details = container.querySelector('details');
+  const details = Array.from(container.querySelectorAll('details')).find(
+    (node) => node.querySelector('summary')?.textContent?.startsWith('展開第 2 欄'),
+  );
   expect(details?.open).toBe(false);
   expect(screen.getByText('展開第 2 欄「學分」的原文數值比較')).toBeTruthy();
   expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
@@ -642,7 +652,7 @@ it('does not compare numeric ordinals, class levels or pages as quantities', () 
       '| 甲 | 1 |', '| 乙 | 2 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     unmount();
   }
 });
@@ -696,7 +706,7 @@ it('refuses to guess credits or mix explicit units and plain numbers', () => {
     ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     unmount();
   }
 });
@@ -739,7 +749,7 @@ it('does not turn numeric years or identifiers into misleading comparison bars',
       '| A | 2024 |', '| B | 2025 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
@@ -800,13 +810,13 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
       '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     unmount();
   }
   const repeated = ['| 項目 | 完成率 |', '| --- | --- |',
     '| 甲 | 20% |', '| 甲 | 30% |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
-  expect(container.querySelector('details')).toBeNull();
+  expect(comparisonSummaries(container)).toEqual([]);
 });
 
 
@@ -819,7 +829,7 @@ it('scales explicit English percent and rate columns to 100%, not to the highest
       '| 資料庫 | 75% |', '| 網路 | 25% |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('summary')?.textContent).toContain('原文百分比（100% 滿格）');
+    expect(comparisonSummaries(container).join(' ')).toContain('原文百分比（100% 滿格）');
     expect(Array.from(container.querySelectorAll('meter')).map((bar) => [
       bar.getAttribute('value'), bar.getAttribute('max'),
     ])).toEqual([['75', '100'], ['25', '100']]);
@@ -833,7 +843,7 @@ it('does not compare unlabeled English rates as quantities or block real numeric
       '| 資料庫 | 75 |', '| 網路 | 25 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     unmount();
   }
   const budget = ['| 課程 | Annual Budget |', '| --- | --- |',
@@ -858,7 +868,7 @@ it('guards progress and additional rate headers with source-grounded 100% scalin
     ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('summary')?.textContent).toContain('原文百分比（100% 滿格）');
+    expect(comparisonSummaries(container).join(' ')).toContain('原文百分比（100% 滿格）');
     expect(Array.from(container.querySelectorAll('meter')).map((meter) => [
       meter.getAttribute('value'), meter.getAttribute('max'),
     ])).toEqual([['75', '100'], ['25', '100']]);
@@ -878,7 +888,7 @@ it('does not misrepresent bare progress or rate numbers as max-relative percenta
     ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
@@ -900,7 +910,7 @@ it('does not scale bare rates or ratios as if the largest student value were 100
       '| 甲 | 75 |', '| 乙 | 25 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
@@ -918,7 +928,7 @@ it('does not force an artificial 100% ceiling on growth or return percentages', 
     const table = screen.getByRole('table');
     expect(within(table).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['75%', '25%']);
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     unmount();
   }
 });
@@ -957,7 +967,7 @@ it('does not mislead on abbreviated temperature or decibel source columns', () =
     const table = screen.getByRole('table');
     expect(within(table).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['20', '40']);
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
@@ -991,7 +1001,7 @@ it('keeps clock readings and map coordinates as exact text rather than ratio bar
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['8', '12']);
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
@@ -1021,7 +1031,7 @@ it('preserves source scores, GPAs, ratings and indexes without implying ratio ma
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['2', '4']);
-    expect(container.querySelector('details')).toBeNull();
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   }
@@ -1138,4 +1148,43 @@ it('keeps calendar dates, timestamps and time-zone positions as source text, not
     ])).toEqual([['10', '20'], ['20', '20']]);
     unmount();
   }
+});
+
+it('selects verbatim source table lines with a focusable one-tap control', () => {
+  const sourceText = [
+    '序言不要複製',
+    '| 課程 | 學分 |', '| --- | --- |',
+    '| SQL \\| NoSQL | 3 |', '| 網頁程式 | 2 |',
+    '結尾不要複製',
+  ].join('\n');
+  const { container } = render(<StudySourceTables text={sourceText} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const field = container.querySelector('textarea');
+  expect(field?.readOnly).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格原文' }));
+  expect(document.activeElement).toBe(field);
+  expect(field?.selectionStart).toBe(0);
+  expect(field?.selectionEnd).toBe(field?.value.length);
+  expect(field?.value).toContain('SQL \\| NoSQL');
+  expect(field?.value).not.toContain('序言');
+  expect(field?.value).not.toContain('結尾');
+});
+
+it('select-all uses the replaced source and excludes HTML-hidden answers', () => {
+  const oldText = ['| 舊講義 | 數值 |', '| --- | --- |', '| 舊 | 9 |'].join('\n');
+  const fresh = [
+    '<div hidden>', '| 教師答案 | 數值 |', '| --- | --- |', '| 祕密 | 999 |', '</div>',
+    '| 新講義 | 學分 |', '| --- | --- |', '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={oldText} />);
+  view.rerender(<StudySourceTables text={fresh} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格原文' }));
+  const field = view.container.querySelector('textarea');
+  expect(field?.value).toBe('| 新講義 | 學分 |\n| --- | --- |\n| 資料庫 | 3 |\n| 網路 | 2 |');
+  expect(field?.value).not.toContain('祕密');
+  expect(field?.value).not.toContain('舊講義');
+  expect(field?.selectionStart).toBe(0);
+  expect(field?.selectionEnd).toBe(field?.value.length);
+  expect(comparisonSummaries(view.container)).toHaveLength(1);
 });

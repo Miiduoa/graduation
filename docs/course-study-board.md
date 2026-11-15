@@ -1226,3 +1226,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 原文表格若以裸整數表示「日期、截止日、時間戳記、時區偏移、Date、Due Date、Timestamp、Unix/POSIX Time、Epoch Seconds、UTC Offset、Day of Month」等位置或序數，原可選 meter 可能把 10 和 20 畫成一半與滿格，錯誤暗示日期或時區存在兩倍關係。現在僅保留逐字原文表格、原數值與可手動選取的原始 Markdown，不再為這些欄位產生零起點比例圖。
 - 保留「學習時數、Study Hours、Duration Minutes、Elapsed Days、Event Count」等真正時長／計數數值比較；新增模擬 DOM 正反測試，不新增套件、不改教材內容、筆記、v1/v2 閱讀／逐題 checkpoint，也不外傳資料。這不是日期推理、圖像圖表理解或真機驗收。
 - 正式 Vitest、Web/Mobile CI、CodeQL、指定 GitHub App 5504170 的明確 APPROVED、Maestro、iOS Safari／Android Chrome，以及 Ahaboard 同教材同題同裝置驗收，仍需依此精確 SHA 重新確認。PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-15：原文表格全選與圖表回歸測試修正
+
+- Markdown 原文表格的唯讀選取區新增「全選第 N 張表格原文」，點按後聚焦並選取原始行，讓手機與鍵盤使用者不必精確拖曳長段選取手把。沿用原始行及教師隱藏答案排除機制；只提供手動複製，不呼叫剪貼簿 API，也不外傳私人教材。
+- 因新增原文選取 details，舊的數值比較 DOM 測試用「沒有任何 details」來表示「沒有衍生圖表」已不正確。本輪將 12 處舊斷言改為檢查衍生比較標題，兩處正向測試也避免誤抓第一個 source details；新增兩組來源全文選取、資料替換、隱藏答案界線測試。
+- 本輪不是完整 CI／CodeQL 或手機真機驗收。App 5504170 APPROVED、Maestro、iOS Safari/Android Chrome/VoiceOver/TalkBack、WebGPU 中文教學與 Ahaboard 同教材同題同機對照仍未完成；PR 保留 Draft、不合併、不部署。
