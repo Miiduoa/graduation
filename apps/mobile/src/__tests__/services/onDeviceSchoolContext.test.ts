@@ -459,7 +459,7 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
     assignments: {
       status: 'available', count: 3,
       items: [{ title: '期中報告', groupName: '資料庫', dueAt: null }],
-      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
     },
     announcements: { status: 'available', items: [] },
   };
@@ -514,6 +514,64 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
     },
   });
   expect(unsupported).not.toContain('期中報告');
+});
+
+test('restored partial assignment metadata matches legacy or eight-page reader behavior', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  // These are authorized-reader shapes, not actual school records.
+  const rows = Array.from({ length: 400 }, (_, index) => ({
+    title: `作業清單項目 #${index + 1}`, groupName: '資料庫', dueAt: null,
+  }));
+  const base: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 401, items: rows,
+      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const format = (snapshot: CampusSenseSnapshot) => formatOnDeviceSchoolPrompt(local, snapshot, 'alice');
+  const budget = format(base);
+  expect(budget).toContain('來源總數：401；本次已取得：400；完整性：僅讀取部分資料');
+  expect(budget).toContain('作業清單項目 #1');
+  const legacy: CampusSenseSnapshot = {
+    ...base, assignments: {
+      ...base.assignments, items: rows.slice(0, 50),
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
+    },
+  };
+  expect(format(legacy)).toContain('來源總數：401；本次已取得：50；完整性：僅讀取部分資料');
+
+  // The real reader cannot return 51 legacy rows or exhaust its eight-page
+  // budget with fewer than 400 rows. A saved JSON snapshot can forge either.
+  const forged: CampusSenseSnapshot[] = [
+    { ...base, assignments: {
+      ...base.assignments, coverage: { complete: false, reason: 'read-budget', pages: 1 },
+    } },
+    { ...base, assignments: {
+      ...base.assignments, coverage: { complete: false, reason: 'read-budget', pages: 7 },
+    } },
+    { ...base, assignments: {
+      ...base.assignments, items: rows.slice(0, 399),
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, coverage: { complete: false, reason: 'legacy-partial', pages: 2 },
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: rows.slice(0, 51),
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    } },
+  ];
+  for (const restored of forged) {
+    const prompt = format(restored);
+    expect(prompt).toContain('此回合沒有主動同步且有效的校園資料');
+    expect(prompt).not.toContain('作業清單項目 #1');
+    expect(prompt).toContain('資料庫概論'); // Independent verified local timetable survives.
+  }
 });
 
 test('complete assignment evidence must match the number of authorized 50-row pages', async () => {
