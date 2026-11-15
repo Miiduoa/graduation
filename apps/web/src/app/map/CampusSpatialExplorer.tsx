@@ -290,7 +290,16 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // Keep public Overpass work out of background tabs while a dated volume
       // remains retainable. The next visible resume event checks this same
       // absolute deadline; hard expiry still evicts geometry even when hidden.
-      if (document.hidden && now < footprintClock.expiresAt) return;
+      if (document.hidden && now < footprintClock.expiresAt) {
+        // The soft deadline timer still has to arm the seven-day hard
+        // deadline. Otherwise returning while hidden leaves no later timer
+        // to evict old geometry until the user brings the tab back.
+        // Keep staleSnapshotRef false so foreground resume revalidates once.
+        if (now >= footprintClock.staleAt && !footprintStale) {
+          setFootprintStale(true);
+        }
+        return;
+      }
       if (now >= footprintClock.expiresAt) {
         // Seven days is the source's *hard* retention limit, not a trigger to
         // keep an unverified building on screen indefinitely during an outage.
