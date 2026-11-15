@@ -69,8 +69,8 @@ it('allows staff to prepare a rule with five recipients and deadlines', async ()
 });
 it('requires advisor selection and required fields before creating internship records', async () => {
   const { view, props, snapshot } = setup('student', 'student');
-  await waitFor(() => expect(view.getByText('建立實習紀錄')).toBeTruthy());
-  fireEvent.press(view.getByText('建立實習紀錄'));
+  await waitFor(() => expect(view.getByRole('button', { name: '建立實習紀錄' })).toBeTruthy());
+  fireEvent.press(view.getByRole('button', { name: '建立實習紀錄' }));
   expect(view.getByText('請先選擇系所規則')).toBeTruthy();
   expect(view.getByText('請填寫實習機構')).toBeTruthy();
   expect(view.getByText('請填寫指導老師姓名')).toBeTruthy();
@@ -85,7 +85,7 @@ it('requires advisor selection and required fields before creating internship re
   fireEvent.press(view.getByText('搜尋指導老師'));
   await waitFor(() => expect(view.getByText(/測試指導老師｜teacher@school.edu.tw/)).toBeTruthy());
   fireEvent.press(view.getByText(/測試指導老師｜teacher@school.edu.tw/));
-  fireEvent.press(view.getByText('建立實習紀錄'));
+  fireEvent.press(view.getByRole('button', { name: '建立實習紀錄' }));
   await waitFor(() =>
     expect(props.service.execute).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'create', teacherUid: 'teacher', organization: '測試機構' }),

@@ -196,7 +196,7 @@ it('shows independent internship department review while workstudy staff and ops
                       canReview: false,
                       canOperate: false,
                     }
-                  : { rules: [], records: [], audit: [] },
+                  : { rules: [], records: [], audit: [], canManage: true },
               },
             }
           : emptyCareerFeed(),
@@ -228,7 +228,7 @@ it('mounts the granted workstudy staff and ops workbenches after the student sna
                       canReview: true,
                       canOperate: true,
                     }
-                  : { rules: [], records: [], audit: [] },
+                  : { rules: [], records: [], audit: [], canManage: true },
               },
             }
           : emptyCareerFeed(),

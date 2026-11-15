@@ -92,10 +92,10 @@ test.each(['owner', 'admin'])('管理已啟用時，%s 不顯示未開放說明'
   expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
 });
 
-test.each([false, true])('社團目錄管理說明沿用既有旗標：%s', (enabled) => {
+test.each([false, true])('社團目錄不再顯示還沒開放的矛盾說明：%s', (enabled) => {
   jest.mocked(clubSummaryEnabled).mockReturnValue(enabled);
   render(<ClubDirectory clubs={[]} onOpen={jest.fn()} />);
-  expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
+  expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
 });
 
 test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async () => {
