@@ -758,8 +758,13 @@ describe('story audience scope transitions', () => {
       expect(view.queryByText('到期前的觀看者')).toBeNull();
       expect(view.queryByText('載入更多觀看者')).toBeNull();
       expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
-      expect(view.getByLabelText('重新整理觀看名單').props.disabled).toBe(true);
+      // Pressable maps disabled to responder behavior; the host View does not
+      // expose a literal disabled prop in React Native Testing Library.
+      const refresh = view.getByLabelText('重新整理觀看名單');
+      expect(refresh.props.accessibilityState).toMatchObject({ disabled: true });
+      fireEvent.press(refresh);
       expect(fetchViewers).toHaveBeenCalledTimes(1);
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
     } finally {
       view.unmount();
       jest.useRealTimers();
