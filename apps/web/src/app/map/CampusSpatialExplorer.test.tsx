@@ -904,6 +904,16 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
     await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    // Hard expiry must remove unverified geometry but must not wake the
+    // public OSM origin while the browser stays in the background.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+    // pageshow can follow visibilitychange on mobile; only one request is valid.
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   } finally {
     timerSpy.mockRestore();
     clockSpy.mockRestore();
