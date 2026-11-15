@@ -286,12 +286,20 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
       if (now >= footprintClock.expiresAt) {
-        // Refresh once at the deadline, retaining the verified geometry and dates.
-        // A pending refresh already serves this purpose; do not restart it on resume.
+        // Seven days is the source's *hard* retention limit, not a trigger to
+        // keep an unverified building on screen indefinitely during an outage.
+        // Discard the volume before attempting a refresh; POIs and external
+        // walking directions remain available even if the origin is offline.
+        // An already-running request may still install a *new* valid snapshot.
         footprintExpiresAtRef.current = null;
-        staleSnapshotRef.current = true;
+        staleSnapshotRef.current = false;
         setFootprintClock(null);
-        setFootprintStale(true);
+        setFootprints([]);
+        setFootprintDate(null);
+        setFootprintBaseDate(null);
+        setFootprintStale(false);
+        setFootprintRefreshFailed(false);
+        setFootprintStatus('unavailable');
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
@@ -333,7 +341,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale;
+      const keepStale = preserveStale && staleSnapshotRef.current;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
@@ -386,7 +394,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Keep the previously verified snapshot even after its refresh deadline.
         // Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale;
+        const keepStale = preserveStale && staleSnapshotRef.current;
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
