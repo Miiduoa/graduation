@@ -49,7 +49,15 @@ function footprintCooldownSeconds(response: Response): number | null {
   }
   const until = Date.parse(raw);
   if (!Number.isFinite(until) || new Date(until).toUTCString() !== raw) return null;
-  const seconds = Math.ceil((until - Date.now()) / 1000);
+  // A mobile device can be minutes ahead of the origin. HTTP-date and Date
+  // are both origin-clock values; a client-only subtraction could treat a
+  // still-active 429/503 cooldown as already expired and hammer Overpass.
+  // Never shorten the locally calculated wait, and cap both at 24 hours.
+  const serverDate = response.headers?.get('date')?.trim() ?? '';
+  const serverTime = Date.parse(serverDate);
+  const serverWait = serverDate && Number.isFinite(serverTime) &&
+    new Date(serverTime).toUTCString() === serverDate ? until - serverTime : -Infinity;
+  const seconds = Math.ceil(Math.max(until - Date.now(), serverWait) / 1000);
   return seconds > 0 ? Math.min(86_400, seconds) : null;
 }
 
