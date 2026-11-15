@@ -41,6 +41,7 @@ export type StudyPracticeAction =
   | { type: 'go'; index: number }
   | { type: 'decide'; outcome: 'again' | 'understood' }
   | { type: 'skip' }
+  | { type: 'undo_skip' }
   | { type: 'restart'; scope: 'all' | 'pending' };
 
 export type StudyPracticeSummary = {
@@ -182,6 +183,11 @@ export function updateStudyPracticeRound(
       if ((action.outcome !== 'again' && action.outcome !== 'understood') ||
         !response.attempt.trim() || !response.answerVisible) return round;
       return advance(withResponse(round, { ...response, outcome: action.outcome }));
+    case 'undo_skip':
+      // A deliberate undo restores an unanswered card without erasing its draft
+      // or source hint. Never alter a completed self-rating by mistake.
+      if (response.outcome !== 'skipped') return round;
+      return withResponse(round, { ...response, outcome: null });
     case 'skip':
       // Revisiting an already assessed or skipped card must not silently overwrite
       // the learner's earlier decision. Editing their attempt resets that outcome.

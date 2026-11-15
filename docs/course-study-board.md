@@ -1240,3 +1240,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 來源表格若是「當地時間／臺北時間／標準時間」或 Local Time／UTC Time／GMT Time／Time of Arrival／Time of Departure，8 點與 12 點不能以從零開始的長條表達兩倍關係，現在保留表格與可複製原文，不再產生倍數圖。Study Hours、Duration Minutes、學習時數等時長仍能比較。已擴充既有 DOM 測試迴圈 8 組，獨立 JS 邊界檢查核對 8 組時刻與 3 組時長；正式 Vitest、手機真機與 WebGPU 教學仍須另驗。
 - 對照當下 main 與白板 45 個差異路徑，僅 CourseMaterials.tsx、CourseMaterials.test.tsx 有共同變動；由共同祖先逐行整合，保留 main 跨裝置教材網址處理及其測試，亦保留白板的啟動入口、筆記／進度與回歸測試；其他非白板檔案保留 main 最新 tree。以白板 head 和 main 為雙親，僅在精確 expected-head 下非強制快轉白板分支。
 - 無新套件、付費 API、私人教材傳輸或備份格式變動。新 SHA 的 GitHub Web／Mobile CI、CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機與 Ahaboard 同教材同題同機對照皆須獨立確認；缺任一 gate 則 PR 保留 Draft，未合併 main、未部署。
+
+
+## 2026-11-15：逐題複習可取消誤按的「略過」
+
+- 學生若誤按「略過這題」，現在從本輪題目清單回到該題，可以選「取消略過，繼續作答」，原題號、已寫的回答與原文提示完整保留，不強制重練整輪或改動自評為已理解；參考回答不會因此公開。略過的統計會回到未自評，方便稍後完成真正的回想。
+- 已完成的回合仍必須由學生明確點回題目才可撤銷略過，已選「這題已理解／還要加強」的自評不可透過本按鈕覆寫。新增 reducer 及 DOM 回歸案例，無備份 JSON schema 變動，既有 v1/v2 閱讀與 v1 逐題 checkpoint 仍沿用原格式；不新增套件、雲端服務或私人教材傳輸。
+- 本輪驗證須以新精確 SHA 的 GitHub CI／CodeQL 結果為準；App 5504170 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同條件對照未完成前，PR 保留 Draft，不合併、不部署。

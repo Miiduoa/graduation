@@ -228,6 +228,33 @@ describe('finite independent practice rounds', () => {
     expect(attempted.responses[attempted.cards[0].id].answerVisible).toBe(true);
   });
 
+  it('undoes an accidental skip after returning, preserving the exact draft and hint without revealing the answer', () => {
+    const attempted = change(round(2), { type: 'attempt', value: '未完成的草稿' }, { type: 'toggle_hint' });
+    const skipped = updateStudyPracticeRound(attempted, { type: 'skip' });
+    const back = updateStudyPracticeRound(skipped, { type: 'go', index: 0 });
+    expect(getStudyPracticeSummary(back).skipped).toBe(1);
+    const restored = updateStudyPracticeRound(back, { type: 'undo_skip' });
+    expect(restored.index).toBe(0);
+    expect(restored.responses[restored.cards[0].id]).toEqual({
+      attempt: '未完成的草稿', answerVisible: false, hintVisible: true, outcome: null,
+    });
+    expect(getStudyPracticeSummary(restored)).toMatchObject({ skipped: 0, unreviewed: 2, answered: 1 });
+    expect(updateStudyPracticeRound(restored, { type: 'undo_skip' })).toBe(restored);
+    const untouched = round();
+    expect(updateStudyPracticeRound(untouched, { type: 'undo_skip' })).toBe(untouched);
+    expect(skipped.responses[skipped.cards[0].id].outcome).toBe('skipped');
+  });
+
+  it('can undo a skipped final question after explicitly reopening the completed round', () => {
+    const completed = updateStudyPracticeRound(round(1), { type: 'skip' });
+    expect(completed.finished).toBe(true);
+    expect(updateStudyPracticeRound(completed, { type: 'undo_skip' })).toBe(completed);
+    const reopened = updateStudyPracticeRound(completed, { type: 'go', index: 0 });
+    const undone = updateStudyPracticeRound(reopened, { type: 'undo_skip' });
+    expect(undone.finished).toBe(false);
+    expect(getStudyPracticeSummary(undone)).toMatchObject({ skipped: 0, unreviewed: 1, pending: 1 });
+  });
+
   it('does not replace an existing self-rating or prior skip when revisiting a card', () => {
     const initial = round(3);
     const assessed = updateStudyPracticeRound(decide(initial, 'understood', '第一題答案'), { type: 'go', index: 0 });
@@ -258,7 +285,7 @@ describe('finite independent practice rounds', () => {
     expect(completed).toMatchObject({ index: 2, finished: true });
     const blocked: StudyPracticeAction[] = [
       { type: 'attempt', value: '完成後的改寫' }, { type: 'toggle_answer' }, { type: 'toggle_hint' },
-      { type: 'decide', outcome: 'understood' }, { type: 'skip' },
+      { type: 'decide', outcome: 'understood' }, { type: 'skip' }, { type: 'undo_skip' },
     ];
     for (const action of blocked) expect(updateStudyPracticeRound(completed, action)).toBe(completed);
     const revisited = updateStudyPracticeRound(completed, { type: 'go', index: 2 });

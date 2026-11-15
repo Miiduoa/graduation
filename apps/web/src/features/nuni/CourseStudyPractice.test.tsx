@@ -237,9 +237,28 @@ it('disables skip on an already assessed or skipped card and preserves explicit 
   expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(false);
   skip();
   selectQuestion(1);
-  expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: '略過這題' })).toBeNull();
+  expect(screen.getByRole('button', { name: '取消略過，繼續作答' })).toBeTruthy();
   expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
     .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，略過' })).toBeTruthy();
+  expect(model.run).not.toHaveBeenCalled();
+});
+
+it('lets the learner undo a skipped question without losing a prior draft or revealing the answer', () => {
+  render(<Controller />);
+  writeAnswer('保留這段未完成的試答');
+  fireEvent.click(screen.getByRole('button', { name: '查看原文提示' }));
+  skip();
+  selectQuestion(1);
+  expect(answerInput().value).toBe('保留這段未完成的試答');
+  expect(screen.getByRole('region', { name: '本題原文提示' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '取消略過，繼續作答' }));
+  expect(answerInput().value).toBe('保留這段未完成的試答');
+  expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(false);
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
   expect(model.run).not.toHaveBeenCalled();
 });
 
