@@ -344,6 +344,10 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
   render(<DormWorkflow schoolId="pu" uid="admin" initialStaff />);
   const button = await screen.findByRole('button', { name: '匯出宿舍統計' });
   expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText('輔導員帳號 UID')).toBeNull();
+  expect(screen.queryByText('值班棟別（授權時必填，多棟以逗號分隔）')).toBeNull();
+  expect(screen.queryByText('授予包裹及報修權限')).toBeNull();
+  expect(screen.queryByText('移除宿舍服務權限')).toBeNull();
   expect(screen.getByText('請先載入全部紀錄，再查看或匯出完整統計。')).toBeTruthy();
   fireEvent.click(await screen.findByText('載入更多紀錄'));
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));

@@ -4,7 +4,7 @@
 
 完整讀取 `/workspace/agent-backend/lanes-1114/宿舍-規格-v1.md`，以已合併 #626 的學生雲端清單為基礎。此次加入正式工單、外宿卡及職員工作台；室友組合、入住點檢照片／PDF 仍屬規格 PR 3，不在這次變更內。
 
-手機 staff 首頁（有宿舍服務權限才顯示）、Dormitory、網頁 `/dormitory` 保留所有個人備忘及校方正式入口；開通後才有輔導員服務及備忘編輯表單中的「送給宿舍輔導員」。網頁另有 `/staff/dorm?schoolId=pu` 職員入口，沿用相同操作。`dorm_staff` 是 `staff` 的子身分，不新增頂層權限。權限判斷依本校有效 membership 及獨立 `dormStaffRoles.packages / repairs`；沒有宿舍授權紀錄的既有服務人員仍沿用既有 serviceRoles，不是依前端身分標籤。
+手機 staff 首頁（有宿舍服務權限才顯示）、Dormitory、網頁 `/dormitory` 保留所有個人備忘及校方正式入口；開通後才有輔導員服務及備忘編輯表單中的「送給宿舍輔導員」。網頁另有 `/staff/dorm?schoolId=pu` 職員入口，沿用相同操作。`dorm_staff` 是 `staff` 的子身分，不新增頂層權限。權限判斷依本校有效 membership 及獨立 `dormStaffRoles.packages / repairs`；沒有宿舍授權紀錄不回退 serviceRoles，不是依前端身分標籤。
 
 正式工單五階段以 `dormStatus` 記錄，保留 `status` 對應欄位，完整內容僅透過 callable 讀取；每次階段變更及重新開啟都附伺服器時間。學生可確認結案、在修好待確認或已結案後按「還沒修好」重開同一張單。舊備忘不冒充工單。新工單透過 dormWorkflow 狀態機操作，舊備忘與舊 API 行為保留。
 
@@ -22,7 +22,7 @@
 - 逐校在 `schools/{schoolId}` 新增 `dormWorkflowEnabled: true` 才開通，缺省或 false 隱藏新服務。不可全校批次預設開啟。
 - 新集合：`schools/{schoolId}/dormLeaves`、`dormResidents`、`dormAnnouncements`。均只由驗證身份與權限的 callable 讀寫，不新增客戶端 Firestore 存取權。
 - 完整報修資料寫入 `dormRepairs`，包裹學號、棟別寫入 `dormPackages`，不進入舊規則允許全校服務人員直接讀取的集合。學生既有 `packages` feed 僅保留 recipientId、品名、地點、狀態、到件時間，不含學號、棟別或名冊資料；登錄與核銷同步原子更新。
-- 管理員指派／撤銷宿舍權限只寫入獨立 `dormStaffRoles`（packages、repairs、buildings），不再寫共用 `serviceRoles`，既有服務的有效權限不變。非空 buildings 限定棟別，空白代表全棟，僅管理員可設定；異動寫入 `adminLogs`。未修改共用登入；本 PR 的共用 postLoginRoles／roles 解析有將 `dorm_staff` 映射為 `staff`，屬權限相關變更。
+- 管理員指派／撤銷宿舍權限入口已移除；產品 UI／API 不可寫入 `dormStaffRoles`，既有文件仍依原授權條件讀取。新增指派功能須待日後明確說「上」，本輪不代表核准。
 - 照片最多三張、每張 10MB，使用既有 `temp/{uid}` 上傳及 Storage 規則，不新增公開路徑；網址只隨工單提供給本人及授權職員。
 - 沒有 SQL migration、Firestore rule、Storage rule 或複合 index 變更。沒有自動執行資料遷移。正式開通前請提供真實住宿生名冊及輔導員帳號，並驗證通知設備設定。
 
@@ -57,7 +57,7 @@
 ## 審查修正（R1）
 
 - P1：名冊匯入改用 Firestore transaction，先讀取整批既有名冊並檢查原棟別，再寫入；包含已移出的住宿生。跨棟移轉僅限學校管理員，即使職員同時負責兩棟也不能移轉。
-- P1（依審查要求隔離的權限修正）：僅修改宿舍 handler 的 setStaff 寫入。當共用 serviceRoles 原為 inactive，而此次授予宿舍服務時，將非宿舍 domain（沿用既有 SERVICE_ROLE_DOMAINS 清單）的旗標明確設為 false，避免共用 status 啟用時恢復舊權限。原為 active 的其他服務保持原狀；其他中繼資料保留。這會清除停用紀錄中的舊服務旗標，未來若要恢復該服務須另外明確授權。
+- 歷史 setStaff 寫入方案已移除；本輪保留既有 `serviceRoles` 與舊服務 API 原狀。
 - 有登入權限migration變更：上述為審查要求的狹義權限修正，仍屬「需晉瑋說『上』」的權限部署範圍；未修改登入、sessions、共用 authz、角色解析、Firestore／Storage rules 或 migration，未部署或操作正式資料。
 - 新增 5 項回歸案例，涵蓋跨棟覆寫、停用名冊、管理員移轉、同棟更新、多棟職員限制，以及 active／inactive 的其他服務有效權限與撤權結果。
 - 驗證：dormWorkflow.test.js、authz.test.js 共 26 項通過；shared typecheck、兩個變更 JS 檔案的 ESLint、handler 語法檢查、git diff --check 通過。執行環境為既有 Node 24，套件要求 Node 20／22，工具有引擎版本警告；無新增依賴、安裝套件或更動 node_modules symlink，未建立暫存檔。
@@ -107,7 +107,7 @@
 ## PR #629 指定 R2 修正（可信身分隔離與明確宿舍授權）
 
 - P1：撤回一般 SSO 對 members.studentId 的新增寫入。成功校方登入後，僅從已驗證 adapter 投影學號及姓名至 schools/{schoolId}/dormSsoIdentities/{uid}；此隔離集合沒有客戶端讀寫授權，沿用現有規則的預設拒絕。重新登入取代舊映射，缺漏／不合法學號清空為 null，不採用 users 或 members 個人資料補值。
-- P1：宿舍 callable 不再回退 serviceRoles；非管理員必須具明確、啟用的 dormStaffRoles、對應 domain 及非空值班棟別。讀寫使用相同棟別判斷；授權拒絕空棟別，兩端提示一併修正。既有共用服務授權與 API 維持原狀，學校管理員仍可處理全校宿舍資料。
+- P1：宿舍 callable 不再回退 serviceRoles；非管理員必須具明確、啟用的 dormStaffRoles、對應 domain 及非空值班棟別。讀寫使用相同棟別判斷；空棟別不授權。既有共用服務授權與 API 維持原狀，學校管理員仍可處理全校宿舍資料。
 - P2：名冊匯入以隔離 SSO 映射查找唯一且啟用的本校成員，姓名取自相同可信映射，修正一般 SSO 成員紀錄沒有姓名而無法搜尋、核對的問題。
 - 有登入權限migration變更：依本輪審查要求，窄幅修改 index.js 一般 SSO 回呼中本 PR 新增的宿舍身分同步，以及 dormWorkflow.js 的宿舍授權判斷；同步實作隔離於 dormSsoIdentity.js。此登入整合、宿舍授權與新增隔離集合仍列入「需晉瑋說『上』」部署範圍。未改共用登入 writer、sessions、共用 authz、ACL／Firestore／Storage rules 或 migration，未部署、遷移或操作正式資料。先前使用 members 學號映射的方案由本節取代；開通前一般 SSO 帳號須重新登入建立隔離映射。
 - 回歸涵蓋：一般 SSO 新／舊帳號以校方姓名匯入與搜尋、缺漏／不合法身分刷新、拒絕 members／users 非隔離學號、重複映射、共用服務不能取得宿舍權限、缺漏／空棟別拒絕授權，以及管理員保留存取能力。
@@ -175,7 +175,7 @@
 - 新增 `findResident` 精確學號查詢，沿用現有宿舍開通、包裹服務及棟別檢查，只回傳在住宿生的隨機代碼、遮罩學號與必要名冊欄位。網頁／手機可在尚未載入完整分頁名冊時查詢並選人登錄包裹；查詢結果獨立於分頁與統計資料。
 - 核銷／退件交易回傳實際更新與跳過件數；零筆更新回傳 `success: false`，兩端明確顯示「未核銷任何包裹」及跳過件數。併發導致已領／已退狀態改變時不誤算更新，郵局／掛號／收發室仍跳過。
 - 回歸測試涵蓋完整學號查詢、遮罩及白名單回應、他棟與非住宿生排除、一般學生拒絕、零筆／全跳過／部分成功與併發狀態改變，以及兩端查詢選人後登錄和零筆核銷提示。
-- 權限範圍標註：依審查建議新增隔離的宿舍查詢 action，沿用既有驗證，未修改登入、sessions、共用 ACL、Firestore／Storage rules 或 migration。原 PR 的 `setStaff` 與 `dormStaffRoles` 權限變更仍保留、仍需原核准；本輪不部署、不合併、不操作正式資料。
+- 權限範圍標註：依審查建議新增隔離的宿舍查詢 action，沿用既有驗證，未修改登入、sessions、共用 ACL、Firestore／Storage rules 或 migration。原 PR 的工作台角色讀取條件保留；`setStaff` 寫入入口已移除；本輪不部署、不合併、不操作正式資料。
 - 驗證結果：後端 2 檔 83 項、網頁 1 檔 16 項、手機 1 檔 15 項全部通過；web／mobile 全專案 typecheck、以 backend/functions 設定執行的 ESLint、`git diff --check` 通過。型別增量檔、測試設定與 Jest 快取均置於 `/tmp/dorm-review-fix`，完成後清除。未安裝或新增依賴，未更換 node_modules symlink。
 
 ## review-dorm-r2.out：本人包裹降級讀取修正
@@ -183,7 +183,7 @@
 - 指定審查無確定 P0／P1；本輪修正 P2：網頁與手機只以 Functions 是否設定決定是否輪詢本人 `parcels`，不再依賴 `dormWorkflowEnabled`。關閉職員工作流程後，已登錄在私有集合的本人包裹仍可讀取。
 - 尚未成功取得本人投影時，保留既有 Firestore 讀取與失敗備援。取得投影後若更新失敗，保留最近成功資料並透過既有錯誤狀態提示讀取失敗；後續舊集合快照不會覆蓋完整投影。下一次輪詢成功即恢復正常狀態。
 - 兩端回歸測試涵蓋無 Functions、首次失敗備援、關閉工作流程、成功後失敗保留待領包裹、恢復後顯示已領取，以及取消訂閱停止輪詢；另驗證後續舊集合快照與端點不可用不會覆蓋投影。
-- 本輪無登入權限migration變更：未修改後端、登入、auth、sessions、ACL、Firestore／Storage rules 或 migration；原 PR 的 `dormStaffRoles`／`setStaff` 授權變更仍保留原核准要求。本輪不部署、不合併、不操作正式資料。
+- 本輪無登入權限migration變更：未修改後端、登入、auth、sessions、ACL、Firestore／Storage rules 或 migration；原 PR 的工作台角色讀取條件保留；`setStaff` 寫入入口已移除。本輪不部署、不合併、不操作正式資料。
 - 驗證：網頁 3 檔 22 項、手機 1 檔 5 項通過；web／mobile／shared 全專案 typecheck 通過；`git diff --check` 通過。型別增量檔與 Jest 快取置於 `/tmp/dorm-r2-fix`，完成後清除。未安裝依賴或更換 node_modules symlink；執行環境 Node 24，工具提示專案要求 Node 20／22。
 
 ## review-dorm-r2.out 後續 P2：失敗後持續更新舊包裹
@@ -198,7 +198,27 @@
 - 以一般 merge 合併 `origin/main`；唯一內容衝突保留主線原文「門禁：24 小時以學生證刷卡進出，00:00–06:00 須刷卡登記」。該檔與主線相同，其他主線變更完整保留。
 - 保留獨立 `dormStaffRoles` 模型，不使用 `serviceRoles` 備援。非管理員須有明確存在、`status: active`、對應 packages／repairs 為 true 的角色，且棟別清單非空、所有項目均為有效字串。工作台查詢結果再次使用與寫入相同的棟別判斷。
 - 宿舍成員操作額外拒絕已標記停用、刪除或刪帳中的呼叫者；管理員也須通過既有 `assertSchoolAdmin`。既有包裹本人相容讀取仍維持原本收件人限定路徑。
-- `setStaff` 保留交易內 `assertSchoolAdmin`、有效本校成員與帳號存在檢查，並拒絕任何已標記非 active 的目標帳號或刪帳中帳號。packages／repairs 任一授權為 true 時，棟別不得空白或為空清單；學生與一般職員均不能授權或撤銷。
+- `setStaff` handler 已刪除；有效本校管理員、職員、學生呼叫皆落入既有「未知操作」，未登入仍由原登入檢查拒絕，不寫入角色或稽核紀錄。
 - 相較修正前僅收緊驗證；未刪除或放寬主線既有管理員／成員限制。未修改共用 authz、登入、session、ACL writers、Firestore／Storage rules 或 migration；未安裝依賴、替換 node_modules、部署或操作正式資料。
 - 驗證：沿用後端既有 Jest／Babel 設定，dormWorkflow、authz、dormAccountDeletion、dormLoginIsolation、accountDeletion 共 5 檔 160 項通過；兩個變更後端檔案 ESLint、Prettier 與 git diff --check 通過。最初使用臨時簡化 Jest 設定時遇到 jose ESM 轉譯錯誤，改回專案設定即通過，無依賴變更。暫存輸出與測試快取位於 `/tmp`，完成後移除。
-- 仍需晉瑋說「上」：新宿舍角色與棟別授權模型、管理員授權入口的上線，以及本分支原有登入隔離同步／刪帳整合等權限範圍變更；本次修正未改寫這些既有登入流程。既有包裹 Firestore 直讀封閉方案、客戶端版本協調、照片簽署權限與舊照片 token 限制仍依 `docs/approval/dorm-privacy-20261114.md` 核准驗收。本次沒有套用規則或執行 migration，不代表已核准開通。
+- 仍需晉瑋說「上」：新宿舍角色與棟別授權模型（管理員授權入口已移除，日後新增須另獲明確核准），以及本分支原有登入隔離同步／刪帳整合等權限範圍變更；本次修正未改寫這些既有登入流程。既有包裹 Firestore 直讀封閉方案、客戶端版本協調、照片簽署權限與舊照片 token 限制仍依 `docs/approval/dorm-privacy-20261114.md` 核准驗收。本次沒有套用規則或執行 migration，不代表已核准開通。
+
+## 移除 setStaff 官方入口（2026-11-15）
+
+選項 2：保留輔導員工作台，刪除後端 setStaff handler 與 Web／Mobile 授權、撤銷表單。全庫搜尋（排除依賴、Git 與建置輸出）未發現其他角色寫入入口；通用 callable／代理即使轉送 setStaff，後端也只會拒絕。產品 UI／API 不可寫入 dormStaffRoles；學校管理員新增指派權限仍待日後明確說「上」，本輪沒有新核准。
+
+逐項相容性核對（以本次 diff 與回歸測試驗證）：
+
+1. 非管理員仍須明確、active 的 dormStaffRoles、對應 packages／repairs 及有效非空 buildings；不回退 serviceRoles。
+2. staff()、inBuilding() 與非空棟別檢查完全保留，空清單不授權全棟。
+3. 管理員既有全棟工作台、總覽及匯出保留；無角色指派入口。
+4. 管理員、職員、學生及未登入呼叫 setStaff 均拒絕；回歸比對全部文件，確認角色、共用服務及 adminLogs 均無異動，也不建立新目標角色。
+5. serviceRoles、舊 packages／repairRequests API 及其權限條件未修改。
+6. Firestore／Storage rules、migration、登入、sessions、auth 與環境旗標未修改。
+7. 其他工作台 handler 的授權檢查完全未修改。
+8. 學生流程、照片／個資遮罩及姓名學號防洩漏修正未修改，既有回歸保留。
+9. 測試直接種入的既有角色持續可存取工作台；刪帳清理保留。
+
+驗證：後端 dormWorkflow（109 項）、authz、dormAccountDeletion、accountDeletion 共 4 檔 167 項通過；Web DormWorkflow 17 項、Mobile DormWorkflow 15 項通過。兩端測試確認管理員統計匯出保留且授權／撤銷欄位按鈕不存在。後端及 Web／Mobile 套件 lint、Web／Mobile 全專案 typecheck、變更程式 Prettier 與 git diff --check 通過。後端 lint 僅有 index.js 原有 4 個未使用變數警告；Node 24 有專案 Node 20／22 引擎提示。
+
+型別檢查沿用 /tmp 設定，將 shared 解析指向本工作樹，未排除來源或修改依賴；測試與型別快取置於 /tmp。未改規則、登入或環境旗標，未部署、推送、rebase 或改寫既有提交。

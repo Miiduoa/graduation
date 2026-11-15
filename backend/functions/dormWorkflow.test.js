@@ -258,38 +258,36 @@ test('student cannot advance staff steps or alter legacy memos', () => {
   expect(transition('fixed', 'closed', true)).toBe(true);
   expect(transition('closed', 'sent', true)).toBe(true);
 });
-test('admin changes only dorm domains, records audit and cannot grant to another school', async () => {
-  const { call, data } = fixture();
-  data.set('users/staff', { displayName: '輔導員' });
-  data.set('schools/pu/serviceRoles/staff', {
-    status: 'active',
-    orders: true,
-    repairs: true,
-    packages: true,
-  });
-  await call('admin', {
-    action: 'setStaff',
-    targetUid: 'staff',
-    packages: false,
-    repairs: false,
-    buildings: [],
-  });
-  expect(data.get('schools/pu/serviceRoles/staff')).toMatchObject({
-    orders: true,
-    repairs: true,
-    packages: true,
-  });
-  expect([...data.keys()].some((k) => k.includes('/adminLogs/'))).toBe(true);
-  await expect(
-    call('admin', {
-      action: 'setStaff',
-      targetUid: 'outsider',
-      packages: true,
-      repairs: true,
-      buildings: ['A'],
-    }),
-  ).rejects.toMatchObject({ code: 'permission-denied' });
-});
+test.each(['admin', 'staff', 'student', undefined])(
+  'removed setStaff rejects %s without changing any documents',
+  async (actor) => {
+    for (const targetUid of ['staff', 'outsider']) {
+      for (const granting of [true, false]) {
+        const { call, data } = fixture();
+        data.set('schools/pu/serviceRoles/staff', {
+          status: 'active',
+          orders: true,
+          packages: true,
+          repairs: true,
+        });
+        data.set('schools/pu/adminLogs/existing', { action: 'existing' });
+        const before = JSON.stringify([...data]);
+        await expect(
+          call(actor, {
+            action: 'setStaff',
+            targetUid,
+            packages: granting,
+            repairs: granting,
+            buildings: granting ? ['A'] : [],
+          }),
+        ).rejects.toMatchObject(
+          actor ? { code: 'invalid-argument', message: '未知操作' } : { code: 'unauthenticated' },
+        );
+        expect(JSON.stringify([...data])).toBe(before);
+      }
+    }
+  },
+);
 test('building announcements reach only roster residents and remain available to them', async () => {
   const { call, data, sendPushToUser } = fixture();
   data.set('schools/pu/dormResidents/123', {
@@ -366,19 +364,21 @@ test('staff can update own building but even multi-building staff cannot transfe
 });
 
 test.each(['active', 'inactive'])(
-  'dorm grants preserve effective non-dorm access for %s records',
+  'removed dorm grants preserve existing dorm and non-dorm access for %s records',
   async (status) => {
     const { call, data } = fixture();
     data.set('users/staff', { displayName: '輔導員' });
     const before = { status, orders: true, printing: true, health: true, customMetadata: 'keep' };
     data.set('schools/pu/serviceRoles/staff', before);
-    await call('admin', {
-      action: 'setStaff',
-      targetUid: 'staff',
-      packages: true,
-      repairs: false,
-      buildings: ['A'],
-    });
+    await expect(
+      call('admin', {
+        action: 'setStaff',
+        targetUid: 'staff',
+        packages: true,
+        repairs: false,
+        buildings: ['A'],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-argument', message: '未知操作' });
     const after = data.get('schools/pu/serviceRoles/staff');
     for (const domain of ['orders', 'printing', 'health'])
       expect(hasServiceDomainAccess(after, domain)).toBe(hasServiceDomainAccess(before, domain));
@@ -387,20 +387,22 @@ test.each(['active', 'inactive'])(
     expect(hasServiceDomainAccess(after, 'packages')).toBe(false);
     expect(await call('staff', { action: 'config' })).toMatchObject({
       packages: true,
-      repairs: false,
+      repairs: true,
     });
-    await call('admin', {
-      action: 'setStaff',
-      targetUid: 'staff',
-      packages: false,
-      repairs: false,
-      buildings: [],
-    });
+    await expect(
+      call('admin', {
+        action: 'setStaff',
+        targetUid: 'staff',
+        packages: false,
+        repairs: false,
+        buildings: [],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-argument', message: '未知操作' });
     const revoked = data.get('schools/pu/serviceRoles/staff');
     expect(revoked).toEqual(before);
     expect(await call('staff', { action: 'config' })).toMatchObject({
-      packages: false,
-      repairs: false,
+      packages: true,
+      repairs: true,
     });
     for (const domain of ['orders', 'printing', 'health'])
       expect(hasServiceDomainAccess(revoked, domain)).toBe(hasServiceDomainAccess(before, domain));
@@ -425,13 +427,6 @@ test('disabled schools retain only the signed-in member history and reject mutat
 test('scoped grants and personal data never enter legacy school-wide access paths', async () => {
   const { call, data } = fixture();
   data.set('users/staff', { displayName: '輔導員' });
-  await call('admin', {
-    action: 'setStaff',
-    targetUid: 'staff',
-    packages: true,
-    repairs: true,
-    buildings: ['A'],
-  });
   expect(data.has('schools/pu/serviceRoles/staff')).toBe(false);
   await call('student', repair);
   expect([...data.keys()].some((k) => k.includes('/repairRequests/'))).toBe(false);
@@ -770,7 +765,7 @@ test.each([
   },
 );
 
-test('dorm grants require buildings while school administrators retain access', async () => {
+test('removed dorm grants reject while school administrators retain workbench access', async () => {
   const { call } = fixture();
   await expect(
     call('admin', { action: 'setStaff', targetUid: 'staff', packages: true, buildings: [] }),
@@ -1799,8 +1794,8 @@ it('核銷回傳實際更新及跳過件數，零筆不回報成功', async () =
   expect(data.get('schools/pu/dormPackages/post').status).toBe('waiting');
 });
 
-test.each(['student', 'staff'])(
-  'ordinary %s cannot grant or revoke dorm permissions',
+test.each(['admin', 'student', 'staff'])(
+  '%s cannot grant or revoke removed dorm permissions',
   async (actor) => {
     const { call, data } = fixture();
     data.set('users/staff', { status: 'active' });
@@ -1814,7 +1809,7 @@ test.each(['student', 'staff'])(
           repairs: granting,
           buildings: granting ? ['A'] : [],
         }),
-      ).rejects.toMatchObject({ code: 'permission-denied' });
+      ).rejects.toMatchObject({ code: 'invalid-argument' });
       expect(data.get('schools/pu/dormStaffRoles/staff')).toEqual(before);
       expect([...data.keys()].some((path) => path.includes('/adminLogs/'))).toBe(false);
     }
@@ -1843,7 +1838,7 @@ test.each(['missing', 'inactive', 'deleted', 'suspended', 'deleting', 'inactive-
         buildings: ['A'],
       }),
     ).rejects.toMatchObject({
-      code: state === 'inactive-member' ? 'permission-denied' : 'failed-precondition',
+      code: 'invalid-argument',
     });
     expect(data.get('schools/pu/dormStaffRoles/staff')).toEqual(before);
     expect([...data.keys()].some((path) => path.includes('/adminLogs/'))).toBe(false);

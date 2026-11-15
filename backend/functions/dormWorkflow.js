@@ -360,55 +360,6 @@ function createDormWorkflowHandler({
         announcements,
       };
     }
-    if (action === 'setStaff') {
-      const target = required(input.targetUid, 160);
-      if (
-        !Array.isArray(input.buildings) ||
-        input.buildings.some((b) => typeof b !== 'string' || !b.trim() || b.length > 70)
-      )
-        throw new HttpsError('invalid-argument', '請檢查棟別');
-      if ((input.packages === true || input.repairs === true) && !input.buildings.length)
-        throw new HttpsError('invalid-argument', '請至少指定一個值班棟別');
-      await db.runTransaction(async (tx) => {
-        await authz.assertSchoolAdmin(schoolId, uid, tx);
-        const memberRef = school.collection('members').doc(target),
-          accountRef = db.collection('users').doc(target),
-          serviceRef = school.collection('dormStaffRoles').doc(target);
-        const [member, account, oldRoles] = await tx.getAll(memberRef, accountRef, serviceRef);
-        if (!member.exists || (member.data().status && member.data().status !== 'active'))
-          throw new HttpsError('permission-denied', '帳號不是本校啟用成員');
-        if (
-          !account.exists ||
-          (account.data()?.status && account.data().status !== 'active') ||
-          account.data()?.accountDeletionInProgress
-        )
-          throw new HttpsError('failed-precondition', '帳號已停用');
-        const granting = input.packages === true || input.repairs === true;
-        tx.set(
-          serviceRef,
-          {
-            status: granting ? 'active' : oldRoles.data()?.status || 'inactive',
-            packages: input.packages === true,
-            repairs: input.repairs === true,
-            staffSubtype: 'dorm_staff',
-            buildings: input.buildings,
-            updatedBy: uid,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
-        tx.create(school.collection('adminLogs').doc(), {
-          action: 'dormStaffRole',
-          targetUid: target,
-          actorUid: uid,
-          packages: input.packages === true,
-          repairs: input.repairs === true,
-          buildings: input.buildings,
-          createdAt: FieldValue.serverTimestamp(),
-        });
-      });
-      return { success: true };
-    }
     if (action === 'announce') {
       staff('packages');
       const building = required(input.building, 70);

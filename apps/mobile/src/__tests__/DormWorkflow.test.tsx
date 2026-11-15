@@ -284,6 +284,10 @@ test('mobile blocks partial statistics until all 51 records have loaded', async 
   );
   const view = render(<DormWorkflow schoolId="pu" uid="admin" initialStaff />);
   await view.findByText('匯出宿舍統計');
+  expect(view.queryByText('輔導員帳號 UID')).toBeNull();
+  expect(view.queryByText('值班棟別（授權時必填，多棟以逗號分隔）')).toBeNull();
+  expect(view.queryByText('授予包裹及報修權限')).toBeNull();
+  expect(view.queryByText('移除宿舍服務權限')).toBeNull();
   expect(view.getByRole('button', { name: '匯出宿舍統計' }).props.accessibilityState.disabled).toBe(
     true,
   );
