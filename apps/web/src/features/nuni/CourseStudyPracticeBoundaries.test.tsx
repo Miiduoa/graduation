@@ -117,11 +117,11 @@ function expectRetainedRound() {
   fireEvent.click(screen.getByRole('button', { name: '上一題' }));
   expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
   expect(screen.queryByText(explanations[0].answer)).toBeNull();
-  // This card has already been skipped. The skip control must not overwrite
-  // its saved outcome or act as navigation when returning from a file read.
-  const skip = screen.getByRole('button', { name: '略過這題' }) as HTMLButtonElement;
-  expect(skip.disabled).toBe(true);
-  fireEvent.click(skip);
+  // Skipped cards now offer an explicit undo instead of a disabled skip.
+  // Returning from a cancelled/failed file read must leave that action untouched.
+  expect(screen.queryByRole('button', { name: '略過這題' })).toBeNull();
+  expect(screen.getByRole('button', { name: '取消略過，繼續作答' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /^第 1 題：.*，略過$/ })).toBeTruthy();
   expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
   fireEvent.click(screen.getByRole('button', { name: '下一題' }));
   expectSecondQuestion();
@@ -188,6 +188,26 @@ it('preserves the round through progress preview and cancellation, then clears i
   fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
   expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe('');
   expect(screen.queryByText(explanations[1].answer)).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('undoes a skipped outcome only on explicit action after a cancelled progress load', async () => {
+  await startSecondQuestion();
+  const finish = pendingRead('progress');
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  await act(async () => finish());
+
+  fireEvent.click(screen.getByRole('button', { name: '上一題' }));
+  expect(screen.getByRole('button', { name: /^第 1 題：.*，略過$/ })).toBeTruthy();
+  expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
+  fireEvent.click(screen.getByRole('button', { name: '取消略過，繼續作答' }));
+  expect(screen.getByRole('button', { name: /^第 1 題：.*，未完成$/ })).toBeTruthy();
+  expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
+  expect(screen.queryByText(explanations[0].answer)).toBeNull();
+  expect((screen.getByRole('button', { name: '略過這題' }) as HTMLButtonElement).disabled).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
+  expectSecondQuestion();
   expect(mocks.run).not.toHaveBeenCalled();
 });
 

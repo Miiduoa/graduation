@@ -1247,3 +1247,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 學生若誤按「略過這題」，現在從本輪題目清單回到該題，可以選「取消略過，繼續作答」，原題號、已寫的回答與原文提示完整保留，不強制重練整輪或改動自評為已理解；參考回答不會因此公開。略過的統計會回到未自評，方便稍後完成真正的回想。
 - 已完成的回合仍必須由學生明確點回題目才可撤銷略過，已選「這題已理解／還要加強」的自評不可透過本按鈕覆寫。新增 reducer 及 DOM 回歸案例，無備份 JSON schema 變動，既有 v1/v2 閱讀與 v1 逐題 checkpoint 仍沿用原格式；不新增套件、雲端服務或私人教材傳輸。
 - 本輪驗證須以新精確 SHA 的 GitHub CI／CodeQL 結果為準；App 5504170 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同條件對照未完成前，PR 保留 Draft，不合併、不部署。
+
+## 2026-11-15：修復「取消略過」導致的 Web Tests 邊界驗證回歸
+
+- 精確 head `7eeda364967a1a85c2d8b6154a156977f585b353` 的 [CI #43694880368](https://github.com/Miiduoa/graduation/actions/runs/43694880368) 已完成但失敗：`CourseStudyPracticeBoundaries.test.tsx` 共 5 項在取消／失敗的教材或進度讀取後，仍尋找舊版已停用的「略過這題」按鈕；新版已刻意將它替換成「取消略過，繼續作答」。同一 SHA 的 Build Web/Mobile、Lint/TypeCheck、Security Gates、Mobile Tests、Functions、Firestore、Assistant Tests 和 CodeQL 成功，不等於整體 CI 通過。
+- 將這五項共用邊界斷言改為核對「略過」狀態與撤銷按鈕仍存在，且沒有偷偷撤銷、清掉題目草稿或揭答；新增一個跨進度讀取取消的 DOM 情境，必須由學生明確按撤銷才把題目從「略過」恢復成「未完成」，並保留下一題草稿及已揭答案。
+- 僅修復測試與技術文件，不更動操作程式、v1/v2 閱讀進度、v1 練習 checkpoint、教材傳輸、套件或付費 API。新 SHA 的 Web Tests 與全套 CI／CodeQL 須重新完成；指定 App 5504170 APPROVED、Maestro、iOS／Android 真機、WebGPU 中文教學與 Ahaboard 同教材同題同機實測仍待驗收。PR 維持 Draft，不合併、不部署。
