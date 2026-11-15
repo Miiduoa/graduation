@@ -18,6 +18,7 @@ const story = {
 function viewer(isOwner = true) {
   return {
     group: { authorUid: story.authorUid, latestAt: 0, stories: [story] },
+    viewerUid: isOwner ? 'alice' : 'reader',
     isOwner,
     index: 0,
     hasPrevious: false,

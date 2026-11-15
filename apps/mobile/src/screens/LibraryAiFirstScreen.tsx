@@ -10,6 +10,7 @@ import {
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { LibraryWebsiteFallback } from './LibraryWebsiteFallback';
 import { useSchool } from '../state/school';
 
 type Navigation = {
@@ -20,8 +21,9 @@ type Navigation = {
 export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navigation }) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
-  const { school } = useSchool();
-  const scope = JSON.stringify([user?.uid, school.id]);
+  const { school, selection, selectionReady } = useSchool();
+  const schoolId = selectionReady ? selection.schoolId ?? '' : '';
+  const scope = JSON.stringify([user?.uid, schoolId, school.name]);
   const activeScope = useRef(scope);
   activeScope.current = scope;
   return (
@@ -29,7 +31,7 @@ export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navi
       key={scope}
       scope={scope}
       activeScope={activeScope}
-      schoolId={school.id}
+      schoolId={schoolId}
       schoolName={school.name}
       navigation={navigation}
     />
@@ -109,9 +111,7 @@ function LibraryContent({
     >
       {!library ? (
         <AICard title="學校圖書館">
-          <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-            目前尚未提供這所學校的圖書館入口。未核對到校方官方網站前，不會帶你到其他學校的館藏。
-          </Text>
+          <LibraryWebsiteFallback schoolId={schoolId} schoolName={schoolName} />
         </AICard>
       ) : (
         <>

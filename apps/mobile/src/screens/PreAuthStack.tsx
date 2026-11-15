@@ -35,13 +35,8 @@ const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
 const PUBLIC_UNAVAILABLE_ACTIONS = [{ label: '查看校方公告', route: '公告總覽' }];
 
 function PublicCareerScreen(props: ServiceScreenProps) {
-  return (
-    <UnavailableFeatureScreen
-      {...props}
-      route={{ ...props.route, name: 'Career' }}
-      actions={PUBLIC_UNAVAILABLE_ACTIONS}
-    />
-  );
+  const { CareerScreen } = require('./CareerScreen') as typeof import('./CareerScreen');
+  return <CareerScreen navigation={props.navigation} />;
 }
 
 function PublicSchoolRoute({ children, onHome }: { children: React.ReactNode; onHome: () => void }) {

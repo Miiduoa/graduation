@@ -9,12 +9,14 @@ let mockAuth: {
   signOutWithWarning: jest.Mock;
 };
 let mockMode: 'light' | 'dark' = 'light';
+let mockPlatform: { session: { platformAccountId: string } | null } | null = null;
 let mockLegalBase: string | null = 'https://nuni.tw';
 const mockSetMode = jest.fn();
 const mockSelectSchool = jest.fn();
 let mockSchoolId = 'pu';
 const navigation = { navigate: jest.fn(), goBack: jest.fn() };
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => mockPlatform }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({
     school: { id: mockSchoolId, name: mockSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' },
@@ -55,6 +57,7 @@ beforeEach(() => {
     signOutWithWarning: jest.fn().mockResolvedValue(true),
   };
   mockMode = 'light';
+  mockPlatform = null;
   mockSchoolId = 'pu';
   mockLegalBase = 'https://nuni.tw';
 });
@@ -77,6 +80,29 @@ test('settings shows real account and version without fabricated permissions, de
   mockMode = 'dark';
   view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
   expect(view.getByText('目前使用深色模式。')).toBeTruthy();
+});
+
+test('Google-only accounts can open assistant permissions while school account actions stay separate', () => {
+  mockAuth.user = null;
+  mockPlatform = { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } };
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getByText('AI 助理')).toBeTruthy();
+  fireEvent.press(view.getByText('助理權限'));
+  expect(navigation.navigate).toHaveBeenCalledWith('AssistantPermissions');
+  expect(view.queryByText('通知設定')).toBeNull();
+  expect(view.queryByText('個人資料')).toBeNull();
+  expect(view.queryByText('匯出我的資料')).toBeNull();
+  expect(view.queryByText('刪除帳號')).toBeNull();
+  mockPlatform = { session: null };
+  view.rerender(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.queryByText('助理權限')).toBeNull();
+});
+
+test('dual account settings retain one assistant permissions entry', () => {
+  mockPlatform = { session: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111' } };
+  const view = render(<SettingsAiFirstScreen navigation={navigation} />);
+  expect(view.getAllByText('助理權限')).toHaveLength(1);
+  expect(view.getByText('通知設定')).toBeTruthy();
 });
 
 test('logout invokes real auth once, and cancellation never changes navigation', async () => {

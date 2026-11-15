@@ -21,6 +21,8 @@ COPY scripts/build-functions-shared.cjs ./scripts/build-functions-shared.cjs
 RUN node scripts/build-functions-shared.cjs
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
+COPY backend/functions/dormWorkflow.js backend/functions/authz.js backend/functions/dormName.js backend/functions/dormSsoIdentity.js ./backend/functions/
+RUN ln -s ../../apps/web/node_modules backend/functions/node_modules
 COPY backend/functions/campusStoryAccessBinding.js ./backend/functions/
 COPY backend/functions/campusAnnouncements/catalog.js ./backend/functions/campusAnnouncements/
 COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/
@@ -42,6 +44,10 @@ ENV NEXT_PUBLIC_DEFAULT_SCHOOL_ID=pu
 ENV NEXT_PUBLIC_ALLOW_LOCAL_MOCK_AUTH=false
 ENV NEXT_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS=false
 RUN node -e "for(const name of ['API_KEY','AUTH_DOMAIN','PROJECT_ID','STORAGE_BUCKET','MESSAGING_SENDER_ID','APP_ID'])if(!process.env['NEXT_PUBLIC_FIREBASE_'+name])throw new Error('Missing public Firebase build setting: '+name)"
+# Keep test-only imports out of the standalone production typecheck.
+RUN find apps/web -path '*/node_modules' -prune -o -type f \
+    \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.spec.ts' -o -name '*.spec.tsx' \) \
+    -exec rm -f {} +
 RUN pnpm --filter web build
 
 FROM base AS runtime

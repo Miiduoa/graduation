@@ -87,3 +87,10 @@ it('keeps emulator routing ahead of Fly routing after browser compilation', asyn
     'http://127.0.0.1:53322/demo-browser/asia-east1/getRepairServiceCapability',
   );
 });
+
+it.each(['', 'https://nuni-functions.fly.dev'])('keeps DM hosted URLs available in compiled browser code (base=%s)', async (base) => {
+  const client = await browserBundle({ NEXT_PUBLIC_FUNCTIONS_BASE_URL: base });
+  for (const name of ['prepareDmConversation', 'sendDmText', 'replyToCampusStory']) {
+    expect(client.getCloudFunctionUrl(name)).toBe('/api/fn/' + name);
+  }
+});

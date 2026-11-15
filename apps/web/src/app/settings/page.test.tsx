@@ -53,6 +53,10 @@ vi.mock('@/features/nuni/Session', () => ({
     if (path === 'class-workspaces') return { workspaces: [] };
     if (path === 'merchant-applications') return { applications: [] };
     if (path === 'merchant-workspaces') return { workspaces: [] };
+    if (path === 'assistant-permissions') return {
+      scope: 'platform-account', accountId: state.nuni.session?.platformAccountId,
+      revision: 0, permissions: { createPersonalEvent: false, prepareFoodOrder: false },
+    };
     throw new Error(path);
   }),
 }));
@@ -597,23 +601,40 @@ it('hides course permissions on refresh and supplies recovery without account-ed
 });
 
 for (const enabled of [false, true]) {
-  it(`shows the nuni assistant explanation only when enabled=${enabled}`, () => {
-    state.nuni.session = { platformAccountId: 'fixture', context: 'fixture-context', isPlatformOperator: false };
+  it(`keeps account permission settings usable when assistant availability=${enabled}`, async () => {
+    state.user = null;
+    state.nuni.session = { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', context: 'fixture-context', isPlatformOperator: false };
     render(<AssistantEnabledProvider enabled={enabled}><SettingsPage /></AssistantEnabledProvider>);
     fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
-    expect(!!screen.queryByText(/Google 平台 AI 會維持開啟，無法透過「平台權限」關閉/)).toBe(enabled);
+    await waitFor(() => expect((screen.getByRole('switch', { name: '新增個人行程' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(state.read).not.toHaveBeenCalled();
   });
 }
 
-it('directs a confirmed Google-only account to platform AI settings without prompting another Google login', async () => {
+it('shows usable Google write permissions directly instead of disabled school switches', async () => {
   state.user = null;
-  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+  state.nuni.session = { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', context: 'a', isPlatformOperator: false };
   render(<AssistantEnabledProvider enabled><SettingsPage /></AssistantEnabledProvider>);
   fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
-  expect(screen.getByRole('heading', { name: 'Google 平台帳號已登入' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: '登入後設定校內助理權限' })).toBeNull();
-  expect((screen.getByRole('switch', { name: /餐廳下單/ }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: '管理平台 AI 權限' }));
+  expect(screen.getByRole('heading', { name: 'Google 帳號的代辦動作' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '前往登入' })).toBeNull();
+  expect(screen.queryByRole('switch', { name: '送出請假申請' })).toBeNull();
+  await waitFor(() => expect((screen.getByRole('switch', { name: '整理訂餐草稿' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(state.read).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '平台權限' }));
   expect(screen.getByRole('heading', { name: '平台服務權限' })).toBeTruthy();
-  expect(new URL(window.location.href).searchParams.get('section')).toBe('platform');
+  fireEvent.click(screen.getByRole('button', { name: '設定 AI 代辦權限' }));
+  expect(new URL(window.location.href).searchParams.get('section')).toBe('assistant');
+  await waitFor(() => expect((screen.getByRole('switch', { name: '新增個人行程' }) as HTMLButtonElement).disabled).toBe(false));
+});
+
+it('separates Google actions from school permissions when both identities are signed in', async () => {
+  state.nuni.session = { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', context: 'a', isPlatformOperator: false };
+  render(<SettingsPage />);
+  fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
+  await waitFor(() => expect((screen.getByRole('switch', { name: '新增個人行程' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.getByRole('heading', { name: '校內助理寫入動作' })).toBeTruthy();
+  expect(screen.getByRole('switch', { name: '送出請假申請' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '儲存 AI 代辦權限' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '儲存助理權限' })).toBeTruthy();
 });

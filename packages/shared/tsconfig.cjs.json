@@ -12,6 +12,7 @@
   },
   "include": [
     "src/postLoginRoles.ts",
+    "src/schoolContactAnswer.ts",
     "src/puEcampusDataPolicy.ts",
     "src/assistantPermissions.ts",
     "src/lms/**/*.ts",

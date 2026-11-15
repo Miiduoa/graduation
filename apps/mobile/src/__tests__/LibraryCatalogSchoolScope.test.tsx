@@ -3,9 +3,11 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 import LibraryCatalogScreen from '../screens/LibraryCatalogScreen';
 
+let mockSelectionReady = true;
+let mockSelected = true;
 let mockSchool = { id: 'nthu', name: '國立清華大學' };
 
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool, selectionReady: mockSelectionReady, selection: { schoolId: mockSelected ? mockSchool.id : null } }) }));
 jest.mock('../ui/components', () => ({
   Screen: ({ children }: { children: React.ReactNode }) =>
     require('react').createElement(require('react-native').View, null, children),
@@ -33,6 +35,8 @@ jest.mock('../ui/theme', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSelectionReady = true;
+  mockSelected = true;
   mockSchool = { id: 'nthu', name: '國立清華大學' };
   jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
 });
@@ -96,4 +100,41 @@ test('Fu Jen catalog deep links stay on Sierra and never open Providence OPAC', 
   expect(url.pathname).toBe('/search~S0*cht/');
   expect(url.searchParams.get('searcharg')).toBe('資料庫');
   expect(url.searchParams.get('searchtype')).toBe('Y');
+});
+
+test('catalog falls back to the matching school website without forwarding the search terms', async () => {
+  mockSchool = { id: 'yuntech', name: '國立雲林科技大學' };
+  const route = { params: { initialQuery: '個人查詢' } };
+  const view = render(<LibraryCatalogScreen route={route} />);
+  await act(async () => fireEvent.press(view.getByRole('link', { name: '開啟國立雲林科技大學官網' })));
+  expect(Linking.openURL).toHaveBeenCalledWith('http://www.yuntech.edu.tw');
+
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  view.rerender(<LibraryCatalogScreen route={route} />);
+  expect(view.queryByText('搜尋本校館藏')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('開啟學校官方館藏')));
+  expect(new URL(jest.mocked(Linking.openURL).mock.lastCall![0]).searchParams.has('query')).toBe(false);
+});
+
+test('does not expose the default Providence OPAC before selection loads or for unresolved selections', () => {
+  mockSchool = { id: 'pu', name: '靜宜大學' };
+  mockSelectionReady = false;
+  const view = render(<LibraryCatalogScreen />);
+  expect(view.queryByText('靜宜館藏搜尋面板')).toBeNull();
+  mockSelectionReady = true;
+  mockSelected = false;
+  view.rerender(<LibraryCatalogScreen />);
+  expect(view.queryByText('靜宜館藏搜尋面板')).toBeNull();
+  expect(view.queryByRole('link')).toBeNull();
+});
+
+test('a search sent to a verified catalog is cleared on a round trip between campuses', () => {
+  const route = { params: { initialQuery: '原校研究主題' } };
+  const view = render(<LibraryCatalogScreen route={route} />);
+  expect(view.getByText('搜尋本校館藏')).toBeTruthy();
+  mockSchool = { id: 'ntu', name: '國立臺灣大學' };
+  view.rerender(<LibraryCatalogScreen route={route} />);
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  view.rerender(<LibraryCatalogScreen route={route} />);
+  expect(view.queryByText('搜尋本校館藏')).toBeNull();
 });

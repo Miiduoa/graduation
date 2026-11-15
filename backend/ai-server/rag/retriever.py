@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from rag.indexer import get_or_create_collection
 from config import RAG_TOP_K
+from rag.public_documents import is_public_visibility, retrieval_filter
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,10 @@ def retrieve(
     collection_name: str = "campus",
     where: dict | None = None,
     embedding_fn=None,
+    *,
+    school_id: str | None = None,
 ) -> list[RetrievedChunk]:
-    """Return the *top_k* most relevant chunks for *query*."""
+    """Rank app help and public material from only the selected campus."""
     collection = get_or_create_collection(collection_name)
 
     if collection.count() == 0:
@@ -37,13 +40,22 @@ def retrieve(
         "n_results": min(top_k, collection.count()),
         "include": ["documents", "metadatas", "distances"],
     }
-    if where:
-        query_kwargs["where"] = where
+    scope = retrieval_filter(school_id)
+    query_kwargs["where"] = {"$and": [scope, where]} if where else scope
     if embedding_fn:
         query_kwargs.pop("query_texts")
         query_kwargs["query_embeddings"] = embedding_fn([query])
 
-    results = collection.query(**query_kwargs)
+    # Legacy public rows can omit visibility, so keep the strict visibility
+    # check here. Expand the ranked window when private rows consume top-k.
+    while True:
+        results = collection.query(**query_kwargs)
+        metadata_rows = results.get("metadatas", [[]])[0]
+        visible = sum(is_public_visibility((meta or {}).get("visibility")) for meta in metadata_rows)
+        window = query_kwargs["n_results"]
+        if visible >= top_k or len(metadata_rows) < window or window >= collection.count():
+            break
+        query_kwargs["n_results"] = min(window * 2, collection.count())
 
     chunks: list[RetrievedChunk] = []
     docs = results.get("documents", [[]])[0]
@@ -51,6 +63,9 @@ def retrieve(
     dists = results.get("distances", [[]])[0]
 
     for text, meta, dist in zip(docs, metas, dists):
+        meta = meta or {}
+        if not is_public_visibility(meta.get("visibility")):
+            continue
         chunks.append(RetrievedChunk(
             text=text,
             source=meta.get("source", "unknown"),
@@ -58,7 +73,7 @@ def retrieve(
             metadata=meta,
         ))
 
-    return chunks
+    return chunks[:top_k]
 
 
 def format_context(chunks: list[RetrievedChunk]) -> str:

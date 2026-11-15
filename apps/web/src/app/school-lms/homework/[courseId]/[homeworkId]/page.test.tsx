@@ -5,13 +5,13 @@ import { AcademicConnectionError } from '@/lib/academicClient';
 import { loadTronClassLms } from '@/lib/tronClassLms';
 import type { LmsReadonlySnapshot } from '@/lib/tronClassLmsTypes';
 
-const context = vi.hoisted(() => ({ uid: 'one' as string | null }));
+const context = vi.hoisted(() => ({ uid: 'one' as string | null, schoolId: 'pu', authLoading: false }));
 vi.mock('@/components/AuthGuard', () => ({
-  useAuth: () => ({ user: context.uid ? { uid: context.uid } : null, loading: false, error: null }),
+  useAuth: () => ({ user: context.uid ? { uid: context.uid } : null, loading: context.authLoading, error: null }),
 }));
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => ({
-    status: 'ready', schoolId: 'pu', schoolName: '靜宜大學', schoolSearch: '?schoolId=pu&campus=pu',
+    status: 'ready', schoolId: context.schoolId, schoolName: context.schoolId === 'pu' ? '靜宜大學' : '國立清華大學', schoolSearch: '?campus=' + context.schoolId,
   }),
 }));
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => ({ studentId: true, loading: false }) }));
@@ -54,7 +54,7 @@ function snapshot(): LmsReadonlySnapshot {
 }
 
 beforeEach(() => {
-  context.uid = 'one';
+  context.uid = 'one'; context.schoolId = 'pu'; context.authLoading = false;
   vi.mocked(loadTronClassLms).mockReset().mockResolvedValue(snapshot());
 });
 afterEach(() => {
@@ -95,4 +95,26 @@ it('shows the homework description and the matching WOW Class link', async () =>
   expect(screen.getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
     'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
   );
+});
+
+it('removes private homework immediately on an account change and a round trip between campuses', async () => {
+  context.authLoading = true;
+  const view = render(<HomeworkDetailPage />);
+  expect(loadTronClassLms).not.toHaveBeenCalled();
+  context.authLoading = false;
+  view.rerender(<HomeworkDetailPage />);
+  await screen.findByRole('heading', { name: '期末專題提案' });
+  expect(screen.getByRole('link', { name: '回到作業清單' }).getAttribute('href')).toBe('/school-lms?campus=pu');
+  vi.mocked(loadTronClassLms).mockImplementation(() => new Promise(() => {}));
+  context.uid = 'two';
+  view.rerender(<HomeworkDetailPage />);
+  expect(screen.queryByText('請上傳提案 PDF')).toBeNull();
+  context.schoolId = 'nthu';
+  view.rerender(<HomeworkDetailPage />);
+  expect(screen.getByRole('link', { name: '清大 eLearn ↗' })).toBeTruthy();
+  expect(loadTronClassLms).toHaveBeenCalledTimes(2);
+  context.schoolId = 'pu';
+  view.rerender(<HomeworkDetailPage />);
+  expect(screen.queryByText('請上傳提案 PDF')).toBeNull();
+  expect(screen.getByText('正在讀取作業說明…')).toBeTruthy();
 });

@@ -11,28 +11,30 @@ import {
   summarizeImportedAcademics,
 } from '@campus/shared/src/importedAcademicSummary';
 import { readPersonalImports, type PersonalImportScope } from './personalImports';
+import { answerLocalSchedule, parseLocalScheduleIntent } from './assistantLocalSchedule';
 
 export type LocalAssistantResult = {
-  kind: 'services' | 'academics';
+  kind: 'services' | 'academics' | 'personal' | 'schedule';
   content: string;
   serviceIds: AssistantServiceId[];
+  courseworkTargets?: import('./assistantCoursework').AssistantCourseworkTarget[];
 };
 
 /** The caller supplies its verified account scope; text never selects an owner or school. */
 export function canAnswerAssistantLocally(question: string): boolean {
-  return !!resolveAssistantServiceIntent(question) || !!parseImportedAcademicIntent(question);
+  return !!resolveAssistantServiceIntent(question) || !!parseImportedAcademicIntent(question) || !!parseLocalScheduleIntent(question);
 }
 
 export function answerAssistantLocally(
   question: string,
   scope: PersonalImportScope,
-  options: { preferCampusReads?: boolean } = {},
+  options: { preferCampusReads?: boolean; deferMissingSchedule?: boolean } = {},
 ): LocalAssistantResult | null {
   const service = resolveAssistantServiceIntent(question);
   if (service?.kind === 'catalog') {
     return {
       kind: 'services',
-      content: '可以從下方選擇服務，或直接說「開啟圖書館」「帶我到課程與作業」。查詢資料與送出操作會依各服務目前接通的能力及帳號權限處理。',
+      content: '可以直接問「我今天有什麼課」「下一堂課在哪裡」「明天有什麼行程」，我會整理這台裝置保存的資料。也能查詢已接通的課務與餐點資訊，支援的代辦會先讓你核對並確認；可用範圍依帳號權限處理。需要自己操作時，也可以說「開啟圖書館」或選下方服務。',
       serviceIds: ASSISTANT_SERVICES.map((item) => item.id),
     };
   }
@@ -42,6 +44,13 @@ export function answerAssistantLocally(
       content: service.service.summary,
       serviceIds: [service.service.id],
     };
+  }
+  const schedule = parseLocalScheduleIntent(question);
+  if (schedule) {
+    if (options.preferCampusReads) return null;
+    const result = answerLocalSchedule(schedule, scope);
+    if (options.deferMissingSchedule && result.availability === 'missing') return null;
+    return { kind: 'schedule', content: result.content, serviceIds: result.serviceIds };
   }
   const academic = parseImportedAcademicIntent(question);
   if (!academic) return null;

@@ -438,7 +438,32 @@ function AccountWorkspace({
                         <p>請依審核說明向受理單位提供資料，不必重複建立申請。</p>
                       )}
                       {item.state === 'approved' && (
-                        <p>店家已核准。請查看已授權門市，確認尚待完成的營運條件。</p>
+                        <div className={styles.stack}>
+                          <p>店家已核准。選擇這個場域的已授權門市，繼續設定菜單與營運資訊。</p>
+                          {overview.workspaces.some(
+                            (workspace) => workspace.tenantId === item.tenantId,
+                          ) ? (
+                            overview.workspaces
+                              .filter((workspace) => workspace.tenantId === item.tenantId)
+                              .map((workspace) => (
+                                <Button
+                                  key={workspace.locationId}
+                                  onClick={() =>
+                                    setSelectedLocation({
+                                      tenantId: workspace.tenantId,
+                                      locationId: workspace.locationId,
+                                    })
+                                  }
+                                >
+                                  前往管理門市：{workspace.locationName}
+                                </Button>
+                              ))
+                          ) : (
+                            <p>
+                              這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。
+                            </p>
+                          )}
+                        </div>
                       )}
                     </li>
                   ))}

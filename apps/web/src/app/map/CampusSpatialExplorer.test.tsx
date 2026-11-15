@@ -551,6 +551,128 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
   }
 });
 
+it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  let rejectRefresh!: (reason: Error) => void;
+  const stalledRefresh = new Promise<unknown>((_resolve, reject) => {
+    rejectRefresh = reject;
+  });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200,
+      headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), stale: true,
+      }),
+    })
+    .mockReturnValueOnce(stalledRefresh)
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date().toISOString(), stale: false,
+      }),
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 10 分鐘冷卻/)).toBeTruthy();
+    fireEvent.click(retry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const release = timeoutSpy.mock.calls.find(([, delay]) =>
+      typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
+    expect(typeof release).toBe('function');
+    await act(async () => { (release as () => void)(); });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    expect(retry.hasAttribute('disabled')).toBe(true);
+
+    await act(async () => { rejectRefresh(new Error('offline during refresh')); });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(within(dialog).getByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(retry);
+    expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(within(dialog).queryByRole('button', { name: '重新讀取建築輪廓' })).toBeNull());
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+    expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
+it('keeps the existing WebGL scene when an OSM refresh only updates the fetch date', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), stale: true,
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap',
+        // Real JSON requests decode new objects, not the same in-memory array.
+        buildings: JSON.parse(JSON.stringify(buildings)),
+        fetchedAt: new Date().toISOString(), stale: false,
+      }),
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toHaveLength(1));
+  const createdScenes = scene.create.mock.calls.length;
+  const disposedScenes = scene.dispose.mock.calls.length;
+  fireEvent.click(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull());
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  // Data date is new, but geometry and source details did not change.
+  expect(scene.create).toHaveBeenCalledTimes(createdScenes);
+  expect(scene.dispose).toHaveBeenCalledTimes(disposedScenes);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('releases a server cooldown after a suspended mobile tab resumes, without auto retrying', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockResolvedValue({
@@ -621,6 +743,176 @@ it('retries Providence building data after a temporary outage without closing th
   expect(within(dialog).queryByRole('button', { name: '重新讀取建築輪廓' })).toBeNull();
   expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('refreshes an expired snapshot on tab resume and replaces it only after success', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  const fetchedAt = new Date(clock - day + 60_000).toISOString();
+  let resolveRefresh!: (value: unknown) => void;
+  const pendingRefresh = new Promise((resolve) => { resolveRefresh = resolve; });
+  const fetchMock = vi.fn().mockResolvedValueOnce({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+  }).mockReturnValueOnce(pendingRefresh);
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+
+    // No network event: a backgrounded modal must no longer advertise fresh data.
+    clock += 2 * 60_000;
+    fireEvent(document, new Event('visibilitychange'));
+    expect(await within(dialog).findByText(/暫用舊快照/)).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // A suspended device can pass the seven-day deadline before timers fire.
+    clock += 6 * day;
+    fireEvent(window, new Event('pageshow'));
+    expect(await within(dialog).findByText(/正在檢查更新/)).toBeTruthy();
+    const previousSceneCount = scene.create.mock.calls.length;
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+    fireEvent(document, new Event('visibilitychange'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const updatedBuildings = buildings.map((building) => ({ ...building, heightMeters: building.heightMeters + 1, heightBasis: 'osm-tag' as const }));
+    await act(async () => resolveRefresh({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings: updatedBuildings,
+        fetchedAt: new Date(clock).toISOString(), stale: false,
+      }),
+    }));
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(updatedBuildings));
+    expect(scene.create).toHaveBeenCalledTimes(previousSceneCount + 1);
+    expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+    expect(within(dialog).getByText(`資料讀取：${new Date(clock).toISOString().slice(0, 10)}`)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    clockSpy.mockRestore();
+  }
+});
+
+it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication deadline via %s and retains geometry when the response is expired', async (trigger) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  // Valid metadata: HTTP fetch is less than 48 hours after Overpass sync.
+  const fetchedAt = new Date(clock - 5 * day + 60_000).toISOString();
+  const osmBaseAt = new Date(Math.floor((clock - 7 * day + 120_000) / 1000) * 1000)
+    .toISOString().replace('.000Z', 'Z');
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, osmBaseAt, stale: true }),
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    clock += 3 * 60_000;
+    if (trigger === 'timer') {
+      const expiryTimer = timerSpy.mock.calls.find(([, delay]) =>
+        typeof delay === 'number' && delay > 119_000 && delay <= 120_000);
+      expect(expiryTimer).toBeTruthy();
+      act(() => { (expiryTimer![0] as () => void)(); });
+    } else {
+      fireEvent(document, new Event('visibilitychange'));
+    }
+    expect(await within(dialog).findByText(/更新未成功，仍顯示先前/)).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
+it.each(['failure', 'timeout'])('retains an expired stale outline after refresh %s', async (outcome) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  let rejectRefresh!: (reason: Error) => void;
+  const pendingRefresh = new Promise<unknown>((_resolve, reject) => { rejectRefresh = reject; });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date(clock - 7 * day + 60_000).toISOString(), stale: true,
+      }),
+    })
+    .mockReturnValueOnce(pendingRefresh);
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/正在檢查更新/)).toBeTruthy();
+
+    clock += 2 * 60_000;
+    fireEvent(window, new Event('pageshow'));
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (outcome === 'timeout') {
+      const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
+      expect(requestTimer).toBeTruthy();
+      act(() => { (requestTimer![0] as () => void)(); });
+    }
+    await act(async () => { rejectRefresh(new Error('offline after snapshot expiry')); });
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/更新未成功，仍顯示先前/)).toBeTruthy();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
 });
 
 it('rejects an expired OSM API snapshot while keeping the known place and walking directions', async () => {

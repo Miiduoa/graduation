@@ -206,6 +206,19 @@ export default function TeacherTodayScreen() {
                       <View style={s.actions}>
                         <Pressable
                           accessibilityRole="button"
+                          accessibilityLabel={`${course.name}，開啟課程工作台`}
+                          onPress={() =>
+                            safeNavigate(navigation, 'CourseHub', {
+                              groupId: course.groupId,
+                              groupName: course.name,
+                            })
+                          }
+                          style={s.secondary}
+                        >
+                          <Text style={s.link}>課程工作台</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
                           accessibilityLabel={`${course.name}，${activeSession?.sessionId ? '進入課堂' : '開始點名'}`}
                           accessibilityState={{
                             disabled: starting?.scope === scope,

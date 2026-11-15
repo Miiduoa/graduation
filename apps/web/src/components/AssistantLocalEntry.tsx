@@ -6,12 +6,16 @@ import { AssistantServiceLinks } from './AssistantServiceLinks';
 
 /** Available with the older public-service assistant, independent of model credentials. */
 export function AssistantLocalEntry({ owner, schoolId }: { owner: string; schoolId: string }) {
+  return <LocalEntry key={JSON.stringify([owner, schoolId])} owner={owner} schoolId={schoolId} />;
+}
+
+function LocalEntry({ owner, schoolId }: { owner: string; schoolId: string }) {
   const [question, setQuestion] = useState('');
   const [reply, setReply] = useState<LocalAssistantResult | null>(null);
   return (
     <details>
-      <summary style={{ minHeight: 44, paddingBlock: 12 }}>更多服務與個人匯入紀錄</summary>
-      <p>可以說「開啟請假」「查看我的匯入成績」或「你能做什麼」。這些查詢由此裝置處理。</p>
+      <summary style={{ minHeight: 44, paddingBlock: 12 }}>查詢課表、行程與個人紀錄</summary>
+      <p>可以問「我今天有什麼課」「下一堂課在哪裡」「明天有什麼行程」，也能查看匯入成績或開啟服務。資料由這台裝置直接整理。</p>
       <form aria-label="裝置服務查詢" onSubmit={(event) => {
         event.preventDefault();
         const result = answerAssistantLocally(question, { owner, schoolId });

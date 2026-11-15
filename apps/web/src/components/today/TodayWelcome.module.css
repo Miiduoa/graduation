@@ -42,7 +42,7 @@
   gap: 8px;
   min-height: 46px;
   padding: 10px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: calc(var(--font-body-size) - 0.0625rem);
   font-weight: 500;
   line-height: 1.4;
@@ -109,12 +109,6 @@
   margin: 0;
   font-size: var(--font-body-size);
   font-weight: 600;
-}
-
-.shortcutHeading > span {
-  color: var(--muted);
-  font-size: calc(var(--font-body-sm-size) - 0.0625rem);
-  white-space: nowrap;
 }
 
 .shortcutGrid {

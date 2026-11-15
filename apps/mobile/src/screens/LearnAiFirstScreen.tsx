@@ -9,6 +9,7 @@ import type { InboxTask } from '../data/types';
 import { safeNavigate } from '../utils/safeNavigate';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { theme } from '../ui/theme';
+import { SchoolLearningLinks } from '../components/SchoolLearningLinks';
 import { LearningNextClassCard } from '../components/LearningNextClassCard';
 import { buildLearningWorkspace, describeLearningTask, filterLearningTasks, type LearningTaskFilter } from '../features/learningWorkspace';
 
@@ -170,6 +171,11 @@ export default function LearnAiFirstScreen() {
             </View>
           ))}
         </View>
+      ) : null}
+      {schoolId ? (
+        <AICard title="本校教學平台">
+          <SchoolLearningLinks key={scope} schoolId={schoolId} />
+        </AICard>
       ) : null}
       <LearningNextClassCard
         onOpenTimetable={() => safeNavigate(navigation, 'PersonalTimetable')}

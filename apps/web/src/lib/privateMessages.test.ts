@@ -1,5 +1,7 @@
-import { beforeEach, expect, it, vi } from 'vitest';
-import { getDocFromServer, onSnapshot, runTransaction } from 'firebase/firestore';
+const functionsConfig = vi.hoisted(() => ({ enabled: true }));
+vi.mock('./cloudFunctions', () => ({ areFunctionsConfigured: () => functionsConfig.enabled }));
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { getDocFromServer, getDocsFromServer, onSnapshot, runTransaction } from 'firebase/firestore';
 import { deriveDmConversationId } from './conversationAccess';
 import {
   watchMessagingSession,
@@ -12,15 +14,26 @@ import {
   markAccountNotificationRead,
   parseNotification,
   notificationDestination,
+  findPrivateMessageRecipients,
+  preparePrivateConversation,
+  sendPreparedPrivateMessage,
+  watchNewPrivateConversation,
   type MessagingSession,
   type AccountNotification,
 } from './privateMessages';
-const runtime = vi.hoisted(() => ({ uid: 'alice' as string | null, configured: true }));
+const runtime = vi.hoisted(() => ({
+  uid: 'alice' as string | null,
+  configured: true,
+  call: vi.fn(),
+  callable: vi.fn(),
+}));
 vi.mock('./firebase', () => ({
   getDb: () => ({}),
-  getAuth: () => ({ currentUser: runtime.uid ? { uid: runtime.uid } : null }),
+  getAuth: () => ({ currentUser: runtime.uid ? { uid: runtime.uid, getIdToken: async () => 'fake-token' } : null }),
   isFirebaseConfigured: () => runtime.configured,
+  getFunctionsInstance: () => 'functions',
 }));
+vi.mock('firebase/functions', () => ({ httpsCallable: runtime.callable }));
 vi.mock('firebase/firestore', () => ({
   collection: (parent: { path?: string }, ...parts: string[]) => ({
     path: [parent.path, ...parts].filter(Boolean).join('/'),
@@ -31,10 +44,13 @@ vi.mock('firebase/firestore', () => ({
   }),
   where: (...args: unknown[]) => ({ where: args }),
   orderBy: (...args: unknown[]) => ({ orderBy: args }),
+  startAt: (...args: unknown[]) => ({ startAt: args }),
+  endAt: (...args: unknown[]) => ({ endAt: args }),
   limit: (count: number) => ({ limit: count }),
   query: (ref: object, ...constraints: object[]) => ({ ...ref, constraints }),
   onSnapshot: vi.fn(),
   getDocFromServer: vi.fn(),
+  getDocsFromServer: vi.fn(),
   runTransaction: vi.fn(),
   serverTimestamp: () => 'SERVER_TIMESTAMP',
   arrayUnion: (uid: string) => ({ arrayUnion: uid }),
@@ -91,14 +107,40 @@ function listener(path: string) {
   return { receive: call[2], error: call[3], query: call[0] };
 }
 const tx = { get: vi.fn(), set: vi.fn(), update: vi.fn() };
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
+  functionsConfig.enabled = true;
   vi.clearAllMocks();
   runtime.uid = 'alice';
   runtime.configured = true;
+  runtime.callable.mockReturnValue(runtime.call);
+  runtime.call.mockReset().mockResolvedValue({
+    data: { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false },
+  });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const name = String(url).split('/api/fn/')[1];
+    if (!name) throw new Error(`unexpected fetch ${url}`);
+    try {
+      const payload = JSON.parse(String(init?.body));
+      const returned = await runtime.call(payload.data);
+      return { ok: true, status: 200, json: async () => ({ result: returned.data }) };
+    } catch (error: any) {
+      if (error?.code && String(error.code).startsWith('functions/')) {
+        const status = String(error.code).slice(10).toUpperCase().replaceAll('-', '_');
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: { status, message: error.message || '' } }),
+        };
+      }
+      throw error;
+    }
+  }));
   vi.mocked(onSnapshot).mockReturnValue(vi.fn());
   vi.mocked(getDocFromServer).mockResolvedValue(
     document('bob', { displayName: '來源姓名' }) as never,
   );
+  vi.mocked(getDocsFromServer).mockReset().mockResolvedValue(querySnapshot([]) as never);
   tx.get.mockImplementation(async ({ path }: { path: string }) => {
     if (path === 'users/alice') return document(path, { schoolId: 'pu' });
     if (path === 'schools/pu/members/alice') return document(path, { status: 'active' });
@@ -439,7 +481,7 @@ it('notification destinations only use supported local tasks and never arbitrary
       type: 'announcement',
       data: { announcementId: 'ann-9', schoolId: 'pu' },
     }),
-  ).toEqual({ href: '/announcements/ann-9?campus=pu&schoolId=pu', label: '查看公告' });
+  ).toEqual({ href: '/announcements/ann-9?campus=pu&schoolId=pu&source=school-announcement', label: '查看公告' });
   expect(
     notificationDestination({
       ...notice,
@@ -632,4 +674,325 @@ it('refuses reactions on messages outside the current school and on recalled mes
   expect(parseNotification('n-1', notification({ data: { schoolId: 'wrong-campus' } }), 'user', session)).toEqual(
     expect.objectContaining({ data: expect.objectContaining({ schoolId: session.schoolId }) }),
   );
+});
+
+it('recognizes a story reply only when its author is the other member of the DM', () => {
+  const receive = vi.fn();
+  watchConversationContents(session, 'conversation-1', receive, vi.fn());
+  listener('conversations/conversation-1').receive(document('conversation-1', conversation()));
+  const messages = listener('conversations/conversation-1/messages');
+  messages.receive(querySnapshot(['bob', 'alice', 'third'].map((authorUid, index) =>
+    document('message-' + index, message({ storyReplyTo: { storyId: 'story-1', authorUid } }))
+  )));
+  const parsed = receive.mock.lastCall![0] as { messages: { id: string; isStoryReply: boolean }[] };
+  expect(parsed.messages.filter((m) => m.isStoryReply).map((m) => m.id)).toEqual(['message-1']);
+});
+
+it('retains only a published photo path in the current DM and strips legacy image URLs from message content', () => {
+  const receive = vi.fn();
+  watchConversationContents(session, 'conversation-1', receive, vi.fn());
+  listener('conversations/conversation-1').receive(document('conversation-1', conversation()));
+  const path = 'conversations/conversation-1/photos/hash/sent.jpg';
+  const legacy = 'https://example.com/photo.jpg?token=secret';
+  const rows = [{ attachmentPath: path }, { attachmentPath: legacy }, { attachmentPath: path, recalledAt: 'then' },
+    { attachmentPath: path.replace('conversation-1', 'other') }];
+  listener('conversations/conversation-1/messages').receive(querySnapshot(rows.map((row, i) =>
+    document('image' + i, message({ type: 'image', content: legacy, mediaUrl: legacy, ...row })))));
+  const parsed = receive.mock.lastCall![0].messages;
+  expect(parsed.filter((m: { attachmentPath?: string }) => m.attachmentPath)).toEqual([expect.objectContaining({ id: 'image0', attachmentPath: path })]);
+  expect(JSON.stringify(parsed)).not.toContain('token=secret');
+});
+
+const prepared = {
+  conversationId: 'dm_pu_alice_bob',
+  peerUid: 'bob',
+  peerName: '來源姓名',
+  exists: false,
+};
+const firstMessageId = 'first_message_12345678';
+const freshSignal = () => new AbortController().signal;
+
+it('searches a bounded current-school name prefix and excludes self without creating a conversation', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValueOnce(querySnapshot([
+    document('alice', { displayName: '陳小安', isDiscoverable: true }),
+    document('bob', { displayName: '陳小文', isDiscoverable: true, department: '資訊管理學系', email: 'private@example.test' }),
+    document('hidden', { displayName: '陳小光', isDiscoverable: false }),
+    document('legacy', { displayName: '陳小雨' }),
+  ]) as never);
+  expect(await findPrivateMessageRecipients(session, ' 陳 ', freshSignal())).toEqual([
+    { uid: 'bob', displayName: '陳小文', department: '資訊管理學系' },
+  ]);
+  expect(getDocsFromServer).toHaveBeenCalledWith({
+    path: 'schools/pu/directory',
+    constraints: [
+      { where: ['isDiscoverable', '==', true] },
+      { orderBy: ['displayName'] },
+      { startAt: ['陳'] },
+      { endAt: ['陳\uf8ff'] },
+      { limit: 20 },
+    ],
+  });
+  expect(runTransaction).not.toHaveBeenCalled();
+  expect(runtime.call).not.toHaveBeenCalled();
+});
+
+it('does not query the directory for an empty or overlong name', async () => {
+  expect(await findPrivateMessageRecipients(session, ' ', freshSignal())).toEqual([]);
+  expect(await findPrivateMessageRecipients(session, '文'.repeat(81), freshSignal())).toEqual([]);
+  expect(getDocsFromServer).not.toHaveBeenCalled();
+});
+
+it('keeps stale or denied directory requests distinct from a successful empty search', async () => {
+  vi.mocked(getDocsFromServer).mockResolvedValueOnce(querySnapshot([], { fromCache: true }) as never);
+  await expect(findPrivateMessageRecipients(session, '陳', freshSignal())).rejects.toMatchObject({ reason: 'stale' });
+  vi.mocked(getDocsFromServer).mockRejectedValueOnce({ code: 'permission-denied' });
+  await expect(findPrivateMessageRecipients(session, '陳', freshSignal())).rejects.toMatchObject({ code: 'permission-denied' });
+  const controller = new AbortController();
+  vi.mocked(getDocsFromServer).mockImplementationOnce(async () => {
+    controller.abort();
+    return querySnapshot([document('bob', { displayName: '舊查詢姓名' })]) as never;
+  });
+  await expect(findPrivateMessageRecipients(session, '陳', controller.signal)).rejects.toMatchObject({ reason: 'stale' });
+});
+
+it.each([false, true])('prepares the exact canonical peer read-only when exists is %s', async (exists) => {
+  runtime.call.mockResolvedValueOnce({ data: { conversationId: prepared.conversationId, peerUid: 'bob', exists } });
+  expect(await preparePrivateConversation(session, 'bob', freshSignal())).toEqual({ ...prepared, exists });
+  expect(fetch).toHaveBeenCalledWith('/api/fn/prepareDmConversation', expect.anything());
+  expect(runtime.call).toHaveBeenCalledWith({ viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob' });
+  expect(runTransaction).not.toHaveBeenCalled();
+  expect(onSnapshot).not.toHaveBeenCalled();
+});
+
+it.each([
+  { conversationId: 'dm_other_alice_bob', peerUid: 'bob', exists: false },
+  { conversationId: 'dm_pu_alice_bob', peerUid: 'third-person', exists: false },
+  { conversationId: 'dm_pu_alice_bob', peerUid: 'bob' },
+])('rejects an invalid preparation receipt %j', async (data) => {
+  runtime.call.mockResolvedValueOnce({ data });
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
+});
+
+it('rejects self, denied preparation and late results after account or route changes', async () => {
+  await expect(preparePrivateConversation(session, 'alice', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
+  expect(runtime.call).not.toHaveBeenCalled();
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, null) as never);
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
+  const controller = new AbortController();
+  runtime.call.mockImplementationOnce(async () => {
+    controller.abort();
+    return { data: prepared };
+  });
+  await expect(preparePrivateConversation(session, 'bob', controller.signal)).rejects.toMatchObject({ reason: 'stale' });
+  runtime.call.mockImplementationOnce(async () => {
+    runtime.uid = 'another-account';
+    return { data: prepared };
+  });
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
+  expect(getDocFromServer).toHaveBeenCalledTimes(1);
+});
+
+it('uses the same text intent for a failed first-send retry and requires its exact receipt', async () => {
+  runtime.call.mockRejectedValueOnce(new Error('lost receipt')).mockResolvedValueOnce({
+    data: { conversationId: prepared.conversationId, messageId: firstMessageId },
+  });
+  await expect(sendPreparedPrivateMessage(session, prepared, firstMessageId, '  嗨，同學  ', freshSignal()))
+    .rejects.toMatchObject({ reason: 'unavailable' });
+  await sendPreparedPrivateMessage(session, prepared, firstMessageId, '  嗨，同學  ', freshSignal());
+  expect(fetch).toHaveBeenLastCalledWith('/api/fn/sendDmText', expect.anything());
+  expect(runtime.call.mock.calls[0]).toEqual(runtime.call.mock.calls[1]);
+  expect(runtime.call).toHaveBeenLastCalledWith({
+    viewerUid: 'alice', schoolId: 'pu', peerUid: 'bob', conversationId: prepared.conversationId,
+    messageId: firstMessageId, content: '嗨，同學',
+  });
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it.each([
+  { conversationId: 'another-conversation', messageId: firstMessageId },
+  { conversationId: prepared.conversationId, messageId: 'another-message' },
+])('rejects a first text acknowledgment belonging to another send %j', async (data) => {
+  runtime.call.mockResolvedValueOnce({ data });
+  await expect(sendPreparedPrivateMessage(session, prepared, firstMessageId, '你好', freshSignal()))
+    .rejects.toMatchObject({ reason: 'unavailable' });
+});
+
+it('cancels stale first text writes and rejects invalid content, IDs or peers before calling', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(sendPreparedPrivateMessage(session, prepared, firstMessageId, '你好', controller.signal)).rejects.toThrow();
+  await expect(sendPreparedPrivateMessage(session, prepared, firstMessageId, '文'.repeat(4001), freshSignal())).rejects.toThrow();
+  await expect(sendPreparedPrivateMessage(session, prepared, 'short', '你好', freshSignal())).rejects.toThrow();
+  await expect(sendPreparedPrivateMessage(session, { ...prepared, peerUid: 'other' }, firstMessageId, '你好', freshSignal())).rejects.toThrow();
+  expect(runtime.call).not.toHaveBeenCalled();
+});
+
+it('waits on the authorized inbox for an approved new peer without reading a missing document', async () => {
+  const receive = vi.fn();
+  const fail = vi.fn();
+  watchNewPrivateConversation(session, prepared, receive, fail);
+  listener('conversations').receive(querySnapshot([]));
+  await vi.waitFor(() => expect(receive).toHaveBeenCalledOnce());
+  expect(receive).toHaveBeenCalledWith(expect.objectContaining({
+    exists: false, messages: [],
+    conversation: expect.objectContaining({ id: prepared.conversationId, peerUid: 'bob', peerName: '來源姓名' }),
+  }));
+  expect(onSnapshot).toHaveBeenCalledTimes(1);
+  expect(runTransaction).not.toHaveBeenCalled();
+  expect(runtime.call).not.toHaveBeenCalled();
+});
+
+it('switches to the strict conversation watcher when the recipient sends first', async () => {
+  const receive = vi.fn();
+  const stop = watchNewPrivateConversation(session, prepared, receive, vi.fn());
+  const stopInbox = vi.mocked(onSnapshot).mock.results[0].value;
+  const inbox = listener('conversations');
+  inbox.receive(querySnapshot([document(prepared.conversationId, conversation())]));
+  await vi.waitFor(() => expect(onSnapshot).toHaveBeenCalledTimes(2));
+  expect(stopInbox).toHaveBeenCalled();
+  listener('conversations/' + prepared.conversationId).receive(document(prepared.conversationId, conversation()));
+  listener('conversations/' + prepared.conversationId + '/messages').receive(querySnapshot([
+    document('incoming', message({ conversationId: prepared.conversationId, content: '對方先打招呼' })),
+  ]));
+  expect(receive).toHaveBeenLastCalledWith(expect.objectContaining({
+    messages: [expect.objectContaining({ content: '對方先打招呼' })],
+  }));
+  const calls = receive.mock.calls.length;
+  stop();
+  inbox.receive(querySnapshot([]));
+  await Promise.resolve();
+  expect(receive).toHaveBeenCalledTimes(calls);
+});
+
+it('never turns a denied inbox query or mismatched peer into an empty new conversation', async () => {
+  const receive = vi.fn();
+  const fail = vi.fn();
+  watchNewPrivateConversation(session, prepared, receive, fail);
+  listener('conversations').error({ code: 'permission-denied' });
+  expect(fail).toHaveBeenCalledWith('permission');
+  expect(receive).not.toHaveBeenCalled();
+  listener('conversations').receive(querySnapshot([
+    document(prepared.conversationId, conversation({ memberIds: ['alice', 'mallory'] })),
+  ]));
+  await vi.waitFor(() => expect(fail).toHaveBeenCalledTimes(2));
+  expect(receive).not.toHaveBeenCalled();
+  expect(onSnapshot).toHaveBeenCalledTimes(1);
+});
+
+it('opens a confirmed existing preparation through the strict document watcher immediately', () => {
+  watchNewPrivateConversation(session, { ...prepared, exists: true }, vi.fn(), vi.fn());
+  expect(listener('conversations/' + prepared.conversationId).query).toMatchObject({
+    path: 'conversations/' + prepared.conversationId,
+  });
+  expect(onSnapshot).toHaveBeenCalledTimes(1);
+});
+
+it('opens an existing member DM after peer school eligibility fails and sends via the existing conversation', async () => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, conversation()) as never);
+  const result = await preparePrivateConversation(session, 'bob', freshSignal());
+  expect(result).toEqual({ ...prepared, exists: true });
+  const receive = vi.fn();
+  watchNewPrivateConversation(session, result, receive, vi.fn());
+  listener('conversations/' + prepared.conversationId).receive(document(prepared.conversationId, conversation()));
+  listener('conversations/' + prepared.conversationId + '/messages').receive(querySnapshot([
+    document('history', message({ conversationId: prepared.conversationId })),
+  ]));
+  expect(receive).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ content: '來源內容' })]) }));
+  tx.get.mockImplementation(async ({ path }: { path: string }) => {
+    if (path === 'users/alice') return document(path, { schoolId: 'pu' });
+    if (path === 'schools/pu/members/alice') return document(path, { status: 'active' });
+    if (path === 'conversations/' + prepared.conversationId) return document(path, conversation());
+    return document(path, null);
+  });
+  await sendPrivateMessage(session, result.conversationId, firstMessageId, '轉校後繼續聊天');
+  expect(tx.set).toHaveBeenCalled();
+  expect(runtime.call).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { row: null, meta: {} },
+  { row: conversation({ memberIds: ['alice', 'mallory'] }), meta: {} },
+  { row: conversation({ schoolId: 'other' }), meta: {} },
+  { row: conversation({ memberIds: ['alice', ''] }), meta: {} },
+  { row: conversation(), meta: { fromCache: true } },
+  { row: conversation(), meta: { hasPendingWrites: true } },
+])('rejects an absent, invalid or unconfirmed existing-DM fallback (%j)', async ({ row, meta }) => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, row, meta) as never);
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toThrow();
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it.each(['permission-denied', 'unavailable'])('does not bypass a server-denied existing conversation (%s)', async (code) => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockRejectedValueOnce({ code });
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toThrow();
+});
+
+
+it.each(['abort', 'account'])('rejects a late existing-DM lookup after %s changes', async (change) => {
+  const controller = new AbortController();
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockImplementationOnce(async () => {
+    if (change === 'abort') controller.abort();
+    else runtime.uid = 'another-account';
+    return document(prepared.conversationId, conversation()) as never;
+  });
+  await expect(preparePrivateConversation(session, 'bob', controller.signal)).rejects.toThrow();
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('keeps existing sends subject to server block and account-status denials', async () => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, conversation()) as never);
+  const result = await preparePrivateConversation(session, 'bob', freshSignal());
+  vi.mocked(runTransaction).mockRejectedValueOnce({ code: 'permission-denied' });
+  await expect(sendPrivateMessage(session, result.conversationId, firstMessageId, '不可繞過限制'))
+    .rejects.toMatchObject({ code: 'permission-denied' });
+  expect(runtime.call).toHaveBeenCalledTimes(1);
+});
+
+it.each([false, true])('prepares a new conversation through hosted /api/fn (configured=%s)', async (configured) => {
+  functionsConfig.enabled = configured;
+  const fetcher = vi.fn().mockResolvedValue({
+    ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false } }),
+  });
+  vi.stubGlobal('fetch', fetcher);
+  vi.mocked(getDocFromServer).mockResolvedValue(document('bob', { displayName: 'Bob' }) as never);
+  try {
+    await expect(preparePrivateConversation(session, 'bob', new AbortController().signal)).resolves.toMatchObject({
+      conversationId: 'dm_pu_alice_bob', exists: false,
+    });
+    expect(fetcher).toHaveBeenCalledWith('/api/fn/prepareDmConversation', expect.anything());
+    expect(getDocFromServer).not.toHaveBeenCalledWith(expect.objectContaining({ path: 'conversations/dm_pu_alice_bob' }));
+  } finally { vi.unstubAllGlobals(); }
+});
+it('sends a prepared first message through hosted /api/fn', async () => {
+  functionsConfig.enabled = false;
+  const fetcher = vi.fn().mockResolvedValue({
+    ok: true, json: async () => ({ result: { conversationId: 'dm_pu_alice_bob', messageId: 'first-text-message-00001' } }),
+  });
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await sendPreparedPrivateMessage(session, { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false, peerName: null },
+      'first-text-message-00001', '你好', new AbortController().signal);
+    expect(fetcher).toHaveBeenCalledWith('/api/fn/sendDmText', expect.anything());
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('preserves stale cancellation when a hosted send is aborted', async () => {
+  functionsConfig.enabled = false;
+  const controller = new AbortController();
+  const fetcher = vi.fn().mockImplementation(async () => {
+    controller.abort();
+    throw new DOMException('Aborted', 'AbortError');
+  });
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await expect(sendPreparedPrivateMessage(session,
+      { conversationId: 'dm_pu_alice_bob', peerUid: 'bob', exists: false, peerName: null },
+      'first-text-message-00001', '你好', controller.signal)).rejects.toMatchObject({ reason: 'stale' });
+  } finally { vi.unstubAllGlobals(); }
 });

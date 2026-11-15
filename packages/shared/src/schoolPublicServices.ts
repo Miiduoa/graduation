@@ -1,6 +1,6 @@
 /**
  * School-specific official public entry points.
- * Source evidence checked 2026-10-24 (see docs/SCHOOL_PUBLIC_SERVICE_SOURCES_2026-10-24.md).
+ * Original entries: docs/SCHOOL_PUBLIC_SERVICE_SOURCES_2026-10-24.md.
  * These are external public pages only — not nuni integrations, private
  * records, appointments, job listings, or authenticated school APIs.
  */
@@ -15,7 +15,7 @@ export type SchoolPublicServiceLink = {
 };
 
 export type SchoolPublicServices = {
-  schoolId: 'pu' | 'ncku' | 'ntpu' | 'ntu';
+  schoolId: 'pu' | 'ncku' | 'ntpu' | 'ntu' | 'nchu' | 'yuntech' | 'nkust' | 'fcu';
   schoolName: string;
   services: Record<SchoolPublicServiceKind, SchoolPublicServiceLink>;
 };
@@ -31,6 +31,11 @@ const ALIASES: Record<string, CanonicalSchoolId> = {
   'tw-ntpu': 'ntpu',
   ntu: 'ntu',
   'tw-ntu': 'ntu',
+  nchu: 'nchu',
+  'tw-nchu': 'nchu',
+  yuntech: 'yuntech',
+  nkust: 'nkust',
+  fcu: 'fcu',
 };
 
 /** Checked 2026-10-24 — 靜宜大學公開入口 */
@@ -161,11 +166,62 @@ const NTU: SchoolPublicServices = {
   },
 };
 
+// Checked against the public pages of each university on 2026-11-06.
+function dedicated(label: string, url: string): SchoolPublicServiceLink {
+  return { label, url, sourceLabel: label, entryKind: 'dedicated' };
+}
+
 const DIRECTORY: Record<CanonicalSchoolId, SchoolPublicServices> = {
   pu: PU,
   ncku: NCKU,
   ntpu: NTPU,
   ntu: NTU,
+  nchu: {
+    schoolId: 'nchu',
+    schoolName: '國立中興大學',
+    services: {
+      courses: dedicated('中興大學課程查詢系統', 'https://onepiece.nchu.edu.tw/cofsys/plsql/crseqry_home'),
+      dormitory: dedicated('中興大學住宿輔導組', 'https://www.osa.nchu.edu.tw/osa/dorm/index.html'),
+      health: dedicated('中興大學健康及諮商中心', 'https://www.osa.nchu.edu.tw/osa/hac/'),
+      career: dedicated('中興大學生涯發展中心', 'https://www.osa.nchu.edu.tw/osa/cdc/'),
+    },
+  },
+  yuntech: {
+    schoolId: 'yuntech',
+    schoolName: '國立雲林科技大學',
+    services: {
+      courses: dedicated('雲科大課程資訊查詢', 'https://webapp.yuntech.edu.tw/WebNewCAS/Course/QueryCour.aspx'),
+      dormitory: dedicated('雲科大宿舍服務中心', 'https://asx.yuntech.edu.tw/index.php/2020-02-26-09-23-21/item/371-2021-08-16-08-33-35/1000'),
+      health: dedicated('雲科大諮商輔導中心', 'https://scc.yuntech.edu.tw/'),
+      career: dedicated('雲科大實習就業發展組', 'https://ttx.yuntech.edu.tw/index.php/2020-02-26-09-22-35/2023-09-19-08-01-4'),
+    },
+  },
+  nkust: {
+    schoolId: 'nkust',
+    schoolName: '國立高雄科技大學',
+    services: {
+      courses: dedicated('高科大課程資料查詢', 'https://stdsys.nkust.edu.tw/student/Course/QueryCourse'),
+      dormitory: dedicated('高科大住宿服務組公告', 'https://osa.nkust.edu.tw/p/403-1154-1785-1.php?Lang=zh-tw'),
+      health: dedicated('高科大諮商輔導預約資訊', 'https://osa.nkust.edu.tw/p/412-1154-10566.php?Lang=zh-tw'),
+      career: dedicated('高科大職涯輔導組', 'https://ascdc.nkust.edu.tw/p/412-1022-1805.php'),
+    },
+  },
+  fcu: {
+    schoolId: 'fcu',
+    schoolName: '逢甲大學',
+    services: {
+      // The registration portal links to Course Search before sign-in.
+      courses: {
+        label: '逢甲大學選課系統與課程檢索入口',
+        url: 'https://course.fcu.edu.tw/',
+        sourceLabel: '逢甲大學選課系統',
+        entryKind: 'student-portal',
+      },
+      dormitory: dedicated('逢甲大學宿舍服務', 'https://dormitory.fcu.edu.tw/'),
+      health: dedicated('逢甲大學諮商輔導中心', 'https://student.fcu.edu.tw/counseling-center/'),
+      career: dedicated('逢甲大學成就學生中心職涯諮詢', 'https://ssc.fcu.edu.tw/careerCounseling'),
+    },
+  },
 };
 
 function normalizeCanonicalSchoolId(schoolId: string | null | undefined): CanonicalSchoolId | null {

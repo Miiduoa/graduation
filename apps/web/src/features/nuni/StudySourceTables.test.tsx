@@ -990,8 +990,8 @@ it('does not mislead on abbreviated temperature or decibel source columns', () =
 it('keeps clock readings and map coordinates as exact text rather than ratio bars', () => {
   // Neither noon / 8 AM nor 120° / 60° longitude implies a twofold quantity.
   for (const header of [
-    '時刻', '上課時間', '開始時間', '抵達時間', '經緯度', '經度', '緯度',
-    '座標', '海拔', 'Time of Day', 'Clock Time', 'Start Time',
+    '時刻', '當地時間', '臺北時間', '標準時間', '上課時間', '開始時間', '抵達時間', '經緯度', '經度', '緯度',
+    '座標', '海拔', 'Time of Day', 'Clock Time', 'Local Time', 'UTC Time', 'GMT Time', 'Time of Arrival', 'Time of Departure', 'Start Time',
     'Departure Time', 'Latitude', 'Longitude', 'Coordinates', 'Elevation',
   ]) {
     const material = [

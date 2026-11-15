@@ -3,12 +3,20 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import DmsListPage from '@/app/dms/page';
 import MessagesPage from '@/app/messages/page';
 import { MessagingShell, PrivateConversationView } from './Messaging';
+import { confirmDmPhoto, readDmPhoto, uploadDmPhoto } from '@/lib/dmPhotos';
+vi.mock('@/lib/dmPhotos', async (original) => ({
+  ...await original<typeof import('@/lib/dmPhotos')>(),
+  confirmDmPhoto: vi.fn(), readDmPhoto: vi.fn(), uploadDmPhoto: vi.fn(),
+}));
 import {
   watchMessagingSession,
   watchPrivateConversations,
   watchConversationContents,
   watchAccountNotifications,
   sendPrivateMessage,
+  sendPreparedPrivateMessage,
+  watchNewPrivateConversation,
+  type PreparedPrivateConversation,
   newPrivateMessageId,
   markConversationRead,
   togglePrivateMessageReaction,
@@ -24,7 +32,7 @@ const account = vi.hoisted(() => ({
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
 vi.mock('@/lib/firebase', () => ({ getAuth: () => ({ currentUser: account.user }) }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  SiteShell: ({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) => <main><p>{subtitle}</p>{children}</main>,
 }));
 vi.mock('@/lib/privateMessages', async (original) => {
   const actual = await original<typeof import('@/lib/privateMessages')>();
@@ -35,6 +43,8 @@ vi.mock('@/lib/privateMessages', async (original) => {
     watchConversationContents: vi.fn(),
     watchAccountNotifications: vi.fn(),
     sendPrivateMessage: vi.fn(),
+    sendPreparedPrivateMessage: vi.fn(),
+    watchNewPrivateConversation: vi.fn(),
     newPrivateMessageId: vi.fn(),
     markConversationRead: vi.fn(),
     togglePrivateMessageReaction: vi.fn(),
@@ -105,7 +115,7 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string }) {
+function Chat({ id = 'opaque_conversation_id_with_underscores', prepared }: { id?: string; prepared?: PreparedPrivateConversation }) {
   return (
     <MessagingShell title="訊息">
       {(session) => (
@@ -113,6 +123,7 @@ function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string 
           key={`${session.uid}:${session.schoolId}:${id}`}
           session={session}
           conversationId={id}
+          prepared={prepared}
         />
       )}
     </MessagingShell>
@@ -141,6 +152,11 @@ beforeEach(() => {
   });
   vi.mocked(newPrivateMessageId).mockReturnValue('request-id');
   vi.mocked(sendPrivateMessage).mockResolvedValue();
+  vi.mocked(sendPreparedPrivateMessage).mockResolvedValue();
+  vi.mocked(watchNewPrivateConversation).mockImplementation((_session, _prepared, receive) => {
+    receive(contents());
+    return vi.fn();
+  });
   vi.mocked(markConversationRead).mockResolvedValue();
   vi.mocked(togglePrivateMessageReaction).mockResolvedValue();
   vi.mocked(markAccountNotificationRead).mockResolvedValue();
@@ -150,6 +166,7 @@ it('uses the authenticated account and real directory content instead of demo ro
   localStorage.setItem('demoRole', 'admin');
   render(<DmsListPage />);
   await screen.findByText('真實目錄姓名');
+  expect(screen.getByText('接著上次的話題，與校園裡的人保持聯繫。')).toBeTruthy();
   expect(screen.getByText('真實最近訊息')).toBeTruthy();
   expect(watchPrivateConversations).toHaveBeenCalledWith(
     { uid: 'alice', schoolId: 'pu' },
@@ -157,6 +174,7 @@ it('uses the authenticated account and real directory content instead of demo ro
     expect.any(Function),
   );
   expect(screen.queryByRole('button', { name: /^新對話|核准|刪除/ })).toBeNull();
+  expect(screen.getByRole('link', { name: '新增訊息' }).getAttribute('href')).toBe('/dms/new');
   expect(screen.getByRole('link', { name: /真實目錄姓名/ }).getAttribute('href')).toBe(
     '/dms/opaque_conversation_id_with_underscores',
   );
@@ -165,6 +183,7 @@ it('logged-out visitors do not subscribe to private data', async () => {
   account.user = null;
   render(<MessagesPage />);
   await screen.findByText('登入後查看訊息');
+  expect(screen.getByText('課程、活動與服務的新消息，都在這裡。')).toBeTruthy();
   expect(watchMessagingSession).not.toHaveBeenCalled();
   expect(watchAccountNotifications).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '通知' }).getAttribute('aria-current')).toBe('page');
@@ -221,7 +240,23 @@ it('successful empty conversations stay empty and an error remains distinct', as
   fireEvent.click(screen.getByRole('button', { name: '重新連線' }));
   await screen.findByText('真實目錄姓名');
 });
-it('a permission or stale event removes previously loaded private conversation content', async () => {
+it.each(['unavailable', 'stale'] as const)('%s preserves loaded history while reconnecting without photo authorization', async (failure) => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const fail = vi.mocked(watchConversationContents).mock.lastCall![3];
+  act(() => fail(failure));
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '加入照片' }) as HTMLButtonElement).disabled).toBe(true);
+  vi.mocked(watchConversationContents).mockImplementationOnce(() => vi.fn());
+  fireEvent.click(screen.getAllByRole('button', { name: '重新連線' })[0]);
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  const receive = vi.mocked(watchConversationContents).mock.lastCall![2];
+  act(() => receive(contents()));
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).disabled).toBe(false);
+  expect(screen.getByRole('button', { name: '加入照片' })).toBeTruthy();
+});
+it('a permission event removes previously loaded private conversation content', async () => {
   render(<Chat />);
   await screen.findByText('伺服器的訊息');
   const fail = vi.mocked(watchConversationContents).mock.calls.at(-1)![3];
@@ -713,4 +748,291 @@ it('keeps unsupported notifications readable without a link back to the current 
   expect(screen.getByText('這則通知目前沒有可開啟的服務連結。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '開啟通知中心' })).toBeNull();
   expect(screen.getAllByRole('button', { name: '標記已讀' })).toHaveLength(2);
+});
+
+it('labels a story reply in the conversation and removes its context after recall', async () => {
+  const thread = contents();
+  thread.messages[0].isStoryReply = true;
+  vi.mocked(watchConversationContents).mockImplementation((_session, _id, receive) => {
+    receive(thread);
+    return vi.fn();
+  });
+  render(<Chat />);
+  await screen.findByText('回覆了限時動態');
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  const receive = vi.mocked(watchConversationContents).mock.calls.at(-1)![2];
+  act(() => receive({ ...thread, messages: [{ ...thread.messages[0], recalled: true }] }));
+  expect(screen.getByText('訊息已收回')).toBeTruthy();
+  expect(screen.queryByText('回覆了限時動態')).toBeNull();
+  expect(screen.queryByText('伺服器的訊息')).toBeNull();
+});
+
+const photoId = 'privatePhotoMessage0001';
+function selectPhoto(loaded = true) {
+  fireEvent.change(screen.getByLabelText('選擇私訊照片'), {
+    target: { files: [new File(['pic'], '校園.jpg', { type: 'image/jpeg' })] },
+  });
+  if (loaded) fireEvent.load(screen.getByRole('img', { name: '待傳送照片預覽' }));
+}
+function showPhotoMessage() {
+  const thread = contents();
+  const row = { ...thread.messages[0], id: photoId, type: 'image', content: '照片',
+    attachmentPath: 'conversations/previous/photos/hash/sent.jpg' };
+  vi.mocked(watchConversationContents).mockImplementation((_session, id, receive) => {
+    receive(id === 'previous' ? { ...thread, messages: [row] } : thread);
+    return vi.fn();
+  });
+  return { thread, row };
+}
+
+it('previews and removes a local photo without disturbing a text draft or sending a request', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '文字草稿' } });
+  fireEvent.change(screen.getByLabelText('選擇私訊照片'), {
+    target: { files: [new File(['gif'], 'bad.gif', { type: 'image/gif' })] },
+  });
+  expect(screen.getByRole('alert').textContent).toMatch(/JPG、PNG 或 WebP/);
+  expect(screen.queryByRole('img')).toBeNull();
+  const release = vi.spyOn(URL, 'revokeObjectURL');
+  selectPhoto();
+  expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toMatch(/^blob:/);
+  fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(release).toHaveBeenCalled();
+  release.mockRestore();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('文字草稿');
+});
+
+it.each([
+  'javascript:alert(1)',
+  'data:image/svg+xml,<svg onload="alert(1)"/>',
+  'https://example.test/photo.jpg',
+  '<img src=x onerror="alert(1)">',
+  'photo.jpg',
+])('never assigns a non-blob preview URL to img src: %s', async (url) => {
+  const create = vi.spyOn(URL, 'createObjectURL').mockReturnValueOnce(url);
+  const release = vi.spyOn(URL, 'revokeObjectURL');
+  try {
+    render(<Chat />);
+    await screen.findByText('伺服器的訊息');
+    selectPhoto(false);
+    expect(create).toHaveBeenCalledWith(expect.any(File));
+    expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBeNull();
+    expect((screen.getByRole('button', { name: '讀取照片中…' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.load(screen.getByRole('img', { name: '待傳送照片預覽' }));
+    expect((screen.getByRole('button', { name: '讀取照片中…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(uploadDmPhoto).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
+    expect(release).toHaveBeenCalledWith(url);
+  } finally {
+    create.mockRestore();
+    release.mockRestore();
+  }
+});
+
+it('replaces and revokes local preview URLs when the selected File changes and on unmount', async () => {
+  const create = vi.spyOn(URL, 'createObjectURL')
+    .mockReturnValueOnce('blob:first-photo').mockReturnValueOnce('blob:second-photo');
+  const release = vi.spyOn(URL, 'revokeObjectURL');
+  try {
+    const view = render(<Chat />);
+    await screen.findByText('伺服器的訊息');
+    selectPhoto();
+    expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBe('blob:first-photo');
+    selectPhoto();
+    expect(release).toHaveBeenCalledWith('blob:first-photo');
+    expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBe('blob:second-photo');
+    expect((screen.getByRole('button', { name: '傳送照片' }) as HTMLButtonElement).disabled).toBe(false);
+    view.unmount();
+    expect(release).toHaveBeenCalledWith('blob:second-photo');
+  } finally {
+    create.mockRestore();
+    release.mockRestore();
+  }
+});
+
+it('sending a photo shows it is not yet available and never starts an upload', async () => {
+  vi.mocked(newPrivateMessageId).mockReturnValue(photoId);
+  render(<Chat id="previous" />);
+  await screen.findByText('伺服器的訊息');
+  selectPhoto();
+  fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(screen.getByRole('img', { name: '待傳送照片預覽' })).toBeTruthy();
+  expect(screen.queryByText('照片已傳送')).toBeNull();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
+  expect(sessionStorage.length).toBe(0);
+});
+
+it('requests each chat photo on demand, hides upon recall and drops image failures', async () => {
+  const { thread, row } = showPhotoMessage();
+  vi.mocked(readDmPhoto).mockResolvedValue({ url: 'https://some-image.test/signed', expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  render(<Chat id="previous" />);
+  const open = await screen.findByRole('button', { name: '查看照片' });
+  expect(readDmPhoto).not.toHaveBeenCalled();
+  fireEvent.click(open);
+  let photo = await screen.findByRole('img', { name: '對話中的照片' });
+  expect(photo.getAttribute('referrerpolicy')).toBe('no-referrer');
+  expect(readDmPhoto).toHaveBeenCalledWith({ viewerUid: 'alice', schoolId: 'pu', conversationId: 'previous', messageId: photoId },
+    row.attachmentPath, expect.anything());
+  fireEvent.click(screen.getByRole('button', { name: '收合照片' }));
+  expect(screen.queryByRole('img')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看照片' }));
+  photo = await screen.findByRole('img', { name: '對話中的照片' });
+  fireEvent.error(photo);
+  expect(screen.queryByRole('img')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看照片' }));
+  await screen.findByRole('img', { name: '對話中的照片' });
+  expect(readDmPhoto).toHaveBeenCalledTimes(3);
+  const receive = vi.mocked(watchConversationContents).mock.calls.at(-1)![2];
+  act(() => receive({ ...thread, messages: [{ ...row, recalled: true }] }));
+  expect(screen.getByText('訊息已收回')).toBeTruthy();
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.queryByRole('button', { name: '查看照片' })).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+});
+
+it('discards a pending photo read and a declined photo draft when switching conversations', async () => {
+  showPhotoMessage();
+  const read = deferred<{ url: string; expiresAt: string }>();
+  vi.mocked(readDmPhoto).mockReturnValueOnce(read.promise);
+  const view = render(<Chat id="previous" />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看照片' }));
+  selectPhoto();
+  fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  const oldRead = vi.mocked(readDmPhoto).mock.lastCall![2];
+  view.rerender(<Chat id="next" />);
+  await screen.findByText('伺服器的訊息');
+  expect(oldRead.aborted).toBe(true);
+  await act(async () => {
+    read.resolve({ url: 'https://old-private.test/secret', expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  });
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.queryByText('照片已傳送')).toBeNull();
+  expect(screen.queryByText('照片私訊尚未開通')).toBeNull();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
+});
+
+it('closes an expired photo and requests a fresh grant if the viewer opens it again', async () => {
+  showPhotoMessage();
+  render(<Chat id="previous" />);
+  const button = await screen.findByRole('button', { name: '查看照片' });
+  vi.useFakeTimers();
+  try {
+    vi.mocked(readDmPhoto).mockImplementation(async () => ({
+      url: 'https://some-image.test/view', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }));
+    await act(async () => fireEvent.click(button));
+    expect(screen.getByRole('img', { name: '對話中的照片' })).toBeTruthy();
+    act(() => vi.advanceTimersByTime(60_001));
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByText('檢視時間已結束，可以再次開啟。')).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '查看照片' })));
+    expect(screen.getByRole('img', { name: '對話中的照片' })).toBeTruthy();
+    expect(readDmPhoto).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('retains a local photo through a stale connection and keeps showing it is not yet available', async () => {
+  vi.mocked(newPrivateMessageId).mockReturnValue(photoId);
+  render(<Chat id="previous" />);
+  await screen.findByText('伺服器的訊息');
+  selectPhoto();
+  fireEvent.click(screen.getByRole('button', { name: '傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  await screen.findByRole('button', { name: '重新傳送照片' });
+  const [, , receive, fail] = vi.mocked(watchConversationContents).mock.lastCall!;
+  act(() => fail('stale'));
+  expect(screen.getByRole('img', { name: '待傳送照片預覽' })).toBeTruthy();
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  act(() => receive(contents()));
+  fireEvent.click(screen.getByRole('button', { name: '重新傳送照片' }));
+  expect(screen.getByText('照片私訊尚未開通')).toBeTruthy();
+  expect(screen.queryByText('照片已傳送')).toBeNull();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  expect(confirmDmPhoto).not.toHaveBeenCalled();
+});
+
+it('discards an unreadable local preview before upload and lets the user pick a replacement', async () => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  selectPhoto(false);
+  expect((screen.getByRole('button', { name: '讀取照片中…' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.error(screen.getByRole('img', { name: '待傳送照片預覽' }));
+  expect(screen.getByRole('alert').textContent).toContain('無法讀取這張照片');
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByRole('button', { name: '加入照片' })).toBeTruthy();
+  expect(uploadDmPhoto).not.toHaveBeenCalled();
+  selectPhoto();
+  expect((screen.getByRole('button', { name: '傳送照片' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('closes a visible photo on pagehide and ignores old reads after hiding and reopening the tab', async () => {
+  showPhotoMessage();
+  const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  const first = deferred<{ url: string; expiresAt: string }>();
+  const second = deferred<{ url: string; expiresAt: string }>();
+  const grant = { url: 'https://image.test/private', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  vi.mocked(readDmPhoto).mockResolvedValueOnce(grant).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  try {
+    render(<Chat id="previous" />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看照片' }));
+    const displayed = await screen.findByRole('img', { name: '對話中的照片' });
+    act(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    expect(displayed.getAttribute('src')).toBeNull();
+    expect(screen.queryByRole('img')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看照片' }));
+    const oldSignal = vi.mocked(readDmPhoto).mock.lastCall![2];
+    visibility.mockReturnValue(true);
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(oldSignal.aborted).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '查看照片' }));
+    expect(readDmPhoto).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue(false);
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    fireEvent.click(screen.getByRole('button', { name: '查看照片' }));
+    const newSignal = vi.mocked(readDmPhoto).mock.lastCall![2];
+    await act(async () => first.resolve(grant));
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByRole('button', { name: '正在開啟…' })).toBeTruthy();
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    expect(newSignal.aborted).toBe(true);
+    await act(async () => second.resolve(grant));
+    expect(screen.queryByRole('img')).toBeNull();
+  } finally {
+    visibility.mockRestore();
+  }
+});
+
+it.each([undefined, true, false])('routes UI text sends through the member flow only for established conversations (exists=%s)', async (exists) => {
+  const prepared = exists === undefined ? undefined : {
+    conversationId: 'dm_pu_alice_bob', peerUid: 'bob', peerName: null, exists,
+  };
+  // An existing thread may be returned by prepare's fallback after the peer transfers schools.
+  render(<Chat id="dm_pu_alice_bob" prepared={prepared} />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '繼續對話' } });
+  fireEvent.click(screen.getByRole('button', { name: '傳送訊息' }));
+  await waitFor(() => expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe(''));
+  if (exists === false) {
+    expect(sendPreparedPrivateMessage).toHaveBeenCalledWith(
+      { uid: 'alice', schoolId: 'pu' }, prepared, 'request-id', '繼續對話', expect.any(AbortSignal),
+    );
+    expect(sendPrivateMessage).not.toHaveBeenCalled();
+  } else {
+    expect(sendPrivateMessage).toHaveBeenCalledWith(
+      { uid: 'alice', schoolId: 'pu' }, 'dm_pu_alice_bob', 'request-id', '繼續對話',
+    );
+    expect(sendPreparedPrivateMessage).not.toHaveBeenCalled();
+  }
 });

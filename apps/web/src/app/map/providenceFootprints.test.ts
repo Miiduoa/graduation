@@ -67,6 +67,29 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('accepts unambiguous, spelled-out OSM metre aliases without guessing other units', () => {
+    // The OSM units guide discourages these aliases but defines them as metres.
+    // A tagged building must not disappear solely due to an unambiguous alias.
+    for (const height of ['18 metre', '18 metres', '18 meter', '18 meters']) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height })],
+      });
+      expect(buildings, height).toHaveLength(1);
+      expect(buildings[0], height).toMatchObject({
+        poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag',
+      });
+      expect(parseProvidenceFootprintResponse({
+        schoolId: 'pu', buildings,
+      }), height).toEqual(buildings);
+    }
+    for (const height of ['18metres', '18meters', '18 kilometres', '18 km',
+      '18 centimetres', '18 metres approx', '18 metres;20 metres']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', height })],
+      }), height).toEqual([]);
+    }
+  });
+
   it('converts unambiguous OSM feet and inches without inventing a height', () => {
     // OSM's ft/in convention: 1 foot is exactly 0.3048 metres;
     // 1 inch is exactly 0.0254 metres. No levels-based estimates.
@@ -522,6 +545,43 @@ describe('Providence footprint API snapshot freshness', () => {
     // A legacy payload lacking replication metadata still follows fetch age.
     expect(parseProvidenceFootprintSnapshot({ ...response, stale: true }, expiry))
       .toMatchObject({ stale: true, osmBaseAt: null });
+  });
+
+  it('does not display OSM edits newer than the database or fetch snapshot', () => {
+    // Synthetic conflicting source dates: the shape may still be valid, but
+    // a way revision cannot originate in a database from before that edit.
+    const revision = {
+      ...footprint, osmVersion: 13, osmEditedAt: '2026-11-09T08:36:00Z',
+    };
+    const snapshot = parseProvidenceFootprintSnapshot({
+      ...response, osmBaseAt: '2026-11-09T08:30:00Z', buildings: [revision],
+    }, now);
+    expect(snapshot?.buildings).toHaveLength(1);
+    expect(snapshot?.buildings[0].outline).toEqual(footprint.outline);
+    expect(snapshot?.buildings[0]).not.toHaveProperty('osmVersion');
+    expect(snapshot?.buildings[0]).not.toHaveProperty('osmEditedAt');
+
+    // A revision at the replication cutoff remains a sourced label.
+    const consistent = {
+      ...revision, osmEditedAt: '2026-11-09T08:34:00Z',
+    };
+    expect(parseProvidenceFootprintSnapshot({
+      ...response, osmBaseAt: '2026-11-09T08:30:00Z', buildings: [consistent],
+    }, now)?.buildings[0]).toMatchObject({
+      osmVersion: 13, osmEditedAt: '2026-11-09T08:34:00Z',
+    });
+
+    // Older Overpass replies have no osm3s field: the HTTP fetch timestamp
+    // is the only available upper bound, not the device clock 1 hour later.
+    const legacy = parseProvidenceFootprintSnapshot({
+      ...response, buildings: [{ ...revision, osmEditedAt: '2026-11-09T09:06:00Z' }],
+    }, now);
+    expect(legacy?.buildings[0]).not.toHaveProperty('osmEditedAt');
+    expect(parseProvidenceFootprintSnapshot({
+      ...response, buildings: [{ ...revision, osmEditedAt: '2026-11-09T09:04:00Z' }],
+    }, now)?.buildings[0]).toMatchObject({
+      osmVersion: 13, osmEditedAt: '2026-11-09T09:04:00Z',
+    });
   });
 
   it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {

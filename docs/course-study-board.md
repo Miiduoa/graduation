@@ -1233,3 +1233,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - Markdown 原文表格的唯讀選取區新增「全選第 N 張表格原文」，點按後聚焦並選取原始行，讓手機與鍵盤使用者不必精確拖曳長段選取手把。沿用原始行及教師隱藏答案排除機制；只提供手動複製，不呼叫剪貼簿 API，也不外傳私人教材。
 - 因新增原文選取 details，舊的數值比較 DOM 測試用「沒有任何 details」來表示「沒有衍生圖表」已不正確。本輪將 12 處舊斷言改為檢查衍生比較標題，兩處正向測試也避免誤抓第一個 source details；新增兩組來源全文選取、資料替換、隱藏答案界線測試。
 - 本輪不是完整 CI／CodeQL 或手機真機驗收。App 5504170 APPROVED、Maestro、iOS Safari/Android Chrome/VoiceOver/TalkBack、WebGPU 中文教學與 Ahaboard 同教材同題同機對照仍未完成；PR 保留 Draft、不合併、不部署。
+
+
+## 2026-11-15：時刻欄位保守圖表判斷與 main 整合
+
+- 來源表格若是「當地時間／臺北時間／標準時間」或 Local Time／UTC Time／GMT Time／Time of Arrival／Time of Departure，8 點與 12 點不能以從零開始的長條表達兩倍關係，現在保留表格與可複製原文，不再產生倍數圖。Study Hours、Duration Minutes、學習時數等時長仍能比較。已擴充既有 DOM 測試迴圈 8 組，獨立 JS 邊界檢查核對 8 組時刻與 3 組時長；正式 Vitest、手機真機與 WebGPU 教學仍須另驗。
+- 對照當下 main 與白板 45 個差異路徑，僅 CourseMaterials.tsx、CourseMaterials.test.tsx 有共同變動；由共同祖先逐行整合，保留 main 跨裝置教材網址處理及其測試，亦保留白板的啟動入口、筆記／進度與回歸測試；其他非白板檔案保留 main 最新 tree。以白板 head 和 main 為雙親，僅在精確 expected-head 下非強制快轉白板分支。
+- 無新套件、付費 API、私人教材傳輸或備份格式變動。新 SHA 的 GitHub Web／Mobile CI、CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機與 Ahaboard 同教材同題同機對照皆須獨立確認；缺任一 gate 則 PR 保留 Draft，未合併 main、未部署。

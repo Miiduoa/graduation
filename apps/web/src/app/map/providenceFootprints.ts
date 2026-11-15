@@ -253,7 +253,10 @@ function heightFromOsmTags(value: unknown):
   // are also documented. Only convert unambiguous units, never infer levels.
   if (typeof raw !== 'string') return null;
   const label = raw.trim();
-  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m)?$/.exec(label);
+  // OSM recommends `m`; explicit metre/meter aliases are discouraged but
+  // unambiguous. Accept them rather than silently hiding a sourced building.
+  // Keep the required space for spelled-out aliases; never guess other units.
+  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m|\s+(?:metre|metres|meter|meters))?$/.exec(label);
   const feet = /^(\d{1,3}(?:\.\d{1,6})?)\s+(?:ft|feet)$/i.exec(label);
   const feetInches = /^(\d{1,3})'(?:([0-9]{1,2})")?$/.exec(label);
   if (feetInches && Number(feetInches[2] ?? 0) >= 12) return null;
@@ -349,6 +352,25 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
   return accepted;
 }
 
+/** OSM way edit metadata cannot postdate the source database snapshot.
+ * Retain otherwise verified outlines, but never show a contradictory revision
+ * as provenance. Allow five minutes for upstream clock skew.
+ */
+export function stripOsmRevisionsAfter(
+  footprints: ProvidenceFootprint[],
+  sourceAsOfMs: number,
+): ProvidenceFootprint[] {
+  const latestPossibleEdit = sourceAsOfMs + 5 * 60 * 1000;
+  return footprints.map((footprint) => {
+    if (!footprint.osmEditedAt ||
+        Date.parse(footprint.osmEditedAt) <= latestPossibleEdit) return footprint;
+    const withoutUnverifiableRevision = { ...footprint };
+    delete withoutUnverifiableRevision.osmVersion;
+    delete withoutUnverifiableRevision.osmEditedAt;
+    return withoutUnverifiableRevision;
+  });
+}
+
 /** Verify that API geometry still has a trustworthy source and recent fetch date.
  * Client clocks may differ by a few minutes, but a forged/far-future timestamp,
  * stale CDN response, or unrelated API payload must not be portrayed as current OSM.
@@ -381,7 +403,14 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
   // the older Overpass replication state. A CDN must not extend either one.
   if (ageMs >= 7 * day || ageMs < -5 * 60 * 1000 ||
       (typeof osmBaseAt === 'string' && now - Date.parse(osmBaseAt) >= 7 * day)) return null;
-  const buildings = parseProvidenceFootprintResponse(data);
+  // A revised OSM way must not appear newer than the map database that
+  // supplied it. Without replication metadata, fall back to HTTP fetch time.
+  // Inconsistent revision labels are removed; separately validated geometry
+  // remains available, with its existing illustrative/sourced height caveats.
+  const buildings = stripOsmRevisionsAfter(
+    parseProvidenceFootprintResponse(data),
+    typeof osmBaseAt === 'string' ? Date.parse(osmBaseAt) : fetchedAtMs,
+  );
   if (!buildings.length) return null;
   return {
     buildings, fetchedAt: data.fetchedAt,

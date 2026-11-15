@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AssistantThread } from './AssistantThread';
+import { assistantPermissionMessage } from './copy';
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -63,6 +64,12 @@ it('surfaces a friendly error region', () => {
   expect(screen.getByRole('alert').textContent).toBe('查詢未完成，請稍後再試。');
 });
 
+it('offers the working assistant settings route when an action permission is denied', () => {
+  render(<AssistantThread {...base} error={assistantPermissionMessage('ASSISTANT_PERMISSION_DENIED')!} />);
+  expect(screen.getByRole('alert').textContent).toContain('這次沒有執行');
+  expect(screen.getByRole('link', { name: '設定 AI 代辦權限' }).getAttribute('href')).toBe('/settings?section=assistant');
+});
+
 it('measures the composer dock height onto the thread shell', () => {
   class MockObserver {
     callback: ResizeObserverCallback;
@@ -110,6 +117,37 @@ it('collapses suggestion chips to one scrolling row after a turn', () => {
   const row = screen.getByLabelText('建議問題');
   expect(row.className).toMatch(/chipsCompact/);
   expect(screen.getByRole('button', { name: '送出' }).hasAttribute('disabled')).toBe(true);
+});
+
+it('enables explicit public reads without model consent but blocks keyboard submission of ordinary questions', () => {
+  const onAsk = vi.fn();
+  const view = render(<AssistantThread {...base} ready={false} question="幫我查清大資料庫課程" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+  view.rerender(<AssistantThread {...base} ready={false} question="請幫我想一個社團介紹稿" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it.each(['查詢我的行程', '列出未交作業'])('enables personal reads without cloud readiness or model consent: %s', (question) => {
+  const onAsk = vi.fn();
+  render(<AssistantThread {...base} ready={false} question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it.each(['local', 'dataRead'])('renders %s source text literally instead of creating links or formatting', (source) => {
+  const answer = '2026-11-12 09:10–10:00｜[假的設定入口](/settings) **私人課程**';
+  const reply = { answer, steps: [], cards: [], ...(source === 'local'
+    ? { local: { kind: 'personal' as const, content: answer, serviceIds: [] } } : { dataRead: true }) };
+  const { container } = render(<AssistantThread {...base} turns={[{ question: '課程資料', reply }]} />);
+  expect(screen.getByText(answer)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '假的設定入口' })).toBeNull();
+  expect(container.querySelector('strong')).toBeNull();
 });
 
 it('does not send while Enter is selecting an IME candidate, but sends with normal Enter', () => {

@@ -237,6 +237,38 @@ describe('optional spatial canvas lifecycle', () => {
     expect(target.z).toBeCloseTo(model.points[0].z, 6);
   });
 
+  it('ignores identical resize notifications while redrawing on DPR changes and tab resume', () => {
+    const { scene, renderer } = setup();
+    drawFrame();
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    const observer = observers.at(-1)!;
+
+    // Neither a duplicate observer notification nor an unchanged window resize
+    // should create an idle GPU frame.
+    observer.callback([], observer as unknown as ResizeObserver);
+    window.dispatchEvent(new Event('resize'));
+    expect(renderer.setSize).toHaveBeenCalledTimes(1);
+    expect(frames.size).toBe(0);
+
+    // A changed DPR may need a different drawing buffer even if CSS dimensions
+    // did not change, and must still redraw.
+    vi.stubGlobal('devicePixelRatio', 1.5);
+    observer.callback([], observer as unknown as ResizeObserver);
+    expect(renderer.setSize).toHaveBeenCalledTimes(2);
+    expect(renderer.domElement.width).toBe(1200);
+    expect(renderer.domElement.height).toBe(720);
+    expect(frames.size).toBe(1);
+    drawFrame();
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+
+    scene.setActive(false);
+    scene.setActive(true);
+    expect(frames.size).toBe(1);
+    drawFrame();
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+    expect(frames.size).toBe(0);
+  });
+
   it('bounds DPR and total GPU pixels while preserving the displayed camera aspect', () => {
     vi.stubGlobal('devicePixelRatio', 3);
     const { renderer, bounds } = setup();

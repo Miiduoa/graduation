@@ -58,7 +58,14 @@ jobs:
       - name: Native scenario regression
         run: pnpm --filter mobile exec jest --runInBand --watch=false --testPathPatterns='Credit(ScenarioAdoptionScreen|PlanScenarioCard|PlanningScreen|PlanningDraftProtection|PlanBatchSaveScreen|TranscriptPlanWrite)' --json --outputFile=../../artifacts/credit-scenario-adoption/native-results.json
       - name: Prepare Chinese browser fonts
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+        run: |
+          # The 61 MB Noto package has repeatedly stalled on the hosted apt mirror.
+          # Use the smaller distro CJK font; fail promptly rather than cancelling
+          # the browser acceptance test after all component tests have passed.
+          timeout 90s sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=15
+          timeout 150s sudo apt-get install -y -o Acquire::Retries=2 -o Acquire::http::Timeout=20 fonts-wqy-microhei
+          fc-cache -f
+          fc-list : family | grep -qi 'WenQuanYi Micro Hei'
       - name: Exercise adoption and undo in real Chrome
         run: node scripts/qa/credit-scenario-adoption-browser.mjs
       - uses: actions/upload-artifact@v7
