@@ -168,6 +168,7 @@ function createDormWorkflowHandler({
       if (!canAccessBuilding(row)) throw new HttpsError('permission-denied', '不屬於值班棟別');
     };
     if (action === 'uploadPhoto') {
+      const bucket = getBucket();
       const contentType = required(input.contentType, 40);
       if (
         !['image/jpeg', 'image/png', 'image/webp'].includes(contentType) ||
@@ -196,7 +197,7 @@ function createDormWorkflowHandler({
           createdAt: FieldValue.serverTimestamp(),
         });
       });
-      const file = getBucket().file(path);
+      const file = bucket.file(path);
       try {
         await file.save(bytes, { resumable: false, timeout: 60000, metadata: { contentType } });
         await db.runTransaction(async (tx) => {
@@ -402,21 +403,36 @@ function createDormWorkflowHandler({
           if (cursor === null) continue;
           let q = school.collection(name);
           if (building !== null) q = q.where('building', '==', building);
-          if (statuses) q = q.where('status', 'in', statuses);
-          if (name === 'dormRepairs') q = q.where('workflow', '==', 'dorm_staff');
-          q = q.orderBy(time, 'desc').orderBy('__name__', 'desc');
+          // Single-field query only: production has no composite workspace indexes.
+          // Bound each authorized stream to 5,000 records; fail clearly rather than
+          // silently presenting partial statistics. Never query another staff building.
+          const snap = await q.limit(5001).get();
+          if (snap.docs.length > 5000)
+            throw new HttpsError('resource-exhausted', '宿舍紀錄超過查詢上限，請聯絡管理員');
+          const millis = (value) => value?.toMillis ? value.toMillis() : Number(value) || 0;
+          const compare = (a, b) =>
+            millis(b.data()[time]) - millis(a.data()[time]) ||
+            (a.id === b.id ? 0 : a.id < b.id ? 1 : -1);
+          let candidates = snap.docs.filter((d) => {
+            const row = d.data();
+            return canAccessBuilding(row) &&
+              (!statuses || statuses.includes(row.status)) &&
+              (name !== 'dormRepairs' || row.workflow === 'dorm_staff') &&
+              (name !== 'dormResidents' || row.active !== false) &&
+              row[time] !== undefined;
+          }).sort(compare);
           if (cursor !== undefined) {
             if (typeof cursor !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(cursor))
               throw new HttpsError('invalid-argument', '分頁代碼錯誤');
             const last = await (await resolveRef(name, cursor)).get();
-            if (!last.exists || !canAccessBuilding(last.data()))
+            if (!last.exists || !canAccessBuilding(last.data()) ||
+                (building !== null && last.data().building !== building))
               throw new HttpsError('invalid-argument', '分頁已失效，請重新整理');
-            q = q.startAfter(last);
+            candidates = candidates.filter((d) => compare(d, last) > 0);
           }
-          const snap = await q.limit(pageSize + 1).get();
-          const docs = snap.docs.slice(0, pageSize);
+          const docs = candidates.slice(0, pageSize);
           for (const d of docs) await ensureHandle(name, d);
-          nextCursors[key] = snap.docs.length > pageSize ? publicId(name, docs.at(-1).id) : null;
+          nextCursors[key] = candidates.length > pageSize ? publicId(name, docs.at(-1).id) : null;
           rows.push(...docs.map((d) => ({ id: d.id, ...serialize(d.data()) })));
         }
         return rows
@@ -458,8 +474,6 @@ function createDormWorkflowHandler({
           const roster = await school
             .collection('dormResidents')
             .where('userId', '==', row.userId)
-            .where('building', '==', row.building)
-            .limit(1)
             .get();
           applicants.set(
             applicantKey,
@@ -932,4 +946,4 @@ function createDormWorkflowHandler({
     throw new HttpsError('invalid-argument', '未知操作');
   };
 }
-module.exports = { createDormWorkflowHandler, transition, LABELS };
+module.exports = { createDormWorkflowHandler, transition, LABELS, HttpsError };

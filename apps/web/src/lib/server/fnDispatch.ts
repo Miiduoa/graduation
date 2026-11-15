@@ -10,6 +10,7 @@ import {
   assertJoinCodeAttemptsAllowed,
   assertTimetableShareCreatesAllowed,
   checkUidRateLimit,
+  createUidRateLimiter,
   recordInvalidJoinCode,
   recordTimetableShareCreate,
 } from './uidRateLimit';
@@ -29,6 +30,9 @@ const JSON_HEADERS = {
 
 const CORS_ALLOW_HEADERS =
   'Authorization, Content-Type, X-Firebase-AppCheck, X-Client-Version, X-Firebase-gmpid, X-Firebase-Encoding';
+
+// Separate 240/UID/min budget covers workbench polling, photos and user actions.
+const dormRateLimit = createUidRateLimiter({ requestsPerMinute: 240 });
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -144,6 +148,11 @@ async function invokeHostedCallable(
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
+  if (name === 'dormWorkflow') {
+    if (!request.auth) throw new HttpsError('unauthenticated', '請先登入');
+    const { invokeDormWorkflow } = await import('./dormWorkflowHandler');
+    return invokeDormWorkflow(db, request);
+  }
   if (name === 'prepareDmConversation' || name === 'sendDmText') {
     const { createDmConversations } = await import('./dmConversationsHandler');
     const handlers = createDmConversations({ db });
@@ -279,13 +288,15 @@ export async function dispatchFnRequest(
       isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
         name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
         name === 'getMyTronClassLms' ||
-        name === 'clearPuCampusSessions',
+        name === 'clearPuCampusSessions' || name === 'dormWorkflow',
     );
     uid = auth?.uid;
     if (uid) {
       // DM / story-reply Functions have no per-UID minute cap. Do not share
       // the hosted 10/min budget with chat, or a long conversation is rejected.
-      if (name !== 'prepareDmConversation' && name !== 'sendDmText' && name !== 'replyToCampusStory') {
+      if (name === 'dormWorkflow') {
+        dormRateLimit.check(uid);
+      } else if (name !== 'prepareDmConversation' && name !== 'sendDmText' && name !== 'replyToCampusStory') {
         checkUidRateLimit(uid);
       }
       if (name === 'joinGroupByCode') {

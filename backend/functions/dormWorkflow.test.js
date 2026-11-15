@@ -858,12 +858,11 @@ test('workspace queries authorized buildings and statuses with stable bounded cu
   const second = await call('staff', { action: 'workspace', cursors: first.nextCursors });
   expect(second.leaves).toHaveLength(10);
   expect(new Set([...first.leaves, ...second.leaves].map((r) => r.id)).size).toBe(60);
-  for (const query of queries.filter((q) => q.orders.length)) {
-    expect(query.filters).toContainEqual(['building', '==', 'A']);
-    expect(query.max).toBe(51);
-    expect(query.orders.at(-1)).toEqual(['__name__', 'desc']);
-    if (!query.path.endsWith('/dormResidents'))
-      expect(query.filters.some(([f, op]) => f === 'status' && op === 'in')).toBe(true);
+  const workspaceQueries = queries.filter((q) => q.max === 5001);
+  expect(workspaceQueries.length).toBeGreaterThan(0);
+  for (const query of workspaceQueries) {
+    expect(query.filters).toEqual([['building', '==', 'A']]);
+    expect(query.orders).toEqual([]);
   }
   expect(second.nextCursors[JSON.stringify(['dormLeaves', 'A'])]).toBeNull();
 });
@@ -901,10 +900,8 @@ test('workspace defaults to actionable statuses and keeps history available expl
   expect((await call('staff', { action: 'workspace' })).packages.map((r) => r.status)).toEqual([
     'waiting',
   ]);
-  expect(queries.find((q) => q.path.endsWith('/dormPackages')).filters).toContainEqual([
-    'status',
-    'in',
-    ['waiting'],
+  expect(queries.find((q) => q.path.endsWith('/dormPackages')).filters).toEqual([
+    ['building', '==', 'A'],
   ]);
   expect(
     (await call('staff', { action: 'workspace', includeHistory: true })).packages,
@@ -2077,3 +2074,18 @@ test.each(['S123456789 同學', '姓名 S123456789', 'OLD987654 同學'])(
     expect(data.get('schools/pu/dormResidents/' + studentId).name).toBe(name);
   },
 );
+
+
+test('workspace fails explicitly above the bounded authorized stream rather than truncating statistics', async () => {
+  const { call, data, queries } = fixture();
+  for (let i = 0; i < 5001; i++)
+    data.set('schools/pu/dormLeaves/capped' + i, {
+      userId: 'student', building: 'A', status: 'pending', createdAt: i,
+    });
+  await expect(call('staff', { action: 'workspace' })).rejects.toMatchObject({
+    code: 'resource-exhausted',
+  });
+  expect(queries.filter((q) => q.max === 5001).every((q) =>
+    q.orders.length === 0 && q.filters.length === 1 && q.filters[0][2] === 'A',
+  )).toBe(true);
+});

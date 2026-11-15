@@ -76,7 +76,7 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
   ).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
-  expect(screen.getByText('明天起退件')).toBeTruthy();
+  expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('私密掛號信')).toBeNull();
   expect(screen.getByRole('heading', { name: '我自己記的' })).toBeTruthy();

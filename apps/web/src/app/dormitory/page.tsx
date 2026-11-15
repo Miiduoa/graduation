@@ -708,7 +708,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
             <ul className={styles.milestones}>{cloud.packages.filter(p => !p.postal).map(item => <li key={item.id}>
               <div><h4>{item.title}</h4><p>到件日：{dormCloudDate(item.arrivedAt)}</p><p>領取地點：{item.location}</p>
                 <p>{item.status === 'waiting' ? '待領取' : item.status === 'collected' ? '已領取' : '已退件'}</p>
-                {dormParcelReturnNotice(item, now) && <p className={styles.muted}>明天起退件</p>}
+                {dormParcelReturnNotice(item, now) && <p className={styles.muted}>{dormParcelReturnNotice(item, now)}</p>}
               </div>
               {item.status === 'waiting' && <button type="button" onClick={() => setShowIdentity(true)}>領取碼</button>}
             </li>)}</ul>

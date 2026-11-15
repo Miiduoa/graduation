@@ -1,6 +1,5 @@
 import { projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import {
   DORM_TICKET_LABELS,
@@ -17,22 +16,19 @@ import {
 } from '@campus/shared/src/dormWorkflow';
 import { View, Text, TextInput, Pressable, Image, Linking, Share } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { getFunctionsInstance } from '../../firebase';
+import { getAuthInstance } from '../../firebase';
+import { postNuniWebFn } from '../../services/nuniWebFn';
 import { aiTokens } from '../../ui/aiFirst';
 type FocusTarget = TextInput;
-const invoke = async <T,>(data: Record<string, unknown>) =>
-  (
-    await httpsCallable<Record<string, unknown>, T>(
-      getFunctionsInstance(),
-      'dormWorkflow',
-    )({
-      ...data,
-      schoolId:
-        typeof data.schoolId === 'string'
-          ? (toPublicSchoolId(data.schoolId) ?? data.schoolId)
-          : data.schoolId,
-    })
-  ).data;
+const invoke = async <T,>(data: Record<string, unknown>): Promise<T> => {
+  const user = getAuthInstance().currentUser;
+  if (!user) throw new Error('請先登入。');
+  return postNuniWebFn('dormWorkflow', {
+    ...data,
+    schoolId: typeof data.schoolId === 'string'
+      ? (toPublicSchoolId(data.schoolId) ?? data.schoolId) : data.schoolId,
+  }, user.uid);
+};
 function Box({ children }: { children: React.ReactNode }) {
   return (
     <View
@@ -223,12 +219,12 @@ export function DormWorkflow({
   const [capability, setCapability] = useState<{ key: string; config: DormWorkflowConfig } | null>(
     null,
   );
-  // Unknown capabilities keep the service visible; the callable still enforces access.
+  // Only a successful capability response may open official submission forms.
   const config =
     capability?.key === capabilityKey
       ? capability.config
       : {
-          enabled: true,
+          enabled: false,
           repairs: false,
           packages: false,
           admin: false,
@@ -338,6 +334,7 @@ export function DormWorkflow({
     if (!uid) return;
     void call<DormWorkflowConfig>({ action: 'config' })
       .then((c) => {
+        if (!c || typeof c.enabled !== 'boolean') throw new Error('宿舍設定無法讀取');
         if (token === generation.current) {
           setCapability({ key: capabilityKey, config: c });
           if (c.enabled && initialStaff && (c.repairs || c.packages)) {
@@ -347,7 +344,7 @@ export function DormWorkflow({
         }
       })
       .catch(() => {
-        if (token === generation.current) setNotice('宿舍服務暫時無法連線。');
+        if (token === generation.current) setNotice('宿舍服務暫時無法使用，請稍後再試。');
       });
     return () => {
       generation.current++;
@@ -417,7 +414,10 @@ export function DormWorkflow({
       setBusy(false);
     }
   }
-  if (!uid || !config || (!config.enabled && submitOnly)) return null;
+  if (!uid) return null;
+  if (capability?.key !== capabilityKey)
+    return <Box><Label>{notice || '正在確認宿舍服務…'}</Label></Box>;
+  if (!config.enabled && submitOnly) return null;
   const f = (key: string, label: string, initial = '', multiline = false) => (
     <Field
       key={key}

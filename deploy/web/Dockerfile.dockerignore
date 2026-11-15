@@ -40,3 +40,8 @@
 **/*serviceAccount*.json
 **/*.pem
 **/*.key
+
+!backend/functions/dormWorkflow.js
+!backend/functions/authz.js
+!backend/functions/dormName.js
+!backend/functions/dormSsoIdentity.js
