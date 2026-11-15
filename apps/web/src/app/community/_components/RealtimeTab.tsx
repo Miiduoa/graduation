@@ -46,11 +46,21 @@ const POI_ICON: Record<SocialPoiCategory, string> = {
   transit: '🚌',
 };
 
-export function RealtimeTab(props: { schoolId: string }) {
-  const { schoolId } = props;
+export function RealtimeTab({ schoolId }: { schoolId: string }) {
+  const { user, loading } = useAuth();
+  // Scope the complete realtime view (peers, stories, and presence) to one identity.
+  // A campus may reuse the same POI id: matching the POI alone is not authorization
+  // to display rows or a check-in state from the previous campus.
+  if (loading) return <p role="status">正在確認登入狀態…</p>;
+  return <ScopedRealtimeTab key={JSON.stringify([user?.uid ?? null, schoolId])} schoolId={schoolId} user={user} />;
+}
+
+function ScopedRealtimeTab({ schoolId, user }: {
+  schoolId: string;
+  user: ReturnType<typeof useAuth>['user'];
+}) {
   const campusPois = verifiedSocialPoisForSchool(schoolId);
   const hasVerifiedPoiDirectory = campusPois.length > 0;
-  const { user } = useAuth();
   const [selectedPoi, setSelectedPoi] = useState<string>(defaultSocialPoiId());
   const [storyGroups, setStoryGroups] = useState<StoryAuthorGroup[]>([]);
   const [peerResult, setPeerResult] = useState<{ poiId: string; items: Peer[] } | null>(null);
