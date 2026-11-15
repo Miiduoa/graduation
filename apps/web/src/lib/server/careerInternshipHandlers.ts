@@ -133,7 +133,7 @@ export function createCareerInternshipHandlers({
         const limit = Math.max(1, Math.min(50, max || 20));
         const batches = await Promise.all(
           ['teacher', 'staff', 'admin'].map((roleName) =>
-            tx.get(members.where('status', '==', 'active').where('role', '==', roleName).limit(80)),
+            tx.get(members.where('status', '==', 'active').where('role', '==', roleName).limit(40)),
           ),
         );
         const candidateDocs = [...new Map(batches.flatMap((s) => s.docs).map((d) => [d.id, d])).values()];
@@ -203,13 +203,13 @@ export function createCareerInternshipHandlers({
             rules: ruleRows.docs.map((d) => ({ ...d.data(), id: d.id }) as InternshipRule),
             records: unique,
             audit: logs,
-            advisors: c.audience === 'student' ? await loadAdvisors('', 20) : undefined,
             canManage: staff || departments.length > 0,
           },
         };
       }
       if (c.action === 'advisorSearch') {
-        if (typeof c.keyword !== 'string') fail('invalid-argument', '請輸入指導老師姓名或學校信箱。');
+        if (typeof c.keyword !== 'string' || !c.keyword.trim())
+          fail('invalid-argument', '請輸入指導老師姓名或學校信箱。');
         return {
           snapshot: {
             rules: [],

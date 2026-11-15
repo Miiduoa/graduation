@@ -140,6 +140,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   const [teacherUid, setTeacherUid] = useState('');
   const [advisorKeyword, setAdvisorKeyword] = useState('');
   const [advisors, setAdvisors] = useState<NonNullable<InternshipSnapshot['advisors']>>([]);
+  const [advisorSearched, setAdvisorSearched] = useState(false);
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [ruleDraft, setRuleDraft] = useState<InternshipRule | null>(null);
@@ -215,12 +216,15 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   async function searchAdvisors() {
     const keyword = advisorKeyword.trim();
     if (!keyword) {
-      setAdvisors(snapshot?.advisors || []);
+      setAdvisorSearched(false);
+      setAdvisors([]);
+      setFieldErrors((previous) => ({ ...previous, teacherUid: '請輸入指導老師姓名或學校信箱。' }));
       return;
     }
     await run(async () => {
       const reply = await service.execute({ action: 'advisorSearch', keyword, limit: 20 });
       setAdvisors(reply.snapshot?.advisors || []);
+      setAdvisorSearched(true);
     }, '已更新指導老師名單。');
   }
   async function submitCreate(rule: InternshipRule | null) {
@@ -333,7 +337,12 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
                 onChange={setAdvisorKeyword}
               />
               <Button label="搜尋指導老師" disabled={busy} onPress={() => void searchAdvisors()} />
-              {!advisors.length && <Body>找不到符合條件的指導老師，請試試其他關鍵字。</Body>}
+              {!advisorSearched && !advisors.length && (
+                <Body>請輸入姓名或學校信箱搜尋後，從名單選擇指導老師。</Body>
+              )}
+              {advisorSearched && !advisors.length && (
+                <Body>找不到符合條件的指導老師，請試試其他關鍵字。</Body>
+              )}
               {!!advisors.length && (
                 <Box>
                   {advisors.map((advisor) => (

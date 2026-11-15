@@ -69,7 +69,7 @@ it('allows staff to prepare a rule with five recipients and deadlines', async ()
   expect(view.getByLabelText('5 交給誰')).toBeTruthy();
 });
 it('requires advisor selection and required fields before creating internship records', async () => {
-  const { view, props } = setup('student', 'student');
+  const { view, props, snapshot } = setup('student', 'student');
   await waitFor(() => expect(view.getByRole('button', { name: '建立實習紀錄' })).toBeTruthy());
   fireEvent.click(view.getByRole('button', { name: '建立實習紀錄' }));
   expect(view.getByText('請先選擇系所規則')).toBeTruthy();
@@ -79,6 +79,10 @@ it('requires advisor selection and required fields before creating internship re
   fireEvent.click(view.getByText('選擇測試系規則'));
   change(view.getByLabelText('實習機構'), '測試機構');
   change(view.getByLabelText('指導老師姓名'), '測試指導老師');
+  change(view.getByLabelText('搜尋本校指導老師（姓名或學校信箱）'), 'teacher@school.edu.tw');
+  props.service.execute.mockResolvedValueOnce({
+    snapshot: { advisors: snapshot.advisors, rules: [], records: [], audit: [] },
+  });
   fireEvent.click(view.getByText('搜尋指導老師'));
   await waitFor(() => expect(view.getByText(/測試指導老師｜teacher@school.edu.tw/)).toBeTruthy());
   fireEvent.click(view.getByText(/測試指導老師｜teacher@school.edu.tw/));

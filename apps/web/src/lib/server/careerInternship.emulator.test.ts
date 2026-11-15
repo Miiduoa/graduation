@@ -117,7 +117,11 @@ suite('internship real Firestore transactions', () => {
   });
   it('supports advisor lookup and returns precise create validation messages', async () => {
     const list = await call('student', { action: 'list', audience: 'student' });
-    expect(list.snapshot?.advisors?.some((advisor) => advisor.uid === 'advisor')).toBe(true);
+    expect(list.snapshot?.canManage).toBe(false);
+    expect(list.snapshot?.advisors).toBeUndefined();
+    await expect(call('student', { action: 'advisorSearch', keyword: '   ' })).rejects.toMatchObject({
+      message: '請輸入指導老師姓名或學校信箱。',
+    });
     const search = await call('student', { action: 'advisorSearch', keyword: 'advisor@school.edu.tw' });
     expect(search.snapshot?.advisors).toEqual(
       expect.arrayContaining([
