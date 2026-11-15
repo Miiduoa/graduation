@@ -275,6 +275,10 @@ type CachedCourseContents = CourseContents & {
   expiresAt: string;
 };
 
+// Partial source failures must not stay cached for the full 10-minute window.
+// A short backoff avoids repeatedly hitting an unavailable school endpoint.
+const PARTIAL_COURSE_RETRY_MS = 60_000;
+
 async function loadCourseContents(
   source: LmsReadonlySource,
   cookies: Record<string, string>,
@@ -382,15 +386,22 @@ function readCachedExtras(value: unknown, nowMs: number): {
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const courseId = positiveId(key);
     const row = record(item);
-    if (!courseId || !cacheStillFresh(row.expiresAt, nowMs) ||
-      typeof row.fetchedAt !== 'string' || typeof row.expiresAt !== 'string' ||
+    const fetchedAtMs = typeof row.fetchedAt === 'string' ? Date.parse(row.fetchedAt) : Number.NaN;
+    const expiresAtMs = typeof row.expiresAt === 'string' ? Date.parse(row.expiresAt) : Number.NaN;
+    // Clamp older cached partial results too, so a previously stored 503 does
+    // not hide newly recovered school content for the full snapshot TTL.
+    const retryMs = Array.isArray(row.errors) && row.errors.length > 0
+      ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS;
+    const effectiveExpiresAtMs = Math.min(expiresAtMs, fetchedAtMs + retryMs);
+    if (!courseId || !Number.isFinite(fetchedAtMs) || !Number.isFinite(effectiveExpiresAtMs) ||
+      effectiveExpiresAtMs <= nowMs ||
       !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !Array.isArray(row.errors)) {
       pruned = true;
       continue;
     }
     extras[String(courseId)] = {
-      fetchedAt: row.fetchedAt,
-      expiresAt: row.expiresAt,
+      fetchedAt: row.fetchedAt as string,
+      expiresAt: new Date(effectiveExpiresAtMs).toISOString(),
       announcements: row.announcements as LmsAnnouncementItem[],
       materials: row.materials as LmsMaterialItem[],
       errors: row.errors as LmsCourseError[],
@@ -653,7 +664,8 @@ export function createTronClassLmsHandler({
           extras[String(courseId)] = {
             ...contents,
             fetchedAt,
-            expiresAt: new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString(),
+            expiresAt: new Date(now() + (contents.errors.length > 0
+              ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS)).toISOString(),
           };
         }
       }
