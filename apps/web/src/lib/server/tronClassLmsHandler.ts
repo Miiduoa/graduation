@@ -660,11 +660,11 @@ export function createTronClassLmsHandler({
         if (course && (refresh || !extras[String(courseId)])) {
           const contents = await loadCourseContents(source, cookies, course);
           fetchedFromSchool = true;
-          const fetchedAt = new Date(now()).toISOString();
+          const fetchedAtMs = now();
           extras[String(courseId)] = {
             ...contents,
-            fetchedAt,
-            expiresAt: new Date(now() + (contents.errors.length > 0
+            fetchedAt: new Date(fetchedAtMs).toISOString(),
+            expiresAt: new Date(fetchedAtMs + (contents.errors.length > 0
               ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS)).toISOString(),
           };
         }
