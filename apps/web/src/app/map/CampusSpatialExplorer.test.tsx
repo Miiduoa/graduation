@@ -641,6 +641,38 @@ it.each([
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A suspended/incorrectly configured phone may disagree with the response
+// server's Date header. HTTP-date Retry-After is on the origin's time scale.
+// These are synthetic 429/503 responses, not real Overpass observations.
+it.each([
+  { status: 429, serverOffsetMinutes: -20, retryOffsetMinutes: -10, expectedMinutes: 10 },
+  { status: 503, serverOffsetMinutes: 20, retryOffsetMinutes: 30, expectedMinutes: 30 },
+  { status: 429, serverOffsetMinutes: null, retryOffsetMinutes: 10, expectedMinutes: 10 },
+])('keeps the longer valid HTTP-date cooldown with clock skew ($status, server $serverOffsetMinutes)',
+  async ({ status, serverOffsetMinutes, retryOffsetMinutes, expectedMinutes }) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const now = Date.now();
+    const serverDate = serverOffsetMinutes === null ? 'invalid Date'
+      : new Date(now + serverOffsetMinutes * 60_000).toUTCString();
+    const retryDate = new Date(now + retryOffsetMinutes * 60_000).toUTCString();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status,
+      headers: { get: (name: string) =>
+        name === 'retry-after' ? retryDate : name === 'date' ? serverDate : null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(new RegExp(`約 ${expectedMinutes} 分鐘冷卻，到期後可再試`))).toBeTruthy();
+    fireEvent.click(retry);
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  });
+
 // These cases are synthetic proxy responses, not observations from Overpass.
 it.each([
   'Sun, 32 Nov 2026 01:02:03 GMT',
