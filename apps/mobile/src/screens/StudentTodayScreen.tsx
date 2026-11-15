@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
+import { CampusPersonalization } from '../components/CampusPersonalization';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
@@ -253,6 +254,7 @@ export default function StudentTodayScreen() {
       now={now}
       styles={s}
       onOpen={openTodo}
+      onOpenCalendar={() => safeNavigate(navigation, 'SmartCalendarScreen')}
       onToggleExpanded={() =>
         setExpandedTodoScope((previous) => (previous === scope ? null : scope))
       }
@@ -305,6 +307,7 @@ export default function StudentTodayScreen() {
             {urgentWorkFirst && todoSection}
             {scheduleSection}
             {!urgentWorkFirst && todoSection}
+            <CampusPersonalization now={now} />
             <QuickCampusEntry
               key={scope}
               uid={uid}
@@ -445,6 +448,7 @@ function TodoList({
   onOpen,
   onToggleExpanded,
   onRetry,
+  onOpenCalendar,
 }: {
   todos: TodoRow[];
   expanded: boolean;
@@ -455,6 +459,7 @@ function TodoList({
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpen: (todo: TodoRow, scrollToSubmit?: boolean) => void;
+  onOpenCalendar: () => void;
   onToggleExpanded: () => void;
   onRetry: () => void;
 }) {
@@ -463,9 +468,16 @@ function TodoList({
   const leaving = new Set(leavingIds);
   return (
     <View style={s.section}>
-      <Text accessibilityRole="header" style={s.sectionTitle}>
-        待處理
-      </Text>
+      <View style={s.sectionHeader}>
+        <Text accessibilityRole="header" style={s.sectionTitle}>
+          待處理
+        </Text>
+        {!unsigned && (
+          <Pressable accessibilityRole="button" onPress={onOpenCalendar} style={s.textButton}>
+            <Text style={s.link}>查看行事曆</Text>
+          </Pressable>
+        )}
+      </View>
       {unsigned ? (
         <Text style={s.empty}>{TODAY_COPY.unsigned}</Text>
       ) : error ? (

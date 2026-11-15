@@ -12,6 +12,7 @@ import {
   text,
   type Adapter,
   type Binding,
+  type Course,
   type CourseworkStudyGuard,
   type CourseworkStudyTarget,
   type EventArgs,
@@ -99,11 +100,11 @@ export function studyGuardForTask(
   };
 }
 
-/** IDs select a source; current school membership and the source itself remain authoritative. */
-export async function readCourseworkStudyTask(
+/** Read current source facts, including closed/submitted work, without authorizing an action. */
+export async function readCourseworkStudySource(
   adapter: Adapter,
   raw: CourseworkStudyTarget,
-): Promise<Task> {
+): Promise<{ course: Course; task: Task }> {
   const target = courseworkStudyTarget(raw);
   const checkCourse = async () => {
     operationSignal()?.throwIfAborted();
@@ -112,6 +113,7 @@ export async function readCourseworkStudyTask(
       : (await adapter.courses()).courses.find((item) => item.id === target.workspaceId);
     operationSignal()?.throwIfAborted();
     if (!course || course.id !== target.workspaceId) return fail('COURSEWORK_UNAVAILABLE', 403);
+    return { id: course.id, title: text(course.title, 1000) };
   };
   await checkCourse();
   const tasks = await adapter.work(target.workspaceId);
@@ -124,10 +126,22 @@ export async function readCourseworkStudyTask(
       (task.kind || 'assignment') === target.kind,
   );
   if (matches.length !== 1) return fail('COURSEWORK_UNAVAILABLE', 409);
-  const task = { ...matches[0] };
-  studyGuardForTask(task, 'coursework-gap');
+  const task = { ...matches[0], title: text(matches[0].title, 1000) };
+  if ((task.state !== 'open' && task.state !== 'closed') || typeof task.submitted !== 'boolean')
+    return fail('COURSEWORK_UNAVAILABLE', 502);
+  deadline(task);
   // Access revoked while work was being read cannot become a new preview.
-  await checkCourse();
+  const course = await checkCourse();
+  return { course, task };
+}
+
+/** IDs select a source; current school membership and the source itself remain authoritative. */
+export async function readCourseworkStudyTask(
+  adapter: Adapter,
+  raw: CourseworkStudyTarget,
+): Promise<Task> {
+  const { task } = await readCourseworkStudySource(adapter, raw);
+  studyGuardForTask(task, 'coursework-gap');
   return task;
 }
 

@@ -3,8 +3,8 @@ import { listPublicCourseOperations } from '@campus/shared/src/publicCourseOpera
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request?: Request) {
-  const params = request ? new URL(request.url).searchParams : new URLSearchParams();
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
   const version = params.get('version') ?? '1';
   const headers = { 'Cache-Control': 'no-store' };
   // Legacy React Native fetch adds `_` for cache: 'no-store'; ignore it as transport metadata.

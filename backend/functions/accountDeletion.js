@@ -194,6 +194,9 @@ function createDeleteUserAccountHandler({
       },
     });
 
+    // Isolated dorm cleanup: revoke dorm authority and erase new private records.
+    await require('./dormAccountDeletion').clearDormAccountData({ db, uid, scanPages });
+
     // Remove school authority first so ordinary membership-checked writes stop.
     for (const collection of ['members', 'directory', 'serviceRoles', 'operators']) {
       await scanPages(db.collectionGroup(collection), async (doc) => {

@@ -1,0 +1,30 @@
+// Approval-only. Insert beneath schools/{schoolId}; never deploy this fragment directly.
+// Callable uses Admin SDK transactions. Clients cannot write records, rules or role grants.
+function internshipMember() {
+  return request.auth != null &&
+    get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
+}
+function internshipTeacher() {
+  return internshipMember() &&
+    get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.role in ['teacher', 'staff', 'admin'];
+}
+function internshipStaff() {
+  return internshipMember() && (
+    get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.role == 'admin' ||
+    (get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)).data.status == 'active' &&
+     get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)).data.get('career_staff', false) == true));
+}
+function internshipDepartment(department) {
+  return internshipMember() &&
+    get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)).data.status == 'active' &&
+    department in get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(request.auth.uid)).data.get('internship_departments', []);
+}
+match /internshipRecords/{recordId} {
+  allow read: if internshipMember() && (resource.data.uid == request.auth.uid ||
+    (resource.data.teacherUid == request.auth.uid && internshipTeacher()) || internshipStaff() || internshipDepartment(resource.data.rule.department));
+  allow write: if false;
+}
+match /internshipRules/{ruleId} {
+  allow read: if internshipMember();
+  allow write: if false;
+}
