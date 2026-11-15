@@ -516,6 +516,42 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
   expect(unsupported).not.toContain('期中報告');
 });
 
+test('complete assignment evidence must match the number of authorized 50-row pages', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  // The real reader returns a page for an empty list, then up to 50 items
+  // per page. Replayed metadata must not claim a different number of pages.
+  for (const count of [0, 1, 50, 51, 100, 400]) {
+    const pages = Math.max(1, Math.ceil(count / 50));
+    const authorized: CampusSenseSnapshot = {
+      userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'available', count: 1 },
+      assignments: {
+        status: 'available', count,
+        items: Array.from({ length: count }, (_, index) => ({
+          title: `期中作業 #${index + 1}`, groupName: '資料庫', dueAt: null,
+        })),
+        coverage: { complete: true, reason: 'complete', pages },
+      },
+      announcements: { status: 'available', items: [] },
+    };
+    const good = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
+    expect(good).toContain('完整性：來源已完整讀取');
+    if (count > 0) expect(good).toContain('期中作業 #1');
+
+    const forged = formatOnDeviceSchoolPrompt(local, {
+      ...authorized,
+      assignments: {
+        ...authorized.assignments,
+        coverage: { complete: true, reason: 'complete', pages: pages === 8 ? 7 : pages + 1 },
+      },
+    }, 'alice');
+    expect(forged).toContain('此回合沒有主動同步且有效的校園資料');
+    expect(forged).not.toContain('期中作業 #1');
+    expect(forged).toContain('資料庫概論'); // Verified offline timetable stays available.
+  }
+});
+
 test('restored assignment snapshot cannot double count the same original student task', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
