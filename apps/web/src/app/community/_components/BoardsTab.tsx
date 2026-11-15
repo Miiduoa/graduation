@@ -186,8 +186,6 @@ function BoardsContent(props: {
       return;
     }
     // Keep the action disabled while its write is unresolved, including repeated clicks.
-    if (pendingSubscriptionLock.current.has(b.id)) return;
-    pendingSubscriptionLock.current.add(b.id);
     setPendingSubscriptionIds((previous) => new Set(previous).add(b.id));
     const uid = user.uid;
     const wasSub = subscribed.has(b.id);
@@ -213,7 +211,6 @@ function BoardsContent(props: {
         alert(wasSub ? '這次未能取消訂閱，請稍後再試。' : '這次未能訂閱，請稍後再試。');
       }
     } finally {
-      pendingSubscriptionLock.current.delete(b.id);
       if (!subscriptionLifetime.signal.aborted) {
         setPendingSubscriptionIds((previous) => {
           const next = new Set(previous);
@@ -407,7 +404,14 @@ function BoardsContent(props: {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => void onToggleSub(b)}
+                        onClick={() => {
+                          // Synchronous event-time lock: two clicks in one React batch must not double-write.
+                          if (pendingSubscriptionLock.current.has(b.id)) return;
+                          pendingSubscriptionLock.current.add(b.id);
+                          void onToggleSub(b).finally(() => {
+                            pendingSubscriptionLock.current.delete(b.id);
+                          });
+                        }}
                         disabled={subscriptionPending}
                         aria-pressed={isSub}
                         aria-busy={subscriptionPending}
