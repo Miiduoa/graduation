@@ -95,6 +95,16 @@ function comparableGeneratedTeaching(text: string, preserveLineBreaks = false): 
     .replace(preserveLineBreaks ? /[^\S\r\n]+/gu : /\s+/gu, ' ').trim();
 }
 
+// Match only the visual width variants of printable ASCII in NEW self-check
+// disclosures. NFKC would also fold mathematically distinct characters such as
+// x² and x2; never change the displayed question, source quote or saved lesson.
+function comparableGeneratedAnswerDisplay(text: string, preserveLineBreaks = false): string {
+  const folded = text.replace(/[\uFF01-\uFF5E]/gu,
+    (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/\u3000/gu, ' ');
+  return comparableGeneratedTeaching(folded, preserveLineBreaks);
+}
+
 // A valid source quote is not enough if the model leaves the explanation itself
 // as punctuation or mathematical operators. Require visible letters or digits
 // in the NEW generated summary and each instructional step, not in saved data.
@@ -178,7 +188,7 @@ function hasDisclosedGeneratedAnswerColumn(question: string, answer: string): bo
       if (cell.startsWith(marker) && cell.endsWith(marker) && cell.length > marker.length * 2)
         cell = cell.slice(marker.length, -marker.length).trim();
     }
-    return comparableGeneratedTeaching(cell).toLowerCase()
+    return comparableGeneratedAnswerDisplay(cell).toLowerCase()
       .replace(/\s+/gu, '').replace(/[.!?。！？；;：:，、]+$/gu, '');
   };
   const expected = normalized(answer);
@@ -210,7 +220,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   // A heading such as "## 答案" without a colon is still an explicit
   // answer key. Only rewrite exact standalone Markdown answer headings in
   // this comparison copy; never mutate the learner-facing question or source.
-  const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase()
+  const question = comparableGeneratedAnswerDisplay(explanation.question, true).toLowerCase()
     .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
     // A model can also place an unpunctuated key on its own line, inside a
     // blockquote/list, or as "**答案** 主鍵". These still display the answer
@@ -218,7 +228,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // then use the same exact-answer boundary check below; a normal mention of
     // "答案" in question prose must remain valid.
     .replace(/(^|\r?\n)[ \t]*(?:>[ \t]*){0,2}(?:(?:[-+*•]|\d{1,2}[.)、])[ \t]+)?(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?(?=[ \t]*\r?\n|[ \t]+\S)/giu, '$1$2：');
-  const answer = comparableGeneratedTeaching(explanation.answer)
+  const answer = comparableGeneratedAnswerDisplay(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
   // New Markdown tables may display an explicit answer key as "| 答案 | 主鍵 |".
   // A pipe with a nonblank following cell can disclose the answer without a colon.

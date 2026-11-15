@@ -1014,6 +1014,11 @@ describe('new lesson self-check quality boundary', () => {
 
 describe('new local self-check answer disclosure boundary', () => {
   it.each([
+    { label: 'fullwidth Latin answer key', question: '哪個語言？Ａｎｓｗｅｒ：ＳＱＬ', answer: 'SQL' },
+    { label: 'fullwidth decimal answer key', question: '計算結果？正解：１．２', answer: '1.2' },
+    { label: 'mixed width key', question: '資料庫題。答案：ＳQＬ', answer: 'SQL' },
+    { label: 'reference answer uses fullwidth letters', question: '資料庫題。答案：SQL', answer: 'ＳＱＬ' },
+    { label: 'fullwidth Markdown-looking table key', question: '哪個指令？\\n｜ 題目 ｜ Ａｎｓｗｅｒ ｜\\n｜ --- ｜ --- ｜\\n｜ 範例 ｜ ＳＱＬ ｜', answer: 'SQL' },
     { label: 'a short Chinese answer in parentheses', question: '哪個欄位？（參考回答：學號）', answer: '學號' },
     { label: 'an English answer key', question: '哪個指令？ 標準答案: SQL。', answer: 'SQL' },
     { label: 'a numeric answer after an answer label', question: '計算結果？答案：1.2', answer: '1.2' },
@@ -1123,6 +1128,10 @@ describe('new local self-check answer disclosure boundary', () => {
   });
 
   it.each([
+    { question: '答案：ＳＱＬＳｅｒｖｅｒ 有什麼用途？', answer: 'SQL' },
+    { question: '答案：１２ 是否過大？', answer: '1' },
+    { question: '解答：x² 和 x2 有什麼差異？', answer: 'x2' },
+    { question: '答案：－１', answer: '1' },
     { question: '主鍵用來識別什麼？', answer: '每一筆紀錄。' },
     { question: '題目出現「答案：」欄位時應如何核對？', answer: '先核對教材原文' },
     { question: '(a+b)？', answer: 'a+b' },
