@@ -1018,7 +1018,7 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'fullwidth decimal answer key', question: '計算結果？正解：１．２', answer: '1.2' },
     { label: 'mixed width key', question: '資料庫題。答案：ＳQＬ', answer: 'SQL' },
     { label: 'reference answer uses fullwidth letters', question: '資料庫題。答案：SQL', answer: 'ＳＱＬ' },
-    { label: 'fullwidth Markdown-looking table key', question: '哪個指令？\\n｜ 題目 ｜ Ａｎｓｗｅｒ ｜\\n｜ --- ｜ --- ｜\\n｜ 範例 ｜ ＳＱＬ ｜', answer: 'SQL' },
+    { label: 'fullwidth Markdown-looking table key', question: '哪個指令？\n｜ 題目 ｜ Ａｎｓｗｅｒ ｜\n｜ --- ｜ --- ｜\n｜ 範例 ｜ ＳＱＬ ｜', answer: 'SQL' },
     { label: 'a short Chinese answer in parentheses', question: '哪個欄位？（參考回答：學號）', answer: '學號' },
     { label: 'an English answer key', question: '哪個指令？ 標準答案: SQL。', answer: 'SQL' },
     { label: 'a numeric answer after an answer label', question: '計算結果？答案：1.2', answer: '1.2' },
