@@ -40,7 +40,13 @@ const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 function footprintCooldownSeconds(response: Response): number | null {
   const raw = response.headers?.get('retry-after')?.trim();
   if (!raw) return null;
-  if (/^[1-9]\d{0,5}$/.test(raw)) return Math.min(86_400, Number(raw));
+  // RFC 9110 delay-seconds is 1*DIGIT: leading zeroes and long positive
+  // values are valid. Cap their effect at 24h, but bound header size before
+  // parsing so malformed or excessively long headers cannot lock controls.
+  if (/^\d{1,64}$/.test(raw)) {
+    const seconds = Number(raw);
+    return seconds > 0 ? Math.min(86_400, seconds) : null;
+  }
   const until = Date.parse(raw);
   if (!Number.isFinite(until) || new Date(until).toUTCString() !== raw) return null;
   const seconds = Math.ceil((until - Date.now()) / 1000);
