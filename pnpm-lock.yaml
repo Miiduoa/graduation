@@ -66,7 +66,7 @@ overrides:
   source-map-js: 1.2.2
   compression: 1.8.2
   firebase-admin@13.10.0>@fastify/busboy: 3.2.2
-  firebase-admin@14.5.0>@fastify/busboy: 3.2.2
+  firebase-admin@14.5.1>@fastify/busboy: 3.2.2
   firebase-functions@6.6.0>protobufjs: 7.6.6
   firebase-functions@7.4.0>protobufjs: 7.6.6
   '@google-cloud/firestore@7.11.6>protobufjs': 7.6.6
@@ -432,11 +432,11 @@ importers:
   backend/functions:
     dependencies:
       firebase-admin:
-        specifier: 14.5.0
-        version: 14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)
+        specifier: 14.5.1
+        version: 14.5.1(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)
       firebase-functions:
         specifier: ^7.4.0
-        version: 7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7))
+        version: 7.4.0(firebase-admin@14.5.1(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7))
       jose:
         specifier: ^6.2.15
         version: 6.2.15
@@ -5823,8 +5823,8 @@ packages:
     resolution: {integrity: sha512-rbuCrJvYRwqBqvbccMS8fj/x2zsaMisdf5RQbRzQzr14Rbq9r2UlpuBHqWAwrO6c9dIRF56xF/xoepXsD5yDuQ==}
     engines: {node: '>=18'}
 
-  firebase-admin@14.5.0:
-    resolution: {integrity: sha512-DElmgmaH9aPXu2dWXGQiDoan33UfTnbfAAKaue4fwEZxmpdaNrTk5DmuFn+vVDki2KZ6TiaC0IHRWcEzcDxB3Q==}
+  firebase-admin@14.5.1:
+    resolution: {integrity: sha512-3NSWRREeFCET2tyiOd0ENvRFdagi9voBRGCiNbGSIRbwuMJh2Eh/dcmItNWd82rcqd+fyW5/77/oZOZxC27/sA==}
     engines: {node: '>=22'}
 
   firebase-functions@7.4.0:
@@ -16173,7 +16173,7 @@ snapshots:
       - encoding
       - supports-color
 
-  firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7):
+  firebase-admin@14.5.1(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7):
     dependencies:
       '@fastify/busboy': 3.2.2
       '@firebase/database-compat': 2.1.7(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)
@@ -16190,13 +16190,13 @@ snapshots:
       - '@firebase/app-compat'
       - supports-color
 
-  firebase-functions@7.4.0(firebase-admin@14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)):
+  firebase-functions@7.4.0(firebase-admin@14.5.1(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)):
     dependencies:
       '@types/cors': 2.8.19
       '@types/express': 5.0.6
       cors: 2.8.6
       express: 5.2.1
-      firebase-admin: 14.5.0(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)
+      firebase-admin: 14.5.1(@firebase/app-compat@0.5.7)(@firebase/app@0.14.7)
       protobufjs: 7.6.6
     transitivePeerDependencies:
       - supports-color
