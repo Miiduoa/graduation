@@ -48,7 +48,7 @@
     {
       "file": "0003-next-16.4.5-security.patch",
       "sha256": "22e0498712470f42ed303580ea40fc092342d2b41f907e23ae2bea4a1f258d88",
-      "purpose": "Rebuild the legacy Web from source at Next.js 16.4.5 for the November 2026 security release, retaining the existing sharp/source-map-js overrides and all unrelated dependency versions. Candidate source is verified; the image must still be built, tested, and published."
+      "purpose": "Rebuild the legacy Web from source at Next.js 16.4.5 for the November 2026 security release, retaining the existing sharp/source-map-js overrides and all unrelated dependency versions. The candidate source was verified and the image has been built, tested, and published as registry.fly.io/nuni-web@sha256:da056fd9d05cf22522aabb3fb2634f592462ec0cb270019444439918ba9e8959."
     }
   ],
   "candidateStatus": "image-built-and-published",
