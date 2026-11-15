@@ -1023,3 +1023,44 @@ it('keeps a nearby but off-outline POI on the ground instead of inventing a roof
   expect(onGround.buildingVolumes).toBe(1);
   expect(illustrative.buildingVolumes).toBe(1);
 });
+
+
+it('does not lift POIs on OSM wall boundaries or corners onto a claimed rooftop', () => {
+  // Synthetic geometry only: a POI on an OSM wall/corner does not establish an
+  // entrance, roof, floor or building height even if a source height tag exists.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const point = campus.points[0];
+  const x = point.location.lng;
+  const y = point.location.lat;
+  const footprint = (outline: [number, number][]): ProvidenceFootprint => ({
+    poiId: point.id, name: point.name, sourceUrl: library.sourceUrl,
+    outline, heightMeters: 18, heightBasis: 'osm-tag',
+  });
+  const markerY = (outline: [number, number][]) => {
+    const { renderer } = setup(campus, undefined, [footprint(outline)]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = graph.children.find((item): item is InstancedMesh =>
+      item instanceof InstancedMesh && item.geometry.type === 'SphereGeometry')!;
+    const transform = new Matrix4();
+    caps.getMatrixAt(0, transform);
+    return new Vector3().setFromMatrixPosition(transform).y;
+  };
+
+  const interior = markerY([
+    [x - 0.00004, y - 0.00004], [x + 0.00004, y - 0.00004],
+    [x + 0.00004, y + 0.00004], [x - 0.00004, y + 0.00004],
+  ]);
+  const wall = markerY([
+    [x, y - 0.00004], [x + 0.00008, y - 0.00004],
+    [x + 0.00008, y + 0.00004], [x, y + 0.00004],
+  ]);
+  const corner = markerY([
+    [x, y], [x + 0.00008, y],
+    [x + 0.00008, y + 0.00008], [x, y + 0.00008],
+  ]);
+  expect(interior).toBeGreaterThan(18);
+  expect(wall).toBeLessThan(18);
+  expect(corner).toBeLessThan(18);
+});

@@ -92,14 +92,30 @@ function overlaps(first: Rectangle, second: Rectangle) {
     first.top + first.height + gap > second.top;
 }
 
-/** The audited POI can be near (but outside) an OSM building by up to 30m.
- * Never place its marker on an invented rooftop when the POI is off the outline.
- * Its original map position remains a ground POI, not an inferred entrance.
+/** A POI inside a sourced OSM outline may be shown above the volume.
+ * A POI exactly on its wall or corner is not evidence of a rooftop location
+ * or building entrance. Keep boundary markers at their recorded ground point.
  */
 function poiWithinOutline(point: CampusSpatialPoint, footprint: ProvidenceFootprint): boolean {
   const { lat, lng } = point.location;
-  let inside = false;
   const ring = footprint.outline;
+  // Ray casting can count an edge as inside depending on polygon winding.
+  // Check edges and corners first; the tolerance only covers floating-point
+  // coordinate rounding, not a fabricated wall thickness or entrance offset.
+  for (let i = 0; i < ring.length; i += 1) {
+    const [x, y] = ring[i];
+    const [nextX, nextY] = ring[(i + 1) % ring.length];
+    const dx = nextX - x;
+    const dy = nextY - y;
+    const lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared === 0) return false;
+    const t = Math.max(0, Math.min(1,
+      ((lng - x) * dx + (lat - y) * dy) / lengthSquared));
+    if (Math.hypot(lng - (x + t * dx), lat - (y + t * dy)) <= 1e-11) {
+      return false;
+    }
+  }
+  let inside = false;
   for (let i = 0, previous = ring.length - 1; i < ring.length; previous = i, i += 1) {
     const [lon, latitude] = ring[i];
     const [previousLon, previousLat] = ring[previous];
