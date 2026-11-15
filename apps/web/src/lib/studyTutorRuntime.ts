@@ -133,9 +133,12 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   const question = comparableGeneratedTeaching(explanation.question, true).toLowerCase();
   const answer = comparableGeneratedTeaching(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
+  // New Markdown tables may display an explicit answer key as "| 答案 | 主鍵 |".
+  // A pipe with a nonblank following cell can disclose the answer without a colon.
+  // Compare only NEW generated results; never alter the student's source text.
   // Generated answer keys also use 是／為, 就是, equals signs, or English labels.
   // This is only a conservative disclosure check, not a semantic answer judge.
-  const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer|ans\.?|solution)\s*(?:[:：=＝]|\bis\b\s*[:：=＝]?)/giu;
+  const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|\|(?=[ \t]*\S)|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer|ans\.?|solution)\s*(?:[:：=＝]|\|(?=[ \t]*\S)|\bis\b\s*[:：=＝]?)/giu;
   let label: RegExpExecArray | null;
   while ((label = labels.exec(question)) !== null) {
     // Generated Markdown may wrap a disclosed key in inline code or emphasis.

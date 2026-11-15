@@ -1076,6 +1076,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'hex HTML entity answer', question: '解答：&#x3C;span class="value"&#x3E;1.2&#x3C;/span&#x3E;', answer: '1.2' },
     { label: 'Chinese book title brackets', question: '答案：《主鍵》', answer: '主鍵' },
     { label: 'Chinese angle quote brackets', question: 'Answer: 〈SQL〉', answer: 'SQL' },
+    { label: 'Markdown table Chinese answer cell', question: '| 題型 | 答案 | 主鍵 |', answer: '主鍵' },
+    { label: 'Markdown table English inline code answer cell', question: '| Answer | `SQL` |', answer: 'SQL' },
+    { label: 'Markdown table Chinese bold key', question: '| 正解 | **主鍵** |', answer: '主鍵' },
+    { label: 'Markdown table numeric key', question: '| 參考回答 | 1.2 |', answer: '1.2' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1150,6 +1154,9 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: 'Answer: <strong>外鍵</strong>，請比較主鍵', answer: '主鍵' },
     { question: 'Answer is what?', answer: 'SQL' },
     { question: '請比較正解為主鍵與外鍵之差異', answer: '外鍵' },
+    { question: '| Answer | SQLServer |', answer: 'SQL' },
+    { question: '| 答案 | 12 |', answer: '1' },
+    { question: '| Answer | `SQL` |', answer: '外鍵' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
     const valid = { ...lesson(), question, answer };
     const pending = runStudyTutor({
