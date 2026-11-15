@@ -4411,6 +4411,81 @@ describe('protected attendance records', () => {
     }
   });
 
+  test('legacy hidden session children reject direct reads and lists, including revocation and stale-session replay', async () => {
+    await seedAttendance();
+    await seedFirestore(async (db) => {
+      const root = db.doc('groups/attendance-class');
+      for (const sessionId of ['current', 'legacy']) {
+        const live = root.collection('liveSessions').doc(sessionId);
+        const attendance = root.collection('attendanceSessions').doc(sessionId);
+        await live.collection('questions').doc('q1').set({ authorId: 'alice', text: 'Synthetic question' });
+        await live.collection('polls').doc('p1').set({ title: 'Synthetic poll' });
+        await attendance.collection('attendanceRecords').doc('alice').set({ uid: 'alice', status: 'present' });
+        await attendance.collection('attendanceCorrections').doc('c1').set({
+          studentUid: 'alice', teacherUid: 'teacher', reason: 'Synthetic correction',
+        });
+      }
+      await root.collection('members').doc('outsider').set({ status: 'active', role: 'student' });
+      await db.doc('schools/other-campus/members/outsider').set({ status: 'active' });
+    });
+
+    const child = (uid, parent, sessionId, collection) =>
+      group(uid).collection(parent).doc(sessionId).collection(collection);
+    const liveQuestion = (uid, sessionId) => child(uid, 'liveSessions', sessionId, 'questions');
+    const livePoll = (uid, sessionId) => child(uid, 'liveSessions', sessionId, 'polls');
+    const roster = (uid, sessionId) => child(uid, 'attendanceSessions', sessionId, 'attendanceRecords');
+    const corrections = (uid, sessionId) => child(uid, 'attendanceSessions', sessionId, 'attendanceCorrections');
+
+    // A v2 parent remains compatible for students and active instructors.
+    await assertSucceeds(liveQuestion('alice', 'current').doc('q1').get());
+    await assertSucceeds(liveQuestion('alice', 'current').get());
+    await assertSucceeds(livePoll('alice', 'current').doc('p1').get());
+    await assertSucceeds(livePoll('alice', 'current').get());
+    await assertSucceeds(roster('alice', 'current').doc('alice').get());
+    await assertSucceeds(roster('teacher', 'current').get());
+    await assertSucceeds(corrections('teacher', 'current').doc('c1').get());
+    await assertSucceeds(corrections('teacher', 'current').get());
+
+    // V1 parent metadata is already hidden. Child paths must never bypass it.
+    for (const collection of [liveQuestion, livePoll]) {
+      await assertFails(collection('alice', 'legacy').doc(collection === liveQuestion ? 'q1' : 'p1').get());
+      await assertFails(collection('alice', 'legacy').get());
+      await assertFails(collection('teacher', 'legacy').get());
+    }
+    await assertFails(roster('alice', 'legacy').doc('alice').get());
+    await assertFails(roster('teacher', 'legacy').get());
+    await assertFails(corrections('teacher', 'legacy').doc('c1').get());
+    await assertFails(corrections('teacher', 'legacy').get());
+    await assertFails(liveQuestion('outsider', 'current').doc('q1').get());
+    await assertFails(roster('outsider', 'current').doc('alice').get());
+    await assertFails(liveQuestion('removed', 'current').doc('q1').get());
+
+    // Revoke an active school credential without re-authenticating. Replays fail.
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/alice').update({ status: 'removed' }));
+    await assertFails(liveQuestion('alice', 'current').doc('q1').get());
+    await assertFails(livePoll('alice', 'current').get());
+    await assertFails(roster('alice', 'current').doc('alice').get());
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/alice').update({ status: 'active' }));
+    await assertSucceeds(liveQuestion('alice', 'current').doc('q1').get());
+
+    // Admin downgrade races with a known subcollection URL: a stale client
+    // cannot continue using the child path after the schema version changes.
+    await seedFirestore(async (db) => {
+      await db.doc('groups/attendance-class/liveSessions/current').update({ schemaVersion: 1 });
+      await db.doc('groups/attendance-class/attendanceSessions/current').update({ schemaVersion: 1 });
+    });
+    await assertFails(liveQuestion('alice', 'current').doc('q1').get());
+    await assertFails(livePoll('alice', 'current').get());
+    await assertFails(roster('alice', 'current').doc('alice').get());
+    await assertFails(corrections('teacher', 'current').get());
+    await seedFirestore(async (db) => {
+      await db.doc('groups/attendance-class/liveSessions/current').update({ schemaVersion: 2 });
+      await db.doc('groups/attendance-class/attendanceSessions/current').update({ schemaVersion: 2 });
+    });
+    await assertSucceeds(liveQuestion('alice', 'current').doc('q1').get());
+    await assertSucceeds(roster('alice', 'current').doc('alice').get());
+  });
+
   test('live questions and teacher polls remain available to existing clients', async () => {
     await seedAttendance();
     const studentSession = group('alice').collection('liveSessions').doc('current');

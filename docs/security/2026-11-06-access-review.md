@@ -811,3 +811,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **最小權限修補**：一般作者更新只允許當下可見的貼文，且不得改動 published/status/deleted/deletedAt 四種發布與撤回標記；具有目前有效管理權限的人仍可恢復、封存。保留一般作者的正常正文編輯與任一有效成員的本人按讚分支。新回歸使用 Firebase Emulator 的合成同校/跨校與權限資料，覆蓋 7 種狀態、published:false、跨帳號、管理員明示重開、管理員於舊快照後封存、校籍/群組成員撤銷後重放與恢復。**新精確 head 的 CI、CodeQL 必須實際完成，不能提前稱為通過。**
 - **重要未解**：目前 `groups/{groupId}/posts` 的讀取規則仍允許有效群組成員直接 GET/LIST 未發布父貼文，此問題**沒有被本次作者寫入修補解決**。需搭配 Web/Mobile feed 查詢、公開狀態欄位與歷史文件安全遷移，不可直接改 list 造成舊資料無法讀取。已簽 GCS/Supabase URL 撤權、真隔離 Storage CAS 競態、歷史附件引用、minimatch 雙鎖檔及正式發布回復驗證均尚待。
 - **發布界線**：保持 Draft，沒有指定 App 5504170 對精確新 head 審查通過不可合併 main/部署。未修改正式資料、金鑰、token、migration、E 校園，亦未重跑受限制的 npm/pnpm audit。
+
+## 2026-11-16｜隱藏的 v1 點名／課堂父文件不可經子集合繞過（PR #577）
+
+- **精確父 head：** `f068f5f77692ca556982973c35a7b0fb2048da5f`。前版 GitHub [CI #43737897167](https://github.com/Miiduoa/graduation/actions/runs/43737897167)、[CodeQL #43737897151](https://github.com/Miiduoa/graduation/actions/runs/43737897151) 與 Course access 已完成成功；Firebase Node 339/339、Web Emulator 51/51。reviews 0、未解決討論 0、指定 App 5504170 無 APPROVED。新提交須重新驗證，不能沿用前版成功結果。
+- **可重現的規則缺口：** `groups/{groupId}/liveSessions/{sessionId}` 與 `attendanceSessions/{sessionId}` 父文件已要求 `schemaVersion == 2`，但 `questions`、`polls`、`attendanceRecords`、`attendanceCorrections` 子集合的 GET/LIST 未檢查父版本。即使舊版父文件含 QR/token/名冊而被隱藏，有效成員仍可直接 SDK 讀取其某些子文件；這不是父文件密鑰本身已曝光的證據。
+- **最小規則修補：** 上述四個子集合增加固定父路徑 `exists + schemaVersion == 2` 檢查，保留 v2 正常學生提問、投票閱讀、本人點名與有效教師更正查閱權限，並在每次讀取核對目前校籍、群組身分。不改動提交/管理寫入與既有歷史資料。
+- **隔離回歸待跑：** 在 `backend/tests/security-rules.test.js` 新增合成 v1/v2 資料，驗證 v2 的 GET/LIST、v1 四種子集合拒絕、跨校與停權、校籍撤銷後同 SDK 重放、父 schema 降級與恢復競態。本輪須以新精確 head 的 Firebase Emulator 和 CI 真實結果為準；提交前僅靜態驗證，不預稱已通過。
+- **未解除：** 群組未發布父貼文仍可在舊 feed 的 GET/LIST 洩漏；GCS/Supabase 已簽 URL 撤權、真正隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔、主線整合與正式發布/回復驗證未結案。僅合成測試；未動正式資料、金鑰、token、migration、部署或 E 校園，且未重送先前被拒絕的 npm/pnpm audit。

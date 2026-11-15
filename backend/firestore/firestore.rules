@@ -1474,6 +1474,13 @@ service cloud.firestore {
       }
 
       match /liveSessions/{sessionId} {
+        // A hidden v1 parent must not be bypassed via a directly addressed
+        // questions/polls subcollection or a query against those subcollections.
+        function hasSafeLiveSessionParent() {
+          return exists(/databases/$(database)/documents/groups/$(groupId)/liveSessions/$(sessionId))
+            && get(/databases/$(database)/documents/groups/$(groupId)/liveSessions/$(sessionId)).data.get('schemaVersion', 0) == 2;
+        }
+
         // Version 1 documents contain public QR secrets and attendance rosters.
         // Clients must query schemaVersion == 2; legacy sessions require migration.
         allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
@@ -1496,7 +1503,7 @@ service cloud.firestore {
               && changesOnlyOwnVote(before.get('upvotedBy', []), after.upvotedBy, before.get('upvotes', 0), after.upvotes);
           }
 
-          allow read: if isActiveGroupMember(groupId);
+          allow read: if isActiveGroupMember(groupId) && hasSafeLiveSessionParent();
           allow create: if isActiveGroupMember(groupId)
             && request.resource.data.authorId == request.auth.uid
             && sessionAcceptsQuestions()
@@ -1511,7 +1518,7 @@ service cloud.firestore {
         }
 
         match /polls/{pollId} {
-          allow read: if isActiveGroupMember(groupId);
+          allow read: if isActiveGroupMember(groupId) && hasSafeLiveSessionParent();
           allow create, update, delete: if canManageGroup(groupId);
         }
       }
@@ -1523,17 +1530,25 @@ service cloud.firestore {
       }
 
       match /attendanceSessions/{sessionId} {
+        // The parent's v2 gate applies to child roster and correction paths too.
+        function hasSafeAttendanceSessionParent() {
+          return exists(/databases/$(database)/documents/groups/$(groupId)/attendanceSessions/$(sessionId))
+            && get(/databases/$(database)/documents/groups/$(groupId)/attendanceSessions/$(sessionId)).data.get('schemaVersion', 0) == 2;
+        }
+
         allow read: if isActiveGroupMember(groupId) && resource.data.schemaVersion == 2;
         allow write: if false;
 
         match /attendanceRecords/{recordId} {
-          allow read: if canManageGroup(groupId)
-            || (isActiveGroupMember(groupId) && recordId == request.auth.uid);
+          allow read: if hasSafeAttendanceSessionParent()
+            && (canManageGroup(groupId)
+              || (isActiveGroupMember(groupId) && recordId == request.auth.uid));
           allow write: if false;
         }
         // 僅伺服器可寫、寫入後不可改的教師更正紀錄。學生不能列舉稽核明細。
         match /attendanceCorrections/{correctionId} {
-          allow read: if isActiveGroupMember(groupId)
+          allow read: if hasSafeAttendanceSessionParent()
+            && isActiveGroupMember(groupId)
             && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
           allow write: if false;
         }
