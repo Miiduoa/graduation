@@ -719,6 +719,35 @@ describe('controlled spatial camera input', () => {
     expect(onSelect).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a second touch from turning a claimed drag into an accidental place selection', () => {
+    const { container, onSelect, onCameraChange, captured } = setupControlled();
+    drawFrame();
+    const button = [...container.querySelectorAll('button')].find((label) => !label.hidden)!;
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 300 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    expect(captured.has(1)).toBe(true);
+
+    // A second finger must release pointer capture without re-enabling the
+    // synthesized click that can arrive after the original finger lifts.
+    pointer(container, 'pointerdown', { pointerId: 2, isPrimary: false });
+    expect(captured.size).toBe(0);
+    pointer(container, 'pointerup', { clientX: 300 });
+    const accidentalClick = new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true });
+    button.dispatchEvent(accidentalClick);
+    expect(accidentalClick.defaultPrevented).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // The next deliberate single-finger tap on a location still works.
+    pointer(button, 'pointerdown');
+    pointer(button, 'pointerup');
+    const deliberateClick = new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true });
+    button.dispatchEvent(deliberateClick);
+    expect(deliberateClick.defaultPrevented).toBe(false);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['pointercancel', 'lostpointercapture', 'blur', 'second-touch', 'resize', 'selection']) (
     'ends pointer tracking after %s', (reason) => {
       const { container, bounds, onCameraChange, setView, captured } = setupControlled();
