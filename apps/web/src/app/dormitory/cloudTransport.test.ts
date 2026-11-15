@@ -6,7 +6,7 @@ const calls = vi.hoisted(() => ({
   paths: [] as unknown[][],
   stop: vi.fn(),
 }));
-vi.mock('@/lib/firebase', () => ({ getDb: () => 'db' }));
+vi.mock('@/lib/firebase', () => ({ getDb: () => 'db', areFunctionsConfigured: () => false }));
 vi.mock('firebase/firestore', () => ({
   collection: (...args: unknown[]) => {
     calls.paths.push(args);
@@ -41,3 +41,59 @@ it('does not fallback to another school or root collections for an empty school 
   expect(calls.paths.every((path) => path[2] === 'nthu')).toBe(true);
   expect(calls.paths).toHaveLength(2);
 });
+
+it('does not overwrite the last private projection with later legacy snapshots or loss of availability', async () => {
+  const { watchDormParcels } = await import('@campus/shared/src/dormitoryCloud');
+  type Rows = Array<{ id: string; data: Record<string, unknown> }>;
+  let legacyRows!: (value: Rows) => void;
+  let availability!: (value: boolean) => void;
+  const rows = vi.fn();
+  const error = vi.fn();
+  const privateRows = [{ id: 'dw_private', data: { description: '待領包裹' } }];
+  const stop = watchDormParcels(
+    (next) => {
+      legacyRows = next;
+      next([]);
+      return () => {};
+    },
+    (next) => {
+      availability = next;
+      next(true);
+      return () => {};
+    },
+    async () => ({ rows: privateRows }),
+    rows,
+    error,
+  );
+  try {
+    await Promise.resolve();
+    expect(rows).toHaveBeenLastCalledWith(privateRows);
+    rows.mockClear();
+    legacyRows([{ id: 'legacy', data: {} }]);
+    expect(rows).not.toHaveBeenCalled();
+    availability(false);
+    expect(rows).toHaveBeenLastCalledWith([{ id: 'legacy', data: {} }, ...privateRows]);
+    legacyRows([]);
+    expect(rows).toHaveBeenLastCalledWith(privateRows);
+    expect(error).toHaveBeenCalledTimes(2);
+  } finally {
+    stop();
+  }
+});
+
+it.each([undefined, null, {}])(
+  'cleans up when the legacy unsubscribe is %s',
+  async (unsubscribe) => {
+    const { watchDormParcels } = await import('@campus/shared/src/dormitoryCloud');
+    const stopAvailable = vi.fn();
+    const stop = watchDormParcels(
+      () => unsubscribe as unknown as () => void,
+      () => stopAvailable,
+      async () => ({ rows: [] }),
+      vi.fn(),
+      vi.fn(),
+    );
+    expect(() => stop()).not.toThrow();
+    expect(stopAvailable).toHaveBeenCalledTimes(1);
+  },
+);

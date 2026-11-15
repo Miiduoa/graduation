@@ -1,4 +1,4 @@
-FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS base
+FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS base
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' \
@@ -21,6 +21,8 @@ COPY scripts/build-functions-shared.cjs ./scripts/build-functions-shared.cjs
 RUN node scripts/build-functions-shared.cjs
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
+COPY backend/functions/dormWorkflow.js backend/functions/authz.js backend/functions/dormName.js backend/functions/dormSsoIdentity.js ./backend/functions/
+RUN ln -s ../../apps/web/node_modules backend/functions/node_modules
 COPY backend/functions/campusStoryAccessBinding.js ./backend/functions/
 COPY backend/functions/campusAnnouncements/catalog.js ./backend/functions/campusAnnouncements/
 COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/
