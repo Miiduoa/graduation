@@ -130,13 +130,45 @@ function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
 function hasDisclosedGeneratedAnswerColumn(question: string, answer: string): boolean {
   const parseRow = (line: string): string[] | null => {
     const text = line.trim();
-    // Escaped pipes and pipes within inline code are ambiguous without a
-    // full Markdown parser. Never guess an answer column from those rows.
-    if (!text.includes('|') || text.includes('\\|') ||
-        new RegExp(String.fromCharCode(96) + '[^' + String.fromCharCode(96) + ']*\\|' +
-          '[^' + String.fromCharCode(96) + ']*' + String.fromCharCode(96), 'u').test(text)) return null;
-    const inner = text.replace(/^\|/u, '').replace(/\|$/u, '');
-    return inner.split('|').map((cell) => cell.trim());
+    if (!text.includes('|')) return null;
+    // Literal pipes in escaped syntax or inline code are not cell delimiters.
+    const cells: string[] = [];
+    let cell = '';
+    let codeTicks = 0;
+    let separators = 0;
+    for (let index = 0; index < text.length;) {
+      const char = text[index];
+      if (char === '\\' && codeTicks === 0 && index + 1 < text.length &&
+          (text[index + 1] === '|' || text[index + 1] === '`' || text[index + 1] === '\\')) {
+        cell += text.slice(index, index + 2);
+        index += 2;
+        continue;
+      }
+      if (char === '`') {
+        let after = index + 1;
+        while (after < text.length && text[after] === '`') after += 1;
+        const ticks = after - index;
+        if (codeTicks === 0) codeTicks = ticks;
+        else if (codeTicks === ticks) codeTicks = 0;
+        cell += text.slice(index, after);
+        index = after;
+        continue;
+      }
+      if (char === '|' && codeTicks === 0) {
+        cells.push(cell.trim());
+        cell = '';
+        separators += 1;
+      } else {
+        cell += char;
+      }
+      index += 1;
+    }
+    // Unclosed inline code is ambiguous: do not infer column positions.
+    if (codeTicks !== 0 || separators === 0) return null;
+    cells.push(cell.trim());
+    if (text.startsWith('|')) cells.shift();
+    if (text.endsWith('|') && cells.at(-1) === '') cells.pop();
+    return cells;
   };
   const normalized = (value: string): string => {
     let cell = value.trim();
