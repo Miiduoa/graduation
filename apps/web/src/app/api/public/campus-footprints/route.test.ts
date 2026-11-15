@@ -1488,4 +1488,85 @@ describe('public Providence building geometry route', () => {
     expect(firstFetch).toHaveBeenCalledTimes(2);
     vi.restoreAllMocks();
   });
+  it.each([
+    { label: 'HTTP 503', mode: 'error' },
+    { label: 'HTTP 200 Content-Range', mode: 'range' },
+    { label: 'HTTP 200 Overpass remark', mode: 'remark' },
+    { label: 'HTTP 200 truncated JSON', mode: 'truncated' },
+  ])('preserves the origin-relative Retry-After when the app clock is ahead: $label', async ({ mode }) => {
+    // The simulated host is 90 minutes ahead of the Overpass server. An
+    // HTTP-date 60 minutes ahead of the server's Date is already in the host's
+    // past. Without the origin Date comparison we retry after only 10 minutes.
+    const serverNow = Date.parse('2026-11-15T00:00:00Z');
+    const localNow = serverNow + 90 * 60_000;
+    const headers = {
+      Date: new Date(serverNow).toUTCString(),
+      'Retry-After': new Date(serverNow + 60 * 60_000).toUTCString(),
+    };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(localNow);
+    try {
+      const bad = mode === 'error'
+        ? new Response('overloaded', { status: 503, headers })
+        : mode === 'range'
+          ? new Response(osmPayload, { status: 200,
+              headers: { ...headers, 'Content-Range': 'bytes 0-99/200' } })
+          : mode === 'remark'
+            ? new Response(JSON.stringify({ remark: 'runtime error: timeout', elements: [] }), {
+                status: 200, headers,
+              })
+            : new Response('{"elements":[', { status: 200, headers });
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(bad)
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(localNow + 11 * 60_000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(localNow + 60 * 60_000 + 1000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('never shortens an HTTP-date cooldown when the app clock is behind the OSM service', async () => {
+    // On a host 90 minutes behind, the local deadline is longer than the
+    // server-relative one. Keep the longer deadline, capped at 24 hours.
+    const serverNow = Date.parse('2026-11-15T00:00:00Z');
+    const localNow = serverNow - 90 * 60_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(localNow);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 429,
+          headers: {
+            Date: new Date(serverNow).toUTCString(),
+            'Retry-After': new Date(serverNow + 60 * 60_000).toUTCString(),
+          },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      expect((await GET()).headers.get('Retry-After')).toBe('9000');
+      clock.mockReturnValue(localNow + 60 * 60_000 + 1000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(localNow + 9001 * 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 });

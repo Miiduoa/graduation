@@ -59,7 +59,7 @@ class OverpassRateLimitError extends Error {
   }
 }
 
-function overpassRetryAfterMs(header: string | null, now: number): number {
+function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
   if (!header) return ERROR_COOLDOWN_MS;
   const value = header.trim();
   let requestedMs: number;
@@ -73,7 +73,14 @@ function overpassRetryAfterMs(header: string | null, now: number): number {
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
     const dateMs = Date.parse(value);
-    requestedMs = Number.isFinite(dateMs) ? dateMs - now : NaN;
+    // HTTP-date Retry-After and the upstream Date share the same server clock.
+    // If our host is ahead, local subtraction alone can shorten a one-hour
+    // pause to the ten-minute default and repeatedly overload public Overpass.
+    // Keep the more conservative of the local and server-relative durations.
+    const originMs = serverDate === null ? NaN : Date.parse(serverDate);
+    requestedMs = Number.isFinite(dateMs)
+      ? Math.max(dateMs - now, Number.isFinite(originMs) ? dateMs - originMs : -Infinity)
+      : NaN;
   }
   if (!Number.isFinite(requestedMs) || requestedMs <= 0) return ERROR_COOLDOWN_MS;
   return Math.max(ERROR_COOLDOWN_MS, Math.min(MAX_RETRY_AFTER_MS, requestedMs));
@@ -240,7 +247,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.status === 206 || response.status === 408 ||
         response.status === 429 || response.status >= 500) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
-        response.headers.get('retry-after'), Date.now(),
+        response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
       ));
     }
     throw new Error('OSM service unavailable');
@@ -253,7 +260,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
     // Retain any upstream cooldown instead of retrying a partial response at 10m.
     throw new OverpassRateLimitError(overpassRetryAfterMs(
-      response.headers.get('retry-after'), Date.now(),
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
   const raw = await readBoundedResponse(response, signal);
@@ -265,7 +272,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // with Retry-After. Never cache truncated JSON or shorten their pause.
     const retryAfter = response.headers.get('retry-after');
     if (retryAfter !== null) {
-      throw new OverpassRateLimitError(overpassRetryAfterMs(retryAfter, Date.now()));
+      throw new OverpassRateLimitError(overpassRetryAfterMs(retryAfter, Date.now(), response.headers.get('date')));
     }
     throw new Error('Invalid Overpass JSON');
   }
@@ -273,7 +280,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // incomplete OSM response may also have an incomplete osm3s header.
   if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
     throw new OverpassRateLimitError(overpassRetryAfterMs(
-      response.headers.get('retry-after'), Date.now(),
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
   const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
