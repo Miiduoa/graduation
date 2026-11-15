@@ -1056,12 +1056,13 @@ it('lets students select verbatim Markdown table lines, including CRLF and escap
   const field = container.querySelector('textarea');
   expect(field?.readOnly).toBe(true);
   expect(field?.getAttribute('aria-label')).toBe('原文表格 1 的可選取文字');
-  expect(field?.value).toBe([
+  // Browsers normalize textarea.value newlines to LF even if source used CRLF.
+  expect(field?.value.replace(/\r\n?/gu, '\n')).toBe([
     '| 課程 | 學分 |',
     '| :--- | ---: |',
     '| SQL \\| NoSQL | 3 |',
     '| 網頁程式 | 2 |',
-  ].join('\r\n'));
+  ].join('\n'));
   expect(field?.value).not.toContain('閱讀前言');
   expect(field?.value).not.toContain('結尾');
 });

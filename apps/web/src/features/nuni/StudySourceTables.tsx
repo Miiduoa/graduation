@@ -204,7 +204,7 @@ function tableSourceSelection(lines: string[], table: StudySourceTable): string 
   const end = start + table.rows.length + 2;
   const selected = lines.slice(start, end);
   // The final CR belongs to the CRLF *after* this table, not to its last cell.
-  // Keep the exact CRLF separators between the selected lines.
+  // Keep CRLF separators in the extracted text; textarea.value may normalize them to LF.
   if (end < lines.length && selected.length) {
     const last = selected.length - 1;
     if (selected[last].endsWith('\r')) selected[last] = selected[last].slice(0, -1);
