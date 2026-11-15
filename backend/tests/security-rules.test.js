@@ -372,6 +372,46 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('storefront post likes only expose self receipts, never other voters or queries', async () => {
+    const likes = 'schools/pu/cafeterias/cafe-1/posts/post-1/likes';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
+      await db.doc('users/mallory').set({ status: 'active', schoolId: 'other' });
+      await db.doc(`${likes}/alice`).set({ createdAt: new Date('2026-11-15T00:00:00Z') });
+      await db.doc(`${likes}/mallory`).set({ createdAt: new Date('2026-11-15T00:00:00Z') });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    // Web and Mobile inspect exactly their own vote, even on a public out-of-campus storefront.
+    await assertSucceeds(alice.doc(`${likes}/alice`).get());
+    await assertSucceeds(mallory.doc(`${likes}/mallory`).get());
+    await assertFails(bob.doc(`${likes}/alice`).get());
+    await assertFails(mallory.doc(`${likes}/alice`).get());
+    await assertFails(alice.doc(`${likes}/mallory`).get());
+    await assertFails(guest.doc(`${likes}/alice`).get());
+
+    // Filtering a collection query by UID does not turn it into an exact document GET.
+    await assertFails(alice.collection(likes).get());
+    await assertFails(alice.collection(likes).where('__name__', '==', 'alice').get());
+    await assertFails(mallory.collection(likes).get());
+    await assertFails(guest.collection(likes).get());
+
+    // Same-user like/unlike, and stale-session replay after account suspension.
+    await assertSucceeds(alice.doc(`${likes}/alice`).delete());
+    await assertSucceeds(alice.doc(`${likes}/alice`).set({ createdAt: new Date() }));
+    await assertFails(bob.doc(`${likes}/alice`).delete());
+    await assertFails(bob.doc(`${likes}/alice`).set({ createdAt: new Date() }));
+    await seedFirestore((db) => db.doc('users/alice').update({ status: 'suspended' }));
+    await assertFails(alice.doc(`${likes}/alice`).get());
+    await assertFails(alice.doc(`${likes}/alice`).delete());
+    await seedFirestore((db) => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(`${likes}/alice`).get());
+  });
+
   test('storefront follower receipts cannot expose another user or enumerate customers', async () => {
     const followers = 'schools/pu/cafeterias/cafe-1/followers';
     await seedFirestore(async (db) => {

@@ -650,7 +650,10 @@ service cloud.firestore {
             || requesterIsCafeteriaOperator(schoolId, cafeteriaId);
 
           match /likes/{uid} {
-            allow read: if isSignedIn();
+            // Like receipts identify a person and their storefront interests.
+            // Web and Mobile only GET the logged-in user's exact receipt.
+            allow get: if isSelf(uid);
+            allow list: if false;
             allow create, delete: if isSelf(uid);
             allow update: if false;
           }

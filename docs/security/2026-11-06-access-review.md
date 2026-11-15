@@ -767,3 +767,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 **最小修補：** 新對話只能初始化自己 UID 的狀態；既有對話若變更任一 presence map，三個 map 的差異都只能包含自己的 UID，且該次不得夾帶其他欄位變更。未修改 presence 的原有文字預覽更新仍可通過；保留目前已存在的對話成員與校籍相容策略，不擅自撤銷跨校後既有私訊。合成 Firebase Emulator 測試包含正常雙人原子更新、偽造對方狀態、清除他人欄位、舊快照競態丟資料、同筆夾帶其他欄位、跨校非成員、建立時冒填、撤銷成員、停權與恢復重放。
 
 **驗證分級：** 本次 Git blob／tree／commit 建立與非強制 expected-SHA 推送後，精確新 head 的 Firestore Rules／Web／Mobile／Functions／CodeQL 等須由新工作流另行確認，不能沿用父 head。正式發佈及實際撤權未驗證。未發布群組父貼文直接讀取、GCS／Supabase 已發 URL 撤銷、真隔離 Storage CAS、歷史附件可信引用、minimatch 兩套鎖檔相容及正式發布回復驗收仍屬待處理。保留 Draft，App 5504170 對精確 head 核可及主線窗口確認前不合併／部署。未觸碰正式資料、金鑰、token、migration、E 校園；未重跑受限制的 npm／pnpm audit。
+
+## 2026-11-15：店家貼文 likes 收據限本人讀取（PR #577）
+
+**漏洞與影響：** `schools/{schoolId}/cafeterias/{cafeteriaId}/posts/{postId}/likes/{uid}` 原本使用 `allow read: if isSignedIn()`。任何已登入帳號可透過 Firestore SDK 精確讀取其他人的按讚收據、直接列舉或以 UID 篩選整篇貼文的按讚者，跨校亦然。這可能暴露帳號 UID 及個人店家興趣；目前沒有正式資料遭利用證據。
+
+**最小修補：** 拆分 `get` 與 `list`：僅准 `isSelf(uid)` 的精確 GET，一律拒絕集合 list；保留既有 `create/delete: isSelf(uid)` 和 `update: false`。同一登錄帳號可繼續在公開跨校店家貼文按讚，讀取自己的那一筆收據；不新增校籍限制，以維持既有 Web `apps/web/src/lib/storefront.ts`、Mobile `apps/mobile/src/services/storefront.ts` 以本人 UID 精確 `getDoc`／`getDocFromServer` 判斷 liked 的行為。帳號停權後 `isSelf` 的共同 `isSignedIn` 會拒絕；它不是已簽發網址撤銷機制。
+
+**可重跑證據：** 新增 `backend/tests/security-rules.test.js` Firebase Emulator 合成案例，驗證本人、跨帳號、跨校、匿名直接 GET，無條件及加 UID 過濾的 list、本人正常 like/unlike、冒刪與冒寫，以及同一已登入 context 在停權後重放拒絕與恢復。舊規則的 `allow read` 可由原始碼確認允許跨帳號／列舉；新精確 head 的 Emulator、主 CI、CodeQL **須依 GitHub 實際執行結果判定**，不能預先宣稱已通過。
+
+**其餘風險及發布界線：** 最高影響尚未修補的是未發布群組父貼文 Firestore 直接 GET/list 曝光，須先協同 Web/Mobile feed 查詢、歷史 publication metadata 與索引過渡。GCS／Supabase 舊簽發 URL、真隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔及正式發布／回復驗收也仍未結案。Supabase permissions、Python security、Mobile Agent Regression、Maestro 未在本次新 head 觸發時不得沿用父版結果。PR 維持 Draft，指定 nuni-merge-gate App 5504170 對精確 head 核可前不合併；沒有使用正式資料、金鑰、token、migration、部署、E 校園，沒有重跑受限制的 npm／pnpm audit。
