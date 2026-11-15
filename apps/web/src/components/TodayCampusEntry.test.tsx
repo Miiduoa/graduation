@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { callCampusAssistant } from '@/lib/campusAssistantClient';
-import { personalImportsStorageKey } from '@/lib/personalImports';
+import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
 import { currentSemesterStartUtc, rocSchoolYear } from '@campus/shared/src/campusAnnouncementQuality';
 import { AssistantEnabledProvider } from './AssistantEnabledProvider';
 import { TodayCampusEntry } from './TodayCampusEntry';
@@ -94,22 +94,33 @@ function reply(answer: string) {
   return Response.json({ answer, steps: [], cards: [] });
 }
 
-function saveTodayLesson() {
-  // The Providence timetable only supports Monday–Friday. Without a fixed
-  // teaching day this valid local-read fixture fails when CI runs on weekends.
-  // Fake Date only: React and Testing Library keep real async timers.
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-11-12T02:30:00.000Z'));
-  const now = new Date();
+function saveTodayLesson(now?: Date): string {
+  // Preserve main's deterministic weekday clock for the UI tests while keeping
+  // explicit historical instants available to the weekend boundary tests.
+  // Only Date is faked: asynchronous React and Testing Library timers stay real.
+  if (!now) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-12T02:30:00.000Z'));
+    now = new Date();
+  }
+  // PU's verified timetable profile accepts Monday–Friday. At Taiwan midnight
+  // on weekends, a same-day test lesson would be rejected as damaged storage.
+  // Keep the fixture valid and ask for the next teaching day instead.
   const taipei = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const weekday = taipei.getUTCDay() || 7;
+  const daysAhead = weekday === 6 ? 2 : weekday === 7 ? 1 : 0;
+  const lessonDate = new Date(now.getTime() + daysAhead * 86_400_000);
+  const lessonWeekday = new Date(lessonDate.getTime() + 8 * 60 * 60 * 1000).getUTCDay() || 7;
   const row = {
     id: 'today-entry-lesson', kind: 'timetable', title: '入口測試資料庫', schoolId: state.school,
-    academicYear: String(rocSchoolYear(now)), semester: currentSemesterStartUtc(now).getUTCMonth() === 7 ? '1' : '2',
-    dayOfWeek: taipei.getUTCDay() || 7, startTime: '10:10', endTime: '11:00', location: '任垣305',
+    academicYear: String(rocSchoolYear(lessonDate)),
+    semester: currentSemesterStartUtc(lessonDate).getUTCMonth() === 7 ? '1' : '2',
+    dayOfWeek: lessonWeekday, startTime: '10:10', endTime: '11:00', location: '任垣305',
     batchId: 'entry-fixture', importedAt: now.toISOString(), source: { type: 'paste', line: 1, rawText: '來源原文不應外送' },
   };
   localStorage.setItem(personalImportsStorageKey({ owner: 'platform:' + state.context, schoolId: state.school }),
     JSON.stringify({ version: 1, records: [row] }));
+  return daysAhead === 2 ? '後天有哪些課？' : daysAhead === 1 ? '明天有哪些課？' : '今天有哪些課？';
 }
 
 beforeEach(() => {
@@ -129,6 +140,33 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it('pins the default PU lesson UI fixture to a valid Thursday without faking async timers', () => {
+  expect(saveTodayLesson()).toBe('今天有哪些課？');
+  expect(new Date().toISOString()).toBe('2026-11-12T02:30:00.000Z');
+  const rows = readPersonalImports({ owner: 'platform:' + state.context, schoolId: state.school });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4,
+    title: '入口測試資料庫', startTime: '10:10', endTime: '11:00',
+  });
+});
+
+it.each([
+  ['Friday', '2026-11-13T17:30:00+08:00', '今天有哪些課？', 5],
+  ['Saturday after midnight', '2026-11-14T00:02:00+08:00', '後天有哪些課？', 1],
+  ['Sunday before midnight', '2026-11-15T23:59:00+08:00', '明天有哪些課？', 1],
+])('keeps %s PU Today lesson fixture readable and correctly dated', (_day, instant, question, weekday) => {
+  expect(saveTodayLesson(new Date(instant))).toBe(question);
+  // Use the production storage reader/validator: an invalid weekend PU
+  // fixture must never be mistaken for a broken logged-in user's storage.
+  const rows = readPersonalImports({ owner: 'platform:' + state.context, schoolId: state.school });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    schoolId: 'pu', academicYear: '115', semester: '1',
+    dayOfWeek: weekday, title: '入口測試資料庫', startTime: '10:10', endTime: '11:00',
+  });
 });
 
 it.each([
@@ -523,11 +561,11 @@ it('stops a school query without clearing previous answers or letting the cancel
 it('answers a saved lesson on Today without cloud consent or an assistant request', async () => {
   const ask = vi.fn(() => reply('不應使用模型回答'));
   mockNuniAsk(ask);
-  saveTodayLesson();
+  const lessonQuestion = saveTodayLesson();
   render(entry());
   const field = await screen.findByRole('textbox', { name: '問題' });
   expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
-  fireEvent.change(field, { target: { value: '今天有哪些課？' } });
+  fireEvent.change(field, { target: { value: lessonQuestion } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
   expect(screen.getByText(/10:10–11:00.*任垣305/)).toBeTruthy();
@@ -541,10 +579,10 @@ it.each([null, 'school-a'])('keeps verified platform reads reachable with cloud 
   state.functionsConfigured = false;
   const fetch = vi.fn();
   vi.stubGlobal('fetch', fetch);
-  saveTodayLesson();
+  const lessonQuestion = saveTodayLesson();
   render(entry(false));
   const field = await screen.findByRole('textbox', { name: '問題' });
-  fireEvent.change(field, { target: { value: '今天有哪些課？' } });
+  fireEvent.change(field, { target: { value: lessonQuestion } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: '你的問題' })).toBeNull();
@@ -609,8 +647,8 @@ it('aborts an old cloud answer when the feature flag changes while keeping direc
   await act(async () => finish(reply('不應回流的雲端答案')));
   expect(screen.queryByText('不應回流的雲端答案')).toBeNull();
   expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
-  saveTodayLesson();
-  fireEvent.change(screen.getByRole('textbox', { name: '問題' }), { target: { value: '今天有哪些課？' } });
+  const lessonQuestion = saveTodayLesson();
+  fireEvent.change(screen.getByRole('textbox', { name: '問題' }), { target: { value: lessonQuestion } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
 });
