@@ -8,6 +8,7 @@ import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
 import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOperations';
+import { exceedsPublicCourseResponseByteLimit } from '@campus/shared/src/publicCourseAssistantClient';
 import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import {
   hasPublicCourseFilters, parsePublicCourseFilterParams, publicCourseFilterLabel, type PublicCourseFilters,
@@ -242,8 +243,14 @@ function PublicCourseSearchForm({
       const response = await fetch('/api/public-course-catalog?' + params, {
         signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error',
       });
-      if (!response.ok) throw new Error();
-      const data = await response.json();
+      // Native already bounds this contract. Web must reject oversized public
+      // replies too, before parsing or offering course rows for personal import.
+      if (!response.ok || Number(response.headers?.get('content-length')) > 512 * 1024) throw new Error();
+      const body = await response.text();
+      if (exceedsPublicCourseResponseByteLimit(body)) throw new Error('Oversized public catalog');
+      // An older response or a cancelled search must never be parsed or displayed.
+      if (pending.current?.controller !== controller || controller.signal.aborted) return;
+      const data: unknown = JSON.parse(body);
       if (!isPublicCourseCatalog(data, schoolId, search.filters)) throw new Error('Invalid catalog');
       if (pending.current?.controller === controller && !controller.signal.aborted) {
         setResult({

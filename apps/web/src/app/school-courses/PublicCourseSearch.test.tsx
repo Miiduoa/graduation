@@ -136,7 +136,7 @@ it.each(['fetch', 'body'])('cancels a same-keyword lookup when a filter is edite
     finish = () => resolve(stage === 'fetch' ? original : originalBody);
   });
   const fetcher = vi.fn()
-    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, headers: new Headers(), text: async () => JSON.stringify(await delayed) }))
     .mockResolvedValueOnce(filteredResponse([], { weekday: 3, credits: 3 }));
   vi.stubGlobal('fetch', fetcher);
   render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['3']} />);
@@ -260,7 +260,7 @@ it.each(['fetch', 'body'])('cancels a linked query when the URL query changes an
     });
   });
   const fetcher = vi.fn()
-    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, headers: new Headers(), text: async () => JSON.stringify(await delayed) }))
     .mockResolvedValueOnce(response([]));
   vi.stubGlobal('fetch', fetcher);
   const view = render(<PublicCourseSearch {...props} queryParameters={['前一筆']} />);
@@ -463,6 +463,34 @@ it('keeps only the latest result, including when the previous response arrives l
   expect(screen.queryByText(course.title)).toBeNull();
 });
 
+
+it('refuses an announced oversized catalog before reading its body or preparing a draft', async () => {
+  const readBody = vi.fn().mockResolvedValue('{}');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, headers: new Headers({ 'content-length': '524289' }), text: readBody,
+  }));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(readBody).not.toHaveBeenCalled();
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('rejects a UTF-8-oversized catalog without a content-length header', async () => {
+  // 60,000 Chinese characters use 540,000 UTF-8 bytes, beyond 512 KiB.
+  // The response would otherwise be a valid course in the correct school.
+  const oversized = await response([{ ...course, title: '資料庫課程'.repeat(36_000) }]).text();
+  const readBody = vi.fn().mockResolvedValue(oversized);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, headers: new Headers(), text: readBody,
+  }));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(readBody).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
 it('handles malformed or wrong-campus replies as failure, retries, and explains the result limit', async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(response([course], { schoolId: 'pu' }))
     .mockResolvedValueOnce(response([course], { truncated: true }));
@@ -487,7 +515,7 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
     });
   });
   const fetcher = vi.fn()
-    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, headers: new Headers(), text: async () => JSON.stringify(await delayed) }))
     .mockResolvedValueOnce(response([]));
   vi.stubGlobal('fetch', fetcher);
   render(<PublicCourseSearch {...props} />);
