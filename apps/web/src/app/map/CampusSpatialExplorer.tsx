@@ -34,11 +34,17 @@ type Props = {
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 
-// A dated stale fallback may return HTTP 200 together with Retry-After.
-// Validate the seconds before disabling the manual retry on mobile.
+// Rate limits can carry Retry-After as delay-seconds or an HTTP-date.
+// Accept only a canonical IMF-fixdate, rejecting malformed/expired dates so a
+// proxy cannot indefinitely lock mobile controls. Cap the pause at one day.
 function footprintCooldownSeconds(response: Response): number | null {
   const raw = response.headers?.get('retry-after')?.trim();
-  return raw && /^[1-9]\d{0,5}$/.test(raw) ? Math.min(86_400, Number(raw)) : null;
+  if (!raw) return null;
+  if (/^[1-9]\d{0,5}$/.test(raw)) return Math.min(86_400, Number(raw));
+  const until = Date.parse(raw);
+  if (!Number.isFinite(until) || new Date(until).toUTCString() !== raw) return null;
+  const seconds = Math.ceil((until - Date.now()) / 1000);
+  return seconds > 0 ? Math.min(86_400, seconds) : null;
 }
 
 function readAppearance() {
@@ -411,9 +417,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const contentRange = response.headers?.get('content-range') ?? null;
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null) {
-          // Only our 503 responses use this contract. Ignore malformed or
-          // unreasonably large intermediary values rather than freezing the UI.
-          const seconds = response.status === 503 ? footprintCooldownSeconds(response) : null;
+          // A proxy may turn an origin throttle into 429; honor its bounded
+          // Retry-After as well as the server's 503 cooldown.
+          const seconds = response.status === 503 || response.status === 429
+            ? footprintCooldownSeconds(response) : null;
           if (active && !timedOut && seconds !== null) {
             setFootprintRetryAfter({ until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60) });
           }
