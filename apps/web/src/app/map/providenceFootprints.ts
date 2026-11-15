@@ -177,7 +177,14 @@ function isStandingBuilding(value: unknown): boolean {
   const classification = tags?.building;
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
-  if (!kind || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A multi-value building classification can mix current and demolished states.
+  // Without a single verified type, do not extrude a complete standing volume.
+  if (!kind || /[;,|]/.test(kind) || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A closed OSM way explicitly tagged area=no represents a line, not a roof
+  // polygon. Unknown area values also need review rather than an invented wall.
+  const area = tags?.area;
+  if (area !== undefined && (typeof area !== 'string' ||
+      !['yes', 'true', '1'].includes(area.trim().toLowerCase()))) return false;
   // OSM building:part marks an individual section of a larger building. This
   // renderer only extrudes audited whole-building ways from the ground and
   // cannot reconstruct a part's neighbouring volumes or real base elevation.
