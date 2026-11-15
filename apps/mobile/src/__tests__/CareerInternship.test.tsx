@@ -2,7 +2,7 @@ import React from 'react';
 import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
 import { CareerInternship } from '../components/career/CareerInternship';
 import { internshipRecord } from '../../../../packages/shared/testFixtures/careerInternship';
-import type { InternshipAudience } from '../../../../packages/shared/src/careerInternship';
+import type { InternshipAudience, InternshipReply } from '../../../../packages/shared/src/careerInternship';
 
 function setup(audience: InternshipAudience = 'student', uid: string | null = 'student') {
   const record = internshipRecord();
@@ -15,7 +15,7 @@ function setup(audience: InternshipAudience = 'student', uid: string | null = 's
   };
   const service = {
     load: jest.fn(async () => snapshot),
-    execute: jest.fn(async () => ({ id: 'record' })),
+    execute: jest.fn(async (): Promise<InternshipReply> => ({ id: 'record' })),
   };
   const props = {
     schoolId: 'pu',
