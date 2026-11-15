@@ -266,7 +266,11 @@ it('destroys old-school graphics and exposes only the replacement school after r
   fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(screen.getByRole('option', { name: '另一校圖書館' })).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toContain('請選擇地點');
+  // The camera now has its own live status; scope this assertion to the
+  // place guidance so adding accessible announcements cannot break school isolation.
+  const guidance = within(screen.getByRole('dialog', { name: '校園空間導覽' }))
+    .getByText('請選擇地點，確認位置後再開啟導航。');
+  expect(guidance.getAttribute('role')).toBe('status');
   expect(screen.queryByRole('heading', { name: '本校圖書館' })).toBeNull();
   expect(scene.create.mock.calls[1][1].points.map((point: { id: string }) => point.id)).toEqual(['new-library']);
 });
