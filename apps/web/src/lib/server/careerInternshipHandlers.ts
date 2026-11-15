@@ -18,6 +18,11 @@ function id(value: unknown): string {
     fail('invalid-argument', '資料編號不正確。');
   return value;
 }
+function requiredText(value: unknown, message: string, max = 200): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > max)
+    fail('invalid-argument', message);
+  return value.trim();
+}
 function text(value: unknown, max = 200): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max)
     fail('invalid-argument', '請確認必填欄位與字數。');
@@ -110,7 +115,39 @@ export function createCareerInternshipHandlers({
           : [];
       const records = school.collection('internshipRecords');
       const rules = school.collection('internshipRules');
+      const members = school.collection('members');
+      const directory = school.collection('directory');
       const at = now().toISOString();
+      const advisorView = (
+        uid: string,
+        member: Record<string, unknown>,
+        profile?: Record<string, unknown>,
+      ) => ({
+        uid,
+        name: String(profile?.displayName || member.displayName || '').trim() || '姓名待確認',
+        email: String(profile?.email || member.email || '').trim(),
+        department: String(profile?.department || member.department || '').trim(),
+      });
+      const loadAdvisors = async (keywordRaw: string, max: number) => {
+        const keyword = keywordRaw.trim().toLocaleLowerCase('zh-TW');
+        const limit = Math.max(1, Math.min(50, max || 20));
+        const batches = await Promise.all(
+          ['teacher', 'staff', 'admin'].map((roleName) =>
+            tx.get(members.where('status', '==', 'active').where('role', '==', roleName).limit(80)),
+          ),
+        );
+        const candidateDocs = [...new Map(batches.flatMap((s) => s.docs).map((d) => [d.id, d])).values()];
+        const profileDocs = await tx.getAll(...candidateDocs.map((doc) => directory.doc(doc.id)));
+        const rows = candidateDocs
+          .map((doc, index) => advisorView(doc.id, doc.data(), profileDocs[index]?.data()))
+          .filter((row) => {
+            if (!keyword) return true;
+            return `${row.name} ${row.email} ${row.department}`.toLocaleLowerCase('zh-TW').includes(keyword);
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+          .slice(0, limit);
+        return rows;
+      };
       const audit = (action: string, targetId: string) =>
         tx.create(school.collection('adminLogs').doc(), {
           action: `internship_${action}`,
@@ -166,6 +203,20 @@ export function createCareerInternshipHandlers({
             rules: ruleRows.docs.map((d) => ({ ...d.data(), id: d.id }) as InternshipRule),
             records: unique,
             audit: logs,
+            advisors: c.audience === 'student' ? await loadAdvisors('', 20) : undefined,
+            canManage: staff || departments.length > 0,
+          },
+        };
+      }
+      if (c.action === 'advisorSearch') {
+        if (typeof c.keyword !== 'string') fail('invalid-argument', '請輸入指導老師姓名或學校信箱。');
+        return {
+          snapshot: {
+            rules: [],
+            records: [],
+            audit: [],
+            advisors: await loadAdvisors(c.keyword, Number(c.limit) || 20),
+            canManage: staff || departments.length > 0,
           },
         };
       }
@@ -197,20 +248,23 @@ export function createCareerInternshipHandlers({
         if (!ruleSnap.exists || ruleSnap.data()?.revision !== c.ruleRevision)
           fail('failed-precondition', '系所規則已更新，請重新選擇。');
         const rule = ruleSnap.data() as InternshipRule;
-        const teacherUid = id(c.teacherUid);
-        const teacher = await tx.get(school.collection('members').doc(teacherUid));
+        const teacherUid =
+          typeof c.teacherUid === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(c.teacherUid)
+            ? c.teacherUid
+            : fail('invalid-argument', '請選擇本校指導老師');
+        const teacher = await tx.get(members.doc(teacherUid));
         if (
           teacher.data()?.status !== 'active' ||
           !['teacher', 'staff', 'admin'].includes(teacher.data()?.role)
         )
-          fail('invalid-argument', '請填寫本校有效指導老師的帳號編號。');
+          fail('invalid-argument', '找不到這位本校指導老師，請改用姓名或學校信箱搜尋後選擇');
         const record: InternshipRecord = {
           id: ref.id,
           uid,
           revision: 1,
           rule,
-          organization: text(c.organization),
-          teacher: text(c.teacher),
+          organization: requiredText(c.organization, '請填寫實習機構'),
+          teacher: requiredText(c.teacher, '請填寫指導老師姓名'),
           teacherUid,
           hours: [],
           documents: rule.documents.map(() => ({

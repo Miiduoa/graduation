@@ -100,6 +100,10 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   const [organization, setOrganization] = useState('');
   const [teacher, setTeacher] = useState('');
   const [teacherUid, setTeacherUid] = useState('');
+  const [advisorKeyword, setAdvisorKeyword] = useState('');
+  const [advisors, setAdvisors] = useState<NonNullable<InternshipSnapshot['advisors']>>([]);
+  const [selectedRuleId, setSelectedRuleId] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [ruleDraft, setRuleDraft] = useState<InternshipRule | null>(null);
   useEffect(() => {
     active.current = true;
@@ -127,6 +131,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         const result = await service.load(audience, { signal: current.signal });
         if (live && !current.signal.aborted) {
           setSnapshot(result);
+          if (audience === 'student') setAdvisors(result.advisors || []);
           setError('');
         }
       } catch (e) {
@@ -168,6 +173,38 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
       writing.current = false;
       if (active.current) setBusy(false);
     }
+  }
+  async function searchAdvisors() {
+    const keyword = advisorKeyword.trim();
+    if (!keyword) {
+      setAdvisors(snapshot?.advisors || []);
+      return;
+    }
+    await run(async () => {
+      const reply = await service.execute({ action: 'advisorSearch', keyword, limit: 20 });
+      setAdvisors(reply.snapshot?.advisors || []);
+    }, '已更新指導老師名單。');
+  }
+  async function submitCreate(rule: InternshipRule | null) {
+    const errors: Record<string, string> = {};
+    if (!organization.trim()) errors.organization = '請填寫實習機構';
+    if (!teacher.trim()) errors.teacher = '請填寫指導老師姓名';
+    if (!teacherUid.trim()) errors.teacherUid = '尚未選擇指導老師';
+    if (!rule) errors.ruleId = '請先選擇系所規則';
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
+    await run(async () => {
+      await service.execute({
+        action: 'create',
+        id: createId.current,
+        ruleId: rule!.id,
+        ruleRevision: rule!.revision,
+        organization: organization.trim(),
+        teacher: teacher.trim(),
+        teacherUid: teacherUid.trim(),
+      });
+      createId.current = newId();
+    });
   }
   const execute = (command: Exclude<InternshipCommand, { action: 'list' }>) =>
     run(() => service.execute(command));
@@ -220,22 +257,16 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
               )}
               {audience === 'student' && (
                 <Button
-                  label={`依${rule.department}規則建立實習`}
+                  label={selectedRuleId === rule.id ? `已選擇${rule.department}規則` : `選擇${rule.department}規則`}
                   disabled={busy}
-                  onPress={() =>
-                    void run(async () => {
-                      await service.execute({
-                        action: 'create',
-                        id: createId.current,
-                        ruleId: rule.id,
-                        ruleRevision: rule.revision,
-                        organization,
-                        teacher,
-                        teacherUid,
-                      });
-                      createId.current = newId();
-                    })
-                  }
+                  onPress={() => {
+                    setSelectedRuleId(rule.id);
+                    setFieldErrors((previous) => {
+                      const next = { ...previous };
+                      delete next.ruleId;
+                      return next;
+                    });
+                  }}
                 />
               )}
             </Card>
@@ -243,14 +274,66 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
           {audience === 'student' && (
             <Card>
               <Heading>建立實習紀錄</Heading>
-              <Field label="實習機構" value={organization} onChange={setOrganization} />
-              <Field label="指導老師姓名" value={teacher} onChange={setTeacher} />
               <Field
-                label="指導老師帳號編號（請向系辦確認）"
-                value={teacherUid}
-                onChange={setTeacherUid}
+                label="系所規則"
+                value={
+                  snapshot.rules.find((rule) => rule.id === selectedRuleId)
+                    ? `${snapshot.rules.find((rule) => rule.id === selectedRuleId)!.department} · ${snapshot.rules.find((rule) => rule.id === selectedRuleId)!.term}`
+                    : ''
+                }
+                onChange={() => {}}
               />
-              <Body>填好後，選擇上方所屬系所與學期的規則建立紀錄。</Body>
+              <Body>請先在上方選擇系所規則，再填寫以下資料。</Body>
+              {fieldErrors.ruleId && <AlertText>{fieldErrors.ruleId}</AlertText>}
+              <Field label="實習機構" value={organization} onChange={setOrganization} />
+              {fieldErrors.organization && <AlertText>{fieldErrors.organization}</AlertText>}
+              <Field label="指導老師姓名" value={teacher} onChange={setTeacher} />
+              {fieldErrors.teacher && <AlertText>{fieldErrors.teacher}</AlertText>}
+              <Field
+                label="搜尋本校指導老師（姓名或學校信箱）"
+                value={advisorKeyword}
+                onChange={setAdvisorKeyword}
+              />
+              <Button label="搜尋指導老師" disabled={busy} onPress={() => void searchAdvisors()} />
+              {!advisors.length && <Body>找不到符合條件的指導老師，請試試其他關鍵字。</Body>}
+              {!!advisors.length && (
+                <Box>
+                  {advisors.map((advisor) => (
+                    <Button
+                      key={advisor.uid}
+                      label={`${advisor.name}｜${advisor.email}${advisor.department ? `｜${advisor.department}` : ''}`}
+                      disabled={busy}
+                      onPress={() => {
+                        setTeacher(advisor.name);
+                        setTeacherUid(advisor.uid);
+                        setFieldErrors((previous) => {
+                          const next = { ...previous };
+                          delete next.teacherUid;
+                          delete next.teacher;
+                          return next;
+                        });
+                      }}
+                    />
+                  ))}
+                </Box>
+              )}
+              <Body>
+                已選擇指導老師：
+                {teacherUid
+                  ? advisors.find((advisor) => advisor.uid === teacherUid)?.name || teacher || '已選擇'
+                  : '尚未選擇'}
+              </Body>
+              {fieldErrors.teacherUid && <AlertText>{fieldErrors.teacherUid}</AlertText>}
+              <Body>填好後，按下方按鈕建立實習紀錄。</Body>
+              <Button
+                label="建立實習紀錄"
+                disabled={busy}
+                onPress={() =>
+                  void submitCreate(
+                    snapshot.rules.find((rule) => rule.id === selectedRuleId) || null,
+                  )
+                }
+              />
             </Card>
           )}
           {audience === 'staff' && (

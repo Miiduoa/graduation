@@ -14,7 +14,7 @@ suite('internship real Firestore transactions', () => {
   let app: App, db: Firestore, handler: ReturnType<typeof createCareerInternshipHandlers>;
   const call = (uid: string | null, c: InternshipCommand, schoolId = 'pu') =>
     handler({ auth: uid ? { uid } : null, data: { ...c, schoolId } });
-  const create = (): InternshipCommand => ({
+  const create = (): Extract<InternshipCommand, { action: 'create' }> => ({
     action: 'create',
     id: 'record',
     ruleId: 'rule',
@@ -37,10 +37,25 @@ suite('internship real Firestore transactions', () => {
   });
   beforeEach(async () => {
     await db.recursiveDelete(db.collection('schools'));
-    for (const uid of ['student', 'other', 'staff', 'dept', 'wrongDept', 'teacher', 'admin'])
+    for (const uid of [
+      'student',
+      'other',
+      'staff',
+      'dept',
+      'wrongDept',
+      'teacher',
+      'advisor',
+      'admin',
+    ])
       await db.doc(`schools/pu/members/${uid}`).set({
         status: 'active',
-        role: uid === 'admin' ? 'admin' : uid === 'teacher' ? 'teacher' : 'member',
+        role:
+          uid === 'admin'
+            ? 'admin'
+            : uid === 'teacher' || uid === 'advisor'
+              ? 'teacher'
+              : 'member',
+        displayName: uid === 'advisor' ? '王指導' : uid,
       });
     await db.doc('schools/pu/serviceRoles/staff').set({ status: 'active', career_staff: true });
     await db
@@ -49,6 +64,11 @@ suite('internship real Firestore transactions', () => {
     await db
       .doc('schools/pu/serviceRoles/wrongDept')
       .set({ status: 'active', internship_departments: ['其他系'] });
+    await db.doc('schools/pu/directory/advisor').set({
+      displayName: '王指導',
+      email: 'advisor@school.edu.tw',
+      department: '測試系',
+    });
     await db.doc('schools/pu/internshipRules/rule').set(internshipRule);
   });
   it('runs student creation, hours, staff document review and teacher confirmation through service', async () => {
@@ -94,6 +114,46 @@ suite('internship real Firestore transactions', () => {
     await call('teacher', { action: 'confirm', id: 'record', revision: revision++ });
     expect((await student.load('student')).records[0]).toMatchObject({ confirmed: true, revision });
     expect((await db.collection('schools/pu/adminLogs').get()).size).toBe(18);
+  });
+  it('supports advisor lookup and returns precise create validation messages', async () => {
+    const list = await call('student', { action: 'list', audience: 'student' });
+    expect(list.snapshot?.advisors?.some((advisor) => advisor.uid === 'advisor')).toBe(true);
+    const search = await call('student', { action: 'advisorSearch', keyword: 'advisor@school.edu.tw' });
+    expect(search.snapshot?.advisors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ uid: 'advisor', name: '王指導', email: 'advisor@school.edu.tw' }),
+      ]),
+    );
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'missing-teacher-uid',
+        teacherUid: '',
+      }),
+    ).rejects.toMatchObject({ message: '請選擇本校指導老師' });
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'missing-organization',
+        organization: '',
+      }),
+    ).rejects.toMatchObject({ message: '請填寫實習機構' });
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'missing-teacher-name',
+        teacher: '',
+      }),
+    ).rejects.toMatchObject({ message: '請填寫指導老師姓名' });
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'invalid-teacher',
+        teacherUid: 'other',
+      }),
+    ).rejects.toMatchObject({
+      message: '找不到這位本校指導老師，請改用姓名或學校信箱搜尋後選擇',
+    });
   });
   it('revokes assigned teacher access after demotion while retaining own student access', async () => {
     const record = internshipRecord();

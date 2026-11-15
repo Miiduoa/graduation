@@ -43,39 +43,21 @@ function Workspace({
   const [review, setReview] = useState(false);
   const [operate, setOperate] = useState(false);
   const [internshipStaff, setInternshipStaff] = useState(false);
-  const [staffProbeAttempt, setStaffProbeAttempt] = useState(0);
-  const [staffProbeRetryable, setStaffProbeRetryable] = useState(false);
   const ports = useMemo(
     () =>
-      createPorts(uid, schoolId, (canReview, canOperate) => {
+      createPorts(uid, schoolId, (canReview, canOperate, canManageInternship) => {
         setReview(canReview);
         setOperate(canOperate);
+        setInternshipStaff(canManageInternship);
       }),
     [uid, schoolId],
   );
   useEffect(() => {
     ports.activate();
-    let live = true;
-    const controller = new AbortController();
-    void ports.service.load('staff', { signal: controller.signal }).then(
-      () => {
-        if (live) setInternshipStaff(true);
-      },
-      (error: unknown) => {
-        if (live) {
-          setInternshipStaff(false);
-          setStaffProbeRetryable(
-            !(error instanceof Error && error.message === '目前沒有實習承辦權限。'),
-          );
-        }
-      },
-    );
     return () => {
-      live = false;
-      controller.abort();
       ports.dispose();
     };
-  }, [ports, staffProbeAttempt]);
+  }, [ports]);
   const onLogin = () => {
     window.location.href = loginUrl;
   };
@@ -114,17 +96,6 @@ function Workspace({
       {internship('student')}
       {review && workstudy('staff')}
       {operate && workstudy('ops')}
-      {staffProbeRetryable && (
-        <button
-          type="button"
-          onClick={() => {
-            setStaffProbeRetryable(false);
-            setStaffProbeAttempt((attempt) => attempt + 1);
-          }}
-        >
-          重新確認承辦權限
-        </button>
-      )}
       {internshipStaff && internship('staff')}
       {internshipStaff && operate && internship('ops')}
     </>
@@ -134,13 +105,23 @@ function Workspace({
 function createPorts(
   uid: string,
   schoolId: string,
-  onPermissions: (review: boolean, operate: boolean) => void,
+  onPermissions: (review: boolean, operate: boolean, internshipManage: boolean) => void,
 ) {
   let live = true;
   const active = () => live && getAuth()?.currentUser?.uid === uid;
+  const waitForUser = async () => {
+    const deadline = Date.now() + 12000;
+    while (live && Date.now() < deadline) {
+      const user = getAuth()?.currentUser;
+      if (user?.uid === uid) return user;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return getAuth()?.currentUser?.uid === uid ? getAuth()!.currentUser : null;
+  };
   const authHeaders = async () => {
-    const user = getAuth()?.currentUser;
-    if (!active() || !user) throw new Error('請重新登入');
+    const user = await waitForUser();
+    if (!live) throw new Error('帳號已變更');
+    if (!user) throw new Error('請重新登入');
     const token = await user.getIdToken();
     if (!active()) throw new Error('帳號已變更');
     return { Authorization: `Bearer ${token}` };
@@ -160,11 +141,41 @@ function createPorts(
       authHeaders,
     }),
   );
-  const load = workstudy.load;
-  workstudy.load = async (audience, options) => {
-    const result = await load(audience, options);
+  const permissionState = { canReview: false, canOperate: false, internshipManage: false };
+  const internshipPorts = createCareerInternshipPorts({
+    schoolId,
+    transport: createInternshipCallableTransport({
+      endpoint: getCloudFunctionUrl('careerInternship'),
+      fetcher,
+      authHeaders,
+    }),
+    scope: { owner: `platform:${uid}`, schoolId },
+    active,
+  });
+  const internshipLoad = internshipPorts.service.load;
+  internshipPorts.service.load = async (audience, options) => {
+    const result = await internshipLoad(audience, options);
     if (active() && audience === 'student') {
-      onPermissions(result.canReview, result.canOperate);
+      permissionState.internshipManage = result.canManage === true;
+      onPermissions(
+        permissionState.canReview,
+        permissionState.canOperate,
+        permissionState.internshipManage,
+      );
+    }
+    return result;
+  };
+  const originalWorkstudyLoad = workstudy.load;
+  workstudy.load = async (audience, options) => {
+    const result = await originalWorkstudyLoad(audience, options);
+    if (active() && audience === 'student') {
+      permissionState.canReview = result.canReview;
+      permissionState.canOperate = result.canOperate;
+      onPermissions(
+        permissionState.canReview,
+        permissionState.canOperate,
+        permissionState.internshipManage,
+      );
     }
     return result;
   };
@@ -174,16 +185,7 @@ function createPorts(
       const { courses } = await loadPersonalTimetable(uid, schoolId);
       return courses.length ? courses : null;
     },
-    ...createCareerInternshipPorts({
-      schoolId,
-      transport: createInternshipCallableTransport({
-        endpoint: getCloudFunctionUrl('careerInternship'),
-        fetcher,
-        authHeaders,
-      }),
-      scope: { owner: `platform:${uid}`, schoolId },
-      active,
-    }),
+    ...internshipPorts,
     activate: () => {
       live = true;
     },

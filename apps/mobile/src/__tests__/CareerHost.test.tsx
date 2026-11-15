@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, render } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 import { CareerHost } from '../components/career/CareerHost';
 import type { CareerWorkbenchEvent } from '@campus/shared/src/careerWorkstudy';
@@ -35,35 +35,10 @@ test('keeps permission-denied hidden without offering or looping a staff retry',
   const view = render(<CareerHost schoolId="pu" />);
   await act(async () => {});
   view.rerender(<CareerHost schoolId="pu" />);
-  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledTimes(0);
   expect(view.queryByText('實習工作區 staff')).toBeNull();
-  expect(view.queryByText('重新確認承辦權限')).toBeNull();
   expect(view.queryByText('目前沒有實習承辦權限。')).toBeNull();
 });
-
-test.each(['尚未啟用', '等候逾時', 'network failure'])(
-  'allows a failed staff probe (%s) to succeed on explicit retry',
-  async (message) => {
-    const fetcher = jest
-      .fn()
-      .mockImplementationOnce(async () => {
-        if (message === 'network failure') throw new TypeError('Failed to fetch');
-        return { ok: false, json: async () => ({ error: { message } }) };
-      })
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ result: { snapshot: { rules: [], records: [], audit: [] } } }),
-      });
-    global.fetch = fetcher;
-    const view = render(<CareerHost schoolId="pu" />);
-    const retry = await view.findByText('重新確認承辦權限');
-    expect(view.queryByText('實習工作區 staff')).toBeNull();
-    fireEvent.press(retry);
-    await waitFor(() => expect(view.getByText('實習工作區 staff')).toBeTruthy());
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(view.queryByText('重新確認承辦權限')).toBeNull();
-  },
-);
 
 test('opens the school event list and both event sources on nuni.tw', async () => {
   global.fetch = jest.fn().mockResolvedValue({

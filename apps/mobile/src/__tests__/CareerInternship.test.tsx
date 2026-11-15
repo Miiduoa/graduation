@@ -6,7 +6,13 @@ import type { InternshipAudience } from '../../../../packages/shared/src/careerI
 
 function setup(audience: InternshipAudience = 'student', uid: string | null = 'student') {
   const record = internshipRecord();
-  const snapshot = { rules: [record.rule], records: [record], audit: [] };
+  const snapshot = {
+    rules: [record.rule],
+    records: [record],
+    audit: [],
+    advisors: [{ uid: 'teacher', name: '測試指導老師', email: 'teacher@school.edu.tw' }],
+    canManage: false,
+  };
   const service = {
     load: jest.fn(async () => snapshot),
     execute: jest.fn(async () => ({ id: 'record' })),
@@ -60,6 +66,27 @@ it('allows staff to prepare a rule with five recipients and deadlines', async ()
   fireEvent.press(view.getByText('新增系所規則'));
   expect(view.getByLabelText('每學分所需時數').props.value).toBe('60');
   expect(view.getByLabelText('5 交給誰')).toBeTruthy();
+});
+it('requires advisor selection and required fields before creating internship records', async () => {
+  const { view, props } = setup('student', 'student');
+  await waitFor(() => expect(view.getByText('建立實習紀錄')).toBeTruthy());
+  fireEvent.press(view.getByText('建立實習紀錄'));
+  expect(view.getByText('請先選擇系所規則')).toBeTruthy();
+  expect(view.getByText('請填寫實習機構')).toBeTruthy();
+  expect(view.getByText('請填寫指導老師姓名')).toBeTruthy();
+  expect(view.getByText('尚未選擇指導老師')).toBeTruthy();
+  fireEvent.press(view.getByText('選擇測試系規則'));
+  fireEvent.changeText(view.getByLabelText('實習機構'), '測試機構');
+  fireEvent.changeText(view.getByLabelText('指導老師姓名'), '測試指導老師');
+  fireEvent.press(view.getByText('搜尋指導老師'));
+  await waitFor(() => expect(view.getByText(/測試指導老師｜teacher@school.edu.tw/)).toBeTruthy());
+  fireEvent.press(view.getByText(/測試指導老師｜teacher@school.edu.tw/));
+  fireEvent.press(view.getByText('建立實習紀錄'));
+  await waitFor(() =>
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'create', teacherUid: 'teacher', organization: '測試機構' }),
+    ),
+  );
 });
 it('keeps student actions out of staff review and protects record version', async () => {
   const { view, props, record } = setup('staff', 'staff');
