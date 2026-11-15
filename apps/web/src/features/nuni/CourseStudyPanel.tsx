@@ -116,10 +116,15 @@ type StudyTextEncoding = 'utf-8' | 'big5';
 // both private lessons and progress backups. A genuine UTF-8 U+FFFD remains
 // valid, while legacy WebViews can use their on-device FileReader fallback.
 async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
-  // A mobile WebView may advertise this API but reject an actual file read.
+  // A mobile WebView can resolve arrayBuffer() with valid UTF-8 that is
+  // silently shorter than the chosen file. A plausible truncated lesson or
+  // syntactically valid JSON must not replace the student's actual source.
+  // Compare exact byte counts, then retry the original file via FileReader.
   if (typeof file.arrayBuffer === 'function') {
-    try { return await file.arrayBuffer(); }
-    catch { /* Fall through to the native on-device FileReader. */ }
+    try {
+      const bytes = await file.arrayBuffer();
+      if (bytes instanceof ArrayBuffer && bytes.byteLength === file.size) return bytes;
+    } catch { /* Fall through to the native on-device FileReader. */ }
   }
   if (typeof FileReader !== 'function') throw new Error('No local binary file reader');
 
@@ -127,8 +132,11 @@ async function readStudyFileBytes(file: File): Promise<ArrayBuffer> {
     try {
       const reader = new FileReader();
       reader.onload = () => {
-        if (reader.result instanceof ArrayBuffer) resolve(reader.result);
-        else reject(new Error('Invalid local file reader result'));
+        // FileReader is the final local fallback: never accept a short/extra
+        // buffer as if it were the complete on-disk lesson or progress JSON.
+        if (reader.result instanceof ArrayBuffer && reader.result.byteLength === file.size)
+          resolve(reader.result);
+        else reject(new Error('Incomplete local file reader result'));
       };
       reader.onerror = () => reject(reader.error ?? new Error('Local file reader failed'));
       reader.onabort = () => reject(new Error('Local file reader aborted'));

@@ -1279,3 +1279,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修復部分手機 WebView 的 `File.text()` 回傳**沒有替代字元、卻已被改寫的有效文字**時，讀書白板可能把錯誤教材當作原文引用的問題。UTF-8 TXT／Markdown 改為與進度 JSON 一樣，從本機檔案原始位元組以 `TextDecoder('utf-8', { fatal: true })` 解碼，當 `Blob.arrayBuffer()` 不可用／失敗時使用裝置內建 `FileReader.readAsArrayBuffer()`，不可讀或非法 UTF-8 時拒絕取代，保留目前教材、筆記與暫停練習。
 - 新增模擬 DOM 回歸：假 `File.text()` 回傳看似正確但改寫「主鍵」規則時仍只採用真實教材位元組；若檔案含非法 UTF-8、`File.text()` 偽造可讀文字，仍拒絕導入並保留私人筆記。並更新原有檔案讀取／WebView 失敗路徑的呼叫斷言。Big5 僅在手動指定時解碼；不新增套件、不改 JSON checkpoint 或外傳教材。
 - 這屬程式／模擬瀏覽器改善，需依新精確 SHA 完成正式 Vitest、CI／CodeQL、指定 App 5504170 APPROVED、Maestro 與 iOS/Android 真機驗收。沒有同教材同題同機 Ahaboard 實測前不宣稱超越競品，PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-15：手機檔案 API 靜默截斷位元組時恢復真正教材與進度
+
+- 若某些行動 WebView 的 `Blob.arrayBuffer()` **正常 resolve 但位元組少於原檔案**，縮短後的文字仍可能是合法 UTF-8，甚至是格式完整、內容卻已被截短或偷換的 JSON。現在會先將二進位結果長度與使用者選取的 `File.size` 精確比對，不相同則重新以裝置內建 `FileReader.readAsArrayBuffer()` 讀取**同一份檔案**；最後一條路徑長度也不符時拒收，不採用可疑資料，也不使用不可信的 `File.text()`。
+- 新增兩組模擬行動 WebView 的 DOM 回歸：UTF-8 教材只回傳合法但缺尾段的位元組時仍能載入真正全文；JSON 回傳**長度較短但語法合法的假筆記**時，還原預覽與明確確認後必須使用完整備份原文，並在確認前保留尚未備份的現有筆記。進度 v1/v2 與練習 checkpoint 不變，不新增套件／付費 API 或外傳私人教材。
+- 這項檢查僅能辨識位元組數量不一致，**不能證明相同長度的內容沒有遭改寫**，也不能代替真機驗收。精確新 SHA 的 CI/CodeQL、App 5504170 APPROVED、Maestro、iOS Safari／Android Chrome、WebGPU 中文教學及 Ahaboard 同題同教材同機對照仍須驗證；PR 繼續 Draft、不合併、不部署。

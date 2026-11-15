@@ -2550,3 +2550,52 @@ it('shows only a current source Markdown table and never treats copied values as
   expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
   expect(mocks.run).not.toHaveBeenCalled();
 });
+
+
+it('recovers the complete UTF-8 lesson when mobile arrayBuffer silently returns a short valid prefix', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const complete = '第一段說明：主鍵不可重複，外鍵必須參照有效資料。';
+  const file = new File([new TextEncoder().encode(complete)], '完整講義.markdown', { type: 'text/markdown' });
+  const shortBytes = new TextEncoder().encode('第一段說明：主鍵不可重複');
+  const fakeRead = vi.fn().mockResolvedValue(shortBytes.buffer);
+  Object.defineProperty(file, 'arrayBuffer', { value: fakeRead });
+  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('被竄改的講義') });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(complete)).toBeTruthy();
+  expect(fakeRead).toHaveBeenCalledOnce();
+  expect(screen.queryByText('被竄改的講義')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('uses full FileReader bytes when mobile arrayBuffer returns a shorter but valid progress JSON', async () => {
+  const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '真正備份的完整主鍵筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const saved = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    // This fake API result is still syntactically valid JSON and has no invalid UTF-8.
+    const shorter = saved.replace('真正備份的完整主鍵筆記', '假筆記');
+    expect(shorter).not.toBe(saved);
+    const fakeBytes = new TextEncoder().encode(shorter);
+    const actualBytes = new TextEncoder().encode(saved);
+    expect(fakeBytes.byteLength).toBeLessThan(actualBytes.byteLength);
+    const file = new File([actualBytes], '上次閱讀進度.json', { type: 'application/json' });
+    const fakeRead = vi.fn().mockResolvedValue(fakeBytes.buffer);
+    Object.defineProperty(file, 'arrayBuffer', { value: fakeRead });
+    fireEvent.change(note, { target: { value: '目前尚未備份的筆記' } });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    expect(await screen.findByRole('region', { name: '閱讀進度預覽' })).toBeTruthy();
+    expect(note.value).toBe('目前尚未備份的筆記');
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+    expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+      .toBe('真正備份的完整主鍵筆記');
+    expect(fakeRead).toHaveBeenCalledOnce();
+  } finally {
+    if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
