@@ -170,8 +170,10 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // code block after "答案：". Ignore ONLY a leading opening fence in this
     // temporary comparison copy; keep the full question unchanged for display.
     // A fence must have a real newline and at most a short language tag.
+    // Blockquoted fences also prefix each code line with >. Discard up to two
+    // markers on the answer line only in this temporary comparison copy.
     const fencedAnswer = sameLineList.replace(
-      /^(?:`{3,}|~{3,})[ \t]*(?:[A-Za-z][A-Za-z0-9_+-]{0,23})?[ \t]*\r?\n[ \t]*/u, '',
+      /^(?:`{3,}|~{3,})[ \t]*(?:[A-Za-z][A-Za-z0-9_+-]{0,23})?[ \t]*\r?\n[ \t]*(?:>[ \t]*){0,2}/u, '',
     );
     const answerPresentation = fencedAnswer.replace(
       /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
