@@ -97,6 +97,72 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('post authors cannot reopen manager-held publication states or replay a stale edit', async () => {
+    const groupId = 'publication-boundary';
+    const path = (name) => `groups/${groupId}/posts/${name}`;
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
+      for (const uid of ['alice', 'bob', 'charlie', 'mallory']) {
+        const school = uid === 'mallory' ? 'other' : 'pu';
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      for (const [uid, role] of [['alice', 'student'], ['bob', 'instructor'], ['charlie', 'student']]) {
+        await db.doc(`groups/${groupId}/members/${uid}`).set({ status: 'active', role });
+      }
+      for (const state of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'deleted', 'cancelled']) {
+        await db.doc(path(state)).set({
+          authorId: 'alice', kind: 'post', title: state, body: 'private until published',
+          status: state, likes: 0, likedBy: [],
+        });
+      }
+      await db.doc(path('hidden')).set({
+        authorId: 'alice', kind: 'post', title: 'Hidden', body: 'not public',
+        published: false, likes: 0, likedBy: [],
+      });
+      await db.doc(path('visible')).set({
+        authorId: 'alice', kind: 'post', title: 'Open', body: 'public',
+        status: 'published', likes: 0, likedBy: [],
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+
+    // An author cannot turn old scheduled, withdrawn or archived content public.
+    for (const state of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'deleted', 'cancelled']) {
+      await assertFails(alice.doc(path(state)).update({ status: 'published', body: 'replayed write' }));
+      await assertFails(alice.doc(path(state)).update({ title: 'unauthorized edit while hidden' }));
+    }
+    await assertFails(alice.doc(path('hidden')).update({ published: true }));
+    await assertFails(alice.doc(path('visible')).update({ published: false }));
+    await assertFails(alice.doc(path('visible')).update({ status: 'scheduled' }));
+    await assertFails(charlie.doc(path('visible')).update({ body: 'another member edit' }));
+    await assertFails(mallory.doc(path('visible')).update({ body: 'another school edit' }));
+
+    // Only current management may explicitly reopen the held post; normal author
+    // edits and the ordinary student vote path keep working afterwards.
+    await assertSucceeds(bob.doc(path('archived')).update({ status: 'published' }));
+    await assertSucceeds(alice.doc(path('archived')).update({ title: 'reopened by manager' }));
+    await assertSucceeds(alice.doc(path('visible')).update({ body: 'ordinary edit' }));
+    await assertSucceeds(charlie.doc(path('visible')).update({ likedBy: ['charlie'], likes: 1 }));
+
+    // A manager can withdraw an active post between a read and a stale write.
+    await assertSucceeds(bob.doc(path('visible')).update({ status: 'archived' }));
+    await assertFails(alice.doc(path('visible')).update({ status: 'published', body: 'stale overwrite' }));
+    await assertFails(alice.doc(path('visible')).update({ body: 'post withdrawal edit' }));
+    await assertSucceeds(bob.doc(path('visible')).update({ status: 'published' }));
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(path('visible')).update({ body: 'revoked token replay' }));
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'active' });
+    });
+    await assertSucceeds(alice.doc(path('visible')).update({ body: 'authorized after restoration' }));
+  });
+
   test('legacy root message read receipts cannot impersonate peers or replay stale lists', async () => {
     const conversationId = 'dm_pu_alice_bob';
     const message = 'messages/read-receipt';

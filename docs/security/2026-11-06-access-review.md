@@ -802,3 +802,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 **最小修補**：沿用巢狀訊息已經測試的 `onlyOwnMessageReadReceipt()`：根集合新訊息 `readBy` 可省略或只能為單一發送者 UID；更新只准既有讀者維持原列表、或新增目前讀者 UID 到陣列尾端。相同收據重試可成功；不可刪除、重排、重複或代加他人。若純更新 `updatedAt` 而不修改 `readBy`，為了歷史相容仍沿用舊行為；不在本輪擴大變更。保留原有既存對話跨校讀取與成員資格政策，未繞過帳號停權。
 
 **合成測試**：`backend/tests/security-rules.test.js` 新增專屬 Firebase Emulator 案例，涵蓋正常建立與本人已讀／冪等重試、偽造建立與代標、跨校非成員與訪客、停權／恢復、撤銷對話成員、重複 UID、別人已讀遭刪除及過時快照競態重放。對照舊規則，偽造建立與改寫他人 `readBy` 可直接由規則邏輯推導；新修補必須以此精確 head 的 Firebase CI 取得可重跑結果，不以靜態檢查代替。其他未發布群組父貼文讀取、已簽發 GCS/Supabase URL、真實 Storage CAS 競態、歷史附件可信引用、minimatch 雙圖與正式部署／回復驗證仍未解除。維持 Draft，不操作正式資料、金鑰、token、migration、E 校園，不進行未授權 npm/pnpm audit；未取得 App 5504170 對精確 head 的 APPROVED 前不合併。
+
+
+## 2026-11-16：群組貼文排程／封存／撤回狀態不得由原作者復活（PR #577）
+
+- **前一精確 head** `133531acf781fed8775c23931f97eaba895201ea`，對應 [CI #43715385125](https://github.com/Miiduoa/graduation/actions/runs/43715385125)、[CodeQL #43715384977](https://github.com/Miiduoa/graduation/actions/runs/43715384977) 與 [Course access #43715385057](https://github.com/Miiduoa/graduation/actions/runs/43715385057) 均已 `completed/success`；該版 Firebase Emulator 338/338、Web 51/51，主 CI Web/Mobile/Build 全部成功。精確 head 15 個 checks 中未有指定 nuni-merge-gate App 5504170 的 APPROVED，reviews 與未解決 threads 均為零。Supabase permissions、Python security、Mobile Agent Regression 與 Maestro 在該版未各自獨立觸發，不能沿用更舊版本。
+- **新發現**：群組貼文的一般作者先前僅不能復活 deleted/cancelled，但可以利用 Firestore SDK 將教師標記為 `draft/scheduled/pending/unpublished/archived` 的既有貼文改回 `status:published`，或把 `published:false` 改為 true，繞過管理者撤權/發布安排；此外可透過舊快照將剛封存的貼文再公開。尚未取得正式站遭利用的證據。
+- **最小權限修補**：一般作者更新只允許當下可見的貼文，且不得改動 published/status/deleted/deletedAt 四種發布與撤回標記；具有目前有效管理權限的人仍可恢復、封存。保留一般作者的正常正文編輯與任一有效成員的本人按讚分支。新回歸使用 Firebase Emulator 的合成同校/跨校與權限資料，覆蓋 7 種狀態、published:false、跨帳號、管理員明示重開、管理員於舊快照後封存、校籍/群組成員撤銷後重放與恢復。**新精確 head 的 CI、CodeQL 必須實際完成，不能提前稱為通過。**
+- **重要未解**：目前 `groups/{groupId}/posts` 的讀取規則仍允許有效群組成員直接 GET/LIST 未發布父貼文，此問題**沒有被本次作者寫入修補解決**。需搭配 Web/Mobile feed 查詢、公開狀態欄位與歷史文件安全遷移，不可直接改 list 造成舊資料無法讀取。已簽 GCS/Supabase URL 撤權、真隔離 Storage CAS 競態、歷史附件引用、minimatch 雙鎖檔及正式發布回復驗證均尚待。
+- **發布界線**：保持 Draft，沒有指定 App 5504170 對精確新 head 審查通過不可合併 main/部署。未修改正式資料、金鑰、token、migration、E 校園，亦未重跑受限制的 npm/pnpm audit。
