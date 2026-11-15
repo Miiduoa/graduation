@@ -1,6 +1,14 @@
 # Legacy Nuni Web security rebuild
 
-Campus One keeps the archived Nuni Web (release 31 digest) as a loopback legacy stage beside the current web process. That stage still ran Next.js 16.2.11. This directory rebuilds the legacy app **from archived `Miiduoa/nuni-prod` source** to Next.js 16.4.2 (the same current-safe pin as Campus One web), without copying private source into the public graduation tree and without mutating the archived remote.
+Campus One keeps the archived Nuni Web as a loopback legacy stage beside the current web process. The previously published security image contains Next.js 16.4.2. This directory prepares a Next.js 16.4.5 candidate **from archived `Miiduoa/nuni-prod` source**, without copying private source into the public graduation tree and without mutating the archived remote.
+
+## Candidate status (2026-11-15)
+
+The source patch chain and resulting Git tree are verified. The new legacy image has **not** been built, tested in Docker, or published. `source.json.publishedImage` and the legacy `FROM` digest in `deploy/web/Dockerfile.nuni` still identify the previous artifact; they are not proof that the candidate is deployed. The combined runtime security check requires Next.js 16.4.5 in both processes and must continue to reject the old legacy artifact.
+
+Verification reconstructed the archived base from the GitHub commit and recursive tree metadata, matched every subtree hash, and reproduced the previous candidate with patches 0001 + 0002 before replaying all three patches to the new `candidateTree`. The lockfile passed an offline frozen-lockfile check with pnpm 10.28.2. Building still requires a complete archived checkout.
+
+The candidate includes the [November 2026 Next.js security fixes](https://nextjs.org/blog/november-2026-security-release). Before production rollout, build the candidate, run the route and synthetic auth contracts below, publish it, and replace both recorded legacy image references with the verified immutable digest. Retain the previous digest for rollback evidence.
 
 ## Source binding
 
@@ -28,7 +36,7 @@ Or:
 python3 deploy/nuni-web-legacy/build.py --source /absolute/path/to/nuni-prod-checkout
 ```
 
-Produces local tag `nuni-legacy-security:20261024` for `linux/amd64`. After independent verification, publish the artifact and use its immutable registry digest in `deploy/web/Dockerfile.nuni`. The verified published artifact is recorded in `source.json`.
+Produces local tag `nuni-legacy-security:20261115` for `linux/amd64`. After independent verification, publish the artifact and use its immutable registry digest in `deploy/web/Dockerfile.nuni`. Record the verified new artifact in `source.json` only after publication succeeds.
 
 Verify tree only:
 
@@ -40,6 +48,7 @@ python3 deploy/nuni-web-legacy/build.py --source /absolute/path/to/nuni-prod-che
 
 1. `0001-next-16.4.2-security.patch` — Next.js 16.4.2 (+ lockfile)
 2. `0002-sharp-source-map-js-security.patch` — root `pnpm.overrides` for `sharp@0.35.5` and `source-map-js@1.2.2` (+ lockfile). Applied after 0001; no runtime forced install into precompiled Next.
+3. `0003-next-16.4.5-security.patch` — Next.js 16.4.5 (+ lockfile), applied after 0002. The existing sharp/source-map-js overrides remain pinned.
 
 `--keep-checkout` fails closed if the destination already exists, equals/nests the source checkout, or its parent is missing. The helper never deletes an unrelated directory.
 
@@ -64,5 +73,5 @@ After the image exists, inventory standalone metadata only under `/app`:
 ```sh
 docker run --rm --platform linux/amd64 --entrypoint node \
   -v "$PWD/deploy/nuni-web-legacy/runtime-inventory-app.cjs:/inventory.cjs:ro" \
-  nuni-legacy-security:20261024 /inventory.cjs /app
+  nuni-legacy-security:20261115 /inventory.cjs /app
 ```

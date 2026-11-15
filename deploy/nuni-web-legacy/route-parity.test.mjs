@@ -72,7 +72,7 @@ test('rebuilt image app-path-routes-manifest matches pinned fixture product rout
     const pinnedProduct = productRoutes(pinned);
     const rebuiltProduct = productRoutes(rebuilt);
     // Exact product-route parity with the frozen live-stage fixture (not a
-    // vacuous subset). Next internals may differ after the 16.4.2 rebuild.
+    // vacuous subset). Next internals may differ after the 16.4.5 rebuild.
     assert.deepEqual(rebuiltProduct, pinnedProduct);
     assert.ok(pinnedProduct.length >= 120, `expected dense product route set, got ${pinnedProduct.length}`);
     const digest = createHash('sha256').update(JSON.stringify(rebuiltProduct)).digest('hex');
