@@ -172,6 +172,40 @@ const LIFECYCLE_STATUS_TAGS = [
   'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
 ] as const;
 
+/** An audited OSM ID is not enough to inherit a campus building's old name.
+ * If a mapper explicitly names a different building, do not attach the verified
+ * POI identity to its volume until that name/source change is reviewed. A
+ * matching Chinese name can validate a bilingual primary name. Missing name
+ * tags remain valid because many real OSM building polygons are unnamed.
+ */
+function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
+  const record = object(tags);
+  if (!record) return false;
+  const primary = record.name;
+  if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
+  // OSM may supply a traditional/Taiwanese name without the generic
+  // name:zh key. All present Chinese identity claims must agree with the
+  // audited campus POI: a matching generic label cannot override an explicit
+  // name:zh-TW/name:zh-Hant for a different building after an OSM edit.
+  const chineseKeys = ['name:zh', 'name:zh-TW', 'name:zh-Hant'] as const;
+  let hasMatchingChineseName = false;
+  for (const key of chineseKeys) {
+    const label = record[key];
+    if (label === undefined) continue;
+    if (typeof label !== 'string' || label.trim() !== expectedName) return false;
+    hasMatchingChineseName = true;
+  }
+  if (hasMatchingChineseName) {
+    // English primary names are permitted when a verified Chinese label
+    // anchors identity. An explicitly different Han-script primary still
+    // contradicts that identity, regardless of which locale supplied it.
+    if (typeof primary === 'string' && /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(primary) &&
+        primary.trim() !== expectedName) return false;
+    return true;
+  }
+  return primary === undefined || primary.trim() === expectedName;
+}
+
 function isStandingBuilding(value: unknown): boolean {
   const tags = object(value);
   const classification = tags?.building;
@@ -287,7 +321,8 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const element = object(value);
     if (element?.type !== 'way' || typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) continue;
     const place = knownWays.get(element.id);
-    if (!place || seen.has(element.id) || !isStandingBuilding(element.tags)) continue;
+    if (!place || seen.has(element.id) || !isStandingBuilding(element.tags) ||
+        !matchesAuditedOsmName(element.tags, place.name)) continue;
     const outline = safeOutline(element.geometry);
     if (!outline || !outlineNearPoi(outline, place)) continue;
     const height = heightFromOsmTags(element.tags);
