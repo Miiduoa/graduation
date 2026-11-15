@@ -256,6 +256,8 @@ test('impossible restored source dates cannot authorize offline course and assig
     '2026-02-29T10:00:00Z', // 2026 is not a leap year.
     '2026-04-31T09:00:00+08:00', // Offset timestamps need calendar validation too.
     '2026-11-31T18:00:00.000Z',
+    // A syntactically valid future save time is not evidence of a saved timetable.
+    new Date(Date.now() + 30_001).toISOString(),
   ]) {
     const prompt = formatOnDeviceSchoolPrompt({
       ...local, timetable: { ...local.timetable, updatedAt },
@@ -268,6 +270,8 @@ test('impossible restored source dates cannot authorize offline course and assig
     '2024-02-29T17:00:00+08:00', // Actual leap day remains valid.
     '2026-10-25T17:00:00.000+08:00',
     '2026-10-25T09:00:00.000Z',
+    // A small clock skew is accepted, including at the exact 30-second boundary.
+    new Date(Date.now() + 30_000).toISOString(),
   ]) {
     const prompt = formatOnDeviceSchoolPrompt({
       ...local, timetable: { ...local.timetable, updatedAt },
