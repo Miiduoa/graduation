@@ -2,13 +2,11 @@
 
 Campus One keeps the archived Nuni Web as a loopback legacy stage beside the current web process. The published security image contains Next.js 16.4.5, rebuilt **from archived `Miiduoa/nuni-prod` source** at candidate tree `019690333ce6ceadd7c30fba3f0ea2ca95b8a648` (digest `sha256:da056fd9d05cf22522aabb3fb2634f592462ec0cb270019444439918ba9e8959`), without copying private source into the public graduation tree and without mutating the archived remote.
 
-## Candidate status (2026-11-15)
+## Published status (2026-11-15)
 
-The source patch chain and resulting Git tree are verified. The new legacy image has **not** been built, tested in Docker, or published. `source.json.publishedImage` and the legacy `FROM` digest in `deploy/web/Dockerfile.nuni` still identify the previous artifact; they are not proof that the candidate is deployed. The combined runtime security check requires Next.js 16.4.5 in both processes and must continue to reject the old legacy artifact.
+The source patch chain, Git tree `019690333ce6ceadd7c30fba3f0ea2ca95b8a648`, and rebuilt linux/amd64 image are verified. The image was published as `registry.fly.io/nuni-web@sha256:da056fd9d05cf22522aabb3fb2634f592462ec0cb270019444439918ba9e8959` (Next.js 16.4.5, sharp 0.35.5, source-map-js 1.2.2). `source.json.publishedImage` and the legacy `FROM` digest in `deploy/web/Dockerfile.nuni` now point at that immutable digest. This is not a production machine rollout; current formal-station machines remain on the previous combined image until a later approved deploy.
 
-Verification reconstructed the archived base from the GitHub commit and recursive tree metadata, matched every subtree hash, and reproduced the previous candidate with patches 0001 + 0002 before replaying all three patches to the new `candidateTree`. The lockfile passed an offline frozen-lockfile check with pnpm 10.28.2. Building still requires a complete archived checkout.
-
-The candidate includes the [November 2026 Next.js security fixes](https://nextjs.org/blog/november-2026-security-release). Before production rollout, build the candidate, run the route and synthetic auth contracts below, publish it, and replace both recorded legacy image references with the verified immutable digest. Retain the previous digest for rollback evidence.
+Verification reconstructed the archived base from the GitHub commit and recursive tree metadata, matched every subtree hash, and reproduced the previous candidate with patches 0001 + 0002 before replaying all three patches to the new `candidateTree`. The lockfile passed an offline frozen-lockfile check with pnpm 10.28.2.
 
 ## Source binding
 

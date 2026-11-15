@@ -6,7 +6,7 @@
 
 本輪準備 Next.js 16.4.5、Node.js 22.23.5／24.22.3、Firebase Admin 14.5.1 的來源修補。版本符合公告範圍，與外部攻擊能否在此應用成立分開記錄；沒有證據顯示專案已遭入侵或資料外洩。
 
-**這是待驗收的修補分支，不是正式部署證明。** 正式 Web 同時啟動 current 與 legacy 兩個程序。`deploy/web/Dockerfile.nuni` 的 legacy 來源仍為先前發布的不可變映像；新的 legacy 候選須先從封存來源重建、驗證、發布並取得真實 digest，才能更新該固定來源。共同 runtime gate 要求兩個程序及巢狀副本都符合新的安全版本，不能放寬檢查來讓舊映像通過。
+**這份文件記錄 16.4.5 修補內容，不是正式站機器已切換的證明。** 正式 Web 同時啟動 current 與 legacy 兩個程序。legacy 來源已更新為已發布的不可變映像 `registry.fly.io/nuni-web@sha256:da056fd9d05cf22522aabb3fb2634f592462ec0cb270019444439918ba9e8959`（Next.js 16.4.5）。共同 runtime gate 要求兩個程序及巢狀副本都是 16.4.5。正式站機器在另一次核准部署前仍是 v195。
 
 ## 版本對照
 
@@ -73,7 +73,7 @@ Web 已使用 firebase-admin/app、auth、firestore modular imports；未發現�
 發布前須：
 
 1. 套用可重現的 legacy 源碼修補，重建並驗證 linux/amd64 standalone、route parity 與 synthetic auth contract。
-2. 取得實際發布的新 legacy immutable digest，再更新組合映像來源；保留上一個已驗證映像作回滾。
+2. 新 legacy immutable digest 已寫入組合映像來源，並保留上一個已驗證映像作回滾。正式站機器仍待另一次核准部署。
 3. 對精確 PR head 執行適用 CI／CodeQL 與既有發布檢查，並取得 ruleset 26004626 要求的 App 5504170「審查通過」。不偽造或略過閘門。
 4. 以標準 PR 合併，再由既有 main Web release 流程、鎖定 expected_revision 發布；核對兩台正式機器映像、兩個 Node 執行檔、Next 套件實例、公開 readiness revision 與核心功能。
 5. 依實際現網啟用情況循既有流程發布 Functions；獨立 API overlay 的 Node 修補另外驗證，不能用 Web 成功代替。
