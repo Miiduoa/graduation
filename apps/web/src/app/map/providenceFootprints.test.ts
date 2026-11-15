@@ -116,6 +116,34 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('does not extrude explicitly non-area or contradictory OSM building geometry', () => {
+    // Geometry closing back on itself is not evidence of an area when OSM
+    // explicitly marks this whitelisted way as a line or an ambiguous type.
+    for (const tags of [
+      { building: 'yes', area: 'no', height: '18 m' },
+      { building: 'school', area: 'false' },
+      { building: 'yes', area: '0' },
+      { building: 'yes', area: 'unknown' },
+      { building: 'yes', area: '' },
+      { building: 'yes', area: null },
+      { building: 'yes', area: true },
+      { building: 'school;demolished' },
+      { building: 'yes,construction' },
+      { building: 'school|roof' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+    // The presence of a valid area tag must not accidentally hide real ways.
+    for (const area of [undefined, 'yes', 'true', '1', ' YES ']) {
+      const tags = area === undefined ? { building: 'school' } : { building: 'school', area };
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), String(area)).toHaveLength(1);
+    }
+  });
+
   it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [{ ...way(255784049), tags: undefined }],
