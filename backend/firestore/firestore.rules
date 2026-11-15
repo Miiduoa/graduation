@@ -1020,17 +1020,47 @@ service cloud.firestore {
 
     // Conversations (DMs and group chats)
     match /conversations/{conversationId} {
+      // Presence/read/typing maps contain one key per participant. A normal
+      // client may touch only its own key, using atomic field-path updates;
+      // replacing a peer's value (or the whole map) is not an acknowledgement.
+      function ownPresenceOnCreate(field) {
+        let value = request.resource.data.get(field, {});
+        return value is map && value.keys().hasOnly([request.auth.uid]);
+      }
+
+      function ownPresenceChange(field) {
+        let before = resource.data.get(field, {});
+        let after = request.resource.data.get(field, {});
+        return before is map && after is map
+          && after.diff(before).affectedKeys().hasOnly([request.auth.uid]);
+      }
+
+      function conversationPresenceWriteOk() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return !changed.hasAny(['onlineUsers', 'lastReadBy', 'typingUsers'])
+          || (
+            changed.hasOnly(['onlineUsers', 'lastReadBy', 'typingUsers'])
+            && ownPresenceChange('onlineUsers')
+            && ownPresenceChange('lastReadBy')
+            && ownPresenceChange('typingUsers')
+          );
+      }
+
       allow read: if isSignedIn()
         && request.auth.uid in resource.data.memberIds;
       allow create: if isSignedIn()
         && request.auth.uid in request.resource.data.memberIds
         && request.resource.data.get('schoolId', '') != ''
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
+        && isSchoolMember(request.resource.data.schoolId)
+        && ownPresenceOnCreate('onlineUsers')
+        && ownPresenceOnCreate('lastReadBy')
+        && ownPresenceOnCreate('typingUsers');
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.memberIds
         && request.resource.data.schoolId == resource.data.schoolId
-        && request.resource.data.memberIds == resource.data.memberIds;
+        && request.resource.data.memberIds == resource.data.memberIds
+        && conversationPresenceWriteOk();
       allow delete: if false;
 
       match /messages/{messageId} {

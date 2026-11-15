@@ -97,6 +97,72 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('conversation presence and read markers cannot impersonate a peer or overwrite races', async () => {
+    const conversation = 'conversations/presence-pu';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu', status: 'active' });
+      await db.doc('users/bob').set({ schoolId: 'pu', status: 'active' });
+      await db.doc('users/mallory').set({ schoolId: 'ncku', status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/ncku/members/mallory').set({ status: 'active' });
+      await db.doc(conversation).set({
+        type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'],
+        onlineUsers: { bob: 'bob-online' },
+        lastReadBy: { bob: 'bob-read' },
+        typingUsers: { bob: 'bob-typing' },
+        lastMessageText: 'hello',
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const thread = alice.doc(conversation);
+
+    // Existing Mobile paths update the participant's map keys atomically.
+    await assertSucceeds(thread.update({
+      'onlineUsers.alice': 'alice-online', 'lastReadBy.alice': 'alice-read',
+    }));
+    await assertSucceeds(thread.update({ 'typingUsers.alice': 'alice-typing' }));
+    await assertSucceeds(thread.update({ 'typingUsers.alice': deleteField() }));
+    await assertSucceeds(thread.update({ lastMessageText: 'normal-message-preview' }));
+
+    // A member cannot mark another user as read/online/typing or clear them.
+    await assertFails(thread.update({ 'onlineUsers.bob': 'forged' }));
+    await assertFails(thread.update({ 'lastReadBy.bob': 'forged' }));
+    await assertFails(thread.update({ 'typingUsers.bob': null }));
+    await assertFails(thread.update({ onlineUsers: { alice: 'alice-online' } }));
+    await assertFails(thread.update({ lastReadBy: { alice: 'alice-read' } }));
+    await assertFails(thread.update({
+      'onlineUsers.alice': 'other-value', lastMessageText: 'smuggled',
+    }));
+    await assertFails(mallory.doc(conversation).update({ 'typingUsers.mallory': 'fake' }));
+
+    // A second user may publish an independent key without losing the first;
+    // retrying an old whole-map snapshot must not erase a newer peer update.
+    await assertSucceeds(bob.doc(conversation).update({ 'onlineUsers.bob': 'bob-newer' }));
+    await assertFails(thread.update({ onlineUsers: { alice: 'stale' } }));
+    await assertSucceeds(thread.update({ 'onlineUsers.alice': 'alice-newer' }));
+
+    // Creation cannot pre-mark a peer even before the first message.
+    const newPath = alice.doc('conversations/presence-new');
+    const fresh = { type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] };
+    await assertFails(newPath.set({ ...fresh, lastReadBy: { bob: 'forged' } }));
+    await assertFails(newPath.set({ ...fresh, onlineUsers: { bob: 'forged' } }));
+    await assertSucceeds(newPath.set({ ...fresh, lastReadBy: { alice: 'self' } }));
+
+    // Revocation takes effect using the same authenticated context.
+    await seedFirestore(db => db.doc(conversation).update({ memberIds: ['bob'] }));
+    await assertFails(thread.update({ 'onlineUsers.alice': 'replay' }));
+    await seedFirestore(async db => {
+      await db.doc(conversation).update({ memberIds: ['alice', 'bob'] });
+      await db.doc('users/alice').update({ status: 'suspended' });
+    });
+    await assertFails(thread.update({ 'lastReadBy.alice': 'replay' }));
+    await seedFirestore(db => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(thread.update({ 'lastReadBy.alice': 'restored' }));
+  });
+
   test('global postLikes cannot enumerate identities or cross a campus/group boundary', async () => {
     await seedFirestore(async (db) => {
       for (const uid of ['alice', 'bob']) {

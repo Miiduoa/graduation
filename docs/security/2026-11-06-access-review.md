@@ -756,3 +756,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 已將合成 Firebase Emulator 回歸加入 `backend/tests/security-rules.test.js`，涵蓋同校 GET/list、Web/Mobile 舊集合限定查詢、跨帳號/跨校、匿名、缺校園文件、跨校或冒名建立、owner/reporter/school 欄位竄改、正常改名/刪除、資格撤銷後相同 token 重放、殘留校籍與恢復。已補正既有訪客案例的合法 synthetic 校籍及歷史 `schoolId` fixture。**本輪新增測試仍須在新精確 head CI 實際跑完後，才能標記隔離驗證通過**；不能用掃描綠燈替代。
 
 仍未完成未發布群組父貼文 Firestore read/list 及 Web/Mobile feed 相容性、GCS/Supabase 已發 URL 撤銷、真隔離 Storage CAS／競態、歷史附件引用、minimatch 雙鎖檔相容、最新 main 整合與正式發布／回復驗收。保持 PR Draft，無指定 App 5504170 核可不得合併。沒有操作正式資料、金鑰、token、migration、部署、E 校園連線，也未重送受限制的 npm/pnpm audit。
+
+
+## 2026-11-15：對話在線／已讀／打字欄位的跨帳號偽造與競態覆寫（PR #577）
+
+核對精確父 head `41c5dcbb38b24bf9aa2f8634a60bcc7f3ae31a64` 的 [主 CI #43639266034](https://github.com/Miiduoa/graduation/actions/runs/43639266034)、[CodeQL #43639266099](https://github.com/Miiduoa/graduation/actions/runs/43639266099) 與 [Course access](https://github.com/Miiduoa/graduation/actions/runs/43639266027) 均已 completed/success；其 15 項 check runs 無 nuni-merge-gate App 5504170 的 APPROVED。PR reviews 與 unresolved threads 均為零。Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 均未在父 head 單獨觸發，不沿用舊 head 成功資料。查核當時主線為 `c2c3a7f0c82362b663c7eff382282d0a72099dcb`，資安 PR ahead 33／behind 11，維持 Draft。
+
+**獨立可利用邊界：** `conversations/{conversationId}` 原本容許任何對話成員修改任意 `onlineUsers`、`lastReadBy`、`typingUsers` map，包括指定其他成員 UID、擦除別人的狀態及以舊快照覆蓋新值。建立對話亦未阻止預先填入對方已讀／在線狀態。既有 Mobile 使用以自己 UID 為鍵的 Firestore 欄位路徑原子更新。沒有正式資料遭利用的證據。
+
+**最小修補：** 新對話只能初始化自己 UID 的狀態；既有對話若變更任一 presence map，三個 map 的差異都只能包含自己的 UID，且該次不得夾帶其他欄位變更。未修改 presence 的原有文字預覽更新仍可通過；保留目前已存在的對話成員與校籍相容策略，不擅自撤銷跨校後既有私訊。合成 Firebase Emulator 測試包含正常雙人原子更新、偽造對方狀態、清除他人欄位、舊快照競態丟資料、同筆夾帶其他欄位、跨校非成員、建立時冒填、撤銷成員、停權與恢復重放。
+
+**驗證分級：** 本次 Git blob／tree／commit 建立與非強制 expected-SHA 推送後，精確新 head 的 Firestore Rules／Web／Mobile／Functions／CodeQL 等須由新工作流另行確認，不能沿用父 head。正式發佈及實際撤權未驗證。未發布群組父貼文直接讀取、GCS／Supabase 已發 URL 撤銷、真隔離 Storage CAS、歷史附件可信引用、minimatch 兩套鎖檔相容及正式發布回復驗收仍屬待處理。保留 Draft，App 5504170 對精確 head 核可及主線窗口確認前不合併／部署。未觸碰正式資料、金鑰、token、migration、E 校園；未重跑受限制的 npm／pnpm audit。
