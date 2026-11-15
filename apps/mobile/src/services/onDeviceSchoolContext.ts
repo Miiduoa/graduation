@@ -239,7 +239,10 @@ export function formatOnDeviceSchoolPrompt(
   const timetable = context?.timetable;
   const validTimetable = !!timetable &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
-    (timetable.updatedAt === null || isRealTimestamp(timetable.updatedAt)) &&
+    // A restored timetable cannot have been saved after the current collection.
+    // Allow a small device-clock skew, but do not trust a future-dated private source.
+    (timetable.updatedAt === null || (isRealTimestamp(timetable.updatedAt) &&
+      Date.parse(timetable.updatedAt) <= Date.now() + 30_000)) &&
     Array.isArray(timetable.courses) && timetable.courses.length <= 80 &&
     // The live collector never attaches course rows to a missing/unreadable source.
     // A restored contradiction must not authorize unrelated private summaries.
