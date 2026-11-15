@@ -239,10 +239,11 @@ export function formatOnDeviceSchoolPrompt(
   const timetable = context?.timetable;
   const validTimetable = !!timetable &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
-    // A restored timetable cannot have been saved after the current collection.
-    // Allow a small device-clock skew, but do not trust a future-dated private source.
+    // The saved timetable must predate the context that collected it. Comparing
+    // to the current clock alone would accept a source written after checkedAt.
+    // Allow 30 seconds for clock skew without trusting later private evidence.
     (timetable.updatedAt === null || (isRealTimestamp(timetable.updatedAt) &&
-      Date.parse(timetable.updatedAt) <= Date.now() + 30_000)) &&
+      Date.parse(timetable.updatedAt) <= checkedAt.getTime() + 30_000)) &&
     Array.isArray(timetable.courses) && timetable.courses.length <= 80 &&
     // The live collector never attaches course rows to a missing/unreadable source.
     // A restored contradiction must not authorize unrelated private summaries.
