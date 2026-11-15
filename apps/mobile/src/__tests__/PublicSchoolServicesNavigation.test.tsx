@@ -385,7 +385,7 @@ test.each([
     route: 'Career',
     openLabel: '前往成大生涯發展與就業輔導組',
     url: 'https://grad-osa.ncku.edu.tw/',
-    marker: /職涯資料尚未連結到校方系統/,
+    marker: /登入後可申請校內工讀與查看實習學分/,
   },
 ] as const)(
   'non-PU guest can open %s and its school official link without school login',

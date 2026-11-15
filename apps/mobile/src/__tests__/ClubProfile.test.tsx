@@ -42,7 +42,7 @@ test('我的社團可搜尋並開啟既有 GroupDetail，找社團不冒充正�
   fireEvent.changeText(screen.getByLabelText('搜尋我的社團'), '熱舞');
   expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
   fireEvent.press(screen.getByText('找社團'));
-  expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
+  expect(screen.getByText('登入後查看學校社團。')).toBeTruthy();
   expect(screen.queryByText('查看社團：攝影社')).toBeNull();
   expect(screen.queryByText('申請加入')).toBeNull();
 });
