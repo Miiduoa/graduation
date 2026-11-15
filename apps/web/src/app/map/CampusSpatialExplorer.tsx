@@ -287,6 +287,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     const checkSnapshotAge = () => {
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
+      // Keep public Overpass work out of background tabs while a dated volume
+      // remains retainable. The next visible resume event checks this same
+      // absolute deadline; hard expiry still evicts geometry even when hidden.
+      if (document.hidden && now < footprintClock.expiresAt) return;
       if (now >= footprintClock.expiresAt) {
         // Seven days is the source's *hard* retention limit, not a trigger to
         // keep an unverified building on screen indefinitely during an outage.
