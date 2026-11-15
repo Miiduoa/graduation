@@ -1007,3 +1007,37 @@ it('keeps clock readings and map coordinates as exact text rather than ratio bar
     unmount();
   }
 });
+
+it('preserves source scores, GPAs, ratings and indexes without implying ratio magnitudes', () => {
+  // Both columns contain the same exact raw values, but 4 GPA points or 4 stars
+  // must not be presented as twice 2 GPA points or twice 2 stars.
+  for (const header of [
+    '成績', '平均成績', '分數', '考試得分', '滿意度', '平均績點',
+    '星等', '智商', '物價指數', 'GPA', 'Grade', 'Score',
+    'Rating', 'Satisfaction', 'Likert Scale', 'IQ', 'Consumer Price Index',
+  ]) {
+    const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['2', '4']);
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares actual counts of ratings and other measurable quantities', () => {
+  for (const header of [
+    '評分人數', '成績筆數', 'Rating Count', 'Number of Scores',
+    'Index Entries', '學分', 'Study Hours', 'Distance', 'Annual Budget',
+  ]) {
+    const material = ['| 名稱 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
+      [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});

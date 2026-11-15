@@ -46,6 +46,17 @@ const NON_RATIO_CLOCK_POSITION_COLUMN =
 const ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN =
   /\b(?:time\s+of\s+day|clock\s+time|(?:start|end|departure|arrival|class)\s+time|latitude|longitude|coordinates?|altitude|elevation)\b/iu;
 
+// GPA, exam scores, Likert ratings, IQ and index numbers are scale readings,
+// not quantities with a meaningful ratio to zero. A 4.0 GPA does not indicate
+// twice the achievement of a 2.0 GPA. Counts *of* ratings, however, are real
+// quantities and should remain available to compare.
+const NON_RATIO_SCORE_SCALE_COLUMN =
+  /(?:成績|分數|得分|評分|評級|星等|滿意度|績點|智商|指數)/u;
+const ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN =
+  /\b(?:gpa|grades?|scores?|ratings?|likert|satisfaction|iq|index|indices)\b/iu;
+const SCORE_COUNT_COLUMN =
+  /(?:人數|筆數|次數|數量|總數|件數|\b(?:count|number\s+of|quantity|entries)\b)/iu;
+
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
     SOURCE_RATE_OR_RATIO_COLUMN.test(header) || ENGLISH_RATE_OR_RATIO_COLUMN.test(header);
@@ -74,7 +85,10 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column)) return null;
+      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
+       !SCORE_COUNT_COLUMN.test(column))) return null;
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
       /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
       // A number identifying a term, page, floor or class is an ordinal or
