@@ -176,7 +176,7 @@ test('synthetic TLS upstream auth contract: start/exchange/session/logout + publ
     'SYNTHETIC_ADMIN_PORT=9080',
     '--workdir',
     '/scripts',
-    'node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53',
+    'node:24.22.3-alpine3.24@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5',
     'node',
     '/scripts/synthetic-upstream.mjs',
   );
