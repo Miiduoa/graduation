@@ -46,6 +46,13 @@ const NON_RATIO_CLOCK_POSITION_COLUMN =
 const ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN =
   /\b(?:time\s+of\s+day|clock\s+time|(?:start|end|departure|arrival|class)\s+time|latitude|longitude|coordinates?|altitude|elevation)\b/iu;
 
+// An unqualified "時間" / "Time" column can mean a clock reading or elapsed
+// duration. A zero-based bar silently assumes duration, which the material
+// has not established. Only explicitly named durations (e.g. 學習時數,
+// Study Hours) are eligible for a quantitative comparison.
+const AMBIGUOUS_TIME_COLUMN =
+  /^(?:時間|時段|time)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // GPA, exam scores, Likert ratings, IQ and index numbers are scale readings,
 // not quantities with a meaningful ratio to zero. A 4.0 GPA does not indicate
 // twice the achievement of a 2.0 GPA. Counts *of* ratings, however, are real
@@ -82,6 +89,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   const column = table.headers[1].trim();
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
   if (isPercentageColumn(column) ||
+      AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||

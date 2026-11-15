@@ -1084,3 +1084,28 @@ it('selects only visible original Markdown, never HTML-hidden teacher answers', 
   expect(field?.value).toBe('| 正式科目 | 學分 |\n| --- | --- |\n| 資料庫 | 3 |');
   expect(field?.value).not.toContain('秘密');
 });
+
+it('does not invent a zero-based duration chart for ambiguous clock/time headers', () => {
+  // 8 and 12 could be clock hours rather than four and twelve hours elapsed.
+  // Even parenthesized qualifiers do not by themselves establish a duration.
+  for (const header of ['時間', '時間（UTC）', '時段', 'Time', 'Time (UTC)']) {
+    const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 8 |', '| 乙 | 12 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares explicitly named elapsed hours rather than disabling useful duration values', () => {
+  for (const header of ['學習時數', 'Study Hours', 'Duration Minutes']) {
+    const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(Array.from(container.querySelectorAll('meter')).map(node => node.getAttribute('value')))
+      .toEqual(['2', '4']);
+    unmount();
+  }
+});
