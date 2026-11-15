@@ -303,6 +303,19 @@ export function createCareerWorkstudyHandlers({
         log(`review_${command.state}`, ref.id);
         return { id: ref.id };
       }
+      if (command.action === 'withdraw') {
+        const ref = applications.doc(id(command.applicationId));
+        const snap = await tx.get(ref);
+        if (!snap.exists) fail('not-found', '找不到這筆申請。');
+        const app = data<CareerApplication>(snap);
+        if (app.uid !== uid) fail('permission-denied', '只能撤回自己的工讀申請。');
+        if (command.revision !== app.revision) fail('aborted', '申請已更新，請重新整理。');
+        if (!['submitted', 'read'].includes(app.state))
+          fail('failed-precondition', '這筆申請目前不可撤回。');
+        tx.delete(ref);
+        log('withdraw', ref.id);
+        return { id: ref.id };
+      }
       if (command.action === 'sources') {
         if (!canOperate) fail('permission-denied', '只有校方管理員可調整資料來源。');
         const s = command.sources;

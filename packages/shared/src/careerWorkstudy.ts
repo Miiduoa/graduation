@@ -97,6 +97,7 @@ export type CareerCommand =
       /** Omit to preserve the saved reply; an explicit empty string clears it. */
       message?: string;
     }
+  | { action: 'withdraw'; applicationId: string; revision: number }
   | { action: 'sources'; sources: CareerSources };
 export type CareerReply = { snapshot?: WorkstudySnapshot; id?: string };
 export type CareerReadOptions = { signal?: AbortSignal };

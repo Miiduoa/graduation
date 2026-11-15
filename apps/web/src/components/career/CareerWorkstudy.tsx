@@ -146,6 +146,9 @@ function Workspace({
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState('機會');
+  const [unitFilter, setUnitFilter] = useState('all');
+  const [slotFilter, setSlotFilter] = useState('all');
+  const [creditFilter, setCreditFilter] = useState<'all' | 'credit' | 'non-credit'>('all');
   const alive = useRef(true);
   const inFlight = useRef(false);
   const generation = useRef(0);
@@ -266,6 +269,20 @@ function Workspace({
   }
   const displayedOpportunities =
     snapshot?.opportunities.filter((o) => audience === 'staff' || o.type === 'workstudy') ?? [];
+  const unitOptions = [...new Set(displayedOpportunities.map((opportunity) => opportunity.unit))];
+  const slotOptions = [
+    ...new Set(
+      displayedOpportunities.flatMap((opportunity) => opportunity.slots.map((slot) => slotLabel(slot))),
+    ),
+  ];
+  const filteredOpportunities = displayedOpportunities.filter((opportunity) => {
+    if (unitFilter !== 'all' && opportunity.unit !== unitFilter) return false;
+    if (slotFilter !== 'all' && !opportunity.slots.map((slot) => slotLabel(slot)).includes(slotFilter))
+      return false;
+    if (creditFilter === 'credit' && !opportunity.credit) return false;
+    if (creditFilter === 'non-credit' && opportunity.credit) return false;
+    return true;
+  });
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   function edit(opportunity: CareerOpportunity) {
     setDraft({ ...opportunity });
@@ -384,13 +401,55 @@ function Workspace({
           {audience === 'staff' && (
             <Button label="新增機會" onPress={() => edit(emptyOpportunity())} />
           )}
+          {snapshot && (
+            <Row>
+              <label>
+                單位
+                <select value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
+                  <option value="all">全部</option>
+                  {unitOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                時段
+                <select value={slotFilter} onChange={(event) => setSlotFilter(event.target.value)}>
+                  <option value="all">全部</option>
+                  {slotOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                學分
+                <select
+                  value={creditFilter}
+                  onChange={(event) =>
+                    setCreditFilter(event.target.value as 'all' | 'credit' | 'non-credit')
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="credit">可抵學分</option>
+                  <option value="non-credit">不抵學分</option>
+                </select>
+              </label>
+            </Row>
+          )}
           {snapshot && !displayedOpportunities.length && (
             <Box>
               <Body>職產處還沒在這裡上架工讀或實習。</Body>
               {official && <External label="前往職產處官網 ↗" url={official.url} />}
             </Box>
           )}
-          {displayedOpportunities.map((o) => {
+          {snapshot && !!displayedOpportunities.length && !filteredOpportunities.length && (
+            <Body>沒有符合目前篩選條件的工讀機會。</Body>
+          )}
+          {filteredOpportunities.map((o) => {
             const conflicts = workstudyConflicts(schoolId, o.slots, courses);
             const application = snapshot?.applications.find((a) => a.opportunityId === o.id);
             const closed = Date.parse(o.deadline) <= checkedAt || !o.published;
@@ -540,6 +599,15 @@ function Workspace({
               </Body>
               <Body>{a.rights.text}</Body>
               <External label="申請時的權益公告 ↗" url={a.rights.url} />
+              {audience === 'student' && ['submitted', 'read'].includes(a.state) && (
+                <Button
+                  label="撤回申請"
+                  disabled={busy}
+                  onPress={() =>
+                    void execute({ action: 'withdraw', applicationId: a.id, revision: a.revision })
+                  }
+                />
+              )}
               {audience === 'staff' && (
                 <Box>
                   <Body>聯絡方式：{a.contact}</Body>

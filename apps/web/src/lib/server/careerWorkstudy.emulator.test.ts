@@ -203,6 +203,25 @@ suite('career transactions against the real Firestore emulator', () => {
     await command('staff', { action: 'save', opportunity: { ...opportunity, revision: 2 } });
     expect((await db.collection('schools/pu/adminLogs').get()).size).toBe(3);
   });
+  it('allows students to withdraw early applications and apply again', async () => {
+    const created = await command('student', apply());
+    await command('student', {
+      action: 'withdraw',
+      applicationId: created.id!,
+      revision: 1,
+    });
+    expect((await db.doc(`schools/pu/careerApplications/${created.id}`).get()).exists).toBe(false);
+    const reapplied = await command('student', apply());
+    expect(reapplied.id).toBe(created.id);
+    await db.doc(`schools/pu/careerApplications/${created.id}`).update({ state: 'interview', revision: 2 });
+    await expect(
+      command('student', {
+        action: 'withdraw',
+        applicationId: created.id!,
+        revision: 2,
+      }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+  });
   it.each([
     { sourceUrl: 'https://evil.example/' },
     { rightsUrl: 'javascript:alert(1)' },

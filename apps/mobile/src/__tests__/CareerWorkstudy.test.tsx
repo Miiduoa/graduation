@@ -89,6 +89,43 @@ test('student sees conflicts without losing opportunities, reads rights and send
   });
   expect(view.getAllByText('已送出').length).toBeGreaterThan(0);
 });
+test('student can withdraw early-stage applications and apply again later', async () => {
+  const { view, data, service } = setup();
+  data.applications = [{ ...application, state: 'submitted' }];
+  await view.findByText('我的申請');
+  fireEvent.press(view.getByRole('button', { name: '撤回申請' }));
+  await waitFor(() =>
+    expect(service.execute).toHaveBeenCalledWith({
+      action: 'withdraw',
+      applicationId: application.id,
+      revision: application.revision,
+    }),
+  );
+});
+
+test('work-study filters can narrow by unit, slot and credit with empty-state feedback', async () => {
+  const { view, data } = setup();
+  data.opportunities = [
+    opportunity,
+    {
+      ...opportunity,
+      id: 'second',
+      title: '第二份工讀',
+      unit: '圖書館',
+      credit: false,
+      slots: [{ day: 4, start: '13:00', end: '15:00' }],
+    },
+  ];
+  await view.findByText('測試用工讀');
+  fireEvent.changeText(view.getByLabelText('篩選單位'), '圖書館');
+  expect(view.getByText('第二份工讀')).toBeTruthy();
+  expect(view.queryByText('測試用工讀')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '週三');
+  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '');
+  fireEvent.press(view.getByRole('button', { name: '學分：可抵學分' }));
+  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+});
 test('guest action asks host to log in and never sends a command', async () => {
   const { view, service, onLogin } = setup('student', null);
   fireEvent.press(await view.findByRole('button', { name: '應徵測試用工讀' }));
