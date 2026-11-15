@@ -128,6 +128,14 @@ suite('internship real Firestore transactions', () => {
         expect.objectContaining({ uid: 'advisor', name: '王指導', email: 'advisor@school.edu.tw' }),
       ]),
     );
+    const byName = await call('student', { action: 'advisorSearch', keyword: '王' });
+    expect(byName.snapshot?.advisors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ uid: 'advisor', name: '王指導' }),
+      ]),
+    );
+    const studentHits = await call('student', { action: 'advisorSearch', keyword: 'student' });
+    expect(studentHits.snapshot?.advisors?.some((advisor) => advisor.uid === 'student')).toBe(false);
     await expect(
       call('student', {
         ...create(),

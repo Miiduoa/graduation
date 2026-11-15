@@ -1,5 +1,5 @@
 /** Approval-isolated: never registered in API routes, fnDispatch or deployed exports. */
-import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { Timestamp, type Firestore, type Query } from 'firebase-admin/firestore';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import {
@@ -128,25 +128,60 @@ export function createCareerInternshipHandlers({
         email: String(profile?.email || member.email || '').trim(),
         department: String(profile?.department || member.department || '').trim(),
       });
+      const advisorRoles = ['teacher', 'staff', 'admin'];
+      const isAdvisor = (data?: Record<string, unknown>) =>
+        data?.status === 'active' && advisorRoles.includes(String(data?.role || ''));
       const loadAdvisors = async (keywordRaw: string, max: number) => {
-        const keyword = keywordRaw.trim().toLocaleLowerCase('zh-TW');
+        const keyword = keywordRaw.trim();
         const limit = Math.max(1, Math.min(50, max || 20));
-        const batches = await Promise.all(
-          ['teacher', 'staff', 'admin'].map((roleName) =>
-            tx.get(members.where('status', '==', 'active').where('role', '==', roleName).limit(40)),
-          ),
-        );
-        const candidateDocs = [...new Map(batches.flatMap((s) => s.docs).map((d) => [d.id, d])).values()];
-        const profileDocs = await tx.getAll(...candidateDocs.map((doc) => directory.doc(doc.id)));
-        const rows = candidateDocs
-          .map((doc, index) => advisorView(doc.id, doc.data(), profileDocs[index]?.data()))
+        const lowered = keyword.toLocaleLowerCase('zh-TW');
+        const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lowered);
+        const ids = new Set<string>();
+        const take = async (query: Query) => {
+          const snap = await tx.get(query.limit(20));
+          snap.docs.forEach((doc) => ids.add(doc.id));
+        };
+        if (isEmail) {
+          const emails = Array.from(new Set([keyword, lowered]));
+          for (const email of emails) {
+            await take(members.where('email', '==', email));
+            await take(directory.where('email', '==', email));
+            await take(db.collection('users').where('email', '==', email));
+          }
+        } else {
+          const names = Array.from(new Set([keyword]));
+          for (const name of names) {
+            await take(members.where('displayName', '==', name));
+            await take(directory.where('displayName', '==', name));
+            await take(
+              members
+                .where('displayName', '>=', name)
+                .where('displayName', '<=', `${name}\uf8ff`),
+            );
+            await take(
+              directory
+                .where('displayName', '>=', name)
+                .where('displayName', '<=', `${name}\uf8ff`),
+            );
+          }
+        }
+        if (!ids.size) return [];
+        const refs = Array.from(ids).slice(0, 40);
+        const memberDocs = await tx.getAll(...refs.map((id) => members.doc(id)));
+        const profileDocs = await tx.getAll(...refs.map((id) => directory.doc(id)));
+        return memberDocs
+          .map((doc, index) =>
+            isAdvisor(doc.data())
+              ? advisorView(doc.id, doc.data() as Record<string, unknown>, profileDocs[index]?.data())
+              : null,
+          )
+          .filter((row): row is NonNullable<typeof row> => Boolean(row))
           .filter((row) => {
-            if (!keyword) return true;
-            return `${row.name} ${row.email} ${row.department}`.toLocaleLowerCase('zh-TW').includes(keyword);
+            const haystack = `${row.name} ${row.email} ${row.department}`.toLocaleLowerCase('zh-TW');
+            return isEmail ? haystack.includes(lowered) : haystack.includes(lowered) || row.name.startsWith(keyword);
           })
           .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
           .slice(0, limit);
-        return rows;
       };
       const audit = (action: string, targetId: string) =>
         tx.create(school.collection('adminLogs').doc(), {
