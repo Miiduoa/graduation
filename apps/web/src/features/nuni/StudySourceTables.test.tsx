@@ -975,3 +975,35 @@ it('does not mislead on abbreviated temperature or decibel source columns', () =
     unmount();
   }
 });
+
+
+it('keeps clock readings and map coordinates as exact text rather than ratio bars', () => {
+  // Neither noon / 8 AM nor 120° / 60° longitude implies a twofold quantity.
+  for (const header of [
+    '時刻', '上課時間', '開始時間', '抵達時間', '經緯度', '經度', '緯度',
+    '座標', '海拔', 'Time of Day', 'Clock Time', 'Start Time',
+    'Departure Time', 'Latitude', 'Longitude', 'Coordinates', 'Elevation',
+  ]) {
+    const material = [
+      '| 樣本 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 8 |', '| 乙 | 12 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['8', '12']);
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+  // A study duration or travelled distance still has a meaningful zero.
+  for (const header of ['學習時數', 'Study Hours', 'Distance', 'Course Credits']) {
+    const material = [
+      '| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 8 |', '| 乙 | 12 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
+      .toEqual(['12', '12']);
+    unmount();
+  }
+});

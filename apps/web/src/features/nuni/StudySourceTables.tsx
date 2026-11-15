@@ -37,6 +37,14 @@ const NON_RATIO_SCIENCE_COLUMN =
 const ENGLISH_NON_RATIO_SCIENCE_COLUMN =
   /\b(?:temperature|temp\.?|celsius|fahrenheit|pH|decibels?|richter)\b/iu;
 const DECIBEL_UNIT_COLUMN = /\bdB(?:A|C|FS|m|W)?\b/u;
+// Clock readings and geographic coordinates have conventional origins.
+// Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
+// are not ratios; retain the original table without a zero-based chart.
+// Do not blacklist elapsed study hours or distances, which can be quantities.
+const NON_RATIO_CLOCK_POSITION_COLUMN =
+  /(?:時刻|時間點|鐘點|開課時間|上課時間|下課時間|開始時間|結束時間|發車時間|抵達時間|到站時間|經度|緯度|經緯度|座標|坐標|海拔|標高)/u;
+const ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN =
+  /\b(?:time\s+of\s+day|clock\s+time|(?:start|end|departure|arrival|class)\s+time|latitude|longitude|coordinates?|altitude|elevation)\b/iu;
 
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
@@ -64,7 +72,9 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
   if (isPercentageColumn(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
-      DECIBEL_UNIT_COLUMN.test(column)) return null;
+      DECIBEL_UNIT_COLUMN.test(column) ||
+      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column)) return null;
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
       /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
       // A number identifying a term, page, floor or class is an ordinal or
