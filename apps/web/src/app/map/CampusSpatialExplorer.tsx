@@ -438,7 +438,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           const rateLimitedOrIncomplete = status === 206 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
             contentRange !== null;
-          const seconds = rateLimitedOrIncomplete ? footprintCooldownSeconds(response) : null;
+          // 429 responses are allowed to omit Retry-After (RFC 6585). When a
+          // proxy strips or corrupts that header, impose a short local backoff
+          // instead of letting repeated taps flood our public footprint API.
+          // Preserve other failure statuses' existing retry behavior.
+          const seconds = rateLimitedOrIncomplete
+            ? (footprintCooldownSeconds(response) ?? (status === 429 ? 60 : null))
+            : null;
           if (active && !timedOut && seconds !== null) {
             setFootprintRetryAfter({ until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60) });
           }
