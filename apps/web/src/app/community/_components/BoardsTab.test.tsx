@@ -128,6 +128,20 @@ it('makes a pending subscription a single action and announces its current state
   await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
 });
 
+it('prevents two subscription writes from rapid clicks before React commits the disabled state', async () => {
+  mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  const pending = deferred<void>();
+  mocks.subscribe.mockReturnValue(pending.promise);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
+  // Both DOM click events occur within one React batch, before a new render can disable the button.
+  act(() => { button.click(); button.click(); });
+  expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
+  expect(mocks.unsubscribe).not.toHaveBeenCalled();
+  await act(async () => pending.resolve(undefined));
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+});
+
 it('reports a failed subscribe, restores the previous state and allows retry', async () => {
   mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
   const pending = deferred<void>();
