@@ -3,6 +3,7 @@ import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
 import HomePage from './page';
+import { TodayAgent } from '@/features/nuni/TodayAgent';
 import { loadHomeData, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { FirebaseError } from 'firebase/app';
@@ -49,6 +50,7 @@ vi.mock('@/components/AppHeader', () => ({
   ),
 }));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
+vi.mock('@/features/nuni/TodayAgent', () => ({ TodayAgent: vi.fn(() => null) }));
 vi.mock('@/lib/usePersonalTodayRecords', () => ({
   usePersonalTodayRecords: () => state.timetable,
 }));
@@ -254,7 +256,7 @@ it('keeps teaching courses on today and no longer lists studying courses as a gr
   expect(screen.queryByRole('heading', { name: /修習課程/ })).toBeNull();
 });
 
-it('does not tell a teacher they have no homework and opens the teaching course list', async () => {
+it('does not tell a teacher they have no homework and opens the teacher course workspace', async () => {
   state.session = { context: 'session-a', platformAccountId: 'teacher-a' };
   vi.mocked(loadNuniHomeSections).mockResolvedValue({
     courses: [{ id: 'teach', name: '教學實習', role: 'owner-teacher', unreadCount: 0 }],
@@ -264,9 +266,10 @@ it('does not tell a teacher they have no homework and opens the teaching course 
   render(<HomePage />);
   const teacherToday = await screen.findByTestId('teacher-today');
   expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
+  // The teacher workspace manages assignments; /course/teach remains the content page.
   expect(
     within(teacherToday).getByRole('link', { name: /教學實習/ }).getAttribute('href'),
-  ).toBe('/course/teach');
+  ).toBe('/teacher/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
   expect(screen.queryByTestId('student-today')).toBeNull();
 });
@@ -989,4 +992,30 @@ it('keeps the active question on screen while a late course load resolves the te
   fireEvent.click(summary);
   await screen.findByTestId('teacher-today');
   expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+});
+
+it('gives the homepage agent only platform tasks, retaining their exact source IDs', async () => {
+  state.session = { context: 'a'.repeat(43), platformAccountId: 'alice-platform' };
+  const platform = data('平台課程', { courses: [{ id: 'platform-course', name: '平台課程', role: 'student', unreadCount: 0 }],
+    tasks: [{ kind: 'quiz', id: 'source-task-id', courseId: 'platform-course', courseName: '平台課程',
+      title: '平台未完成測驗', dueAt: '2099-01-02T12:00:00+08:00' }] });
+  vi.mocked(loadHomeData).mockResolvedValue(data('學校課程'));
+  vi.mocked(loadNuniHomeSections).mockResolvedValue(platform);
+  render(<HomePage />);
+  await waitFor(() => expect(vi.mocked(TodayAgent).mock.calls.some(([input]) =>
+    input.tasks.some((task) => task.id === 'source-task-id'))).toBe(true));
+  const input = vi.mocked(TodayAgent).mock.calls.at(-1)![0];
+  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false });
+  expect(input.tasks).toEqual(platform.tasks);
+  expect(input.tasks.some((task) => task.courseName === '學校課程')).toBe(false);
+});
+
+it('removes the platform agent while its session is uncertain even when school auth remains', async () => {
+  state.session = { context: 'a'.repeat(43), platformAccountId: 'alice-platform' };
+  state.sessionError = '登入狀態尚未核對';
+  vi.mocked(loadHomeData).mockResolvedValue(data('學校課程'));
+  vi.mocked(loadNuniHomeSections).mockResolvedValue(data('平台課程'));
+  render(<HomePage />);
+  await screen.findAllByText('學校課程 作業');
+  expect(TodayAgent).not.toHaveBeenCalled();
 });

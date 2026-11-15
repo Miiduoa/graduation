@@ -107,12 +107,14 @@ function assertCurrent(uid: string, current: () => boolean) {
 export async function loadMapFavorites(uid: string, schoolId: string): Promise<string[]> {
   assertCurrent(uid, () => true);
   if (!validId(schoolId)) throw new Error('Invalid school');
-  const snapshot = await getDocsFromServer(
+  // A stalled Firestore read must not leave the map's saved-place UI waiting
+  // indefinitely. Do not fall back to another school's or user's favorites.
+  const snapshot = await withTimeout(getDocsFromServer(
     query(
       collection(getDb(), 'users', uid, 'schools', schoolId, 'favorites'),
       where('type', '==', 'poi'),
     ),
-  );
+  ), MAP_SOURCE_TIMEOUT_MS);
   assertCurrent(uid, () => true);
   return snapshot.docs.flatMap((entry) => {
     const data = entry.data();

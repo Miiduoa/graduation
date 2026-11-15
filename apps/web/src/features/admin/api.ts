@@ -28,6 +28,7 @@ export type AdminAudit = {
   id: string;
   actionLabel: string;
   actorName: string;
+  targetTenantId: string | null;
   targetSchoolName: string | null;
   detail: string;
   createdAt: string;
@@ -153,6 +154,7 @@ export function parseAudit(value: unknown): AdminAudit[] {
       id: text(row.id),
       actionLabel: text(row.actionLabel),
       actorName: text(row.actorName),
+      targetTenantId: nullableText(row.targetTenantId ?? null),
       targetSchoolName: nullableText(row.targetSchoolName),
       detail: text(row.detail),
       createdAt,

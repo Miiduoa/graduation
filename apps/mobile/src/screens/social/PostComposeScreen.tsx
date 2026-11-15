@@ -65,10 +65,11 @@ export function PostComposeScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const routeBoardId = props?.route?.params?.boardId as string | undefined;
+  const fromCreatorProfile = props?.route?.name === 'CreatorPostCompose';
   const routeDefaultAnon =
     props?.route?.params?.defaultAnonymous === true || props?.route?.params?.defaultAnonymous === false
       ? (props.route.params.defaultAnonymous as boolean)
-      : true;
+      : !fromCreatorProfile;
 
   const [boardId, setBoardId] = useState(routeBoardId ?? '');
   const [boards, setBoards] = useState<CampusBoard[]>([]);
@@ -94,10 +95,10 @@ export function PostComposeScreen(props: any) {
   const selectedBoard = useMemo(() => boards.find((b) => b.id === boardId), [boards, boardId]);
 
   useEffect(() => {
-    if (selectedBoard?.defaultAnonymous != null) {
+    if (!fromCreatorProfile && selectedBoard?.defaultAnonymous != null) {
       setAnonymous(selectedBoard.defaultAnonymous);
     }
-  }, [selectedBoard?.defaultAnonymous]);
+  }, [fromCreatorProfile, selectedBoard?.defaultAnonymous]);
 
   const pickImage = async () => {
     if (drafts.length >= MAX_MEDIA) {
@@ -265,6 +266,13 @@ export function PostComposeScreen(props: any) {
           <Text style={styles.label}>匿名貼文</Text>
           <Switch value={anonymous} onValueChange={setAnonymous} />
         </View>
+        {fromCreatorProfile ? (
+          <Text style={[styles.counter, { textAlign: 'left', marginBottom: 10 }]}>
+            {anonymous
+              ? '匿名貼文不會出現在個人作品中。'
+              : '這篇將以你的帳號署名發表，並顯示在你的個人作品中。'}
+          </Text>
+        ) : null}
 
         <Text style={styles.label}>標題</Text>
         <TextInput

@@ -209,7 +209,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
     };
   }, [context, request, revision]);
 
-  const openWeb = async (path: '/classroom/account' | '/admin') => {
+  const openWeb = async (path: '/classroom/account' | '/admin' | '/admin#audit') => {
     setLinkError('');
     try {
       await Linking.openURL(`https://nuni.tw${path}`);
@@ -266,6 +266,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
           </Text>
           <Text style={s.body}>管理學校接入、服務狀態與檢舉。私人課程仍依課程成員資格授權。</Text>
           <Action label="開啟網頁管理工作台" onPress={() => void openWeb('/admin')} />
+          <Action label="查閱操作紀錄" onPress={() => void openWeb('/admin#audit')} />
         </View>
       ) : null}
       {linkError ? (

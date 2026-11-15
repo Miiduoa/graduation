@@ -11,7 +11,7 @@ const {
 const { createRequire } = require('node:module');
 const { basename, dirname, join, relative, sep } = require('node:path');
 
-const APPROVED_NEXT_VERSION = '16.4.2';
+const APPROVED_NEXT_VERSION = '16.4.5';
 const APPROVED_SHARP_VERSION = '0.35.5';
 const APPROVED_SOURCE_MAP_JS_VERSION = '1.2.2';
 const APPROVED_PACKAGES = Object.freeze({

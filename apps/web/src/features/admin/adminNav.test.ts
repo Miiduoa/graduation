@@ -116,3 +116,19 @@ it('round-trips the campus announcements section in the hash', () => {
   });
   expect(isAdminWorkbenchHash('#announcements')).toBe(true);
 });
+
+it('round-trips the audit school scope separately from free-text search', () => {
+  const location = {
+    ...defaultAdminLocation(),
+    section: 'audit' as const,
+    auditTenantId: 'school-one',
+    auditSchoolName: '第一學校',
+    auditQuery: '聯絡資訊',
+  };
+  expect(parseAdminHash(serializeAdminHash(location))).toEqual(location);
+  expect(parseAdminHash('#audit?tenantId=school-one')).toMatchObject({
+    auditTenantId: 'school-one',
+    auditSchoolName: '',
+    auditQuery: '',
+  });
+});
