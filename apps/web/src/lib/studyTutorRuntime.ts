@@ -124,6 +124,51 @@ function hasDistinctGeneratedReview(explanation: TutorExplanation): boolean {
   return comparable(explanation.question) !== comparable(explanation.answer);
 }
 
+// A labeled answer column in a multiline Markdown table also reveals a
+// generated answer before a learner attempts it. Only match exact cell values
+// for NEW local generation; saved lessons and original source are unchanged.
+function hasDisclosedGeneratedAnswerColumn(question: string, answer: string): boolean {
+  const parseRow = (line: string): string[] | null => {
+    const text = line.trim();
+    // Escaped pipes and pipes within inline code are ambiguous without a
+    // full Markdown parser. Never guess an answer column from those rows.
+    if (!text.includes('|') || text.includes('\\|') ||
+        new RegExp(String.fromCharCode(96) + '[^' + String.fromCharCode(96) + ']*\\|' +
+          '[^' + String.fromCharCode(96) + ']*' + String.fromCharCode(96), 'u').test(text)) return null;
+    const inner = text.replace(/^\|/u, '').replace(/\|$/u, '');
+    return inner.split('|').map((cell) => cell.trim());
+  };
+  const normalized = (value: string): string => {
+    let cell = value.trim();
+    // Remove only matching presentation wrappers; keep minus signs,
+    // decimal points and internal identifier punctuation significant.
+    for (const marker of ['**', '__', String.fromCharCode(96), '*', '_']) {
+      if (cell.startsWith(marker) && cell.endsWith(marker) && cell.length > marker.length * 2)
+        cell = cell.slice(marker.length, -marker.length).trim();
+    }
+    return comparableGeneratedTeaching(cell).toLowerCase()
+      .replace(/\s+/gu, '').replace(/[.!?。！？；;：:，、]+$/gu, '');
+  };
+  const expected = normalized(answer);
+  if (!expected) return false;
+  const headerPattern = /^(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution|correctanswer|expectedanswer|referenceanswer)$/u;
+  const lines = question.split(/\r?\n/u);
+  for (let index = 0; index < lines.length - 2; index += 1) {
+    const headers = parseRow(lines[index]);
+    const separator = parseRow(lines[index + 1]);
+    if (!headers || !separator || headers.length !== separator.length ||
+        !separator.every((cell) => /^:?-{3,}:?$/u.test(cell))) continue;
+    const answerIndices = headers.flatMap((header, column) => headerPattern.test(normalized(header)) ? [column] : []);
+    if (answerIndices.length === 0) continue;
+    for (let rowIndex = index + 2; rowIndex < lines.length; rowIndex += 1) {
+      const cells = parseRow(lines[rowIndex]);
+      if (!cells || cells.length !== headers.length) break;
+      if (answerIndices.some((column) => normalized(cells[column]) === expected)) return true;
+    }
+  }
+  return false;
+}
+
 // A self-check cannot test recall if it prints its own reference answer in
 // an explicit answer key. Only reject a labelled disclosure that actually
 // matches the generated answer; ordinary questions may contain the same
@@ -202,7 +247,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
       !(followingCharacter === '_' && closesEmphasis)) continue;
     return false;
   }
-  return true;
+  return !hasDisclosedGeneratedAnswerColumn(question, answer);
 }
 
 // Distinct titles, source lines or whitespace cannot turn the SAME explanation

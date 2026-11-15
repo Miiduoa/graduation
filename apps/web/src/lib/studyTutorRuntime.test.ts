@@ -1080,6 +1080,11 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'Markdown table English inline code answer cell', question: '| Answer | `SQL` |', answer: 'SQL' },
     { label: 'Markdown table Chinese bold key', question: '| 正解 | **主鍵** |', answer: '主鍵' },
     { label: 'Markdown table numeric key', question: '| 參考回答 | 1.2 |', answer: '1.2' },
+    { label: 'aligned Chinese answer column', question: '哪個欄位？\n| 題目 | 答案 |\n| --- | --- |\n| 識別紀錄 | 主鍵 |', answer: '主鍵' },
+    { label: 'English answer column in CRLF table', question: 'Which term?\r\n| Prompt | Answer |\r\n| :--- | ---: |\r\n| DB | `SQL` |', answer: 'SQL' },
+    { label: 'single-column Markdown answer table', question: '計算結果為何？\n| 正解 |\n| --- |\n| 1.2 |', answer: '1.2' },
+    { label: 'bold key in a later table row', question: '請解釋。\n| 題型 | 參考回答 |\n| --- | --- |\n| 例題 | 其他 |\n| 練習 | **外鍵** |', answer: '外鍵' },
+    { label: 'answer column on the left', question: '選哪個？\n| 正確選項 | 題號 |\n| --- | --- |\n| B | 第一題 |', answer: 'B' },
   ])('rejects $label, preserves old backup parsing and allows retry', async ({ question, answer }) => {
     const leaked = { ...lesson(), question, answer };
     expect(parseTutorExplanation(JSON.stringify(leaked), passage()))
@@ -1157,6 +1162,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '| Answer | SQLServer |', answer: 'SQL' },
     { question: '| 答案 | 12 |', answer: '1' },
     { question: '| Answer | `SQL` |', answer: '外鍵' },
+    { question: '答案在哪？\n| 題目 | 答案 |\n| --- | --- |\n| 示例 | SQLServer |', answer: 'SQL' },
+    { question: '是否正確？\n| 題目 | 正解 |\n| --- | --- |\n| 示例 | 12 |', answer: '1' },
+    { question: '哪個欄位？\n| 題目 | Answer |\n| --- | --- |\n| 示例 | 主鍵 |', answer: '外鍵' },
+    { question: '表格內容是什麼？\n| 術語 | 範例 |\n| --- | --- |\n| 語法 | SQL |', answer: 'SQL' },
   ])('keeps a question without a disclosed answer: $question', async ({ question, answer }) => {
     const valid = { ...lesson(), question, answer };
     const pending = runStudyTutor({
