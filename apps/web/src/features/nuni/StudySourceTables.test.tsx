@@ -938,3 +938,40 @@ it('keeps fixed 100% charts for bounded completion rates and numeric budgets', (
   expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
     .toEqual(['75', '75']);
 });
+
+it('does not mislead on abbreviated temperature or decibel source columns', () => {
+  // 40 °C is not twice 20 °C, and 60 dBA is not twice 30 dBA.
+  // Only the literal source cells should remain, not a zero-based meter.
+  for (const header of [
+    '氣溫', '室溫', '體溫', '水溫', '氣溫 (°C)', '室溫（°F）',
+    '℃', '℉', 'Temp', 'Temp.', 'Temp (°C)', 'Noise dBA',
+    'Sound Level dB(A)', 'Noise dBC', 'Sound dBFS', 'Signal dBm',
+  ]) {
+    const material = [
+      '| 樣本 | ' + header + ' |',
+      '| --- | --- |',
+      '| 甲 | 20 |',
+      '| 乙 | 40 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    const table = screen.getByRole('table');
+    expect(within(table).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['20', '40']);
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+  // Database abbreviations and true amounts must remain usable.
+  for (const header of ['DB Record Count', '年度預算', 'Course Credits']) {
+    const material = [
+      '| 項目 | ' + header + ' |',
+      '| --- | --- |',
+      '| 甲 | 20 |',
+      '| 乙 | 40 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('max')))
+      .toEqual(['40', '40']);
+    unmount();
+  }
+});

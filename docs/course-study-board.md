@@ -1187,3 +1187,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 部分手機 WebView 雖提供 `File.text()` 或 `Blob.arrayBuffer()`，實際從裝置檔案 App 選取教材與進度 JSON 時仍會拒絕讀取。現在在這兩種讀取路徑遭拒後，改用裝置原生 `FileReader.readAsArrayBuffer()` 嘗試恢復。
 - UTF-8 仍以嚴格位元組解碼拒絕損壞內容，避免默默變成替代字元或覆蓋未備份筆記。新增 3 組模擬瀏覽器 DOM 回歸測試：`File.text` 拒絕、兩個 Blob API 均拒絕但 FileReader 成功、損壞 JSON 拒收。原始教材、scope、進度格式、其他功能與本機資料界線不變，無新套件或外部 API。
 - 這是程式與測試提交，不等於正式 Vitest、Web/Mobile CI、CodeQL、App 5504170 APPROVED、Maestro、iOS／Android 真機或 Ahaboard 同教材同題同機驗收；PR 保持 Draft、不合併、不部署。
+
+
+### 2026-11-15：科學教材溫度簡寫與分貝單位不再被畫成倍數長條
+
+- 原文數值比較已排除「溫度／攝氏／華氏」，但教師講義常寫「氣溫、室溫、體溫、水溫、Temp、°C、°F、℃、℉」，音量欄位也會寫 dBA、dBC、dBFS、dBm。這些欄位若只填 20／40 或 30／60，原版仍可能畫成 1:2 的零起點 meter，造成「40°C 是 20°C 的兩倍熱」「60 dBA 是 30 dBA 的兩倍聲音」的錯誤暗示。
+- 新版將這些有明確科學單位的**欄標題**排除在零起點數值比較之外，保留所有原文表格與精確數字；同時將區分大小寫的 dB 單位與資料庫縮寫 DB 分開，避免誤傷 DB Record Count、年度預算及學分等適合比較的實際數量。
+- 新增模擬 DOM 正反回歸；不新增套件、不推斷單位、不修改教材或進度備份，也不外傳私人教材。此修補不是圖片圖表理解、WebGPU 中文教學、實機 VoiceOver／TalkBack 或 Ahaboard 同題同機對照證據。新 SHA 的 CI／CodeQL、指定 App 5504170、Maestro 與 iOS／Android 仍需逐項核對；PR 繼續 Draft，未合併、未部署。

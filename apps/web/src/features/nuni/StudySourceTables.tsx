@@ -28,9 +28,15 @@ const ENGLISH_UNBOUNDED_RATE_COLUMN =
 // have an arbitrary zero or logarithmic scale. A zero-based meter would
 // falsely imply that a 40 °C reading is twice as hot as 20 °C, or that
 // pH 8 is twice pH 4. Keep exact source cells, but omit a ratio-style bar.
-const NON_RATIO_SCIENCE_COLUMN = /(?:溫度|攝氏|華氏|酸鹼值|酸鹼度|地震規模|震級|分貝)/u;
+// Textbook headers often abbreviate temperature as 氣溫、Temp or °C/℃,
+// and sound level as dBA/dBFS. These still cannot use zero-based ratio bars.
+// Keep the case-sensitive dB unit separate so "DB Record Count" is not
+// misclassified as a decibel measurement.
+const NON_RATIO_SCIENCE_COLUMN =
+  /(?:溫度|氣溫|室溫|體溫|水溫|攝氏|華氏|酸鹼值|酸鹼度|地震規模|震級|分貝|[℃℉]|°\s*[CF]\b)/iu;
 const ENGLISH_NON_RATIO_SCIENCE_COLUMN =
-  /\b(?:temperature|celsius|fahrenheit|pH|decibels?|dB|richter)\b/iu;
+  /\b(?:temperature|temp\.?|celsius|fahrenheit|pH|decibels?|richter)\b/iu;
+const DECIBEL_UNIT_COLUMN = /\bdB(?:A|C|FS|m|W)?\b/u;
 
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
@@ -57,7 +63,8 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   const column = table.headers[1].trim();
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
   if (isPercentageColumn(column) ||
-      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column)) return null;
+      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
+      DECIBEL_UNIT_COLUMN.test(column)) return null;
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
       /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
       // A number identifying a term, page, floor or class is an ordinal or
