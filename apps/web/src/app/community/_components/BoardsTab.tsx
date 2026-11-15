@@ -59,6 +59,8 @@ function BoardsContent(props: {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [pendingSubscriptionIds, setPendingSubscriptionIds] = useState<Set<string>>(new Set());
+  // A ref closes the gap between a click and React's next render/disabled update.
+  const pendingSubscriptionLock = useRef<Set<string>>(new Set());
   // Lifecycle-only signal: do not cancel a Firestore write or report it as cancelled.
   const [subscriptionLifetime] = useState(() => new AbortController());
   useEffect(() => () => subscriptionLifetime.abort(), [subscriptionLifetime]);
@@ -184,7 +186,8 @@ function BoardsContent(props: {
       return;
     }
     // Keep the action disabled while its write is unresolved, including repeated clicks.
-    if (pendingSubscriptionIds.has(b.id)) return;
+    if (pendingSubscriptionLock.current.has(b.id)) return;
+    pendingSubscriptionLock.current.add(b.id);
     setPendingSubscriptionIds((previous) => new Set(previous).add(b.id));
     const uid = user.uid;
     const wasSub = subscribed.has(b.id);
@@ -210,6 +213,7 @@ function BoardsContent(props: {
         alert(wasSub ? '這次未能取消訂閱，請稍後再試。' : '這次未能訂閱，請稍後再試。');
       }
     } finally {
+      pendingSubscriptionLock.current.delete(b.id);
       if (!subscriptionLifetime.signal.aborted) {
         setPendingSubscriptionIds((previous) => {
           const next = new Set(previous);
