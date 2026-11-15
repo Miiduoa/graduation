@@ -67,6 +67,17 @@ function progressFile(text: string, name = '資料庫.campus-study.json', read =
   return file;
 }
 
+// Pending restore tests must hold the original-byte read, not File.text().
+function pendingProgressFile(name: string, onPending: (release: (value: string) => void) => void): File {
+  const file = progressFile('pending', name);
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: () => new Promise<ArrayBuffer>((resolve) => {
+      onPending((value) => resolve(new TextEncoder().encode(value).buffer));
+    }),
+  });
+  return file;
+}
+
 function selectFile(file: File) {
   fireEvent.change(screen.getByLabelText(restoreLabel), { target: { files: [file] } });
 }
@@ -348,7 +359,7 @@ it('ignores a cancelled file read after a newer progress file has reached previe
   const older = progress();
   older.source.title = '不應還原的舊進度';
   let finish!: (value: string) => void;
-  selectFile(progressFile('pending', '舊進度.campus-study.json', () => new Promise((resolve) => { finish = resolve; })));
+  selectFile(pendingProgressFile('舊進度.campus-study.json', (release) => { finish = release; }));
   fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
   const newer = progress();
   newer.source.title = '應該還原的新進度';
@@ -383,7 +394,7 @@ it.each([
   fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '先前帳號課程的筆記' } });
   fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
   let finish!: (value: string) => void;
-  selectFile(progressFile('pending', '先前進度.campus-study.json', () => new Promise((resolve) => { finish = resolve; })));
+  selectFile(pendingProgressFile('先前進度.campus-study.json', (release) => { finish = release; }));
   view.rerender(<CourseStudyPanel scope={nextScope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   expect(inputValue(noteLabel)).toBe('');
   expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();

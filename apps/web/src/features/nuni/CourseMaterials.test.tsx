@@ -204,7 +204,12 @@ it.each(['context', 'access'] as const)('discards a late progress-file read afte
   });
   let finish!: (value: string) => void;
   const file = new File([saved], 'saved.campus-study.json', { type: 'application/json' });
-  Object.defineProperty(file, 'text', { value: () => new Promise<string>((resolve) => { finish = resolve; }) });
+  // A pending progress restore reads the original bytes, not File.text().
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: () => new Promise<ArrayBuffer>((resolve) => {
+      finish = (value) => resolve(new TextEncoder().encode(value).buffer);
+    }),
+  });
   fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
   if (boundary === 'context') {
     state.context = 'session-b';

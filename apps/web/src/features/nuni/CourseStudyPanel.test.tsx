@@ -854,8 +854,8 @@ it('rejects corrupt backup bytes even if a WebView File.text fabricates valid JS
   fireEvent.click(screen.getByText('接著上次的進度'));
   fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
 
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent',
-    expect.stringContaining('進度備份含有無法解碼的 UTF-8 位元組'));
+  // Export fallback may also have an alert: assert the exact read error.
+  expect(await screen.findByText(/這份進度備份含有無法解碼的 UTF-8 位元組/)).toBeTruthy();
   expect(inaccurateText).not.toHaveBeenCalled();
   expect(readBytes).toHaveBeenCalledOnce();
   expect(note.value).toBe('目前未備份的個人筆記');
@@ -1406,8 +1406,11 @@ it('returns to the progress picker after cancelling a pending file read and igno
   fireEvent.click(screen.getByText('接著上次的進度'));
   const input = screen.getByLabelText('載入閱讀進度檔') as HTMLInputElement;
   const file = new File(['pending'], 'reading.campus-study.json', { type: 'application/json' });
-  Object.defineProperty(file, 'text', {
-    value: () => new Promise<string>((resolve) => { finish = resolve; }),
+  // The restore reads original file bytes, so delay the byte API.
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: () => new Promise<ArrayBuffer>((resolve) => {
+      finish = (value) => resolve(new TextEncoder().encode(value).buffer);
+    }),
   });
   fireEvent.change(input, { target: { files: [file] } });
   expect(screen.getByRole('button', { name: '取消讀取' })).toBeTruthy();
