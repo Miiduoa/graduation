@@ -537,4 +537,53 @@ describe('story audience scope transitions', () => {
     subscription.mockRestore();
   });
 
+  test('a viewer can stop waiting for a slow next page, ignore a late denial, and retry the exact cursor', async () => {
+    const cursor = { id: 'slow-second-page' } as Cursor;
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'first', displayName: '已載入的同學' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'second', displayName: '重新載入的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, cursor);
+    expect(view.getByText('正在載入更多觀看者…')).toBeTruthy();
+    expect(view.getByLabelText('停止等待下一頁')).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText('停止等待下一頁'));
+    expect(view.queryByText('正在載入更多觀看者…')).toBeNull();
+    expect(view.getByText('載入更多觀看者')).toBeTruthy();
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+
+    await act(async () => {
+      pending.reject({ code: 'permission-denied' });
+      await pending.promise.catch(() => {});
+    });
+    expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, cursor]);
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+    expect(view.getByText('重新載入的同學')).toBeTruthy();
+    expect(view.queryByText('停止等待')).toBeNull();
+    view.unmount();
+  });
+
 });
