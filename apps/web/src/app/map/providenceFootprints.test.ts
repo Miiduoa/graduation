@@ -160,6 +160,50 @@ describe('Providence OSM building outlines', () => {
     })).toHaveLength(1);
   });
 
+  it('does not extrude a coordinate-closed but OSM-node-open way', () => {
+    // These IDs are synthetic. Real OSM way closure requires first/last
+    // node IDs to match; two different nodes may share the same coordinates.
+    const closedIds = [101, 102, 103, 104, 101];
+    const withNodes = (nodes: unknown) => ({
+      ...way(255784049, library, { building: 'school' }), nodes,
+    });
+    expect(parseProvidenceOsmFootprints({
+      elements: [withNodes(closedIds)],
+    })).toMatchObject([{ poiId: 'pu-library' }]);
+    for (const nodes of [
+      [101, 102, 103, 104, 105], // same first/last coordinates, different OSM node
+      // An internally repeated ID with two different geometry coordinates is
+      // contradictory even though the coordinate ring itself is valid.
+      [101, 102, 103, 102, 101],
+      [101, 101, 103, 104, 101],
+      [101, 102, 103, 101], // missing geometry reference
+      [101, 102, 103, 104, 101, 101], // extra reference
+      [101, 102, -3, 104, 101],
+      [101, 102, '103', 104, 101],
+      null,
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [withNodes(nodes)],
+      }), JSON.stringify(nodes)).toEqual([]);
+    }
+    // A repeated OSM node ID identifies exactly one coordinate. This fixture
+    // differs by only 5e-10 degrees: safeOutline's geometry-only tolerance
+    // would accept it, but its explicit OSM node identity is contradictory.
+    const conflictingClosure = library.map((point) => ({ ...point }));
+    conflictingClosure[conflictingClosure.length - 1].lon += 5e-10;
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...withNodes(closedIds), geometry: conflictingClosure }],
+    })).toEqual([]);
+    // Preserve existing geometry-only compatibility when no node IDs exist.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, conflictingClosure, { building: 'school' })],
+    })).toHaveLength(1);
+    // Synthetic fixtures without node references preserve legacy parsing.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'school' })],
+    })).toHaveLength(1);
+  });
+
   it('does not present unprefixed lifecycle markers as an intact campus building', () => {
     // OSM supports both lifecycle prefixes and direct flags. A way can retain
     // building=yes after demolition, ruin, abandonment or reconstruction.
