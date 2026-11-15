@@ -417,10 +417,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const contentRange = response.headers?.get('content-range') ?? null;
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null) {
-          // A proxy may turn an origin throttle into 429; honor its bounded
-          // Retry-After as well as the server's 503 cooldown.
-          const seconds = response.status === 503 || response.status === 429
-            ? footprintCooldownSeconds(response) : null;
+          // Match the API's fail-closed response policy: an upstream/proxy can
+          // request a cooldown on 408, gateway failures, or partial content,
+          // not only 429/503. Do not hammer a source that rejected a full map.
+          const status = response.status;
+          const rateLimitedOrIncomplete = status === 206 || status === 408 ||
+            status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
+            contentRange !== null;
+          const seconds = rateLimitedOrIncomplete ? footprintCooldownSeconds(response) : null;
           if (active && !timedOut && seconds !== null) {
             setFootprintRetryAfter({ until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60) });
           }
