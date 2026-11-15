@@ -34,11 +34,15 @@ function validNthuMeetingPairs(value: unknown): value is readonly PublicCatalogM
   // Sparse arrays must not silently mean "no class".
   const maxTimeLength = weekdays.length * periodOrder.length * 2;
   return Array.isArray(value) && value.length > 0 && value.length <= 32 &&
-    value.every((pair, index) => Object.prototype.hasOwnProperty.call(value, index) &&
-      pair !== null && typeof pair === 'object' &&
-      !Array.isArray(pair) && typeof pair.time === 'string' &&
-      pair.time.length <= maxTimeLength && typeof pair.room === 'string' &&
-      /^(?:[MTWRFSU][1-9nabcd])+$/.test(pair.time));
+    // Array.every skips holes. Iterate dense indices so missing entries fail.
+    Array.from({ length: value.length }, (_, index) => index).every(index => {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) return false;
+      const pair = value[index];
+      return pair !== null && typeof pair === 'object' &&
+        !Array.isArray(pair) && typeof pair.time === 'string' &&
+        pair.time.length <= maxTimeLength && typeof pair.room === 'string' &&
+        /^(?:[MTWRFSU][1-9nabcd])+$/.test(pair.time);
+    });
 }
 
 function clockMinutes(value: string): number {
