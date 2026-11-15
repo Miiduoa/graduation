@@ -253,12 +253,15 @@ export function createCampusSpatialScene(
     emitCamera(next);
   }
   function onPointerDown(event: PointerEvent) {
-    suppressDragClick = false;
     if (disposed || !active || !options.onCameraChange) return;
     if (event.isPrimary === false || (drag && drag.pointerId !== event.pointerId)) {
+      // A second finger may interrupt a claimed horizontal drag. Keep the
+      // click guard until its synthesized click is handled, or a fresh primary
+      // pointerdown starts a deliberate tap on a place label.
       cancelDrag();
       return;
     }
+    suppressDragClick = false;
     if (event.button !== 0 || !width) return;
     const target = event.target;
     if (target instanceof Element && target.closest('button, a, input, select, textarea, [contenteditable]')) return;
