@@ -3,7 +3,7 @@ import { it, expect, vi } from 'vitest';
 import { act, render, fireEvent, waitFor } from '@testing-library/react';
 import { CareerInternship } from './CareerInternship';
 import { internshipRecord } from '@campus/shared/testFixtures/careerInternship';
-import type { InternshipAudience } from '@campus/shared/src/careerInternship';
+import type { InternshipAudience, InternshipReply } from '@campus/shared/src/careerInternship';
 
 function setup(audience: InternshipAudience = 'student', uid: string | null = 'student') {
   const record = internshipRecord();
@@ -16,7 +16,7 @@ function setup(audience: InternshipAudience = 'student', uid: string | null = 's
   };
   const service = {
     load: vi.fn(async () => snapshot),
-    execute: vi.fn(async () => ({ id: 'record' })),
+    execute: vi.fn(async (): Promise<InternshipReply> => ({ id: 'record' })),
   };
   const props = {
     schoolId: 'pu',

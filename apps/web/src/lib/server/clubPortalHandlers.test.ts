@@ -196,7 +196,7 @@ test('社課時間預設值只作為顯示，不會寫回資料庫', async () =>
     instagram: '',
     line: '',
   });
-  expect(store.docs.get('groups/club')?.clubProfile?.meetingTime).toBe('');
+  expect((store.docs.get('groups/club') as { clubProfile?: { meetingTime?: string } } | undefined)?.clubProfile?.meetingTime).toBe('');
 });
 test('未核可及停權不能學號加入，但邀請碼不加限制', async () => {
   store.docs.delete('schools/school/clubs/club');
