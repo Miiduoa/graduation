@@ -166,7 +166,14 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // Local models sometimes print a literal HTML-formatted answer key.
     // Match up to three short literal style tags with bounded attributes in
     // the comparison copy. Never parse/execute HTML or rewrite displayed text.
-    const answerPresentation = sameLineList.replace(
+    // Local models can display a reference key inside a fenced Markdown
+    // code block after "答案：". Ignore ONLY a leading opening fence in this
+    // temporary comparison copy; keep the full question unchanged for display.
+    // A fence must have a real newline and at most a short language tag.
+    const fencedAnswer = sameLineList.replace(
+      /^(?:`{3,}|~{3,})[ \t]*(?:[A-Za-z][A-Za-z0-9_+-]{0,23})?[ \t]*\r?\n[ \t]*/u, '',
+    );
+    const answerPresentation = fencedAnswer.replace(
       /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
     );
     const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';

@@ -1293,3 +1293,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 原本按「取消讀取」只停止顯示進度與忽略晚到結果，但舊版 WebView 的原生 `FileReader.readAsArrayBuffer()` 可能仍在背景讀取檔案。現在把每次來源與 JSON 進度選取的 `AbortSignal` 傳至本機位元組讀取，取消、切換來源或關閉白板時呼叫實際 `FileReader.abort()`，並清理事件監聽；即使 abort API 例外也會結束 Promise，不更動學生現有筆記。
 - 若 `Blob.arrayBuffer()` 本身不可取消，會在它完成後再次檢查 signal，避免已取消的短位元組結果啟動額外 FileReader 讀取。新增兩項 DOM／模擬 WebView 回歸，分別驗證真實原生讀取取消與晚到位元組不再啟動備援。這不是手機硬體性能或實機驗收結果。
 - 原文 UTF-8／手動 Big5、安全讀檔長度確認與備份格式維持不變。無新套件／遠端私人教材傳輸；新 head 的 CI／CodeQL、App 5504170、Maestro、iOS／Android 與 Ahaboard 仍需另驗，PR 維持 Draft、不合併、不部署。
+
+
+### 2026-11-16：裝置端複習題避免以 Markdown 程式碼區塊洩漏答案
+
+- 由本機 WebGPU 模型新產生的自我檢查題，若在「答案／參考回答／Answer」標記後直接以 Markdown 三反引號（含短語言標籤）或波浪線程式碼區塊列出**同一個參考回答**，現在判定為已揭答，停止採用這道題，讓學生可以重新生成而非先看到解答。這只調整新生成內容的比較副本，不修改原教材、逐字引句或既有 v1/v2 離線閱讀／練習備份。
+- 加入 5 組模擬 Worker 洩漏案例（繁中、SQL、數值、空行與 CRLF），以及 3 組保留有效問題的邊界案例（SQLServer/SQL、12/1、不同參考答案），避免只因有程式碼示例便誤拒收。沒有新增套件、付費 API 或傳輸私人教材。這是程式邊界修補，不能等同 WebGPU 中文教學的實際正確率。
+- 本 SHA 的 Web／Mobile CI、CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 實機及 Ahaboard 同教材同題同裝置對照仍須各自驗收；PR 保持 Draft，不合併、不部署。
