@@ -5,6 +5,7 @@ import {
   loadMapFavorites,
   loadMapLocations,
   MapSourceTimeoutError,
+  MAP_SOURCE_TIMEOUT_MS,
   withTimeout,
   setMapFavorite,
   type MapLocation,
@@ -109,6 +110,36 @@ it('reads only the authenticated accounts school favorites and validates their i
     path: 'users/alice/schools/pu/favorites',
     constraints: [['type', '==', 'poi']],
   });
+});
+
+it('times out a stalled school-scoped favorites read instead of waiting indefinitely', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(getDocsFromServer).mockReturnValueOnce(new Promise(() => {}) as never);
+    const result = loadMapFavorites('alice', 'pu');
+    const rejected = expect(result).rejects.toBeInstanceOf(MapSourceTimeoutError);
+    await vi.advanceTimersByTimeAsync(MAP_SOURCE_TIMEOUT_MS);
+    await rejected;
+    expect(getDocsFromServer).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('preserves valid saved places when the source finishes before the deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(getDocsFromServer).mockImplementationOnce(() => new Promise((resolve) => {
+      setTimeout(() => resolve(snapshot(entry('poi_library', {
+        type: 'poi', itemId: 'library', schoolId: 'pu',
+      })) as never), MAP_SOURCE_TIMEOUT_MS - 10);
+    }) as never);
+    const result = loadMapFavorites('alice', 'pu');
+    await vi.advanceTimersByTimeAsync(MAP_SOURCE_TIMEOUT_MS - 10);
+    await expect(result).resolves.toEqual(['library']);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('makes saving an already-saved location idempotent without a forbidden update', async () => {

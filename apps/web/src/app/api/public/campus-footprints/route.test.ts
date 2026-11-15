@@ -47,6 +47,10 @@ describe('public Providence building geometry route', () => {
     const called = new URL(mockedFetch.mock.calls[0][0]);
     expect(called.hostname).toBe('overpass-api.de');
     const query = called.searchParams.get('data')!;
+    // Overpass execution and public memory budgets must remain below the
+    // independent 12-second HTTP transport deadline.
+    expect(query).toContain('[out:json][timeout:8][maxsize:67108864]');
+    expect(query).not.toContain('[timeout:12]');
     expect(query).toContain('way(id:');
     expect(query).toContain('255784049');
     expect(query).toContain('out meta geom;');
@@ -172,6 +176,175 @@ describe('public Providence building geometry route', () => {
     const response = await GET();
     expect(response.status).toBe(200);
     expect((await response.json()).buildings).toHaveLength(1);
+  });
+
+  it.each(['', 'x-unknown', 'identity, gzip', 'gzip, br'])(
+    'rejects ambiguous Overpass Content-Encoding %j rather than trust decoded JSON',
+    async (encoding) => {
+      // This synthetic fetch body is already valid JSON. An unreviewed or
+      // stacked coding must not disable identity length verification simply
+      // because Content-Encoding is non-null.
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': encoding, 'Content-Length': '1' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect((await response.json()).error).toMatch(/temporarily unavailable/);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('rejects unsupported encoding before reading a stalled response body', async () => {
+    vi.useFakeTimers();
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() {
+        cancelled += 1;
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Encoding': 'x-unknown' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    let settled = false;
+    const pending = GET().then((response) => { settled = true; return response; });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(settled).toBe(true);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(cancelled).toBe(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['gzip', 'br', 'deflate'])(
+    'rejects impossible zero-byte %s transfer without caching valid-looking decoded JSON',
+    async (encoding) => {
+      // A compressed wire body with Content-Length: 000 has no bytes from
+      // which Fetch could have decoded this JSON. This is a synthetic
+      // contradictory header/body pair, not a recorded Overpass incident.
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': encoding, 'Content-Length': '000' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect((await response.json()).error).toMatch(/temporarily unavailable/);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('cancels a stalled encoded body when the wire length falsely claims zero bytes', async () => {
+    let cancelled = 0;
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() {
+        cancelled += 1;
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stalled, {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '0' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    // Non-settling stream cancellation must not delay the response.
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect(cancelled).toBe(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['gzip', 'BR', 'deflate', 'identity'])(
+    'accepts recognized Overpass single Content-Encoding %s',
+    async (encoding) => {
+      // A mocked Fetch response provides already-decoded JSON; no claim about
+      // live Overpass compression or transfer correctness.
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': encoding,
+          'Content-Length': encoding === 'identity'
+            ? String(new TextEncoder().encode(osmPayload).byteLength) : '42' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(200);
+      expect((await response.json()).buildings).toHaveLength(1);
+    },
+  );
+
+  it('accepts decoded JSON below 500 KB when gzip wire length is slightly larger', async () => {
+    // Fetch can expose already-decoded JSON but preserve compressed wire
+    // Content-Length. A transport length over the decoded cap is not, by
+    // itself, evidence that the decoded OSM JSON exceeds our memory budget.
+    // This is a synthetic Fetch header/body contract, not a live OSM request.
+    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '500001' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a decoded gzip body over 500 KB despite a short encoded length', async () => {
+    // Untrusted compressed bodies must still obey the *decoded* streaming cap.
+    const upstream = vi.fn().mockResolvedValue(new Response(' '.repeat(500_001), {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '42' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized encoded gzip response without reading its stalled stream', async () => {
+    vi.useFakeTimers();
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([123])); },
+      cancel() {
+        cancelled += 1;
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Encoding': 'gzip', 'Content-Length': '1000001' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    let settled = false;
+    const pending = GET().then((result) => { settled = true; return result; });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(settled).toBe(true);
+    expect((await pending).status).toBe(503);
+    expect(cancelled).toBe(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
   });
 
   it('retains a dated stale snapshot instead of replacing it with HTTP 206 geometry', async () => {
@@ -647,6 +820,81 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['incomplete remark', 'truncated JSON'])(
+    'honours Retry-After on HTTP 200 with %s without accepting geometry',
+    async (kind) => {
+      const start = Math.floor(Date.now() / 1000) * 1000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        // An incomplete result may also omit the replication timestamp.
+        // The 200 + remark is a soft upstream failure, not a valid snapshot.
+        const incomplete = kind === 'incomplete remark'
+          ? JSON.stringify({
+            osm3s: {},
+            ...JSON.parse(osmPayload),
+            remark: 'runtime error: Query timed out',
+          })
+          : '{"elements":[{"type":"way","id":255784049';
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response(incomplete, {
+            status: 200, headers: { 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const refused = await GET();
+        expect(refused.status).toBe(503);
+        expect(refused.headers.get('Cache-Control')).toBe('no-store');
+        expect(refused.headers.get('Retry-After')).toBe('3600');
+        expect((await refused.json()).error).toMatch(/temporarily unavailable/);
+
+        clock.mockReturnValue(start + 11 * 60_000);
+        expect((await GET()).headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + 60 * 60_000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it('preserves dated stale outlines when an HTTP 200 remark requests a longer retry pause', async () => {
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    const day = 24 * 60 * 60 * 1000;
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          ...JSON.parse(osmPayload),
+          remark: 'runtime error: Query timed out',
+        }), { status: 200, headers: { 'Retry-After': '3600' } }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const original = await (await GET()).json();
+      clock.mockReturnValue(start + day + 1_000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(fallback.headers.get('Retry-After')).toBe('3600');
+      expect(await fallback.json()).toMatchObject({
+        stale: true, fetchedAt: original.fetchedAt, buildings: original.buildings,
+      });
+      clock.mockReturnValue(start + day + 11 * 60_000);
+      expect((await GET()).headers.get('Retry-After')).toBe('2941');
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('keeps the last good snapshot when an HTTP 200 Overpass timeout has partial buildings', async () => {
     const partial = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
@@ -895,6 +1143,8 @@ describe('public Providence building geometry route', () => {
   });
 
   it.each([
+    { status: 400, retryAfter: null, cooldown: '86400' },
+    { status: 403, retryAfter: null, cooldown: '86400' },
     { status: 406, retryAfter: null, cooldown: '86400' },
     { status: 429, retryAfter: '3600', cooldown: '3600' },
     { status: 503, retryAfter: '3600', cooldown: '3600' },
@@ -997,6 +1247,159 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+
+  it.each([206, 408, 500, 502, 520])(
+    'honours a one-hour Retry-After on rejected Overpass HTTP %i without accepting partial geometry',
+    async (status) => {
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        // Synthetic statuses (including 520): no assertion that the live server
+        // has emitted them. Valid geometry in a 206 reply must still be refused.
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response(osmPayload, {
+            status, headers: { 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+        expect(rejected.headers.get('Retry-After')).toBe('3600');
+        expect((await rejected.json()).error).toMatch(/temporarily unavailable/);
+
+        clock.mockReturnValue(start + 11 * 60_000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + 60 * 60_000 + 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it('retains a one-hour Retry-After for HTTP 200 with Content-Range without accepting its JSON', async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(osmPayload, {
+          status: 200,
+          headers: { 'Content-Range': 'bytes 0-99/200', 'Retry-After': '3600' },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(start + 11 * 60_000);
+      expect((await GET()).headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 60 * 60_000 + 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('keeps an existing dated stale snapshot while a failed HTTP 500 requests a one-hour cooldown', async () => {
+    const start = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(new Response('upstream unavailable', {
+          status: 500, headers: { 'Retry-After': '3600' },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await (await GET()).json();
+      expect(first.buildings).toHaveLength(1);
+      clock.mockReturnValue(start + day + 1000);
+      const stale = await GET();
+      expect(stale.status).toBe(200);
+      expect(stale.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(stale.headers.get('Retry-After')).toBe('3600');
+      expect((await stale.json())).toMatchObject({
+        stale: true, fetchedAt: first.fetchedAt, buildings: first.buildings,
+      });
+      clock.mockReturnValue(start + day + 11 * 60_000 + 1000);
+      const cooling = await GET();
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect((await cooling.json()).stale).toBe(true);
+      expect(upstream).toHaveBeenCalledTimes(2);
+      clock.mockReturnValue(start + day + 60 * 60_000 + 2000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).stale).toBe(false);
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      label: 'overflowed delta-seconds',
+      header: '9'.repeat(350),
+      expectedSeconds: 86_400,
+      status: 503,
+    },
+    {
+      label: 'zero-padded delta-seconds',
+      header: '0'.repeat(350) + '1800',
+      expectedSeconds: 1_800,
+      status: 502,
+    },
+  ])('honours $label Retry-After without retrying a busy Overpass service early',
+    async ({ header, expectedSeconds, status }) => {
+      // Synthetic upstream headers. In particular, converting 350 digits
+      // with Number() would overflow and accidentally impose only 600 sec.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('busy', {
+            status, headers: { 'Retry-After': header },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Retry-After')).toBe(String(expectedSeconds));
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+
+        clock.mockReturnValue(start + (expectedSeconds - 1) * 1000);
+        const blocked = await GET();
+        expect(blocked.status).toBe(503);
+        expect(blocked.headers.get('Retry-After')).toBe('1');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + (expectedSeconds + 1) * 1000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
   it('obeys a one-hour Overpass 429 Retry-After rather than retrying after ten minutes', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
@@ -1085,4 +1488,85 @@ describe('public Providence building geometry route', () => {
     expect(firstFetch).toHaveBeenCalledTimes(2);
     vi.restoreAllMocks();
   });
+  it.each([
+    { label: 'HTTP 503', mode: 'error' },
+    { label: 'HTTP 200 Content-Range', mode: 'range' },
+    { label: 'HTTP 200 Overpass remark', mode: 'remark' },
+    { label: 'HTTP 200 truncated JSON', mode: 'truncated' },
+  ])('preserves the origin-relative Retry-After when the app clock is ahead: $label', async ({ mode }) => {
+    // The simulated host is 90 minutes ahead of the Overpass server. An
+    // HTTP-date 60 minutes ahead of the server's Date is already in the host's
+    // past. Without the origin Date comparison we retry after only 10 minutes.
+    const serverNow = Date.parse('2026-11-15T00:00:00Z');
+    const localNow = serverNow + 90 * 60_000;
+    const headers = {
+      Date: new Date(serverNow).toUTCString(),
+      'Retry-After': new Date(serverNow + 60 * 60_000).toUTCString(),
+    };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(localNow);
+    try {
+      const bad = mode === 'error'
+        ? new Response('overloaded', { status: 503, headers })
+        : mode === 'range'
+          ? new Response(osmPayload, { status: 200,
+              headers: { ...headers, 'Content-Range': 'bytes 0-99/200' } })
+          : mode === 'remark'
+            ? new Response(JSON.stringify({ remark: 'runtime error: timeout', elements: [] }), {
+                status: 200, headers,
+              })
+            : new Response('{"elements":[', { status: 200, headers });
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(bad)
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(localNow + 11 * 60_000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(localNow + 60 * 60_000 + 1000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('never shortens an HTTP-date cooldown when the app clock is behind the OSM service', async () => {
+    // On a host 90 minutes behind, the local deadline is longer than the
+    // server-relative one. Keep the longer deadline, capped at 24 hours.
+    const serverNow = Date.parse('2026-11-15T00:00:00Z');
+    const localNow = serverNow - 90 * 60_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(localNow);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 429,
+          headers: {
+            Date: new Date(serverNow).toUTCString(),
+            'Retry-After': new Date(serverNow + 60 * 60_000).toUTCString(),
+          },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      expect((await GET()).headers.get('Retry-After')).toBe('9000');
+      clock.mockReturnValue(localNow + 60 * 60_000 + 1000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(localNow + 9001 * 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 });

@@ -1,0 +1,22 @@
+name: Campus Spatial Benchmark Audit
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/qa/campus-spatial/compare_trials.py'
+      - 'scripts/qa/campus-spatial/test_compare_trials.py'
+      - 'scripts/qa/campus-spatial/benchmark-evidence.md'
+      - '.github/workflows/campus-spatial-benchmark.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate synthetic benchmark audit cases (not field results)
+        run: python3 -m unittest discover -s scripts/qa/campus-spatial -p 'test_compare_trials.py' -v

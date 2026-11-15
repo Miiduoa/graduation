@@ -2,18 +2,20 @@
 import { createClubAdmin } from '../../../../../backend/functions/clubAdmin';
 import { beforeEach, expect, test } from 'vitest';
 import { clubRosterCsv } from '@campus/shared/src/clubExport';
-import { createClubPortal } from './clubPortalHandlers';
+import { CLUB_CHECK_IN_LEGACY_SCAN_LIMIT, createClubPortal } from './clubPortalHandlers';
 import { createMemoryGroupStore } from './memoryGroupStore';
 import { createGroupInviteHandlers } from './groupInviteHandlers';
 let store: ReturnType<typeof createMemoryGroupStore>,
   run: ReturnType<typeof createClubPortal>,
   time: number;
+let legacyIdentityBatches: number[];
 let reads: { path: string; aggregate: boolean; size: number; maximum: number }[];
 const call = (uid = 'student', data: Record<string, unknown> = {}) =>
   run({ auth: { uid }, data: { schoolId: 'school', groupId: 'club', action: 'read', ...data } });
 beforeEach(() => {
   time = 1000;
   reads = [];
+  legacyIdentityBatches = [];
   store = createMemoryGroupStore([
     [
       'groups/club',
@@ -100,6 +102,19 @@ beforeEach(() => {
   const transaction = store.db.runTransaction.bind(store.db);
   store.db.runTransaction = (callback) =>
     transaction((tx: any) => {
+      const getAll = tx.getAll.bind(tx);
+      tx.getAll = (...refs: any[]) => {
+        if (
+          refs.length % 2 === 0 &&
+          refs.every((ref, index) =>
+            index % 2 === 0
+              ? ref.path.startsWith('schools/school/members/')
+              : ref.path.startsWith('users/'),
+          )
+        )
+          legacyIdentityBatches.push(refs.length);
+        return getAll(...refs);
+      };
       const get = tx.get.bind(tx);
       tx.get = async (query: any) => {
         if (query.filters) return query.clubQuery();
@@ -760,3 +775,45 @@ test.each(['school', 'another'])('舊報名備援學號僅採用同校帳號：%
   if (schoolId === 'school') await expect(result).resolves.toMatchObject({ success: true });
   else await expect(result).rejects.toThrow('這位不在報名名單');
 });
+
+test.each(['legacy', 'indexed', 'missing', 'modern'])(
+  '四碼掃描達總讀取上限即要求 QR，不採用未確認唯一的結果：%s',
+  async (match) => {
+    await event();
+    const path = 'groups/club/clubEvents/event/registrations/';
+    for (let n = 0; n < CLUB_CHECK_IN_LEGACY_SCAN_LIMIT; n++)
+      store.docs.set(path + `a${String(n).padStart(4, '0')}`, {
+        status: 'registered',
+        ...(match === 'modern' ? { studentSuffix: '0000' } : {}),
+      });
+    if (match !== 'missing') {
+      store.docs.set(path + 'a0000', {
+        status: 'registered',
+        ...(match === 'indexed' || match === 'modern' ? { studentSuffix: '5678' } : {}),
+      });
+      store.docs.set('schools/school/members/a0000', { studentId: 'S12345678' });
+    }
+    // A later duplicate cannot be ruled out by accepting the first match.
+    store.docs.set(path + 'student', { status: 'registered' });
+    time = 5500;
+    reads = [];
+    legacyIdentityBatches = [];
+    await expect(
+      call('officer', { action: 'checkIn', eventId: 'event', checkInCode: '5678' }),
+    ).rejects.toMatchObject({
+      code: 'failed-precondition',
+      message: '簽到名單過長，請改掃 QR',
+    });
+    const registrationReads = reads
+      .filter((r) => r.path.endsWith('/registrations') && !r.aggregate)
+      .slice(1);
+    const scanned = registrationReads.reduce((sum, r) => sum + r.size, 0);
+    expect(scanned).toBeGreaterThan(100);
+    expect(
+      scanned + legacyIdentityBatches.reduce((sum, size) => sum + size, 0),
+    ).toBeLessThanOrEqual(CLUB_CHECK_IN_LEGACY_SCAN_LIMIT);
+    expect(legacyIdentityBatches.every((size) => size <= 200)).toBe(true);
+    expect(store.docs.get(path + 'a0000')?.checkedInAt).toBeUndefined();
+    expect(store.docs.get(path + 'student')?.checkedInAt).toBeUndefined();
+  },
+);

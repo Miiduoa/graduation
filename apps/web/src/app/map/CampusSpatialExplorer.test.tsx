@@ -121,15 +121,27 @@ it('controls camera without changing the place or recreating its context and res
   fireEvent.click(within(dialog).getByRole('button', { name: '向右旋轉' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
-  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
+  const scaleAnnouncement = within(dialog).getByText('縮放 125%');
+  expect(scaleAnnouncement.getAttribute('role')).toBe('status');
+  expect(scaleAnnouncement.getAttribute('aria-live')).toBe('polite');
+  expect(scaleAnnouncement.getAttribute('aria-atomic')).toBe('true');
   fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '看全部地點' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '回到北向' }));
-  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1 }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1.25 }));
+  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
   expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
+  const restoreZoom = within(dialog).getByRole('button', { name: '還原 100% 縮放' }) as HTMLButtonElement;
+  expect(restoreZoom.disabled).toBe(false);
+  fireEvent.click(restoreZoom);
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: 0, zoom: 1 }));
+  expect(within(dialog).getByText('縮放 100%')).toBeTruthy();
+  expect(restoreZoom.disabled).toBe(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
@@ -139,13 +151,28 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   const changed = scene.create.mock.calls[0][2].onCameraChange;
   act(() => changed({ bearing: 420, zoom: 9 }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 60, zoom: MAX_SPATIAL_ZOOM }));
-  expect(within(dialog).getByRole('button', { name: '放大空間圖' }).getAttribute('aria-disabled')).toBe('true');
+  const zoomIn = within(dialog).getByRole('button', { name: '放大空間圖' }) as HTMLButtonElement;
+  expect(zoomIn.disabled).toBe(true);
+  expect(zoomIn.hasAttribute('aria-disabled')).toBe(false);
+  const callsAtMaximum = scene.setView.mock.calls.length;
+  fireEvent.click(zoomIn);
+  expect(scene.setView).toHaveBeenCalledTimes(callsAtMaximum);
   expect(within(dialog).getByText('縮放 250%')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '向左旋轉' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 30, zoom: MAX_SPATIAL_ZOOM }));
   act(() => changed({ bearing: -60, zoom: 0 }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 300, zoom: MIN_SPATIAL_ZOOM }));
-  expect(within(dialog).getByRole('button', { name: '縮小空間圖' }).getAttribute('aria-disabled')).toBe('true');
+  const zoomOut = within(dialog).getByRole('button', { name: '縮小空間圖' }) as HTMLButtonElement;
+  expect(zoomOut.disabled).toBe(true);
+  expect(zoomOut.hasAttribute('aria-disabled')).toBe(false);
+  const callsAtMinimum = scene.setView.mock.calls.length;
+  fireEvent.click(zoomOut);
+  expect(scene.setView).toHaveBeenCalledTimes(callsAtMinimum);
+  const restoreZoom = within(dialog).getByRole('button', { name: '還原 100% 縮放' }) as HTMLButtonElement;
+  expect(restoreZoom.disabled).toBe(false);
+  fireEvent.click(restoreZoom);
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: 300, zoom: 1 }));
+  expect(restoreZoom.disabled).toBe(true);
   expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
@@ -253,7 +280,11 @@ it('destroys old-school graphics and exposes only the replacement school after r
   fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(screen.getByRole('option', { name: '另一校圖書館' })).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toContain('請選擇地點');
+  // The camera now has its own live status; scope this assertion to the
+  // place guidance so adding accessible announcements cannot break school isolation.
+  const guidance = within(screen.getByRole('dialog', { name: '校園空間導覽' }))
+    .getByText('請選擇地點，確認位置後再開啟導航。');
+  expect(guidance.getAttribute('role')).toBe('status');
   expect(screen.queryByRole('heading', { name: '本校圖書館' })).toBeNull();
   expect(scene.create.mock.calls[1][1].points.map((point: { id: string }) => point.id)).toEqual(['new-library']);
 });
@@ -745,7 +776,7 @@ it('retries Providence building data after a temporary outage without closing th
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('refreshes an expired snapshot on tab resume and replaces it only after success', async () => {
+it('evicts an expired snapshot on tab resume, then installs only fresh source geometry', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -785,10 +816,12 @@ it('refreshes an expired snapshot on tab resume and replaces it only after succe
     // A suspended device can pass the seven-day deadline before timers fire.
     clock += 6 * day;
     fireEvent(window, new Event('pageshow'));
-    expect(await within(dialog).findByText(/正在檢查更新/)).toBeTruthy();
+    // Expired geometry is not rendered while a replacement request is pending.
+    expect(await within(dialog).findByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    expect(within(dialog).queryByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeNull();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
     const previousSceneCount = scene.create.mock.calls.length;
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
     fireEvent(document, new Event('visibilitychange'));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const updatedBuildings = buildings.map((building) => ({ ...building, heightMeters: building.heightMeters + 1, heightBasis: 'osm-tag' as const }));
@@ -809,7 +842,7 @@ it('refreshes an expired snapshot on tab resume and replaces it only after succe
   }
 });
 
-it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication deadline via %s and retains geometry when the response is expired', async (trigger) => {
+it.each(['visibilitychange', 'timer'])('drops geometry at the earlier OSM replication deadline via %s when the response is expired', async (trigger) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -847,10 +880,10 @@ it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication
     } else {
       fireEvent(document, new Event('visibilitychange'));
     }
-    expect(await within(dialog).findByText(/更新未成功，仍顯示先前/)).toBeTruthy();
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
-    expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).queryByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeNull();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   } finally {
@@ -859,7 +892,7 @@ it.each(['visibilitychange', 'timer'])('refreshes at the earlier OSM replication
   }
 });
 
-it.each(['failure', 'timeout'])('retains an expired stale outline after refresh %s', async (outcome) => {
+it.each(['failure', 'timeout'])('does not resurrect a seven-day-old outline after refresh %s', async (outcome) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -897,7 +930,11 @@ it.each(['failure', 'timeout'])('retains an expired stale outline after refresh 
 
     clock += 2 * 60_000;
     fireEvent(window, new Event('pageshow'));
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    // React removes the expired volume immediately, but SpatialCanvas creates
+    // its replacement Three.js scene after an asynchronous dynamic import.
+    // Await that new scene rather than inspecting the disposed previous scene.
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     if (outcome === 'timeout') {
       const requestTimer = timerSpy.mock.calls.filter(([, delay]) => delay === 15_000).at(-1);
@@ -905,9 +942,9 @@ it.each(['failure', 'timeout'])('retains an expired stale outline after refresh 
       act(() => { (requestTimer![0] as () => void)(); });
     }
     await act(async () => { rejectRefresh(new Error('offline after snapshot expiry')); });
-    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(within(dialog).getByText(/更新未成功，仍顯示先前/)).toBeTruthy();
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).queryByText(/更新未成功，仍顯示先前/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
     timerSpy.mockRestore();
