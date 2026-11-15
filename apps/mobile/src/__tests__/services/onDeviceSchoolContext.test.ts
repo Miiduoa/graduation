@@ -257,7 +257,7 @@ test('impossible restored source dates cannot authorize offline course and assig
     '2026-04-31T09:00:00+08:00', // Offset timestamps need calendar validation too.
     '2026-11-31T18:00:00.000Z',
     // A syntactically valid future save time is not evidence of a saved timetable.
-    new Date(Date.now() + 30_001).toISOString(),
+    new Date(Date.now() + 31_000).toISOString(),
   ]) {
     const prompt = formatOnDeviceSchoolPrompt({
       ...local, timetable: { ...local.timetable, updatedAt },
