@@ -257,7 +257,7 @@ test('impossible restored source dates cannot authorize offline course and assig
     '2026-04-31T09:00:00+08:00', // Offset timestamps need calendar validation too.
     '2026-11-31T18:00:00.000Z',
     // A syntactically valid future save time is not evidence of a saved timetable.
-    new Date(Date.now() + 31_000).toISOString(),
+    new Date(Date.parse(local.checkedAt) + 31_000).toISOString(),
   ]) {
     const prompt = formatOnDeviceSchoolPrompt({
       ...local, timetable: { ...local.timetable, updatedAt },
@@ -271,7 +271,7 @@ test('impossible restored source dates cannot authorize offline course and assig
     '2026-10-25T17:00:00.000+08:00',
     '2026-10-25T09:00:00.000Z',
     // A small clock skew is accepted, including at the exact 30-second boundary.
-    new Date(Date.now() + 30_000).toISOString(),
+    new Date(Date.parse(local.checkedAt) + 30_000).toISOString(),
   ]) {
     const prompt = formatOnDeviceSchoolPrompt({
       ...local, timetable: { ...local.timetable, updatedAt },
@@ -279,6 +279,20 @@ test('impossible restored source dates cannot authorize offline course and assig
     expect(prompt).toContain('資料庫概論');
     expect(prompt).toContain('Alice 私人作業');
   }
+  // A timestamp can be in the past relative to now but still postdate the
+  // collection it supposedly belongs to. That cannot prove private provenance.
+  const postCollection = {
+    ...local,
+    checkedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    timetable: {
+      ...local.timetable,
+      updatedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    },
+  };
+  const rejected = formatOnDeviceSchoolPrompt(postCollection, sense, 'alice');
+  expect(rejected).toContain('目前沒有可確認的本機個人課表');
+  expect(rejected).not.toContain('資料庫概論');
+  expect(rejected).not.toContain('Alice 私人作業');
 });
 
 test('restored campus summaries with damaged fields never crash or enter the private offline prompt', async () => {
