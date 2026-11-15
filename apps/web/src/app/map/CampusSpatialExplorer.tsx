@@ -221,6 +221,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
   const footprintExpiresAtRef = useRef<number | null>(null);
   const footprintRequestActiveRef = useRef(false);
+  // A hidden tab must evict expired geometry without fetching; retry when visible.
+  const deferredExpiredRefreshRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
@@ -283,6 +285,27 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   }, [footprintRetryAfter]);
 
   useEffect(() => {
+    if (school !== 'pu') {
+      deferredExpiredRefreshRef.current = false;
+      return;
+    }
+    const resumeExpiredRefresh = () => {
+      if (!deferredExpiredRefreshRef.current || document.hidden ||
+          footprintRetryAfter !== null || footprintRequestActiveRef.current) return;
+      deferredExpiredRefreshRef.current = false;
+      setFootprintAttempt((value) => value + 1);
+    };
+    // Also retry when a Retry-After that blocked the foreground resume ends.
+    resumeExpiredRefresh();
+    document.addEventListener('visibilitychange', resumeExpiredRefresh);
+    window.addEventListener('pageshow', resumeExpiredRefresh);
+    return () => {
+      document.removeEventListener('visibilitychange', resumeExpiredRefresh);
+      window.removeEventListener('pageshow', resumeExpiredRefresh);
+    };
+  }, [school, footprintRetryAfter]);
+
+  useEffect(() => {
     if (school !== 'pu' || footprintClock === null) return;
     const checkSnapshotAge = () => {
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
@@ -319,8 +342,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // but keep the loading state until that bounded request finishes.
         const refreshing = footprintRequestActiveRef.current;
         setFootprintStatus(refreshing ? 'loading' : 'unavailable');
-        if (!refreshing && footprintRetryAfter === null) {
-          setFootprintAttempt((value) => value + 1);
+        if (!refreshing) {
+          if (document.hidden || footprintRetryAfter !== null) {
+            // The hard deadline clears geometry even in the background, but
+            // network revalidation waits for a visible tab and server cooldown.
+            deferredExpiredRefreshRef.current = true;
+          } else {
+            setFootprintAttempt((value) => value + 1);
+          }
         }
       } else if (now >= footprintClock.staleAt && !staleSnapshotRef.current) {
         // Mark the dated source stale immediately on tab resume, and revalidate
@@ -355,6 +384,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     // A freshness deadline may retain a dated snapshot; the seven-day hard
     // source expiry never may.
     const preserveStale = staleSnapshotRef.current;
+    // A manual refresh or an already-triggered request supersedes deferral.
+    deferredExpiredRefreshRef.current = false;
     footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
