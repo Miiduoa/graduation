@@ -289,7 +289,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
   const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
   const [footprintAttempt, setFootprintAttempt] = useState(0);
-  const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable'>(
+  const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable' | 'deferred'>(
     school === 'pu' ? 'loading' : 'unavailable',
   );
   const [footprintDate, setFootprintDate] = useState<string | null>(null);
@@ -508,6 +508,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     // mobile browser session). Do not start a fresh public OSM request until
     // the user returns. The original POIs and walking link still work.
     if (document.hidden) {
+      // Do not announce an active OSM fetch when mobile has suspended it.
+      // Keep POIs and navigation usable while waiting for a visible tab.
+      setFootprintStatus('deferred');
       let resumed = false;
       const fetchWhenVisible = () => {
         if (resumed || document.hidden) return;
@@ -713,6 +716,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             {school === 'pu' && (
               <div className={styles.footprintInfo}>
                 {footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
+                {footprintStatus === 'deferred' && <span role="status">目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓；地點標記與導航仍可使用。</span>}
                 {footprintStatus === 'unavailable' && <>
                   <span role="status">公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
                   {footprintRetryAfter !== null && <span id={footprintCooldownNoteId} role="status">
