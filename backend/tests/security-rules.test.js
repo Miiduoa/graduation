@@ -1499,9 +1499,11 @@ describe('firestore security rules', () => {
       await assertFails(bob.collection(posts).where('published', '==', true).get());
       await assertSucceeds(teacher.collection(posts).get());
       await assertSucceeds(bob.doc(posts + '/visible').get({ source: 'server' }));
-      // A legacy post with no visibility metadata is still a valid direct
-      // visible-link GET, but cannot accidentally leak through a broad feed.
-      await assertSucceeds(bob.doc(postPath).get({ source: 'server' }));
+      // Missing visibility fields are ambiguous: fail closed for everyone
+      // except the author and active managers, even with a known document ID.
+      await assertFails(bob.doc(postPath).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(postPath).get({ source: 'server' }));
+      await assertSucceeds(teacher.doc(postPath).get({ source: 'server' }));
 
       for (const changed of [
         { published: false, status: 'published', deleted: false, deletedAt: null },

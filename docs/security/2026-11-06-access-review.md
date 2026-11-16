@@ -845,3 +845,9 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **發布阻礙／相容性：** 舊紀錄可能缺少其中一個明確旗標，雖然舊的正常直接 GET 可維持，但新 LIST 會故意排除這類資料。必須先在隔離資料與正式資料唯讀盤點歷史可見貼文，確認可修補的正規化範圍及待遷移數量、索引 READY 與 Web／Mobile／規則的發布順序；不能逕自把缺欄位的草稿推定為公開。未獲資料發布資格前，不能遷移、套用正式規則或宣稱正式歷史貼文完整可見。
 - 測試設計：合成資料涵蓋公開／草稿／排程／封存／撤回／刪除標記、正常列表、已知路徑 GET、群組／校籍撤權、同一認證狀態重放與跨校群組變更。依本精確提交的 CI 記錄確認是否真正執行且通過，不能沿用上一版綠燈。
 - 其餘既發 GCS/Supabase bearer URL 撤銷、真 Storage CAS、歷史附件引用、minimatch 兩圖相容及 App 5504170 核可、正式發布回復仍未結案。沒有正式資料、金鑰、migration、E 校園或受限 npm/pnpm audit 操作。
+
+### 2026-11-16 安全補充：既有缺少發布旗標的父貼文不得預設公開
+
+- 第一版候選修補容許一般成員以直接 GET 讀取沒有明確 published/status/deleted/deletedAt 的舊貼文，並不保證這些舊貼文真的曾公開。第二版改為非作者、非管理員直接 GET **也必須具備全部四項公開欄位**。這是 fail-closed 的刻意相容性變更：無明確欄位的舊連結可能暫時不可讀，不得為了恢復顯示而推定全部舊文公開。
+- 增加純離線、唯讀的 `scripts/audit-group-post-visibility.cjs` 與 Node 測試。輸入為經獨立授權取得的 NDJSON（每筆 `{path:"groups/G/posts/P",data:{...}}`），僅輸出 `canonicalVisible/hidden/reviewRequired` 件數，不輸出原文、UID 或標題、不連網或修改資料；`reviewRequired` 須人工判定。可用 `node --test scripts/audit-group-post-visibility.test.cjs` 驗證，`node scripts/audit-group-post-visibility.cjs synthetic.ndjson` 操作合成輸入。不得未經發布授權直接匯出正式資料，亦不會自動修補紀錄。
+- 本輪候選版本仍待精確 head CI/Firebase emulator、正式索引及 Web/Mobile 相容性、歷史資料稽核、App 5504170 審查；不得合併或部署。

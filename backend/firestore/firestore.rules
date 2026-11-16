@@ -1178,7 +1178,7 @@ service cloud.firestore {
         allow get: if isActiveGroupMember(groupId)
           && (canManageGroup(groupId)
             || resource.data.get('authorId', '') == request.auth.uid
-            || isVisiblePostForReactions());
+            || isCanonicalVisiblePost());
         allow list: if isActiveGroupMember(groupId)
           && (canManageGroup(groupId) || isCanonicalVisiblePost());
         // 助理回覆的狀態（assistantReply）只由伺服器寫
