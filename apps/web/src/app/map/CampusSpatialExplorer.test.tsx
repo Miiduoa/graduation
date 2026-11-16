@@ -959,6 +959,47 @@ it('releases a server cooldown after a suspended mobile tab resumes, without aut
   }
 });
 
+it('keeps an OSM cooldown locked if a mobile clock moves backwards before its timer fires', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503,
+    headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  let clock = Date.now();
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const cooldownTimer = timerSpy.mock.calls.find(([, delay]) => delay === 600_000);
+    expect(cooldownTimer).toBeTruthy();
+
+    // The timeout was scheduled before an NTP/time-zone clock correction.
+    // A browser timer firing must not bypass the server's absolute cooldown.
+    clock -= 2 * 60_000;
+    act(() => { (cooldownTimer![0] as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByText(/約 12 分鐘冷卻/)).toBeTruthy();
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    clock += 12 * 60_000 + 1;
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
 it('retries Providence building data after a temporary outage without closing the tour', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const outline = [
