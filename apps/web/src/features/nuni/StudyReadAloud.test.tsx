@@ -141,6 +141,38 @@ it('finds a newly installed local Chinese voice even when voiceschanged never fi
   expect(spoken.text).toBe('這段講義仍只在裝置上朗讀');
 });
 
+it('automatically detects a newly installed local voice after returning to the lesson', () => {
+  voices = [remote];
+  render(<StudyReadAloud text="從手機設定返回課程" />);
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
+
+  // A WebView may never emit voiceschanged after installing a voice.
+  voices = [remote, local];
+  act(() => window.dispatchEvent(new Event('focus')));
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(speak).not.toHaveBeenCalled(); // Returning to the tab never starts private audio.
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(local);
+});
+
+it('refreshes only installed voices after page restore and visibility changes', () => {
+  const simplified = { lang: 'zh-CN', localService: true };
+  const taiwanese = { lang: 'zh-Hant-TW', localService: true };
+  voices = [remote];
+  render(<StudyReadAloud text="個人教材保留在裝置上" />);
+  voices = [remote, simplified, taiwanese];
+  act(() => window.dispatchEvent(new Event('pageshow')));
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(taiwanese);
+  const utterance = speak.mock.calls[0][0] as Utterance;
+  act(() => utterance.onend?.());
+
+  voices = [remote];
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(speak).toHaveBeenCalledTimes(1); // Never falls back to the network voice.
+});
+
 it('retains the local-only boundary when the voice lookup temporarily throws', () => {
   voices = [remote];
   render(<StudyReadAloud text="原文" />);

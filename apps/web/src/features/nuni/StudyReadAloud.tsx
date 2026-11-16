@@ -245,12 +245,24 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     };
     refreshVoices.current = update;
     update();
+    // iOS Safari and in-app WebViews may not emit voiceschanged after students
+    // enable an installed voice in device settings. Refresh on returning to
+    // the lesson; do not resume or start speech without a user gesture.
+    const refreshOnForeground = () => {
+      if (document.visibilityState !== 'hidden') update();
+    };
+    window.addEventListener('focus', refreshOnForeground);
+    window.addEventListener('pageshow', refreshOnForeground);
+    document.addEventListener('visibilitychange', refreshOnForeground);
     // Some mobile speech engines throw when adding a voiceschanged listener.
     // Keep manual installed-voice detection available rather than crashing the panel.
     try { synthesis.addEventListener('voiceschanged', update); }
     catch { /* Students can retry through the manual voice refresh button. */ }
     return () => {
       clearPlaybackTimeout();
+      window.removeEventListener('focus', refreshOnForeground);
+      window.removeEventListener('pageshow', refreshOnForeground);
+      document.removeEventListener('visibilitychange', refreshOnForeground);
       refreshVoices.current = null;
       remainingChunks.current = [];
       // A failed listener teardown must never prevent cancelling private speech.
