@@ -1154,11 +1154,17 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     fireEvent.click(retry);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    const refreshingNotice = within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/);
+    expect(refreshingNotice.getAttribute('role')).toBe('status');
+    expect(refreshingNotice.id).toBeTruthy();
     expect(retry.hasAttribute('disabled')).toBe(true);
+    // The disabled stale-snapshot retry must explain its in-flight state,
+    // not just an earlier rate-limit cooldown that has already disappeared.
+    expect(retry.getAttribute('aria-describedby')).toBe(refreshingNotice.id);
 
     await act(async () => { rejectRefresh(new Error('offline during refresh')); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(retry.hasAttribute('aria-describedby')).toBe(false);
     expect(within(dialog).getByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
