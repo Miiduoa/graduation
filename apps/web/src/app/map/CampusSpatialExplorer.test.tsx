@@ -1160,8 +1160,8 @@ it('bounds the first hard-expiry timer for an already-stale OSM snapshot', async
   expect(buildings).toHaveLength(1);
   const day = 24 * 60 * 60 * 1000;
   const now = Date.now();
-  // A valid two-day-old API snapshot has five days until hard expiry.
-  // Unbounded setTimeout would overflow the browser's signed 32-bit delay.
+  // A valid two-day-old snapshot has five days until hard expiry.
+  // Recheck its absolute deadline in daily steps instead of waiting five days.
   const fetchedAt = new Date(now - 2 * day).toISOString();
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, headers: { get: () => null },
