@@ -108,6 +108,27 @@ it('keeps existing board subscriptions available to ordinary members', async () 
 });
 
 
+it('lets signed-out students retry a board subscription after signing in without an alert', async () => {
+  mocks.auth.user = null;
+  mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
+  button.focus();
+  fireEvent.click(button);
+  expect(mocks.subscribe).not.toHaveBeenCalled();
+  expect(mocks.unsubscribe).not.toHaveBeenCalled();
+  expect(window.alert).not.toHaveBeenCalled();
+  expect(screen.getByRole('status').textContent).toBe('請先登入才能訂閱「科學討論」。');
+  expect(document.activeElement).toBe(button);
+
+  mocks.auth.user = { uid: 'student' };
+  view.rerender(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const signedIn = await screen.findByRole('button', { name: '訂閱科學討論' });
+  expect(screen.getByRole('status').textContent).toBe('');
+  fireEvent.click(signedIn);
+  await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
+});
+
 it('makes a pending subscription a single action and announces its current state to assistive tech', async () => {
   mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
   const pending = deferred<void>();
