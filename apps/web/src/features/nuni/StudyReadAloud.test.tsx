@@ -59,6 +59,27 @@ it('recognizes an installed Mandarin BCP 47 voice even when a Chinese voice prec
   expect((speak.mock.calls[0][0] as Utterance).voice).toBe(traditional);
 });
 
+it.each([
+  { primary: 'zh-Hans-TW', alternate: 'zh-Hant-HK', description: 'a Simplified TW tag versus Traditional HK' },
+  { primary: 'cmn_Hans_TW', alternate: 'zh-TW', description: 'a Mandarin Simplified TW tag versus local zh-TW' },
+  { primary: 'zh-Hans-HK', alternate: 'cmn_Hant', description: 'a Simplified HK tag versus an unqualified Traditional voice' },
+])('prefers installed Traditional Chinese for $description', ({ primary, alternate }) => {
+  const simplified = { lang: primary, localService: true };
+  const traditional = { lang: alternate, localService: true };
+  voices = [simplified, traditional];
+  render(<StudyReadAloud text="繁體中文教材與題目" />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(traditional);
+});
+
+it('keeps an explicitly Simplified Chinese local voice usable when no Traditional voice exists', () => {
+  const onlyVoice = { lang: 'zh-Hans-TW', localService: true };
+  voices = [onlyVoice, remote];
+  render(<StudyReadAloud text="本機教材仍可朗讀" />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(onlyVoice);
+});
+
 it('never chooses a remote Taiwanese voice over an installed Chinese fallback', () => {
   const remoteTaiwanese = { lang: 'zh-TW', localService: false };
   const installedFallback = { lang: 'zh-CN', localService: true };
