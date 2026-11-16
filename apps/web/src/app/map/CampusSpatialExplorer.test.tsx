@@ -722,21 +722,27 @@ it.each([
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   });
 
-// Gateway failures may omit Retry-After as well. The local one-minute
-// backoff prevents repeated requests to the public OSM proxy while keeping
-// the previously known place and walking navigation available.
+// 408s, incomplete intermediary responses (206 or Content-Range on a 200),
+// and gateway failures may omit Retry-After. A one-minute local backoff avoids
+// repeated requests while original POIs and walking directions stay usable.
+// These are synthetic proxy responses, not observed Overpass behavior.
 it.each([
-  { status: 502, retryAfter: null },
-  { status: 503, retryAfter: null },
-  { status: 503, retryAfter: 'invalid HTTP-date' },
-  { status: 504, retryAfter: null },
-])('backs off an OSM gateway outage without a usable Retry-After ($status, $retryAfter)',
-  async ({ status, retryAfter }) => {
+  { status: 206, retryAfter: null, contentRange: null },
+  { status: 206, retryAfter: null, contentRange: 'bytes 0-63/4096' },
+  { status: 200, retryAfter: null, contentRange: 'bytes 0-63/4096' },
+  { status: 408, retryAfter: null, contentRange: null },
+  { status: 502, retryAfter: null, contentRange: null },
+  { status: 503, retryAfter: null, contentRange: null },
+  { status: 503, retryAfter: 'invalid HTTP-date', contentRange: null },
+  { status: 504, retryAfter: null, contentRange: null },
+])('backs off an incomplete or failed OSM response without usable Retry-After ($status, $retryAfter, $contentRange)',
+  async ({ status, retryAfter, contentRange }) => {
     const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
     const json = vi.fn();
     const fetchMock = vi.fn().mockResolvedValue({
-      ok: false, status,
-      headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+      ok: status >= 200 && status < 300, status,
+      headers: { get: (name: string) => name === 'retry-after' ? retryAfter :
+        name === 'content-range' ? contentRange : null },
       json,
     });
     vi.stubGlobal('fetch', fetchMock);
