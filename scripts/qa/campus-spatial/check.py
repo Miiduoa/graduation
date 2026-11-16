@@ -250,7 +250,7 @@ def camera_status(dialog):
 async def expect_zoom_status(dialog, zoom_percent):
     # Test the same accessible element users see, not a removed zoom-only node.
     await expect(camera_status(dialog)).to_have_text(
-        re.compile(rf"^視角方位 (?:0|[1-9]\\d{{0,2}})° · 縮放 {zoom_percent}%$")
+        re.compile(rf"^視角方位 (?:0|[1-9][0-9]{{0,2}})° · 縮放 {zoom_percent}%$")
     )
 
 
