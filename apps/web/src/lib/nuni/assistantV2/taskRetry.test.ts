@@ -6,6 +6,7 @@ import { V2Error, type Binding } from './contracts';
 import { fixtureAdapter, fixtureBinding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
 import { run } from './runner';
 import { retryTaskReads } from './taskRetry';
+import { readLostFound } from './lostFoundAdapter';
 
 let serial = 0;
 const binding = (): Binding => ({ ...fixtureBinding, conversationId: 'retry-' + ++serial });
@@ -32,6 +33,34 @@ function retry(result: Awaited<ReturnType<typeof prepare>>, overrides: Partial<P
 }
 
 describe('selective cross-service read continuation', () => {
+  it('retries the exact lost-found owner, status and keyword scope without rereading other services', async () => {
+    const fixture = fixtureAdapter();
+    const transport = vi.fn().mockRejectedValueOnce(new V2Error(503, 'LOST_FOUND_UNAVAILABLE'));
+    fixture.adapter.lostFound = vi.fn(args => readLostFound(fixtureBinding.schoolId, args, transport, now));
+    const result = await prepare('查我發布的已結案失物招領關鍵字「黑色 iPhone 15」，查公車', fixture);
+    expect(result.taskRetry?.stepIds).toEqual(['task-1']);
+    transport.mockResolvedValue({ schoolId: fixtureBinding.schoolId, items: [], nextCursor: null });
+    const transit = vi.spyOn(fixture.adapter, 'transit');
+    const response = await retry(result);
+    expect(response.taskPlan.steps).toHaveLength(1);
+    expect(response.taskPlan.steps[0]).toMatchObject({ serviceId: 'lost-found', status: 'completed' });
+    expect(response.answer).toContain('我發布的刊登');
+    expect(response.answer).toContain('黑色 iPhone 15');
+    expect(transport).toHaveBeenCalledTimes(2);
+    for (const call of transport.mock.calls) expect(call).toEqual(['lost-found/list', {
+      schoolId: fixtureBinding.schoolId, mine: true, status: 'resolved', q: '黑色 iPhone 15', limit: 5,
+    }]);
+    expect(transit).not.toHaveBeenCalled();
+    expect(response).toMatchObject({ cards: [], dataRead: true, modelCalls: 0 });
+    expect(fixture.writes).toHaveLength(0);
+    expect(fixture.orderCalls).toHaveLength(0);
+    await expect(retry(result, { binding: { ...result.scope, schoolId: 'another-school' } }))
+      .rejects.toMatchObject({ code: 'TASK_RETRY_INVALID' });
+    await expect(retry(result, { binding: { ...result.scope, account: 'another-account' } }))
+      .rejects.toMatchObject({ code: 'TASK_RETRY_INVALID' });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
   it('retries the failed source without rereading unrelated completed services', async () => {
     const result = await unavailableBus('查今天課表，查餐廳，查公車');
     const ledger = vi.spyOn(result.fixture.adapter, 'ledger'), dining = vi.spyOn(result.fixture.adapter, 'dining');

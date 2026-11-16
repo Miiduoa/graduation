@@ -13,6 +13,8 @@ import { formatPublicCourseAssistantRead } from '@campus/shared/src/publicCourse
 import { findSchoolById } from '@campus/shared/src/schools';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind } from './publicCampus';
+import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
+import { parseAssistantCampusEventTargets, type AssistantCampusEventTarget } from '../../assistantCampusEvent';
 import type { AssistantCourseworkTarget } from '../../assistantCoursework';
 import type { createTools } from './tools';
 import type { CrossServiceOperation, CrossServiceRequest } from './crossServiceRequest';
@@ -43,6 +45,8 @@ function failureMessage(error: unknown): string {
 }
 
 function readSummary(operation: CrossServiceOperation, value: unknown, now: number, schoolId: string): string {
+  if (operation.tool === 'get_lost_found')
+    return formatLostFoundRead(parseLostFoundResult(value, schoolId, operation.args));
   const campusKind = publicCampusToolKind(operation.tool);
   if (campusKind) return formatPublicCampusRead(parsePublicCampusResult(value, schoolId, campusKind));
   if (unwrap(value).hasTimetableSource === false)
@@ -76,6 +80,31 @@ function readSummary(operation: CrossServiceOperation, value: unknown, now: numb
       : '這次餐廳目錄沒有回傳資料，尚不能據此判斷是否營業。';
   }
   return '已讀取此服務的可用資料。';
+}
+
+/** Explicit selections come only from the verified reader, never answer prose. */
+function readPlanEventTargets(request: CrossServiceRequest, plan: AssistantTaskPlan,
+  results: Map<string, unknown>, schoolId: string): AssistantCampusEventTarget[] {
+  const targets = new Map<string, AssistantCampusEventTarget>();
+  for (const operation of request.operations) {
+    if (operation.kind !== 'read' || operation.tool !== 'get_campus_events' ||
+        !['completed', 'partial'].includes(plan.steps.find(step => step.id === operation.id)?.status || '') ||
+        !results.has(operation.id)) continue;
+    const read = parsePublicCampusResult(results.get(operation.id), schoolId, 'events');
+    if (read.status !== 'ready') continue;
+    const selected = parseAssistantCampusEventTargets(read.items.map(item => ({
+      schoolId, source: read.source, id: item.id, title: item.title, startsAt: item.startsAt,
+      ...(item.endsAt ? { endsAt: item.endsAt } : {}),
+      ...(item.location ? { location: item.location } : {}), href: item.href, checkedAt: read.checkedAt,
+    })), schoolId);
+    for (const target of selected) {
+      const key = target.source + ':' + target.id;
+      const previous = targets.get(key);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(target)) return [];
+      targets.set(key, target);
+    }
+  }
+  return [...targets.values()].slice(0, 5);
 }
 
 /** Selection hints for a later fresh read, never authority to reuse this task's data or cards. */
@@ -179,7 +208,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -215,10 +244,12 @@ export async function runCrossService(input: {
         results.set(operation.id, value);
         const result = unwrap(value);
         step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
-        step.summary = result.unavailable && !publicCampusToolKind(operation.tool)
+        const sourceSummary = publicCampusToolKind(operation.tool) || operation.tool === 'get_lost_found';
+        step.summary = result.unavailable && !sourceSummary
           ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
-        if (publicCampusToolKind(operation.tool)) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
-        if (partial(result) && !publicCampusToolKind(operation.tool)) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
+        if (operation.tool === 'get_lost_found') step.href = parseLostFoundResult(value, binding.schoolId, operation.args).href;
+        else if (sourceSummary) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
+        if (partial(result) && !sourceSummary) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
       } else if (operation.kind === 'free-time') {
         const value = await call('find_free_time', operation.args, operation.question);
         const originalSlots = rows(unwrap(value).slots);
@@ -363,6 +394,7 @@ export async function runCrossService(input: {
     .replace(/\s+/g, ' ').trim().slice(0, 1200);
   return { taskPlan, answer, cards, steps, dataRead: true as const,
     courseworkTargets: readPlanCourseworkTargets(request, taskPlan, results, now),
+    eventTargets: readPlanEventTargets(request, taskPlan, results, binding.schoolId),
     ...(tools.publicCourseResults.length ? { publicCourseResults: tools.publicCourseResults } : {}),
     stopReason: unresolved.length ? 'TASKS_INCOMPLETE' : '' };
 }

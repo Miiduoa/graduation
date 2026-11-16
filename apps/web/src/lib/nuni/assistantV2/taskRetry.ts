@@ -9,7 +9,7 @@ import { createTools } from './tools';
 const RETRY_TTL_MS = 15 * 60 * 1000;
 const READ_TOOLS = new Set([
   'get_schedule', 'get_calendar', 'get_due_work', 'get_imported_academics', 'get_dining',
-  'list_food_orders', 'get_campus_announcements', 'get_campus_events',
+  'list_food_orders', 'get_campus_announcements', 'get_campus_events', 'get_lost_found',
 ]);
 const READ_KINDS = new Set(['free-time', 'materials', 'clubs', 'transit', 'public-course']);
 const invalid = (): never => { throw new V2Error(409, 'TASK_RETRY_INVALID'); };

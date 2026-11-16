@@ -9,6 +9,8 @@ import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantTaskPlan } from './AssistantTaskPlan';
+import { AssistantCampusEvents } from './AssistantCampusEvents';
+import type { AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -26,7 +28,7 @@ import type { V2ActionStates, V2Card, V2Turn } from './types';
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
   if (parseAssistantTaskPlan(reply.taskPlan))
     return <p>已逐項整理這次任務，結果與尚待處理的項目如下。</p>;
-  if (reply.local || reply.dataRead || reply.publicCourseResults !== undefined)
+  if (reply.local || reply.dataRead || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined || reply.campusEventPreview)
     return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
   return <AssistantMarkdown text={reply.answer} />;
 }
@@ -58,6 +60,8 @@ export function AssistantThread({
   onRecoverQuestion,
   onAsk,
   onStudyTarget,
+  onEventTarget,
+  eventBlockedReason,
   onTaskRetry,
   taskRetryForTurn,
   onStop,
@@ -87,6 +91,8 @@ export function AssistantThread({
   onRecoverQuestion: () => void;
   onAsk: () => void;
   onStudyTarget?: (target: AssistantCourseworkTarget, date?: string) => void;
+  onEventTarget?: (turn: V2Turn, target: AssistantCampusEventTarget) => void;
+  eventBlockedReason?: string;
   onTaskRetry?: (turn: V2Turn, stepIds: string[]) => void;
   taskRetryForTurn?: (turn: V2Turn) => AssistantTaskRetry | null;
   onStop?: () => void;
@@ -253,6 +259,10 @@ export function AssistantThread({
                     ))}
                   </div>
                 ) : null}
+                <AssistantCampusEvents targets={turn.reply.eventTargets} schoolId={schoolId}
+                  pending={pending || !!onStop} blockedReason={eventBlockedReason}
+                  sourceOnly={turn.reply.campusEventPreview === true}
+                  onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
@@ -284,7 +294,7 @@ export function AssistantThread({
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
-            {renderPlanRevision?.(turn)}
+            {!turn.reply.campusEventPreview && renderPlanRevision?.(turn)}
           </article>
         ))}
         {pending ? (

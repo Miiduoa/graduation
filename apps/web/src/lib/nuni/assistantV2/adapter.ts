@@ -17,6 +17,9 @@ import { hasPublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
 import { parsePublicCourseArguments, publicCourseArguments, PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { bounded, id, object, V2Error, type Adapter, type Obj } from './contracts';
 import { readPublicCampus } from './publicCampusAdapter';
+import { readPublicEvent } from './publicEventAdapter';
+import { parsePublicEventTarget } from './publicEvent';
+import { readLostFound } from './lostFoundAdapter';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
   if (!Array.isArray(v[key])) throw new V2Error(502, 'INVALID_RESPONSE');
@@ -189,6 +192,68 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           afterRead: check,
         } });
       }, active, 4000);
+    },
+    publicEvent: async (requested) => {
+      const target = parsePublicEventTarget(requested);
+      if (target.schoolId !== schoolId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      return bounded(async (child) => {
+        const check = () => {
+          child.throwIfAborted();
+          active.throwIfAborted();
+          if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        };
+        const { publicCampusFirestore } = await import('../../server/publicCampusFirestore');
+        check();
+        return readPublicEvent({ target, guard: {
+          db: publicCampusFirestore(),
+          beforeRead() {
+            check();
+            if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+          },
+          afterRead: check,
+        } });
+      }, active, 4000);
+    },
+    lostFound: async (args) => {
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      const expectedAccount = verifiedPrincipal.platformAccountId;
+      const result = await readLostFound(schoolId, args, async (path, input) => {
+        try { return await request(path, input); }
+        catch (error) {
+          if ((error as { status?: number }).status !== 401) throw error;
+          // Older deployments route unknown platform paths to school auth.
+          // Probe this exact session once; never repeat the list operation or
+          // adopt a different account into the original task's binding.
+          let current: ReturnType<typeof parseNuniPrincipal>;
+          try { current = parseNuniPrincipal(await request('sessions/current')); }
+          catch (probeError) {
+            signal.throwIfAborted();
+            operationSignal()?.throwIfAborted();
+            const failure = probeError as { status?: number; code?: string };
+            if (failure.status === 401) {
+              verifiedPrincipal = undefined;
+              throw probeError;
+            }
+            if ([429, 499, 504].includes(failure.status || 0) ||
+                ['API_BUDGET_EXCEEDED', 'TOOL_TIMEOUT', 'DEADLINE_EXCEEDED', 'ABORTED'].includes(failure.code || ''))
+              throw probeError;
+            throw new V2Error(503, 'SERVICE_UNAVAILABLE');
+          }
+          if (current.platformAccountId !== expectedAccount) {
+            verifiedPrincipal = undefined;
+            throw new V2Error(401, 'SESSION_CHANGED');
+          }
+          throw new V2Error(503, 'LOST_FOUND_UNAVAILABLE');
+        }
+      });
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      return result;
     },
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),

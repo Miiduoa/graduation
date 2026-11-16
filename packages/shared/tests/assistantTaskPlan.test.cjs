@@ -200,10 +200,14 @@ describe('assistant connected service capabilities', () => {
     assert.deepEqual(getAssistantServiceCapability('school-courses').modes, ['read', 'handoff']);
     assert.deepEqual(getAssistantServiceCapability('school-courses').tools,
       ['get_public_courses', 'list_campus_services', 'propose_open_page']);
-    for (const [id, tool] of [['announcements', 'get_campus_announcements'], ['events', 'get_campus_events']]) {
+    for (const [id, tool] of [['announcements', 'get_campus_announcements'], ['lost-found', 'get_lost_found']]) {
       assert.deepEqual(getAssistantServiceCapability(id).modes, ['read']);
       assert.deepEqual(getAssistantServiceCapability(id).tools, [tool]);
     }
+    assert.deepEqual(getAssistantServiceCapability('events').modes, ['read', 'prepare']);
+    assert.deepEqual(getAssistantServiceCapability('events').tools, ['get_campus_events', 'propose_personal_event']);
+    assert.match(getAssistantServiceCapability('events').summary, /明確選取後重新核對/);
+    assert.match(getAssistantServiceCapability('lost-found').summary, /不讀聯絡方式/);
   });
 
   test('metadata remains immutable and does not expose an authorization decision', () => {

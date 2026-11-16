@@ -124,11 +124,12 @@ export function AssistantTaskPlan({ plan, cards, states, retry: rawRetry, pendin
       {steps.map(({ step, status, summary }, index) => {
         const service = getAssistantService(step.serviceId);
         const capability = getAssistantServiceCapability(step.serviceId);
-        // A display-only step cannot distinguish a failed draft from a reader
-        // in a service that also prepares writes. Keep those on their card path.
+        // Event creation has a separate, source-selected preview endpoint, so
+        // its cross-service steps remain reads even when preparation is offered.
+        // Other mixed services keep failed drafts on their original card path.
         const readSource = !step.cardIds?.length && status === step.status &&
           ['completed', 'partial', 'blocked'].includes(status) &&
-          capability?.modes.includes('read') && !capability.modes.includes('prepare');
+          capability?.modes.includes('read') && (!capability.modes.includes('prepare') || step.serviceId === 'events');
         const href = step.href && (status === 'handoff' || readSource) ? inAppHref(step.href) : null;
         return <li key={step.id} className={styles.step} data-status={status}>
           <span className={styles.number} aria-hidden="true">{index + 1}</span>

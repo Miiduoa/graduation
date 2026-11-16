@@ -23,6 +23,10 @@ export type V2Reply = {
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
   courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
   courseworkDate?: string;
+  /** Exact public records offered for an explicit, independently re-read selection. */
+  eventTargets?: import('@/lib/assistantCampusEvent').AssistantCampusEventTarget[];
+  /** Source-bound event cards cannot be revised into an unrelated calendar entry. */
+  campusEventPreview?: boolean;
   /** Server-prepared task results; validate before rendering or linking. */
   taskPlan?: import('@campus/shared/src/assistantTaskPlan').AssistantTaskPlan;
   /** Scoped read continuation; never an action-card confirmation. */

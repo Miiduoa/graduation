@@ -7,6 +7,7 @@ import { informationReads, type InformationRead } from './information';
 import { studyWindow } from './tools';
 import { publicCourseArguments } from './publicCourses';
 import { parsePublicCampusRead } from './publicCampus';
+import { parseLostFoundRead } from './lostFound';
 
 export type CrossServiceOperation = {
   id: string;
@@ -101,7 +102,8 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
       /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
   const text = question.normalize('NFKC').trim();
   if (/不要|不用|不必|不需要|無須|別幫|先別|不是要|翻譯|這句話|假設|如果|例如|範例|之前|曾經|昨天|前天|剛才|剛剛|每天|每日|每週|每月|自動|持續/.test(text)) return null;
-  const split = (value: string) => value.split(/(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/)
+  const split = (value: string) => value.split(/(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、])+/)
+    .flatMap(part => parseLostFoundRead(part) ? [part] : part.split(/[和與]+/))
     .map(part => part.trim()).filter(Boolean).map(question => ({ question, publicCourseIntent: null }));
   const compound = publicCourseCompoundRequest(text, schoolId);
   const clauses: { question: string; publicCourseIntent: PublicCourseAssistantIntent | null }[] = compound
@@ -110,7 +112,7 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
   if (!clauses.length || clauses.length > 12) return null;
   // A weekday filter or a quoted course title belongs to its public source,
   // not the private calendar's date or the remaining task grammar.
-  if (clauses.some(clause => !clause.publicCourseIntent &&
+  if (clauses.some(clause => !clause.publicCourseIntent && !parseLostFoundRead(clause.question) &&
       /[「」『』“”"'`]|週|周|禮拜|月底|本月|下月|明年|今年/.test(clause.question))) return null;
   const days = clauses.map(clause => clause.publicCourseIntent ? undefined : requestedDay(clause.question, now));
   if (days.includes(null)) return null;
@@ -129,6 +131,12 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
       continue;
     }
     const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
+    const lostFound = parseLostFoundRead(clause);
+    if (lostFound) {
+      add({ kind: 'read', label: lostFound.args.mine ? '查我發布的失物招領' : '查平台失物招領',
+        serviceId: 'lost-found', tool: lostFound.tool, args: { ...lostFound.args } });
+      continue;
+    }
     const publicCampus = parsePublicCampusRead(clause);
     if (publicCampus) {
       add({ kind: 'read', label: publicCampus.kind === 'announcements' ? '查學生公告' : '查近期活動',
@@ -199,11 +207,14 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     // completed task. Ambiguous multi-service clauses remain conversational.
     const services = [...new Set(handoffs.map(([, service]) => service))];
     if (services.length !== 1) return null;
+    // An unsupported ownership or date filter must not be stripped into the
+    // now-connected lost-found feed. Explicit navigation is still a handoff.
+    if (services[0] === 'lost-found' && !/^(?:開啟|打開|前往|進入)/.test(short)) return null;
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
-  const singlePublicRead = requested.length === 1 && requested[0].kind === 'read' &&
-    ['get_campus_announcements', 'get_campus_events'].includes(requested[0].tool || '');
-  if ((!singlePublicRead && requested.length < 2) || requested.length > 12 || (!singlePublicRead &&
+  const singleSourceRead = requested.length === 1 && requested[0].kind === 'read' &&
+    ['get_campus_announcements', 'get_campus_events', 'get_lost_found'].includes(requested[0].tool || '');
+  if ((!singleSourceRead && requested.length < 2) || requested.length > 12 || (!singleSourceRead &&
       new Set(requested.map(op => op.kind === 'public-course' ? op.kind + ':' + JSON.stringify(op.args)
         : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2)) return null;
   const operations: CrossServiceOperation[] = [];

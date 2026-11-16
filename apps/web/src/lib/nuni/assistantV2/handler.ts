@@ -20,7 +20,9 @@ import { courseworkStudyTarget } from './courseworkStudy';
 import { COURSEWORK_STUDY_MESSAGES, prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import { readCourseworkFollowup } from './courseworkFollowup';
 import { retryTaskReads } from './taskRetry';
-const ACTIONS = ['capability', 'ask', 'plan', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
+import { parsePublicEventTarget } from './publicEvent';
+import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventRequest';
+const ACTIONS = ['capability', 'ask', 'plan', 'event-preview', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 const followupHits = new Map<string, number[]>();
@@ -132,6 +134,7 @@ export async function handleV2(request: NextRequest, action: string) {
         version: 2,
         ready: Boolean(process.env.GROQ_API_KEY || fallbackReady()),
         planning: true,
+        eventPreview: true,
         writesEnabled: process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true',
         fallback: fallbackReady(),
         simulation: false,
@@ -143,6 +146,8 @@ export async function handleV2(request: NextRequest, action: string) {
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget']
         : action === 'plan'
           ? ['schoolId', 'conversationId', 'routeToken', 'task']
+          : action === 'event-preview'
+            ? ['schoolId', 'conversationId', 'routeToken', 'event']
           : action === 'followup'
             ? ['schoolId', 'conversationId', 'issuedContext', 'token', 'args']
             : action === 'retry'
@@ -159,12 +164,15 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
+    const selectedEvent = action === 'event-preview' ? parsePublicEventTarget(raw.event) : undefined;
+    if (selectedEvent && selectedEvent.schoolId !== schoolId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
     if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
         !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const preparing = action === 'ask' || action === 'plan';
+    const preparing = action === 'ask' || action === 'plan' || action === 'event-preview';
+    const routePurpose = action === 'event-preview' ? 'event-preview' : 'chat';
     const target = action === 'reconcile' || action === 'followup' || action === 'retry' ? undefined : preparing || action === 'revise'
-      ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
+      ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret, routePurpose)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
       if (request.headers.has('fly-replay-failed')) throw new V2Error(409, 'CONFIRMATION_REVOKED');
@@ -203,7 +211,7 @@ export async function handleV2(request: NextRequest, action: string) {
     if (action === 'revise') routeOwner(raw.routeToken, binding, secret);
     let protection: PlanProtection | undefined;
     if (preparing) {
-      if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret);
+      if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret, routePurpose);
       if (raw.planProtection !== undefined) {
         try {
           const input = object(raw.planProtection, ['originalEvents', 'protectedIndices']);
@@ -223,7 +231,7 @@ export async function handleV2(request: NextRequest, action: string) {
           history(raw.history);
         }
         const fresh = { ...binding, conversationId: randomUUID() };
-        return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret) });
+        return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret, routePurpose) });
       }
     }
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
@@ -269,7 +277,7 @@ export async function handleV2(request: NextRequest, action: string) {
       sessionKey = hash(session.sessionHandle);
     const now = Date.now();
     // Structured previews have their own allowance; chat quota belongs to chat.
-    const allowance = action === 'plan' ? planHits : hits;
+    const allowance = action === 'plan' || action === 'event-preview' ? planHits : hits;
     for (const [k, times] of allowance) {
       if (!times.some((t) => t > now - 3600000)) allowance.delete(k);
     }
@@ -280,6 +288,17 @@ export async function handleV2(request: NextRequest, action: string) {
     allowance.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
+      if (action === 'event-preview') {
+        const result = await prepareCampusEventRequest({
+          target: selectedEvent!, adapter: source.adapter, binding, secret, writes, now, signal,
+        });
+        signal.throwIfAborted();
+        return jsonResponse({
+          version: 2, ...result, campusEventPreview: true, modelCalls: 0, simulation: source.adapter.simulation,
+          ...(result.cards.length ? { expiresAt: now + 300000 } : {}),
+          ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
+        });
+      }
       if (action === 'plan') {
         // An in-app task selection is a source hint, never a chat prompt or
         // execution authority. Re-read it through the existing guarded planner.
@@ -401,6 +420,7 @@ export async function handleV2(request: NextRequest, action: string) {
           ? { message: '仍有一項資料重查正在進行，請等結果回來後再試。' }
           : code === 'EVENT_START_PASSED'
           ? { message: '這個時段已經開始，請重新安排時間。' }
+          : CAMPUS_EVENT_MESSAGES[code] ? { message: CAMPUS_EVENT_MESSAGES[code] }
           : COURSEWORK_STUDY_MESSAGES[code] ? { message: COURSEWORK_STUDY_MESSAGES[code] }
           : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
       },

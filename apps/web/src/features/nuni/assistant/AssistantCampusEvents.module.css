@@ -1,0 +1,15 @@
+.results { min-width: 0; margin-top: 16px; }
+.results h3 { margin: 0 0 6px; font-size: 15px; }
+.note, .checked { margin: 5px 0 0 !important; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.checked { font-size: 12px; }
+.blocked { margin: 10px 0 !important; padding: 10px 12px; border-radius: 10px; background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.6; }
+.list { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.item { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.item h4 { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.when { margin: 6px 0 0 !important; font-size: 13px; line-height: 1.6; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
+.prepare, .source { box-sizing: border-box; display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.prepare { padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--panel); color: var(--text); font-family: inherit; font-weight: 600; cursor: pointer; }
+.prepare:disabled { opacity: .55; cursor: default; }
+.source { padding: 8px 0; color: var(--brand); text-decoration: underline; text-underline-offset: 3px; }
+.prepare:focus-visible, .source:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }

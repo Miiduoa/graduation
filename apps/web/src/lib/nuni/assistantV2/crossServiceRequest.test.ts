@@ -73,6 +73,35 @@ describe('compound task intent and source scope', () => {
     expect(crossServiceRequest('查課表，查公車', 1e30)).toBeNull();
     expect(crossServiceRequest('查課表，查公車', NaN)).toBeNull();
   });
+
+  it('runs a single lost-found query as a bounded reader and preserves filters beside other services', () => {
+    expect(crossServiceRequest('查失物招領', now, binding.schoolId)?.operations).toEqual([
+      { id: 'task-1', kind: 'read', serviceId: 'lost-found', label: '查平台失物招領', tool: 'get_lost_found', args: {}, dependsOn: [] },
+    ]);
+    const plan = crossServiceRequest('找學生證的招領，查今天課表，查公車', now, binding.schoolId)!;
+    expect(plan.operations[0]).toMatchObject({ kind: 'read', serviceId: 'lost-found', tool: 'get_lost_found',
+      args: { q: '學生證', type: 'found' } });
+    expect(plan.operations.map(operation => operation.serviceId)).toEqual(['lost-found', 'timetable', 'bus']);
+    const own = crossServiceRequest('查我發布的已結案失物招領關鍵字「黑色 iPhone 15」，查公車', now, binding.schoolId)!;
+    expect(own.operations[0].args).toEqual({ mine: true, status: 'resolved', q: '黑色 iPhone 15' });
+  });
+
+  it('preserves a literal quoted conjunction and never confuses a lost personal item with an owned post', () => {
+    const quoted = crossServiceRequest('查失物招領關鍵字「和平紀念卡」，查公車', now, binding.schoolId)!;
+    expect(quoted.operations[0].args).toEqual({ q: '和平紀念卡' });
+    const dropped = crossServiceRequest('我的學生證掉了，查公車', now, binding.schoolId)!;
+    expect(dropped.operations[0].args).toEqual({ q: '學生證', type: 'found' });
+    expect(dropped.operations[0].args).not.toHaveProperty('mine');
+  });
+
+  it('does not silently convert lost-found date, owner, foreign-school or write scope into a generic feed', () => {
+    for (const question of ['查今天失物招領，查公車', '查清大失物招領，查公車',
+      '查我的失物招領，查公車', '查失物招領關鍵字學生證並聯絡失主，查公車',
+      '查我發布的失物招領並下架，查公車', '查失物招領關鍵字學生證的聯絡方式，查公車'])
+      expect(crossServiceRequest(question, now, binding.schoolId), question).toBeNull();
+    const handoff = crossServiceRequest('開啟失物招領，查公車', now, binding.schoolId)!;
+    expect(handoff.operations[0]).toMatchObject({ kind: 'handoff', serviceId: 'lost-found' });
+  });
 });
 
 async function ask(question: string, fixture = fixtureAdapter()) {

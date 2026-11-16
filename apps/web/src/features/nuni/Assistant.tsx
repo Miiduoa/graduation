@@ -34,12 +34,14 @@ import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistan
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import { assistantPermissionMessage, inAppHref } from './assistant/copy';
-import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
+import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
+import { campusEventIdentity, campusEventPreviewIssue, campusEventTargetKey, parseAssistantCampusEventTargets,
+  type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 type Step = {
@@ -244,10 +246,20 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
 const ASSISTANT_PENDING_STATUS = {
   ask: '正在整理回覆',
   retry: '正在重查未完成的資料',
+  event: '正在重新核對活動並準備行程預覽',
   confirm: '正在確認操作結果',
   reconcile: '正在核對執行結果',
   cancel: '正在確認撤銷結果',
 } as const;
+
+function eventPreparationBlockReason(turns: V2Turn[], states: V2ActionStates, journalReady: boolean): string {
+  if (!journalReady) return '正在核對先前操作，完成後才能準備活動行程。';
+  if (hasUnresolvedAssistantAction(states) || turns.some(turn => turn.reply.cards.some(card => {
+    const state = states[card.mutationId];
+    return !state || !['verified', 'cancelled', 'superseded', 'handoff'].includes(state.status);
+  }))) return '請先確認或取消原本的待確認項目；尚未核對完成的操作請先重新核對。原確認卡會保留，不會被活動預覽取代。';
+  return '';
+}
 
 function V2Conversation({
   context,
@@ -357,6 +369,7 @@ function V2Conversation({
   const timeDrafts = usePrecisePlanDraft({ accountId, schoolId, context }, active);
   const shiftDrafts = useShiftPlanDraft({ accountId, schoolId, context }, active);
   function sourceForTurn(turn: V2Turn) {
+    if (turn.reply.campusEventPreview) return null;
     if (turn.reply.cards.some(card => card.schoolId !== schoolId)) return null;
     try { return revisionDraftSource(turn.reply.cards); } catch { return null; }
   }
@@ -372,7 +385,7 @@ function V2Conversation({
     return shiftDrafts.clearSource(source.key, true);
   }
   function canEditPlanDraft(turn: V2Turn) {
-    return active() && !busy.current && journalReadyRef.current &&
+    return !turn.reply.campusEventPreview && active() && !busy.current && journalReadyRef.current &&
       turns.includes(turn) && !hasUnresolvedAssistantAction(actionStates.current) &&
       isUnattemptedCalendarPlan(turn, actionStates.current) &&
       !revisionTurns.current.has(turn) && !preciseRevisionTurns.current.has(turn) && !selectionRevisionTurns.current.has(turn) && !shiftRevisionTurns.current.has(turn);
@@ -487,6 +500,7 @@ function V2Conversation({
       retriedTaskSteps.current.set(turn, retired);
       setTurns(previous => [...previous, { question: current, conversationId: sourceConversation,
         reply: { ...reply, taskPlan, cards: [], dataRead: true,
+          eventTargets: parseAssistantCampusEventTargets(reply.eventTargets, schoolId),
           courseworkTargets: parseAssistantCourseworkTargets(reply.courseworkTargets) } }]);
       setRecoverableQuestion(previous => previous === current ? '' : previous);
     } catch (e) {
@@ -501,6 +515,80 @@ function V2Conversation({
         setAsking(false);
         setPending(false);
       }
+    }
+  }
+  async function previewCampusEvent(turn: V2Turn, selected: AssistantCampusEventTarget) {
+    if (!active() || busy.current || !turns.includes(turn) || turn.reply.campusEventPreview) return;
+    const target = parseAssistantCampusEventTargets(turn.reply.eventTargets, schoolId)
+      .find(item => campusEventTargetKey(item) === campusEventTargetKey(selected));
+    const problem = eventPreparationBlockReason(turns, actionStates.current, journalReadyRef.current) ||
+      (target ? campusEventPreviewIssue(target, Date.now()) : '這筆活動來源尚未通過核對，請重新查詢活動。');
+    if (problem || !target) { setError(problem || '請重新查詢活動。'); return; }
+    busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('event');
+    setPending(true);
+    setError('');
+    try {
+      // Event previews have an independent issuance route. Never replace the
+      // ordinary conversation or invalidate one of its existing confirmations.
+      const event = campusEventIdentity(target);
+      const bootstrap = await send('event-preview', { conversationId: crypto.randomUUID(), event }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      if (bootstrap?.bootstrap !== true || typeof bootstrap.conversationId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,100}$/.test(bootstrap.conversationId) || bootstrap.conversationId === conversation.current ||
+        typeof bootstrap.routeToken !== 'string' || !bootstrap.routeToken || bootstrap.routeToken.length > 2048)
+        throw new Error('活動預覽尚未取得有效的確認路徑，請重新查詢後再試。');
+      const eventConversation = bootstrap.conversationId;
+      const reply = await send('event-preview', { conversationId: eventConversation,
+        routeToken: bootstrap.routeToken, event }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      const freshTargets = parseAssistantCampusEventTargets(reply?.eventTargets, schoolId);
+      if (reply?.version !== 2 || reply.campusEventPreview !== true || typeof reply.answer !== 'string' ||
+        !Array.isArray(reply.steps) || reply.steps.length > 16 || reply.steps.some((step: unknown) =>
+          !step || typeof step !== 'object' || !['name', 'status', 'summary'].every(key => typeof (step as Record<string, unknown>)[key] === 'string')) ||
+        !Array.isArray(reply.cards) || reply.cards.length > 1 ||
+        freshTargets.length > 1 || freshTargets.some(item => campusEventTargetKey(item) !== campusEventTargetKey(target)) ||
+        (reply.eventTargets !== undefined && (!Array.isArray(reply.eventTargets) || reply.eventTargets.length !== freshTargets.length)))
+        throw new Error('活動預覽尚未通過核對，原本的確認內容仍保留。');
+      const cards: V2Card[] = reply.cards.map((raw: V2Card) => {
+        if (!raw || raw.tool !== 'propose_personal_event' || raw.schoolId !== schoolId ||
+          typeof raw.token !== 'string' || !raw.token || raw.token.length > 4096 ||
+          typeof raw.mutationId !== 'string' || !/^av2_[a-f0-9]{32}$/.test(raw.mutationId) ||
+          turns.some(previous => previous.reply.cards.some(card => card.mutationId === raw.mutationId)) ||
+          typeof raw.destination !== 'string' || !raw.destination || raw.destination.length > 300 || freshTargets.length !== 1)
+          throw new Error('活動確認卡尚未通過核對，請重新查詢後再試。');
+        const args = parseAssistantCalendarEvent(raw.args), fresh = freshTargets[0];
+        if (campusEventPreviewIssue(fresh, Date.now()))
+          throw new Error('活動確認內容尚無法由目前來源完整核對，請重新查詢後再試。');
+        const start = new Date(Date.parse(fresh.startsAt) + 28_800_000).toISOString();
+        const end = new Date(Date.parse(fresh.endsAt ?? '') + 28_800_000).toISOString();
+        if (args.allDay || args.title !== fresh.title || args.location !== undefined ||
+          args.date !== start.slice(0, 10) || args.startTime !== start.slice(11, 16) || args.endTime !== end.slice(11, 16) ||
+          (args.endDate || args.date) !== end.slice(0, 10))
+          throw new Error('活動確認內容與重新核對的來源不一致，尚未建立行程。');
+        return { tool: raw.tool, args: { ...args }, token: raw.token, mutationId: raw.mutationId,
+          schoolId, destination: raw.destination, conversationId: eventConversation };
+      });
+      setTurns(previous => [...previous, { question: `將「${target.title}」加入個人行事曆`,
+        conversationId: eventConversation, reply: { answer: reply.answer, steps: reply.steps, cards,
+          campusEventPreview: true, dataRead: true, eventTargets: freshTargets,
+          ...(reply.simulation === true ? { simulation: true } : {}) } }]);
+    } catch (e) {
+      if (!scopeSignal.aborted) setError(pendingAsk.signal.aborted
+        ? '已停止這次活動預覽，原本的結果與確認內容仍保留。'
+        : e instanceof Error ? e.message : '活動預覽未完成，請稍後再試。');
+    } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
+      busy.current = false;
+      if (!scopeSignal.aborted) { setAsking(false); setPending(false); }
     }
   }
   async function ask(selection?: AssistantCourseworkSelection) {
@@ -598,6 +686,7 @@ function V2Conversation({
       }
       if ((!ready || !consent) && !studySelection) return;
       const history = studySelection ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead && turn.reply.publicCourseResults === undefined &&
+        turn.reply.eventTargets === undefined && !turn.reply.campusEventPreview &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -612,7 +701,9 @@ function V2Conversation({
           ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
-      if (publicCompound || reply.publicCourseResults !== undefined || parseAssistantTaskPlan(reply.taskPlan)) reply.dataRead = true;
+      if (publicCompound || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined ||
+        reply.campusEventPreview || parseAssistantTaskPlan(reply.taskPlan)) reply.dataRead = true;
+      if (reply.eventTargets !== undefined) reply.eventTargets = parseAssistantCampusEventTargets(reply.eventTargets, schoolId);
       // The last selected source stays an untrusted hint for a fresh read, never a model-history fact.
       reply.courseworkTargets = parseAssistantCourseworkTargets(
         reply.courseworkTargets ?? (studySelection ? [studySelection.target] : undefined));
@@ -622,7 +713,7 @@ function V2Conversation({
       }
       if (reply.cards.length) {
         for (const card of turns.flatMap((turn) => turn.reply.cards)) {
-          if (canConfirmAction(actionStates.current[card.mutationId]))
+          if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
             setAction(card, { status: 'superseded' });
         }
       }
@@ -762,6 +853,7 @@ function V2Conversation({
     }
   }
   async function revisePlan(turn: V2Turn, instruction: string, protectedIndices: readonly number[] = []): Promise<{ ok: boolean; message: string }> {
+    if (turn.reply.campusEventPreview) return { ok: false, message: '這是活動來源行程，請重新查詢來源後再準備。' };
     if (busy.current || !active() || !ready || !revisionConsent.current)
       return { ok: false, message: '請先等目前操作完成，並同意模型處理後再重新預覽。' };
     const continuing = revisionTurns.current.has(turn) && turn.reply.cards.every(card =>
@@ -835,7 +927,7 @@ function V2Conversation({
       const after = getPlanRevisionEvents({ question: current, reply });
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
-        if (canConfirmAction(actionStates.current[card.mutationId]))
+        if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
           setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: '修改原先安排：' + instruction.trim(), reply };
@@ -874,6 +966,7 @@ function V2Conversation({
     | { kind: 'selection'; keepMutationIds: string[] }
     | { kind: 'shift'; change: PlanShiftChange },
   ): Promise<{ ok: boolean; message: string }> {
+    if (turn.reply.campusEventPreview) return { ok: false, message: '這是活動來源行程，請重新查詢來源後再準備。' };
     const selecting = request.kind === 'selection', shifting = request.kind === 'shift';
     const attempts = selecting ? selectionRevisionTurns.current : shifting ? shiftRevisionTurns.current : preciseRevisionTurns.current;
     if (busy.current || !active() || !journalReadyRef.current)
@@ -964,7 +1057,8 @@ function V2Conversation({
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
-        if (canConfirmAction(actionStates.current[card.mutationId])) setAction(card, { status: 'superseded' });
+        if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
+          setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: (selecting ? '選擇要建立的行程：' : shifting ? '整組調整時間：' : '精確調整時間：') + edit.label, reply };
       if (selecting || shifting || individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
@@ -1094,6 +1188,8 @@ function V2Conversation({
       onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
       onStudyTarget={(target, date) => void ask({ target, date })}
+      onEventTarget={(turn, target) => void previewCampusEvent(turn, target)}
+      eventBlockedReason={eventPreparationBlockReason(turns, states, journalReady)}
       onTaskRetry={(turn, stepIds) => void retryTasks(turn, stepIds)}
       taskRetryForTurn={taskRetryForTurn}
       onStop={inlineDraft && asking ? () => askRequest.current?.abort() : undefined}
@@ -1112,6 +1208,7 @@ function V2Conversation({
           : <AssistantPlanComparison {...comparison} /> : null;
       }}
       renderPlanRevision={turn => {
+        if (turn.reply.campusEventPreview) return null;
         const source = sourceForTurn(turn);
         return <>
           <AssistantPlanSelection turn={turn} states={states} pending={pending}

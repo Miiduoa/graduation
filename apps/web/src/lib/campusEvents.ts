@@ -90,7 +90,14 @@ function isCampusEventSource(value: unknown): value is CampusEventSource {
   return typeof value === 'string' && EVENT_SOURCES.includes(value as CampusEventSource);
 }
 
-function dateString(value: unknown): string {
+function dateString(value: unknown, requireInstant = false): string {
+  // Agent actions must not turn a date-only or timezone-free source into a
+  // guessed instant. Keep the existing page reader's display behavior intact.
+  if (requireInstant && typeof value === 'string') {
+    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value)) return '';
+    const day = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+    if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== value.slice(0, 10)) return '';
+  }
   const date =
     typeof value === 'string'
       ? new Date(value)
@@ -111,6 +118,7 @@ function parseEventDocument(
   document: SourceDocument,
   schoolId: string,
   source: CampusEventSource,
+  requireInstant = false,
 ): CampusEvent {
   const data = document.data();
   if (typeof data.title !== 'string' || !data.title.trim()) {
@@ -130,8 +138,8 @@ function parseEventDocument(
     schoolId,
     title: data.title,
     description: typeof data.description === 'string' ? data.description : '',
-    startsAt: dateString(data.startsAt),
-    endsAt: dateString(data.endsAt) || undefined,
+    startsAt: dateString(data.startsAt, requireInstant),
+    endsAt: dateString(data.endsAt, requireInstant) || undefined,
     location: typeof data.location === 'string' ? data.location : undefined,
     organizer: typeof data.organizer === 'string' ? data.organizer : undefined,
     capacity: nonnegativeNumber(data.capacity),
@@ -228,21 +236,27 @@ export async function loadCampusEvent(
   schoolId: string,
   id: string,
   source?: string,
+  guard?: PublicCampusReadGuard,
 ): Promise<CampusEvent | null> {
-  const db = sourceDb(schoolId);
+  const db = sourceDb(schoolId, guard);
   if (!id || id.includes('/')) return null;
-  if (source != null && !isCampusEventSource(source)) {
+  if ((source != null && !isCampusEventSource(source)) || (guard && !source)) {
     throw new Error('Invalid event source');
   }
 
   const candidates = source ? [source] : EVENT_SOURCES;
   for (const candidate of candidates) {
-    const snapshot = await getDocFromServer(doc(db, ...eventCollectionPath(schoolId, candidate), id));
+    const path = eventCollectionPath(schoolId, candidate);
+    const snapshot = await guardedPublicCampusRead(guard, () => getDocFromServer(doc(db, ...path, id)));
     if (!snapshot.exists()) continue;
+    if (snapshot.id !== id || (guard && snapshot.ref.parent.path !== path.join('/'))) {
+      throw new Error('Invalid campus content');
+    }
     return parseEventDocument(
       { id: snapshot.id, data: () => snapshot.data() as Record<string, unknown> },
       schoolId,
       candidate,
+      Boolean(guard),
     );
   }
   return null;

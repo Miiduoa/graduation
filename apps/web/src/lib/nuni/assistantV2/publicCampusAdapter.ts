@@ -13,7 +13,7 @@ import {
 } from './publicCampus';
 
 function plain(value: unknown, max: number): string {
-  return typeof value === 'string' ? value.replace(/<[^>]*>/g, ' ')
+  return typeof value === 'string' ? value.replace(/<[^<>]*>/g, ' ')
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
 }
 function time(value: unknown): string | undefined {

@@ -7,6 +7,7 @@ import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskP
 import { parseAssistantPublicCourseResults, type AssistantPublicCourseResult } from '@campus/shared/src/assistantPublicCourseResults';
 import { parsePublicCourseArguments, publicCourseArguments, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
 import { parsePublicCampusRead, parsePublicCampusResult } from './publicCampus';
+import { lostFoundListInput, parseLostFoundRead, parseLostFoundResult } from './lostFound';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
@@ -54,6 +55,14 @@ const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
   get_campus_announcements: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_campus_events: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_lost_found: [{
+    q: { type: 'string', minLength: 1, maxLength: 100 },
+    type: { enum: ['lost', 'found'] },
+    category: { enum: ['electronics', 'cards', 'documents', 'wallet', 'clothing', 'accessories', 'books', 'keys', 'other'] },
+    status: { enum: ['open', 'resolved', 'all'] },
+    mine: { type: 'boolean' },
+    limit: { type: 'integer', minimum: 1, maximum: 5 },
+  }, []],
   get_public_courses: [
     { schoolId: { enum: ['nthu', 'ncnu'] }, query: { type: 'string', maxLength: 80 },
       weekday: { type: 'integer', minimum: 1, maximum: 7 },
@@ -451,6 +460,8 @@ export const toolNames = Object.keys(definitions);
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
 function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
+  const lostFound = parseLostFoundRead(question);
+  if (lostFound) return [['失物招領', lostFound.tool]];
   const publicCampus = parsePublicCampusRead(question);
   if (publicCampus) return [[publicCampus.kind === 'announcements' ? '學生公告' : '公開活動', publicCampus.tool]];
   const other = taskQuestionOutsidePublicCourses(question, schoolId);
@@ -509,6 +520,8 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
     : '';
 }
 export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
+  const lostFound = parseLostFoundRead(question);
+  if (lostFound) return [lostFound.tool];
   const publicCampus = parsePublicCampusRead(question);
   if (publicCampus) return [publicCampus.tool];
   const other = taskQuestionOutsidePublicCourses(question, schoolId);
@@ -957,6 +970,12 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_lost_found': {
+        lostFoundListInput(a, binding.schoolId);
+        if (!adapter.lostFound) return fail('LOST_FOUND_UNAVAILABLE', 503);
+        const result = await adapter.lostFound(a);
+        return parseLostFoundResult(result, binding.schoolId, a);
+      }
       case 'get_campus_announcements':
       case 'get_campus_events': {
         if (!adapter.publicCampus) return fail('PUBLIC_CAMPUS_UNAVAILABLE', 503);
@@ -1529,7 +1548,7 @@ export function createTools(
         cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
       // Public content readers do not reinterpret unsupported school, date or
       // endpoint fields as an unfiltered query for the bound campus.
-      if (name === 'get_campus_announcements' || name === 'get_campus_events') validateTool(name, cleaned);
+      if (name === 'get_campus_announcements' || name === 'get_campus_events' || name === 'get_lost_found') validateTool(name, cleaned);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);
