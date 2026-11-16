@@ -1766,6 +1766,36 @@ it('retries a denied mobile JSON copy without changing the validated backup or n
   }
 });
 
+it('restores notes copy focus immediately after a denied mobile clipboard retry succeeds', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('permission denied'))
+    .mockResolvedValueOnce(undefined);
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '尚未另存的課堂筆記' } });
+    const trigger = screen.getByRole('button', { name: '複製本次筆記' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const manual = await screen.findByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    const snapshot = manual.value;
+    expect(snapshot).toContain('尚未另存的課堂筆記');
+    const retry = screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.queryByRole('region', { name: '手動複製本次筆記' })).toBeNull());
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText.mock.calls[0][0]).toBe(snapshot);
+    expect(writeText.mock.calls[1][0]).toBe(snapshot);
+    expect(document.activeElement).toBe(trigger);
+    expect(inputValue(noteLabel)).toBe('尚未另存的課堂筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('ignores a delayed clipboard success after closing the manual backup fallback', async () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   let resolveRetry!: () => void;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PERSONAL_IMPORT_DOCUMENT_LIMITS } from '@campus/shared/src/imports/documents';
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 import {
@@ -422,7 +422,9 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
 
   // Restore focus only after the fallback has unmounted. Focusing its trigger
   // inside the close handler can be undone when React removes the active button.
-  useEffect(() => {
+  // Restore keyboard and screen-reader focus in the same DOM commit that
+  // removes the retry button. A passive effect can leave focus on <body>.
+  useLayoutEffect(() => {
     if (manualCopyText !== null) {
       // Select the snapshot once when the fallback first appears. Mobile
       // app switching, tapping controls or returning from screen-reader

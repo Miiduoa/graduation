@@ -1408,3 +1408,11 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 部分 iOS／Android 語音引擎會接受 `speechSynthesis.speak()`，卻一直不發出 `onend`／`onerror`，讓學生停在「停止朗讀」無法完成。現在每段朗讀獨立設 180 秒無回應保護：逾時只嘗試停止當前本機語音、清掉剩餘段落並明確提示可重試或閱讀原文；若瀏覽器拒絕停止則保留停止按鈕與裝置控制提示，不假稱已停止。
 - 每段正常完成、主動停止、教材替換與離開頁面會清除等待計時；同步立即完成的語音不額外排程。新增兩項模擬瀏覽器回歸，核對逾時恢復、重試，以及無過期計時器對新來源造成影響。資料仍只交給安裝於裝置的中文離線聲音，不上傳私人教材、不改任何閱讀或複習 JSON 格式、無新套件。
 - 模擬瀏覽器可驗證狀態與清理，不能代表 iOS Safari／Android Chrome／VoiceOver／TalkBack 真機驗收；最新精確 SHA 的 CI、CodeQL、App 5504170 APPROVED、Maestro、WebGPU 與 Ahaboard 同教材同題同裝置實測仍各自待證。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-16：修復手機剪貼簿重試成功後鍵盤焦點短暫遺失
+
+- 精確前版 head `ec7732e7b417a01538e415086076a60cc4938a33` 的 [CI #43850180516](https://github.com/Miiduoa/graduation/actions/runs/43850180516) **Web Tests 失敗 1 項**：`CourseStudyPanel.test.tsx` 的手機 JSON 剪貼簿權限拒絕後重試情境，手動備援區已移除，但原「複製閱讀進度 JSON」按鈕尚未恢復焦點，當下焦點落在 `body`。從 Web Tests job `133240391221` 實際日誌確認；其他 Web 測試成功不抵銷該失敗，同 SHA CodeQL／Course access review 成功。
+- 手動複製備援的初次聚焦及關閉後還原焦點改在 DOM 同一次提交時完成（`useLayoutEffect`），避免行動 WebView／鍵盤／讀屏先看到焦點暫時消失。保留原本對已切換教材、已失效剪貼簿請求和不存在的原按鈕的處理，不偽稱剪貼簿實際貼上成功。
+- 既有 JSON 重試回歸已精確檢查焦點、筆記與備份不變；新增「本次筆記」先遭拒絕後再重試成功的模擬 DOM 回歸，核對完整複製字串、還原原按鈕焦點與未保存筆記不消失。此項是程式與自動化測試，尚非 iOS Safari／Android Chrome、VoiceOver／TalkBack 真機驗收。無新套件、付費 API、私人教材外傳或 v1/v2 進度與 v1 練習 checkpoint 變更。
+- 新精確 head 的 Web/Mobile、Build、Lint/TypeCheck、Security Gates、CodeQL／指定 App 5504170 APPROVED 均須另行確認；Maestro、真機及 Ahaboard 同教材同題同機對照未齊前維持 Draft，不合併、不部署。
