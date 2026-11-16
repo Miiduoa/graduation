@@ -575,6 +575,79 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
+// Synthetic HTTP 200 responses from a proxy can still be corrupt, truncated,
+// or fail the OSM source/geometry contract. Reject them without inviting a
+// rapid retry loop, while keeping POIs and the existing walking route available.
+it.each([
+  { label: 'truncated JSON', brokenJson: true, retryAfter: null, minutes: 1 },
+  { label: 'untrusted OSM source', brokenJson: false, retryAfter: null, minutes: 1 },
+  { label: 'truncated JSON with Retry-After', brokenJson: true, retryAfter: '600', minutes: 10 },
+])('backs off an untrusted HTTP 200 footprint body ($label)', async ({ brokenJson, retryAfter, minutes }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const json = vi.fn().mockImplementation(async () => {
+    if (brokenJson) throw new SyntaxError('Unexpected end of JSON input');
+    return { schoolId: 'untrusted-campus', source: 'OpenStreetMap', buildings: [] };
+  });
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200,
+    headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(new RegExp(`約 ${minutes} 分鐘冷卻，到期後可再試`))).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(json).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('keeps a dated stale outline when a subsequent HTTP 200 refresh has invalid JSON', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+    })
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => { throw new SyntaxError('Truncated body'); },
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+  fireEvent.click(retry);
+  expect(await within(dialog).findByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('honors the API Retry-After cooldown without hammering Overpass or blocking navigation', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
