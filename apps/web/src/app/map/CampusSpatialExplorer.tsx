@@ -414,8 +414,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         }
       }
     };
-    // An already-stale snapshot can have a hard deadline days away. Clamp the
-    // first timer too: browsers overflow delays above 2^31-1 ms to near-zero.
+    // A retainable but already-stale snapshot may have a hard deadline days
+    // away. Recheck the absolute deadline at least daily, including after
+    // device clock adjustments, rather than waiting several days initially.
     timer = window.setTimeout(checkSnapshotAge,
       Math.max(0, Math.min(FOOTPRINT_DAY_MS, nextDeadline - Date.now())));
     document.addEventListener('visibilitychange', checkSnapshotAge);
