@@ -1106,6 +1106,49 @@ it('keeps an OSM cooldown locked if a mobile clock moves backwards before its ti
   }
 });
 
+it('rearms a cooldown timeout after a small clock rollback without a minute-label change', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503,
+    headers: { get: (name: string) => name === 'retry-after' ? '605' : null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  let clock = Date.now();
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 11 分鐘冷卻/)).toBeTruthy();
+    const original = timerSpy.mock.calls.find(([, delay]) => delay === 605_000);
+    expect(original).toBeTruthy();
+
+    // The first timeout runs after NTP moves the wall clock back 20 seconds.
+    // Both 605s and 625s round to 11 minutes. No React status change can
+    // incidentally restart the timer: the callback itself must rearm it.
+    clock -= 20_000;
+    act(() => { (original![0] as () => void)(); });
+    expect(within(dialog).getByText(/約 11 分鐘冷卻/)).toBeTruthy();
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    const rearmed = timerSpy.mock.calls.filter(([, delay]) => delay === 625_000).at(-1);
+    expect(rearmed).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Expiry should unlock on the rearmed callback without a visibility
+    // event or the browser's potentially throttled 60-second interval.
+    clock += 625_001;
+    act(() => { (rearmed![0] as () => void)(); });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
 it('retries Providence building data after a temporary outage without closing the tour', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const outline = [
