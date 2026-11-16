@@ -438,6 +438,25 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       staleSnapshotRef.current = false;
       return;
     }
+    // The dialog can mount while a tab is suspended (e.g. restored from a
+    // mobile browser session). Do not start a fresh public OSM request until
+    // the user returns. The original POIs and walking link still work.
+    if (document.hidden) {
+      let resumed = false;
+      const fetchWhenVisible = () => {
+        if (resumed || document.hidden) return;
+        resumed = true;
+        document.removeEventListener('visibilitychange', fetchWhenVisible);
+        window.removeEventListener('pageshow', fetchWhenVisible);
+        setFootprintAttempt((attempt) => attempt + 1);
+      };
+      document.addEventListener('visibilitychange', fetchWhenVisible);
+      window.addEventListener('pageshow', fetchWhenVisible);
+      return () => {
+        document.removeEventListener('visibilitychange', fetchWhenVisible);
+        window.removeEventListener('pageshow', fetchWhenVisible);
+      };
+    }
     let active = true;
     let timedOut = false;
     // A freshness deadline may retain a dated snapshot; the seven-day hard
