@@ -574,6 +574,28 @@ test('restored partial assignment metadata matches legacy or eight-page reader b
   }
 });
 
+test('complete pending-only evidence never implies all assignments or submitted history', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const pendingOnly: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 0, items: [],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  // The server reader deliberately excludes submitted, closed and unpublished
+  // assignments; a complete pending list is not a complete student history.
+  const prompt = formatOnDeviceSchoolPrompt(local, pendingOnly, 'alice');
+  expect(prompt).toContain('已授權待處理作業來源：available；來源總數：0；本次已取得：0；完整性：來源已完整讀取');
+  expect(prompt).toContain('不包括已提交、草稿、關閉或無權存取的作業');
+  expect(prompt).toContain('不能當成全部作業或歷史繳交清單');
+  expect(prompt).toContain('若要核對全部作業與繳交狀態，請到原課程作業頁核對');
+  expect(prompt).toContain('沒有繳交回條也不能斷言未交');
+});
+
 test('complete assignment evidence must match the number of authorized 50-row pages', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
