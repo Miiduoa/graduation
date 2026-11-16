@@ -198,8 +198,14 @@ function BoardsContent(props: {
   }
 
   const onToggleSub = async (b: CampusBoard) => {
-    if (!user?.uid || !schoolId) {
-      alert('請先登入');
+    if (!user?.uid) {
+      // A guest can still read the board. Keep focus on the action and announce
+      // the sign-in requirement without a blocking browser dialog or Firestore write.
+      reportSubscriptionOutcome(b.id, `請先登入才能訂閱「${b.name}」。`);
+      return;
+    }
+    if (!schoolId) {
+      reportSubscriptionOutcome(b.id, '請先選擇學校後再訂閱看板。');
       return;
     }
     // Clear only this board's previous outcome; other in-flight boards retain theirs.
