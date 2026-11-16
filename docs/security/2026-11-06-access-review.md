@@ -851,3 +851,10 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 第一版候選修補容許一般成員以直接 GET 讀取沒有明確 published/status/deleted/deletedAt 的舊貼文，並不保證這些舊貼文真的曾公開。第二版改為非作者、非管理員直接 GET **也必須具備全部四項公開欄位**。這是 fail-closed 的刻意相容性變更：無明確欄位的舊連結可能暫時不可讀，不得為了恢復顯示而推定全部舊文公開。
 - 增加純離線、唯讀的 `scripts/audit-group-post-visibility.cjs` 與 Node 測試。輸入為經獨立授權取得的 NDJSON（每筆 `{path:"groups/G/posts/P",data:{...}}`），僅輸出 `canonicalVisible/hidden/reviewRequired` 件數，不輸出原文、UID 或標題、不連網或修改資料；`reviewRequired` 須人工判定。可用 `node --test scripts/audit-group-post-visibility.test.cjs` 驗證，`node scripts/audit-group-post-visibility.cjs synthetic.ndjson` 操作合成輸入。不得未經發布授權直接匯出正式資料，亦不會自動修補紀錄。
 - 本輪候選版本仍待精確 head CI/Firebase emulator、正式索引及 Web/Mobile 相容性、歷史資料稽核、App 5504170 審查；不得合併或部署。
+
+### 2026-11-17｜P0 follow-up：未明示公開之 legacy 父貼文的巢狀留言不可讀取（PR #577）
+
+- **問題：** 上輪父貼文 GET/LIST 改為四個顯式公開欄位 fail-closed，但 `groups/{groupId}/posts/{postId}/comments/{commentId}` 仍沿用 `published` 預設 true、`deleted` 預設 false 等舊相容條件。有群組資格的非作者可直接 GET/LIST 這些 legacy 父貼文的留言；父貼文拒絕讀取不會自動保護子集合。這是獨立權限繞過，不能把上一輪父貼文修補當成整個討論串已防護。
+- **最小修補：** 將子留言讀寫共用的 `canReadPostComments()` 非作者可見條件改為與父貼文一致的四項明確值（`published:true`、`status:'published'`、`deleted:false`、`deletedAt:null`）；保留原作者在有效校籍／群組資格下預覽自己的草稿留言、正常發布貼文的其他成員互動，以及撤權與刪文後拒絕。未增加角色或跨校豁免，也未修改正式資料。
+- **合成回歸：** 更新 `backend/tests/security-rules.test.js` 的通用正常 fixture 為明示公開；另在父貼文及留言案例明確建立 legacy 缺欄位父文件，要求非作者（含教師）透過直接 GET 與 LIST 讀取留言被拒，作者仍可讀；伺服器明示發布後正常讀取與互動恢復，原有封存、撤權及重放案例保留。**本次改動如沒有精確 head Firebase Emulator 成功紀錄，就只能稱為待驗證候選，不得稱已隔離驗收。**
+- **發佈阻礙不變：** 歷史缺欄位的原本可見留言對非作者會被暫時隱藏；需事先合法盤點與人工判斷、隔離資料相容/索引、主線整合、完整 CI 及指定 App 5504170 對新 head 審查通過後，再由正式發布窗口處理。GCS/Supabase 既發網址、真 Storage CAS、歷史附件可信引用、minimatch 與回復驗證仍未結案。不執行正式資料、金鑰、token、migration、部署、E 校園或未授權 npm/pnpm audit 操作。

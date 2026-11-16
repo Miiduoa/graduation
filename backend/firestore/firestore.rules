@@ -1251,7 +1251,8 @@ service cloud.firestore {
 
         match /comments/{commentId} {
           // Comments are a separate collection path: membership alone must not
-          // expose replies on an author's withdrawn or unpublished post.
+          // expose replies on hidden, withdrawn or unclassified legacy parents.
+          // Match the same four explicit visibility fields as parent GET/LIST.
           // The parent lookup is fixed to this group/post, not client input.
           function canReadPostComments() {
             let postData = get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data;
@@ -1260,13 +1261,12 @@ service cloud.firestore {
               && (
                 postData.get('authorId', null) == request.auth.uid
                 || (
-                  postData.get('published', true) != false
-                  && !(postData.get('status', '') in [
-                    'draft', 'scheduled', 'pending', 'unpublished',
-                    'archived', 'cancelled', 'canceled', 'deleted'
-                  ])
-                  && postData.get('deleted', false) != true
-                  && postData.get('deletedAt', null) == null
+                  // A legacy row with missing visibility fields cannot be
+                  // assumed public after parent GET/LIST became fail-closed.
+                  postData.get('published', false) == true
+                  && postData.get('status', '') == 'published'
+                  && postData.get('deleted', true) == false
+                  && postData.get('deletedAt', 'missing') == null
                 )
               );
           }

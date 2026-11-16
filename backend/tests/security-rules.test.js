@@ -1463,7 +1463,10 @@ describe('firestore security rules', () => {
         }
       });
       const db = testEnv.authenticatedContext('alice').firestore();
-      await assertSucceeds(db.doc(postPath).set({ authorId: 'alice', kind: 'post', title: 'Lecture notes' }));
+      await assertSucceeds(db.doc(postPath).set({
+        authorId: 'alice', kind: 'post', title: 'Lecture notes',
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
       await assertSucceeds(db.doc(commentPath).set({ authorId: 'alice', body: 'Page two' }));
     });
 
@@ -1487,6 +1490,11 @@ describe('firestore security rules', () => {
           createdAt: new Date('2026-11-15T00:00:00Z'),
         });
       });
+      // Deliberately downgrade one parent to a legacy row to verify its
+      // direct GET remains private despite a known document path.
+      await seedFirestore((admin) => admin.doc(postPath).set({
+        authorId: 'alice', kind: 'post', title: 'Legacy lecture notes',
+      }));
       const visible = bob.collection(posts)
         .where('published', '==', true)
         .where('status', '==', 'published')
@@ -1688,7 +1696,21 @@ describe('firestore security rules', () => {
         await admin.doc('schools/pu/members/bob').set({ status: 'active' });
       });
 
-      // Ordinary/legacy posts without an explicit visibility flag remain usable.
+      // A known legacy parent path must not expose nested comments through
+      // direct GET or collection LIST to another group member. The post owner
+      // may still preview their own historical comments.
+      await seedFirestore((admin) => admin.doc(postPath).set({
+        authorId: 'alice', kind: 'post', title: 'Legacy draft',
+      }));
+      await assertFails(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertFails(teacher.collection(commentCollection).get());
+      await assertFails(bob.doc(commentPath).get({ source: 'server' }));
+      await assertFails(bob.collection(commentCollection).get());
+      await assertSucceeds(alice.doc(commentPath).get({ source: 'server' }));
+      // Explicit server-reviewed publication restores normal member access.
+      await seedFirestore((admin) => admin.doc(postPath).update({
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
       await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
       await assertSucceeds(teacher.collection(commentCollection).get());
       const peerComment = bob.doc(commentCollection + '/bob-review');
