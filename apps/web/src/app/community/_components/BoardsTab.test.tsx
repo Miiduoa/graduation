@@ -92,6 +92,29 @@ it('explains an unmatched board search and returns focus to all loaded boards wi
   expect(mocks.list).toHaveBeenCalledTimes(initialReads);
 });
 
+
+it('announces matching loaded boards and lets keyboard users clear search with Escape without another read', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'study-a', name: '讀書討論', type: 'topic' },
+    { id: 'study-b', name: '期末讀書', type: 'topic' },
+    { id: 'life', name: '生活交流', type: 'topic' },
+  ]);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('link', { name: /讀書討論/ });
+  const search = screen.getByRole('searchbox', { name: '搜尋看板' });
+  search.focus();
+  const reads = mocks.list.mock.calls.length;
+  fireEvent.change(search, { target: { value: '讀書' } });
+  expect(screen.getByRole('status', { name: '看板搜尋結果' }).textContent).toContain('找到 2 個符合「讀書」的看板');
+  expect(screen.queryByRole('link', { name: /生活交流/ })).toBeNull();
+  fireEvent.keyDown(search, { key: 'Escape', code: 'Escape' });
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('link', { name: /生活交流/ })).toBeTruthy();
+  expect(screen.queryByRole('status', { name: '看板搜尋結果' })).toBeNull();
+  expect(mocks.list).toHaveBeenCalledTimes(reads);
+});
+
 it('does not send ordinary members into a board creation flow they cannot use', async () => {
   mocks.list.mockResolvedValue([]);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
