@@ -1014,6 +1014,11 @@ describe('new lesson self-check quality boundary', () => {
 
 describe('new local self-check answer disclosure boundary', () => {
   it.each([
+    { label: 'English answer followed by teaching words', question: 'Which language? Answer: SQL is a database language.', answer: 'SQL' },
+    { label: 'Latin answer followed by tabs', question: 'What is used? Answer: SQL\tcan query tables.', answer: 'SQL' },
+    { label: 'Markdown link visibly spells out answer', question: 'Which query language? Answer: [SQL](https://example.test/reference)', answer: 'SQL' },
+    { label: 'Markdown image alt reveals answer to screen readers', question: 'Which term? 答案：![主鍵](diagram.png)', answer: '主鍵' },
+    { label: 'emphasized Markdown link reveals fullwidth key', question: 'Which term? Answer: **[ＳＱＬ](reference.md)**', answer: 'SQL' },
     { label: 'fullwidth Latin answer key', question: '哪個語言？Ａｎｓｗｅｒ：ＳＱＬ', answer: 'SQL' },
     { label: 'fullwidth decimal answer key', question: '計算結果？正解：１．２', answer: '1.2' },
     { label: 'mixed width key', question: '資料庫題。答案：ＳQＬ', answer: 'SQL' },
@@ -1128,6 +1133,10 @@ describe('new local self-check answer disclosure boundary', () => {
   });
 
   it.each([
+    { question: 'Answer: SQLServer is different from SQL?', answer: 'SQL' },
+    { question: 'Answer: [SQLServer](https://example.test) refers to which product?', answer: 'SQL' },
+    { question: 'Answer: [12](https://example.test/number) is too large?', answer: '1' },
+    { question: 'Answer: [外鍵](https://example.test/term) 有什麼用途？', answer: '主鍵' },
     { question: '答案：ＳＱＬＳｅｒｖｅｒ 有什麼用途？', answer: 'SQL' },
     { question: '答案：１２ 是否過大？', answer: '1' },
     { question: '解答：x² 和 x2 有什麼差異？', answer: 'x2' },

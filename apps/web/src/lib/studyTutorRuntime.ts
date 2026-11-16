@@ -278,10 +278,34 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     const answerPresentation = fencedAnswer.replace(
       /^([\s"'“”‘’「『（(\[【`*_]*)(?:<(?:strong|em|b|i|code|span)(?:[ \t]+[^<>\r\n]{0,120})?[ \t]*>[\s]*){1,3}/iu, '$1',
     );
-    const emphasisPrefix = answerPresentation.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
-    const disclosed = answerPresentation
-      .replace(/^[\s"'“”‘’「『《〈（(\[【`*_]+/gu, '').replace(/\s+/gu, '');
+    // A Markdown link displays its label (or image alt text for screen readers),
+    // not the destination. Inspect only one complete leading link in this
+    // comparison copy; do not dereference URLs or modify the shown question.
+    const visibleAnswer = answerPresentation.replace(
+      /^([\s"'“”‘’「『《〈（(`*_]*)(?:!)?\[([^\]\r\n]{1,200})\]\([^()\s\r\n]{1,300}\)/u,
+      '$1$2',
+    );
+    const emphasisPrefix = visibleAnswer.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const visibleContent = visibleAnswer.replace(/^[\s"'“”‘’「『《〈（(\[【`*_]+/gu, '');
+    const disclosed = visibleContent.replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
+    // Compact matching tolerates spacing within an answer, but it must not
+    // turn "SQL is ..." into "SQLis" and mistake a visible answer for SQLis.
+    // Preserve only the boundary after the matched answer; Latin identifiers
+    // joined WITHOUT a separator (SQLServer, SQL_joins) stay distinct.
+    let referenceCursor = 0;
+    let visibleCursor = 0;
+    while (referenceCursor < answer.length && visibleCursor < visibleContent.length) {
+      if (/\s/u.test(visibleContent[visibleCursor])) {
+        visibleCursor += 1;
+        continue;
+      }
+      if (visibleContent[visibleCursor] !== answer[referenceCursor]) break;
+      visibleCursor += 1;
+      referenceCursor += 1;
+    }
+    const followsWhitespace = referenceCursor === answer.length &&
+      /^\s/u.test(visibleContent.slice(visibleCursor));
     // For numeric reference answers, 1 is not the same answer as 12 or 1.2.
     // Keep decimal points and mathematical operators significant.
     const finalAnswerCharacter = Array.from(answer).at(-1) ?? '';
@@ -296,7 +320,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
       !/^[\p{L}\p{N}_]/u.test(remaining.slice(emphasisPrefix.length));
     // SQL_joins remains distinct from SQL, but _SQL_ and __SQL__ reveal SQL.
     if (/[a-z]/u.test(finalAnswerCharacter) && /[a-z0-9_]/u.test(followingCharacter) &&
-      !(followingCharacter === '_' && closesEmphasis)) continue;
+      !followsWhitespace && !(followingCharacter === '_' && closesEmphasis)) continue;
     return false;
   }
   return !hasDisclosedGeneratedAnswerColumn(question, answer);
