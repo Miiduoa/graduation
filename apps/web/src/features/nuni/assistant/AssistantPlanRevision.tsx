@@ -47,17 +47,9 @@ function focusGeometry(target: HTMLElement) {
   const bounds = target.getBoundingClientRect();
   const block = bounds.bottom > top + height - bottomMargin ? 'end' as const
     : bounds.top < top + topMargin ? 'start' as const : undefined;
-  return { bounds, top, left, height, width, block,
+  return { block,
     visible: !block && bounds.width > 0 && bounds.height > 0 && bounds.left >= left && bounds.right <= left + width };
 }
-
-type TabFocusSnapshot = {
-  event: KeyboardEvent;
-  generation: number;
-  x: number;
-  y: number;
-  visible: Map<HTMLElement, ReturnType<typeof focusGeometry>>;
-};
 
 function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft, protectedSelection, onProtectedSelectionChange }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
@@ -66,9 +58,6 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
   const field = useRef<HTMLTextAreaElement>(null);
   const mounted = useRef(false);
   const focusFrame = useRef<number | null>(null);
-  const tabSnapshot = useRef<TabFocusSnapshot | null>(null);
-  const tabSnapshotExpiry = useRef<number | null>(null);
-  const tabGeneration = useRef(0);
   const busy = useRef(false);
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
@@ -89,9 +78,6 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       mounted.current = false;
       if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
       focusFrame.current = null;
-      if (tabSnapshotExpiry.current !== null) window.clearTimeout(tabSnapshotExpiry.current);
-      tabSnapshotExpiry.current = null;
-      tabSnapshot.current = null;
     };
   }, []);
   useEffect(() => { if (open) field.current?.focus(); }, [open]);
@@ -110,55 +96,45 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       ? '全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。'
       : '全部項目已勾選保留原樣，這次不會重新預覽；請依原確認卡顯示的結果核對。';
 
-  function clearTabSnapshot() {
-    if (tabSnapshotExpiry.current !== null) window.clearTimeout(tabSnapshotExpiry.current);
-    tabSnapshotExpiry.current = null;
-    tabSnapshot.current = null;
-  }
-
-  function invalidateTabSnapshot() {
-    tabGeneration.current += 1;
-    clearTabSnapshot();
-  }
-
-  function rememberTabScroll(event: ReactKeyboardEvent<HTMLElement>) {
-    invalidateTabSnapshot();
-    if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-    const visible: TabFocusSnapshot['visible'] = new Map();
-    for (const target of event.currentTarget.querySelectorAll<HTMLElement>('button, input, textarea')) {
-      const geometry = focusGeometry(target);
-      if (geometry.visible) visible.set(target, geometry);
+  function focusVisibleTabControl(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!mounted.current || event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    const root = panel.current;
+    const current = document.activeElement;
+    if (!root || !(current instanceof HTMLElement) || current !== event.target || !root.contains(current)) return;
+    const controls: HTMLElement[] = [];
+    for (const target of root.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex], [contenteditable]')) {
+      const style = window.getComputedStyle(target);
+      if (target.matches(':disabled') || target.closest('[hidden], [inert]') || style.display === 'none' ||
+        style.visibility === 'hidden' || style.visibility === 'collapse') continue;
+      const bounds = target.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      if (target.tabIndex < 0 && !target.matches('[contenteditable]:not([contenteditable="false"])')) continue;
+      // Only this panel's ordinary native controls have a known DOM Tab order.
+      // Positive tabindex, radios and custom stops keep the browser's behavior.
+      if (target.tabIndex !== 0 || !target.matches('button, input[type="checkbox"], textarea')) return;
+      controls.push(target);
     }
-    tabSnapshot.current = { event: event.nativeEvent, generation: tabGeneration.current,
-      x: window.scrollX, y: window.scrollY, visible };
-    // A cancelled Tab must not affect a later programmatic focus.
-    tabSnapshotExpiry.current = window.setTimeout(invalidateTabSnapshot, 0);
+    const index = controls.indexOf(current);
+    if (index < 0) return;
+    const next = controls[index + (event.shiftKey ? -1 : 1)];
+    if (!next || !focusGeometry(next).visible) return;
+    // Inline threads can have their own clipping/scroller. Leave those to native
+    // Tab rather than preventing a needed scroll of an ancestor.
+    for (let parent = next.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
+      const style = window.getComputedStyle(parent);
+      if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) return;
+    }
+    event.preventDefault();
+    next.focus({ preventScroll: true });
   }
 
   function revealFocusedControl(target: EventTarget) {
-    const snapshot = tabSnapshot.current;
-    clearTabSnapshot(); // Native Tab chooses the target; a snapshot is consumed once.
     if (!(target instanceof HTMLElement) || !target.matches('button, input, textarea')) return;
     if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
     focusFrame.current = window.requestAnimationFrame(() => {
       focusFrame.current = null;
       if (!mounted.current || document.activeElement !== target || !panel.current?.contains(target)) return;
-      let geometry = focusGeometry(target);
-      const before = snapshot?.visible.get(target);
-      if (snapshot && before && snapshot.generation === tabGeneration.current && !snapshot.event.defaultPrevented) {
-        const dx = window.scrollX - snapshot.x;
-        const dy = window.scrollY - snapshot.y;
-        // Undo only native document scrolling of an already readable control.
-        // A resized viewport, layout change or nested scroll keeps normal reveal.
-        if ((dx || dy) && before.top === geometry.top && before.left === geometry.left &&
-          before.height === geometry.height && before.width === geometry.width &&
-          Math.abs(geometry.bounds.top + dy - before.bounds.top) < 1 &&
-          Math.abs(geometry.bounds.left + dx - before.bounds.left) < 1 &&
-          before.bounds.width === geometry.bounds.width && before.bounds.height === geometry.bounds.height) {
-          window.scrollTo({ left: snapshot.x, top: snapshot.y, behavior: 'instant' });
-          geometry = focusGeometry(target);
-        }
-      }
+      const geometry = focusGeometry(target);
       // Explicit alignment reveals controls hidden by the sticky dock even when
       // they are still inside the layout viewport and nearest would not move.
       if (geometry.block)
@@ -237,10 +213,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
 
   if (!open && !started && !pristine) return null;
   return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議"
-    onKeyDownCapture={rememberTabScroll} onKeyUpCapture={clearTabSnapshot} onPointerDownCapture={invalidateTabSnapshot}
-    onBlurCapture={event => {
-      if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) invalidateTabSnapshot();
-    }}
+    onKeyDown={focusVisibleTabControl}
     onFocusCapture={event => revealFocusedControl(event.target)}>
     {complete ? <p role="status" className={styles.notice}>{message}</p> : <>
       <button ref={entry} type="button" className={styles.secondary}
