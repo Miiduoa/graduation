@@ -33,6 +33,40 @@ type Props = {
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
+const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
+
+// A modal-local Retry-After can be bypassed by closing and reopening the map.
+// Keep the deadline only in same-tab session storage; never store geometry,
+// student locations, or credentials. Private browsers may disable storage.
+function readStoredFootprintCooldown(): { until: number; minutes: number } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(OSM_COOLDOWN_STORAGE_KEY);
+    if (!raw || !/^\d{13}$/.test(raw)) {
+      if (raw) window.sessionStorage.removeItem(OSM_COOLDOWN_STORAGE_KEY);
+      return null;
+    }
+    const until = Number(raw);
+    const remaining = until - Date.now();
+    if (!Number.isSafeInteger(until) || remaining <= 0 || remaining > FOOTPRINT_DAY_MS) {
+      window.sessionStorage.removeItem(OSM_COOLDOWN_STORAGE_KEY);
+      return null;
+    }
+    return { until, minutes: Math.ceil(remaining / 60_000) };
+  } catch {
+    return null;
+  }
+}
+
+function storeFootprintCooldown(until: number | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (until === null) window.sessionStorage.removeItem(OSM_COOLDOWN_STORAGE_KEY);
+    else window.sessionStorage.setItem(OSM_COOLDOWN_STORAGE_KEY, String(until));
+  } catch {
+    // Keep the map usable in browsers that restrict session storage.
+  }
+}
 
 // Rate limits can carry Retry-After as delay-seconds or an HTTP-date.
 // Accept only a canonical IMF-fixdate, rejecting malformed/expired dates so a
@@ -272,7 +306,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const deferredExpiredRefreshRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
-  const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
+  const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(readStoredFootprintCooldown);
+  // Expiry enables a deliberate retry; it must not automatically poll Overpass.
+  const restoredCooldownRef = useRef(footprintRetryAfter !== null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
   const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
@@ -300,6 +336,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
   const sourceFootprint = place
     ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
+
+  useEffect(() => {
+    if (school === 'pu') storeFootprintCooldown(footprintRetryAfter?.until ?? null);
+  }, [school, footprintRetryAfter?.until]);
 
   useEffect(() => {
     if (footprintRetryAfter === null) return;
@@ -453,6 +493,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     if (school !== 'pu' || model.unavailableReason) {
       staleSnapshotRef.current = false;
       return;
+    }
+    if (restoredCooldownRef.current) {
+      // A resumed or hidden dialog must not bypass the previous failed request.
+      if (footprintRetryAfter !== null || footprintAttempt === 0) {
+        setFootprintStatus('unavailable');
+        return;
+      }
+      restoredCooldownRef.current = false;
     }
     // The dialog can mount while a tab is suspended (e.g. restored from a
     // mobile browser session). Do not start a fresh public OSM request until
