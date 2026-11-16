@@ -7,6 +7,7 @@ export const APPLICATION_STATES = [
   'interview',
   'accepted',
   'rejected',
+  'withdrawn',
 ] as const;
 export type ApplicationState = (typeof APPLICATION_STATES)[number];
 export const APPLICATION_LABELS: Record<ApplicationState, string> = {
@@ -15,6 +16,7 @@ export const APPLICATION_LABELS: Record<ApplicationState, string> = {
   interview: '約面談',
   accepted: '錄取',
   rejected: '未錄取',
+  withdrawn: '已撤回',
 };
 export type WorkSlot = { day: number; start: string; end: string };
 export type CareerOpportunity = {
@@ -70,6 +72,7 @@ export type CareerWorkbenchEvent = {
   source: 'school-club-events' | 'school-events';
 };
 export type WorkstudySnapshot = {
+  viewerRole?: string;
   events: CareerWorkbenchEvent[];
   opportunities: CareerOpportunity[];
   applications: CareerApplication[];
@@ -97,6 +100,7 @@ export type CareerCommand =
       /** Omit to preserve the saved reply; an explicit empty string clears it. */
       message?: string;
     }
+  | { action: 'withdraw'; applicationId: string; revision: number }
   | { action: 'sources'; sources: CareerSources };
 export type CareerReply = { snapshot?: WorkstudySnapshot; id?: string };
 export type CareerReadOptions = { signal?: AbortSignal };
@@ -180,6 +184,7 @@ export function transitionAllowed(from: ApplicationState, to: ApplicationState) 
         interview: ['accepted', 'rejected'],
         accepted: [],
         rejected: [],
+        withdrawn: [],
       } as Record<ApplicationState, string[]>
     )[from]?.includes(to) ?? false
   );
