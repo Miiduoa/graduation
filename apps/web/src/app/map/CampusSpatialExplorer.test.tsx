@@ -902,7 +902,11 @@ it('defers an OSM request opened in a hidden mobile tab until one foreground res
   vi.stubGlobal('fetch', fetchMock);
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
+  // The shared open() helper expects an initialized WebGL scene, which must
+  // deliberately NOT exist while the page is hidden.
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  expect(scene.create).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -914,6 +918,7 @@ it('defers an OSM request opened in a hidden mobile tab until one foreground res
   fireEvent(document, new Event('visibilitychange'));
   fireEvent(window, new Event('pageshow'));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
@@ -924,13 +929,16 @@ it('removes a hidden-tab OSM resume listener when the spatial dialog closes', as
   vi.stubGlobal('fetch', fetchMock);
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  expect(scene.create).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   fireEvent(document, new Event('visibilitychange'));
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).not.toHaveBeenCalled();
+  expect(scene.create).not.toHaveBeenCalled();
 });
 
 it('allows a single retry when an unlabelled 503 gateway cooldown expires', async () => {
@@ -1467,17 +1475,24 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const rearmedHard = timerSpy.mock.calls.filter(([, delay]) => delay === 120_000).at(-1);
     expect(rearmedHard).toBeTruthy();
+    const sceneCountBeforeExpiry = scene.create.mock.calls.length;
     clock = deadline + 1_000;
     act(() => { (rearmedHard![0] as () => void)(); });
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    // Hard expiry clears the old geometry, but the hidden-tab WebGL fix
+    // must not recreate a graphics context until the tab is visible again.
+    expect(scene.create).toHaveBeenCalledTimes(sceneCountBeforeExpiry);
+    expect(scene.dispose).toHaveBeenCalled();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-    // Hard expiry must remove unverified geometry but must not wake the
-    // public OSM origin while the browser stays in the background.
+    // Expiry must not wake the public OSM origin while in the background.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     fireEvent(document, new Event('visibilitychange'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // On resume, WebGL must finally receive the now-empty geometry, not
+    // resurrect the expired building that was visible before backgrounding.
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    expect(scene.create).toHaveBeenCalledTimes(sceneCountBeforeExpiry + 1);
     expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
     // pageshow can follow visibilitychange on mobile; only one request is valid.
     fireEvent(window, new Event('pageshow'));
