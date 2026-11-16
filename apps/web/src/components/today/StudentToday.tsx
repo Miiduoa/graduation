@@ -30,11 +30,14 @@ import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
 import { TodayWelcome } from './TodayWelcome';
+import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
   assistant?: ReactNode;
+  agent?: ReactNode;
+  personalization?: ReactNode;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
@@ -58,6 +61,7 @@ type Props = {
 
 type BoundProps = {
   assistant?: ReactNode;
+  agent?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
   signedIn: boolean;
@@ -148,6 +152,7 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
+      {props.agent}
       {!props.skeleton && props.unsigned && action.type !== 'class' && (
         <TodayWelcome
           importHref={props.importHref}
@@ -174,6 +179,7 @@ export function StudentToday(props: Props) {
           <TodayUnreadNotifications unsigned={props.unsigned} />
         </div>
       )}
+      {props.personalization}
       {props.assistant}
       {props.updatedAt || props.refreshing ? (
         <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
@@ -447,6 +453,18 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      agent={props.agent}
+      personalization={!scope.loading && props.now ? (
+        <CampusPersonalizationSection
+          key={scope.scopeKey}
+          scope={scope.scope}
+          now={props.now}
+          events={records.imported.records}
+          eventsReady={records.imported.ready}
+          eventsError={records.imported.error}
+          schoolName={scope.schoolName}
+        />
+      ) : null}
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
       now={props.now}

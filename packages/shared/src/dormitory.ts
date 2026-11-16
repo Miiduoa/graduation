@@ -40,7 +40,7 @@ export const DORM_REPAIR_SHORTCUTS: ReadonlyArray<{
 export const DORM_REPAIR_REFERENCE_LIMIT = 80;
 
 /** Phrases that imply this app submits to the school, issues a ticket, or tracks official progress. */
-export const DORM_REPAIR_DISALLOWED_COPY = /單號|已送出給學校|查詢進度|工單|已提交報修|查看處理狀況|修繕進度|查進度|已受理|派員處理|即時提交/;
+export const DORM_REPAIR_DISALLOWED_COPY = /已送出|單號|已送出給學校|查詢進度|工單|已提交報修|查看處理狀況|修繕進度|查進度|已受理|派員處理|即時提交/;
 
 /** Shared web/app copy: personal memos only; official filing stays on school channels. */
 export const DORM_REPAIR_COPY = {
@@ -98,6 +98,9 @@ export type DormRepair = {
   title: string;
   location: string;
   description: string;
+  availability?: string; // Resident-entered contact/access arrangements, not permission to enter.
+  followUpDate?: string;
+  followUpNote?: string;
   reference?: string; // Optional school-issued identifier the resident copied in after using an official channel.
   status: DormRepairStatus;
   createdAt: number;
@@ -284,6 +287,9 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
       const reference = boundedText(row.reference, DORM_REPAIR_REFERENCE_LIMIT);
       repairs.push({
         ...(reference ? { reference } : {}),
+        availability: boundedText(row.availability, 160),
+        followUpDate: isValidDormDate(boundedText(row.followUpDate, 10)) ? boundedText(row.followUpDate, 10) : '',
+        followUpNote: boundedText(row.followUpNote, 1200),
         id,
         category: repairCategories.includes(row.category as DormRepairCategory)
           ? (row.category as DormRepairCategory)
@@ -373,5 +379,7 @@ export function formatDormRepairForCopy(repair: DormRepair): string {
     '問題：' + repair.title,
     repair.location ? '位置：' + repair.location : '',
     repair.description ? '狀況：' + repair.description : '',
+    repair.availability ? '可聯繫時段／入室協調：' + repair.availability : '',
+    repair.followUpNote ? '自行記下的聯繫紀錄：' + repair.followUpNote : '',
   ].filter(Boolean).join('\n');
 }

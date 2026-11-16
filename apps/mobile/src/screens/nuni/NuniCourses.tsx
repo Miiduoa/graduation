@@ -15,7 +15,9 @@ import { AppState, Image, Linking, Share, Alert, Pressable, ScrollView, Text, Te
 import { materialCapabilities, materialFailureMessage, readMaterialWithDeadline } from '@campus/shared/src/materialAccess';
 import { photoPdfAvailable } from './nativePhotoPdf';
 import { NativePhotoPdfEditor } from './NativePhotoPdfEditor';
+import { CourseMaterialText } from '../../components/CourseMaterialText';
 import { PublishedFeedbackLink } from '../../components/PublishedFeedbackLink';
+import { CampusPersonalization } from '../../components/CampusPersonalization';
 import { revealAssignmentSubmitArea } from './scrollAssignment';
 import {
   MATERIAL_CURSOR_CYCLE_MESSAGE,
@@ -874,6 +876,7 @@ function CourseScope({
             />
           )}
           <CourseList classes={classes} open={openCourse} joinRequested={joinRequested} />
+          <CampusPersonalization active={active && focused} />
         </>
       )}
     </ScrollView>
@@ -1944,7 +1947,7 @@ function MaterialCard({
         ) : null}
         <Copy title>{material.title}</Copy>
         {material.unitTitle ? <Copy>{material.unitTitle}</Copy> : null}
-        <Copy>{material.body}</Copy>
+        <CourseMaterialText text={material.body} />
         <MaterialBookmarkButton
           courseId={material.workspaceId}
           materialId={material.id}

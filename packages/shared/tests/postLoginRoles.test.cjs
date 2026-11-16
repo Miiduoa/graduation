@@ -18,6 +18,7 @@ require.extensions['.ts'] = (module, filename) => {
   module._compile(source, filename);
 };
 const { resolveUserRoles } = require('../src/postLoginRoles.ts');
+const { toCampusRole } = require('../src/roles.ts');
 require.extensions['.ts'] = original;
 
 describe('resolveUserRoles authority boundary', () => {
@@ -166,3 +167,12 @@ describe('resolveUserRoles authority boundary', () => {
 
 // Keep path reference so tooling sees this as a shared package test.
 assert.ok(fs.existsSync(path.join(__dirname, '../src/postLoginRoles.ts')));
+
+test('dorm subtype does not grant a global staff role', () => {
+  assert.equal(toCampusRole('dorm_staff'), null);
+  assert.equal(
+    resolveUserRoles({ userDoc: { role: 'dorm_staff' }, tcCourses: [] }).primaryRole,
+    'student',
+  );
+  assert.equal(toCampusRole('staff'), 'staff');
+});

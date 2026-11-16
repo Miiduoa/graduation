@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Rebuilt legacy Nuni Web (linux/amd64). Does not copy private source into the
 # graduation context; build.py materializes a patched checkout first.
-FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS base
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS base
 RUN apk add --no-cache --upgrade 'ca-certificates>=20261020-r0' 'ca-certificates-bundle>=20261020-r0'
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -46,7 +46,7 @@ COPY packages/contracts packages/contracts
 COPY packages/source-test-utils packages/source-test-utils
 COPY apps/web apps/web
 RUN pnpm --filter @campus/web build \
-  && node -e "const v=require('./apps/web/node_modules/next/package.json').version; if(v!=='16.4.2') throw new Error('Expected Next 16.4.2 during build, got '+v)"
+  && node -e "const v=require('./apps/web/node_modules/next/package.json').version; if(v!=='16.4.5') throw new Error('Expected Next 16.4.5 during build, got '+v)"
 
 FROM base AS runtime
 ENV NODE_ENV=production
@@ -68,7 +68,7 @@ const path = require("node:path");
 const root = "/app";
 const serverRequire = createRequire("/app/apps/web/server.js");
 const nextPkg = serverRequire("next/package.json");
-if (nextPkg.version !== "16.4.2") throw new Error("Runtime Next must be 16.4.2, got " + nextPkg.version);
+if (nextPkg.version !== "16.4.5") throw new Error("Runtime Next must be 16.4.5, got " + nextPkg.version);
 const nextRequire = createRequire(serverRequire.resolve("next"));
 function packageVersion(req, name) {
   const entry = req.resolve(name);

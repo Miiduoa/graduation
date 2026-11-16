@@ -352,7 +352,11 @@ it.each(['expired', 'corrupt'] as const)('does not expose %s saved content after
   expect(screen.queryByRole('region', { name: '未送出的修訂草稿' })).toBeNull();
   expect(screen.queryByDisplayValue(instruction)).toBeNull();
   expect(screen.queryByText('英文閱讀')).toBeNull();
-  expect(draftEntries()).toEqual([]);
+  // The composer can mount before the queued draft read; wait for its actual cleanup.
+  await waitFor(() => expect(draftEntries()).toEqual([]));
+  expect(screen.queryByRole('region', { name: '未送出的修訂草稿' })).toBeNull();
+  expect(screen.queryByDisplayValue(instruction)).toBeNull();
+  expect(screen.queryByText('英文閱讀')).toBeNull();
   expect(calls).toEqual([]);
 });
 

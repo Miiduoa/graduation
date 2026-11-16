@@ -4,7 +4,7 @@ const HOSTED_FN_ORIGIN = 'https://nuni.tw/api/fn';
 
 /** POST a hosted nuni-web callable. Permission checks stay in the existing callers and handlers. */
 export async function postNuniWebFn<Input, Output>(
-  name: 'prepareDmConversation' | 'sendDmText' | 'replyToCampusStory',
+  name: 'dormWorkflow' | 'prepareDmConversation' | 'sendDmText' | 'replyToCampusStory',
   data: Input,
   viewerUid: string,
   signal?: AbortSignal,

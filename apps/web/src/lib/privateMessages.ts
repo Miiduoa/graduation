@@ -828,9 +828,12 @@ export function notificationDestination(
   const schoolSearch = schoolId ? `?${schoolParams.toString()}` : '';
   if (notification.type === 'announcement') {
     const announcementId = safeNoticeId(data.announcementId);
+    // 校園公告通知來自 schools/{schoolId}/announcements，不能改開同編號的舊集合。
+    if (schoolId && announcementId) schoolParams.set('source', 'school-announcement');
+    const announcementSearch = schoolParams.size ? `?${schoolParams.toString()}` : '';
     return announcementId
       ? {
-          href: `/announcements/${encodeURIComponent(announcementId)}${schoolSearch}`,
+          href: `/announcements/${encodeURIComponent(announcementId)}${announcementSearch}`,
           label: '查看公告',
         }
       : { href: `/announcements${schoolSearch}`, label: '查看公告' };

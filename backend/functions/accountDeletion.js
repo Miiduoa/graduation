@@ -198,6 +198,8 @@ function createDeleteUserAccountHandler({
     // Independent LMS bindings use provider-qualified owners, not ownerUid.
     // Close their write barrier before erasing credentials and private ledgers.
     await closeTronClassOwner({ db, ownerKey: `firebase:${uid}`, now: () => currentTime });
+    // Isolated dorm cleanup: revoke dorm authority and erase new private records.
+    await require('./dormAccountDeletion').clearDormAccountData({ db, uid, scanPages });
 
     // Remove school authority first so ordinary membership-checked writes stop.
     for (const collection of ['members', 'directory', 'serviceRoles', 'operators']) {

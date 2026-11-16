@@ -1182,3 +1182,13 @@ test('student grade row reaches its workspace gradebook through the navigator', 
   expect(navigation.getCurrentRoute()?.name).toBe('CourseGradebook');
   expect(navigation.getCurrentRoute()?.params).toMatchObject({ groupId: 'course-1', sourceSystem: 'workspace' });
 });
+
+test('個人頁發文使用獨立路由，保留一般發文路由', async () => {
+  const { navigation } = await mount(HomeStack);
+  act(() => navigation.navigate('PostCompose'));
+  const draftKey = navigation.getRootState().routes.find((route) => route.name === 'PostCompose')?.key;
+  expect(draftKey).toBeTruthy();
+  act(() => navigation.navigate('CreatorPostCompose'));
+  expect(navigation.getCurrentRoute()?.name).toBe('CreatorPostCompose');
+  expect(navigation.getRootState().routes.find((route) => route.name === 'PostCompose')?.key).toBe(draftKey);
+});

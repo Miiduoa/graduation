@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
+import { CampusPersonalization } from '../components/CampusPersonalization';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
@@ -306,6 +307,7 @@ export default function StudentTodayScreen() {
             {urgentWorkFirst && todoSection}
             {scheduleSection}
             {!urgentWorkFirst && todoSection}
+            <CampusPersonalization now={now} />
             <QuickCampusEntry
               key={scope}
               uid={uid}
