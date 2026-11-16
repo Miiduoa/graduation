@@ -286,6 +286,13 @@ function PublicCourseSearchForm({
       const response = await fetch('/api/public-course-catalog?' + params, {
         signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error',
       });
+      // A cancelled fetch can still resolve with a late Response (for example
+      // through a service worker). Do not start reading its body: in the
+      // text()-only fallback that would buffer a stale, potentially large reply.
+      if (controller.signal.aborted || pending.current?.controller !== controller) {
+        void response.body?.cancel().catch(() => undefined);
+        return;
+      }
       // Native already bounds this contract. Web must reject oversized public
       // replies too, before parsing or offering course rows for personal import.
       if (!response.ok || Number(response.headers?.get('content-length')) > MAX_PUBLIC_COURSE_RESPONSE_BYTES) {
