@@ -30,6 +30,7 @@ export type SelectedSchoolProviderProps = {
   ownerKey: string | null;
   identityReady?: boolean;
   accountSchoolId?: string | null;
+  accountSchoolPending?: boolean;
   loading: boolean;
   schools: readonly BrowseSchool[];
   catalogStatus: 'loading' | 'ready' | 'error';
@@ -110,6 +111,7 @@ export function SelectedSchoolProvider({
   ownerKey,
   identityReady = true,
   accountSchoolId,
+  accountSchoolPending = false,
   loading,
   schools,
   catalogStatus,
@@ -191,7 +193,13 @@ export function SelectedSchoolProvider({
       ? savedSchoolId
       : (catalog.find((school) => school.id === accountSchoolId)?.id ?? null),
   );
-  const ready = !loading && hydrated && catalogStatus === 'ready';
+  const hasQuerySelection = Boolean(
+    params?.get('campus')?.trim() || params?.get('schoolId')?.trim() || normalizeSchoolCode(params?.get('school')),
+  );
+  // 偏好先完成 hydration；只有缺少網址與偏好時才等待帳號瀏覽預設。
+  const selectionLoading = loading || !hydrated ||
+    (accountSchoolPending && !hasQuerySelection && savedSchoolId === undefined);
+  const ready = !selectionLoading && catalogStatus === 'ready';
   const selectedSchool = ready
     ? (catalog.find((school) => school.id === requestedId) ?? null)
     : null;
@@ -290,7 +298,7 @@ export function SelectedSchoolProvider({
         selectedSchool,
         selectedSchoolId: selectedSchool?.id ?? null,
         selectSchool,
-        loading: loading || !hydrated,
+        loading: selectionLoading,
         catalogStatus,
         catalogError,
         onRetryCatalog,

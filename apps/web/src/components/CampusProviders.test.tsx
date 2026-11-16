@@ -5,17 +5,18 @@ vi.mock('firebase/firestore', () => ({
   getDoc: profileRead,
 }));
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CampusProviders } from './CampusProviders';
 import { SchoolSelector } from './SchoolSelector';
-import { useSelectedSchool } from './SelectedSchoolProvider';
+import { schoolPreferenceKey, useSelectedSchool } from './SelectedSchoolProvider';
+const navigation = vi.hoisted(() => ({ search: '' }));
 const user = vi.hoisted(() => ({ uid: 'alice' as string | null }));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({ user: user.uid ? { uid: user.uid } : null, loading: false }),
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(navigation.search),
   useRouter: () => ({ replace: vi.fn() }),
 }));
 const fetcher = vi.fn();
@@ -24,6 +25,7 @@ const response = (value: unknown, status = 200) =>
 beforeEach(() => {
   profileRead.mockReset().mockResolvedValue({ get: () => undefined });
   user.uid = 'alice';
+  navigation.search = '';
   localStorage.clear();
   vi.stubGlobal('fetch', fetcher.mockReset());
 });
@@ -188,4 +190,66 @@ it('切換帳號後忽略舊帳號延遲回傳的學校', async () => {
   expect(screen.queryByRole('combobox', { name: '瀏覽校園' })).toBeNull();
   await act(async () => resolveBob({ get: () => 'nthu' }));
   expect((await screen.findByRole('combobox', { name: '瀏覽校園' }) as HTMLSelectElement).value).toBe('nthu');
+});
+
+
+afterEach(() => { vi.useRealTimers(); });
+
+function pendingAccountSchool() {
+  let resolveRead!: (value: unknown) => void;
+  profileRead.mockImplementation(() => new Promise((resolve) => { resolveRead = resolve; }));
+  fetcher.mockImplementation((url: string) => Promise.resolve(response(
+    url === '/api/nuni/session' ? { authenticated: false } : { schools: [
+      { id: 'pu', name: '靜宜大學' }, { id: 'nthu', name: '國立清華大學' },
+    ] },
+  )));
+  return () => resolveRead({ get: () => 'pu' });
+}
+
+it.each([
+  ['campus=all', undefined, ''],
+  ['schoolId=all', undefined, ''],
+  ['campus=nthu', undefined, 'nthu'],
+  ['schoolId=nthu', undefined, 'nthu'],
+  ['', 'nthu', 'nthu'],
+  ['', null, ''],
+] as const)('網址 %s、偏好 %s 不必等待帳號學校即可選校', async (query, saved, expected) => {
+  navigation.search = query;
+  if (saved !== undefined) {
+    localStorage.setItem(schoolPreferenceKey('alice|'), JSON.stringify({ schoolId: saved }));
+  }
+  const resolveRead = pendingAccountSchool();
+  render(<CampusProviders><View /></CampusProviders>);
+  const selector = await screen.findByRole('combobox', { name: '瀏覽校園' });
+  expect((selector as HTMLSelectElement).value).toBe(expected);
+  expect((selector as HTMLSelectElement).disabled).toBe(false);
+  await act(async () => resolveRead());
+  expect((selector as HTMLSelectElement).value).toBe(expected);
+  fireEvent.change(selector, { target: { value: expected === 'nthu' ? 'pu' : 'nthu' } });
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey('alice|'))!).schoolId)
+    .toBe(expected === 'nthu' ? 'pu' : 'nthu');
+});
+
+it('無網址與偏好時等待帳號學校，逾時退回不限校園且仍可手動選校', async () => {
+  const resolveRead = pendingAccountSchool();
+  vi.useFakeTimers();
+  await act(async () => { render(<CampusProviders><View /></CampusProviders>); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_999); });
+  expect(screen.queryByRole('combobox', { name: '瀏覽校園' })).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  const selector = screen.getByRole('combobox', { name: '瀏覽校園' });
+  expect((selector as HTMLSelectElement).value).toBe('');
+  await act(async () => resolveRead());
+  expect((selector as HTMLSelectElement).value).toBe('');
+  fireEvent.change(selector, { target: { value: 'nthu' } });
+  expect((selector as HTMLSelectElement).value).toBe('nthu');
+});
+
+it('沒有網址或偏好時，不先顯示不限校園再跳到帳號學校', async () => {
+  const resolveRead = pendingAccountSchool();
+  render(<CampusProviders><View /></CampusProviders>);
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/schools', expect.anything()));
+  expect(screen.queryByRole('combobox', { name: '瀏覽校園' })).toBeNull();
+  await act(async () => resolveRead());
+  expect((await screen.findByRole('combobox', { name: '瀏覽校園' }) as HTMLSelectElement).value).toBe('pu');
 });

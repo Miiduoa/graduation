@@ -17,6 +17,7 @@ import { PersonalImportSyncBridge } from './imports/PersonalImportSync';
 
 type Catalog = { schools: BrowseSchool[]; status: 'loading' | 'ready' | 'error' };
 const CATALOG_RETRY_DELAY_MS = 4_000;
+const ACCOUNT_SCHOOL_TIMEOUT_MS = 6_000;
 
 function catalogRetryDelayMs(retryAfter: string | null) {
   if (!retryAfter) return CATALOG_RETRY_DELAY_MS;
@@ -77,6 +78,11 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (auth.loading || !uid) return;
     let active = true;
+    const timeout = setTimeout(() => {
+      if (!active) return;
+      active = false;
+      setAccountSchool({ scope: accountScope, schoolId: null });
+    }, ACCOUNT_SCHOOL_TIMEOUT_MS);
     // 只取既有所屬學校作為瀏覽預設，不作為入學或授權證明。
     void (async () => {
       let schoolId: string | null = null;
@@ -93,9 +99,13 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
       } catch {
         // 讀取失敗仍可手動選擇瀏覽校園。
       }
+      clearTimeout(timeout);
       if (active) setAccountSchool({ scope: accountScope, schoolId });
     })();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
   }, [auth.loading, uid, accountScope]);
   const accountSchoolReady = !uid || accountSchool?.scope === accountScope;
   const [catalog, setCatalog] = useState<Catalog>({ schools: [], status: 'loading' });
@@ -137,7 +147,8 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
     <SelectedSchoolProvider
       ownerKey={owner}
       accountSchoolId={uid && accountSchool?.scope === accountScope ? accountSchool.schoolId : null}
-      loading={auth.loading || nuni.loading || !accountSchoolReady}
+      loading={auth.loading || nuni.loading}
+      accountSchoolPending={!accountSchoolReady}
       identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
       schools={catalog.schools}
       catalogStatus={catalog.status}
