@@ -1077,7 +1077,11 @@ it.each([
   const dialog = await open();
   const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
   await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  const cooldownNotice = within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/);
+  // A disabled retry control needs a live explanation for screen-reader users.
+  expect(cooldownNotice.getAttribute('role')).toBe('status');
+  expect(cooldownNotice.id).toBeTruthy();
+  expect(retry.getAttribute('aria-describedby')).toBe(cooldownNotice.id);
   fireEvent.click(retry);
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1132,7 +1136,10 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
     const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-    expect(within(dialog).getByText(/約 10 分鐘冷卻/)).toBeTruthy();
+    const staleCooldownNotice = within(dialog).getByText(/約 10 分鐘冷卻/);
+    expect(staleCooldownNotice.getAttribute('role')).toBe('status');
+    expect(staleCooldownNotice.id).toBeTruthy();
+    expect(retry.getAttribute('aria-describedby')).toBe(staleCooldownNotice.id);
     fireEvent.click(retry);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -1142,6 +1149,8 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     now += 600_001;
     await act(async () => { (release as () => void)(); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    // When the cooldown ends, do not reference a notice that has disappeared.
+    expect(retry.hasAttribute('aria-describedby')).toBe(false);
     fireEvent.click(retry);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
