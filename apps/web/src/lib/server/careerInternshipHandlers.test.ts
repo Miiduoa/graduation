@@ -124,6 +124,27 @@ describe('advisor search with a document budget', () => {
       ).toBe('teacher');
     },
   );
+  it('reserves directory reads when 200 surname students fill the members query', async () => {
+    const { rows, call, stats } = memoryStore();
+    for (let i = 0; i < 200; i++) {
+      rows.set(`schools/pu/members/s${i}`, {
+        status: 'active',
+        role: 'student',
+        displayName: `王同學${String(i).padStart(3, '0')}`,
+      });
+    }
+    rows.set('schools/pu/members/teacher', { status: 'active', role: 'teacher' });
+    rows.set('schools/pu/directory/teacher', {
+      displayName: '王老師',
+      email: 'teacher@school.edu.tw',
+    });
+
+    const result = await call({ action: 'advisorSearch', keyword: '王' });
+    expect(result.snapshot?.advisors).toEqual([
+      { uid: 'teacher', name: '王老師', email: 'teacher@school.edu.tw', department: '' },
+    ]);
+    expect(stats().reads).toBeLessThanOrEqual(202);
+  });
   it.each(['members', 'directory', 'users'])(
     'keeps legacy identifiers and email in %s searchable',
     async (source) => {

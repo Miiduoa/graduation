@@ -152,37 +152,9 @@ export function createCareerInternshipHandlers({
             );
           return haystack.includes(lowered) || (!isEmail && row.name.startsWith(keyword));
         };
+        const pending: { query: Query; paginate: boolean; memberQuery: boolean }[] = [];
         const take = async (query: Query, paginate = false, memberQuery = false) => {
-          let cursor;
-          while (remaining >= 4 && advisors.length < limit) {
-            // Reserve enough reads to check school membership and hydrate every candidate.
-            const size = Math.min(20, Math.floor(remaining / 4));
-            const page: Query = cursor ? query.startAfter(cursor) : query;
-            const snap = await tx.get(page.limit(size));
-            remaining -= Math.max(1, snap.size);
-            for (const doc of snap.docs) {
-              if (seen.has(doc.id)) continue;
-              const memberDoc = memberQuery ? doc : await tx.get(members.doc(doc.id));
-              if (!memberQuery) remaining--;
-              seen.add(doc.id);
-              if (!isAdvisor(memberDoc.data())) continue;
-              const [profile, user] = await tx.getAll(
-                directory.doc(doc.id),
-                db.collection('users').doc(doc.id),
-              );
-              remaining -= 2;
-              const row = advisorView(
-                doc.id,
-                memberDoc.data()!,
-                { ...user.data(), ...profile.data() },
-                user.data(),
-              );
-              if (matches(row)) advisors.push(row);
-              if (advisors.length >= limit) break;
-            }
-            if (!paginate || snap.size < size) break;
-            cursor = snap.docs[snap.docs.length - 1];
-          }
+          pending.push({ query, paginate, memberQuery });
         };
         for (const field of ['studentId', 'student_id', 'login']) {
           for (const value of new Set([keyword, keyword.toUpperCase(), lowered])) {
@@ -215,6 +187,42 @@ export function createCareerInternshipHandlers({
               true,
             );
           }
+        }
+        // Keep the legacy first page of each query ahead of all continuation pages.
+        // Reserve a candidate's worst-case reads for every later source, so a busy
+        // members query cannot prevent directory, users or another field from running.
+        while (pending.length && remaining >= 4 && advisors.length < limit) {
+          const { query, paginate, memberQuery } = pending.shift()!;
+          const available = remaining - pending.length * 4;
+          const size = Math.min(20, Math.floor(available / 4));
+          const snap = await tx.get(query.limit(size));
+          remaining -= Math.max(1, snap.size);
+          for (const doc of snap.docs) {
+            if (seen.has(doc.id)) continue;
+            const memberDoc = memberQuery ? doc : await tx.get(members.doc(doc.id));
+            if (!memberQuery) remaining--;
+            seen.add(doc.id);
+            if (!isAdvisor(memberDoc.data())) continue;
+            const [profile, user] = await tx.getAll(
+              directory.doc(doc.id),
+              db.collection('users').doc(doc.id),
+            );
+            remaining -= 2;
+            const row = advisorView(
+              doc.id,
+              memberDoc.data()!,
+              { ...user.data(), ...profile.data() },
+              user.data(),
+            );
+            if (matches(row)) advisors.push(row);
+            if (advisors.length >= limit) break;
+          }
+          if (paginate && snap.size === size && remaining >= (pending.length + 1) * 4)
+            pending.push({
+              query: query.startAfter(snap.docs[snap.docs.length - 1]),
+              paginate,
+              memberQuery,
+            });
         }
         return advisors
           .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
