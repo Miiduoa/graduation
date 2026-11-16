@@ -475,6 +475,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
+    // Distinguish fetch-level network errors from a server response. Do not
+    // overwrite a valid Retry-After from an HTTP or JSON-contract failure.
+    let receivedResponse = false;
     // A freshness deadline may retain a dated snapshot; the seven-day hard
     // source expiry never may.
     const preserveStale = staleSnapshotRef.current;
@@ -511,6 +514,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     };
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
+        receivedResponse = true;
         // Fetch considers 203/206 successful, but the map API contract is a
         // complete 200 JSON document. A CDN/proxy must not turn a transformed
         // or partial representation into a trusted 3D building snapshot.
@@ -577,8 +581,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintRefreshFailed(false);
         setFootprintStatus('ready');
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active || timedOut) return;
+        // A rejected fetch (offline/DNS/proxy failure) has no HTTP status or
+        // Retry-After. Rate-limit manual retries without changing explicit
+        // server cooldowns or the existing retryable HTTP 500 behavior.
+        if (!receivedResponse && error instanceof TypeError) {
+          setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
+        }
         // Preserve only a still-retainable dated snapshot on refresh failure.
         // Once source retention expires, all failures stay marker-only.
         setFootprintRefreshing(false);
