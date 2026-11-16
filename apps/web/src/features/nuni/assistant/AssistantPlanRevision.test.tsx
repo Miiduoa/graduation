@@ -313,7 +313,7 @@ function focusScrollFixture(top = 526.94) {
   const button = screen.getByRole('button', { name: '重新預覽' });
   const scroll = vi.fn();
   Object.defineProperty(button, 'scrollIntoView', { configurable: true, value: scroll });
-  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, top, 88, 44));
+  const bounds = vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, top, 88, 44));
   const computedStyle = window.getComputedStyle.bind(window);
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
     const style = computedStyle(element, pseudo);
@@ -328,7 +328,7 @@ function focusScrollFixture(top = 526.94) {
     frames.clear();
     for (const callback of callbacks) callback(0);
   });
-  return { view, button, scroll, request, cancel, frames, flush };
+  return { view, button, scroll, bounds, request, cancel, frames, flush };
 }
 
 it('aligns the bottom of a focused control hidden by the dock even inside the layout viewport', () => {
@@ -383,6 +383,140 @@ it('cancels a pending focus frame on unmount and ignores a late callback from th
   expect(cancel).toHaveBeenCalledWith(id);
   expect(frames.size).toBe(0);
   act(() => lateCallback(0));
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+function nativeTabScrollFixture(top = 406.84375) {
+  const fixture = focusScrollFixture(top);
+  vi.stubGlobal('scrollX', 0);
+  vi.stubGlobal('scrollY', 1920);
+  // Reproduce the document movement from the 320px browser regression, without
+  // pretending jsdom implements native Tab navigation or sticky dock layout.
+  fixture.bounds.mockImplementation(() => new DOMRect(29 - window.scrollX, top + 1920 - window.scrollY, 88, 44));
+  const restore = vi.spyOn(window, 'scrollTo').mockImplementation((options?: ScrollToOptions | number, y?: number) => {
+    vi.stubGlobal('scrollX', typeof options === 'number' ? options : options?.left ?? window.scrollX);
+    vi.stubGlobal('scrollY', typeof options === 'number' ? y ?? window.scrollY : options?.top ?? window.scrollY);
+  });
+  const nativeFocus = () => {
+    vi.stubGlobal('scrollY', 1858);
+    act(() => fixture.button.focus());
+  };
+  return { ...fixture, field: screen.getByLabelText('修改條件'), restore, nativeFocus };
+}
+
+it.each([false, true])('keeps the original scroll when native Tab (shift=%s) moves an already readable control', shiftKey => {
+  const { button, field, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture();
+  const from = shiftKey ? screen.getByRole('button', { name: '收起修改' }) : field;
+  act(() => from.focus());
+  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(true);
+  expect(document.activeElement).toBe(from); // The component leaves focus order to the browser.
+  nativeFocus();
+  fireEvent.keyUp(button, { key: 'Tab', shiftKey });
+  flush();
+  expect(document.activeElement).toBe(button);
+  expect(restore).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 1920, behavior: 'instant' });
+  expect(window.scrollY).toBe(1920);
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it('does not request scrolling when native Tab leaves an already readable control in place', () => {
+  const { button, field, scroll, restore, flush } = nativeTabScrollFixture();
+  fireEvent.keyDown(field, { key: 'Tab' });
+  act(() => button.focus());
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it('keeps normal reveal for a control that was already hidden before native Tab', () => {
+  const { field, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture(526.94);
+  fireEvent.keyDown(field, { key: 'Tab' });
+  nativeFocus();
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'end', inline: 'nearest', behavior: 'instant' });
+});
+
+it.each([false, true])('lets native Tab (shift=%s) leave the panel and discards its snapshot', shiftKey => {
+  const { button, scroll, restore, flush } = nativeTabScrollFixture();
+  const from = screen.getByRole('button', { name: shiftKey ? '修改時間或條件' : '收起修改' });
+  const outside = screen.getByRole('button', { name: '表單外的控制項' });
+  act(() => from.focus());
+  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(true);
+  vi.stubGlobal('scrollY', 1858);
+  act(() => outside.focus());
+  flush();
+  expect(document.activeElement).toBe(outside);
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => button.focus());
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledOnce();
+});
+
+it('does not restore a Tab cancelled by another handler, even when it focuses the button', () => {
+  const { field, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture();
+  field.addEventListener('keydown', event => { nativeFocus(); event.preventDefault(); }, { once: true });
+  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false);
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledOnce();
+});
+
+it('expires a Tab snapshot without a focus change before a later programmatic focus', async () => {
+  const { field, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture();
+  fireEvent.keyDown(field, { key: 'Tab' });
+  await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+  nativeFocus();
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledOnce();
+});
+
+it('uses a Tab snapshot only once, without affecting later programmatic focus', () => {
+  const { field, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture();
+  fireEvent.keyDown(field, { key: 'Tab' });
+  nativeFocus();
+  flush();
+  expect(restore).toHaveBeenCalledOnce();
+  restore.mockClear();
+  act(() => field.focus());
+  nativeFocus();
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledOnce();
+});
+
+it('invalidates a consumed Tab snapshot when pointer input arrives before its focus frame', () => {
+  const { button, field, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture();
+  fireEvent.keyDown(field, { key: 'Tab' });
+  nativeFocus();
+  fireEvent.pointerDown(button);
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledOnce();
+});
+
+it.each(['viewport', 'layout'])('keeps normal reveal when %s changes during native Tab', change => {
+  const { field, bounds, scroll, restore, nativeFocus, flush } = nativeTabScrollFixture();
+  fireEvent.keyDown(field, { key: 'Tab' });
+  nativeFocus();
+  if (change === 'viewport') vi.stubGlobal('visualViewport', { offsetTop: 0, height: 680 });
+  else bounds.mockReturnValue(new DOMRect(29, 490, 88, 44));
+  flush();
+  expect(restore).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'end', inline: 'nearest', behavior: 'instant' });
+});
+
+it('does not restore a consumed Tab snapshot after unmount, even for a late focus frame', () => {
+  const { view, field, scroll, restore, nativeFocus, frames } = nativeTabScrollFixture();
+  fireEvent.keyDown(field, { key: 'Tab' });
+  nativeFocus();
+  const lateCallback = [...frames.values()][0];
+  view.unmount();
+  act(() => lateCallback(0));
+  expect(restore).not.toHaveBeenCalled();
   expect(scroll).not.toHaveBeenCalled();
 });
 
