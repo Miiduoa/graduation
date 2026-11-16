@@ -73,7 +73,14 @@ function readAppearance() {
 function subscribeAppearance(notify: () => void) {
   const media = ['(prefers-reduced-motion: reduce)', '(prefers-color-scheme: dark)']
     .map((query) => window.matchMedia?.(query));
-  for (const query of media) query?.addEventListener('change', notify);
+  // iOS Safari versions with legacy MediaQueryList listeners do not expose
+  // addEventListener/removeEventListener. Keep reduced-motion and theme changes
+  // reactive instead of breaking the spatial dialog on those devices.
+  for (const query of media) {
+    if (!query) continue;
+    if (typeof query.addEventListener === 'function') query.addEventListener('change', notify);
+    else query.addListener?.(notify);
+  }
   const observer = new MutationObserver(notify);
   observer.observe(document.documentElement, {
     attributes: true,
@@ -81,7 +88,11 @@ function subscribeAppearance(notify: () => void) {
   });
   return () => {
     observer.disconnect();
-    for (const query of media) query?.removeEventListener('change', notify);
+    for (const query of media) {
+      if (!query) continue;
+      if (typeof query.removeEventListener === 'function') query.removeEventListener('change', notify);
+      else query.removeListener?.(notify);
+    }
   };
 }
 
