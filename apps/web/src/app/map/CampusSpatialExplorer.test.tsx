@@ -1176,10 +1176,16 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
     expect(softTimer).toBeTruthy();
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     const originalClock = clock;
-    // A mobile clock rollback must not consume the only 24h deadline timer.
-    clock -= 120_000;
+    // An extreme wall-clock correction must not schedule a timeout larger
+    // than a day (which could overflow the browser's 32-bit timer).
+    clock -= 30 * day;
     act(() => { (softTimer![0] as () => void)(); });
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+    const boundedTimer = timerSpy.mock.calls.filter(([, delay]) => delay === day).at(-1);
+    expect(boundedTimer).toBeTruthy();
+    // The next timer may also fire early after the clock is corrected again.
+    clock = originalClock - 120_000;
+    act(() => { (boundedTimer![0] as () => void)(); });
     const rearmedSoft = timerSpy.mock.calls.find(([, delay]) => delay === 180_000);
     expect(rearmedSoft).toBeTruthy();
     clock = originalClock + 90_000;
