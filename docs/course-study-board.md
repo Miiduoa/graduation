@@ -1441,3 +1441,8 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - 精確前版 head `4e86896534b2853f5d5d1d947f5565f850de4341` 的 Web Tests job 133408123430 在 `studySourceTables.test.ts` 失敗 1 項：`display:none;display:block!important` 應依 CSS cascade 顯示，但新測試誤當為隱藏答案（來源掃描器的實際行為正確）。本輪將該個案移至「可見教材」案例，並補上兩個同等 `!important` 依最後宣告決定可見／隱藏的回歸案例，避免為滿足錯誤測試而把正常教材隱藏。
 - 本輪僅修正測試預期及驗證覆寫優先順序，沒有更動來源掃描器、私人教材或 v1/v2 閱讀／v1 練習 checkpoint；正式 Vitest、全套 CI/CodeQL 及指定 App 5504170 APPROVED 均須以新的精確 commit 核實。Maestro、iOS/Android 真機及 Ahaboard 同教材同題同裝置比較未有足夠證據時 PR 保持 Draft，不合併、不部署。
+
+### 2026-11-17：修正無效 Markdown 程式區塊造成公開表格消失
+
+- 原文中三個反引號開頭但資訊字串又包含反引號的行，依 CommonMark 不屬於合法 fenced code opener；舊掃描器卻把後續合法課程表格全部當成程式碼，學生看不到原文表格。現在對這類無效 opener 不啟動程式碼區塊；合法波浪號 fence 的資訊字串即使含反引號，仍正確隱藏其中的示範表格。
+- 新增兩個來源解析器回歸案例，檢查公開表格位置與合法程式區塊隔離。只變更裝置端原文解析、測試及文件，不變動私人教材、外部傳輸、學習進度或練習 JSON 格式；完整 CI、CodeQL、指定 App 5504170 與真機／競品對照必須依新 SHA 個別驗證，PR 維持 Draft，不合併或部署。

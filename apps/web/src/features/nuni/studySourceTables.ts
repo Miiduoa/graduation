@@ -264,7 +264,14 @@ function fenceMarker(line: string): { character: string; length: number; suffix:
   if (marker !== '~' && marker !== String.fromCharCode(96)) return null;
   let length = 0;
   while (trimmed[length] === marker) length += 1;
-  return length >= 3 ? { character: marker, length, suffix: trimmed.slice(length) } : null;
+  if (length < 3) return null;
+  const suffix = trimmed.slice(length);
+  // CommonMark forbids backticks inside a backtick fence's info string.
+  // Treat that line as ordinary lesson text, not a code block hiding a
+  // legitimate source table below. Tilde fence info may contain backticks.
+  if (marker === String.fromCharCode(96) && suffix.includes(String.fromCharCode(96)))
+    return null;
+  return { character: marker, length, suffix };
 }
 
 /** Markdown inline code contains literal tags, not active HTML blocks. */

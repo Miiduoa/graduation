@@ -13,6 +13,21 @@ const realTable = (startLine: number) => [{
   rows: [['資料庫', '3']],
 }];
 
+describe('valid Markdown fence boundaries for course source tables', () => {
+  it('keeps a public table after an invalid backtick-fence info string', () => {
+    // A backtick in a backtick fence info string makes that opener invalid.
+    // The following blank line starts an ordinary, visible source table.
+    const source = ['```js`example', '', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(3));
+  });
+
+  it('still suppresses table-looking code inside a valid tilde fence', () => {
+    // Backticks are legal in the info string of a tilde fence.
+    const source = ['~~~language`example', ...visibleTable, '~~~', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+});
+
 describe('raw HTML figures and tables are not source Markdown tables', () => {
   it.each([
     { label: 'SVG graphic', open: '<svg viewBox="0 0 20 20">', close: '</svg>' },
