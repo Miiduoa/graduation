@@ -68,6 +68,7 @@ function BoardsContent(props: {
   const [subscriptionLifetime] = useState(() => new AbortController());
   useEffect(() => () => subscriptionLifetime.abort(), [subscriptionLifetime]);
   const [filter, setFilter] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [composeEpoch, setComposeEpoch] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
   const [createPending, setCreatePending] = useState(false);
@@ -268,8 +269,10 @@ function BoardsContent(props: {
         }}
       >
         <input
+          ref={searchInputRef}
           type="search"
           className="input"
+          aria-label="搜尋看板"
           placeholder="搜尋看板"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -340,6 +343,23 @@ function BoardsContent(props: {
               : '看板由學校管理者建立，開放後就能在這裡參與討論。'}
           </div>
           {access.status !== 'allowed' && <p><Link className="btn" href={`/community?schoolId=${encodeURIComponent(schoolId)}`}>看校園動態</Link></p>}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
+          <p aria-live="polite" style={{ margin: '0 0 12px' }}>
+            找不到符合「{filter.trim()}」的看板。
+          </p>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setFilter('');
+              // The clear button disappears with the empty state. Keep keyboard focus in the search field.
+              searchInputRef.current?.focus();
+            }}
+          >
+            清除搜尋
+          </button>
         </div>
       ) : (
         (['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((t) => {
