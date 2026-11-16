@@ -819,3 +819,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **最小規則修補：** 上述四個子集合增加固定父路徑 `exists + schemaVersion == 2` 檢查，保留 v2 正常學生提問、投票閱讀、本人點名與有效教師更正查閱權限，並在每次讀取核對目前校籍、群組身分。不改動提交/管理寫入與既有歷史資料。
 - **隔離回歸待跑：** 在 `backend/tests/security-rules.test.js` 新增合成 v1/v2 資料，驗證 v2 的 GET/LIST、v1 四種子集合拒絕、跨校與停權、校籍撤銷後同 SDK 重放、父 schema 降級與恢復競態。本輪須以新精確 head 的 Firebase Emulator 和 CI 真實結果為準；提交前僅靜態驗證，不預稱已通過。
 - **未解除：** 群組未發布父貼文仍可在舊 feed 的 GET/LIST 洩漏；GCS/Supabase 已簽 URL 撤權、真正隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔、主線整合與正式發布/回復驗證未結案。僅合成測試；未動正式資料、金鑰、token、migration、部署或 E 校園，且未重送先前被拒絕的 npm/pnpm audit。
+
+
+## 2026-11-16：群組貼文撤回後的作者硬刪除繞過（PR #577）
+
+- **前一精確 head：** `6cbcb1eed98ac66c27683783520f85fe19d99f1a`。該版主 CI #43759950703、CodeQL #43759950791 與 Course access #43759950712 均 completed/success，Rules 340/340、Web Emulator 56/56。這些成功**不能替代本次新提交的測試**。
+- **漏洞與最小修補：** `groups/{groupId}/posts/{postId}` 的一般作者 `delete` 原本只要求身分與非公告，沒有核對貼文已被管理者標為 draft、scheduled、pending、unpublished、archived、cancelled、canceled、deleted 或 `published:false`；作者可以直接 SDK 硬刪遭保留或撤回的父貼文，規避管理保全。現在非管理作者刪除必須通過與互動相同的可見狀態檢查，只有仍具有效管理資格的管理者可以刪除被保留內容；一般作者刪除已發布普通貼文仍保留。
+- **隔離回歸：** `backend/tests/security-rules.test.js` 新增合成 Firebase Emulator 測試，包括九種隱藏／撤回狀態、同校他人／跨校／匿名拒絕、合法作者刪除與管理者刪除、管理員撤回後的舊會話重放，以及停權、群組撤權、校籍撤權與恢復。須以新 head CI 實際執行結果決定通過與否，未經執行不得宣稱已驗收。
+- **相容性限制：** 不具管理權的作者不能直接硬刪自己已進入未發布／撤回狀態的草稿；此類清理須走有授權的管理流程。既有 UI 若提供草稿刪除功能，須另行檢查顯示與錯誤引導，不能把此開發分支變更說成已正式上線。
+- **仍未結案：** 群組父貼文的 Firestore GET/LIST 仍可能直接曝光未發布資料，需要 Web/Mobile feed 查詢與歷史欄位安全過渡；已發 GCS/Supabase URL 撤權、真隔離 Storage CAS、歷史附件引用、minimatch 兩套鎖檔、目前 main 整合、App 5504170 的精確 head APPROVED 與正式發布／回復驗證也均未完成。本輪不合併或部署，不觸碰正式資料、金鑰、附件 token、migration、E 校園，也不重送受限制 npm/pnpm audit。

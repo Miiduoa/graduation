@@ -163,6 +163,68 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.doc(path('visible')).update({ body: 'authorized after restoration' }));
   });
 
+  test('authors cannot hard-delete held group posts or replay deletes after moderation', async () => {
+    const groupId = 'moderated-delete-boundary';
+    const path = (id) => `groups/${groupId}/posts/${id}`;
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, school] of [['alice', 'pu'], ['bob', 'pu'], ['charlie', 'pu'], ['mallory', 'other']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({ status: 'active' });
+      }
+      for (const [uid, role] of [['alice', 'student'], ['bob', 'instructor'], ['charlie', 'student']]) {
+        await db.doc(`groups/${groupId}/members/${uid}`).set({ status: 'active', role });
+      }
+      for (const status of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']) {
+        await db.doc(path(status)).set({ authorId: 'alice', kind: 'post', status, body: 'held by moderator' });
+      }
+      await db.doc(path('hidden')).set({ authorId: 'alice', kind: 'post', published: false });
+      for (const id of ['visible', 'stale', 'revoked']) {
+        await db.doc(path(id)).set({ authorId: 'alice', kind: 'post', status: 'published' });
+      }
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    // GET permission and knowledge of the path must not permit destructive
+    // deletion after publication has been held by moderation.
+    for (const status of ['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted', 'hidden']) {
+      await assertFails(alice.doc(path(status)).delete());
+    }
+    await assertFails(charlie.doc(path('visible')).delete());
+    await assertFails(mallory.doc(path('visible')).delete());
+    await assertFails(guest.doc(path('visible')).delete());
+    await assertSucceeds(alice.doc(path('visible')).delete());
+    await assertSucceeds(bob.doc(path('archived')).delete());
+
+    // Reusing the same signed-in client after a manager's withdrawal must not
+    // turn a stale author delete into a successful destructive operation.
+    await seedFirestore(db => db.doc(path('stale')).update({ status: 'archived' }));
+    await assertFails(alice.doc(path('stale')).delete());
+    await assertSucceeds(bob.doc(path('stale')).update({ status: 'published' }));
+    await assertSucceeds(alice.doc(path('stale')).delete());
+
+    // Account suspension, group revocation, and school revocation each take
+    // effect for a previously authorized client without an auth-token refresh.
+    await seedFirestore(db => db.doc('users/alice').update({ status: 'suspended' }));
+    await assertFails(alice.doc(path('revoked')).delete());
+    await seedFirestore(async db => {
+      await db.doc('users/alice').update({ status: 'active' });
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(path('revoked')).delete());
+    await seedFirestore(async db => {
+      await db.doc(`groups/${groupId}/members/alice`).update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await assertFails(alice.doc(path('revoked')).delete());
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(path('revoked')).delete());
+  });
+
   test('legacy root message read receipts cannot impersonate peers or replay stale lists', async () => {
     const conversationId = 'dm_pu_alice_bob';
     const message = 'messages/read-receipt';

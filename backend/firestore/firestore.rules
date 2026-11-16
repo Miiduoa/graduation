@@ -1214,7 +1214,11 @@ service cloud.firestore {
               && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
             )
           );
-        allow delete: if canManageGroup(groupId) || ownsOrdinaryPost();
+        // A member cannot erase a post after a moderator has held, archived or
+        // withdrawn it. The author may remove an ordinary visible post only;
+        // active managers retain the ability to remove held and legacy drafts.
+        allow delete: if canManageGroup(groupId)
+          || (ownsOrdinaryPost() && isVisiblePostForReactions());
 
         match /comments/{commentId} {
           // Comments are a separate collection path: membership alone must not
