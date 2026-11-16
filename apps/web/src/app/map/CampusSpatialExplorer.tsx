@@ -452,12 +452,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           const rateLimitedOrIncomplete = status === 206 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
             contentRange !== null;
-          // 429 may omit Retry-After (RFC 6585). Overpass proxies can also
-          // omit it during 502/503/504 gateway outages. Back off for 60s
-          // rather than permitting rapid retries against an unhealthy source.
-          // Honor an explicit valid Retry-After first; keep other errors'
-          // existing retry behavior instead of imposing a global lockout.
-          const fallbackBackoff = status === 429 || status === 502 || status === 503 || status === 504;
+          // A proxy can return an incomplete 206/Content-Range document or
+          // a 408 without Retry-After. These responses cannot be trusted as
+          // complete OSM geometry and should not trigger a manual retry loop.
+          // Back off 60s alongside 429 and 502/503/504. Explicit valid
+          // Retry-After still wins; an ordinary 500 keeps its existing retry.
+          const fallbackBackoff = status === 206 || status === 408 || status === 429 ||
+            status === 502 || status === 503 || status === 504 || contentRange !== null;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
