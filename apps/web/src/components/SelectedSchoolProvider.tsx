@@ -29,6 +29,7 @@ export type BrowseSchool = {
 export type SelectedSchoolProviderProps = {
   ownerKey: string | null;
   identityReady?: boolean;
+  accountSchoolId?: string | null;
   loading: boolean;
   schools: readonly BrowseSchool[];
   catalogStatus: 'loading' | 'ready' | 'error';
@@ -92,22 +93,23 @@ export function schoolPreferenceKey(ownerKey: string | null) {
   return `campus.browse-school.v1:${ownerKey === null ? 'guest' : `account:${encodeURIComponent(ownerKey)}`}`;
 }
 
-function storedSelection(value: string | null): string | null {
-  if (!value) return null;
+function storedSelection(value: string | null): string | null | undefined {
+  if (!value) return undefined;
   try {
     const stored: unknown = JSON.parse(value);
     if (stored && typeof stored === 'object' && 'schoolId' in stored) {
-      return typeof stored.schoolId === 'string' ? stored.schoolId : null;
+      if (stored.schoolId === null || typeof stored.schoolId === 'string') return stored.schoolId;
     }
   } catch {
     // Invalid or old browser preferences do not establish a school selection.
   }
-  return null;
+  return undefined;
 }
 
 export function SelectedSchoolProvider({
   ownerKey,
   identityReady = true,
+  accountSchoolId,
   loading,
   schools,
   catalogStatus,
@@ -124,13 +126,13 @@ export function SelectedSchoolProvider({
   const pendingEventSchool = useRef<{ storageKey: string; id: string | null; from: string } | null>(null);
   const [preference, setPreference] = useState<{
     scope: typeof scope;
-    schoolId: string | null;
+    schoolId: string | null | undefined;
     storageError: string | null;
   } | null>(null);
   // Hide previous identity state immediately without remounting page content or losing drafts.
   const currentPreference = preference?.scope === scope ? preference : null;
   const hydrated = currentPreference !== null;
-  const savedSchoolId = currentPreference?.schoolId ?? null;
+  const savedSchoolId = currentPreference?.schoolId;
   const storageError = currentPreference?.storageError ?? null;
 
   useLayoutEffect(() => {
@@ -142,7 +144,7 @@ export function SelectedSchoolProvider({
 
   useEffect(() => {
     if (!loading) {
-      let schoolId: string | null = null;
+      let schoolId: string | null | undefined;
       let storageError: string | null = null;
       try {
         schoolId = storedSelection(localStorage.getItem(storageKey));
@@ -184,7 +186,10 @@ export function SelectedSchoolProvider({
       schoolId: params?.get('schoolId'),
       school: params?.get('school'),
     },
-    savedSchoolId,
+    // 帳號學校僅作為公開瀏覽預設，仍須存在於目前目錄。
+    savedSchoolId !== undefined
+      ? savedSchoolId
+      : (catalog.find((school) => school.id === accountSchoolId)?.id ?? null),
   );
   const ready = !loading && hydrated && catalogStatus === 'ready';
   const selectedSchool = ready
