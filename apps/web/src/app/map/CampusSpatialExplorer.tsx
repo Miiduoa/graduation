@@ -302,7 +302,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         current?.until === footprintRetryAfter.until && current.minutes !== minutes
           ? { ...current, minutes } : current);
     };
-    const timer = window.setTimeout(() => setFootprintRetryAfter(null),
+    // Browser timers are monotonic, but the server cooldown deadline uses wall time.
+    // If the user sets the clock backwards while a timer is pending, its old
+    // timeout can fire before the absolute deadline. Recheck before unlocking.
+    const timer = window.setTimeout(synchronizeCooldown,
       Math.max(0, footprintRetryAfter.until - Date.now()));
     const interval = window.setInterval(synchronizeCooldown, 60_000);
     document.addEventListener('visibilitychange', synchronizeCooldown);
