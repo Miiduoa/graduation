@@ -242,15 +242,29 @@ async def assert_navigation(page):
     return href
 
 
+def camera_status(dialog):
+    """The accessible readout combines bearing and zoom in one live region."""
+    return dialog.get_by_role("group", name="調整空間視角", exact=True).get_by_role("status")
+
+
+async def expect_zoom_status(dialog, zoom_percent):
+    # Test the same accessible element users see, not a removed zoom-only node.
+    await expect(camera_status(dialog)).to_have_text(
+        re.compile(rf"^視角方位 (?:0|[1-9]\\d{{0,2}})° · 縮放 {zoom_percent}%$")
+    )
+
+
 async def camera_readout(page):
-    """Read the visible compass and zoom, without exposing renderer internals."""
+    """Read the visible compass and accessible camera status, not renderer internals."""
     dialog = dialog_for(page)
     await expect(dialog.get_by_text("畫面北向", exact=True)).to_be_visible()
     transform = await dialog.get_by_role("group", name="調整空間視角", exact=True).locator("svg g").get_attribute("transform")
     match = re.fullmatch(r"rotate\(([-+\d.eE]+) 20 20\)", transform or "")
     assert match, f"Compass does not expose a rendered rotation: {transform}"
-    zoom_text = await dialog.get_by_text(re.compile(r"^縮放 \d+%$")).inner_text()
-    return {"northDegrees": float(match[1]), "zoomPercent": int(re.search(r"\d+", zoom_text)[0])}
+    status_text = (await camera_status(dialog).inner_text()).strip()
+    readout = re.fullmatch(r"視角方位 (\d{1,3})° · 縮放 (\d+)%", status_text)
+    assert readout and 0 <= int(readout[1]) < 360, f"Invalid camera status: {status_text}"
+    return {"northDegrees": float(match[1]), "zoomPercent": int(readout[2])}
 
 
 async def assert_same_scene(page, canvas, context, selected):
@@ -324,7 +338,7 @@ async def camera_controls(page, _requests, _resources):
     await expect(host).to_be_focused()
     # A keyboard event activates the visible-focus treatment on the scene.
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 100)
     await page.wait_for_timeout(100)
     assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
     focus = await host.evaluate("""el => ({
@@ -361,7 +375,7 @@ async def camera_controls(page, _requests, _resources):
             await button.click()
         await expect(button).to_be_disabled()
         await expect(button).not_to_have_attribute("aria-disabled", "true")
-        await expect(dialog.get_by_text(f"縮放 {bound}%", exact=True)).to_be_visible()
+        await expect_zoom_status(dialog, bound)
         await dialog.get_by_role("button", name=before_name, exact=True).focus()
         await page.keyboard.press("Tab")
         await expect(dialog.get_by_role("button", name=after_name, exact=True)).to_be_focused()
@@ -375,19 +389,19 @@ async def camera_controls(page, _requests, _resources):
     # Home restores north without losing the current (minimum) zoom.
     await page.keyboard.press("ArrowLeft")
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 65%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 65)
     assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
     rotated = await click_camera("向右旋轉")
     await click_camera("放大空間圖")
     await selector_for(page).select_option(LIBRARY["id"])
     selected = LIBRARY["id"]
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 100)
     assert abs((await camera_readout(page))["northDegrees"] - rotated["northDegrees"]) < 1e-7
     await assert_same_scene(page, canvas, context, selected)
     await assert_idle_renderer(page)
     await click_camera("放大空間圖")
     await dialog.get_by_role("button", name="看全部地點", exact=True).click()
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 100)
     assert abs((await camera_readout(page))["northDegrees"] - rotated["northDegrees"]) < 1e-7
     await assert_same_scene(page, canvas, context, selected)
     await assert_idle_renderer(page)
