@@ -842,6 +842,45 @@ it.each([
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   });
 
+it('defers an OSM request opened in a hidden mobile tab until one foreground resume', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503, headers: { get: () => null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  // A spurious pageshow while still hidden must not touch public Overpass.
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).not.toHaveBeenCalled();
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  fireEvent(document, new Event('visibilitychange'));
+  fireEvent(window, new Event('pageshow'));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('removes a hidden-tab OSM resume listener when the spatial dialog closes', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  fireEvent(document, new Event('visibilitychange'));
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
 it('allows a single retry when an unlabelled 503 gateway cooldown expires', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockResolvedValue({
