@@ -510,7 +510,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     if (document.hidden) {
       // Do not announce an active OSM fetch when mobile has suspended it.
       // Keep POIs and navigation usable while waiting for a visible tab.
-      setFootprintStatus('deferred');
+      // Preserve previously verified, still-retainable outlines while a
+      // background refresh waits; only the pending fetch becomes deferred.
+      setFootprintStatus((current) => current === 'ready' ? current : 'deferred');
       let resumed = false;
       const fetchWhenVisible = () => {
         if (resumed || document.hidden) return;
