@@ -72,7 +72,9 @@ it('delays hidden-tab WebGL startup and its 12-second deadline until the tour is
     render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-    expect(within(dialog).getByText(/正在開啟空間導覽/)).toBeTruthy();
+    expect(within(dialog).getByText(/目前位於背景分頁，返回導覽後才會啟動立體畫面/)).toBeTruthy();
+    expect(within(dialog).getByRole('status').textContent).toContain('仍可查看地點與步行導航');
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
     expect(scene.create).not.toHaveBeenCalled();
     expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
 
@@ -92,6 +94,34 @@ it('delays hidden-tab WebGL startup and its 12-second deadline until the tour is
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
     timerSpy.mockRestore();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
+it('pauses in-flight 3D module startup when the tab backgrounds before import settles', async () => {
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  // Open while visible, then suspend in the same React act before the lazy
+  // Three.js module can resolve. The browser must not allocate WebGL in back.
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    fireEvent(document, new Event('visibilitychange'));
+    await Promise.resolve();
+  });
+  try {
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('status').textContent).toContain('返回導覽後才會啟動立體畫面');
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   }
 });
