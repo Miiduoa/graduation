@@ -1191,3 +1191,35 @@ describe('HTML named entities must not expose explicitly hidden answer tables', 
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+describe('explicitly hidden paragraph, label and heading notes', () => {
+  it.each([
+    '<p hidden>',
+    '<p aria-hidden="true">',
+    '<p style="visibility:hidden">',
+    '<label hidden>',
+    '<h2 style="display:none">',
+  ])('does not promote a hidden teacher-only source table from %s', (opening) => {
+    const tag = /^<([a-z][a-z0-9]*)/iu.exec(opening)?.[1] ?? 'p';
+    const source = [
+      opening,
+      '| 教師用答案 | 學分 |',
+      '| --- | --- |',
+      '| 尚未公布 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<p aria-hidden="false">',
+    '<p title="hidden is a sample">',
+    '<label style="display:block">',
+    '<h2 class="example">',
+  ])('retains a visible course table inside %s', (opening) => {
+    const tag = /^<([a-z][a-z0-9]*)/iu.exec(opening)?.[1] ?? 'p';
+    const source = [opening, ...visibleTable, `</${tag}>`].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});

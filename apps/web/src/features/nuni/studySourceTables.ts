@@ -25,8 +25,10 @@ const MAX_ROWS = 20;
 const HIDDEN_HTML_CONTAINERS = new Set([
   'div', 'section', 'aside', 'article', 'figure', 'blockquote',
   'main', 'header', 'footer', 'nav', 'form', 'fieldset',
-  // Hidden handout answers can also be wrapped in inline/list elements.
-  'span', 'ul', 'ol', 'li',
+  // Teacher-only notes may use paragraph, label, or heading wrappers too.
+  // Scan explicit hidden attributes/styles on these elements as well, while
+  // leaving ordinary visible HTML wrappers eligible for source tables.
+  'span', 'p', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
 ]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
