@@ -1102,6 +1102,9 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
     expect(fetchMock).toHaveBeenCalledTimes(1);
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     fireEvent(document, new Event('visibilitychange'));
+    // Hidden soft expiry has already advanced the timer to seven-day hard
+    // expiry. Visibility and pageshow must still revalidate exactly once.
+    fireEvent(window, new Event('pageshow'));
     expect(await within(dialog).findByText(/暫用舊快照/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
