@@ -1270,3 +1270,35 @@ describe('source table boundaries for explicitly zero-opacity HTML wrappers', ()
     expect(extractStudySourceTables(source)).toEqual(realTable(6));
   });
 });
+
+describe('zero-opacity CSS exponent notation cannot expose unpublished source tables', () => {
+  it.each([
+    '<div style="opacity:0e0">',
+    '<section style="opacity:0E+3">',
+    '<aside style="opacity:.0e-2">',
+    '<p style="opacity:-0.00e+4">',
+    '<h2 style="opacity:+00e2%">',
+    '<div style="opacity:0e0!important; opacity:1">',
+  ])('omits teacher-only rows for an explicitly transparent wrapper: %s', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 教師尚未公布 | 分數 |',
+      '| --- | --- |',
+      '| 不可額外顯示 | 99 |',
+      '</' + tag + '>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<div style="opacity:1e-2">',
+    '<div style="opacity:0e0; opacity:1">',
+    '<div style="opacity:0e0; opacity:1!important">',
+    '<div style="opacity:1!important; opacity:0e0">',
+  ])('preserves visible tables when opacity is nonzero or overridden: %s', (opening) => {
+    const source = [opening, ...visibleTable, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});

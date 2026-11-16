@@ -1,3 +1,8 @@
+## 2026-11-17：CSS 科學記號的零透明度不再使隱藏答案成為衍生公開表格
+
+- 修補「來源表格」的有限可見性掃描：CSS 數值允許指數表示法，教材若使用 `opacity:0e0`、`opacity:.0e-2`、`opacity:0E+3` 或 `0e2%`，先前僅辨識十進位零的規則可能漏掉明確透明的教師備註，將其中 Markdown 管線表格額外列為可展開的公開來源。現在只在合法的**零尾數**允許指數記號，不以浮點數轉換去猜測下溢結果；仍遵守同屬性覆寫順序與 `!important`，保留可見原文表格。
+- 新增 6 項應隱藏、4 項可見覆寫的純函式 Vitest 回歸；無新套件、外傳私人教材或變更 v1/v2 閱讀與 v1 練習備份。這是衍生資料安全邊界補強，**非**原教材存取控制、完整 CSS 排版引擎、WebGPU／真機／競品正確性驗收。新精確 SHA 仍須檢查 GitHub CI／CodeQL、App 5504170 APPROVED、Maestro、iOS／Android 及 Ahaboard 同題同裝置實測；PR 維持 Draft，未合併、未部署。
+
 ## 2026-11-17：修復非同步講義替換確認時鍵盤焦點偶爾留在舊標題
 
 - 精確 head `71af435e97e9d8750cce6e856fa193d8071a75e9` 的 [CI #43930499576](https://github.com/Miiduoa/graduation/actions/runs/43930499576) 中 Web Tests job `133521293652` 失敗 1 項（16,256 通過、115 略過）：本機 TXT 讀取成功、替換確認標題已出現，但鍵盤焦點仍停留在舊「讀書白板」標題，未即時移到「要改讀另一份教材嗎？」。本版其它 Mobile、Functions、Firestore、Security、Lint、Web/Mobile Build 與 CodeQL 都成功，但不能當成新 SHA 的通過證據。

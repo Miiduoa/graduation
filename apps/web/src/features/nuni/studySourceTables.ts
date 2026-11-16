@@ -146,6 +146,9 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     if (!previous || important || !previous.important)
       effective.set(name, { value, important });
   }
+  // CSS <number> also permits a base-ten exponent: 0e3 and .0e-2 stay
+  // completely transparent. Match a zero mantissa, not floating-point
+  // underflow (e.g. 1e-99999), and preserve normal cascade precedence.
   // Explicit zero opacity hides the whole wrapper even when display/visibility
   // are otherwise visible. Do not infer variables, calc(), animations or
   // external CSS; only literal zero numbers/percentages with cascade applied.
@@ -153,7 +156,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
   return effective.get('display')?.value === 'none' ||
     ['hidden', 'collapse'].includes(effective.get('visibility')?.value ?? '') ||
     effective.get('content-visibility')?.value === 'hidden' ||
-    (opacity !== undefined && /^[+-]?(?:0+(?:\.0+)?|\.0+)%?$/u.test(opacity));
+    (opacity !== undefined && /^[+-]?(?:0+(?:\.0+)?|\.0+)(?:e[+-]?\d+)?%?$/u.test(opacity));
 }
 
 function hasHiddenHtmlAttribute(token: string): boolean {
