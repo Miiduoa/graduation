@@ -464,6 +464,13 @@ it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores 
     await act(async () => { (callback as () => void)(); });
     expect(signal?.aborted).toBe(true);
     expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    // Timeout must throttle subsequent requests even if AbortSignal is ignored.
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+    fireEvent.click(retry);
+    fireEvent(window, new Event('pageshow'));
+    expect(window.fetch).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
@@ -489,6 +496,8 @@ it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores 
     });
     expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(window.fetch).toHaveBeenCalledTimes(1);
     expect(scene.create).toHaveBeenCalledTimes(1);
   } finally {
     timeoutSpy.mockRestore();
