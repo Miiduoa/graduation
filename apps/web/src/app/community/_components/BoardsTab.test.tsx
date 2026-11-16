@@ -200,6 +200,32 @@ it('does not show a stale failure after changing schools while a subscribe is pe
   expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
 });
 
+it('keeps both outcomes visible when two boards finish out of order', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic' },
+    { id: 'arts', name: '人文討論', type: 'topic' },
+  ]);
+  const science = deferred<void>();
+  const arts = deferred<void>();
+  mocks.subscribe.mockImplementation((_uid: string, _school: string, id: string) =>
+    id === 'science' ? science.promise : arts.promise);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const first = await screen.findByRole('button', { name: '訂閱科學討論' });
+  const second = screen.getByRole('button', { name: '訂閱人文討論' });
+  fireEvent.click(first);
+  fireEvent.click(second);
+  expect(mocks.subscribe).toHaveBeenCalledTimes(2);
+  await act(async () => arts.resolve(undefined));
+  expect(screen.getByRole('status').textContent).toContain('已訂閱「人文討論」。');
+  await act(async () => science.reject(new Error('offline')));
+  const status = screen.getByRole('status').textContent ?? '';
+  expect(status).toContain('未能訂閱「科學討論」，已恢復原狀，請重試。');
+  expect(status).toContain('已訂閱「人文討論」。');
+  expect(first.getAttribute('aria-pressed')).toBe('false');
+  expect(second.getAttribute('aria-pressed')).toBe('true');
+  expect(window.alert).not.toHaveBeenCalled();
+});
+
 it('shows permission loading and a separate retry without hiding the readable boards', async () => {
   mocks.access.status = 'loading';
   mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
