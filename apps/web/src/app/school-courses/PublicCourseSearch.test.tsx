@@ -464,6 +464,47 @@ it('keeps only the latest result, including when the previous response arrives l
 });
 
 
+it('does not consume a late cancelled fetch reply even without a readable stream', async () => {
+  let finishOld!: (reply: Response) => void;
+  const lateText = vi.fn().mockResolvedValue(await response([course]).text());
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(new Promise<Response>((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  submit('前一筆');
+  submit('下一筆');
+  expect((await screen.findByText(/沒有找到「下一筆」課程/)).textContent).toContain('下一筆');
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  await act(async () => {
+    finishOld({ ok: true, headers: new Headers(), text: lateText } as unknown as Response);
+  });
+  expect(lateText).not.toHaveBeenCalled();
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('cancels an unread late streaming response after the student changes the search', async () => {
+  let finishOld!: (reply: Response) => void;
+  const cancelled = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{')); },
+    cancel: cancelled,
+  });
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(new Promise<Response>((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  submit('前一筆');
+  submit('下一筆');
+  await screen.findByText(/沒有找到「下一筆」課程/);
+  await act(async () => { finishOld(new Response(stream, { status: 200 })); });
+  expect(cancelled).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
 it('refuses an announced oversized catalog before reading its body or preparing a draft', async () => {
   const readBody = vi.fn().mockResolvedValue('{}');
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
