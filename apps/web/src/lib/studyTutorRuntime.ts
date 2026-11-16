@@ -285,8 +285,15 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
       /^([\s"'“”‘’「『《〈（(`*_]*)(?:!)?\[([^\]\r\n]{1,200})\]\([^()\s\r\n]{1,300}\)/u,
       '$1$2',
     );
-    const emphasisPrefix = visibleAnswer.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
-    const visibleContent = visibleAnswer.replace(/^[\s"'“”‘’「『《〈（(\[【`*_]+/gu, '');
+    // GFM strikethrough still visibly discloses an answer. Remove only a
+    // complete leading ~~...~~ span in this comparison copy; a single ~
+    // (e.g. the bitwise NOT operator) must remain part of the answer.
+    const strikeVisibleAnswer = visibleAnswer.replace(
+      /^([\s"'“”‘’「『《〈（(\[【`*_]*)(?:~~)([^~\r\n]{1,200})~~/u,
+      '$1$2',
+    );
+    const emphasisPrefix = strikeVisibleAnswer.match(/^[\s"'“”‘’「『《〈（(\[【`*]*(_{1,2})/u)?.[1] ?? '';
+    const visibleContent = strikeVisibleAnswer.replace(/^[\s"'“”‘’「『《〈（(\[【`*_]+/gu, '');
     const disclosed = visibleContent.replace(/\s+/gu, '');
     if (!disclosed.startsWith(answer)) continue;
     // Compact matching tolerates spacing within an answer, but it must not

@@ -1057,6 +1057,10 @@ describe('new local self-check answer disclosure boundary', () => {
     { label: 'double underscore emphasis', question: 'What? Solution: __SQL__', answer: 'SQL' },
     { label: 'underscore emphasis inside Chinese quotes', question: '參考答案：「_SQL_」', answer: 'SQL' },
     { label: 'Markdown emphasis on decimal', question: '解答：*1.2*', answer: '1.2' },
+    { label: 'GFM strikethrough English answer', question: 'Which language? Answer: ~~SQL~~', answer: 'SQL' },
+    { label: 'GFM strikethrough Chinese answer', question: '哪個欄位？答案：~~主鍵~~', answer: '主鍵' },
+    { label: 'GFM strikethrough decimal answer', question: '結果為何？解答：~~1.2~~', answer: '1.2' },
+    { label: 'bold nested GFM strikethrough answer', question: 'Which language? Answer: **~~SQL~~**', answer: 'SQL' },
     { label: 'same-line Markdown bullet with English key', question: 'Answer: - SQL', answer: 'SQL' },
     { label: 'same-line Chinese bullet with Chinese key', question: '答案：• 主鍵', answer: '主鍵' },
     { label: 'same-line numbered choice key', question: '正解：1. B', answer: 'B' },
@@ -1134,6 +1138,10 @@ describe('new local self-check answer disclosure boundary', () => {
 
   it.each([
     { question: 'Answer: SQLServer is different from SQL?', answer: 'SQL' },
+    { question: 'Answer: ~~SQLServer~~ is a different product?', answer: 'SQL' },
+    { question: '答案：~~12~~ 是否太大？', answer: '1' },
+    { question: '答案：~1 的位元運算結果為何？', answer: '1' },
+    { question: '答案：~~外鍵~~ 和主鍵有什麼不同？', answer: '主鍵' },
     { question: 'Answer: [SQLServer](https://example.test) refers to which product?', answer: 'SQL' },
     { question: 'Answer: [12](https://example.test/number) is too large?', answer: '1' },
     { question: 'Answer: [外鍵](https://example.test/term) 有什麼用途？', answer: '主鍵' },
