@@ -476,6 +476,26 @@ it('refuses an announced oversized catalog before reading its body or preparing 
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
 });
 
+it.each([
+  { reason: 'announced oversize', status: 200, contentLength: '524289' },
+  { reason: 'HTTP error', status: 503, contentLength: '8' },
+])('cancels the unread stream on $reason before it can enter a timetable', async ({ status, contentLength }) => {
+  const cancelBody = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array([123])); },
+    cancel: cancelBody,
+  });
+  const fetcher = vi.fn().mockResolvedValue(new Response(stream, {
+    status, headers: { 'content-length': contentLength },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(cancelBody).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
 it('rejects a UTF-8-oversized catalog without a content-length header', async () => {
   // 60,000 Chinese characters use 540,000 UTF-8 bytes, beyond 512 KiB.
   // The response would otherwise be a valid course in the correct school.

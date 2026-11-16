@@ -288,7 +288,12 @@ function PublicCourseSearchForm({
       });
       // Native already bounds this contract. Web must reject oversized public
       // replies too, before parsing or offering course rows for personal import.
-      if (!response.ok || Number(response.headers?.get('content-length')) > MAX_PUBLIC_COURSE_RESPONSE_BYTES) throw new Error();
+      if (!response.ok || Number(response.headers?.get('content-length')) > MAX_PUBLIC_COURSE_RESPONSE_BYTES) {
+        // A rejected header/status must also stop the incoming body. Otherwise
+        // an oversized upstream response can keep downloading after we error.
+        void response.body?.cancel().catch(() => undefined);
+        throw new Error('Invalid public catalog response');
+      }
       const body = await readBoundedCatalogBody(response, controller.signal);
       // An older response or a cancelled search must never be parsed or displayed.
       if (pending.current?.controller !== controller || controller.signal.aborted) return;
