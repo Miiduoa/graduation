@@ -2,7 +2,9 @@ const { FieldValue } = require('firebase-admin/firestore');
 const { createDeleteUserAccountHandler, RETAINED_CATEGORIES } = require('./accountDeletion');
 
 function isDeleteSentinel(value) {
-  return Boolean(value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete()));
+  return Boolean(
+    value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete()),
+  );
 }
 
 function applyWrite(current, data, replace) {
@@ -146,7 +148,8 @@ function store(seed = []) {
       check('commit', writes[0]?.[1].path || 'empty');
       for (const [kind, reference, data, options] of writes) {
         if (kind === 'delete') docs.delete(reference.path);
-        else if (kind === 'set') docs.set(reference.path, applyWrite(docs.get(reference.path), data, !options?.merge));
+        else if (kind === 'set')
+          docs.set(reference.path, applyWrite(docs.get(reference.path), data, !options?.merge));
         else docs.set(reference.path, applyWrite(docs.get(reference.path), data, false));
       }
       return result;
@@ -548,4 +551,43 @@ test('Auth deletion errors stay failures and only missing Auth is idempotent suc
     Object.assign(new Error('already removed'), { code: 'auth/user-not-found' }),
   );
   expect((await state.handler(request())).success).toBe(true);
+});
+
+test('account deletion drains dorm identities, authority, private records and parcel mirrors across schools', async () => {
+  const seed = [['users/alice', {}]];
+  for (const school of ['pu', 'other']) {
+    for (const collection of ['dormStaffRoles', 'dormSsoIdentities']) {
+      seed.push([`schools/${school}/${collection}/alice`, { studentId: '123', status: 'active' }]);
+      seed.push([`schools/${school}/${collection}/bob`, { studentId: '456' }]);
+      seed.push([`groups/g/${collection}/alice`, { keep: true }]);
+    }
+    for (let i = 0; i < 205; i++) {
+      for (const collection of [
+        'dormResidents',
+        'dormLeaves',
+        'dormRepairs',
+        'dormPackages',
+        'dormPhotoUploads',
+      ]) {
+        const ownerField = collection === 'dormPackages' ? 'recipientId' : 'userId';
+        seed.push([
+          `schools/${school}/${collection}/${i}`,
+          { [ownerField]: 'alice', studentId: '123', name: '私人姓名' },
+        ]);
+        seed.push([`schools/${school}/${collection}/bob`, { [ownerField]: 'bob' }]);
+      }
+      seed.push([`schools/${school}/packages/${i}`, { recipientId: 'alice' }]);
+    }
+    seed.push([`schools/${school}/packages/bob`, { recipientId: 'bob' }]);
+  }
+  const state = store(seed);
+  await state.handler(request());
+  expect(
+    [...state.docs.keys()]
+      .filter((path) => path.startsWith('schools/'))
+      .every((path) => path.endsWith('/bob')),
+  ).toBe(true);
+  expect(state.docs.has('groups/g/dormStaffRoles/alice')).toBe(true);
+  expect(state.docs.has('groups/g/dormSsoIdentities/alice')).toBe(true);
+  await state.handler(request()); // Retrying cleanup remains safe.
 });

@@ -97,7 +97,7 @@ test.each(['functions/not-found', 'functions/unavailable', 'network-request-fail
   async (code) => {
     mockCall.mockRejectedValue(Object.assign(new Error(code), { code }));
     render(<ClubSummary uid="one" schoolId="school" groupId="club" />);
-    expect(await screen.findByText('備援社員 · 會長')).toBeTruthy();
+    expect(await screen.findByText('備援社員 · 社長')).toBeTruthy();
     expect(screen.getByText('活動管理與 CSV 匯出暫時無法使用，社員名單仍可查閱。')).toBeTruthy();
     expect(screen.queryByText(/活動 0 場|尚無活動|0900000000/)).toBeNull();
     expect(screen.queryByText('建立活動')).toBeNull();

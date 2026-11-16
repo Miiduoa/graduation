@@ -12,6 +12,7 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured } from './firebase';
+import { guardedPublicCampusRead, type PublicCampusReadGuard } from './publicCampusReadGuard';
 
 export type CampusEventSource = 'school-club-events' | 'school-events' | 'legacy-events';
 
@@ -79,10 +80,10 @@ function assertSchoolId(schoolId: string): string {
   return assertStableId(schoolId, 'schoolId');
 }
 
-function sourceDb(schoolId: string) {
+function sourceDb(schoolId: string, guard?: PublicCampusReadGuard) {
   assertSchoolId(schoolId);
   if (!isFirebaseConfigured()) throw new Error('Campus content unavailable');
-  return getDb();
+  return guard?.db ?? getDb();
 }
 
 function isCampusEventSource(value: unknown): value is CampusEventSource {
@@ -173,8 +174,9 @@ function assertCursor(schoolId: string, cursor: CampusEventCursor) {
 export async function loadCampusEventPage(
   schoolId: string,
   cursor: CampusEventCursor | null = null,
+  guard?: PublicCampusReadGuard,
 ): Promise<CampusEventPage> {
-  const db = sourceDb(schoolId);
+  const db = sourceDb(schoolId, guard);
   if (cursor) assertCursor(schoolId, cursor);
 
   const sources = cursor ? [cursor.source] : EVENT_SOURCES;
@@ -186,7 +188,8 @@ export async function loadCampusEventPage(
       ...(cursor ? [startAfter(cursor.document)] : []),
       limit(EVENT_PAGE_FETCH),
     ];
-    const snapshot = await getDocsFromServer(query(collection(db, ...path), ...constraints));
+    const snapshot = await guardedPublicCampusRead(guard, () =>
+      getDocsFromServer(query(collection(db, ...path), ...constraints)));
     if (snapshot.empty && !cursor && source !== EVENT_SOURCES[EVENT_SOURCES.length - 1]) {
       continue;
     }

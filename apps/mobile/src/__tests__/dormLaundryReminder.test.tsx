@@ -253,7 +253,7 @@ test('cloud parcels show arrival and identity, keep postal items separate, and p
   expect(screen.getByText(/待領包裹 1 件/)).toBeTruthy();
   fireEvent.press(screen.getByText('包裹領取'));
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
-  expect(screen.getByText('明天起退件')).toBeTruthy();
+  expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('不混入的掛號')).toBeNull();
   expect(screen.getByText('我自己記的')).toBeTruthy();

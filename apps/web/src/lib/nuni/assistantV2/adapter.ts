@@ -16,6 +16,7 @@ import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOpe
 import { hasPublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
 import { parsePublicCourseArguments, publicCourseArguments, PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { bounded, id, object, V2Error, type Adapter, type Obj } from './contracts';
+import { readPublicCampus } from './publicCampusAdapter';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
   if (!Array.isArray(v[key])) throw new V2Error(502, 'INVALID_RESPONSE');
@@ -162,6 +163,32 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
         { query: search.query, ...search.filters }, version), active, PUBLIC_COURSE_TOOL_TIMEOUT_MS);
       active.throwIfAborted();
       return result;
+    },
+    publicCampus: async (kind, limit) => {
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      if (!['announcements', 'events'].includes(kind) || !Number.isInteger(limit) || limit < 1 || limit > 5 ||
+          !/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
+        throw new V2Error(422, 'INVALID_INPUT');
+      return bounded(async (child) => {
+        const check = () => {
+          child.throwIfAborted();
+          active.throwIfAborted();
+          if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        };
+        const { publicCampusFirestore } = await import('../../server/publicCampusFirestore');
+        check();
+        const db = publicCampusFirestore();
+        return readPublicCampus({ kind, schoolId, limit, guard: {
+          db,
+          beforeRead() {
+            check();
+            if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+          },
+          afterRead: check,
+        } });
+      }, active, 4000);
     },
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),

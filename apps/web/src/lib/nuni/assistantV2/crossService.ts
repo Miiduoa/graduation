@@ -12,6 +12,7 @@ import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantP
 import { formatPublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistant';
 import { findSchoolById } from '@campus/shared/src/schools';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
+import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind } from './publicCampus';
 import type { AssistantCourseworkTarget } from '../../assistantCoursework';
 import type { createTools } from './tools';
 import type { CrossServiceOperation, CrossServiceRequest } from './crossServiceRequest';
@@ -41,7 +42,9 @@ function failureMessage(error: unknown): string {
   }
 }
 
-function readSummary(operation: CrossServiceOperation, value: unknown, now: number): string {
+function readSummary(operation: CrossServiceOperation, value: unknown, now: number, schoolId: string): string {
+  const campusKind = publicCampusToolKind(operation.tool);
+  if (campusKind) return formatPublicCampusRead(parsePublicCampusResult(value, schoolId, campusKind));
   if (unwrap(value).hasTimetableSource === false)
     return '目前沒有已同步的課表來源，還不能據此判定沒有課或可用空堂。';
   if (operation.directRead)
@@ -128,6 +131,8 @@ export async function runCrossService(input: {
   binding: Binding;
   signal: AbortSignal;
   now: number;
+  /** Retry may preserve an earlier date but must not suggest an elapsed slot. */
+  availableAfter?: number;
 }) {
   const { request, tools, binding, signal, now } = input;
   const foreignPublicSource = request.operations.some(operation =>
@@ -174,7 +179,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -210,15 +215,21 @@ export async function runCrossService(input: {
         results.set(operation.id, value);
         const result = unwrap(value);
         step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
-        step.summary = result.unavailable ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now);
-        if (partial(result)) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
+        step.summary = result.unavailable && !publicCampusToolKind(operation.tool)
+          ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
+        if (publicCampusToolKind(operation.tool)) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
+        if (partial(result) && !publicCampusToolKind(operation.tool)) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
       } else if (operation.kind === 'free-time') {
         const value = await call('find_free_time', operation.args, operation.question);
-        results.set(operation.id, value);
-        const slots = rows(unwrap(value).slots);
+        const originalSlots = rows(unwrap(value).slots);
+        const slots = input.availableAfter === undefined ? originalSlots : originalSlots.filter(row =>
+          typeof row.date === 'string' && typeof row.startTime === 'string' &&
+          Date.parse(row.date + 'T' + row.startTime + ':00+08:00') >= input.availableAfter!);
+        results.set(operation.id, input.availableAfter === undefined ? value : { ...unwrap(value), slots });
         step.status = slots.length ? 'completed' : 'blocked';
         step.summary = slots.length ? '已核對同步課表與個人行程，可用時段：' + slots.slice(0, 5)
           .map(row => `${label(row.date)} ${label(row.startTime)}–${label(row.endTime)}`).join('、')
+          : originalSlots.length ? '原查詢時段已經過去，沒有可接續安排的未來空檔。'
           : '指定日期與時段內沒有符合長度的空檔，尚未安排。';
       } else if (operation.kind === 'study') {
         const pending = pendingTasks(operation);

@@ -214,6 +214,8 @@ export type Adapter = {
   materials(courseId: string, cursor?: string): Promise<unknown>;
   /** Reviewed anonymous catalogs; this never changes the private school binding. */
   publicCourses?(search: import('@campus/shared/src/publicCourseAssistant').PublicCourseAssistantSearch): Promise<unknown>;
+  /** Anonymous public content in this adapter's fixed school, never a private school login. */
+  publicCampus?(kind: import('./publicCampus').PublicCampusKind, limit: number): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,

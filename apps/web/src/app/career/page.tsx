@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
 import {
-  CAREER_EMPTY,
   CAREER_JOBS_UNAVAILABLE,
   CAREER_LINKS,
   careerCalendarUrl,
@@ -14,6 +13,7 @@ import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServ
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './career.module.css';
+import { CareerHost } from '@/components/career/CareerHost';
 function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
   const [feed, setFeed] = useState<CareerFeed | null>(null);
   const [retry, setRetry] = useState(0);
@@ -75,15 +75,12 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
       </section>
       <section className={styles.panel}>
         <h2>校內工讀與實習</h2>
-        <p>{CAREER_EMPTY}</p>
         {official && (
           <a href={official.url} target="_blank" rel="noopener noreferrer">
             {official.label} ↗
           </a>
         )}
-        <p>
-          此頁提供公開資訊，尚未接上校內工讀申請及實習學分系統。申請、權益說明與學分認定請洽校方；這裡不受理投遞或登錄時數。
-        </p>
+        <CareerHost schoolId={schoolId} />
       </section>
       <section className={styles.panel}>
         <h2>校方職涯公告</h2>
@@ -154,7 +151,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
       <aside className={styles.panel}>
         <h2>給學生、職涯承辦與平台營運</h2>
         <p>
-          訪客與登入者看到相同的公開資訊。承辦與營運可從來源連結核對公告；本頁沒有上架、申請審核、學生名冊或實習紀錄管理功能。諮詢預約請依校方網站流程辦理。
+          公開資訊與校方連結持續提供。登入後依校方授權顯示申請與承辦工作台；諮詢預約請依校方網站流程辦理。
         </p>
       </aside>
     </>

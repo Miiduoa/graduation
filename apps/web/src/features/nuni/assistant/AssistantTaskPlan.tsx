@@ -1,7 +1,9 @@
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import { getAssistantService } from '@campus/shared/src/assistantServices';
-import { parseAssistantTaskPlan, type AssistantTaskStep } from '@campus/shared/src/assistantTaskPlan';
+import { getAssistantServiceCapability, parseAssistantTaskPlan, type AssistantTaskStep } from '@campus/shared/src/assistantTaskPlan';
+import { parseAssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { inAppHref } from './copy';
 import type { V2ActionState, V2ActionStates, V2Card } from './types';
 import styles from './AssistantTaskPlan.module.css';
@@ -81,13 +83,28 @@ function displayStep(step: AssistantTaskStep, cards: V2Card[], states: V2ActionS
 }
 
 /** The task list describes results; all confirmations remain in the existing cards. */
-export function AssistantTaskPlan({ plan, cards, states }: {
+export function AssistantTaskPlan({ plan, cards, states, retry: rawRetry, pending = false, onRetry }: {
   plan: unknown;
   cards: V2Card[];
   states: V2ActionStates;
+  retry?: unknown;
+  pending?: boolean;
+  onRetry?: (stepIds: string[]) => void;
 }) {
   const parsed = parseAssistantTaskPlan(plan);
+  const retry = parseAssistantTaskRetry(rawRetry, parsed);
+  const expiresAt = retry?.expiresAt;
+  const [retryNow, setRetryNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (expiresAt === undefined) return;
+    const remaining = expiresAt - Date.now();
+    const delay = Number.isFinite(remaining) ? Math.max(0, Math.min(remaining + 1, 2147483647)) : 0;
+    const timer = setTimeout(() => setRetryNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
   if (!parsed?.steps.length) return null;
+  const expired = !!retry && (!Number.isFinite(retryNow) || retryNow >= retry.expiresAt);
+  const canRetry = !!retry && !!onRetry;
   const steps = parsed.steps.map((step) => displayStep(step, cards, states));
   const completed = steps.filter((step) => step.status === 'completed').length;
   const ready = steps.filter((step) => step.status === 'ready').length;
@@ -97,11 +114,22 @@ export function AssistantTaskPlan({ plan, cards, states }: {
       <p role="status" aria-live="polite" aria-atomic="true">
         已完成 {completed}/{steps.length} 項{ready ? ` · ${ready} 項待確認` : ''}
       </p>
+      {canRetry && <button type="button" className={styles.retry}
+        disabled={pending || expired} onClick={() => onRetry(retry!.stepIds)}>
+        重查未完成項目
+      </button>}
     </div>
+    {canRetry && expired && <p className={styles.expired}>這份查詢已過期，請重新描述要查的資料。</p>}
     <ol className={styles.steps}>
       {steps.map(({ step, status, summary }, index) => {
-        const href = status === 'handoff' && step.href ? inAppHref(step.href) : null;
         const service = getAssistantService(step.serviceId);
+        const capability = getAssistantServiceCapability(step.serviceId);
+        // A display-only step cannot distinguish a failed draft from a reader
+        // in a service that also prepares writes. Keep those on their card path.
+        const readSource = !step.cardIds?.length && status === step.status &&
+          ['completed', 'partial', 'blocked'].includes(status) &&
+          capability?.modes.includes('read') && !capability.modes.includes('prepare');
+        const href = step.href && (status === 'handoff' || readSource) ? inAppHref(step.href) : null;
         return <li key={step.id} className={styles.step} data-status={status}>
           <span className={styles.number} aria-hidden="true">{index + 1}</span>
           <div className={styles.body}>
@@ -110,7 +138,14 @@ export function AssistantTaskPlan({ plan, cards, states }: {
               <span className={styles.status}>{STATUS_LABELS[status]}</span>
             </div>
             <p className={styles.summary}>{summary}</p>
-            {href && service && <Link className={styles.link} href={href}>開啟{service.label}</Link>}
+            {canRetry && retry!.stepIds.includes(step.id) && <button type="button"
+              className={styles.retry} aria-label={'重新查詢' + step.label}
+              disabled={pending || expired} onClick={() => onRetry([step.id])}>
+              重新查詢
+            </button>}
+            {href && service && <Link className={styles.link} href={href}>
+              {status === 'handoff' ? `開啟${service.label}` : '查看來源'}
+            </Link>}
           </div>
         </li>;
       })}

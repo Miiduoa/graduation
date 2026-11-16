@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import type { AssistantTaskPlan as TaskPlan, AssistantTaskStep } from '@campus/shared/src/assistantTaskPlan';
@@ -33,8 +33,121 @@ const step = (overrides: Partial<AssistantTaskStep> = {}): AssistantTaskStep => 
   status: 'ready', summary: '已找到 30 分鐘，請核對下方確認卡。', cardIds: [eventCard().mutationId], ...overrides,
 }).filter(([, value]) => value !== undefined)) as AssistantTaskStep;
 const plan = (...steps: AssistantTaskStep[]): TaskPlan => ({ version: 1, steps });
+const retryProof = (stepIds = ['transit']) => ({ version: 1 as const,
+  token: 'task_read_retry.' + 'A'.repeat(43), stepIds, expiresAt: Date.now() + 60_000 });
 
 describe('cross-service task results', () => {
+  it.each(['completed', 'partial', 'blocked'] as const)('links a %s public read to its validated scoped source', (status) => {
+    const raw = plan(step({ id: 'announcement-read', label: '查校園公告', serviceId: 'announcements',
+      status, cardIds: undefined, href: '/announcements?schoolId=nthu', summary: '這次公告讀取結果。' }));
+    render(<AssistantTaskPlan plan={raw} cards={[]} states={{}} />);
+    const source = screen.getByRole('link', { name: '查看來源' });
+    expect(source.getAttribute('href')).toBe('/announcements?schoolId=nthu');
+    expect(screen.queryByRole('link', { name: '開啟校園公告' })).toBeNull();
+  });
+
+  it('keeps read-source links separate from the existing service handoff', () => {
+    const raw = plan(
+      step({ id: 'events', label: '查校園活動', serviceId: 'events', status: 'partial', cardIds: undefined,
+        href: '/events?schoolId=pu', summary: '尚有下一頁活動。' }),
+      step({ id: 'public', label: '查清大公開課程', serviceId: 'school-courses', status: 'completed', cardIds: undefined,
+        href: '/school-courses?schoolId=nthu', summary: '公開課程已讀取。' }),
+      step({ id: 'dorm', label: '宿舍報修', serviceId: 'dormitory', status: 'handoff', cardIds: undefined,
+        href: '/dormitory?schoolId=pu', summary: '請從宿舍服務接續。' }),
+    );
+    render(<AssistantTaskPlan plan={raw} cards={[]} states={{}} />);
+    expect(screen.getAllByRole('link', { name: '查看來源' }).map(link => link.getAttribute('href')))
+      .toEqual(['/events?schoolId=pu', '/school-courses?schoolId=nthu']);
+    expect(screen.getByRole('link', { name: '開啟宿舍服務' }).getAttribute('href')).toBe('/dormitory?schoolId=pu');
+  });
+
+  it('does not turn a draft or a confirmation-bound step into a read-source shortcut', () => {
+    const raw = plan(
+      step({ id: 'unbound-ready', label: '未備妥的讀取', serviceId: 'events', status: 'ready', cardIds: undefined,
+        href: '/events?schoolId=pu' }),
+      step({ id: 'calendar-draft', label: '未完成的行程草稿', status: 'blocked', cardIds: undefined,
+        href: '/calendar?schoolId=pu' }),
+      step({ id: 'card-linked', label: '已綁定確認卡的項目', serviceId: 'events', status: 'partial',
+        href: '/events?schoolId=pu' }),
+    );
+    render(<AssistantTaskPlan plan={raw} cards={[eventCard()]} states={{}} />);
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it.each(['https://example.invalid/source', '/calendar?schoolId=pu', '//example.invalid',
+    '/announcements?source=%255c%255cexample.invalid'])('does not relax the shared source URL contract: %s', (href) => {
+    render(<AssistantTaskPlan plan={plan(step({ id: 'public-read', label: '查校園公告', serviceId: 'announcements',
+      status: 'completed', cardIds: undefined, href }))} cards={[]} states={{}} />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.queryByRole('region', { name: '跨功能任務步驟' })).toBeNull();
+  });
+
+  it('retries only signed unfinished read steps and preserves pending confirmations', () => {
+    const raw = plan(
+      step({ id: 'schedule', label: '核對課表', serviceId: 'timetable', status: 'completed', cardIds: undefined }),
+      step(),
+      step({ id: 'materials', label: '找課程教材', serviceId: 'classroom', status: 'partial', cardIds: undefined }),
+      step({ id: 'transit', label: '查公車資訊', serviceId: 'bus', status: 'blocked', cardIds: undefined }),
+    );
+    const retry = retryProof(['materials', 'transit']), onRetry = vi.fn();
+    const view = render(<AssistantTaskPlan plan={raw} cards={[eventCard()]} states={{}} retry={retry} onRetry={onRetry} />);
+    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: '重新查詢安排作業準備時間' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '重新查詢核對課表' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢查公車資訊' }));
+    expect(onRetry).toHaveBeenCalledExactlyOnceWith(['transit']);
+    fireEvent.click(screen.getByRole('button', { name: '重查未完成項目' }));
+    expect(onRetry).toHaveBeenLastCalledWith(['materials', 'transit']);
+    expect(screen.getByText('待確認')).toBeTruthy();
+    view.rerender(<AssistantTaskPlan plan={raw} cards={[eventCard()]} states={{}}
+      retry={retry} pending onRetry={onRetry} />);
+    for (const button of screen.getAllByRole('button')) expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '重查未完成項目' }));
+    expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { stepIds: ['study'] }, { stepIds: ['completed'] }, { stepIds: ['unknown'] },
+    { stepIds: ['transit', 'transit'] }, { token: 'not-a-signed-continuation' },
+    { expiresAt: Number.NaN },
+  ])('does not expose a retry with invalid provenance: %j', (changes) => {
+    render(<AssistantTaskPlan plan={plan(step(),
+      step({ id: 'completed', label: '已讀資料', status: 'completed', cardIds: undefined }),
+      step({ id: 'transit', label: '查公車資訊', serviceId: 'bus', status: 'blocked', cardIds: undefined }))}
+      cards={[eventCard()]} states={{}} retry={{ ...retryProof(), ...changes }} onRetry={vi.fn()} />);
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('disables retry exactly when its continuation expires without another user action', () => {
+    vi.useFakeTimers();
+    try {
+      const onRetry = vi.fn();
+      render(<AssistantTaskPlan plan={plan(step({ id: 'transit', label: '查公車資訊', serviceId: 'bus',
+        status: 'blocked', cardIds: undefined }))} cards={[]} states={{}}
+        retry={{ ...retryProof(), expiresAt: Date.now() + 1000 }} onRetry={onRetry} />);
+      const retry = screen.getByRole('button', { name: '重查未完成項目' }) as HTMLButtonElement;
+      expect(retry.disabled).toBe(false);
+      act(() => vi.advanceTimersByTime(1001));
+      expect(retry.disabled).toBe(true);
+      expect(screen.getByText('這份查詢已過期，請重新描述要查的資料。')).toBeTruthy();
+      fireEvent.click(retry);
+      expect(onRetry).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not enable a continuation when the device clock is invalid', () => {
+    const retry = retryProof(), now = vi.spyOn(Date, 'now').mockReturnValue(Number.NaN);
+    try {
+      const onRetry = vi.fn();
+      render(<AssistantTaskPlan plan={plan(step({ id: 'transit', label: '查公車資訊', serviceId: 'bus',
+        status: 'blocked', cardIds: undefined }))} cards={[]} states={{}} retry={retry} onRetry={onRetry} />);
+      const button = screen.getByRole('button', { name: '重查未完成項目' }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      fireEvent.click(button);
+      expect(onRetry).not.toHaveBeenCalled();
+    } finally { now.mockRestore(); }
+  });
+
   it.each([undefined, null, {}, { version: 2, steps: [] }, { version: 1, steps: [] },
     { version: 1, steps: [{ ...step(), serviceId: 'made-up-service' }] },
     { version: 1, steps: [step({ status: 'handoff', href: 'https://example.invalid' })] },

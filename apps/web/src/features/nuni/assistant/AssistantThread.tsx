@@ -10,6 +10,7 @@ import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantTaskPlan } from './AssistantTaskPlan';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
+import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
@@ -57,6 +58,8 @@ export function AssistantThread({
   onRecoverQuestion,
   onAsk,
   onStudyTarget,
+  onTaskRetry,
+  taskRetryForTurn,
   onStop,
   onConfirm,
   onCancel,
@@ -84,6 +87,8 @@ export function AssistantThread({
   onRecoverQuestion: () => void;
   onAsk: () => void;
   onStudyTarget?: (target: AssistantCourseworkTarget, date?: string) => void;
+  onTaskRetry?: (turn: V2Turn, stepIds: string[]) => void;
+  taskRetryForTurn?: (turn: V2Turn) => AssistantTaskRetry | null;
   onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
@@ -150,7 +155,7 @@ export function AssistantThread({
   const publicCompound = publicCourseCompoundRequest(question, schoolId);
   const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    ((consent && ready) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+    ((consent && ready) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
       (onStudyTarget && courseworkStudyFollowup(question) !== null))));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
@@ -250,7 +255,10 @@ export function AssistantThread({
                 ) : null}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
-                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states} />
+                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
+                  retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
+                  pending={pending || !!onStop}
+                  onRetry={onTaskRetry ? stepIds => onTaskRetry(turn, stepIds) : undefined} />
                 <PublicCourseResults results={turn.reply.publicCourseResults} />
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>

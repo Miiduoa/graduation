@@ -6,6 +6,7 @@ import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@
 import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskPlan';
 import { parseAssistantPublicCourseResults, type AssistantPublicCourseResult } from '@campus/shared/src/assistantPublicCourseResults';
 import { parsePublicCourseArguments, publicCourseArguments, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
+import { parsePublicCampusRead, parsePublicCampusResult } from './publicCampus';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
@@ -51,6 +52,8 @@ const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  get_campus_announcements: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_campus_events: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_public_courses: [
     { schoolId: { enum: ['nthu', 'ncnu'] }, query: { type: 'string', maxLength: 80 },
       weekday: { type: 'integer', minimum: 1, maximum: 7 },
@@ -448,6 +451,8 @@ export const toolNames = Object.keys(definitions);
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
 function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
+  const publicCampus = parsePublicCampusRead(question);
+  if (publicCampus) return [[publicCampus.kind === 'announcements' ? '學生公告' : '公開活動', publicCampus.tool]];
   const other = taskQuestionOutsidePublicCourses(question, schoolId);
   if (other !== question) {
     const domains: [string, string][] = publicCourseSearches(question, schoolId).length
@@ -470,7 +475,9 @@ function requestedToolDomains(question: string, simulation: boolean, schoolId = 
   const campusLookup = question.length <= 1000 &&
     !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(question) &&
     !/[「」『』“”"'`]|不要|不用|不必|無須|不需要|不想|不是要|先別|別幫|翻譯|這句話|假設|如果|昨天|前天|剛才|之前|曾經|以前/.test(campusQuestion);
-  add(campusLookup && /圖書館|怎麼走|地圖|公告|活動/.test(campusQuestion), '校園資訊', 'get_campus_info');
+  add(campusLookup && /圖書館|怎麼走|地圖/.test(campusQuestion), '校園資訊', 'get_campus_info');
+  add(campusLookup && /公告/.test(campusQuestion) && !/開啟|打開|前往|進入/.test(campusQuestion), '學生公告', 'get_campus_announcements');
+  add(campusLookup && /活動/.test(campusQuestion) && !/開啟|打開|前往|進入|報名/.test(campusQuestion), '公開活動', 'get_campus_events');
   add(foodOrderIntent(question) || /點餐|菜單|便當/.test(question), '點餐',
     /再點|跟上次一樣/.test(question) ? 'reorder_last_food_order' : 'get_food_menu');
   add(/吃|中午|餐廳/.test(question) && !foodOrderIntent(question), '餐廳', 'get_dining');
@@ -502,6 +509,8 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
     : '';
 }
 export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
+  const publicCampus = parsePublicCampusRead(question);
+  if (publicCampus) return [publicCampus.tool];
   const other = taskQuestionOutsidePublicCourses(question, schoolId);
   if (other !== question) {
     const names = selectTools(other, simulation, schoolId)
@@ -552,6 +561,8 @@ export function selectTools(question: string, simulation: boolean, schoolId = ''
   if (/社團/.test(question)) add('list_clubs', 'get_club_feed');
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
+  if (/公告/.test(question) && !/開啟|打開|前往|進入/.test(question)) add('get_campus_announcements');
+  if (/活動/.test(question) && !/開啟|打開|前往|進入|報名/.test(question)) add('get_campus_events');
   if (/通知/.test(question) && simulation) add('get_notifications');
   if (information.length && !foodOrderIntent(question) && !scheduleIntent(question) && !personalSlotSelect(question)) {
     out.delete('propose_personal_event');
@@ -946,6 +957,13 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_campus_announcements':
+      case 'get_campus_events': {
+        if (!adapter.publicCampus) return fail('PUBLIC_CAMPUS_UNAVAILABLE', 503);
+        const kind = name === 'get_campus_announcements' ? 'announcements' : 'events';
+        const result = await adapter.publicCampus(kind, Number(a.limit ?? 5));
+        return parsePublicCampusResult(result, binding.schoolId, kind);
+      }
       case 'get_public_courses': {
         const search = parsePublicCourseArguments(a);
         const requested = publicCourseSearches(question, binding.schoolId);
@@ -1509,6 +1527,9 @@ export function createTools(
       if (name === 'list_food_orders' && reorder) delete cleaned.state;
       if (name === 'reorder_last_food_order' || name === 'propose_food_order')
         cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
+      // Public content readers do not reinterpret unsupported school, date or
+      // endpoint fields as an unfiltered query for the bound campus.
+      if (name === 'get_campus_announcements' || name === 'get_campus_events') validateTool(name, cleaned);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);

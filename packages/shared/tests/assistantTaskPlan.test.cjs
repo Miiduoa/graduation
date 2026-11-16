@@ -188,7 +188,7 @@ describe('assistant connected service capabilities', () => {
   });
 
   test('does not label source links, unconnected private services or school writers as data or execution', () => {
-    for (const id of ['library', 'map', 'announcements', 'events', 'notifications', 'messages',
+    for (const id of ['library', 'map', 'notifications', 'messages',
       'school-lms', 'dormitory', 'leave', 'grades', 'app-orders', 'admin']) {
       const capability = getAssistantServiceCapability(id);
       assert.deepEqual(capability.modes, ['handoff'], id);
@@ -200,6 +200,10 @@ describe('assistant connected service capabilities', () => {
     assert.deepEqual(getAssistantServiceCapability('school-courses').modes, ['read', 'handoff']);
     assert.deepEqual(getAssistantServiceCapability('school-courses').tools,
       ['get_public_courses', 'list_campus_services', 'propose_open_page']);
+    for (const [id, tool] of [['announcements', 'get_campus_announcements'], ['events', 'get_campus_events']]) {
+      assert.deepEqual(getAssistantServiceCapability(id).modes, ['read']);
+      assert.deepEqual(getAssistantServiceCapability(id).tools, [tool]);
+    }
   });
 
   test('metadata remains immutable and does not expose an authorization decision', () => {

@@ -25,6 +25,8 @@ export type V2Reply = {
   courseworkDate?: string;
   /** Server-prepared task results; validate before rendering or linking. */
   taskPlan?: import('@campus/shared/src/assistantTaskPlan').AssistantTaskPlan;
+  /** Scoped read continuation; never an action-card confirmation. */
+  taskRetry?: import('@campus/shared/src/assistantTaskRetry').AssistantTaskRetry;
   /** Reviewed public catalogs; validate their envelope before rendering cards. */
   publicCourseResults?: import('@campus/shared/src/assistantPublicCourseResults').AssistantPublicCourseResult[];
 };
@@ -32,6 +34,8 @@ export type V2Reply = {
 export type V2Turn = {
   question: string;
   reply: V2Reply;
+  /** Preserve the original conversation when retrying this turn's scoped reads. */
+  conversationId?: string;
   /** Local public lookup, outside the model conversation and signed action cards. */
   publicCourse?: { read?: PublicCourseAssistantRead };
 };

@@ -6,6 +6,8 @@ import { SiteShell } from '@/components/SiteShell';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssistantClient';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
+import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
+import { isAssistantTaskRetryQuestion, parseAssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
@@ -241,6 +243,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
 }
 const ASSISTANT_PENDING_STATUS = {
   ask: '正在整理回覆',
+  retry: '正在重查未完成的資料',
   confirm: '正在確認操作結果',
   reconcile: '正在核對執行結果',
   cancel: '正在確認撤銷結果',
@@ -281,6 +284,7 @@ function V2Conversation({
   const [error, setError] = useState('');
   const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
+  const retriedTaskSteps = useRef(new WeakMap<V2Turn, Set<string>>());
   const revisionConsent = useRef(false);
   const revisionTurns = useRef(new Set<V2Turn>());
   const preciseRevisionTurns = useRef(new Set<V2Turn>());
@@ -390,7 +394,7 @@ function V2Conversation({
   async function send(action: string, input: object, askSignal?: AbortSignal) {
     const scopeSignal = controller.current!.signal;
     const signal = askSignal ?? scopeSignal;
-    return withAssistantRequestDeadline(signal, action === 'ask' ? 65000 : 15000, async (requestSignal) => {
+    return withAssistantRequestDeadline(signal, action === 'ask' || action === 'retry' ? 65000 : 15000, async (requestSignal) => {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
       credentials: 'same-origin',
@@ -433,11 +437,89 @@ function V2Conversation({
       if (active()) setError('行程結果已核對，待核對清單暫時無法更新；再次開啟時只會查核，不會重複建立。');
     }
   }
+  function taskRetryForTurn(turn: V2Turn) {
+    const retry = parseAssistantTaskRetry(turn.reply.taskRetry, turn.reply.taskPlan);
+    if (!retry) return null;
+    const retired = retriedTaskSteps.current.get(turn);
+    const stepIds = retry.stepIds.filter(stepId => !retired?.has(stepId));
+    return stepIds.length ? { ...retry, stepIds } : null;
+  }
+  async function retryTasks(turn: V2Turn, stepIds: string[], prompt?: string) {
+    if (!active() || busy.current || !journalReadyRef.current || !turns.includes(turn)) return;
+    const retry = taskRetryForTurn(turn);
+    const now = Date.now();
+    if (!retry || !Number.isFinite(now) || retry.expiresAt <= now || !stepIds.length ||
+        new Set(stepIds).size !== stepIds.length || stepIds.some(stepId => !retry.stepIds.includes(stepId))) {
+      setError('這份查詢已無法接續，請重新描述要查的資料。');
+      return;
+    }
+    const sourceConversation = turn.conversationId || conversation.current;
+    const current = prompt || (stepIds.length === 1
+      ? '重新查詢' + (parseAssistantTaskPlan(turn.reply.taskPlan)?.steps.find(step => step.id === stepIds[0])?.label || '未完成項目')
+      : '重查未完成項目');
+    busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('retry');
+    setPending(true);
+    setError('');
+    if (prompt) setQuestion('');
+    try {
+      const reply = await send('retry', { token: retry.token, stepIds,
+        conversationId: sourceConversation }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      const taskPlan = parseAssistantTaskPlan(reply?.taskPlan);
+      if (reply?.version !== 2 || typeof reply.answer !== 'string' || !Array.isArray(reply.steps) ||
+          !Array.isArray(reply.cards) || reply.cards.length || !taskPlan ||
+          stepIds.some(stepId => !taskPlan.steps.some(step => step.id === stepId)) ||
+          (reply.taskRetry !== undefined && !parseAssistantTaskRetry(reply.taskRetry, taskPlan)))
+        throw new Error('重查結果尚未通過核對，請稍後再試。');
+      // This response is read-only. It cannot replace, retire or reissue any
+      // signed calendar/food card from the original turn.
+      const retired = new Set(retriedTaskSteps.current.get(turn));
+      for (const step of taskPlan.steps)
+        if (retry.stepIds.includes(step.id)) retired.add(step.id);
+      retriedTaskSteps.current.set(turn, retired);
+      setTurns(previous => [...previous, { question: current, conversationId: sourceConversation,
+        reply: { ...reply, taskPlan, cards: [], dataRead: true,
+          courseworkTargets: parseAssistantCourseworkTargets(reply.courseworkTargets) } }]);
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+    } catch (e) {
+      if (!scopeSignal.aborted)
+        setError(pendingAsk.signal.aborted ? '已停止這次重查，原本的結果與確認內容仍保留。'
+          : e instanceof Error ? e.message : '重查未完成，請稍後再試。');
+    } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
+      busy.current = false;
+      if (!scopeSignal.aborted) {
+        setAsking(false);
+        setPending(false);
+      }
+    }
+  }
   async function ask(selection?: AssistantCourseworkSelection) {
     const current = selection
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim();
     if (!current || busy.current) return;
+    if (!selection && isAssistantTaskRetryQuestion(current)) {
+      const source = [...turns].reverse().find(turn => {
+        const retry = taskRetryForTurn(turn);
+        return retry && retry.expiresAt > Date.now();
+      });
+      if (!source) {
+        setError('目前沒有可接續的未完成資料查詢，請重新描述要查的項目。');
+        return;
+      }
+      await retryTasks(source, taskRetryForTurn(source)!.stepIds, current);
+      return;
+    }
     const publicCompound = !selection && publicCourseCompoundRequest(current, schoolId);
     const publicCourseIntent = !publicCompound && !selection && resolvePublicCourseAssistantIntent(current, schoolId);
     const followup = !publicCompound && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
@@ -530,7 +612,7 @@ function V2Conversation({
           ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
-      if (publicCompound || reply.publicCourseResults !== undefined) reply.dataRead = true;
+      if (publicCompound || reply.publicCourseResults !== undefined || parseAssistantTaskPlan(reply.taskPlan)) reply.dataRead = true;
       // The last selected source stays an untrusted hint for a fresh read, never a model-history fact.
       reply.courseworkTargets = parseAssistantCourseworkTargets(
         reply.courseworkTargets ?? (studySelection ? [studySelection.target] : undefined));
@@ -544,7 +626,7 @@ function V2Conversation({
             setAction(card, { status: 'superseded' });
         }
       }
-      setTurns((t) => [...t, { question: current, reply }]);
+      setTurns((t) => [...t, { question: current, reply, conversationId: conversation.current }]);
       setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
       if (!controller.current?.signal.aborted) {
@@ -1012,6 +1094,8 @@ function V2Conversation({
       onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
       onStudyTarget={(target, date) => void ask({ target, date })}
+      onTaskRetry={(turn, stepIds) => void retryTasks(turn, stepIds)}
+      taskRetryForTurn={taskRetryForTurn}
       onStop={inlineDraft && asking ? () => askRequest.current?.abort() : undefined}
       onConfirm={(cards) => void execute(cards)}
       allowBatchConfirmation={turn => !individualConfirmationTurns.current.has(turn)}

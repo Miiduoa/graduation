@@ -6,6 +6,7 @@ import { directReads, type DirectRead } from './directRead';
 import { informationReads, type InformationRead } from './information';
 import { studyWindow } from './tools';
 import { publicCourseArguments } from './publicCourses';
+import { parsePublicCampusRead } from './publicCampus';
 
 export type CrossServiceOperation = {
   id: string;
@@ -128,6 +129,12 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
       continue;
     }
     const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
+    const publicCampus = parsePublicCampusRead(clause);
+    if (publicCampus) {
+      add({ kind: 'read', label: publicCampus.kind === 'announcements' ? '查學生公告' : '查近期活動',
+        serviceId: publicCampus.kind, tool: publicCampus.tool, args: publicCampus.args });
+      continue;
+    }
     const readClause = /^(?:個人行程|個人行事曆|行事曆|課表|未交作業|待繳作業|作業|測驗)$/.test(clause)
       ? '查' + clause : clause;
     const reads = directReads(readClause, now);
@@ -145,6 +152,10 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     const information = informationReads(clause, now);
     if (information.length) {
       for (const read of information) {
+        if (read.kind === 'work') {
+          const from = date(read.args.from || taipeiDate(now));
+          read.args = { ...read.args, from, to: date(read.args.to || addDays(from, 6)) };
+        }
         if (!days[index] && inheritedDays.length === 1 && read.kind === 'schedule' && !read.view &&
             !/目前|現在|最近/.test(clause)) read.args = { from: inheritedDay, to: inheritedDay };
         add({ kind: 'read', label: read.kind === 'orders' ? '查訂單進度' : read.kind === 'work' ? '查課程待辦' : '核對課表',
@@ -190,9 +201,11 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     if (services.length !== 1) return null;
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
-  if (requested.length < 2 || requested.length > 12 ||
+  const singlePublicRead = requested.length === 1 && requested[0].kind === 'read' &&
+    ['get_campus_announcements', 'get_campus_events'].includes(requested[0].tool || '');
+  if ((!singlePublicRead && requested.length < 2) || requested.length > 12 || (!singlePublicRead &&
       new Set(requested.map(op => op.kind === 'public-course' ? op.kind + ':' + JSON.stringify(op.args)
-        : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2) return null;
+        : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2)) return null;
   const operations: CrossServiceOperation[] = [];
   let serial = requested.length;
   const prerequisite = (tool: string, args: Obj, label: string, serviceId: AssistantServiceId) => {

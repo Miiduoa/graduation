@@ -5,6 +5,7 @@ import { prepareExplicitEventRequest } from './explicitEventRequest';
 import { prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import { crossServiceRequest } from './crossServiceRequest';
 import { runCrossService } from './crossService';
+import { issueTaskRetry } from './taskRetry';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS, publicCourseArguments, publicCourseClarifications, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
 import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
 import { formatPublicCourseAssistantRead, publicCourseAssistantSource } from '@campus/shared/src/publicCourseAssistant';
@@ -358,10 +359,12 @@ export async function run(input: RunInput) {
     const taskRequest = input.planRevision ? null : crossServiceRequest(input.question, now, input.binding.schoolId);
     if (taskRequest) {
       const result = await runCrossService({ request: taskRequest, tools, binding: input.binding, signal, now });
+      const taskRetry = issueTaskRetry({ question: input.question, request: taskRequest, plan: result.taskPlan,
+        binding: input.binding, secret: input.secret, now });
       steps.push(...result.steps);
       stopReason = result.stopReason;
       log('assistant.completed');
-      return { version: 2, ...result, modelCalls: 0, usage, simulation: input.adapter.simulation };
+      return { version: 2, ...result, ...(taskRetry ? { taskRetry } : {}), modelCalls: 0, usage, simulation: input.adapter.simulation };
     }
     if (!executionQuestion && !requestedPublicCourses.length && publicClarifications.length) {
       signal.throwIfAborted();

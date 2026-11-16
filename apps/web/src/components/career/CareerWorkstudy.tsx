@@ -145,28 +145,61 @@ function Workspace({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState<string | null>(null);
   const [tab, setTab] = useState('機會');
+  const [unitFilter, setUnitFilter] = useState('all');
+  const [slotFilter, setSlotFilter] = useState('all');
+  const [creditFilter, setCreditFilter] = useState<'all' | 'credit' | 'non-credit'>('all');
   const alive = useRef(true);
   const inFlight = useRef(false);
   const generation = useRef(0);
-  async function refresh() {
-    const current = ++generation.current;
-    try {
-      const data = await service.load(audience);
-      if (alive.current && current === generation.current) {
-        setSnapshot(data);
-        setCheckedAt(Date.now());
-        setError('');
-      }
-    } catch (e) {
-      if (alive.current && current === generation.current) {
-        setSnapshot(null);
-        setError(e instanceof Error ? e.message : '暫時讀不到工讀資料，請重新整理。');
-      }
+  const readTask = useRef<Promise<void> | null>(null);
+  const readController = useRef<AbortController | null>(null);
+  const pendingRefresh = useRef(false);
+  const session = useRef(0);
+  function refresh(): Promise<void> {
+    if (!alive.current) return Promise.resolve();
+    if (readTask.current) {
+      // Queue one follow-up; triggers alone must not starve the active read.
+      pendingRefresh.current = true;
+      return readTask.current;
     }
+    const epoch = session.current;
+    const task = (async () => {
+      do {
+        pendingRefresh.current = false;
+        const controller = new AbortController();
+        readController.current = controller;
+        const current = ++generation.current;
+        try {
+          const data = await service.load(audience, { signal: controller.signal });
+          if (alive.current && !controller.signal.aborted && current === generation.current) {
+            setSnapshot(data);
+            setCheckedAt(Date.now());
+            setError('');
+          }
+        } catch (e) {
+          if (alive.current && !controller.signal.aborted && current === generation.current) {
+            setSnapshot(null);
+            setError(e instanceof Error ? e.message : '暫時讀不到工讀資料，請重新整理。');
+          }
+        }
+      } while (alive.current && epoch === session.current && pendingRefresh.current);
+    })();
+    readTask.current = task;
+    void task.finally(() => {
+      if (readTask.current === task) {
+        readTask.current = null;
+        readController.current = null;
+        // A write can request a refresh after the loop exits but before this cleanup.
+        if (alive.current && pendingRefresh.current) void refresh();
+      }
+    });
+    return task;
   }
   useEffect(() => {
     alive.current = true;
+    const epoch = session.current;
     let cancelled = false;
     void Promise.resolve().then(() => {
       if (!cancelled) void refresh();
@@ -193,6 +226,11 @@ function Workspace({
     return () => {
       cancelled = true;
       alive.current = false;
+      session.current = epoch + 1;
+      pendingRefresh.current = false;
+      readController.current?.abort();
+      readTask.current = null;
+      readController.current = null;
       clearInterval(timer);
       unsubscribe?.();
     };
@@ -206,6 +244,8 @@ function Workspace({
     setError('');
     setNotice('');
     generation.current++;
+    pendingRefresh.current = false;
+    readController.current?.abort();
     try {
       await service.execute(command);
       if (!alive.current) return;
@@ -219,7 +259,14 @@ function Workspace({
       setSelected(null);
       setConfirmed(false);
       setDraft(null);
-      setNotice(command.action === 'apply' ? '已送出申請，可在「我的申請」查看進度。' : '已儲存。');
+      setNotice(
+        command.action === 'apply'
+          ? '已送出申請，可在「我的申請」查看進度。'
+          : command.action === 'withdraw'
+            ? '已撤回申請。'
+            : '已儲存。',
+      );
+      setConfirmWithdraw(null);
       await refresh();
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : '這次沒有完成，請重試。');
@@ -230,6 +277,25 @@ function Workspace({
   }
   const displayedOpportunities =
     snapshot?.opportunities.filter((o) => audience === 'staff' || o.type === 'workstudy') ?? [];
+  const unitOptions = [...new Set(displayedOpportunities.map((opportunity) => opportunity.unit))];
+  const slotOptions = [
+    ...new Set(
+      displayedOpportunities.flatMap((opportunity) =>
+        opportunity.slots.map((slot) => slotLabel(slot)),
+      ),
+    ),
+  ];
+  const filteredOpportunities = displayedOpportunities.filter((opportunity) => {
+    if (unitFilter !== 'all' && opportunity.unit !== unitFilter) return false;
+    if (
+      slotFilter !== 'all' &&
+      !opportunity.slots.map((slot) => slotLabel(slot)).includes(slotFilter)
+    )
+      return false;
+    if (creditFilter === 'credit' && !opportunity.credit) return false;
+    if (creditFilter === 'non-credit' && opportunity.credit) return false;
+    return true;
+  });
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   function edit(opportunity: CareerOpportunity) {
     setDraft({ ...opportunity });
@@ -304,6 +370,8 @@ function Workspace({
         </Card>
       </Box>
     );
+  if (audience === 'student' && snapshot?.viewerRole === 'teacher' && !snapshot.applications.length)
+    return null;
   return (
     <Box>
       <Heading>
@@ -321,8 +389,12 @@ function Workspace({
         onPress={() => {
           void refresh();
           void loadCourses()
-            .then(setCourses)
-            .catch(() => setCourses(null));
+            .then((value) => {
+              if (alive.current) setCourses(value);
+            })
+            .catch(() => {
+              if (alive.current) setCourses(null);
+            });
         }}
       />
       {!snapshot && !error && <Body>正在讀取工讀資料…</Body>}
@@ -344,15 +416,59 @@ function Workspace({
           {audience === 'staff' && (
             <Button label="新增機會" onPress={() => edit(emptyOpportunity())} />
           )}
+          {snapshot && (
+            <Row>
+              <label>
+                單位
+                <select value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
+                  <option value="all">全部</option>
+                  {unitOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                時段
+                <select value={slotFilter} onChange={(event) => setSlotFilter(event.target.value)}>
+                  <option value="all">全部</option>
+                  {slotOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                學分
+                <select
+                  value={creditFilter}
+                  onChange={(event) =>
+                    setCreditFilter(event.target.value as 'all' | 'credit' | 'non-credit')
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="credit">可抵學分</option>
+                  <option value="non-credit">不抵學分</option>
+                </select>
+              </label>
+            </Row>
+          )}
           {snapshot && !displayedOpportunities.length && (
             <Box>
               <Body>職產處還沒在這裡上架工讀或實習。</Body>
               {official && <External label="前往職產處官網 ↗" url={official.url} />}
             </Box>
           )}
-          {displayedOpportunities.map((o) => {
+          {snapshot && !!displayedOpportunities.length && !filteredOpportunities.length && (
+            <Body>沒有符合目前篩選條件的工讀機會。</Body>
+          )}
+          {filteredOpportunities.map((o) => {
             const conflicts = workstudyConflicts(schoolId, o.slots, courses);
-            const application = snapshot?.applications.find((a) => a.opportunityId === o.id);
+            const application = snapshot?.applications.find(
+              (a) => a.opportunityId === o.id && a.state !== 'withdrawn',
+            );
             const closed = Date.parse(o.deadline) <= checkedAt || !o.published;
             return (
               <Card key={o.id}>
@@ -500,7 +616,37 @@ function Workspace({
               </Body>
               <Body>{a.rights.text}</Body>
               <External label="申請時的權益公告 ↗" url={a.rights.url} />
-              {audience === 'staff' && (
+              {audience === 'student' && ['submitted', 'read'].includes(a.state) && (
+                <Box>
+                  <Button
+                    label="撤回申請"
+                    disabled={busy}
+                    onPress={() => setConfirmWithdraw(a.id)}
+                  />
+                  {confirmWithdraw === a.id && (
+                    <Box>
+                      <Body>確定要撤回這筆工讀申請嗎？</Body>
+                      <Button
+                        label="確認撤回申請"
+                        disabled={busy}
+                        onPress={() =>
+                          void execute({
+                            action: 'withdraw',
+                            applicationId: a.id,
+                            revision: a.revision,
+                          })
+                        }
+                      />
+                      <Button
+                        label="取消"
+                        disabled={busy}
+                        onPress={() => setConfirmWithdraw(null)}
+                      />
+                    </Box>
+                  )}
+                </Box>
+              )}
+              {audience === 'staff' && a.state !== 'withdrawn' && (
                 <Box>
                   <Body>聯絡方式：{a.contact}</Body>
                   <Body>{a.introduction || '未填補充說明'}</Body>

@@ -79,8 +79,16 @@ const capabilityDescriptions = {
   },
   'school-lms': handoff('可開啟校方作業與教材入口；本助理尚未接通校方作業繳交。'),
   attendance: handoff('可開啟課程的點名與出席入口；本助理尚未代查或代送點名。'),
-  announcements: handoff('可提供所選校園的公告入口；此工具不會讀取公告全文。'),
-  events: handoff('可提供所選校園的活動入口；此工具不會讀取活動內容或代報名。'),
+  announcements: {
+    modes: ['read'],
+    summary: '可讀取所選校園目前公開學生公告牆的標題、摘要與原文來源；保留來源異常、缺漏與非完整歷史範圍。',
+    tools: ['get_campus_announcements'],
+  },
+  events: {
+    modes: ['read'],
+    summary: '可讀取所選校園公開活動的時間、地點與摘要；資料分頁或缺漏會標示，不會代報名或新增行程。',
+    tools: ['get_campus_events'],
+  },
   library: handoff('可提供圖書館服務與官方來源入口；此工具不會查借閱紀錄、續借或預約座位。'),
   map: handoff('可提供所選校園的地圖與官方來源入口；此工具不會建立實際導航路線。'),
   bus: {

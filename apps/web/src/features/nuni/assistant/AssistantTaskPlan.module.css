@@ -114,3 +114,43 @@
   outline-offset: 3px;
   border-radius: 3px;
 }
+
+.retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.body > .retry {
+  margin-top: 7px;
+}
+
+.retry + .link {
+  margin-inline-start: 10px;
+}
+
+.retry:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+.retry:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.expired {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
