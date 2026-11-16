@@ -552,10 +552,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             </div>
             <p className={styles.note}>選擇地點或拖動導覽進度，讓視角跟著移動。步行路線請使用導航。</p>
             {school === 'pu' && (
-              <div className={styles.footprintInfo} role="status">
-                {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
+              <div className={styles.footprintInfo}>
+                {footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
                 {footprintStatus === 'unavailable' && <>
-                  <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
+                  <span role="status">公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
                   {footprintRetryAfter !== null && <span>
                     為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
@@ -567,7 +567,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </>}
                 {footprintStatus === 'ready' && (
                   <>
-                    <strong>{visibleFootprints.length} 棟公開建築輪廓</strong>
+                    <strong role="status">{visibleFootprints.length} 棟公開建築輪廓</strong>
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
@@ -576,8 +576,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                       {footprintRetryAfter !== null && <span>
                         為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                       </span>}
-                      {footprintRefreshing && <span>正在檢查更新，暫時保留舊輪廓。</span>}
-                      {footprintRefreshFailed && !footprintRefreshing && <span>更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
+                      {footprintRefreshing && <span role="status">正在檢查更新，暫時保留舊輪廓。</span>}
+                      {footprintRefreshFailed && !footprintRefreshing && <span role="status">更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
                       <button className={styles.retryFootprints} type="button"
                         disabled={footprintRetryAfter !== null || footprintRefreshing}
                         onClick={() => {
