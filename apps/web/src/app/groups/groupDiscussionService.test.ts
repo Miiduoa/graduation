@@ -7,6 +7,7 @@ import {
   runTransaction,
   startAfter,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { readMemberGroup } from './groupService';
 import {
@@ -44,6 +45,7 @@ vi.mock('firebase/firestore', () => ({
   orderBy: vi.fn((...args: unknown[]) => ({ orderBy: args })),
   limit: vi.fn((n: number) => ({ limit: n })),
   startAfter: vi.fn((cursor: unknown) => ({ startAfter: cursor })),
+  where: vi.fn((...args: unknown[]) => ({ where: args })),
   serverTimestamp: () => 'server-time',
   getDocsFromServer: vi.fn(),
   updateDoc: vi.fn(),
@@ -171,6 +173,10 @@ it('loads posts only after membership is confirmed for the school scope', async 
   expect(readMemberGroup).toHaveBeenCalledWith('alice', 'pu', 'g1');
   expect(limit).toHaveBeenCalledWith(20);
   expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
+  expect(where).toHaveBeenCalledWith('published', '==', true);
+  expect(where).toHaveBeenCalledWith('status', '==', 'published');
+  expect(where).toHaveBeenCalledWith('deleted', '==', false);
+  expect(where).toHaveBeenCalledWith('deletedAt', '==', null);
   expect(result.group.id).toBe('g1');
   expect(result.page.posts).toHaveLength(2);
   expect(result.page.hasMore).toBe(false);
@@ -221,6 +227,10 @@ it('blocks announcement posts for regular members and allows managers via transa
     title: '公告',
     body: '內容',
     clientIntentId: 'ann-1',
+    published: true,
+    status: 'published',
+    deleted: false,
+    deletedAt: null,
   });
 });
 

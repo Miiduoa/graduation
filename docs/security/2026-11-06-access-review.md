@@ -836,3 +836,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **修補：** 在規則建立專屬 title/body 型別與長度檢查，title 不超過 120、body 不超過 8000；只在建立或實際修改此兩個文字欄位時要求驗證。歷史文章欄位缺失時，其他 metadata 更新、按讚及管理流程不因本變更被一概封鎖。未新增對正式資料的讀寫。
 - **合成回歸：** backend/tests/security-rules.test.js 測試合法、邊界、超長、非字串、正常改文、跨帳號／跨校拒絕、群組與校籍撤權、停權、舊 SDK replay 及恢復。只有對此精確 head 執行成功的 Firebase emulator／主 CI／CodeQL 才能標記驗證；發布前不借用舊 head 成果。
 - **明確限制：** 其他非 title/body 欄位及大量發文頻率並未由此上限全面處理；未發布父貼文 GET/LIST、GCS/Supabase 已簽 URL 撤銷、真隔離 Storage CAS、歷史附件資料補證、minimatch 雙依賴圖、正式部署與回復，以及指定 App 5504170 精確 head APPROVED 仍未結案。維持 PR Draft，不自行合併、部署、清理正式 token／金鑰、migration、E 校園連線或受限制的 npm/pnpm audit。
+
+
+## 2026-11-16｜P0 群組父貼文讀取範圍：待正式發布的隔離修補
+
+- 修補採用最小可驗證的 Firestore 界線：非管理成員的直接 GET 只接受可見貼文，原作者可讀取自己的草稿，活躍管理員可審查被保留貼文；LIST 僅接受可由查詢證明是明確 `published:true`、`status:published`、`deleted:false`、`deletedAt:null` 的貼文。一般成員的無條件 LIST／僅以一個旗標過濾的 LIST 應被拒絕。拒絕對隱藏父貼文 GET 與 LIST 的正式有效性，須以精確 head 的 Firebase Emulator 回歸結果為準。
+- Web 與 Mobile 群組列表加入相同四個 where 條件，新貼文建立時明確寫入四個欄位；Firestore 另加入複合索引。這是**候選規則與呼叫端整合**，不是正式已上線。
+- **發布阻礙／相容性：** 舊紀錄可能缺少其中一個明確旗標，雖然舊的正常直接 GET 可維持，但新 LIST 會故意排除這類資料。必須先在隔離資料與正式資料唯讀盤點歷史可見貼文，確認可修補的正規化範圍及待遷移數量、索引 READY 與 Web／Mobile／規則的發布順序；不能逕自把缺欄位的草稿推定為公開。未獲資料發布資格前，不能遷移、套用正式規則或宣稱正式歷史貼文完整可見。
+- 測試設計：合成資料涵蓋公開／草稿／排程／封存／撤回／刪除標記、正常列表、已知路徑 GET、群組／校籍撤權、同一認證狀態重放與跨校群組變更。依本精確提交的 CI 記錄確認是否真正執行且通過，不能沿用上一版綠燈。
+- 其餘既發 GCS/Supabase bearer URL 撤銷、真 Storage CAS、歷史附件引用、minimatch 兩圖相容及 App 5504170 核可、正式發布回復仍未結案。沒有正式資料、金鑰、migration、E 校園或受限 npm/pnpm audit 操作。

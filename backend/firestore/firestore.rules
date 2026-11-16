@@ -1165,7 +1165,22 @@ service cloud.firestore {
                 && request.resource.data.body.size() <= 8000));
         }
 
-        allow read: if isActiveGroupMember(groupId);
+        // Direct GET may show a legacy visible post or the author's own draft.
+        // LIST is stricter: Firestore rules are not filters, so readers must
+        // constrain queries to explicitly published, non-withdrawn records.
+        function isCanonicalVisiblePost() {
+          return resource.data.get('published', false) == true
+            && resource.data.get('status', '') == 'published'
+            && resource.data.get('deleted', true) == false
+            && resource.data.get('deletedAt', 'missing') == null;
+        }
+
+        allow get: if isActiveGroupMember(groupId)
+          && (canManageGroup(groupId)
+            || resource.data.get('authorId', '') == request.auth.uid
+            || isVisiblePostForReactions());
+        allow list: if isActiveGroupMember(groupId)
+          && (canManageGroup(groupId) || isCanonicalVisiblePost());
         // 助理回覆的狀態（assistantReply）只由伺服器寫
         allow create: if isActiveGroupMember(groupId)
           && postTextWithinLimits()

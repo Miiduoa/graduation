@@ -342,7 +342,15 @@ export function GroupDetailScreen(props: any) {
     if (isFirebaseMockMode()) return (groupId ? DEMO_POSTS_FOR_GROUP[groupId] : undefined) ?? [];
     if (!groupId) return [];
     const ref = collection(db, 'groups', groupId, 'posts');
-    const qy = query(ref, orderBy('createdAt', 'desc'), limit(50));
+    const qy = query(
+      ref,
+      where('published', '==', true),
+      where('status', '==', 'published'),
+      where('deleted', '==', false),
+      where('deletedAt', '==', null),
+      orderBy('createdAt', 'desc'),
+      limit(50),
+    );
     const snap = await getDocs(qy);
     const rows = snap.docs.map((d) => {
       const data = d.data() as any;
@@ -620,6 +628,10 @@ export function GroupDetailScreen(props: any) {
         schoolId: school.id,
         likes: 0,
         likedBy: [],
+        published: true,
+        status: 'published',
+        deleted: false,
+        deletedAt: null,
       });
 
       // 如果是問題，助理回覆由伺服器在提問建立後產生，這邊不用再寫

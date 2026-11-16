@@ -1467,6 +1467,69 @@ describe('firestore security rules', () => {
       await assertSucceeds(db.doc(commentPath).set({ authorId: 'alice', body: 'Page two' }));
     });
 
+
+    test('non-manager post GET and LIST exclude withdrawn parents while normal published feeds remain queryable', async () => {
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      const teacher = testEnv.authenticatedContext('teacher').firestore();
+      const posts = 'groups/course/posts';
+      await seedFirestore(async (admin) => {
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+        await admin.doc(posts + '/visible').set({
+          authorId: 'alice', kind: 'post', title: 'Published',
+          published: true, status: 'published', deleted: false, deletedAt: null,
+          createdAt: new Date('2026-11-16T00:00:00Z'),
+        });
+        await admin.doc(posts + '/hidden').set({
+          authorId: 'alice', kind: 'post', title: 'Moderated',
+          published: true, status: 'archived', deleted: false, deletedAt: null,
+          createdAt: new Date('2026-11-15T00:00:00Z'),
+        });
+      });
+      const visible = bob.collection(posts)
+        .where('published', '==', true)
+        .where('status', '==', 'published')
+        .where('deleted', '==', false)
+        .where('deletedAt', '==', null)
+        .orderBy('createdAt', 'desc').limit(50);
+      const page = await assertSucceeds(visible.get());
+      assert.deepEqual(page.docs.map((entry) => entry.id), ['visible']);
+      await assertFails(bob.collection(posts).get());
+      await assertFails(bob.collection(posts).where('published', '==', true).get());
+      await assertSucceeds(teacher.collection(posts).get());
+      await assertSucceeds(bob.doc(posts + '/visible').get({ source: 'server' }));
+      // A legacy post with no visibility metadata is still a valid direct
+      // visible-link GET, but cannot accidentally leak through a broad feed.
+      await assertSucceeds(bob.doc(postPath).get({ source: 'server' }));
+
+      for (const changed of [
+        { published: false, status: 'published', deleted: false, deletedAt: null },
+        ...['draft', 'scheduled', 'pending', 'unpublished', 'archived', 'cancelled', 'canceled', 'deleted']
+          .map((status) => ({ published: true, status, deleted: false, deletedAt: null })),
+        { published: true, status: 'published', deleted: true, deletedAt: null },
+        { published: true, status: 'published', deleted: false, deletedAt: new Date('2026-11-16T01:00:00Z') },
+      ]) {
+        await seedFirestore((admin) => admin.doc(posts + '/hidden').update(changed));
+        await assertFails(bob.doc(posts + '/hidden').get({ source: 'server' }));
+        await assertSucceeds(alice.doc(posts + '/hidden').get({ source: 'server' }));
+        await assertSucceeds(teacher.doc(posts + '/hidden').get({ source: 'server' }));
+        const safePage = await assertSucceeds(visible.get());
+        assert.deepEqual(safePage.docs.map((entry) => entry.id), ['visible']);
+      }
+      // Same SDK client/context cannot reuse cached membership after revocation.
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(visible.get());
+      await assertFails(bob.doc(posts + '/visible').get({ source: 'server' }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'active' }));
+      await seedFirestore((admin) => admin.doc('schools/pu/members/bob').update({ status: 'removed' }));
+      await assertFails(visible.get());
+      await seedFirestore((admin) => admin.doc('schools/pu/members/bob').update({ status: 'active' }));
+      await assertSucceeds(visible.get());
+      await seedFirestore((admin) => admin.doc('groups/course').update({ schoolId: 'other' }));
+      await assertFails(visible.get());
+    });
+
     test('a member cannot promote their post to an announcement', async () => {
       const post = testEnv.authenticatedContext('alice').firestore().doc(postPath);
       await assertSucceeds(post.update({ title: 'Revised lecture notes' }));

@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   startAfter,
   updateDoc,
+  where,
   type QueryDocumentSnapshot,
   type DocumentData,
 } from 'firebase/firestore';
@@ -132,9 +133,17 @@ export async function loadGroupDiscussionPage(
   const group = await readMemberGroup(uid, schoolId, groupId);
   assertCurrent(uid, current);
   const postsRef = collection(getDb(), 'groups', groupId, 'posts');
+  // Rules require provably visible candidates; legacy rows without explicit
+  // visibility metadata stay out of member feeds until reviewed/backfilled.
+  const visibleOnly = [
+    where('published', '==', true),
+    where('status', '==', 'published'),
+    where('deleted', '==', false),
+    where('deletedAt', '==', null),
+  ];
   const pageQuery = cursor
-    ? query(postsRef, orderBy('createdAt', 'desc'), startAfter(cursor), limit(PAGE_SIZE))
-    : query(postsRef, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+    ? query(postsRef, ...visibleOnly, orderBy('createdAt', 'desc'), startAfter(cursor), limit(PAGE_SIZE))
+    : query(postsRef, ...visibleOnly, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
   const snap = await getDocsFromServer(pageQuery);
   assertCurrent(uid, current);
   const posts = snap.docs
@@ -201,6 +210,10 @@ export async function createGroupDiscussionPost(
     likes: 0,
     likedBy: [] as string[],
     clientIntentId: input.postId,
+    published: true,
+    status: 'published',
+    deleted: false,
+    deletedAt: null,
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
   };
 
