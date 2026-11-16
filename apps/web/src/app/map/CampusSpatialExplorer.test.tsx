@@ -598,6 +598,10 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
       fetchedAt: new Date().toISOString(), stale: false,
     }) });
   vi.stubGlobal('fetch', fetchMock);
+  // The scheduled callback must run after the absolute wall-clock deadline.
+  // Invoking a timer early must never bypass a server cooldown.
+  let now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const timeoutSpy = vi.spyOn(window, 'setTimeout');
   try {
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -614,6 +618,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     // not a real public Overpass rate-limit observation.
     const release = timeoutSpy.mock.calls.find(([, delay]) => typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
     expect(typeof release).toBe('function');
+    now += 600_001;
     await act(async () => { (release as () => void)(); });
     expect(retry.hasAttribute('disabled')).toBe(false);
     fireEvent.click(retry);
@@ -622,6 +627,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     expect(within(dialog).queryByText(/約 10 分鐘冷卻，到期後可再試/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
+    nowSpy.mockRestore();
   }
 });
 
@@ -754,6 +760,10 @@ it('allows a single retry when an unlabelled 503 gateway cooldown expires', asyn
     ok: false, status: 503, headers: { get: () => null },
   });
   vi.stubGlobal('fetch', fetchMock);
+  // The scheduled callback must run after the absolute wall-clock deadline.
+  // Invoking a timer early must never bypass a server cooldown.
+  let now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const timeoutSpy = vi.spyOn(window, 'setTimeout');
   try {
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -763,12 +773,14 @@ it('allows a single retry when an unlabelled 503 gateway cooldown expires', asyn
     const release = timeoutSpy.mock.calls.find(([, delay]) =>
       typeof delay === 'number' && delay >= 59_000 && delay <= 60_000)?.[0];
     expect(typeof release).toBe('function');
+    now += 60_001;
     await act(async () => { (release as () => void)(); });
     expect(retry.hasAttribute('disabled')).toBe(false);
     fireEvent.click(retry);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   } finally {
     timeoutSpy.mockRestore();
+    nowSpy.mockRestore();
   }
 });
 
@@ -836,6 +848,10 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
       }),
     });
   vi.stubGlobal('fetch', fetchMock);
+  // The scheduled callback must run after the absolute wall-clock deadline.
+  // Invoking a timer early must never bypass a server cooldown.
+  let now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const timeoutSpy = vi.spyOn(window, 'setTimeout');
   try {
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -851,6 +867,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     const release = timeoutSpy.mock.calls.find(([, delay]) =>
       typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
     expect(typeof release).toBe('function');
+    now += 600_001;
     await act(async () => { (release as () => void)(); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
     fireEvent.click(retry);
@@ -873,6 +890,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
+    nowSpy.mockRestore();
   }
 });
 
