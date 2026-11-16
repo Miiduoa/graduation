@@ -182,7 +182,8 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
           // reader reports a read-budget cutoff only after eight full pages.
           // Restored metadata must not claim a different source/read shape.
           (coverage.reason === 'legacy-partial'
-            ? coverage.pages !== 1 || assignments.items.length > CAMPUS_ASSIGNMENT_PAGE_SIZE
+            ? coverage.pages !== 1 || assignments.items.length === 0 ||
+              assignments.items.length > CAMPUS_ASSIGNMENT_PAGE_SIZE
             : coverage.pages !== CAMPUS_ASSIGNMENT_MAX_PAGES ||
               assignments.items.length !== CAMPUS_ASSIGNMENT_MAX_PAGES * CAMPUS_ASSIGNMENT_PAGE_SIZE)))) return false;
   // The authorized paginated reader rejects duplicate assignment identities.
