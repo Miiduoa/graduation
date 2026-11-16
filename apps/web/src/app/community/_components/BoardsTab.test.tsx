@@ -115,6 +115,38 @@ it('announces matching loaded boards and lets keyboard users clear search with E
   expect(mocks.list).toHaveBeenCalledTimes(reads);
 });
 
+it('keeps a Chinese IME candidate Escape from discarding the board search', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'study', name: '讀書討論', type: 'topic' },
+    { id: 'life', name: '生活交流', type: 'topic' },
+  ]);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('link', { name: /讀書討論/ });
+  const search = screen.getByRole('searchbox', { name: '搜尋看板' });
+  search.focus();
+  const reads = mocks.list.mock.calls.length;
+  fireEvent.change(search, { target: { value: '讀' } });
+  expect(screen.getByRole('link', { name: /讀書討論/ })).toBeTruthy();
+
+  fireEvent.compositionStart(search, { data: '讀' });
+  fireEvent.keyDown(search, { key: 'Escape', code: 'Escape', isComposing: true });
+  expect((search as HTMLInputElement).value).toBe('讀');
+  expect(screen.getByRole('link', { name: /讀書討論/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /生活交流/ })).toBeNull();
+
+  // Some IMEs report keyCode 229 at the end of composition, after isComposing becomes false.
+  fireEvent.compositionEnd(search);
+  fireEvent.keyDown(search, { key: 'Escape', code: 'Escape', keyCode: 229, isComposing: false });
+  expect((search as HTMLInputElement).value).toBe('讀');
+
+  // A subsequent ordinary Escape should still clear the search without another read.
+  fireEvent.keyDown(search, { key: 'Escape', code: 'Escape', keyCode: 27, isComposing: false });
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('link', { name: /生活交流/ })).toBeTruthy();
+  expect(document.activeElement).toBe(search);
+  expect(mocks.list).toHaveBeenCalledTimes(reads);
+});
+
 it('does not send ordinary members into a board creation flow they cannot use', async () => {
   mocks.list.mockResolvedValue([]);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
