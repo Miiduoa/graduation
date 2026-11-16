@@ -65,10 +65,29 @@ test('審核申請顯示等待回覆；學生不顯示管理', async () => {
   await screen.findByText('申請加入');
   jest.mocked(callClubPortal).mockResolvedValue({ ...profile, status: 'pending' });
   fireEvent.press(screen.getByText('申請加入'));
-  await waitFor(() =>
-    expect(screen.getAllByText('已送出申請，等幹部回覆').length).toBeGreaterThan(0),
-  );
+  await waitFor(() => expect(screen.getAllByText('已送出申請，等幹部回覆')).toHaveLength(1));
   expect(screen.queryByText('管理')).toBeNull();
+});
+test('待審中的入社申請可由學生自行取消', async () => {
+  jest.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    club: { ...profile.club!, joinPolicy: 'review' },
+    status: 'pending',
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('已送出申請，等幹部回覆');
+  fireEvent.press(screen.getByText('取消入社申請'));
+  expect(callClubPortal).not.toHaveBeenCalledWith('one', 'pu', {
+    action: 'cancelJoin',
+    groupId: 'club',
+  });
+  fireEvent.press(screen.getByText('確認取消入社申請'));
+  await waitFor(() =>
+    expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+      action: 'cancelJoin',
+      groupId: 'club',
+    }),
+  );
 });
 test('手機幹部可審核社員及新增活動公告', async () => {
   jest.mocked(callClubPortal).mockResolvedValue({
@@ -318,4 +337,33 @@ test('活動結束保留佇列管理；完整報名名單載入前不判定社�
   fireEvent.press(screen.getByText('載入更多報名者'));
   await screen.findByText(/未報名社員 · 這位不在報名名單/);
   expect(screen.queryByText(/後頁社員 · 這位不在報名名單/)).toBeNull();
+});
+
+test('官方幹部與名冊統一顯示社長', async () => {
+  jest.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    role: 'owner',
+    status: 'active',
+    members: [{ id: 'one', name: '王同學', role: 'owner', phone: '', duesPaid: false }],
+    officialOfficers: [{ id: 'one', role: 'owner', status: 'confirmed' }],
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.press(await screen.findByText('管理'));
+  expect(screen.getByText(/王同學 · 社長 · 電話/)).toBeTruthy();
+  expect(screen.getByText(/王同學 · 社長 · 課外組已確認/)).toBeTruthy();
+  expect(screen.queryByText(/會長/)).toBeNull();
+});
+
+test('手機退出社團需再次確認', async () => {
+  jest.mocked(callClubPortal).mockResolvedValue({ ...profile, role: 'member', status: 'active' });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  fireEvent.press(await screen.findByText('⋯ 退出社團'));
+  expect(callClubPortal).not.toHaveBeenCalledWith('one', 'pu', {
+    action: 'leave',
+    groupId: 'club',
+  });
+  fireEvent.press(screen.getByText('確認退出社團'));
+  await waitFor(() =>
+    expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', { action: 'leave', groupId: 'club' }),
+  );
 });

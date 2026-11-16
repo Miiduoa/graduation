@@ -75,6 +75,11 @@ export async function loadClubSummary(
 }
 
 export const clubRoleLabel = (role: string) =>
-  ({ owner: '會長', admin: '幹部', member: '社員', instructor: '指導老師', moderator: '協管員' })[
-    role
-  ] ?? (['會長', '幹部', '社員', '指導老師', '協管員'].includes(role) ? role : '社員');
+  ({
+    會長: '社長',
+    owner: '社長',
+    admin: '幹部',
+    member: '社員',
+    instructor: '指導老師',
+    moderator: '協管員',
+  })[role] ?? (['社長', '幹部', '社員', '指導老師', '協管員'].includes(role) ? role : '社員');

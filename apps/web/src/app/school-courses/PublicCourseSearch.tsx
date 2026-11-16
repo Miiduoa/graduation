@@ -54,6 +54,48 @@ function sameSearch(left: CourseSearch, right: CourseSearch): boolean {
   return left.query === right.query && left.filters?.weekday === right.filters?.weekday && left.filters?.credits === right.filters?.credits;
 }
 
+const MAX_PUBLIC_COURSE_RESPONSE_BYTES = 512 * 1024;
+
+// Bound the decoded response *while it streams*. Checking only response.text()
+// still buffers a maliciously large reply before the 512 KiB guard can run.
+async function readBoundedCatalogBody(response: Response, signal: AbortSignal): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    // Some browser test doubles and older fetch implementations expose text()
+    // but no readable body; preserve the size check on that fallback.
+    const text = await response.text();
+    if (exceedsPublicCourseResponseByteLimit(text)) throw new Error('Oversized public catalog');
+    return text;
+  }
+
+  const decoder = new TextDecoder();
+  const fragments: string[] = [];
+  let bytes = 0;
+  let finished = false;
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    if (signal.aborted) throw new Error('Cancelled public catalog');
+    while (true) {
+      const chunk = await reader.read();
+      if (signal.aborted) throw new Error('Cancelled public catalog');
+      if (chunk.done) { finished = true; break; }
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_PUBLIC_COURSE_RESPONSE_BYTES) throw new Error('Oversized public catalog');
+      fragments.push(decoder.decode(chunk.value, { stream: true }));
+    }
+    fragments.push(decoder.decode());
+    const text = fragments.join('');
+    if (exceedsPublicCourseResponseByteLimit(text)) throw new Error('Oversized public catalog');
+    return text;
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    // Abort/oversize must also close the reader, not leave a network body open.
+    if (!finished) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
 // Serialize clipboard writes across cards. A slow earlier write must never
 // replace the student's most recently requested course after it finishes.
 let latestClipboardCopy = 0;
@@ -245,9 +287,8 @@ function PublicCourseSearchForm({
       });
       // Native already bounds this contract. Web must reject oversized public
       // replies too, before parsing or offering course rows for personal import.
-      if (!response.ok || Number(response.headers?.get('content-length')) > 512 * 1024) throw new Error();
-      const body = await response.text();
-      if (exceedsPublicCourseResponseByteLimit(body)) throw new Error('Oversized public catalog');
+      if (!response.ok || Number(response.headers?.get('content-length')) > MAX_PUBLIC_COURSE_RESPONSE_BYTES) throw new Error();
+      const body = await readBoundedCatalogBody(response, controller.signal);
       // An older response or a cancelled search must never be parsed or displayed.
       if (pending.current?.controller !== controller || controller.signal.aborted) return;
       const data: unknown = JSON.parse(body);

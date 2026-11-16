@@ -491,6 +491,46 @@ it('rejects a UTF-8-oversized catalog without a content-length header', async ()
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
 });
 
+it('stops a streaming oversized catalog before buffering the remaining response', async () => {
+  const huge = new TextEncoder().encode(await response([{ ...course, title: '資料'.repeat(180_000) }]).text());
+  expect(huge.byteLength).toBeGreaterThan(512 * 1024);
+  let pulls = 0;
+  const cancelled = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls++;
+      if (pulls === 1) controller.enqueue(huge.subarray(0, 350_000));
+      else if (pulls === 2) controller.enqueue(huge.subarray(350_000, 600_000));
+      else controller.enqueue(huge.subarray(600_000));
+    },
+    cancel: cancelled,
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(cancelled).toHaveBeenCalledTimes(1);
+  expect(pulls).toBeLessThanOrEqual(3);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('decodes UTF-8 courses correctly when a streaming chunk splits a Chinese character', async () => {
+  const bytes = new TextEncoder().encode(await response([course]).text());
+  const splitAt = bytes.findIndex(byte => byte >= 0xe0) + 1;
+  expect(splitAt).toBeGreaterThan(1);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, splitAt));
+      controller.enqueue(bytes.subarray(splitAt));
+      controller.close();
+    },
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '帶入課表核對' })).toBeTruthy();
+});
+
 it('handles malformed or wrong-campus replies as failure, retries, and explains the result limit', async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(response([course], { schoolId: 'pu' }))
     .mockResolvedValueOnce(response([course], { truncated: true }));

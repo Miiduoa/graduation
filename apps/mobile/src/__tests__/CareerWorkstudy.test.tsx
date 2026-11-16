@@ -89,6 +89,49 @@ test('student sees conflicts without losing opportunities, reads rights and send
   });
   expect(view.getAllByText('已送出').length).toBeGreaterThan(0);
 });
+test('student can withdraw early-stage applications and apply again later', async () => {
+  const { view, data, service } = setup();
+  data.applications = [{ ...application, state: 'submitted' }];
+  await view.findByText('我的申請');
+  fireEvent.press(view.getByRole('button', { name: '撤回申請' }));
+  expect(service.execute).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '確認撤回申請' }));
+  data.applications = [{ ...application, state: 'withdrawn' }];
+  await waitFor(() =>
+    expect(service.execute).toHaveBeenCalledWith({
+      action: 'withdraw',
+      applicationId: application.id,
+      revision: application.revision,
+    }),
+  );
+  await waitFor(() => expect(view.getByText('已撤回申請。')).toBeTruthy());
+  expect(view.getByText(/已撤回$/)).toBeTruthy();
+  expect(view.getByRole('button', { name: `應徵${opportunity.title}` })).toBeTruthy();
+});
+
+test('work-study filters can narrow by unit, slot and credit with empty-state feedback', async () => {
+  const { view, data } = setup();
+  data.opportunities = [
+    opportunity,
+    {
+      ...opportunity,
+      id: 'second',
+      title: '第二份工讀',
+      unit: '圖書館',
+      credit: false,
+      slots: [{ day: 4, start: '13:00', end: '15:00' }],
+    },
+  ];
+  await view.findByText('測試用工讀');
+  fireEvent.changeText(view.getByLabelText('篩選單位'), '圖書館');
+  expect(view.getByText('第二份工讀')).toBeTruthy();
+  expect(view.queryByText('測試用工讀')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '週三');
+  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '');
+  fireEvent.press(view.getByRole('button', { name: '學分：可抵學分' }));
+  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+});
 test('guest action asks host to log in and never sends a command', async () => {
   const { view, service, onLogin } = setup('student', null);
   fireEvent.press(await view.findByRole('button', { name: '應徵測試用工讀' }));
@@ -395,4 +438,28 @@ test('a cancelled read cannot overwrite the newer result after a write', async (
   expect(view.getByText('測試用工讀')).toBeTruthy();
   expect(view.queryByText('已取消的舊結果')).toBeNull();
   expect(service.load).toHaveBeenCalledTimes(3);
+});
+
+test('withdrawn applications stay visible without staff review controls', async () => {
+  const { view, data } = setup('staff');
+  data.applications = [{ ...application, state: 'withdrawn' }];
+  await view.findByText('職涯工作台');
+  fireEvent.press(view.getByText('申請'));
+  await waitFor(() => expect(view.getByText(/已撤回$/)).toBeTruthy());
+  expect(view.queryByText('改為單位已讀')).toBeNull();
+  expect(view.queryByText('改為約面談')).toBeNull();
+});
+
+test('hides student work-study chrome for teachers without applications and keeps staff tools', async () => {
+  const { view, data, service } = setup();
+  data.viewerRole = 'teacher';
+  data.applications = [];
+  await waitFor(() => expect(service.load).toHaveBeenCalled());
+  await act(async () => {});
+  expect(view.queryByText('我的申請')).toBeNull();
+  expect(view.queryByText(/應徵/)).toBeNull();
+  view.unmount();
+  const staff = setup('staff');
+  staff.data.viewerRole = 'teacher';
+  await waitFor(() => expect(staff.view.getByText('新增機會')).toBeTruthy());
 });

@@ -145,7 +145,11 @@ function Workspace({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState<string | null>(null);
   const [tab, setTab] = useState('機會');
+  const [unitFilter, setUnitFilter] = useState('all');
+  const [slotFilter, setSlotFilter] = useState('all');
+  const [creditFilter, setCreditFilter] = useState<'all' | 'credit' | 'non-credit'>('all');
   const alive = useRef(true);
   const inFlight = useRef(false);
   const generation = useRef(0);
@@ -255,7 +259,14 @@ function Workspace({
       setSelected(null);
       setConfirmed(false);
       setDraft(null);
-      setNotice(command.action === 'apply' ? '已送出申請，可在「我的申請」查看進度。' : '已儲存。');
+      setNotice(
+        command.action === 'apply'
+          ? '已送出申請，可在「我的申請」查看進度。'
+          : command.action === 'withdraw'
+            ? '已撤回申請。'
+            : '已儲存。',
+      );
+      setConfirmWithdraw(null);
       await refresh();
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : '這次沒有完成，請重試。');
@@ -266,6 +277,25 @@ function Workspace({
   }
   const displayedOpportunities =
     snapshot?.opportunities.filter((o) => audience === 'staff' || o.type === 'workstudy') ?? [];
+  const unitOptions = [...new Set(displayedOpportunities.map((opportunity) => opportunity.unit))];
+  const slotOptions = [
+    ...new Set(
+      displayedOpportunities.flatMap((opportunity) =>
+        opportunity.slots.map((slot) => slotLabel(slot)),
+      ),
+    ),
+  ];
+  const filteredOpportunities = displayedOpportunities.filter((opportunity) => {
+    if (unitFilter !== 'all' && opportunity.unit !== unitFilter) return false;
+    if (
+      slotFilter !== 'all' &&
+      !opportunity.slots.map((slot) => slotLabel(slot)).includes(slotFilter)
+    )
+      return false;
+    if (creditFilter === 'credit' && !opportunity.credit) return false;
+    if (creditFilter === 'non-credit' && opportunity.credit) return false;
+    return true;
+  });
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   function edit(opportunity: CareerOpportunity) {
     setDraft({ ...opportunity });
@@ -340,6 +370,8 @@ function Workspace({
         </Card>
       </Box>
     );
+  if (audience === 'student' && snapshot?.viewerRole === 'teacher' && !snapshot.applications.length)
+    return null;
   return (
     <Box>
       <Heading>
@@ -384,15 +416,59 @@ function Workspace({
           {audience === 'staff' && (
             <Button label="新增機會" onPress={() => edit(emptyOpportunity())} />
           )}
+          {snapshot && (
+            <Row>
+              <label>
+                單位
+                <select value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
+                  <option value="all">全部</option>
+                  {unitOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                時段
+                <select value={slotFilter} onChange={(event) => setSlotFilter(event.target.value)}>
+                  <option value="all">全部</option>
+                  {slotOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                學分
+                <select
+                  value={creditFilter}
+                  onChange={(event) =>
+                    setCreditFilter(event.target.value as 'all' | 'credit' | 'non-credit')
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="credit">可抵學分</option>
+                  <option value="non-credit">不抵學分</option>
+                </select>
+              </label>
+            </Row>
+          )}
           {snapshot && !displayedOpportunities.length && (
             <Box>
               <Body>職產處還沒在這裡上架工讀或實習。</Body>
               {official && <External label="前往職產處官網 ↗" url={official.url} />}
             </Box>
           )}
-          {displayedOpportunities.map((o) => {
+          {snapshot && !!displayedOpportunities.length && !filteredOpportunities.length && (
+            <Body>沒有符合目前篩選條件的工讀機會。</Body>
+          )}
+          {filteredOpportunities.map((o) => {
             const conflicts = workstudyConflicts(schoolId, o.slots, courses);
-            const application = snapshot?.applications.find((a) => a.opportunityId === o.id);
+            const application = snapshot?.applications.find(
+              (a) => a.opportunityId === o.id && a.state !== 'withdrawn',
+            );
             const closed = Date.parse(o.deadline) <= checkedAt || !o.published;
             return (
               <Card key={o.id}>
@@ -540,7 +616,37 @@ function Workspace({
               </Body>
               <Body>{a.rights.text}</Body>
               <External label="申請時的權益公告 ↗" url={a.rights.url} />
-              {audience === 'staff' && (
+              {audience === 'student' && ['submitted', 'read'].includes(a.state) && (
+                <Box>
+                  <Button
+                    label="撤回申請"
+                    disabled={busy}
+                    onPress={() => setConfirmWithdraw(a.id)}
+                  />
+                  {confirmWithdraw === a.id && (
+                    <Box>
+                      <Body>確定要撤回這筆工讀申請嗎？</Body>
+                      <Button
+                        label="確認撤回申請"
+                        disabled={busy}
+                        onPress={() =>
+                          void execute({
+                            action: 'withdraw',
+                            applicationId: a.id,
+                            revision: a.revision,
+                          })
+                        }
+                      />
+                      <Button
+                        label="取消"
+                        disabled={busy}
+                        onPress={() => setConfirmWithdraw(null)}
+                      />
+                    </Box>
+                  )}
+                </Box>
+              )}
+              {audience === 'staff' && a.state !== 'withdrawn' && (
                 <Box>
                   <Body>聯絡方式：{a.contact}</Body>
                   <Body>{a.introduction || '未填補充說明'}</Body>
