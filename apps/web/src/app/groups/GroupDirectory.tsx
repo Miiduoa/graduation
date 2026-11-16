@@ -253,12 +253,11 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
                 )}
               </h2>
               {group.description && <p className={styles.description}>{group.description}</p>}
-              {mode === 'clubs' && <p>下一場活動尚未串接 · 未讀公告數未提供</p>}
               <div className={styles.actions}>
                 {mode === 'clubs' && (
                   <Link
                     className="btn"
-                    href={`/groups/${encodeURIComponent(group.id)}/club/overview?schoolId=${encodeURIComponent(schoolId)}`}
+                    href={`/clubs/${encodeURIComponent(group.id)}?schoolId=${encodeURIComponent(schoolId)}&tab=mine`}
                   >
                     查看社團
                   </Link>
@@ -351,7 +350,7 @@ export function GroupDirectory({
   searchParams,
 }: {
   mode: Mode;
-  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
+  searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string; tab?: string }>;
 }) {
   const params = searchParams ? use(searchParams) : undefined;
   const { school, ready } = useBrowsingSchoolPageContext(params);
@@ -382,7 +381,7 @@ export function GroupDirectory({
           我的群組
         </Link>
         <Link
-          href={`/clubs?schoolId=${encodeURIComponent(school.id)}`}
+          href={`/clubs?schoolId=${encodeURIComponent(school.id)}&tab=mine`}
           aria-current={mode === 'clubs' ? 'page' : undefined}
         >
           我的社團
@@ -398,13 +397,18 @@ export function GroupDirectory({
           <p>使用你的學校帳號，查看成員資格與加入紀錄。</p>
           <Link
             className="btn primary"
-            href={`/login?returnUrl=${encodeURIComponent(`/${mode}?schoolId=${school.id}`)}`}
+            href={`/login?returnUrl=${encodeURIComponent(`/${mode}?schoolId=${school.id}${mode === 'clubs' ? '&tab=mine' : ''}`)}`}
           >
             登入學校帳號
           </Link>
         </section>
       ) : mode === 'clubs' ? (
-        <ClubDirectory key={JSON.stringify([user.uid, school.id])}>
+        <ClubDirectory
+          key={JSON.stringify([user.uid, school.id, params?.tab === 'discover' ? 'discover' : 'mine'])}
+          uid={user.uid}
+          schoolId={school.id}
+          tab={params?.tab === 'discover' ? 'discover' : 'mine'}
+        >
           <MemberDirectory uid={user.uid} schoolId={school.id} mode="clubs" />
         </ClubDirectory>
       ) : (

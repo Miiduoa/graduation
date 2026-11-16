@@ -1,11 +1,30 @@
 'use client';
-import { clubEnabled } from './clubService';
+import { ClubPortal } from './ClubPortal';
 import { useState, type ReactNode } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import styles from './groups.module.css';
 
-export function ClubDirectory({ children }: { children: ReactNode }) {
-  const [segment, setSegment] = useState<'mine' | 'discover'>('mine');
-  const [search, setSearch] = useState('');
+export function ClubDirectory({
+  children,
+  uid,
+  schoolId,
+  tab,
+}: {
+  children: ReactNode;
+  uid: string;
+  schoolId: string;
+  tab?: 'mine' | 'discover';
+}) {
+  const [segment, setSegment] = useState<'mine' | 'discover'>(tab === 'discover' ? 'discover' : 'mine');
+  const router = useRouter();
+  const params = useSearchParams();
+  const updateSegment = (next: 'mine' | 'discover') => {
+    setSegment(next);
+    const query = new URLSearchParams(params.toString());
+    query.set('schoolId', schoolId);
+    query.set('tab', next);
+    router.replace(`/clubs?${query.toString()}`);
+  };
   return (
     <div className={styles.page}>
       <div role="group" aria-label="社團分段" className={styles.actions}>
@@ -13,8 +32,7 @@ export function ClubDirectory({ children }: { children: ReactNode }) {
           className="btn"
           aria-pressed={segment === 'mine'}
           onClick={() => {
-            setSegment('mine');
-            setSearch('');
+            updateSegment('mine');
           }}
         >
           我的社團
@@ -23,8 +41,7 @@ export function ClubDirectory({ children }: { children: ReactNode }) {
           className="btn"
           aria-pressed={segment === 'discover'}
           onClick={() => {
-            setSegment('discover');
-            setSearch('');
+            updateSegment('discover');
           }}
         >
           找社團
@@ -33,25 +50,12 @@ export function ClubDirectory({ children }: { children: ReactNode }) {
       <div hidden={segment !== 'mine'}>{children}</div>
       {segment === 'discover' && (
         <>
-          <label className={styles.field}>
-            搜尋學校社團
-            <input
-              type="search"
-              placeholder="名稱或介紹"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-          <section className={styles.status}>
-            <h2>學校還沒提供社團名單。</h2>
-            <p>尚未串接課外組核可名單，因此這裡不列出一般群組，也不提供入社或申請。</p>
-          </section>
+          <ClubPortal key={`${uid}:${schoolId}`} uid={uid} schoolId={schoolId} />
         </>
       )}
       <p className={styles.availability}>
         「我的社團」列出已加入的群組，是否為正式社團仍以課外組名單為準。
       </p>
-      {!clubEnabled() && <p>這所學校還沒開放社團管理。</p>}
     </div>
   );
 }
