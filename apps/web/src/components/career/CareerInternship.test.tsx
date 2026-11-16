@@ -301,6 +301,11 @@ it.each(['teacher', 'student'])(
       await act(async () => {
         fireEvent.click(button);
       });
+      if (viewer === 'teacher') {
+        await act(async () => {
+          fireEvent.click(view.getByText('確定結案'));
+        });
+      }
       const card = view.getByTestId(`internship-${record.id}`);
       expect(within(card).getByText('時數與所有文件確認完成後才能結案。')).toBeTruthy();
       const loads = props.service.load.mock.calls.length;
@@ -348,4 +353,105 @@ it('shows one own-record heading and hides the selection hint after selecting a 
   expect(view.getAllByText('我的實習')).toHaveLength(1);
   fireEvent.click(view.getByText('選擇測試系規則'));
   expect(view.queryByText('請先在上方選擇系所規則，再填寫以下資料。')).toBeNull();
+});
+
+it('asks before close-out and preserves success on the confirmed card after reload', async () => {
+  const { view, props, record, snapshot } = setup('student', 'teacher');
+  record.documents.forEach((d) => {
+    d.submitted = true;
+    d.verified = true;
+  });
+  record.hours = [{ id: 'ready', date: '2026-11-13', hours: 60, note: '', verified: true }];
+  await waitFor(() => expect(view.getByText('指導老師確認結案')).toBeTruthy());
+  fireEvent.click(view.getByText('指導老師確認結案'));
+  expect(props.service.execute).not.toHaveBeenCalled();
+  expect(view.getByText('確定要為這筆實習結案？結案後就不能再從這裡撤回。')).toBeTruthy();
+  fireEvent.click(view.getByText('取消'));
+  expect(view.queryByText('確定結案')).toBeNull();
+  expect(props.service.execute).not.toHaveBeenCalled();
+  fireEvent.click(view.getByText('指導老師確認結案'));
+  props.service.load.mockImplementation(async () => ({
+    ...snapshot,
+    records: [{ ...record, revision: 2, confirmed: true }],
+  }));
+  fireEvent.click(view.getByText('確定結案'));
+  await waitFor(() =>
+    expect(props.service.execute).toHaveBeenCalledWith({
+      action: 'confirm',
+      id: record.id,
+      revision: 1,
+    }),
+  );
+  await waitFor(() =>
+    expect(view.getByText(/已結案。指導老師已確認；學分仍以教務認定為準。/)).toBeTruthy(),
+  );
+  const card = view.getByTestId(`internship-${record.id}`);
+  expect(within(card).getByText('已儲存，正在更新進度。')).toBeTruthy();
+  expect(view.queryByText('指導老師確認結案')).toBeNull();
+  fireEvent.click(view.getByText('重新整理實習進度'));
+  await waitFor(() => expect(props.service.load).toHaveBeenCalledTimes(3));
+  expect(
+    within(view.getByTestId(`internship-${record.id}`)).getByText('已儲存，正在更新進度。'),
+  ).toBeTruthy();
+});
+it.each(['一般操作錯誤', '另一個視窗已更新這筆紀錄，已為你重新整理。'])(
+  'keeps hours feedback when polling flips the label: %s',
+  async (message) => {
+    vi.useFakeTimers();
+    try {
+      const { view, props, record, snapshot } = setup('student', 'teacher');
+      record.hours = [{ id: 'hours1', date: '2026-11-13', hours: 60, note: '', verified: false }];
+      await act(async () => {});
+      const before = props.service.load.mock.calls.length;
+      props.service.execute.mockRejectedValueOnce(new Error(message));
+      // Only the conflict must reload immediately. The ordinary rejection changes on the poll.
+      props.service.load.mockImplementation(async () => ({
+        ...snapshot,
+        records: [
+          { ...record, revision: 2, hours: record.hours.map((h) => ({ ...h, verified: true })) },
+        ],
+      }));
+      await act(async () => {
+        fireEvent.click(view.getByText('確認2026-11-13時數'));
+      });
+      expect(props.service.load.mock.calls.length).toBe(
+        before + (message === '一般操作錯誤' ? 0 : 1),
+      );
+      expect(within(view.getByTestId(`internship-${record.id}`)).getByText(message)).toBeTruthy();
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+      const card = view.getByTestId(`internship-${record.id}`);
+      expect(within(card).getByText('撤銷確認2026-11-13時數')).toBeTruthy();
+      expect(within(card).getByText(message)).toBeTruthy();
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it('keeps conflict feedback on the card when reload removes the document control', async () => {
+  const { view, props, record, snapshot } = setup('student', 'teacher');
+  record.documents[0].submitted = true;
+  await waitFor(() => expect(view.getByText('確認申請')).toBeTruthy());
+  const message = '另一個視窗已更新這筆紀錄，已為你重新整理。';
+  props.service.execute.mockRejectedValueOnce(
+    Object.assign(new Error(message), { code: 'aborted' }),
+  );
+  props.service.load.mockImplementation(async () => ({
+    ...snapshot,
+    records: [
+      {
+        ...record,
+        revision: 2,
+        documents: record.documents.map((d) => ({ ...d, verified: true })),
+      },
+    ],
+  }));
+  await act(async () => {
+    fireEvent.click(view.getByText('確認申請'));
+  });
+  await waitFor(() => expect(view.queryByText('確認申請')).toBeNull());
+  expect(within(view.getByTestId(`internship-${record.id}`)).getByText(message)).toBeTruthy();
 });
