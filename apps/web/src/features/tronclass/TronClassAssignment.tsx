@@ -28,9 +28,31 @@ function connectionChanged(reason: unknown): reason is TronClassRequestError {
 }
 
 function sizeLabel(size: number): string {
+  if (size < 1024) return `${size} B`;
   return size >= 1024 * 1024
     ? `${(size / (1024 * 1024)).toFixed(1)} MB`
-    : `${Math.max(1, Math.ceil(size / 1024))} KB`;
+    : `${(size / 1024).toFixed(1)} KB`;
+}
+
+function preparationLimits(preparation: TronClassPreparation | null) {
+  if (preparation?.rules?.status === 'confirmed') {
+    return {
+      confirmed: true,
+      allowsText: preparation.rules.allowsText,
+      allowsAttachments: preparation.rules.allowsAttachments,
+      maxFiles: Math.min(MAX_FILES, preparation.maxFiles),
+      maxFileBytes: Math.min(MAX_FILE_BYTES, preparation.maxFileBytes),
+      maxTotalBytes: Math.min(MAX_TOTAL_BYTES, preparation.rules.maxTotalBytes),
+      contentTypes: preparation.allowedContentTypes,
+    };
+  }
+  // Missing/unknown source rules permit local preparation only. These limits
+  // describe nuni's editor, never inferred permission to submit to the school.
+  return {
+    confirmed: false, allowsText: true, allowsAttachments: true,
+    maxFiles: MAX_FILES, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES,
+    contentTypes: [] as string[],
+  };
 }
 
 function pendingKey(owner: string, courseId: number, homeworkId: number): string {
@@ -84,17 +106,10 @@ export function TronClassAssignment({
   }, [onConnectionChanged, onBusy, onSubmitted]);
   const storageKey = pendingKey(owner, homework.courseId, homework.id);
   const working = phase === 'uploading' || phase === 'submitting' || checking;
-  const maxFiles = Math.min(
-    MAX_FILES,
-    preparation?.maxFiles && preparation.maxFiles > 0 ? preparation.maxFiles : MAX_FILES,
-  );
-  const maxFileBytes = Math.min(
-    MAX_FILE_BYTES,
-    preparation?.maxFileBytes && preparation.maxFileBytes > 0
-      ? preparation.maxFileBytes
-      : MAX_FILE_BYTES,
-  );
-  const permitted = preparation?.allowedContentTypes ?? [];
+  const limits = preparationLimits(preparation);
+  const canAddAttachments = limits.allowsAttachments && limits.maxFiles > 0 &&
+    limits.maxFileBytes > 0 && limits.maxTotalBytes > 0;
+  const submissionAllowed = preparation?.canSubmit === true && limits.confirmed && !prepareError;
 
   useEffect(() => {
     alive.current = true;
@@ -148,6 +163,8 @@ export function TronClassAssignment({
           callbacks.current.onConnectionChanged(reason);
           return;
         }
+        setPreparation(null);
+        setConfirmed(false);
         setPrepareError(tronClassErrorMessage(reason));
         setPreparing(false);
       },
@@ -177,43 +194,47 @@ export function TronClassAssignment({
     setError('');
   }
 
-  function validateFiles(values: Attachment[], limits = preparation): string | null {
-    const count = Math.min(
-      MAX_FILES,
-      limits?.maxFiles && limits.maxFiles > 0 ? limits.maxFiles : MAX_FILES,
-    );
-    const bytes = Math.min(
-      MAX_FILE_BYTES,
-      limits?.maxFileBytes && limits.maxFileBytes > 0 ? limits.maxFileBytes : MAX_FILE_BYTES,
-    );
-    if (values.length > count) return `一次最多可加入 ${count} 個附件。`;
+  function validateFiles(values: Attachment[], preparationValue = preparation): string | null {
+    const rules = preparationLimits(preparationValue);
+    if (values.length > 0 && (!rules.allowsAttachments || rules.maxFiles === 0 ||
+      rules.maxFileBytes === 0 || rules.maxTotalBytes === 0)) {
+      return '這份作業目前不接受附件，請移除已選取的附件。';
+    }
+    if (values.length > rules.maxFiles) return `一次最多可加入 ${rules.maxFiles} 個附件。`;
+    if (values.some(({ file }) => !file.name || file.name.length > 200 || /[\\/\u0000-\u001f\u007f]/.test(file.name)))
+      return '附件名稱須在 200 字以內，請移除無法使用的字元後重新選取。';
     if (values.some((item) => item.file.size === 0)) return '附件是空白檔案，請重新選擇。';
-    if (values.some((item) => item.file.size > bytes))
-      return `每個附件須小於 ${sizeLabel(bytes)}。`;
-    if (values.reduce((sum, item) => sum + item.file.size, 0) > MAX_TOTAL_BYTES)
-      return '附件合計須小於 20 MB。';
-    const types = limits?.allowedContentTypes ?? [];
+    if (values.some((item) => item.file.size > rules.maxFileBytes))
+      return `單一附件不可超過 ${sizeLabel(rules.maxFileBytes)}。`;
+    if (values.reduce((sum, item) => sum + item.file.size, 0) > rules.maxTotalBytes)
+      return `附件合計不可超過 ${sizeLabel(rules.maxTotalBytes)}。`;
+    if (values.some(({ file }) => file.type.length > 100 ||
+      !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(file.type || 'application/octet-stream')))
+      return '其中有無法辨識格式的附件，請重新選取檔案。';
     if (
-      types.length &&
-      values.some((item) => !types.includes(item.file.type || 'application/octet-stream'))
+      rules.contentTypes.length &&
+      values.some((item) => !rules.contentTypes.includes(item.file.type || 'application/octet-stream'))
     )
       return '其中有此作業不接受的檔案格式，請依作業要求調整附件。';
     return null;
   }
 
+  function validatePayload(preparationValue = preparation, requireConfirmed = false): string | null {
+    const rules = preparationLimits(preparationValue);
+    if (requireConfirmed && !rules.confirmed)
+      return '尚未確認這份作業的繳交規則，請重新讀取後再試。';
+    if (!content.trim() && files.length === 0) return '請先輸入作業內容或加入附件。';
+    if (content.length > 20000) return '作業文字最多 20,000 字，較長內容請改用附件。';
+    if (content.trim() && !rules.allowsText)
+      return '這份作業只接受附件，請將文字整理在附件內，並清空本頁的作業內容後再送出。';
+    return validateFiles(files, preparationValue);
+  }
+
   function preview() {
     if (working || !restored || phase !== 'editing') return;
-    const issue = validateFiles(files);
+    const issue = validatePayload();
     if (issue) {
       setError(issue);
-      return;
-    }
-    if (!content.trim() && files.length === 0) {
-      setError('請先輸入作業內容或加入附件。');
-      return;
-    }
-    if (content.length > 20000) {
-      setError('作業文字最多 20,000 字，較長內容請改用附件。');
       return;
     }
     setError('');
@@ -248,7 +269,7 @@ export function TronClassAssignment({
   }
 
   async function submit() {
-    if (prepareOnly || lock.current || phase !== 'preview' || !confirmed || !preparation?.canSubmit || !restored)
+    if (prepareOnly || lock.current || phase !== 'preview' || !confirmed || !submissionAllowed || preparing || !restored)
       return;
     lock.current = true;
     callbacks.current.onBusy(true);
@@ -257,6 +278,7 @@ export function TronClassAssignment({
     const operationId = operation.current ?? crypto.randomUUID();
     operation.current = operationId;
     let dispatched = false;
+    let prepared = false;
     try {
       const latest = await client.prepare(homework.courseId, homework.id);
       if (!alive.current) return;
@@ -269,14 +291,17 @@ export function TronClassAssignment({
         return;
       }
       setPreparation(latest);
+      prepared = true;
       if (!latest.canSubmit) {
         setPhase('editing');
+        setConfirmed(false);
         setError(latest.blockedReason || '這份作業目前無法從 nuni 繳交，請查看原作業。');
         return;
       }
-      const issue = validateFiles(files, latest);
+      const issue = validatePayload(latest, true);
       if (issue) {
         setPhase('editing');
+        setConfirmed(false);
         setError(issue);
         return;
       }
@@ -353,9 +378,13 @@ export function TronClassAssignment({
         callbacks.current.onConnectionChanged(reason);
         return;
       }
+      if (!prepared) {
+        setPreparation(null);
+        setPrepareError(tronClassErrorMessage(reason));
+      }
       setPhase(dispatched ? 'unknown' : 'editing');
       setError(
-        dispatched ? '尚未收到可核對的繳交結果，請先查證這次送出。' : tronClassErrorMessage(reason),
+        dispatched ? '尚未收到可核對的繳交結果，請先查證這次送出。' : prepared ? tronClassErrorMessage(reason) : '',
       );
     } finally {
       lock.current = false;
@@ -414,11 +443,12 @@ export function TronClassAssignment({
     if (preparing || working) return;
     setPreparing(true);
     setPrepareError('');
+    setConfirmed(false);
     setPrepareEpoch((value) => value + 1);
   }
 
   const previous = preparation?.receipt;
-  const blocked = !preparing && !preparation?.canSubmit;
+  const blocked = !preparing && !submissionAllowed;
 
   return (
     <section
@@ -475,7 +505,9 @@ export function TronClassAssignment({
       )}
       {blocked && phase !== 'unknown' && phase !== 'submitted' && (
         <div className={styles.notice}>
-          <p>{preparation?.blockedReason || '目前無法確認這份作業是否接受直接繳交。'}</p>
+          <p>{preparation?.blockedReason || (limits.confirmed
+            ? '目前無法確認這份作業是否接受直接繳交。'
+            : '尚未確認這份作業的繳交規則。')}</p>
           <p>可以先整理內容與附件，再開啟原作業完成繳交。</p>
         </div>
       )}
@@ -517,6 +549,11 @@ export function TronClassAssignment({
         <>
           {phase === 'editing' ? (
             <div className={styles.form}>
+              {limits.confirmed && <p className={styles.muted}>
+                {limits.allowsText
+                  ? canAddAttachments ? '這份作業接受文字與附件。' : '這份作業只接受文字。'
+                  : canAddAttachments ? '這份作業只接受附件，請將作業文字整理在附件內。' : '這份作業目前未開放可用的繳交方式。'}
+              </p>}
               <label htmlFor={`${fieldId}-answer`}>
                 作業內容
                 <textarea
@@ -538,7 +575,8 @@ export function TronClassAssignment({
                   id={`${fieldId}-attachments`}
                   type="file"
                   multiple
-                  accept={permitted.length ? permitted.join(',') : undefined}
+                  disabled={!canAddAttachments}
+                  accept={limits.contentTypes.length ? limits.contentTypes.join(',') : undefined}
                   onChange={(event) => {
                     addFiles(event.target.files);
                     event.target.value = '';
@@ -546,7 +584,9 @@ export function TronClassAssignment({
                 />
               </label>
               <p className={styles.muted}>
-                最多 {maxFiles} 個附件，每個 {sizeLabel(maxFileBytes)}，合計 20 MB。
+                {canAddAttachments
+                  ? `${limits.confirmed ? '本次附件上限' : '本頁整理上限'}：最多 ${limits.maxFiles} 個附件，每個 ${sizeLabel(limits.maxFileBytes)}，合計 ${sizeLabel(limits.maxTotalBytes)}。`
+                  : '這份作業目前不接受附件。'}
               </p>
             </div>
           ) : (
@@ -626,7 +666,7 @@ export function TronClassAssignment({
               <>
                 <button
                   className="btn primary"
-                  disabled={prepareOnly || working || !confirmed || !preparation?.canSubmit || preparing}
+                  disabled={prepareOnly || working || !confirmed || !submissionAllowed || preparing}
                   onClick={() => void submit()}
                 >
                   {phase === 'uploading'

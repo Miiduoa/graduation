@@ -257,6 +257,19 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       !(value.receipt === null || isReceipt(value.receipt))
     )
       return invalidResponse();
+    if (value.rules !== undefined) {
+      const rules = value.rules;
+      if (!isRecord(rules)) return invalidResponse();
+      if (rules.status === 'unknown') {
+        if (Object.keys(rules).some((key) => key !== 'status') || value.canSubmit) return invalidResponse();
+      } else if (rules.status === 'confirmed') {
+        if (Object.keys(rules).some((key) => !['status', 'allowsText', 'allowsAttachments', 'maxTotalBytes'].includes(key)) ||
+          typeof rules.allowsText !== 'boolean' || typeof rules.allowsAttachments !== 'boolean' ||
+          typeof rules.maxTotalBytes !== 'number' || !Number.isSafeInteger(rules.maxTotalBytes) || rules.maxTotalBytes < 0 ||
+          !isArrayOf(value.allowedContentTypes, (type) => isText(type) && type.length <= 100 &&
+            /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(type), 50)) return invalidResponse();
+      } else return invalidResponse();
+    }
     if (value.history !== undefined && !isTronClassSubmissionHistory(value.history, {
       courseId: input.courseId as number, homeworkId: input.homeworkId as number,
     })) return invalidResponse();

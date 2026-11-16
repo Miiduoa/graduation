@@ -112,10 +112,10 @@ module `539963` 判斷「已提交」時，同時檢查教師代標、草稿與�
 
 因此可根據這份證據修正唯讀來源及其回歸測試，production writer 仍維持 `contractVerified: false`。官方資源的雜湊可追溯程式版本，不能證明一次真實操作成功。
 
-## 離線分析器的目前缺口
+## 離線分析器的後續實作與缺口
 
-截至本輪，`scripts/tronclass/analyze-har.mjs` 尚未更新為上述已觀察路徑。它原有的候選路徑、receipt 欄位與鏈結邏輯，不能完整辨識真正的 `submission_list`、`/api/course/activities/.../submissions`、二進位上傳及 callback。**空 entries 或缺少 chain 可能是分析器不認識路徑，不代表 HAR 中沒有這些動作。**
+首次公開查核時，`scripts/tronclass/analyze-har.mjs` 尚未辨識上述真實路徑；2026-11-16 的後續開發已將報告更新為 `formatVersion: 2`，加入官方 `submission_list`、`/api/course/activities/.../submissions`、metadata、可精確關聯的同來源 binary PUT 及 callback。原猜測端點保留為 `legacy_*`，不再建立正式操作證據。
 
-後續更新應同時處理固定路徑識別、草稿與正式送出分流、本文 comment／uploads ID 關聯、本人 created_by、is_latest_version、草稿／退回／教師代標旗標、來源 created_at，以及預建 metadata → 二進位 → callback → final → 本人歷史的各階段。仍須保留去值化輸出、輸入上限、未知狀態及 `contractVerified: false`；不得為了通過分析就把所有上傳 host 或未知欄位放行。
+目前分析器已區分 POST 新版本與 PUT 既有草稿轉正式，核對事前本人歷史、comment／數字 uploads、created_by、唯一最新版及草稿／退回／教師代標旗標。created_at 仍只表示來源紀錄時間；同來源 URL 的離線一致性也不構成線上 PUT 授權。跨來源儲存服務、QINIU 及外部資源尚未支援，**空 entries 或缺少 chain 不代表 HAR 中沒有這些動作**。去值化、輸入上限、未知狀態與 `contractVerified: false` 均保留，仍不能取代真人收件驗收。
 
 操作與工具限制另見 [離線查核說明](../../scripts/tronclass/README.md)。[TronClass 官方作業 FAQ](https://support.tronclass.com/tw/question/homework) 亦說明資源庫檔案必須與作業活動建立關聯，單有檔案不等於繳交完成；容量、次數與補交規則依校方及教師設定。

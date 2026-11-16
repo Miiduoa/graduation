@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
 import { isTronClassSubmissionHistory, type TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import type { TronClassSubmissionRules } from '../tronClassIntegrationTypes';
 import type {
   TronClassAssignment, TronClassHomeworkScope, TronClassSourceReceipt,
   TronClassSubmissionBinding, TronClassSubmissionSource,
@@ -31,6 +32,7 @@ export type TronClassPreparedSubmission = TronClassHomeworkScope & {
   title: string; description: string; deadline: string | null;
   canSubmit: boolean; blockedReason: string | null;
   maxFiles: number; maxFileBytes: number; allowedContentTypes: string[];
+  rules: TronClassSubmissionRules;
   receipt: TronClassSubmissionReceipt | null;
   history?: TronClassSubmissionHistory;
 };
@@ -346,6 +348,11 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
         canSubmit: blockedReason === null, blockedReason,
         maxFiles: Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES),
         maxFileBytes: Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES),
+        rules: assignment.permissionKnown ? {
+          status: 'confirmed', allowsText: assignment.allowsText,
+          allowsAttachments: assignment.allowsAttachments,
+          maxTotalBytes: Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES),
+        } : { status: 'unknown' },
         allowedContentTypes: [...assignment.allowedContentTypes], receipt,
         ...(history ? { history } : {}) };
     },

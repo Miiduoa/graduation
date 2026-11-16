@@ -103,6 +103,7 @@ const preparation: TronClassPreparation = {
   maxFiles: 4,
   maxFileBytes: 10 * 1024 * 1024,
   allowedContentTypes: ['application/pdf', 'text/plain'],
+  rules: { status: 'confirmed', allowsText: true, allowsAttachments: true, maxTotalBytes: 20 * 1024 * 1024 },
   receipt: null,
 };
 const receipt = {

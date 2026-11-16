@@ -22,21 +22,25 @@ export const LIMITS = Object.freeze({
 
 const ORIGIN = 'https://tronclass.pu.edu.tw';
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
-// These are routes seen in this repository or public client source, not verified
-// PU write contracts. In particular, recognizing /api/uploads does not establish
-// that it is the school's upload endpoint or that binary transfer completed.
+// Public-client evidence: docs/nuni/tronclass-public-contract-2026-11-16.md.
+// A recognized route is still only an observation in an editable offline HAR.
 const ROUTES = [
   { re: /^\/api\/profile\/?$/, path: '/api/profile', kind: 'profile' },
-  { re: /^\/api\/uploads\/?$/, path: '/api/uploads', kind: 'upload_candidate' },
+  { re: /^\/api\/uploads\/?$/, path: '/api/uploads', kind: 'upload_metadata' },
   { re: /^\/api\/uploads\/[A-Za-z0-9_-]{1,128}\/blob\/?$/, path: '/api/uploads/{uploadKey}/blob', kind: 'download' },
+  { re: /^\/internal-api\/upload\/callback\/(\d{1,20})\/?$/, path: '/internal-api/upload/callback/{uploadId}', kind: 'upload_callback', ids: ['upload'] },
+  { re: /^\/api\/course\/activities\/(\d{1,20})\/submissions\/?$/, path: '/api/course/activities/{activityId}/submissions', kind: 'submission', ids: ['activity'] },
+  { re: /^\/api\/activities\/(\d{1,20})\/students\/(\d{1,20})\/submission_list\/?$/, path: '/api/activities/{activityId}/students/{studentId}/submission_list', kind: 'student_history', ids: ['activity', 'student'] },
+  { re: /^\/api\/course\/activities\/(\d{1,20})\/students\/(\d{1,20})\/submission\/?$/, path: '/api/course/activities/{activityId}/students/{studentId}/submission', kind: 'student_submission', ids: ['activity', 'student'] },
+  { re: /^\/api\/activities\/(\d{1,20})\/groups\/(\d{1,20})\/submission_list\/?$/, path: '/api/activities/{activityId}/groups/{groupId}/submission_list', kind: 'group_history', ids: ['activity', 'group'] },
   { re: /^\/api\/courses\/?$/, path: '/api/courses', kind: 'read' },
   { re: /^\/api\/courses\/(\d{1,20})\/homework-activities\/?$/, path: '/api/courses/{courseId}/homework-activities', kind: 'read' },
   { re: /^\/api\/courses\/(\d{1,20})\/homework-activities\/(\d{1,20})\/?$/, path: '/api/courses/{courseId}/homework-activities/{activityId}', kind: 'read' },
-  { re: /^\/api\/courses\/(\d{1,20})\/homework-activities\/(\d{1,20})\/submissions\/?$/, path: '/api/courses/{courseId}/homework-activities/{activityId}/submissions', kind: 'submission_candidate' },
-  { re: /^\/api\/courses\/(\d{1,20})\/homework-activities\/(\d{1,20})\/student-submissions\/?$/, path: '/api/courses/{courseId}/homework-activities/{activityId}/student-submissions', kind: 'readback_candidate' },
-  { re: /^\/api\/courses\/(\d{1,20})\/activities\/(\d{1,20})\/student-submissions\/?$/, path: '/api/courses/{courseId}/activities/{activityId}/student-submissions', kind: 'readback_candidate' },
+  { re: /^\/api\/courses\/(\d{1,20})\/homework-activities\/(\d{1,20})\/submissions\/?$/, path: '/api/courses/{courseId}/homework-activities/{activityId}/submissions', kind: 'legacy_submission_candidate' },
+  { re: /^\/api\/courses\/(\d{1,20})\/homework-activities\/(\d{1,20})\/student-submissions\/?$/, path: '/api/courses/{courseId}/homework-activities/{activityId}/student-submissions', kind: 'legacy_readback_candidate' },
+  { re: /^\/api\/courses\/(\d{1,20})\/activities\/(\d{1,20})\/student-submissions\/?$/, path: '/api/courses/{courseId}/activities/{activityId}/student-submissions', kind: 'legacy_readback_candidate' },
   { re: /^\/api\/courses\/(\d{1,20})\/activities\/?$/, path: '/api/courses/{courseId}/activities', kind: 'read' },
-  { re: /^\/api\/activities\/(\d{1,20})\/?$/, path: '/api/activities/{activityId}', kind: 'read' },
+  { re: /^\/api\/activities\/(\d{1,20})\/?$/, path: '/api/activities/{activityId}', kind: 'activity', ids: ['activity'] },
   { re: /^\/api\/courses\/(\d{1,20})\/(discussions|forums)\/?$/, path: '/api/courses/{courseId}/{discussionCollection}', kind: 'discussion_candidate' },
   { re: /^\/api\/courses\/(\d{1,20})\/(discussions|forums)\/(\d{1,20})\/posts\/?$/, path: '/api/courses/{courseId}/{discussionCollection}/{discussionId}/posts', kind: 'discussion_candidate' },
   { re: /^\/api\/courses\/(\d{1,20})\/surveys\/(\d{1,20})\/responses\/?$/, path: '/api/courses/{courseId}/surveys/{surveyId}/responses', kind: 'survey_candidate' },
@@ -57,6 +61,13 @@ const FIELDS = new Set([
   'page', 'page_size', 'total', 'has_next', 'questions', 'answers', 'scores',
   'comments', 'overallFeedback', 'totalScore', 'posts', 'discussions', 'forums',
   'success', 'error', 'message',
+  'list', 'comment', 'is_draft', 'is_redo', 'is_latest_version', 'created_by',
+  'submit_by_instructor', 'marked_submitted', 'submit_by_group', 'group_id', 'group',
+  'upload_url', 'storage_type', 'transcoder', 'file_key', 'parent_type', 'parent_id',
+  'is_scorm', 'is_wmpkg', 'source', 'is_marked_attachment', 'embed_material_type',
+  'slides', 'other_resources', 'uploads_in_rich_text', 'multiple_choice_title',
+  'mode', 'type', 'is_announce_score_time_passed', 'slide_references',
+  'is_hidden', 'hidden', 'published', 'next_page', 'total_count', 'has_more',
 ]);
 
 export class HarInputError extends Error {
@@ -130,196 +141,376 @@ function bodyOf(body) {
   }
 }
 
-function routeOf(value) {
-  if (typeof value !== 'string' || value.length > 8192) return null;
+function safeUrl(value, relative = false) {
+  if (typeof value !== 'string' || !value || value.length > 8192
+    || Array.from(value).some((character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)
+    || value.includes('\\')) return null;
+  const absolute = relative && value.startsWith('/') && !value.startsWith('//') ? `${ORIGIN}${value}` : value;
+  if (!absolute.startsWith('https://')) return null;
+  try {
+    const url = new URL(absolute);
+    const rawPath = absolute.slice(absolute.indexOf('://') + 3).split(/[?#]/, 1)[0];
+    if (url.username || url.password || url.hash || rawPath.includes('%') || rawPath.includes('..')) return null;
+    return url;
+  } catch { return null; } // Never print a URL or a URL parser error.
+}
+
+function numericId(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function sameSchoolOrigin(value) {
+  if (typeof value !== 'string' || value.length > 8192) return false;
   try {
     const url = new URL(value);
-    if (url.origin !== ORIGIN || url.username || url.password) return null;
-    // Do not normalize encoded traversal or accept path segments containing PII.
-    const rawPath = value.slice(value.indexOf('://') + 3).split(/[?#]/, 1)[0];
-    if (rawPath.includes('%') || rawPath.includes('..') || rawPath.includes('\\')) return null;
-    for (const route of ROUTES) {
-      const match = route.re.exec(url.pathname);
-      if (match) return { path: route.path, kind: route.kind, course: match[1], activity: match[2] };
+    return url.origin === ORIGIN && !url.username && !url.password;
+  } catch { return false; }
+}
+
+function routeOf(value) {
+  const url = safeUrl(value);
+  if (!url || url.origin !== ORIGIN) return null;
+  for (const route of ROUTES) {
+    const match = route.re.exec(url.pathname);
+    if (match) {
+      const ids = Object.fromEntries((route.ids ?? []).map((key, index) => [key, numericId(Number(match[index + 1]))]));
+      return { path: route.path, kind: route.kind, ...ids };
     }
-  } catch { /* Never print the URL or URL parser error. */ }
-  return null;
-}
-
-function scalar(value) {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return `n:${value}`;
-  if (typeof value === 'string' && value.length > 0 && value.length <= 128) return `s:${value}`;
-  return null;
-}
-
-function unwrap(value) {
-  if (object(value?.data)) return value.data;
-  return value;
-}
-
-function uploadRefs(value) {
-  if (!object(value)) return [];
-  const refs = [];
-  const add = (item) => {
-    if (object(item)) {
-      for (const key of ['upload_key', 'key', 'upload_id', 'file_id', 'id']) {
-        if (scalar(item[key])) refs.push(scalar(item[key]));
-      }
-    } else if (scalar(item)) refs.push(scalar(item));
-  };
-  for (const key of ['upload_key', 'upload_id']) if (scalar(value[key])) refs.push(scalar(value[key]));
-  for (const key of ['uploads', 'attachments', 'files', 'upload_ids', 'upload_keys']) {
-    if (Array.isArray(value[key])) value[key].slice(0, LIMITS.receiptSamples).forEach(add);
   }
-  return [...new Set(refs)];
-}
-
-function uploadResponseRefs(value) {
-  const data = unwrap(value);
-  const upload = object(data?.upload) ? data.upload : data;
-  if (!object(upload)) return [];
-  return [...new Set(['key', 'upload_key', 'id', 'upload_id'].map((key) => scalar(upload[key])).filter(Boolean))];
-}
-
-function receiptCollection(value) {
-  const data = unwrap(value);
-  if (Array.isArray(data)) return data;
-  for (const key of ['submissions', 'student_submissions']) {
-    if (Array.isArray(data?.[key])) return data[key];
-  }
-  if (object(data?.submission)) return [data.submission];
-  return object(data) ? [data] : [];
-}
-
-function receiptRecords(value) {
-  return receiptCollection(value).slice(0, LIMITS.receiptSamples).filter(object);
-}
-
-function attachmentLimitReached(value) {
-  return ['uploads', 'attachments', 'files', 'upload_ids', 'upload_keys']
-    .some((key) => Array.isArray(value?.[key]) && value[key].length > LIMITS.receiptSamples);
-}
-
-function submissionId(value) {
-  return scalar(value?.submission_id) ?? scalar(value?.id);
-}
-
-function ownerId(value) {
-  const ids = [...new Set([value?.student_id, value?.user_id, value?.student?.id, value?.user?.id]
-    .map(scalar).filter(Boolean))];
-  return ids.length === 1 ? ids[0] : null;
-}
-
-function consistentActivity(value, route) {
-  return ['course_id', 'activity_id', 'homework_id'].every((key) => {
-    if (value?.[key] === undefined) return true;
-    const expected = key === 'course_id' ? route.course : route.activity;
-    return scalar(value[key]) !== null && String(value[key]) === expected;
-  });
-}
-
-function explicitSubmitted(value) {
-  if (value?.submitted === false) return false;
-  if (value?.status !== undefined && value.status !== 'submitted') return false;
-  return value?.status === 'submitted' || value?.submitted === true;
-}
-
-function hasSubmissionTime(value) {
-  return typeof value?.submitted_at === 'string'
-    && /^\d{4}-\d\d-\d\dT/.test(value.submitted_at)
-    && Number.isFinite(Date.parse(value.submitted_at));
+  return null;
 }
 
 function successfulHttp(entry) {
-  return entry.status >= 200 && entry.status < 300;
+  return entry?.status >= 200 && entry.status < 300;
 }
 
-function homeworkEvidence(entries) {
-  const uploads = entries.filter((entry) => entry.route.kind === 'upload_candidate' && entry.method === 'POST');
-  const finals = entries.filter((entry) => entry.route.kind === 'submission_candidate' && entry.method === 'POST');
-  const reads = entries.filter((entry) => ['submission_candidate', 'readback_candidate'].includes(entry.route.kind) && entry.method === 'GET');
-  const identities = new Map();
-  let currentIdentity = null;
-  for (const entry of entries) {
-    identities.set(entry.index, currentIdentity);
-    if (entry.route.kind === 'profile' && entry.method === 'GET') {
-      currentIdentity = successfulHttp(entry) ? scalar(unwrap(entry.response.value)?.id) : null;
+function visible(value) {
+  if (!object(value)) return false;
+  return ['is_hidden', 'hidden'].every((key) => value[key] === undefined || value[key] === false || value[key] === 0)
+    && (value.published === undefined || value.published === true || value.published === 1);
+}
+
+function submissionState(row) {
+  if (!object(row) || !visible(row)
+    || (row.is_latest_version !== undefined && typeof row.is_latest_version !== 'boolean')) return 'unknown';
+  if (row.is_draft === true && row.is_redo === true) return 'unknown';
+  if (row.is_draft === true) return 'draft';
+  if (row.is_redo === true) return 'returned';
+  if (row.is_draft !== false || row.is_redo !== false) return 'unknown';
+  if (row.submit_by_instructor === false) return 'submitted';
+  if (row.submit_by_instructor === true && row.marked_submitted === true) return 'teacher-marked';
+  return 'unknown';
+}
+
+function submissionIntent(entry) {
+  const flag = entry.request.value?.is_draft;
+  return flag === false ? 'final' : flag === true ? 'draft' : 'unknown';
+}
+
+function historyDetails(value) {
+  const recognized = object(value) && Array.isArray(value.list);
+  const rows = recognized ? value.list.slice(0, LIMITS.receiptSamples) : [];
+  const truncated = recognized && value.list.length > LIMITS.receiptSamples;
+  const ids = rows.map((row) => numericId(row?.id));
+  const paginationUnknown = recognized && (
+    (value.total !== undefined && value.total !== value.list.length)
+    || (value.has_next !== undefined && value.has_next !== false)
+    || (value.next_page !== undefined && value.next_page !== null)
+    || ['paging', 'pagination', 'page', 'pages', 'page_size', 'page_count', 'total_pages',
+      'total_count', 'next', 'next_cursor', 'cursor', 'has_more'].some((key) => Object.hasOwn(value, key)));
+  const latest = rows.filter((row) => row?.is_latest_version === true);
+  const complete = recognized && !truncated && !paginationUnknown && rows.every(object)
+    && ids.every((id) => id !== null) && new Set(ids).size === ids.length && latest.length <= 1;
+  const counts = { submitted: 0, draft: 0, returned: 0, 'teacher-marked': 0, unknown: 0 };
+  for (const row of rows) counts[submissionState(row)]++;
+  return {
+    rows, complete, truncated, latest: latest.length === 1 ? latest[0] : null,
+    public: {
+      recognizedEnvelope: recognized, recordsSampled: rows.length, analysisTruncated: truncated,
+      shapeAndPaginationConsistent: complete,
+      latestMarker: !recognized ? 'unavailable' : latest.length > 1 ? 'ambiguous' : latest.length === 1 ? 'unique' : 'absent',
+      latestState: complete && latest.length === 1 ? submissionState(latest[0]) : null,
+      stateCounts: counts,
+    },
+  };
+}
+
+function uploadIds(value, records = false) {
+  if (!Array.isArray(value)) return { ids: [], valid: false, truncated: false };
+  const truncated = value.length > LIMITS.receiptSamples;
+  const ids = value.slice(0, LIMITS.receiptSamples).map((item) => numericId(records ? item?.id : item));
+  return { ids: ids.filter((id) => id !== null), valid: !truncated && ids.every((id) => id !== null)
+    && new Set(ids).size === ids.length, truncated };
+}
+
+function uploadDetails(entry) {
+  const request = entry.request.value;
+  const response = entry.response.value;
+  const url = safeUrl(response?.upload_url, true);
+  const urlPolicy = url ? url.origin === ORIGIN ? 'same-origin' : 'cross-origin-unsupported'
+    : response?.upload_url === undefined ? 'missing' : 'invalid';
+  const storage = response?.storage_type;
+  const raw = storage === 'S3' && response?.transcoder === 'WRPC';
+  const modeKnown = typeof storage === 'string' && storage.length > 0 && storage.length <= 64
+    && storage !== 'QINIU' && (storage !== 'S3' || typeof response?.transcoder === 'string');
+  return {
+    id: numericId(response?.id), url: urlPolicy === 'same-origin' ? url.href : null, urlPolicy,
+    metadataShapeKnown: object(request) && typeof request.name === 'string' && request.name.length > 0
+      && Number.isSafeInteger(request.size) && request.size >= 0,
+    name: request?.name, size: request?.size,
+    mode: !modeKnown ? 'unsupported' : raw ? 'raw-put' : 'multipart-put',
+    callbackRequired: modeKnown ? raw : null,
+    qiniu: storage === 'QINIU',
+  };
+}
+
+function identityContexts(entries, interruptions) {
+  const contexts = new Map();
+  let owner = null;
+  let epoch = 0;
+  for (const entry of [...entries, ...interruptions].sort((first, second) => first.index - second.index)) {
+    contexts.set(entry.index, { owner, epoch });
+    if ((entry.route.kind === 'profile' && entry.method === 'GET') || entry.status === 401) {
+      const next = entry.route.kind === 'profile' && successfulHttp(entry) ? numericId(entry.response.value?.id) : null;
+      if (next !== owner) epoch++;
+      owner = next;
     }
   }
+  return contexts;
+}
+
+function sameContext(contexts, first, second) {
+  const a = contexts.get(first.index);
+  const b = contexts.get(second.index);
+  return Boolean(a && b && a.owner !== null && a.owner === b.owner && a.epoch === b.epoch);
+}
+
+function sameScope(row, activity, course) {
+  return object(row) && ['activity_id', 'homework_id'].every((key) => row[key] === undefined || row[key] === activity)
+    && (row.course_id === undefined || (course !== null && row.course_id === course))
+    && Object.entries({ activity, homework: activity, course }).every(([key, expected]) => row[key] === undefined
+      || (expected !== null && object(row[key]) && row[key].id === expected));
+}
+
+function declaredOwnerConsistent(row, owner, teacherCreator = false) {
+  if (!object(row) || owner === null) return false;
+  if (['student_id', 'user_id'].some((key) => row[key] !== undefined && row[key] !== owner)) return false;
+  for (const key of ['student', 'user', 'created_by']) {
+    if (row[key] === undefined) continue;
+    if (!object(row[key]) || numericId(row[key].id) === null
+      || (!(teacherCreator && key === 'created_by') && row[key].id !== owner)) return false;
+  }
+  return (row.group_id === undefined || row.group_id === null || row.group_id === 0)
+    && (row.group === undefined || row.group === null)
+    && (row.submit_by_group === undefined || row.submit_by_group === false);
+}
+
+function personalOwner(row, owner) {
+  return object(row?.created_by) && row.created_by.id === owner && declaredOwnerConsistent(row, owner);
+}
+
+function personalHistoryScope(history, owner, activity, course) {
+  return owner !== null && history.complete && history.rows.every((row) =>
+    object(row?.created_by) && numericId(row.created_by.id) !== null && visible(row)
+    && sameScope(row, activity, course) && declaredOwnerConsistent(row, owner, row.submit_by_instructor === true));
+}
+
+function sourceCreatedAt(row) {
+  return typeof row?.created_at === 'string' && row.created_at.length <= 80
+    && /^\d{4}-\d\d-\d\d[T ]\d\d:\d\d/.test(row.created_at) && Number.isFinite(Date.parse(row.created_at));
+}
+
+function uploadEvidence(id, final, entries, contexts) {
+  const metadata = entries.filter((entry) => entry.route.kind === 'upload_metadata' && entry.method === 'POST'
+    && entry.index < final.index && entry.upload?.id === id && sameContext(contexts, entry, final));
+  const meta = metadata.length === 1 ? metadata[0] : null;
+  const binaries = meta ? entries.filter((entry) => entry.route.kind === 'upload_binary' && entry.method === 'PUT'
+    && entry.index > meta.index && entry.index < final.index && entry.metadataIndexes.length === 1
+    && entry.metadataIndexes[0] === meta.index && sameContext(contexts, entry, final)) : [];
+  const binary = binaries.at(-1);
+  const callbacks = meta && binary ? entries.filter((entry) => entry.route.kind === 'upload_callback' && entry.method === 'POST'
+    && entry.route.upload === id && entry.request.value?.file_key === id
+    && entry.index > binary.index && entry.index < final.index && sameContext(contexts, entry, final)) : [];
+  const callback = callbacks.at(-1);
+  const parent = meta?.request.value;
+  const returnedParent = meta?.response.value;
+  const parentScopeConsistent = Boolean(parent && (parent.parent_type === 'activity'
+    ? parent.parent_id === final.route.activity
+    : parent.parent_type === null && parent.parent_id === 0)
+    && ['parent_type', 'parent_id'].every((key) => returnedParent?.[key] === undefined || returnedParent[key] === parent[key]));
+  const payloadMetadata = Boolean(meta && binary && (meta.upload.mode === 'raw-put'
+    ? binary.rawPayloadMetadata && binary.requestBodySize === meta.upload.size
+    : meta.upload.mode === 'multipart-put' && binary.fileNames.length === 1 && binary.fileNames[0] === meta.upload.name));
+  const observed = {
+    uniqueMetadataReference: Boolean(meta), metadataHttp2xx: successfulHttp(meta),
+    metadataShapeKnown: Boolean(meta?.upload.metadataShapeKnown),
+    parentScopeConsistent,
+    sameOriginExactUploadUrl: Boolean(meta?.upload.url && binary),
+    binaryHttp2xx: successfulHttp(binary), binaryPayloadMetadata: payloadMetadata,
+    callbackRequirementKnown: meta?.upload.callbackRequired !== null && Boolean(meta),
+    requiredCallbackHttp2xx: Boolean(meta && meta.upload.callbackRequired !== null
+      && (!meta.upload.callbackRequired || successfulHttp(callback))),
+  };
+  const missing = [];
+  if (!meta) missing.push(metadata.length > 1 ? 'upload_metadata_reference_ambiguous' : 'upload_to_final_reference_link_missing');
+  if (meta && !observed.metadataHttp2xx) missing.push('upload_metadata_http_2xx_missing');
+  if (meta && !observed.metadataShapeKnown) missing.push('upload_metadata_shape_missing');
+  if (meta && !parentScopeConsistent) missing.push(parent?.parent_type === 'activity' || returnedParent?.parent_type === 'activity'
+    ? 'upload_parent_activity_mismatch' : 'upload_parent_scope_unsupported');
+  if (meta?.upload.urlPolicy === 'cross-origin-unsupported') missing.push('cross_origin_upload_url_unsupported');
+  if (meta && !meta.upload.url) missing.push('same_origin_upload_url_missing');
+  if (meta?.upload.qiniu) missing.push('qiniu_upload_flow_unsupported');
+  if (meta?.upload.mode === 'unsupported') missing.push('upload_storage_flow_unsupported');
+  if (!observed.sameOriginExactUploadUrl || !observed.binaryHttp2xx) missing.push('binary_put_observation_missing');
+  if (!payloadMetadata) missing.push('binary_payload_metadata_missing');
+  if (!observed.callbackRequirementKnown) missing.push('upload_callback_requirement_unknown');
+  if (meta?.upload.callbackRequired && !observed.requiredCallbackHttp2xx) missing.push('upload_callback_observation_missing');
+  return {
+    metadataEntry: meta ? meta.index + 1 : null, binaryEntry: binary ? binary.index + 1 : null,
+    callbackEntry: callback ? callback.index + 1 : null, observed, missingEvidence: missing,
+  };
+}
+
+function homeworkEvidence(entries, interruptions) {
+  const uploads = entries.filter((entry) => entry.route.kind === 'upload_metadata' && entry.method === 'POST');
+  const binaries = entries.filter((entry) => entry.route.kind === 'upload_binary' && entry.method === 'PUT');
+  const callbacks = entries.filter((entry) => entry.route.kind === 'upload_callback' && entry.method === 'POST');
+  const submissions = entries.filter((entry) => entry.route.kind === 'submission' && ['POST', 'PUT'].includes(entry.method));
+  const finals = submissions.filter((entry) => submissionIntent(entry) === 'final');
+  const reads = entries.filter((entry) => entry.route.kind === 'student_history' && entry.method === 'GET');
+  const activities = entries.filter((entry) => entry.route.kind === 'activity' && entry.method === 'GET');
+  const contexts = identityContexts(entries, interruptions);
   const chains = finals.slice(0, LIMITS.evidenceFinals).map((final) => {
-    const finalBody = unwrap(final.request.value);
-    const finalId = submissionId(receiptRecords(final.response.value)[0]);
-    const expectedOwner = identities.get(final.index);
-    const expectedFiles = uploadRefs(finalBody);
-    const expectsContent = typeof finalBody?.content === 'string' && finalBody.content.length > 0;
-    const linkedUploads = uploads.filter((entry) => entry.index < final.index && successfulHttp(entry)
-      && uploadResponseRefs(entry.response.value).some((ref) => expectedFiles.includes(ref)));
-    const uploadLinks = expectedFiles.length > 0 && expectedFiles.every((ref) => linkedUploads.some((entry) => uploadResponseRefs(entry.response.value).includes(ref)));
-    const fileParts = uploadLinks && linkedUploads.every((entry) => entry.hasFilePart);
-    const candidateReads = reads.filter((entry) => entry.index > final.index && successfulHttp(entry)
-      && entry.route.course === final.route.course && entry.route.activity === final.route.activity);
+    const body = final.request.value;
+    const finalRow = final.response.value?.submission;
+    const finalId = numericId(finalRow?.id);
+    const expectedOwner = contexts.get(final.index).owner;
+    const files = uploadIds(body?.uploads);
+    const contentCaptured = typeof body?.comment === 'string';
+    const activity = activities.filter((entry) => entry.index < final.index && entry.route.activity === final.route.activity
+      && sameContext(contexts, entry, final)).at(-1);
+    const activityData = activity?.response.value;
+    const course = numericId(activityData?.course_id);
+    const individualActivity = successfulHttp(activity) && activityData?.id === final.route.activity && course !== null
+      && activityData?.type === 'homework' && activityData?.submit_by_group === false && visible(activityData);
+    const nextWrite = submissions.find((entry) => entry.index > final.index && entry.route.activity === final.route.activity);
+    const candidateReads = reads.filter((entry) => entry.index > final.index && entry.index < (nextWrite?.index ?? Infinity)
+      && entry.route.activity === final.route.activity);
     const analyzedReads = candidateReads.slice(0, LIMITS.evidenceReadbacks);
-    const matches = analyzedReads.flatMap((entry) => receiptRecords(entry.response.value).map((receipt) => {
-      const ownerMatches = expectedOwner !== null && ownerId(receipt) === expectedOwner && identities.get(entry.index) === expectedOwner;
-      const receiptMatches = finalId !== null && submissionId(receipt) === finalId
-        && consistentActivity(receipt, final.route) && consistentActivity(finalBody, final.route);
-      const files = uploadRefs(receipt);
-      const attachmentsMatch = expectedFiles.length > 0 && expectedFiles.every((ref) => files.includes(ref));
-      const contentMatch = expectsContent && receipt.content === finalBody.content;
-      return { entry, receipt, ownerMatches, receiptMatches, attachmentsMatch, contentMatch };
-    }));
-    // Keep each fact on one receipt. Never combine one student's owner field
-    // with another student's submission ID or attachment/status evidence.
-    const match = matches.find((item) => item.ownerMatches && item.receiptMatches
-      && explicitSubmitted(item.receipt) && hasSubmissionTime(item.receipt)
-      && (!expectedFiles.length || item.attachmentsMatch)
-      && (!expectsContent || item.contentMatch)
-      && (expectedFiles.length > 0 || expectsContent))
-      ?? matches.find((item) => item.ownerMatches && item.receiptMatches);
+    // Use the latest observed read in this attempt's interval. A later returned,
+    // malformed or inaccessible history must not be replaced by an older success.
+    const readback = analyzedReads.at(-1);
+    const history = historyDetails(readback?.response.value);
+    const readbackScope = personalHistoryScope(history, expectedOwner, final.route.activity, course);
+    const matched = finalId !== null && readbackScope ? history.rows.find((row) => row.id === finalId) : null;
+    const sameReadOwner = Boolean(readback && expectedOwner !== null && readback.route.student === expectedOwner
+      && sameContext(contexts, readback, final));
+    const ownerMatches = sameReadOwner && personalOwner(matched, expectedOwner);
+    const finalIdentityConsistent = declaredOwnerConsistent(final.response.value, expectedOwner)
+      && declaredOwnerConsistent(finalRow, expectedOwner);
+    const receiptMatches = Boolean(matched && finalIdentityConsistent && sameScope(matched, final.route.activity, course)
+      && sameScope(body, final.route.activity, course) && sameScope(finalRow, final.route.activity, course)
+      && sameScope(final.response.value, final.route.activity, course));
+    const receiptFiles = uploadIds(matched?.uploads, true);
+    const attachmentsMatch = Boolean(matched && files.valid && receiptFiles.valid && files.ids.length === receiptFiles.ids.length
+      && files.ids.every((id) => receiptFiles.ids.includes(id)));
+    const contentMatch = Boolean(matched && contentCaptured && matched.comment === body.comment);
+    const baseline = reads.filter((entry) => entry.index < final.index && entry.route.activity === final.route.activity
+      && entry.route.student === expectedOwner && sameContext(contexts, entry, final)).at(-1);
+    const before = historyDetails(baseline?.response.value);
+    const baselineKnown = successfulHttp(baseline) && personalHistoryScope(before, expectedOwner, final.route.activity, course);
+    const prior = finalId !== null ? before.rows.find((row) => row?.id === finalId) : null;
+    const putTarget = final.method === 'PUT' && finalId !== null && body?.submission_id === finalId;
+    const freshTransition = baselineKnown && finalId !== null && (final.method === 'POST'
+      ? body?.submission_id === undefined && !prior
+      : putTarget && personalOwner(prior, expectedOwner) && sameScope(prior, final.route.activity, course)
+        && submissionState(prior) === 'draft');
+    const standardResources = body?.mode === 'normal'
+      && ['slides', 'other_resources', 'uploads_in_rich_text'].every((key) => Array.isArray(body?.[key]) && body[key].length === 0);
+    const stages = files.valid ? files.ids.map((id) => uploadEvidence(id, final, entries, contexts)) : [];
     const observed = {
       profileIdentityBeforeFinal: expectedOwner !== null,
-      finalHttp2xx: successfulHttp(final),
+      individualActivityBeforeFinal: Boolean(individualActivity), finalHttp2xx: successfulHttp(final),
       finalSubmissionId: finalId !== null,
-      finalAttachmentReferences: expectedFiles.length > 0,
-      finalContentCaptured: expectsContent,
-      uploadReferencesLinked: uploadLinks,
-      uploadFilePartMetadata: fileParts,
+      finalResponseStudentConsistent: finalIdentityConsistent,
+      finalUploadIdsValid: files.valid, finalAttachmentReferences: files.ids.length > 0,
+      finalContentCaptured: contentCaptured, standardResourcesOnly: standardResources,
+      finalHasContentOrAttachments: Boolean((contentCaptured && body.comment.trim()) || files.ids.length),
+      putDraftTargetMatchesResponse: putTarget,
+      uploadReferencesLinked: stages.length > 0 && stages.every((stage) => stage.observed.uniqueMetadataReference
+        && stage.observed.metadataHttp2xx && stage.observed.metadataShapeKnown && stage.observed.parentScopeConsistent),
+      binaryPutAndPayloadObserved: stages.length > 0 && stages.every((stage) => stage.observed.sameOriginExactUploadUrl
+        && stage.observed.binaryHttp2xx && stage.observed.binaryPayloadMetadata),
+      requiredCallbacksObserved: stages.length > 0 && stages.every((stage) => stage.observed.callbackRequirementKnown
+        && stage.observed.requiredCallbackHttp2xx),
       sameActivityReadbackAfterFinal: candidateReads.length > 0,
-      sameReceiptAndOwner: Boolean(match),
-      explicitSubmittedState: Boolean(match && explicitSubmitted(match.receipt)),
-      submissionTimestamp: Boolean(match && hasSubmissionTime(match.receipt)),
-      attachmentReferencesInReadback: Boolean(match?.attachmentsMatch),
-      exactContentInReadback: Boolean(match?.contentMatch),
+      readbackHttp2xx: successfulHttp(readback), readbackShapeAndPaginationConsistent: history.complete,
+      readbackScopeConsistent: readbackScope,
+      readbackIdentityContext: sameReadOwner,
+      sameReceiptAndOwner: ownerMatches && receiptMatches,
+      explicitStudentSubmittedState: Boolean(matched && submissionState(matched) === 'submitted'),
+      latestVersionMatches: Boolean(matched && history.latest === matched && matched.is_latest_version === true),
+      sourceCreatedAtCaptured: sourceCreatedAt(matched),
+      attachmentReferencesInReadback: attachmentsMatch, exactContentInReadback: contentMatch,
+      prefinalHistoryObserved: baselineKnown, newSubmissionOrDraftTransition: Boolean(freshTransition),
     };
     const missing = [];
     if (candidateReads.length > LIMITS.evidenceReadbacks) missing.push('readback_analysis_limit');
-    if (analyzedReads.some((entry) => receiptCollection(entry.response.value).length > LIMITS.receiptSamples)) missing.push('receipt_analysis_limit');
-    if (attachmentLimitReached(finalBody) || attachmentLimitReached(match?.receipt)) missing.push('attachment_analysis_limit');
-    if (!observed.profileIdentityBeforeFinal) missing.push('profile_identity_missing');
-    if (!observed.finalHttp2xx) missing.push('final_http_2xx_missing');
-    if (!observed.finalSubmissionId) missing.push('final_submission_id_missing');
-    if (expectedFiles.length && !uploadLinks) missing.push('upload_to_final_reference_link_missing');
-    if (expectedFiles.length && !fileParts) missing.push('upload_file_part_metadata_missing');
-    if (!observed.sameActivityReadbackAfterFinal) missing.push('same_activity_readback_missing');
-    if (!observed.sameReceiptAndOwner) missing.push('same_receipt_and_owner_link_missing');
-    if (!observed.explicitSubmittedState) missing.push('explicit_submitted_state_missing');
-    if (!observed.submissionTimestamp) missing.push('submission_timestamp_missing');
-    if (expectedFiles.length && !observed.attachmentReferencesInReadback) missing.push('attachment_readback_link_missing');
-    if ((expectsContent || !expectedFiles.length) && !observed.exactContentInReadback) missing.push('content_readback_link_missing');
+    if (history.truncated || before.truncated) missing.push('receipt_analysis_limit');
+    if (files.truncated || receiptFiles.truncated) missing.push('attachment_analysis_limit');
+    for (const [field, code] of [
+      ['profileIdentityBeforeFinal', 'profile_identity_missing'],
+      ['individualActivityBeforeFinal', 'individual_activity_missing_or_unsupported'],
+      ['finalHttp2xx', 'final_http_2xx_missing'], ['finalSubmissionId', 'final_submission_id_missing'],
+      ['finalResponseStudentConsistent', 'final_response_student_conflict'],
+      ['finalUploadIdsValid', 'final_upload_ids_missing_or_invalid'], ['finalContentCaptured', 'final_comment_missing'],
+      ['standardResourcesOnly', 'nonstandard_resources_or_mode_unsupported'],
+      ['finalHasContentOrAttachments', 'final_content_or_attachments_missing'],
+      ['sameActivityReadbackAfterFinal', 'same_activity_readback_missing'], ['readbackHttp2xx', 'readback_http_2xx_missing'],
+      ['readbackShapeAndPaginationConsistent', 'readback_shape_or_pagination_incomplete'],
+      ['readbackScopeConsistent', 'readback_owner_or_scope_conflict'],
+      ['readbackIdentityContext', 'readback_identity_context_missing'],
+      ['sameReceiptAndOwner', 'same_receipt_and_owner_link_missing'],
+      ['explicitStudentSubmittedState', 'explicit_student_submitted_state_missing'],
+      ['latestVersionMatches', 'latest_version_match_missing'], ['sourceCreatedAtCaptured', 'source_created_at_missing'],
+      ['attachmentReferencesInReadback', 'attachment_readback_link_missing'], ['exactContentInReadback', 'content_readback_link_missing'],
+      ['prefinalHistoryObserved', 'prefinal_history_missing_or_incomplete'],
+      ['newSubmissionOrDraftTransition', 'new_submission_or_draft_transition_unproven'],
+    ]) if (!observed[field]) missing.push(code);
+    if (final.method === 'PUT' && !putTarget) missing.push('put_draft_target_missing_or_conflicting');
+    for (const stage of stages) missing.push(...stage.missingEvidence);
     return {
-      finalEntry: final.index + 1,
-      linkedUploadEntries: linkedUploads.map((entry) => entry.index + 1),
-      linkedReadbackEntry: match ? match.entry.index + 1 : null,
-      observed, missingEvidence: missing,
+      finalEntry: final.index + 1, method: final.method,
+      linkedActivityEntry: activity ? activity.index + 1 : null,
+      linkedBaselineReadbackEntry: baseline ? baseline.index + 1 : null,
+      linkedUploadEntries: stages.map((stage) => stage.metadataEntry).filter((index) => index !== null),
+      linkedBinaryUploadEntries: stages.map((stage) => stage.binaryEntry).filter((index) => index !== null),
+      linkedCallbackEntries: stages.map((stage) => stage.callbackEntry).filter((index) => index !== null),
+      linkedReadbackEntry: matched && readback ? readback.index + 1 : null,
+      readbackState: submissionState(matched), uploads: stages, observed, missingEvidence: [...new Set(missing)],
     };
   });
   return {
-    uploadCandidates: uploads.length, finalCandidates: finals.length, readbackCandidates: reads.length,
+    uploadMetadataCandidates: uploads.length, binaryPutCandidates: binaries.length, callbackCandidates: callbacks.length,
+    finalCandidates: finals.length, draftCandidates: submissions.filter((entry) => submissionIntent(entry) === 'draft').length,
+    unknownSubmissionCandidates: submissions.filter((entry) => submissionIntent(entry) === 'unknown').length,
+    readbackCandidates: reads.length, activityReads: activities.length,
+    unlistedSessionInterruptions: interruptions.length,
     chainAnalysisTruncated: finals.length > LIMITS.evidenceFinals,
     missingTracePhases: [
-      ...(!uploads.length ? ['upload_trace_missing'] : []),
+      ...(!activities.length ? ['activity_trace_missing'] : []),
+      ...(!uploads.length ? ['upload_metadata_trace_missing'] : []),
+      ...(!binaries.length ? ['upload_binary_trace_missing'] : []),
+      ...(!callbacks.length ? ['upload_callback_trace_missing'] : []),
       ...(!finals.length ? ['final_trace_missing'] : []),
-      ...(!reads.length ? ['readback_trace_missing'] : []),
+      ...(!reads.length ? ['student_history_trace_missing'] : []),
+    ],
+    unsupportedTraceKinds: [
+      ...(entries.some((entry) => entry.route.kind.startsWith('legacy_')) ? ['legacy_submission_paths'] : []),
+      ...(entries.some((entry) => entry.route.kind === 'group_history') ? ['group_submission_history'] : []),
+      ...(entries.some((entry) => entry.route.kind === 'student_submission') ? ['single_submission_as_complete_history'] : []),
+      ...(uploads.some((entry) => entry.upload.urlPolicy === 'cross-origin-unsupported') ? ['cross_origin_binary_upload'] : []),
+      ...(uploads.some((entry) => entry.upload.qiniu) ? ['qiniu_chunk_upload'] : []),
     ],
     chains,
   };
@@ -329,23 +520,54 @@ export function analyzeHar(har) {
   if (!object(har?.log) || !Array.isArray(har.log.entries)) throw new HarInputError('invalid_har');
   if (har.log.entries.length > LIMITS.entries) throw new HarInputError('entry_limit_exceeded');
   const selected = [];
+  const metadata = [];
+  const interruptions = [];
   let ignored = 0;
   for (let index = 0; index < har.log.entries.length; index++) {
     const entry = har.log.entries[index];
-    const route = routeOf(entry?.request?.url);
     const method = entry?.request?.method;
-    if (!route || !METHODS.has(method)) { ignored++; continue; }
     const status = Number.isInteger(entry?.response?.status) && entry.response.status >= 100 && entry.response.status <= 599
       ? entry.response.status : null;
-    const request = bodyOf(entry?.request?.postData);
+    let route = routeOf(entry?.request?.url);
+    let metadataIndexes = [];
+    if (!route && method === 'PUT') {
+      const url = safeUrl(entry?.request?.url);
+      // No storage-host wildcard: one successful same-origin metadata response
+      // authorizes inspection of precisely its returned URL, including query.
+      if (url?.origin === ORIGIN) metadataIndexes = metadata.filter((candidate) =>
+        successfulHttp(candidate) && candidate.upload.id !== null && candidate.upload.metadataShapeKnown
+        && candidate.upload.url === url.href).map((candidate) => candidate.index);
+      if (metadataIndexes.length) route = { path: '{sameOriginUploadUrl}', kind: 'upload_binary' };
+    }
+    if (!route || !METHODS.has(method)) {
+      // Retain only a private, path-free interruption marker. Unknown school
+      // endpoints can invalidate identity without entering the public allowlist.
+      if (status === 401 && sameSchoolOrigin(entry?.request?.url)) {
+        interruptions.push({ index, route: { kind: 'session_interruption' }, method: '', status });
+      }
+      ignored++; continue;
+    }
+    const request = route.kind === 'upload_binary'
+      ? { public: { format: mediaType(entry?.request?.postData?.mimeType), state: 'binary_body_omitted' } }
+      : bodyOf(entry?.request?.postData);
     const response = bodyOf(entry?.response?.content);
     const params = entry?.request?.postData?.params;
-    const hasFilePart = request.public.format === 'multipart' && Array.isArray(params)
-      && params.some((param) => typeof param?.fileName === 'string' && param.fileName.length > 0);
-    selected.push({ index, route, method, status, request, response, hasFilePart });
+    const fileNames = request.public.format === 'multipart' && Array.isArray(params) && params.length <= LIMITS.receiptSamples
+      ? params.filter((param) => param?.name === 'file' && typeof param.fileName === 'string' && param.fileName.length > 0)
+        .map((param) => param.fileName) : [];
+    const requestBodySize = Number.isSafeInteger(entry?.request?.bodySize) && entry.request.bodySize >= 0
+      ? entry.request.bodySize : null;
+    const rawPayloadMetadata = typeof entry?.request?.postData?.mimeType === 'string'
+      && entry.request.postData.mimeType.length > 0 && request.public.format !== 'multipart' && requestBodySize !== null;
+    const item = { index, route, method, status, request, response, metadataIndexes, fileNames, requestBodySize, rawPayloadMetadata };
+    if (route.kind === 'upload_metadata' && method === 'POST') {
+      item.upload = uploadDetails(item);
+      metadata.push(item);
+    }
+    selected.push(item);
   }
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     contractVerified: false,
     evidenceLevel: 'untrusted_offline_trace_only',
     origin: ORIGIN,
@@ -359,14 +581,22 @@ export function analyzeHar(har) {
       httpStatus: entry.status,
       requestBody: entry.request.public,
       responseBody: entry.response.public,
+      ...(entry.route.kind === 'submission' && ['POST', 'PUT'].includes(entry.method)
+        ? { submissionIntent: submissionIntent(entry) } : {}),
+      ...(entry.route.kind === 'student_history' && entry.method === 'GET'
+        ? { history: historyDetails(entry.response.value).public } : {}),
+      ...(entry.upload ? { uploadMetadata: { uploadUrlPolicy: entry.upload.urlPolicy,
+        transferMode: entry.upload.mode, callbackRequired: entry.upload.callbackRequired } } : {}),
+      ...(entry.route.kind === 'upload_binary' ? { associatedMetadataEntries: entry.metadataIndexes.map((index) => index + 1) } : {}),
     })),
-    homeworkEvidence: homeworkEvidence(selected),
+    homeworkEvidence: homeworkEvidence(selected, interruptions),
     manualReviewRequired: [
       'school_endpoint_and_field_semantics',
       'account_and_session_binding',
       'actual_binary_upload_completion',
+      'cross_origin_storage_and_qiniu_contracts',
       'authoritative_receipt_and_policy_rules',
-      'receipt_freshness_and_server_timestamps',
+      'history_completeness_and_authoritative_submission_time',
       'idempotency_timeout_and_error_variants',
       'authorized_school_sandbox_acceptance',
     ],

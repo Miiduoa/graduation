@@ -19,7 +19,9 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | Agent 代理下載與準備作業 | 已實作，需使用者分別授權；在聊天內下載附件、選定作業並開啟預覽 |
 | 隨時調整／撤銷 Agent 權限 | 已實作，綁定 revision 與權限版本雙重檢查；換綁後重新授權 |
 | 作業文字、附件選擇、預覽、複製內容 | 已實作，草稿及檔案只留在目前頁面記憶體 |
+| 依已確認的作業規則編輯與預覽 | 已實作；保留零附件額度，送出前先核對全部文字、檔案與總量，規則未知時只標示本頁整理上限 |
 | 上傳 → 最終送出 → 讀回收據 | 服務及 UI 已實作，以注入測試來源驗證 |
+| 官方送出協定與受控文字候選實作 | 已實作 request builder、acknowledgment parser 及預設停用的單次 POST；尚未接入公開路由或正式 provider |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
 | 重交、撤回、小組繳交、代替其他人繳交 | 未實作；小組歷史也回傳 `group-unsupported`，引導至原作業查看 |
 | 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊作業、討論發文／回覆、問卷與同儕互評 writer 改為明確拒絕，避免假成功 |
@@ -94,6 +96,10 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 `PUT /api/tronclass` 接收單一附件原始 bytes。query 為 `courseId`, `homeworkId`, `revision`, `operationId`, `fileId`, `name`；Content-Type 為檔案 MIME。單檔最多 10 MiB、每份最多 4 個檔案、總附件最多 20 MiB、文字最多 20,000 字元；校方規則若更嚴格，採更嚴格者。這是應用程式上限，不是校方的通用額度。
 
+`prepare.rules` 為 `{ status: "unknown" }` 或 `{ status: "confirmed", allowsText, allowsAttachments, maxTotalBytes }`；附件數量、單檔上限與 MIME 仍由既有 `maxFiles`、`maxFileBytes`、`allowedContentTypes` 提供。來源 `permissionKnown` 未確認時，不把本頁 4 檔／10 MiB／20 MiB 整理額度當成校方授權。已確認的零值保持為零，不回退成預設額度；較舊的回應若沒有 `rules`，仍能整理與預覽，但不能據此送出。
+
+使用者確認送出後，UI 先重新取得完整規則，再一次核對文字、所有附件、檔名、空檔、個別大小、合計大小及 MIME。任何一項不合格，都在第一個 upload 前停止並保留草稿。重新讀取失敗會移除舊的送出資格，不讓先前的 `canSubmit` 繼續生效。後端原有規則檢查仍保留。
+
 回應使用 `Cache-Control: no-store, private`，不快取私人校方資料。一般請求每 owner 每程序每分鐘 60 次，同步每分鐘 6 次；另有 Firestore 持久化登入嘗試限制（15 分鐘：owner 6 次、同校方帳號 5 次）。一般請求限制不是跨程序全域配額。
 
 ### 教材附件下載
@@ -123,7 +129,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 1. 讀取本人課程與作業，確認來源已提供明確規則。
 2. 使用者檢視預覽，勾選確認，送出前重新讀取條件。
-3. 逐檔上傳並驗證完整附件集合；任何一檔失敗就不進入最終送出。
+3. 先以最新條件核對全部文字與附件，全部合格才逐檔上傳並驗證完整集合；任何一檔失敗就不進入最終送出。
 4. Firestore transaction 取得操作及作業鎖。鎖以校方、學生、課程、作業為範圍，即使同一校方學生綁定不同 nuni 帳號也共用。
 5. 再確認目前綁定與最新作業規則，之後才呼叫來源送出。
 6. 讀回來源收據，核對學生、課程、作業、正式 submitted 狀態、有效時間、本次文字與完整附件；排除原本已存在的收據。
@@ -152,13 +158,31 @@ production `createTronClassSubmissionSource()` 目前為 `contractVerified: fals
 
 目前未使用真人校方帳號、未對學校送出作業，也未證明所有上述契約已成立。
 
+### 受控候選實作的範圍
+
+`tronClassSubmissionProtocol.ts` 已根據官方公開 client 實作新作業 POST 的固定 body、一般檔案 metadata body、S3／WRPC callback body，以及保守的 acknowledgment／metadata parser。純文字先做 HTML escape 再保留換行；一般附件使用數字 ID，不把 `operationId` 或猜測的 upload key 放入校方 body。Metadata 的 `parent_id: 0` 代表個人資源根目錄，不是課程或活動 ID。
+
+Metadata parser 只回傳 `metadata-created` 和數字 ID，二進位能力固定為 `unsupported`；不使用或回傳任意 `upload_url`。Acknowledgment parser 要求明確的本人、課程、活動、新 ID 與非草稿／非教師代標等欄位；缺少任何必要證據保持 `unconfirmed`。這是保守候選 schema，尚無真人 POST 回應證明所有必填欄位一定存在。結果不含本文、教師資料、時間或 `receipt`，尤其不將 `created_at` 改成 `submittedAt`。
+
+`createTronClassTextSubmissionCandidate()` 是供受控環境驗證的獨立候選，不是 production `TronClassSubmissionSource`。其限制為：
+
+- `enabled` 預設 false，`contractVerified` 固定 false；沒有公開 HTTP 入口，也沒有環境變數可把它接入既有正式送出流程。
+- 只接受 normal、個人、一般窗口、首次、純文字；呼叫端必須提供從校方資料取得的權限確認、完整空歷史、零送出次數及前置活動已符合的證明。候選不以 raw activity 缺少欄位推論放行。
+- 使用固定靜宜 origin 與 `/api/course/activities/{id}/submissions` POST，拒絕任意路徑、query、附件 ID、二進位或其他作業模式。XSRF cookie 缺少或格式不符時停止；目前只實作公開 Angular 預設策略，仍需實測校方要求。
+- 送出前後重新檢查 binding revision；預設 15 秒、最多 1 MiB 回應、無 redirect／fallback／retry。單一 candidate 實例只允許一次外部嘗試，競態或逾時不會再送。
+- 上述單一實例保護不能代替既有持久化 operation／作業鎖。接入正式 provider 前，仍須完成真實權限 reader、CSRF／session 契約、持久化 claim 與本人／教師 readback 驗收。
+
+目前測試全部注入記憶體 HTTP 回應與合成身分；本次沒有執行候選的真實校方 POST，也沒有開放附件傳輸或把 acknowledgment 當成成功收據。
+
 ### 離線契約查核工具
 
 `scripts/tronclass/analyze-har.mjs` 可在本機檢查已獲授權的 HAR，輸出固定靜宜 origin、白名單路徑模板、HTTP method／status、去值化 JSON 型別與 upload → final → 本人 readback 的證據缺口。原始 header、cookie、query、學生代號、檔名、內容及未知欄位名稱都不輸出；輸入、分析深度與輸出均有限制，錯誤也使用固定代碼。
 
 此工具不連網、不重播操作，不會自行開放 adapter。HAR 可被編輯，HTTP 2xx 或完整觀察鏈也不能取代真人校方驗收，報告的 `contractVerified` 永遠是 false。使用方式、輸入限制與缺口說明見 [`scripts/tronclass/README.md`](../../scripts/tronclass/README.md)。原始 HAR 不應提交 Git 或傳入對話。
 
-**目前分析器仍使用原有候選路徑，尚未完整辨識本輪確認的 `submission_list`、`/api/course/activities/{id}/submissions`、二進位上傳及 callback。空報告或缺少 chain 不能解讀成 HAR 中沒有這些動作。** 下一步需連同狀態欄位與附件關聯一起更新分析器；詳見 [公開前端契約查核的工具缺口](tronclass-public-contract-2026-11-16.md#離線分析器的目前缺口)。
+本輪分析器已升為 `formatVersion: 2`，辨識官方 activity／本人 `submission_list` GET、POST／PUT final、metadata、可精確關聯的同來源 binary PUT 及 callback。舊猜測路徑保留 `legacy_*` 分類，不再作為正式流程證據。它會核對登入脈絡、事前歷史、相同作業與版本、`created_by`、數字 upload IDs、精確本文及唯一最新版；POST 新送出與 PUT 草稿轉正式分開處理，後續退回或讀取失敗不會被先前成功掩蓋。
+
+Binary 證據只採用先前 metadata 中完全相同的同來源 `upload_url`，包含 query 的一致性；這是離線比對，不代表該 URL 已獲准作為線上 PUT 目的地。跨來源儲存服務、QINIU 或外部資源明確列為未支援。空報告、未識別路徑與不足的 chain 仍不能證明 HAR 沒有操作，完整觀察鏈也不會把 `contractVerified` 改成 true。使用範圍見 [分析器說明](../../scripts/tronclass/README.md)。
 
 ## 環境設定
 
@@ -204,19 +228,19 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、Agent grants／意圖／工具／下載、client、TronClassWorkspace 與既有 Assistant／NuniApp 回歸；另外驗證 Mobile 五個舊 writer 沒有任何網路送出。HAR 測試使用 `node --test scripts/tronclass/analyze-har.test.mjs`，已加入既有 CI。
 
-2026-11-16 本輪驗證結果如下。這是本次指定範圍的回歸結果，不代表整個 monorepo 的所有測試均已執行；重跑的子集合不重複累加。
+2026-11-16 續作的驗證結果如下。這是本次指定範圍的回歸結果，不代表整個 monorepo 的所有測試均已執行；重跑的子集合不重複累加。
 
 | 範圍 | 結果 |
 | --- | --- |
-| Web 回歸 | **27 個測試檔、599 / 599 通過** |
+| Web TronClass 回歸 | **30 個測試檔、809 / 809 通過**，包含新規則 UI、protocol 與 candidate |
 | 完整 Web TypeScript 檢查 | 通過，exit 0 |
-| 本輪修改的 Web TypeScript 檔 ESLint | **0 errors** |
-| 共用歷史回應 parser ESLint | `--max-warnings 0` 通過 |
+| 本輪修改的 Web TypeScript 檔 ESLint | **12 個檔案，`--max-warnings 0` 通過** |
 | nuni UI design gate | `--base origin/main` 通過 |
-| Backend account＋dorm 回歸 | **49 / 49 通過**，為這兩個範圍的合計 |
-| Backend TronClass scraper 回歸 | **88 / 88 通過** |
+| 離線 HAR v2 | **32 / 32 通過**，包含交叉審查發現的作者、baseline 範圍、metadata 與同來源 401 邊界 |
 
-本輪涵蓋本人歷史 GET 的來源及身分範圍核對、草稿／退回／教師標記／未知狀態、最新版與來源時間、教師內容移除、分頁與資料上限、小組未支援、歷史與新收據隔離，以及來源隱藏過濾、校方登入失效與晚到結果的重新連接行為。既有 Agent 與作業權限、防重及恢復流程亦在 Web 指定回歸範圍內。前輪 Mobile 舊 writer 與離線 HAR 的測試紀錄不列入本輪數量。
+本輪新涵蓋零附件額度、文字／附件模式、最新規則變更、全部附件在上傳前核對、prepare 失敗撤銷舊資格；protocol 的數字 ID、純文字處理、metadata 與 acknowledgment 分流；candidate 的預設停用、權限不明停止、deadline 跨過 awaited binding check、固定 POST、有限回應、CSRF 格式、取消／逾時、同時呼叫只送一次，以及綁定變更丟棄晚到結果。protocol 131 項、candidate 45 項與規則 UI 20 項均包含在 Web 809 項之內，不重複累加。
+
+既有本人歷史、Agent 權限、資料可見性、防重與重新連接亦包含在本輪 Web 指定範圍內。前輪 Backend account＋dorm 49 項、scraper 88 項與其他 Mobile 測試未在本輪重新計數；相應實作本輪沒有變更。
 
 測試中的 verified provider、帳號、課程及收據都是合成資料，用於證明權限隔離、防重、失敗與恢復行為。官方公開 JavaScript 的匿名 GET 查核可證明前端使用的路徑與欄位，不能取代真人帳號回應、真實繳交或教師收件驗收。本輪沒有宣告正式部署，也未宣告桌面／窄螢幕／深色模式的瀏覽器視覺驗證通過；UI design gate 是程式檢查，不等同視覺驗收。
 

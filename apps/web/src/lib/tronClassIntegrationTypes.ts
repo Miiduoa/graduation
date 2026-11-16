@@ -80,6 +80,11 @@ export type TronClassSubmissionReceipt = {
   source: 'tronclass';
 };
 
+/** Confirmed school rules are independent of whether nuni can currently write. */
+export type TronClassSubmissionRules =
+  | { status: 'unknown' }
+  | { status: 'confirmed'; allowsText: boolean; allowsAttachments: boolean; maxTotalBytes: number };
+
 export type TronClassPreparation = {
   source: 'tronclass';
   schoolId: 'pu';
@@ -94,6 +99,8 @@ export type TronClassPreparation = {
   maxFiles: number;
   maxFileBytes: number;
   allowedContentTypes: string[];
+  /** Older responses omit this field and must be treated as unconfirmed. */
+  rules?: TronClassSubmissionRules;
   receipt: TronClassSubmissionReceipt | null;
   history?: TronClassSubmissionHistory;
 };

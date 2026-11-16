@@ -123,6 +123,38 @@ function closeOwner(rows: Map<string, Record<string, unknown>>) {
 }
 
 describe('TronClass submission orchestration (injected verified source only)', () => {
+  it('preserves confirmed zero attachment limits for a text-only assignment', async () => {
+    const f = fixture();
+    Object.assign(f.assignment, { allowsAttachments: false, maxFiles: 0, maxFileBytes: 0, maxTotalBytes: 0 });
+    expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ canSubmit: true, maxFiles: 0, maxFileBytes: 0,
+      rules: { status: 'confirmed', allowsText: true, allowsAttachments: false, maxTotalBytes: 0 } });
+    expect(f.source.uploadFile).not.toHaveBeenCalled();
+    expect(f.source.submit).not.toHaveBeenCalled();
+  });
+
+  it('reports unconfirmed rules without interpreting placeholder false or zero values as school permissions', async () => {
+    const f = fixture();
+    Object.assign(f.assignment, { permissionKnown: false, allowsText: false, allowsAttachments: false,
+      maxFiles: 0, maxFileBytes: 0, maxTotalBytes: 0 });
+    expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ canSubmit: false, rules: { status: 'unknown' } });
+  });
+
+  it.each([5 * 1024 * 1024, 30 * 1024 * 1024])('returns the stricter school/app total attachment limit for %s bytes', async (maxTotalBytes) => {
+    const f = fixture();
+    f.assignment.maxTotalBytes = maxTotalBytes;
+    expect((await f.service.prepare(OWNER, SCOPE)).rules).toEqual({ status: 'confirmed',
+      allowsText: true, allowsAttachments: true, maxTotalBytes: Math.min(maxTotalBytes, 20 * 1024 * 1024) });
+  });
+
+  it('does not enable an unverified writer merely because its read rules are known', async () => {
+    const f = fixture();
+    f.source.contractVerified = false;
+    expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ canSubmit: false,
+      rules: { status: 'confirmed', allowsText: true, allowsAttachments: true } });
+    expect(f.source.uploadFile).not.toHaveBeenCalled();
+    expect(f.source.submit).not.toHaveBeenCalled();
+  });
+
   it('prepares rules and requires all uploaded files plus a matching school receipt', async () => {
     const f = fixture();
     expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ canSubmit: true, revision: REVISION, receipt: null });

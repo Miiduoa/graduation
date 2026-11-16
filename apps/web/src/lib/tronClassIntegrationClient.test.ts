@@ -24,6 +24,39 @@ describe('TronClass client response boundary', () => {
     expect(preparation.receipt).toBeNull();
   });
 
+  it('accepts confirmed zero limits and keeps old responses readable without inventing confirmed rules', () => {
+    const value = { ...preparation, canSubmit: true, blockedReason: null,
+      rules: { status: 'confirmed', allowsText: true, allowsAttachments: false, maxTotalBytes: 0 } };
+    expect(parseTronClassResult('prepare', value, { courseId: 1, homeworkId: 2 })).toEqual(value);
+    const legacy = parseTronClassResult('prepare', preparation, { courseId: 1, homeworkId: 2 });
+    expect(legacy).not.toHaveProperty('rules');
+  });
+
+  it('accepts an explicit unknown-rules response only as unavailable for submission', () => {
+    const value = { ...preparation, rules: { status: 'unknown' } };
+    expect(parseTronClassResult('prepare', value, { courseId: 1, homeworkId: 2 })).toEqual(value);
+    expect(() => parseTronClassResult('prepare', { ...value, canSubmit: true }, { courseId: 1, homeworkId: 2 }))
+      .toThrowError('尚未收到可確認的回覆');
+  });
+
+  it.each([
+    null,
+    { status: ['confirmed'], allowsText: true, allowsAttachments: true, maxTotalBytes: 20 },
+    { status: 'confirmed', allowsText: 'true', allowsAttachments: true, maxTotalBytes: 20 },
+    { status: 'confirmed', allowsText: true, allowsAttachments: true, maxTotalBytes: -1 },
+    { status: 'confirmed', allowsText: true, allowsAttachments: true, maxTotalBytes: 1.5 },
+    { status: 'unknown', allowsText: true },
+  ])('rejects malformed or contradictory rule metadata: %j', rules => {
+    expect(() => parseTronClassResult('prepare', { ...preparation, rules }, { courseId: 1, homeworkId: 2 }))
+      .toThrowError('尚未收到可確認的回覆');
+  });
+
+  it('rejects MIME patterns that the confirmed school contract cannot compare as exact file types', () => {
+    const rules = { status: 'confirmed', allowsText: true, allowsAttachments: true, maxTotalBytes: 20 };
+    expect(() => parseTronClassResult('prepare', { ...preparation, rules, allowedContentTypes: ['image/*'] }, { courseId: 1, homeworkId: 2 }))
+      .toThrowError('尚未收到可確認的回覆');
+  });
+
   it.each([
     { ...history, courseId: 999 }, { ...history, homeworkId: 999 },
     { ...history, state: ['available'] },
