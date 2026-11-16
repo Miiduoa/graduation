@@ -1165,7 +1165,7 @@ service cloud.firestore {
                 && request.resource.data.body.size() <= 8000));
         }
 
-        // Direct GET may show a legacy visible post or the author's own draft.
+        // Direct GET of ambiguous legacy posts is limited to the author or manager.
         // LIST is stricter: Firestore rules are not filters, so readers must
         // constrain queries to explicitly published, non-withdrawn records.
         function isCanonicalVisiblePost() {
@@ -1224,7 +1224,7 @@ service cloud.firestore {
           && request.resource.data.get('isAI', false) == false
           && request.resource.data.get('authorName', '') != '助理回覆'
           && (
-            (isActiveGroupMember(groupId) && isVisiblePostForReactions() && ownPostVoteOnly())
+            (isActiveGroupMember(groupId) && isCanonicalVisiblePost() && ownPostVoteOnly())
             || (
               (canManageGroup(groupId)
                 || (ownsOrdinaryPost()
@@ -1235,10 +1235,11 @@ service cloud.firestore {
                   // post. Moderators alone can reopen archived, scheduled or
                   // unpublished content; a stale author write must not revive it.
                   && isVisiblePostForReactions()
-                  && request.resource.data.get('published', true) == resource.data.get('published', true)
-                  && request.resource.data.get('status', '') == resource.data.get('status', '')
-                  && request.resource.data.get('deleted', false) == resource.data.get('deleted', false)
-                  && request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)))
+                  // Default-value equality allowed missing visibility flags
+                  // to be materialized as public by a legacy post author.
+                  && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                    'published', 'status', 'deleted', 'deletedAt'
+                  ]))
               && request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
               && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
             )
@@ -1247,7 +1248,7 @@ service cloud.firestore {
         // withdrawn it. The author may remove an ordinary visible post only;
         // active managers retain the ability to remove held and legacy drafts.
         allow delete: if canManageGroup(groupId)
-          || (ownsOrdinaryPost() && isVisiblePostForReactions());
+          || (ownsOrdinaryPost() && isCanonicalVisiblePost());
 
         match /comments/{commentId} {
           // Comments are a separate collection path: membership alone must not

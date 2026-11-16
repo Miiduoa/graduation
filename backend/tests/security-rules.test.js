@@ -122,7 +122,8 @@ describe('firestore security rules', () => {
       });
       await db.doc(path('visible')).set({
         authorId: 'alice', kind: 'post', title: 'Open', body: 'public',
-        status: 'published', likes: 0, likedBy: [],
+        status: 'published', published: true, deleted: false, deletedAt: null,
+        likes: 0, likedBy: [],
       });
     });
     const alice = testEnv.authenticatedContext('alice').firestore();
@@ -180,7 +181,10 @@ describe('firestore security rules', () => {
       }
       await db.doc(path('hidden')).set({ authorId: 'alice', kind: 'post', published: false });
       for (const id of ['visible', 'stale', 'revoked']) {
-        await db.doc(path(id)).set({ authorId: 'alice', kind: 'post', status: 'published' });
+        await db.doc(path(id)).set({
+          authorId: 'alice', kind: 'post', status: 'published',
+          published: true, deleted: false, deletedAt: null,
+        });
       }
     });
     const alice = testEnv.authenticatedContext('alice').firestore();
@@ -1627,6 +1631,48 @@ describe('firestore security rules', () => {
       await seedFirestore((admin) =>
         admin.doc('groups/course/members/alice').update({ status: 'removed' }));
       await assertFails(author.update({ title: 'After revocation' }));
+    });
+
+    test('unclassified legacy post cannot be promoted, voted or hard-deleted without review', async () => {
+      const legacy = 'groups/course/posts/legacy-unclassified';
+      await seedFirestore(async (admin) => {
+        await admin.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc(legacy).set({
+          authorId: 'alice', kind: 'post', status: 'published', title: 'Legacy post',
+          likedBy: [], likes: 0,
+        });
+      });
+      const author = testEnv.authenticatedContext('alice').firestore().doc(legacy);
+      const member = testEnv.authenticatedContext('bob').firestore().doc(legacy);
+      const manager = testEnv.authenticatedContext('teacher').firestore().doc(legacy);
+      const crossSchool = testEnv.authenticatedContext('mallory').firestore().doc(legacy);
+      await assertSucceeds(author.get({ source: 'server' }));
+      await assertFails(member.get({ source: 'server' }));
+      await assertFails(member.update({ likedBy: ['bob'], likes: 1 }));
+      await assertFails(crossSchool.update({ likedBy: ['mallory'], likes: 1 }));
+      // Previous default-value equality permitted this unauthorized
+      // publication of an unclassified legacy parent post.
+      await assertFails(author.update({ published: true, deleted: false, deletedAt: null }));
+      await assertFails(author.delete());
+      await assertSucceeds(author.update({ title: 'Legacy text correction' }));
+      // The actual manager may classify/restore the old post deliberately.
+      await assertSucceeds(manager.update({
+        published: true, status: 'published', deleted: false, deletedAt: null,
+      }));
+      await assertSucceeds(member.get({ source: 'server' }));
+      await assertSucceeds(member.update({ likedBy: ['bob'], likes: 1 }));
+      // Reusing a previously authorized SDK after moderation or membership
+      // revocation must not permit reaction replay or deletion.
+      await seedFirestore((admin) => admin.doc(legacy).update({ status: 'archived' }));
+      await assertFails(member.update({ likedBy: [], likes: 0 }));
+      await assertFails(author.delete());
+      await assertFails(author.update({ status: 'published' }));
+      await assertSucceeds(manager.update({ status: 'published' }));
+      await seedFirestore((admin) => admin.doc('groups/course/members/bob').update({ status: 'removed' }));
+      await assertFails(member.get({ source: 'server' }));
+      await assertFails(member.update({ likedBy: [], likes: 0 }));
     });
 
     test('group post votes cannot forge other members and reject withdrawn or revoked users', async () => {

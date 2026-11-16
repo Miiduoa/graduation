@@ -858,3 +858,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **最小修補：** 將子留言讀寫共用的 `canReadPostComments()` 非作者可見條件改為與父貼文一致的四項明確值（`published:true`、`status:'published'`、`deleted:false`、`deletedAt:null`）；保留原作者在有效校籍／群組資格下預覽自己的草稿留言、正常發布貼文的其他成員互動，以及撤權與刪文後拒絕。未增加角色或跨校豁免，也未修改正式資料。
 - **合成回歸：** 更新 `backend/tests/security-rules.test.js` 的通用正常 fixture 為明示公開；另在父貼文及留言案例明確建立 legacy 缺欄位父文件，要求非作者（含教師）透過直接 GET 與 LIST 讀取留言被拒，作者仍可讀；伺服器明示發布後正常讀取與互動恢復，原有封存、撤權及重放案例保留。**本次改動如沒有精確 head Firebase Emulator 成功紀錄，就只能稱為待驗證候選，不得稱已隔離驗收。**
 - **發佈阻礙不變：** 歷史缺欄位的原本可見留言對非作者會被暫時隱藏；需事先合法盤點與人工判斷、隔離資料相容/索引、主線整合、完整 CI 及指定 App 5504170 對新 head 審查通過後，再由正式發布窗口處理。GCS/Supabase 既發網址、真 Storage CAS、歷史附件可信引用、minimatch 與回復驗證仍未結案。不執行正式資料、金鑰、token、migration、部署、E 校園或未授權 npm/pnpm audit 操作。
+
+
+### 2026-11-17：P0 未明示公開舊貼文的寫入繞過與作者硬刪阻斷（PR #577）
+
+- 前一精確 head `82e36071fe8a7b53237581557bbc2e2fb22f1ffb` 在父貼文 GET/LIST、留言都 fail-closed 後，寫入條件仍以 `resource.data.get('published', true)`、`get('deleted',false)`、`get('deletedAt',null)` 的預設值比對。缺欄位但有 `status:'published'` 的歷史文件，可由原作者直接 UPDATE 加入缺少的公開旗標，繞過管理員審核後重新變成 GET/LIST 可讀。一般成員按讚及作者硬刪也沿用寬鬆的舊可見條件，可能操作尚未分類的歷史文。
+- 最小修補：普通作者 UPDATE 不得新增、移除或修改 `published/status/deleted/deletedAt` 四個欄位（使用 `diff(...).affectedKeys().hasAny(...)` 而非預設值比較）；保留原作者文字更正及管理員人工發布。第三方 vote 與原作者硬刪只接受四個欄位完整的 `isCanonicalVisiblePost()`，不對缺欄位資料推定公開。
+- 新增 Firebase 模擬器合成回歸：未分類歷史貼文直接 GET、跨帳號與跨校投票拒絕，原作者補旗標公開與硬刪拒絕，文字更正保留，管理員手動明示發布後恢復讀取／投票，封存後重放及群組撤權後重放拒絕。既有正常公開貼文 fixture 補齊四欄位。
+- **本輪驗證限制：** GitHub 新 head 的 Firebase Emulator、CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 尚須各自核實，靜態語法檢查不構成隔離驗收。歷史貼文缺旗標時，作者刪除與一般成員投票會暫停，必須先完成合法唯讀盤點、人工判讀、索引及 Web/Mobile/Rules 相容性與回復程序。PR Draft、最新主線分歧與指定 nuni-merge-gate App 5504170 對精確 head APPROVED 均阻擋合併與部署。
+- 未操作正式資料、金鑰、Storage token、migration、E 校園連線或受限制的 npm/pnpm audit；GCS/Supabase URL 撤銷、真 Storage CAS、歷史附件可信引用、minimatch 雙套鎖檔仍待驗收。
