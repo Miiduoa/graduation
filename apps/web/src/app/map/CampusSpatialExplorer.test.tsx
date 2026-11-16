@@ -993,18 +993,24 @@ it('defers an OSM request opened in a hidden mobile tab until one foreground res
   const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
   expect(scene.create).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
+  // A suspended mobile tab is waiting, not actively downloading OSM data.
+  const deferred = within(dialog).getByText(/目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓/);
+  expect(deferred.getAttribute('role')).toBe('status');
+  expect(within(dialog).queryByText(/正在讀取靜宜建築輪廓/)).toBeNull();
   expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
   // A spurious pageshow while still hidden must not touch public Overpass.
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).getByText(/目前位於背景分頁/)).toBeTruthy();
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   fireEvent(document, new Event('visibilitychange'));
   fireEvent(window, new Event('pageshow'));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).queryByText(/目前位於背景分頁/)).toBeNull();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
