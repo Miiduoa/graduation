@@ -87,22 +87,21 @@ function splitInlineCssDeclarations(style: string): string[] {
   return declarations;
 }
 
-// HTML decodes numeric character references inside quoted attribute values
-// before applying inline styles / ARIA. Only decode numeric references here;
-// this is not a complete HTML entity or CSS cascade implementation.
 // HTML resolves character references in quoted attributes before parsing
 // CSS/ARIA. Decode one pass only: &amp;colon; represents literal &colon; in
 // the DOM, not a second colon escape. These named references affect explicit
 // hidden styles; this is intentionally not a full HTML entity parser.
 function decodeHtmlAttributeReferences(value: string): string {
-  const cssEntities: Record<string, string> = {
-    colon: ':', semi: ';', Tab: '\t', NewLine: '\n',
-    excl: '!', sol: '/', lpar: '(', rpar: ')',
-  };
+  // Use a Map so an unrecognized &constructor;/&toString; is never
+  // substituted by an inherited Object prototype member.
+  const cssEntities = new Map<string, string>([
+    ['colon', ':'], ['semi', ';'], ['Tab', '\t'], ['NewLine', '\n'],
+    ['excl', '!'], ['sol', '/'], ['lpar', '('], ['rpar', ')'],
+  ]);
   return value.replace(/&(?:#(?:[xX]([0-9a-fA-F]+)|([0-9]+));?|([A-Za-z]+);)/gu,
     (reference: string, hex: string | undefined, decimal: string | undefined,
       name: string | undefined) => {
-      if (name !== undefined) return cssEntities[name] ?? reference;
+      if (name !== undefined) return cssEntities.get(name) ?? reference;
       const codePoint = Number.parseInt(hex ?? decimal ?? '', hex === undefined ? 10 : 16);
       return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff &&
         (codePoint < 0xd800 || codePoint > 0xdfff)
