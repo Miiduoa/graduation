@@ -192,6 +192,7 @@ test('learning excludes tasks outside current memberships and opens a verified s
   expect(view.queryByText('不可列出的任務')).toBeNull();
   fireEvent.press(view.getByText('進行中的點名'));
   expect(mockNavigation.navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'AttendanceMultiMethod',
     params: { courseId: 'group-1', sessionId: 'session-1' },
   });

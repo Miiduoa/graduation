@@ -221,6 +221,35 @@ it('returns Google login to the requested assistant permission section, campus a
   expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(null))!)).toEqual({ schoolId: 'nthu' });
 });
 
+it.each([
+  {
+    scope: 'campus=pu&schoolId=pu&school=PU',
+    expectedCampus: { schoolId: 'pu', campus: 'pu', school: 'PU' },
+  },
+  { scope: 'campus=all&schoolId=pu&school=PU', expectedCampus: { campus: 'all' } },
+  { scope: '', expectedCampus: { schoolId: 'nthu', campus: 'nthu', school: 'NTHU' } },
+])(
+  'returns from settings to the profile in the resolved "$scope" campus only',
+  async ({ scope, expectedCampus }) => {
+    const saved = JSON.stringify({ schoolId: 'nthu' });
+    localStorage.setItem(schoolPreferenceKey(null), saved);
+    visit(
+      `/settings?${scope}${scope ? '&' : ''}section=appearance&token=private&q=private-query&returnUrl=%2Fadmin#reading`,
+    );
+    render(<Flow task="settings" />);
+    await waitFor(() => {
+      const target = new URL(
+        screen.getByRole('link', { name: /返回個人資料/ }).getAttribute('href')!,
+        'https://campus.local',
+      );
+      expect(target.pathname).toBe('/profile');
+      expect(Object.fromEntries(target.searchParams)).toEqual(expectedCampus);
+      expect(target.hash).toBe('');
+    });
+    expect(localStorage.getItem(schoolPreferenceKey(null))).toBe(saved);
+  },
+);
+
 it.each(['notifications', 'account'])('returns school connection to the %s settings task', async (section) => {
   localStorage.setItem(schoolPreferenceKey(null), JSON.stringify({ schoolId: 'nthu' }));
   visit(`/settings?section=${section}&campus=pu&schoolId=pu#preferences`);

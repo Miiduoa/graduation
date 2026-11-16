@@ -58,6 +58,7 @@ test('a course task opens that assignment instead of the class feed', async () =
   const view = render(<LearnAiFirstScreen />);
   fireEvent.press(await view.findByText('迴歸分析作業'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: {
       courseId: 'course-a',

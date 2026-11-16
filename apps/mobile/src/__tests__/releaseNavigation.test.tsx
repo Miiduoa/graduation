@@ -13,6 +13,9 @@ import {
   type RootTabParamList,
 } from '../app/rootNavigation';
 import { safeNavigate } from '../utils/safeNavigate';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import type { InboxTask } from '../data/types';
 import Constants from 'expo-constants';
 import { HomeStack } from '../screens/HomeStack';
 import { LearnStack } from '../screens/LearnStack';
@@ -70,6 +73,7 @@ jest.mock('../features/campusAssistant', () => ({
     reason: '尚未下載免費模型',
   })),
 }));
+jest.mock('../services/companionSignalRecorder', () => ({ recordCompanionEvent: jest.fn() }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../screens/AdminDashboardScreen', () => {
   const React = require('react');
@@ -1319,6 +1323,10 @@ test.each([
   ['notifications', 'Notifications', '訊息', 'Inbox'],
   ['career?schoolId=pu', 'Career', '校園', 'CampusHome'],
   ['settings', 'Settings', '我的', 'MeHome'],
+  ['personal-timetable', 'PersonalTimetable', '學習', 'LearnHome'],
+  ['grades', 'Grades', '學習', 'LearnHome'],
+  ['course-hub?groupId=course-1', 'CourseHub', '學習', 'LearnHome'],
+  ['personal-calendar/event-1', 'PersonalCalendar', '學習', 'LearnHome'],
 ])('冷啟動 %s 連結使用正確分頁且可返回該分頁首頁', async (path, screen, tab, home) => {
   if (screen === 'Career') mockSchool = 'ncku';
   const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
@@ -1349,6 +1357,125 @@ test.each([
   expect(navigation.getCurrentRoute()?.name).toBe(home);
   state = navigation.getRootState();
   expect(state.routes[state.index].name).toBe(tab);
+});
+
+const courseTaskCases: Array<{
+  label: string;
+  task: Partial<InboxTask>;
+  teaching?: boolean;
+  screen: string;
+  params: Record<string, unknown>;
+}> = [
+  {
+    label: '繳交作業',
+    task: { kind: 'assignment', assignmentId: 'assignment-1' },
+    screen: 'HomeworkSubmit',
+    params: {
+      courseId: 'course-1', hwId: 'assignment-1', hwTitle: '本週課務',
+      dueAt: '2026-11-18T15:59:00.000Z', scrollToSubmit: true,
+    },
+  },
+  {
+    label: '開啟測驗',
+    task: { kind: 'quiz', assignmentId: 'quiz-1' },
+    screen: 'QuizTaking',
+    params: {
+      groupId: 'course-1', groupName: '資料庫', quizId: 'quiz-1',
+      dueAt: '2026-11-18T15:59:00.000Z',
+    },
+  },
+  {
+    label: '課堂簽到',
+    task: { kind: 'live', sessionId: 'session-1' },
+    screen: 'AttendanceMultiMethod',
+    params: { courseId: 'course-1', sessionId: 'session-1' },
+  },
+  {
+    label: '課程討論',
+    task: { kind: 'group' },
+    screen: 'CourseDiscussion',
+    params: { groupId: 'course-1', groupName: '資料庫' },
+  },
+  {
+    label: '教師批改',
+    teaching: true,
+    task: { kind: 'assignment', assignmentId: 'assignment-1' },
+    screen: 'TeacherGrading',
+    params: {
+      courseId: 'course-1', courseName: '資料庫', assignmentId: 'assignment-1',
+      assignmentTitle: '本週課務',
+    },
+  },
+];
+
+function courseTask(overrides: Partial<InboxTask> = {}): InboxTask {
+  return {
+    id: 'task-1', kind: 'assignment', groupId: 'course-1', groupName: '資料庫',
+    title: '本週課務', subtitle: '課程待辦', priority: 3,
+    dueAt: new Date('2026-11-18T15:59:00.000Z'), ...overrides,
+  };
+}
+
+test.each(courseTaskCases)('首次從今天$label後能返回課務首頁，再回原首頁', async ({ task, teaching, screen, params }) => {
+  if (teaching) mockAuth.profile = { ...mockAuth.profile, role: 'teacher', roleGroup: 'teacher' };
+  const { navigation, onUnhandledAction } = await mountRootTabs();
+  const source = navigation.getCurrentRoute();
+  expect(navigation.getRootState().routes.find((route) => route.name === '學習')?.state).toBeUndefined();
+  act(() => {
+    expect(navigateFromInboxTask(navigation, courseTask(task), {
+      role: teaching ? 'teacher' : 'student', isTeachingRole: !!teaching, scrollToSubmit: true,
+    })).toBe(true);
+  });
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: screen, params });
+  expect(navigation.getRootState().routes.find((route) => route.name === '學習')?.state?.routes.map((route) => route.name))
+    .toEqual(['LearnHome', screen]);
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('LearnHome');
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()).toEqual(source);
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('首次從通知開啟指定課程，保留來源參數與課務首頁回程', async () => {
+  const { navigation, onUnhandledAction } = await mountRootTabs();
+  act(() => safeNavigate(navigation, 'Notifications'));
+  const notifications = navigation.getCurrentRoute();
+  const params = { source: 'tronclass', courseId: 321, groupName: '來源課程' };
+  act(() => navigateToCourseScreen(navigation, 'student', 'CourseHub', params));
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'CourseHub', params });
+  expect(navigation.getRootState().routes.find((route) => route.name === '學習')?.state?.routes.map((route) => route.name))
+    .toEqual(['LearnHome', 'CourseHub']);
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('LearnHome');
+  act(() => navigation.navigate('訊息'));
+  expect(navigation.getCurrentRoute()).toEqual(notifications);
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test.each(['Today', '訊息'] as const)('從%s開啟作業時保留既有課務堆疊、參數與返回順序', async (sourceTab) => {
+  const { navigation, onUnhandledAction } = await mountRootTabs();
+  act(() => safeNavigate(navigation, 'CourseCatalog', { schoolId: 'pu', keyword: '資料庫' }));
+  act(() => navigateToCourseScreen(navigation, 'student', 'CourseHub', {
+    groupId: 'original-course', groupName: '原課程', sourceSystem: 'workspace',
+  }));
+  const before = navigation.getRootState().routes.find((route) => route.name === '學習')?.state?.routes;
+  expect(before?.map((route) => route.name)).toEqual(['LearnHome', 'CourseCatalog', 'CourseHub']);
+  act(() => navigation.navigate(sourceTab));
+  act(() => navigateFromInboxTask(navigation, courseTask({ assignmentId: 'assignment-1' }), {
+    role: 'student', isTeachingRole: false,
+  }));
+  const after = navigation.getRootState().routes.find((route) => route.name === '學習')?.state?.routes;
+  expect(after?.slice(0, -1)).toEqual(before);
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'HomeworkSubmit', params: { courseId: 'course-1', hwId: 'assignment-1' },
+  });
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()).toEqual(before?.[2]);
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()).toEqual(before?.[1]);
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()).toEqual(before?.[0]);
+  expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
 test.each(['root', 'safe'] as const)('%s 首次由我的開啟公開社群頁，返回交流首頁', async (entry) => {

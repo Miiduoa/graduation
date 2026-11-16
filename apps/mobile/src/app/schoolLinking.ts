@@ -20,6 +20,7 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
         },
       },
       學習: {
+        initialRouteName: 'LearnHome',
         screens: {
           LearnHome: 'learn',
           CoursesHome: 'courses',

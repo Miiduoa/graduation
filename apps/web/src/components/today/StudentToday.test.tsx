@@ -270,7 +270,7 @@ it('does not declare there are no assignments when the course platform is unconn
   view({ timetableStatus: 'ready', lmsUnconnected: true });
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
   expect(screen.getByRole('link', { name: '查看我的課程' }).getAttribute('href')).toBe(
-    '/classroom',
+    '/classroom?campus=pu',
   );
 });
 
@@ -565,7 +565,7 @@ it.each(['pending', 'empty', 'error'] as const)(
     });
     const work = within(screen.getByTestId('today-work'));
     const calendar = work.getByRole('link', { name: '查看行事曆' });
-    expect(calendar.getAttribute('href')).toBe('/calendar');
+    expect(calendar.getAttribute('href')).toBe('/calendar?campus=pu');
     calendar.focus();
     expect(document.activeElement).toBe(calendar);
     if (state === 'pending') {

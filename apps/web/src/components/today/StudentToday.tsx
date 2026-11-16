@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { buildPersonalToday } from '@campus/shared';
 import {
   formatTodayHeaderDate,
@@ -22,6 +23,7 @@ import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
+import { useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { loginHref } from '@/lib/navigation';
 import { assignmentHref, assignmentSubmitHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
@@ -39,6 +41,8 @@ type Props = {
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
+  /** Browsing context stays distinct from a timetable whose school is still resolving. */
+  campusSearch?: string;
   now: Date | null;
   updatedAt: Date | null;
   unsigned: boolean;
@@ -93,9 +97,9 @@ export function StudentToday(props: Props) {
       (props.timetableStatus === 'ready' && action.type !== 'class'));
   const showPlanner =
     !props.unsigned || !['empty', 'unsigned-scope'].includes(props.timetableStatus);
-  const returnSearch = buildCampusNavigationSearch(
-    new URL(props.timetableHref, 'https://campus.local').searchParams,
-  );
+  const returnSearch =
+    props.campusSearch ??
+    buildCampusNavigationSearch(new URL(props.timetableHref, 'https://campus.local').searchParams);
   const primaryLabel =
     action.type === 'overdue'
       ? TODAY_COPY.overdue
@@ -152,6 +156,7 @@ export function StudentToday(props: Props) {
       leavingTodoIds={props.leavingTodoIds}
       now={now}
       onRetry={props.onRetryTodos}
+      campusSearch={returnSearch}
     />
   );
 
@@ -180,6 +185,7 @@ export function StudentToday(props: Props) {
               timetableStatus={props.timetableStatus}
               lmsUnconnected={props.lmsUnconnected}
               weekHref={props.weekHref}
+              classroomHref={campusServiceHref('/classroom', returnSearch)}
             />
           </div>
         )}
@@ -228,12 +234,14 @@ function TodayStatus({
   timetableStatus,
   lmsUnconnected,
   weekHref,
+  classroomHref,
 }: {
   finished: boolean;
   todosError: string;
   timetableStatus: TimetableStatus;
   lmsUnconnected: boolean;
   weekHref: string;
+  classroomHref: string;
 }) {
   if (finished) return <p>{TODAY_COPY.allClassesDone}</p>;
   if (todosError || timetableStatus === 'error') {
@@ -249,7 +257,7 @@ function TodayStatus({
     return <p>先加入你的課表，就能查看每天的安排。</p>;
   }
   if (lmsUnconnected) {
-    return <Link href="/classroom">查看我的課程</Link>;
+    return <Link href={classroomHref}>查看我的課程</Link>;
   }
   return (
     <>
@@ -347,6 +355,7 @@ function TodoList({
   leavingTodoIds,
   now,
   onRetry,
+  campusSearch,
 }: {
   todos: TodayTodo[];
   primaryId?: string;
@@ -357,6 +366,7 @@ function TodoList({
   leavingTodoIds?: readonly string[];
   now: Date;
   onRetry: () => void;
+  campusSearch: string;
 }) {
   const leaving = useMemo(() => new Set(leavingTodoIds ?? []), [leavingTodoIds]);
   const [expanded, setExpanded] = useState(false);
@@ -369,14 +379,15 @@ function TodoList({
           {TODAY_FLOW_WORK_TITLE}
         </h2>
         {!unsigned && (
-          <Link className={styles.sectionLink} href="/calendar">
+          <Link className={styles.sectionLink} href={campusServiceHref('/calendar', campusSearch)}>
             查看行事曆
           </Link>
         )}
       </div>
       {unsigned ? (
         <p className={styles.empty}>
-          {TODAY_COPY.unsigned} <Link href="/calendar">也可先查看行事曆與期限</Link>
+          {TODAY_COPY.unsigned}{' '}
+          <Link href={campusServiceHref('/calendar', campusSearch)}>也可先查看行事曆與期限</Link>
         </p>
       ) : error ? (
         <>
@@ -390,7 +401,8 @@ function TodoList({
       ) : null}
       {!unsigned && lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
-          還沒有 nuni 課程資料。<Link href="/classroom">加入課程</Link>
+          還沒有 nuni 課程資料。
+          <Link href={campusServiceHref('/classroom', campusSearch)}>加入課程</Link>
           ，加入後作業期限會出現在這裡與行事曆。
         </p>
       ) : !unsigned && !error && !lmsUnconnected && todos.length === 0 ? (
@@ -452,6 +464,7 @@ function TodoList({
 export function StudentTodayPage(props: BoundProps) {
   const scope = usePersonalImportScope();
   const records = usePersonalTodayRecords();
+  const campusSearch = useCampusNavigationSearch(useSearchParams());
   const now = props.now ?? new Date();
   const schoolId = records.schoolId || scope.scope.schoolId || 'personal';
   const campusId = schoolId === 'personal' ? 'all' : schoolId;
@@ -495,6 +508,7 @@ export function StudentTodayPage(props: BoundProps) {
       }
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
+      campusSearch={campusSearch}
       now={props.now}
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}

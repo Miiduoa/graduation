@@ -400,6 +400,7 @@ test('the explicit submit button opens the real assignment', async () => {
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: {
       courseId: 'course-a',
@@ -442,6 +443,7 @@ test('one-tap homework uses the real current inbox task instead of a guessed tar
   await view.findAllByText('繳交期末報告');
   fireEvent.press(view.getByLabelText('直接前往交作業'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a' }),
   });
@@ -625,6 +627,7 @@ test('after classes end, the work row and its separate submit button retain thei
   fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    initial: false,
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a', scrollToSubmit: true }),
   });
@@ -657,6 +660,7 @@ test.each([
   fireEvent.press(quiz);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'QuizTaking',
     params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() },
   });
@@ -701,7 +705,7 @@ test('a class starting soon keeps the urgent quiz visible in the collapsed list 
   const headings = view.getAllByRole('header').map(node => node.props.children);
   expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
   fireEvent.press(view.getByRole('button', { name: '去作答，期中考' }));
-  expect(mockNavigate).toHaveBeenCalledWith('學習', { screen: 'QuizTaking',
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { initial: false, screen: 'QuizTaking',
     params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() } });
   expect(view.getByText(TODAY_COPY.moreTodos(11))).toBeVisible();
   expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();

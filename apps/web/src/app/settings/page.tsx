@@ -1323,7 +1323,10 @@ function SettingsContent({
               </button>
             ))}
           </nav>
-          <Link className={styles.profileLink} href="/profile">
+          <Link
+            className={styles.profileLink}
+            href={campusServiceHref('/profile', campusSearch)}
+          >
             返回個人資料 <span aria-hidden="true">↗</span>
           </Link>
         </aside>

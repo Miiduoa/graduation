@@ -184,6 +184,28 @@ async def goto_path(page, path):
     await page.goto(BASE + path, wait_until='load')
 
 
+async def wait_for_campus_header(page, school_id, school_name):
+    # The load event does not mean React has finished adopting streamed content.
+    # A raw CSS locator can briefly see both client and hidden server headers.
+    # Wait for the whole DOM to contain one header with a resolved picker; never
+    # choose the first/visible copy, which would hide a persistent duplicate.
+    await page.wait_for_function('''({schoolId, schoolName}) => {
+        const headers = document.querySelectorAll('header[data-campus-navigation="true"]');
+        const campuses = document.querySelectorAll('header summary[aria-label^="切換校園："]');
+        if (headers.length !== 1 || campuses.length !== 1) return false;
+        const campus = campuses[0];
+        const picker = campus.closest('details')?.querySelector('select');
+        return headers[0].contains(campus)
+            && campus.getAttribute('aria-label') === `切換校園：${schoolName}`
+            && picker !== null && picker !== undefined && !picker.disabled
+            && picker.value === schoolId;
+    }''', arg={'schoolId': school_id, 'schoolName': school_name}, timeout=5000)
+    await expect(page.locator('header[data-campus-navigation="true"]')).to_have_count(1)
+    campus = page.locator('header summary[aria-label^="切換校園："]')
+    await expect(campus).to_have_count(1)
+    return campus
+
+
 def assert_login_destination(href, return_path, school_context=None):
     context = school_context or {}
     assert set(context) <= {'school', 'schoolId', 'campus'}, context
@@ -467,7 +489,7 @@ async def check_deep_link_login_scope(page, preference, *, student_card=False):
 
     try:
         await goto_path(page, '/?campus=pu')
-        campus = page.locator('header summary[aria-label^="切換校園："]')
+        campus = await wait_for_campus_header(page, 'pu', '靜宜大學')
         await expect(campus).to_contain_text('靜宜大學')
         await campus.focus()
         await campus.press('Enter')
@@ -484,6 +506,7 @@ async def check_deep_link_login_scope(page, preference, *, student_card=False):
                 lambda value: parse_qs(urlparse(value).query).get('campus') == ['nthu']
             )
             await expect_saved_school('nthu')
+            await wait_for_campus_header(page, 'nthu', '國立清華大學')
             await expect(campus).to_contain_text('國立清華大學')
             await campus.focus()
             await campus.press('Enter')
@@ -504,6 +527,7 @@ async def check_deep_link_login_scope(page, preference, *, student_card=False):
         target = '/school-info?school=PU&schoolId=pu&campus=pu&token=discard-me#contact'
         await goto_path(page, target)
         await expect(page.get_by_role('heading', name='學校資訊', exact=True)).to_be_visible()
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
         await expect(campus).to_contain_text('靜宜大學')
         sign_in = page.locator('header[data-campus-navigation="true"]').get_by_role(
             'link', name='登入', exact=True
@@ -551,6 +575,7 @@ async def check_student_card_login_scope(page, preference, saved_school):
     }
     await goto_path(page, target)
     await expect(page.get_by_role('heading', level=1, name='數位學生證', exact=True)).to_be_visible()
+    await wait_for_campus_header(page, 'pu', '靜宜大學')
     await expect(page.locator('header summary[aria-label^="切換校園："]')).to_contain_text('靜宜大學')
     sign_in = page.get_by_role('link', name='登入學校帳號', exact=True)
     await expect(sign_in).to_be_visible()
@@ -1117,6 +1142,7 @@ async def main():
             await goto_path(page, '/?campus=pu')
             await check_home_personalization(page)
             results.append('home preferences start collapsed, support keyboard editing and cancel, persist only in their campus scope')
+            await wait_for_campus_header(page, 'pu', '靜宜大學')
             services = page.locator('header summary[aria-label="所有服務"]')
             await services.click()
             await expect(page.get_by_role('link', name='尋找校園服務')).to_be_visible()
@@ -1192,11 +1218,12 @@ async def main():
             results.append('settings deep links, history and keyboard sections preserve campus and fragment')
 
             await goto_path(page, '/?campus=pu')
-            campus = page.locator('header summary[aria-label^="切換校園："]')
+            campus = await wait_for_campus_header(page, 'pu', '靜宜大學')
             await campus.click()
             await expect(page.get_by_role('combobox', name='瀏覽校園', exact=True)).to_be_visible()
             await no_overflow(page)
             await page.get_by_role('combobox', name='瀏覽校園', exact=True).select_option('nthu')
+            await wait_for_campus_header(page, 'nthu', '國立清華大學')
             await expect(campus).to_contain_text('國立清華大學')
             await expect(page.get_by_role('combobox', name='瀏覽校園', exact=True)).not_to_be_visible()
             timetable = page.get_by_role('navigation', name='主要導覽').get_by_role('link', name='課務')
@@ -1223,6 +1250,7 @@ async def main():
             await check_oled(page)
             await page.screenshot(path=str(OUT / 'home-oled-desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
+            await wait_for_campus_header(page, 'pu', '靜宜大學')
             await page.locator('header summary[aria-label="所有服務"]').click()
             await page.screenshot(path=str(OUT / 'services-oled-mobile.png'), animations='disabled')
             await page.get_by_role('button', name='關閉所有服務').click()
@@ -1454,6 +1482,75 @@ async def main():
             await no_overflow(signed_page)
             results.append('account return navigation drops auth payloads and nested redirects')
             results.append('signed-in account visits follow allowed return paths')
+
+            # These are browser-only session fixtures, not a real school account.
+            # Keep course reads local while checking the actual Next navigation.
+            async def empty_workspaces(route):
+                assert route.request.method == 'GET'
+                await route.fulfill(json={'workspaces': []})
+
+            await signed.route('**/api/nuni/class-workspaces', empty_workspaces)
+            await goto_path(signed_page, '/?campus=pu')
+            signed_campus = await wait_for_campus_header(signed_page, 'pu', '靜宜大學')
+            await expect(signed_campus).to_contain_text('靜宜大學')
+            await signed_campus.click()
+            await signed_page.get_by_role('combobox', name='瀏覽校園', exact=True).select_option('nthu')
+            await wait_for_campus_header(signed_page, 'nthu', '國立清華大學')
+            await expect(signed_campus).to_contain_text('國立清華大學')
+            preference_key = 'campus.browse-school.v1:account:%7Cpa_00000000-0000-4000-8000-000000000001'
+            assert await signed_page.evaluate('key => JSON.parse(localStorage.getItem(key))', preference_key) == {
+                'schoolId': 'nthu',
+            }
+            for scope in ['pu', 'all']:
+                expected_scope = {'campus': ['all']} if scope == 'all' else {
+                    'schoolId': ['pu'], 'campus': ['pu'], 'school': ['PU'],
+                }
+                for start, label, destination, section, extra in [
+                    ('/', '查看行事曆', '/calendar', '課務', {}),
+                    ('/', '加入課程', '/classroom', '課務', {}),
+                    ('/classroom', '課業成績與回饋', '/grades', '課務', {'tab': ['feedback']}),
+                    ('/classroom/account', '前往我的課程', '/classroom', '課務', {}),
+                    ('/classroom/course/invalid-id', '回到我的課程', '/classroom', '課務', {}),
+                    ('/settings', '返回個人資料', '/profile', '我的', {}),
+                ]:
+                    if start == '/settings':
+                        # This explicit sidebar link is desktop-only. Mobile
+                        # returns through the existing breadcrumb below.
+                        await signed_page.set_viewport_size({'width': 1440, 'height': 1000})
+                    await goto_path(signed_page, f'{start}?campus={scope}&token=fixture-only&q=old-search#old-position')
+                    link = signed_page.get_by_role('link', name=label, exact=True)
+                    await expect(link).to_be_visible()
+                    target = urlparse(await link.get_attribute('href'))
+                    assert target.path == destination, (start, label, target)
+                    assert parse_qs(target.query) == {**extra, **expected_scope}, (start, label, target)
+                    assert not target.fragment, (start, label, target)
+                    await link.click()
+                    await signed_page.wait_for_url(lambda value: urlparse(value).path == destination)
+                    assert parse_qs(urlparse(signed_page.url).query) == {**extra, **expected_scope}
+                    await check_primary_navigation(signed_page, section, scope)
+                    assert await signed_page.evaluate('key => JSON.parse(localStorage.getItem(key))', preference_key) == {
+                        'schoolId': 'nthu',
+                    }
+                    await no_overflow(signed_page)
+                await signed_page.set_viewport_size({'width': 390, 'height': 844})
+                await goto_path(signed_page, f'/settings?campus={scope}&token=fixture-only&q=old-search#old-position')
+                breadcrumb = signed_page.get_by_role('navigation', name='目前位置').get_by_role(
+                    'link', name='我的', exact=True,
+                )
+                await expect(breadcrumb).to_be_visible()
+                await breadcrumb.click()
+                await signed_page.wait_for_url(lambda value: urlparse(value).path == '/profile')
+                assert parse_qs(urlparse(signed_page.url).query) == expected_scope
+                assert not urlparse(signed_page.url).fragment
+                await check_primary_navigation(signed_page, '我的', scope)
+                assert await signed_page.evaluate('key => JSON.parse(localStorage.getItem(key))', preference_key) == {
+                    'schoolId': 'nthu',
+                }
+                await no_overflow(signed_page)
+                results.append(f'home, course and account service links preserve {scope} despite saved NTHU')
+            await signed_page.screenshot(
+                path=str(OUT / 'profile-return-all-mobile.png'), full_page=True, animations='disabled',
+            )
 
             async def capture_platform(name, operator):
                 nonlocal active_page
