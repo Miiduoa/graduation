@@ -177,7 +177,14 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
           // metadata cannot claim that 51 rows came from a single page.
           coverage.pages !== Math.max(1, Math.ceil(assignments.items.length / CAMPUS_ASSIGNMENT_PAGE_SIZE))
         : coverage.reason === 'complete' || assignments.count === null ||
-          assignments.items.length >= assignments.count))) return false;
+          assignments.items.length >= assignments.count ||
+          // A legacy server sends at most one 50-row page. The paginated
+          // reader reports a read-budget cutoff only after eight full pages.
+          // Restored metadata must not claim a different source/read shape.
+          (coverage.reason === 'legacy-partial'
+            ? coverage.pages !== 1 || assignments.items.length > CAMPUS_ASSIGNMENT_PAGE_SIZE
+            : coverage.pages !== CAMPUS_ASSIGNMENT_MAX_PAGES ||
+              assignments.items.length !== CAMPUS_ASSIGNMENT_MAX_PAGES * CAMPUS_ASSIGNMENT_PAGE_SIZE)))) return false;
   // The authorized paginated reader rejects duplicate assignment identities.
   // A JSON-restored snapshot can bypass that reader; two distinct titles with
   // the same original assignment ID are not two separate student tasks.
@@ -305,7 +312,7 @@ const sampleCourses = owned && timetable
     ? [
         '以下為使用者主動取得的已授權校園摘要，只代表 ' + verifiedSense.checkedAt + ' 同步時的狀態。',
         '校方課表來源：' + verifiedSense.schedule.status + '；無法取得不能等同今天沒課。',
-        '已接通作業：' + verifiedSense.assignments.status +
+        '已授權待處理作業來源：' + verifiedSense.assignments.status +
           '；來源總數：' + (verifiedSense.assignments.count ?? '無法取得') +
           '；本次已取得：' + verifiedSense.assignments.items.length +
           '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
@@ -316,7 +323,8 @@ const sampleCourses = owned && timetable
           }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
-        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。請到原作業頁核對，不可把同步資料說成最新結果，不得執行任何寫入。',
+        '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
+        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';
   return [
