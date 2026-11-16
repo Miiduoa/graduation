@@ -556,6 +556,14 @@ test('restored partial assignment metadata matches legacy or eight-page reader b
     { ...base, assignments: {
       ...base.assignments, items: rows.slice(0, 399),
     } },
+    // The first (legacy) page cannot be empty if the source reports pending
+    // tasks. Do not mistake contradictory restored data for "no homework".
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: [],
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [],
+    } },
     { ...legacy, assignments: {
       ...legacy.assignments, coverage: { complete: false, reason: 'legacy-partial', pages: 2 },
     } },
