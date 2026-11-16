@@ -1583,6 +1583,45 @@ it.each([
   }
 });
 
+// Even when URL.createObjectURL returns normally, malformed values must not
+// navigate away from the lesson or be mistaken for a completed TXT/JSON export.
+it.each([
+  { label: 'undefined object URL for TXT', action: '下載本次筆記', field: '可選取的本次筆記文字', returnedUrl: undefined },
+  { label: 'empty object URL for TXT', action: '下載本次筆記', field: '可選取的本次筆記文字', returnedUrl: '' },
+  { label: 'non-string object URL for TXT', action: '下載本次筆記', field: '可選取的本次筆記文字', returnedUrl: 42 },
+  { label: 'external URL for JSON', action: '儲存閱讀進度', field: '可選取的閱讀進度 JSON', returnedUrl: 'https://example.invalid/redirect' },
+  { label: 'script URL for JSON', action: '儲存閱讀進度', field: '可選取的閱讀進度 JSON', returnedUrl: 'javascript:alert(1)' },
+  { label: 'scheme-only Blob URL for JSON', action: '儲存閱讀進度', field: '可選取的閱讀進度 JSON', returnedUrl: 'blob:' },
+])('keeps private notes and a selectable backup instead of navigating on $label', ({ action, field, returnedUrl }) => {
+  const create = vi.fn().mockReturnValue(returnedUrl);
+  const revoke = vi.fn();
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '不可遺失的課堂筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    expect(create).toHaveBeenCalledOnce();
+    expect(click).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(document.querySelector('a[download]')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('目前無法下載');
+    expect(inputValue(noteLabel)).toBe('不可遺失的課堂筆記');
+    const backup = screen.getByRole('textbox', { name: field }) as HTMLTextAreaElement;
+    expect(backup.value).toContain('不可遺失的課堂筆記');
+    expect(backup.value).toContain(material.body);
+    if (action === '儲存閱讀進度') {
+      expect(parseCourseStudyProgress(backup.value, scope).passages['0:0'].note).toBe('不可遺失的課堂筆記');
+    }
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('downloads only after an explicit click, recovers from download failure, and clears the file URL on source replacement', async () => {
   const create = vi.fn().mockImplementationOnce(() => { throw new Error('unsupported'); }).mockReturnValue('blob:study-notes');
   const revoke = vi.fn();

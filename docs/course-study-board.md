@@ -1,3 +1,9 @@
+## 2026-11-17：TXT／JSON 進度下載遇異常 Blob 網址時不跳出課程
+
+- 修復讀書白板共用的「下載本次筆記／本輪練習／閱讀進度／逐題 checkpoint」匯出入口：部分異常行動 WebView 的 `URL.createObjectURL()` 可能**未拋錯**卻回傳空值、非字串或非 `blob:` 網址。舊程式直接指定 `a.href` 再觸發點擊，可能誤導向目前頁面或不預期的網址，且誤報下載已送出。現在先驗證只接受非空 Blob URL，無效時不點擊連結，保留學生的私人筆記、原教材和完整可選取的 TXT／JSON 備份。
+- 加入 6 組模擬 DOM 反例，涵蓋 undefined、空字串、數字、外部 HTTPS、script scheme、只有 `blob:` scheme；核對沒有建立有效下載連結／沒有點擊、錯誤明示、手動備份保留、JSON 可由原進度解析器讀回。與來源表格獨立 TXT 下載的既有防護一致。不新增套件、付費 API、傳輸私人教材或改動 v1/v2 閱讀／v1 練習備份格式。
+- 本次程式與模擬瀏覽器測試不等於 iOS Safari／Android Chrome 真機測試。需按新精確 SHA 確認 Web／Mobile／Build／Lint／Security／CodeQL 與 App 5504170 審查；Maestro、WebGPU 中文教學可靠性及 Ahaboard 同教材同題同機的完成率／延遲／正確性對照仍待驗證。PR #534 保持 Draft，不合併、不部署。
+
 ## 2026-11-17：無效 CSS 覆寫不得讓隱藏的教師表格外顯
 
 - 「來源表格」原本依照同一 CSS 屬性的最後一個宣告判定：但瀏覽器會忽略無效的純文字值，例如 `display:none;display:banana`、`opacity:0;opacity:broken`。舊掃描器會讓無效後值覆蓋有效隱藏值，額外列出原本透明或不顯示的教師備註。現針對 `display`、`visibility`、`content-visibility` 的單一字詞和 `opacity` 的數值與有限函式做語法邊界檢查，忽略明確無效的後宣告，仍按原本 `!important`／順序運作；正常的 `display:flex`、`visibility:visible`、`opacity:.5` 和 `initial` 仍可覆寫。

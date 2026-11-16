@@ -551,7 +551,14 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     try {
       const prepared = contents();
       preparedFallback = { text: prepared.text, kind: prepared.kind };
-      url = URL.createObjectURL(prepared.blob);
+      const createdUrl: unknown = URL.createObjectURL(prepared.blob);
+      // A broken mobile WebView may return undefined, an empty value or a
+      // non-Blob navigation URL without throwing. Never click that link when
+      // exporting private TXT notes or restorable JSON checkpoints.
+      if (typeof createdUrl !== 'string' || !createdUrl.startsWith('blob:') || createdUrl.length <= 5) {
+        throw new Error('Browser did not create a local Blob download URL');
+      }
+      url = createdUrl;
       link.href = url;
       link.download = filename;
       link.hidden = true;
