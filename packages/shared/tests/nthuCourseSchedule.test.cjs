@@ -14,6 +14,7 @@ require.extensions['.ts'] = (module, filename) => {
 const { nthuCourseIdentity, nthuCourseMeetings, nthuTimetableImportCsv } = require('../src/nthuCourseSchedule.ts');
 const { isPublicCourseCatalog, isNcnuPublicCourseCatalog } = require('../src/publicCourseCatalog.ts');
 const { parsePersonalImport } = require('../src/imports/parser.ts');
+const { previewPersonalCalendar, serializePersonalCalendar } = require('../src/timetable/personalCalendarExport.ts');
 require.extensions['.ts'] = original;
 
 // Exact room/time pairs and identity from the public 115-1 JSON, retrieved 2026-11-06.
@@ -58,6 +59,30 @@ test('all seven weekday codes and nonadjacent periods remain separate meetings',
   ]);
 });
 
+test('115-1 verified 20-minute breaks stay free in timetable and CSV round-trip', () => {
+  const time = 'M2M3M4MnM5M6M7';
+  const meetings = [{ time, room: '教室甲' }];
+  const expected = [
+    ['2', '09:00', '09:50'],
+    ['34n', '10:10', '13:00'],
+    ['56', '13:20', '15:10'],
+    ['7', '15:30', '16:20'],
+  ];
+  assert.deepEqual(nthuCourseMeetings(meetings, '1151').map(row =>
+    [row.periodLabel, row.startTime, row.endTime]), expected);
+  const csv = nthuTimetableImportCsv({ ...chemistry, time, room: '教室甲', meetings });
+  assert.ok(csv);
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  });
+  assert.deepEqual(parsed.rows.map(row => [row.periodLabel, row.startTime, row.endTime]), expected);
+  assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+  assert.ok(parsed.rows.every(row => row.location === '教室甲' &&
+    row.schoolId === 'nthu' && row.academicYear === '115' && row.semester === '1'));
+  // Do not infer clock breaks for terms without an audited timetable.
+  assert.deepEqual(nthuCourseMeetings(meetings, '1152').map(row => row.periodLabel), ['234n567']);
+});
+
 test('a real two-room course keeps each room, weekday and verified clock through the CSV importer', () => {
   const csv = nthuTimetableImportCsv(chemistry);
   const parsed = parsePersonalImport(csv, { kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '' });
@@ -71,6 +96,39 @@ test('a real two-room course keeps each room, weekday and verified clock through
   ]);
   assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
   assert.ok(parsed.rows.every(row => row.startPeriod === undefined));
+});
+
+test('malformed public meeting pairs fail closed before direct CSV import', () => {
+  const malformed = [
+    null, {}, [], [null], [{ room: '教室', time: 3 }],
+    [{ room: 17, time: 'M3' }], [{ room: '教室', time: null }],
+    [{ room: '教室', time: 'M3' }, null],
+    Array(33).fill({ room: '教室', time: 'M3' }),
+    Array(1), // Array.every otherwise skips missing entries.
+    [{ room: '教室', time: 'M3'.repeat(99) }],
+  ];
+  for (const meetings of malformed) {
+    assert.equal(nthuCourseMeetings(meetings, '1151'), null);
+    assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings }), null);
+  }
+  for (const change of [{ time: null }, { room: 4 }, { meetings: undefined }]) {
+    assert.equal(nthuTimetableImportCsv({ ...chemistry, ...change }), null);
+  }
+  // Valid official data, including an unpublished room name, still imports.
+  const valid = [{ time: 'M3M4', room: '' }];
+  assert.deepEqual(nthuCourseMeetings(valid, '1151').map(row => row.periodLabel), ['34']);
+  assert.ok(nthuTimetableImportCsv({ ...chemistry, time: 'M3M4', room: '', meetings: valid }));
+  const sparse = Array(1);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, time: '', room: '', meetings: sparse }), null);
+  const oversized = [{ time: 'M3'.repeat(99), room: '教室' }];
+  assert.equal(nthuTimetableImportCsv({
+    ...chemistry, time: oversized[0].time, room: '教室', meetings: oversized,
+  }), null);
+  // All 14 periods across seven weekdays are the maximum unique input.
+  const fullWeekTime = [...'MTWRFSU'].map(day =>
+    [...'1234n56789abcd'].map(period => day + period).join('')).join('');
+  assert.equal(fullWeekTime.length, 196);
+  assert.ok(nthuCourseMeetings([{ time: fullWeekTime, room: '教室' }], '1151'));
 });
 
 test('missing, partially missing and unfamiliar times cannot produce a partial timetable', () => {
@@ -99,6 +157,32 @@ test('the CSV handoff rejects mismatched course identities and preserves zero cr
   const options = { kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '' };
   assert.equal(parsePersonalImport(nthuTimetableImportCsv({ ...chemistry, credits: '0' }), options).rows[0].credits, 0);
   assert.equal(parsePersonalImport(nthuTimetableImportCsv({ ...chemistry, credits: '' }), options).rows[0].credits, undefined);
+});
+
+test('NTHU offering identity and credits must agree with the displayed official course', () => {
+  // Both fields are set by the official-feed parser. A malformed or stale
+  // response must remain review-only, not silently mislabel credits or department.
+  for (const course of [
+    { ...chemistry, department: 'CS' }, { ...chemistry, department: '' },
+    { ...chemistry, credits: '-1' }, { ...chemistry, credits: '3 學分' },
+    { ...chemistry, credits: '41' }, { ...chemistry, credits: '9'.repeat(400) },
+  ]) {
+    assert.equal(nthuTimetableImportCsv(course), null);
+  }
+  for (const credits of ['0', '0.5', '3', '3.0', '40']) {
+    const csv = nthuTimetableImportCsv({ ...chemistry, credits });
+    assert.ok(csv);
+    const parsed = parsePersonalImport(csv, {
+      kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+    });
+    assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+    assert.ok(parsed.rows.every(row => row.schoolId === 'nthu' && row.credits === Number(credits)));
+  }
+  const withoutCredits = nthuTimetableImportCsv({ ...chemistry, credits: '' });
+  assert.ok(withoutCredits);
+  assert.ok(parsePersonalImport(withoutCredits, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  }).rows.every(row => row.credits === undefined));
 });
 
 test('catalog responses require the expected campus and valid bounded room/time pairs', () => {
@@ -135,7 +219,107 @@ test('duplicate weekday-periods across official room/time pairs require manual r
   const valid = [{ time: 'M3M4', room: 'A' }, { time: 'M5', room: 'B' }, { time: 'T3', room: 'C' }];
   assert.deepEqual(nthuCourseMeetings(valid, '1151').map(({ dayOfWeek, room }) => [dayOfWeek, room]),
     [[1, 'A'], [1, 'B'], [2, 'C']]);
-  assert.equal(parsePersonalImport(nthuTimetableImportCsv({ ...chemistry, meetings: valid }), {
+  const matchedCourse = { ...chemistry, meetings: valid,
+    time: valid.map(pair => pair.time).join('\n'), room: valid.map(pair => pair.room).join('\n'),
+  };
+  assert.equal(parsePersonalImport(nthuTimetableImportCsv(matchedCourse), {
     kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
   }).rows.length, 3);
+});
+
+test('import rejects mismatched public display and actual meeting pairs', () => {
+  // Catalog parsers create both fields from the same official room/time pairs.
+  // Reject a malformed or stale response instead of silently importing a
+  // different weekday, classroom or number of meetings than was displayed.
+  assert.ok(nthuTimetableImportCsv(chemistry));
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, time: 'M3M4' }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, room: 'BMES醫環618' }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: [chemistry.meetings[0]] }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: [
+    { ...chemistry.meetings[0], time: 'T3T4' }, chemistry.meetings[1],
+  ] }), null);
+  assert.equal(nthuTimetableImportCsv({ ...chemistry, meetings: [
+    { ...chemistry.meetings[0], room: '錯誤教室' }, chemistry.meetings[1],
+  ] }), null);
+});
+
+// Keep the exhaustive clock/CSV matrix in the existing fixed CI test selection.
+require('./nthuCourseBreaks.cjs');
+
+
+test('115-1 NTHU CSV imports keep all three free breaks in a one-day ICS snapshot', () => {
+
+  const time = 'M2M3M4MnM5M6M7';
+  const meetings = [{ time, room: '教室甲' }];
+  const csv = nthuTimetableImportCsv({ ...chemistry, time, room: '教室甲', meetings });
+  assert.ok(csv);
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  });
+  assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+  const records = parsed.rows.map((row, index) => ({
+    ...row, id: 'confirmed-' + index, batchId: 'course-import',
+    importedAt: '2026-11-13T00:00:00.000Z',
+  }));
+  assert.equal(records.length, 4);
+  const foreign = { ...records[0], id: 'other-campus', schoolId: 'ncnu' };
+  const preview = previewPersonalCalendar([...records, foreign], {
+    schoolId: 'nthu', termKey: '115|1', start: '2026-11-16', end: '2026-11-16',
+  });
+  const expected = [
+    ['09:00', '09:50'], ['10:10', '13:00'],
+    ['13:20', '15:10'], ['15:30', '16:20'],
+  ];
+  const taipeiClock = timestamp => new Date(timestamp + 8 * 3600000).toISOString().slice(11, 16);
+  assert.deepEqual(preview.events.map(event => [
+    taipeiClock(event.startAt), taipeiClock(event.endAt),
+  ]), expected);
+  assert.equal(preview.skipped.length, 0);
+  assert.ok(preview.events.every(event =>
+    event.row.schoolId === 'nthu' && event.row.location === '教室甲'));
+  const ics = serializePersonalCalendar(preview, new Date('2026-11-13T00:00:00.000Z'));
+  const blocks = ics.match(/BEGIN:VEVENT\r\n[\s\S]*?END:VEVENT/g) ?? [];
+  const timestamps = blocks.map(block => [
+    block.match(/^DTSTART:(\S+)/m)?.[1],
+    block.match(/^DTEND:(\S+)/m)?.[1],
+  ]);
+  assert.deepEqual(timestamps, [
+    ['20261116T010000Z', '20261116T015000Z'],
+    ['20261116T021000Z', '20261116T050000Z'],
+    ['20261116T052000Z', '20261116T071000Z'],
+    ['20261116T073000Z', '20261116T082000Z'],
+  ]);
+  assert.equal(new Set(preview.events.map(event => event.uid)).size, 4);
+});
+
+test('unverified NTHU semester remains review-only and never creates an invented ICS event', () => {
+  const course = {
+    ...chemistry,
+    code: '11520AES 520300',
+    semester: '1152',
+    time: 'M2M3M4MnM5M6M7',
+    room: '教室甲',
+    meetings: [{ room: '教室甲', time: 'M2M3M4MnM5M6M7' }],
+  };
+  const csv = nthuTimetableImportCsv(course);
+  assert.ok(csv);
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '',
+  });
+  assert.deepEqual(parsed.issues.filter(issue => issue.severity === 'error'), []);
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0].periodLabel, '234n567');
+  assert.equal(parsed.rows[0].startTime, undefined);
+  assert.equal(parsed.rows[0].endTime, undefined);
+  const records = parsed.rows.map(row => ({
+    ...row, id: 'confirmed-unverified', batchId: 'course-import',
+    importedAt: '2026-11-13T00:00:00.000Z',
+  }));
+  const preview = previewPersonalCalendar(records, {
+    schoolId: 'nthu', termKey: '115|2', start: '2027-04-05', end: '2027-04-05',
+  });
+  assert.equal(preview.events.length, 0);
+  assert.equal(preview.skipped.length, 1);
+  assert.equal(preview.skipped[0].schoolId, 'nthu');
+  assert.equal(serializePersonalCalendar(preview).includes('BEGIN:VEVENT'), false);
 });
