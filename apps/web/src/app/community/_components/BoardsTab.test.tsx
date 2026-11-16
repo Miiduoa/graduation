@@ -151,10 +151,34 @@ it('reports a failed subscribe, restores the previous state and allows retry', a
   fireEvent.click(button);
   await act(async () => pending.reject(new Error('offline')));
   expect((button as HTMLButtonElement).disabled).toBe(false);
-  expect(window.alert).toHaveBeenCalledExactlyOnceWith('這次未能訂閱，請稍後再試。');
+  expect(window.alert).not.toHaveBeenCalled();
+  expect(button.getAttribute('aria-pressed')).toBe('false');
+  expect(screen.getByRole('status').textContent).toBe('未能訂閱「科學討論」，已恢復原狀，請重試。');
   fireEvent.click(button);
   await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('已訂閱「科學討論」。'));
   expect(button.getAttribute('aria-pressed')).toBe('true');
+});
+
+it('explains a failed cancellation inline, restores the subscribed state, and supports retry', async () => {
+  mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  mocks.subscriptions.mockResolvedValue(['science']);
+  const pending = deferred<void>();
+  mocks.unsubscribe.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '取消訂閱科學討論' });
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(button);
+  expect(button.getAttribute('aria-busy')).toBe('true');
+  await act(async () => pending.reject({ code: 'permission-denied' }));
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  expect(button.getAttribute('aria-busy')).toBe('false');
+  expect(screen.getByRole('status').textContent).toBe('未能取消訂閱「科學討論」，已恢復原狀，請重試。');
+  expect(window.alert).not.toHaveBeenCalled();
+  fireEvent.click(button);
+  await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('已取消訂閱「科學討論」。'));
+  expect(button.getAttribute('aria-pressed')).toBe('false');
 });
 
 it('does not show a stale failure after changing schools while a subscribe is pending', async () => {
@@ -172,6 +196,7 @@ it('does not show a stale failure after changing schools while a subscribe is pe
   await act(async () => pending.reject(new Error('old school offline')));
   expect(other.getAttribute('aria-pressed')).toBe('false');
   expect(window.alert).not.toHaveBeenCalled();
+  expect(screen.getByRole('status').textContent).toBe('');
   expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
 });
 

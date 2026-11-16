@@ -59,6 +59,7 @@ function BoardsContent(props: {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [pendingSubscriptionIds, setPendingSubscriptionIds] = useState<Set<string>>(new Set());
+  const [subscriptionNotice, setSubscriptionNotice] = useState('');
   // A ref closes the gap between a click and React's next render/disabled update.
   const pendingSubscriptionLock = useRef<Set<string>>(new Set());
   // Lifecycle-only signal: do not cancel a Firestore write or report it as cancelled.
@@ -185,6 +186,8 @@ function BoardsContent(props: {
       alert('請先登入');
       return;
     }
+    // Clear an earlier result so the next confirmed outcome can be announced again.
+    setSubscriptionNotice('');
     // Keep the action disabled while its write is unresolved, including repeated clicks.
     setPendingSubscriptionIds((previous) => new Set(previous).add(b.id));
     const uid = user.uid;
@@ -198,6 +201,9 @@ function BoardsContent(props: {
     try {
       if (wasSub) await unsubscribeFromBoard(uid, schoolId, b.id);
       else await subscribeToBoard(uid, schoolId, b.id);
+      if (!subscriptionLifetime.signal.aborted) {
+        setSubscriptionNotice(wasSub ? `已取消訂閱「${b.name}」。` : `已訂閱「${b.name}」。`);
+      }
     } catch {
       // Parent remounts on account/school change. Late failures must never alert
       // or change the new school's subscription state.
@@ -208,7 +214,10 @@ function BoardsContent(props: {
           else next.delete(b.id);
           return next;
         });
-        alert(wasSub ? '這次未能取消訂閱，請稍後再試。' : '這次未能訂閱，請稍後再試。');
+        // Report a recoverable failure without a blocking browser alert.
+        setSubscriptionNotice(wasSub
+          ? `未能取消訂閱「${b.name}」，已恢復原狀，請重試。`
+          : `未能訂閱「${b.name}」，已恢復原狀，請重試。`);
       }
     } finally {
       if (!subscriptionLifetime.signal.aborted) {
@@ -260,6 +269,10 @@ function BoardsContent(props: {
           </button>
         )}
       </div>
+      <p role="status" aria-live="polite" aria-atomic="true"
+        style={{ margin: subscriptionNotice ? '0 0 12px' : 0, fontSize: 13 }}>
+        {subscriptionNotice}
+      </p>
 
       <section ref={recoveryArea} tabIndex={-1} aria-label="看板建立狀態"
         hidden={!notice && !closedPending && !needsRecovery && !permissionRetryFinished && access.status !== 'loading' && access.status !== 'error'}>
