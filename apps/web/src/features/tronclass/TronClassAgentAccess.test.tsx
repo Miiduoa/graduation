@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createTronClassAgentClient } from '@/lib/tronClassAgentClient';
+import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 import { TronClassAgentAccess } from './TronClassAgentAccess';
 
 const revision = 'a'.repeat(32);
@@ -72,4 +73,22 @@ it('does not apply a previous binding or a late unmounted response', async () =>
   expect(saved).not.toHaveBeenCalled();
   expect(changed).not.toHaveBeenCalled();
   expect(screen.queryByRole('checkbox')).toBeNull();
+});
+
+it.each(['status', 'set'] as const)('passes an expired %s session to the connection recovery callback', async (failedAction) => {
+  const changed = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    return body.action === failedAction
+      ? json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401)
+      : json({ revision, version, permissions, updatedAt: null });
+  }));
+  render(<TronClassAgentAccess client={client} revision={revision} onConnectionChanged={changed} />);
+  if (failedAction === 'set') {
+    fireEvent.click(await screen.findByRole('checkbox', { name: /讀取課程、作業/ }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存助理權限' }));
+  }
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+  expect(changed.mock.calls[0][0]).toBeInstanceOf(TronClassRequestError);
+  expect(changed.mock.calls[0][0]).toMatchObject({ code: 'TRONCLASS_RECONNECT_REQUIRED', status: 401 });
 });

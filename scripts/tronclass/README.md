@@ -2,6 +2,23 @@
 
 這支工具把**本機 HAR** 裡與靜宜 TronClass 有關的已知路徑整理成型別與關聯缺口，供開發者確認正式 adapter 的必要條件。它不登入、不發網路請求、不重新送出任何操作，也不會把 `contractVerified` 改成 `true`。
 
+## 2026-11-16：官方公開前端已確認的路徑與工具缺口
+
+本輪匿名查核靜宜官方公開 JavaScript，找到學生介面實際使用的下列路徑。來源版本、資源 URL、SHA-256、module 定位與尚未驗證的部分，見 [公開前端契約查核](../../docs/nuni/tronclass-public-contract-2026-11-16.md)。這些是 client 實作證據，不是正式寫入驗收。
+
+| 階段 | 官方前端使用的路徑／方式 |
+| --- | --- |
+| 活動詳情 | `GET /api/activities/{activityId}` |
+| 個人繳交歷史 | `GET /api/activities/{activityId}/students/{studentId}/submission_list`，回應 envelope 為 list |
+| 新建繳交／草稿 | `POST /api/course/activities/{activityId}/submissions`；is_draft 區分正式與草稿 |
+| 更新既有草稿 | 同一路徑 PUT，另帶 submission_id |
+| 建立上傳 metadata | `POST /api/uploads`，JSON metadata；此時檔案尚未傳完 |
+| 二進位與完成通知 | 依 storage_type 使用回傳的 upload_url；S3／WRPC 另呼叫 `POST /internal-api/upload/callback/{id}` |
+
+**本版 analyze-har 尚未支援這整條流程。** 它仍以原先列出的候選路徑與欄位分析，未完整識別上述 submission_list、真正 final、二進位與 callback。未知路徑會略過，**空 entries、沒有 chain 或缺少某階段，可能只是分析器尚不認識，不能解讀成紀錄中沒有操作。** 原有 `/api/courses/{courseId}/homework-activities/{activityId}/submissions` 等候選模板，不是本次觀察到的學生送出路徑。
+
+本輪只補文件，未修改 analyzer 程式。擴充時需要同步更新路徑與狀態語意：comment、uploads ID、created_by、is_latest_version、is_draft、is_redo、教師代標及 created_at；不能只新增 URL 正規表示式後沿用假設的 submitted／content／attachments 欄位。預建 metadata、傳送 bytes 與完成 callback 也必須分開核對。即使將來全部識別，contractVerified 仍固定為 false。
+
 ## 使用方式
 
 需要 Node.js 22，不需安裝套件。在 repository 根目錄執行：
@@ -25,8 +42,8 @@ HAR 必須是你有權使用的本機一般檔案。工具拒絕 URL、符號連
 | --- | --- |
 | `entries` | 只列固定 `https://tronclass.pu.edu.tw` origin 與程式中明列的路徑模板、HTTP method／狀態及 JSON 型別。路徑在白名單內不代表該寫入端點已獲學校確認。 |
 | `requestBody` / `responseBody` | JSON schema 形狀，只包含型別及允許的欄位名稱；沒有任何原始值、enum、examples 或 required 推論。未擷取、非 JSON、編碼、過大及無法解析的 body 都明確標記。 |
-| `homeworkEvidence.missingTracePhases` | 整份紀錄缺少上傳、正式送出或讀回的哪個階段。純文字繳交仍會標記尚無附件上傳紀錄，避免誤認已支援檔案繳交。 |
-| `homeworkEvidence.chains` | 每次正式送出是否能在同一份紀錄中連到先前上傳的附件代號、先前登入者、稍後同作業的同一份本人 receipt、明確 submitted 狀態、時間及內容／附件。只輸出布林值、固定缺口代碼和 HAR entry 序號，不輸出代號本身。 |
+| `homeworkEvidence.missingTracePhases` | **在本版能識別的路徑內**，缺少上傳、正式送出或讀回的哪個候選階段；不代表完整 HAR 沒有該動作。純文字繳交仍會標記尚無附件上傳紀錄。 |
+| `homeworkEvidence.chains` | 對本版能識別的送出候選，比對先前上傳代號／登入者及稍後同作業的本人 receipt、明確狀態、時間與內容／附件。這套欄位尚未對齊本輪找到的官方 client。只輸出布林值、固定缺口代碼和 HAR entry 序號，不輸出代號本身。 |
 | `manualReviewRequired` | 仍須由正式介面文件或獲授權的測試環境確認的事項，包括真正檔案上傳完成、身分／session 綁定、狀態語意、學校規則、冪等與逾時處理。 |
 | `contractVerified` | **固定為 `false`**。HAR 是可編輯的離線紀錄，不能證明伺服器真實接受了操作。即使沒有關聯缺口，也不是啟用寫入的驗收結果。 |
 
@@ -36,6 +53,6 @@ HAR 必須是你有權使用的本機一般檔案。工具拒絕 URL、符號連
 
 ## 下一步：實際介面驗收
 
-報告可以指出缺哪段合約與哪些欄位型別，但無法取代校方驗收。完成 adapter 前，還需要確認檔案上傳／finalize 的真正請求與回應、附件與 final 的關係、權威本人 receipt、修改／重繳政策，以及網路逾時後如何避免重複提交。遇到 HTTP 成功卻沒有完整本人讀回紀錄時，維持 unavailable 或待確認，不可回報「已繳交」。
+先依上述官方公開前端證據擴充 analyzer 的識別與鏈結測試，再使用受控操作紀錄驗收。現有報告只能指出已識別範圍的型別與缺口，無法取代校方驗收。完成 adapter 前，還需要確認檔案上傳／finalize 的真正請求與回應、附件與 final 的關係、權威本人 receipt、修改／重繳政策，以及網路逾時後如何避免重複提交。遇到 HTTP 成功卻沒有完整本人讀回紀錄時，維持 unavailable 或待確認，不可回報「已繳交」。
 
 參考來源：[TronClass 官方作業說明](https://support.tronclass.com/tw/question/homework)、[官方操作手冊](https://support.tronclass.com/public-manual/manual-teacher.html)。這些文件確認操作流程與政策差異，沒有提供靜宜站點可直接驗收的完整 HTTP 寫入合約。既有 repository 的讀取路徑與 legacy writer，以及公開 [Tronclass-API client](https://github.com/seven-317/Tronclass-API)，僅用來界定待查核路徑，不作為 verified 證據。

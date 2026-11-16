@@ -5,6 +5,7 @@ import { classifySchoolReadError, isMaterialActivityType, tronClassUploadHref } 
 import { createTronClassBindingService } from './tronClassBinding';
 import { createPuRelayFetch } from './puEdgeRelay';
 import { tronClassLmsReadonlySource, type LmsReadonlySource } from './tronClassLmsSource';
+import { isTronClassSourceVisible } from './tronClassSourceVisibility';
 
 export const TRONCLASS_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 export const TRONCLASS_DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -190,10 +191,12 @@ export function createTronClassMaterialDownloader(dependencies: {
       const names = matches.map((row) => {
         if ((row.course_id !== undefined && positiveId(row.course_id) !== input.courseId) ||
           typeof row.type !== 'string' || !row.type || !isMaterialActivityType(row.type) ||
-          row.is_hidden === true || row.hidden === true) fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
+          !isTronClassSourceVisible(row)) fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
         const uploads = Array.isArray(row.uploads) ? row.uploads : Array.isArray(row.attachments) ? row.attachments : [];
         const files = uploads.slice(0, 30).map(record).filter((file) => (file.key || file.file_key || file.upload_id) === input.uploadKey);
-        if (files.length !== 1 || files[0].allow_download !== true) fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
+        if (files.length !== 1 || !isTronClassSourceVisible(files[0]) || files[0].allow_download !== true) {
+          fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
+        }
         return safeFilename(files[0].name || files[0].filename);
       });
       if (new Set(names).size !== 1) unavailable();

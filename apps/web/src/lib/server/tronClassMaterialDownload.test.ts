@@ -53,15 +53,39 @@ describe('authorized material download', () => {
     { ...material, course_id: 999 },
     { ...material, type: 'homework' },
     { ...material, hidden: true },
+    { ...material, is_hidden: true },
+    { ...material, is_hidden: 1 },
+    { ...material, hidden: 1 },
+    { ...material, published: false },
+    { ...material, published: 0 },
+    { ...material, hidden: false, is_hidden: 1, published: true },
+    { ...material, hidden: 'false' },
     { ...material, uploads: [{ key: input.uploadKey, name: 'private.pdf' }] },
     { ...material, uploads: [{ key: input.uploadKey, name: 'private.pdf', allow_download: false }] },
     { ...material, uploads: [{ key: 'different-upload', name: 'other.pdf', allow_download: true }] },
     { ...material, uploads: [...material.uploads, ...material.uploads] },
+    { ...material, uploads: [{ ...material.uploads[0], is_hidden: 1 }] },
+    { ...material, uploads: [{ ...material.uploads[0], published: false }] },
   ])('requires exact activity/course/file identity and explicit download authority: %j', async (row) => {
     const f = fixture();
     vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [row] });
     await expect(f.download(owner, input)).rejects.toMatchObject({ status: 403 });
     expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts the known visible boolean and numeric flags without granting authority to a hidden duplicate', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities)
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: 0, hidden: false, published: 1 }] })
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: false, hidden: 0, published: true }] });
+    expect((await f.download(owner, input)).bytes).toEqual(fixtureBytes);
+
+    const denied = fixture();
+    vi.mocked(denied.source.fetchActivities)
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: 0, published: true }] })
+      .mockResolvedValueOnce({ ok: true, value: [{ ...material, is_hidden: 1, published: true }] });
+    await expect(denied.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(denied.fetch).not.toHaveBeenCalled();
   });
 
   it('tolerates only the optional courseware endpoint being absent', async () => {

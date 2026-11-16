@@ -94,6 +94,17 @@ describe('production TronClass submission source is read-only until its contract
     await expect(source.getAssignment(binding, { ...scope, homeworkId: 999 })).rejects.toMatchObject({ code: 'TRONCLASS_HOMEWORK_NOT_FOUND' });
   });
 
+  it.each([
+    { is_hidden: true }, { is_hidden: 1 }, { hidden: true }, { hidden: 1 },
+    { published: false }, { published: 0 }, { is_hidden: false, hidden: true },
+  ])('does not reveal hidden or unpublished assignment details during preparation: %j', async (flags) => {
+    const { reads, source } = fixture();
+    vi.mocked(reads.fetchHomeworkPage).mockResolvedValue({
+      ok: true, value: { homework_activities: [{ ...homework, ...flags }], total: 1 },
+    });
+    await expect(source.getAssignment(binding, scope)).rejects.toMatchObject({ code: 'TRONCLASS_HOMEWORK_NOT_FOUND' });
+  });
+
   it('maps expired source authentication to reconnect', async () => {
     const first = fixture();
     vi.mocked(first.reads.fetchCourses).mockRejectedValueOnce(new Error('TronClass session 已失效，請重新登入'));

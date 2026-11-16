@@ -12,12 +12,15 @@ const {
   tcFetchHomeworkActivitiesPage,
   tcFetchActivitiesRaw,
   tcFetchCourseAnnouncementsStrict,
+  tcFetchHomeworkActivityStrict,
+  tcFetchStudentHomeworkSubmissionList,
 } = require('./tronClassScraper');
 
 function mockHttpsResponse({ status = 200, headers = {}, body = '{}' }) {
   https.request.mockImplementationOnce((options, callback) => {
     const req = new EventEmitter();
     req.write = jest.fn();
+    req.destroy = jest.fn();
     req.end = jest.fn(() => {
       const res = new EventEmitter();
       res.statusCode = status;
@@ -248,6 +251,123 @@ describe('tronClassScraper', () => {
     mockHttpsResponse({ status: 404, body: '{}' });
     await expect(tcFetchCourseAnnouncementsStrict({ session: 'cookie' }, 10001)).rejects.toMatchObject({
       status: 404,
+    });
+  });
+
+  describe('official student homework read endpoints', () => {
+    test('reads the direct activity object with one fixed GET and leaves scope validation to the caller', async () => {
+      const raw = { id: 20001, course_id: 10001, type: 'homework', data: { homework_type: 'file_upload' }, published: true };
+      mockHttpsResponse({ body: JSON.stringify(raw) });
+      await expect(tcFetchHomeworkActivityStrict({ session: 'private-fixture' }, 20001)).resolves.toEqual(raw);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      expect(https.request.mock.calls[0][0]).toMatchObject({
+        hostname: 'tronclass.pu.edu.tw', method: 'GET', path: '/api/activities/20001', family: 4,
+        headers: { Accept: 'application/json', Cookie: 'session=private-fixture' },
+      });
+      expect(https.request.mock.results[0].value.write).not.toHaveBeenCalled();
+    });
+
+    test('preserves the student list envelope, order and draft/final fields without inventing pages', async () => {
+      const raw = {
+        list: [
+          { id: 901, student_id: 123, status: 'draft', submitted_at: null, content: 'draft-fixture' },
+          { id: 902, student_id: 123, status: 'submitted', submitted_at: '2026-11-16T01:00:00Z', content: 'final-fixture' },
+        ],
+        paging: { pages: 3 },
+      };
+      mockHttpsResponse({ body: JSON.stringify(raw) });
+      await expect(tcFetchStudentHomeworkSubmissionList({ session: 'private-fixture' }, 20001, 123)).resolves.toEqual(raw);
+      expect(https.request).toHaveBeenCalledTimes(1);
+      expect(https.request.mock.calls[0][0]).toMatchObject({
+        hostname: 'tronclass.pu.edu.tw', method: 'GET', path: '/api/activities/20001/students/123/submission_list',
+      });
+      expect(https.request.mock.results[0].value.write).not.toHaveBeenCalled();
+    });
+
+    test('distinguishes an explicit empty list from a missing list', async () => {
+      mockHttpsResponse({ body: '{"list":[]}' });
+      await expect(tcFetchStudentHomeworkSubmissionList({}, 20001, 123)).resolves.toEqual({ list: [] });
+      expect(https.request).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '20001', '../profile', '1?student=2', null, undefined, true, {}])(
+      'rejects non-numeric or unsafe identifiers before any school request: %p', async (id) => {
+        await expect(tcFetchHomeworkActivityStrict({}, id)).rejects.toMatchObject({ code: 'TC_HOMEWORK_INVALID_ID', status: 400 });
+        await expect(tcFetchStudentHomeworkSubmissionList({}, id, 123)).rejects.toMatchObject({ code: 'TC_HOMEWORK_INVALID_ID', status: 400 });
+        await expect(tcFetchStudentHomeworkSubmissionList({}, 20001, id)).rejects.toMatchObject({ code: 'TC_HOMEWORK_INVALID_ID', status: 400 });
+        expect(https.request).not.toHaveBeenCalled();
+      },
+    );
+
+    describe.each([
+      ['activity', () => tcFetchHomeworkActivityStrict({ session: 'private-fixture' }, 20001)],
+      ['student history', () => tcFetchStudentHomeworkSubmissionList({ session: 'private-fixture' }, 20001, 123)],
+    ])('%s failures', (_name, read) => {
+      test.each([301, 302, 303, 307, 308, 401, 403, 404, 503])('rejects HTTP %s without redirecting or probing a fallback', async (status) => {
+        mockHttpsResponse({ status, headers: { location: 'https://other.test/credential-target' }, body: '{}' });
+        const pending = read();
+        if ([302, 401, 403].includes(status)) await expect(pending).rejects.toThrow('session 已失效');
+        else await expect(pending).rejects.toMatchObject({ status, code: 'TC_HTTP' });
+        expect(https.request).toHaveBeenCalledTimes(1);
+        expect(https.request.mock.calls[0][0]).toMatchObject({ hostname: 'tronclass.pu.edu.tw', method: 'GET' });
+        expect(https.request.mock.results[0].value.write).not.toHaveBeenCalled();
+      });
+
+      test('recognizes an HTML login page and never reports no submissions', async () => {
+        mockHttpsResponse({ body: '<html><form>private-login-response</form></html>' });
+        await expect(read()).rejects.toThrow('session 已失效');
+        expect(https.request).toHaveBeenCalledTimes(1);
+      });
+
+      test('does not include source text in malformed JSON errors', async () => {
+        mockHttpsResponse({ body: '{"private-source-content":' });
+        await expect(read()).rejects.toMatchObject({ code: 'TC_HOMEWORK_RESPONSE_INVALID', message: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502 });
+        expect(https.request).toHaveBeenCalledTimes(1);
+      });
+
+      test('bounds a stalled read to eight seconds and does not retry', async () => {
+        jest.useFakeTimers();
+        https.request.mockImplementation(() => {
+          const req = new EventEmitter();
+          req.end = jest.fn();
+          req.destroy = jest.fn();
+          return req;
+        });
+        const pending = expect(read()).rejects.toThrow('timed out');
+        await jest.advanceTimersByTimeAsync(8000);
+        await pending;
+        expect(https.request).toHaveBeenCalledTimes(1);
+        expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+      });
+
+      test('destroys an oversized response instead of parsing or returning a truncated list', async () => {
+        mockHttpsResponse({ body: 'x'.repeat(1024 * 1024 + 1) });
+        await expect(read()).rejects.toThrow('response is too large');
+        expect(https.request).toHaveBeenCalledTimes(1);
+        expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    test.each([null, [], {}, { activity: { id: 20001 } }, { id: 0 }, { id: '20001/other' }, { message: 'unavailable' }])(
+      'rejects an invalid direct activity envelope: %p', async (raw) => {
+        mockHttpsResponse({ body: JSON.stringify(raw) });
+        await expect(tcFetchHomeworkActivityStrict({}, 20001)).rejects.toMatchObject({ code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502 });
+        expect(https.request).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    test.each([null, [], {}, { list: null }, { list: {} }, { submissions: [] }, { data: { list: [] } }])(
+      'rejects an invalid submission_list envelope instead of returning empty history: %p', async (raw) => {
+        mockHttpsResponse({ body: JSON.stringify(raw) });
+        await expect(tcFetchStudentHomeworkSubmissionList({}, 20001, 123)).rejects.toMatchObject({ code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502 });
+        expect(https.request).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    test('rejects a list above the item limit without truncating it or requesting another page', async () => {
+      mockHttpsResponse({ body: JSON.stringify({ list: Array.from({ length: 1001 }, (_, id) => ({ id })) }) });
+      await expect(tcFetchStudentHomeworkSubmissionList({}, 20001, 123)).rejects.toMatchObject({ code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502 });
+      expect(https.request).toHaveBeenCalledTimes(1);
     });
   });
 });

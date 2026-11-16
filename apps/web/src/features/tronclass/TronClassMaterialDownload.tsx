@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { tronClassErrorMessage, type TronClassClient } from '@/lib/tronClassIntegrationClient';
+import { tronClassErrorMessage, TronClassRequestError, type TronClassClient } from '@/lib/tronClassIntegrationClient';
 import styles from './tronclass.module.css';
 
 export function TronClassMaterialDownload({
@@ -11,6 +11,7 @@ export function TronClassMaterialDownload({
   activityId,
   uploadKey,
   name,
+  onConnectionChanged,
 }: {
   client: TronClassClient;
   revision: string;
@@ -18,12 +19,15 @@ export function TronClassMaterialDownload({
   activityId: number;
   uploadKey: string;
   name: string;
+  onConnectionChanged?: (reason?: unknown) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const alive = useRef(true);
   const lock = useRef(false);
+  const connectionChanged = useRef(onConnectionChanged);
+  useEffect(() => { connectionChanged.current = onConnectionChanged; }, [onConnectionChanged]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -55,7 +59,13 @@ export function TronClassMaterialDownload({
       }
       setMessage('已開始下載。');
     } catch (reason) {
-      if (alive.current) setError(tronClassErrorMessage(reason));
+      if (!alive.current) return;
+      if (connectionChanged.current && reason instanceof TronClassRequestError &&
+        ['TRONCLASS_BINDING_CHANGED', 'TRONCLASS_RECONNECT_REQUIRED'].includes(reason.code)) {
+        connectionChanged.current(reason);
+        return;
+      }
+      setError(tronClassErrorMessage(reason));
     } finally {
       lock.current = false;
       if (alive.current) setBusy(false);

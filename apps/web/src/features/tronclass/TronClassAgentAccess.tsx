@@ -21,7 +21,7 @@ export function TronClassAgentAccess({ client, revision, expectedVersion, compac
   expectedVersion?: string | null;
   compact?: boolean;
   onSaved?: (grant: TronClassAgentGrant) => void;
-  onConnectionChanged?: () => void;
+  onConnectionChanged?: (reason?: unknown) => void;
 }) {
   const headingId = useId();
   const [grant, setGrant] = useState<TronClassAgentGrant | null>(null);
@@ -57,7 +57,7 @@ export function TronClassAgentAccess({ client, revision, expectedVersion, compac
       if (controller.signal.aborted) return;
       setError(tronClassErrorMessage(reason));
       setUnconnected(reason instanceof TronClassRequestError && [401, 409].includes(reason.status));
-      if (isTronClassAuthorityError(reason)) connectionChanged.current?.();
+      if (isTronClassAuthorityError(reason)) connectionChanged.current?.(reason);
       setLoading(false);
     });
     return () => controller.abort();
@@ -87,7 +87,7 @@ export function TronClassAgentAccess({ client, revision, expectedVersion, compac
     } catch (reason) {
       if (signal.aborted) return;
       setError(tronClassErrorMessage(reason));
-      if (isTronClassAuthorityError(reason)) connectionChanged.current?.();
+      if (isTronClassAuthorityError(reason)) connectionChanged.current?.(reason);
       // Reload the current revision/version after any failed save; never overwrite
       // another device's choice with a stale compare-and-set version.
       setGrant(null);

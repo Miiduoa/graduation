@@ -159,6 +159,79 @@ describe('TronClass submission orchestration (injected verified source only)', (
   });
 
   it.each([
+    { status: 401, code: 'TRONCLASS_RECONNECT_REQUIRED' },
+    { status: 409, code: 'TRONCLASS_BINDING_CHANGED' },
+    { status: 401, code: 'SIGN_IN_REQUIRED' },
+  ])('surfaces expired or replaced sessions while preparing receipt reads: %j', async ({ status, code }) => {
+    const f = fixture();
+    vi.mocked(f.source.listSubmissions).mockRejectedValueOnce(new NuniError(status, code));
+    await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ status, code });
+    expect(f.source.submit).not.toHaveBeenCalled();
+    expect(f.source.uploadFile).not.toHaveBeenCalled();
+    expect(f.rows.size).toBe(0);
+  });
+
+  it('retains a retryable receipt failure when the school session is still valid', async () => {
+    const f = fixture();
+    vi.mocked(f.source.listSubmissions).mockRejectedValueOnce(new NuniError(503, 'TRONCLASS_SOURCE_UNAVAILABLE'));
+    await expect(f.service.prepare(OWNER, SCOPE)).resolves.toMatchObject({
+      canSubmit: false, receipt: null, blockedReason: '繳交紀錄暫時無法確認，請重新讀取後再試。',
+    });
+    expect(f.source.submit).not.toHaveBeenCalled();
+  });
+
+  it('shows separate read-only school history while both production write operations remain unavailable', async () => {
+    const f = fixture();
+    f.source.contractVerified = false;
+    const history = { source: 'tronclass' as const, ...SCOPE, fetchedAt: new Date(NOW).toISOString(),
+      state: 'available' as const, latestId: '7', entries: [{ id: '7', state: 'returned' as const,
+        isLatest: true, createdAt: new Date(NOW - 1000).toISOString(), content: '原本的作業',
+        contentTruncated: false, attachments: [], hasOtherResources: false }] };
+    f.source.readSubmissionHistory = vi.fn(async () => history);
+    const result = await f.service.prepare(OWNER, SCOPE);
+    expect(result).toMatchObject({ canSubmit: false, receipt: null, history });
+    expect(f.source.listSubmissions).not.toHaveBeenCalled();
+    await expect(f.upload()).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    await expect(f.service.submit(OWNER, INPUT)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(f.rows.size).toBe(0);
+    expect(f.source.submit).not.toHaveBeenCalled();
+  });
+
+  it('does not use historical display data for submission reconciliation', async () => {
+    const f = fixture();
+    f.source.readSubmissionHistory = vi.fn();
+    vi.mocked(f.source.submit).mockResolvedValueOnce();
+    expect(await f.service.submit(OWNER, INPUT)).toMatchObject({ status: 'unknown', receipt: null });
+    expect(f.source.readSubmissionHistory).not.toHaveBeenCalled();
+  });
+
+  it('does not relabel failed history reads as an empty successful history', async () => {
+    const f = fixture();
+    f.source.contractVerified = false;
+    f.source.readSubmissionHistory = vi.fn(async () => { throw new NuniError(502, 'TRONCLASS_HISTORY_UNAVAILABLE'); });
+    expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ canSubmit: false, receipt: null,
+      history: { state: 'unavailable', entries: [], latestId: null } });
+  });
+
+  it('drops a history result if the account rebinds while it is being loaded', async () => {
+    const f = fixture();
+    f.source.contractVerified = false;
+    f.source.readSubmissionHistory = vi.fn(async () => {
+      f.rebind();
+      return { source: 'tronclass' as const, ...SCOPE, fetchedAt: new Date(NOW).toISOString(),
+        state: 'available' as const, latestId: null, entries: [] };
+    });
+    await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  });
+
+  it('surfaces school expiry from the separate history source for inline reconnect', async () => {
+    const f = fixture();
+    f.source.contractVerified = false;
+    f.source.readSubmissionHistory = vi.fn(async () => { throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED'); });
+    await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ status: 401, code: 'TRONCLASS_RECONNECT_REQUIRED' });
+  });
+
+  it.each([
     { permissionKnown: false }, { individual: false }, { canSubmit: false }, { isClosed: true },
     { remainingAttempts: 0 }, { deadline: '2026-11-12T08:00:00.000Z' },
     { opensAt: '2026-11-14T08:00:00.000Z' }, { allowsText: false, allowsAttachments: false },

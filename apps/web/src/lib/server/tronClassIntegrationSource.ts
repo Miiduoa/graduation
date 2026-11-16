@@ -23,6 +23,7 @@ import type {
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import { tronClassLmsReadonlySource } from './tronClassLmsSource';
 import { createTronClassBindingService } from './tronClassBinding';
+import { isTronClassSourceVisible } from './tronClassSourceVisibility';
 
 const MAX_OVERVIEW_COURSES = 40;
 const READ_BUDGET_MS = 50_000;
@@ -111,6 +112,7 @@ async function readHomework(
 ): Promise<{ homework: TronClassHomeworkItem[]; errors: TronClassSyncError[] }> {
   const items: TronClassHomeworkItem[] = [];
   const seen = new Set<number>();
+  let accumulated = 0;
   try {
     for (let page = 1; page <= HOMEWORK_MAX_PAGES; page++) {
       await check();
@@ -122,14 +124,23 @@ async function readHomework(
       const rows = response.value.homework_activities;
       if (!Array.isArray(rows) || rows.length > HOMEWORK_PAGE_SIZE) throw new Error('Invalid homework page');
       for (const raw of rows) {
-        const item = parseHomework(raw, course);
-        if (!item || seen.has(item.id)) throw new Error('Invalid or repeated homework');
-        seen.add(item.id);
+        const row = record(raw);
+        const id = positiveId(row.id);
+        if (!id || seen.has(id) || (row.course_id !== undefined && positiveId(row.course_id) !== course.id)) {
+          throw new Error('Invalid or repeated homework');
+        }
+        seen.add(id);
+        if (!isTronClassSourceVisible(row)) continue;
+        const item = parseHomework(row, course);
+        if (!item) throw new Error('Invalid homework');
         items.push(item);
       }
+      // The source total counts hidden rows too; filtering must not hide a
+      // missing page or turn a complete source response into a partial one.
+      accumulated += rows.length;
       const next = homeworkPageAdvance({
         page, pageSize: HOMEWORK_PAGE_SIZE, pageLength: rows.length,
-        accumulated: items.length, total: response.value.total,
+        accumulated, total: response.value.total,
       });
       if (next === 'complete') return { homework: items, errors: [] };
       if (next === 'incomplete') break;
@@ -142,6 +153,7 @@ async function readHomework(
 
 function announcement(raw: unknown, course: TronClassCourseSummary, source: 'course' | 'activity') {
   const row = record(raw);
+  if (!isTronClassSourceVisible(row)) return null;
   const id = positiveId(row.id);
   const title = text(row.title || row.name);
   if (!id || !title || (row.course_id !== undefined && positiveId(row.course_id) !== course.id)) return null;
@@ -155,6 +167,7 @@ function announcement(raw: unknown, course: TronClassCourseSummary, source: 'cou
 
 function material(raw: unknown, course: TronClassCourseSummary) {
   const row = record(raw);
+  if (!isTronClassSourceVisible(row)) return null;
   const id = positiveId(row.id);
   const title = text(row.title || row.name);
   const type = text(row.type, 40);
@@ -163,6 +176,7 @@ function material(raw: unknown, course: TronClassCourseSummary) {
   const uploads = Array.isArray(row.uploads) ? row.uploads : Array.isArray(row.attachments) ? row.attachments : [];
   const files = uploads.slice(0, 30).flatMap((item) => {
     const file = record(item);
+    if (!isTronClassSourceVisible(file)) return [];
     const name = text(file.name || file.filename, 200);
     if (!name) return [];
     const key = text(file.key || file.file_key || file.upload_id, 200);
@@ -170,6 +184,17 @@ function material(raw: unknown, course: TronClassCourseSummary) {
     return [{ name, allowDownload, downloadHref: allowDownload && key ? tronClassUploadHref(key) : null }];
   });
   return { id, courseId: course.id, courseName: course.name, title, type, files, href: tronClassActivityHref(course.id, id) };
+}
+
+function visibleSourceRows(rows: unknown[]): unknown[] {
+  // A stale public copy in another feed must not override a hidden copy of the
+  // same activity. Course announcements have their own ID namespace.
+  const denied = new Set<number>();
+  for (const raw of rows) {
+    const id = positiveId(record(raw).id);
+    if (id && !isTronClassSourceVisible(raw)) denied.add(id);
+  }
+  return rows.filter((raw) => isTronClassSourceVisible(raw) && !denied.has(positiveId(record(raw).id) ?? 0));
 }
 
 async function readContents(
@@ -205,8 +230,9 @@ async function readContents(
     const key = JSON.stringify([item.courseId, item.id.split(':').at(-1), item.title, item.content]);
     if (!seenAnnouncements.has(key)) { seenAnnouncements.add(key); announcements.push(item); }
   };
-  for (const raw of notices.ok ? notices.value : []) addAnnouncement(announcement(raw, course, 'course'));
-  for (const raw of [...(activities.ok ? activities.value : []), ...(courseware.ok ? courseware.value : [])]) {
+  for (const raw of visibleSourceRows(notices.ok ? notices.value : [])) addAnnouncement(announcement(raw, course, 'course'));
+  const activityRows = visibleSourceRows([...(activities.ok ? activities.value : []), ...(courseware.ok ? courseware.value : [])]);
+  for (const raw of activityRows) {
     const item = material(raw, course);
     if (item && !seenMaterials.has(item.id)) { seenMaterials.add(item.id); materials.push(item); }
     if (isAnnouncementActivityType(record(raw).type)) addAnnouncement(announcement(raw, course, 'activity'));

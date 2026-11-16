@@ -1,6 +1,6 @@
 # TronClass 獨立綁定與作業整合
 
-更新日期：2026-11-13。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
+更新日期：2026-11-16。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
 
 ## 功能狀態
 
@@ -9,9 +9,11 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 能力 | 本分支狀態 |
 | --- | --- |
 | 使用 nuni 平台登入或 Firebase 登入綁定 TronClass | 已實作；不依賴 E-campus session |
-| 重新連接、換綁、解除連接 | 已實作，使用 revision 防止舊請求覆蓋新綁定 |
+| 重新連接、換綁、解除連接 | 已實作，使用 revision 防止舊請求覆蓋新綁定；校方 session 失效時在原頁開啟重新連接表單 |
 | 本人 ongoing / upcoming 課程、作業與截止時間 | 已實作，分頁不完整會顯示部分失敗 |
+| 本人個人作業的歷次繳交內容 | 已實作官方 GET 來源，顯示本文、附件名稱／大小、來源紀錄時間及五種狀態；與本系統新送出的收據分開 |
 | 選定課程的公告與教材 | 已實作，包含一般活動與 courseware 活動 |
+| 來源隱藏／未發布資料過濾 | 已套用於作業、公告、教材與附件，以及作業歷史的讀取邊界；不因另一旗標允許就忽略明確拒絕 |
 | 使用已綁定 session 下載教材附件 | 已實作，重新確認本人課程、活動與附件下載權限；真人下載仍待驗收 |
 | 既有 Assistant 直接查詢 TronClass | 已實作，回傳本人課程、作業狀態、公告與教材；私有結果不加入雲端模型歷史 |
 | Agent 代理下載與準備作業 | 已實作，需使用者分別授權；在聊天內下載附件、選定作業並開啟預覽 |
@@ -19,10 +21,32 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 作業文字、附件選擇、預覽、複製內容 | 已實作，草稿及檔案只留在目前頁面記憶體 |
 | 上傳 → 最終送出 → 讀回收據 | 服務及 UI 已實作，以注入測試來源驗證 |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
-| 重交、撤回、小組繳交、代替其他人繳交 | 未實作；不得套用一般個人作業送出流程 |
+| 重交、撤回、小組繳交、代替其他人繳交 | 未實作；小組歷史也回傳 `group-unsupported`，引導至原作業查看 |
 | 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊作業、討論發文／回覆、問卷與同儕互評 writer 改為明確拒絕，避免假成功 |
 
 TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的收件、附件與教師批改，不是 TronClass 的正式繳交證據。
+
+## 本人歷次作業紀錄
+
+本輪依靜宜官方公開前端確認讀取路徑，新增 `readSubmissionHistory()`。伺服器先以目前綁定的校方學生檢查本人課程與作業清單，再呼叫 `GET /api/activities/{activityId}`，確認活動 ID、課程 ID、`type: homework`、可見性及 `submit_by_group: false`，最後才讀取 `GET /api/activities/{activityId}/students/{studentId}/submission_list` 的 `{ list: [...] }`。學生 ID 來自伺服器已驗證的綁定，不接受瀏覽器指定他人 ID 或來源 URL。官方資源版本、SHA-256、模組定位及尚未驗證的範圍見 [2026-11-16 公開前端契約查核](tronclass-public-contract-2026-11-16.md)。
+
+歷史隨 `prepare` 回傳，顯示五種逐筆狀態：
+
+| state | 畫面名稱 | 判讀原則 |
+| --- | --- | --- |
+| `submitted` | 已繳交 | `is_draft`、`is_redo`、`submit_by_instructor` 均明確為 false |
+| `draft` | 草稿 | `is_draft: true`，且未同時標示退回重做 |
+| `returned` | 退回重做 | `is_redo: true`，且未同時標示草稿 |
+| `teacher-marked` | 教師標記已繳 | 明確不是草稿或退回，且 `submit_by_instructor`、`marked_submitted` 均為 true |
+| `unknown` | 狀態待確認 | 必要旗標不足、型別不符或互相矛盾，不用 JavaScript 的 `!undefined` 推論已繳交 |
+
+只有 `is_latest_version: true` 才建立 `latestId`，保留各版本自己的狀態，不以最大 ID、第一筆或時間猜測最新版。缺少最新版標記時仍可逐筆查看；重複最新版、重複 ID、身分或範圍不符、顯示不完整分頁等情況，整份歷史回報 `unavailable`，不回傳看似完整的部分紀錄。來源 `created_at` 轉成 `createdAt` 顯示為「紀錄時間」，不是已驗證的正式送出時間；無法解析的時間維持 null。
+
+只輸出整理後的本文、附件名稱與大小，本文以純文字顯示，超過 20,000 字元標示截斷。清單及單筆附件各上限 100 筆，超量不默默截成完整結果；歷史附件目前不提供直接下載。外部資源與簡報只顯示另有資源的提示。任何 `submit_by_instructor: true` 的教師建立紀錄均移除本文、附件及其他資源，不透傳建立人、教師評語、分數或 `submission_correct`。
+
+`submit_by_group: true` 直接回傳 `group-unsupported` 並保留原作業入口，不呼叫個人歷史來代替小組結果。一般讀取失敗顯示「暫時無法讀取」，可在頁內重試；空清單只代表這次沒有取得紀錄。校方登入失效或明確撤銷存取權限則保留錯誤，不降級成空清單。
+
+**歷史不是本系統新送出的收據。** `history` 不填入 `receipt`，不參與 `submit`／`reconcile` 的成功判定，也不解除寫入限制。既有正式版本、教師標記或上傳檔案，都不能證明 nuni 的某次新送出已成功。
 
 ## 在既有 Assistant 使用 Agent
 
@@ -50,6 +74,10 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 - 長時間讀取結束會再驗證 nuni 身分與校方綁定；使用者換帳號、重新連線或解除連線後，舊資料不會送回新畫面。
 - 本分支不授予校務角色、課程權限或組織成員資格，也不恢復 `alcat.pu.edu.tw` / `mypu.pu.edu.tw` 的暫停流程。
 
+當查詢、歷史讀取或下載收到 `TRONCLASS_RECONNECT_REQUIRED`，Web 會立即撤下依賴舊連線的畫面，清空密碼欄，在原頁顯示重新連接表單並保留 compare-and-set 所需的 revision。即使本地綁定的 12 小時期限尚未到，也不以本地 `connected` 狀態覆蓋校方的登入失效結果。重新連接前先停止舊資料與下載流程，晚到的 status、查詢或繳交紀錄不能恢復舊畫面。
+
+來源資料若提供 `is_hidden`、`hidden` 或 `published`，會依已知 boolean／0、1 編碼檢查；任一拒絕或無法辨識的值都不放行。缺少這些旗標的舊格式仍沿用既有本人課程及附件權限檢查，不能把「沒有隱藏旗標」當成獨立授權。相同活動在一般活動與 courseware 清單出現時，拒絕標記不會被另一份可見資料蓋過。
+
 ## HTTP 介面
 
 `POST /api/tronclass`，`Content-Type: application/json`，JSON 上限 96 KiB。請求只接受各 action 已列出的欄位。
@@ -60,7 +88,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 | `connect` | `schoolId: "pu"`, `account`, `password`, `expectedRevision` | 驗證校方身分後綁定；初次 revision 為 null |
 | `disconnect` | `expectedRevision` | 解除目前綁定 |
 | `sync` | 無；可加 `courseId` | 讀取全部本人課程與作業；選定課程時讀公告、教材 |
-| `prepare` | `courseId`, `homeworkId` | 讀取作業資訊與可送出條件 |
+| `prepare` | `courseId`, `homeworkId` | 讀取作業資訊、可送出條件及獨立的本人歷史 `history`；歷史不構成 `receipt` |
 | `submit` | `courseId`, `homeworkId`, `revision`, `operationId`, `content`, `attachments`, `confirmed: true` | 最終送出；attachments 為本次已驗證的 fileId，非來源 upload key |
 | `reconcile` | `operationId`, `revision` | 只查證原操作，不重新送出 |
 
@@ -112,6 +140,8 @@ UI 的 sessionStorage 只保存 owner＋課程＋作業對應的 operation ID，
 
 production `createTronClassSubmissionSource()` 目前為 `contractVerified: false`，`uploadFile`、`submit`、`listSubmissions` 會明確拒絕。把 `TRONCLASS_HOMEWORK_WRITE_ENABLED` 改為 true 仍無法解鎖。
 
+本輪新增的 `readSubmissionHistory` 是獨立唯讀能力，不受 writer 開放條件限制；它不等同於寫入流程的 `listSubmissions` 收據查證。公開前端已提供真正 final 與多階段 upload 的路徑證據，但尚未取得可證明真實寫入成功、完整附件關聯及超時恢復的校方回應。
+
 開放前需要一個可控制、可驗證結果的測試課程及作業，記錄實際上傳、關聯附件、最終送出、讀回本人收據的校方契約；敏感 cookie、帳密及作業內容不得放進版本庫或測試 fixture。需確認：
 
 - CSRF／session 更新、校方課程與學生識別、正式 submitted 與 draft 的差異。
@@ -127,6 +157,8 @@ production `createTronClassSubmissionSource()` 目前為 `contractVerified: fals
 `scripts/tronclass/analyze-har.mjs` 可在本機檢查已獲授權的 HAR，輸出固定靜宜 origin、白名單路徑模板、HTTP method／status、去值化 JSON 型別與 upload → final → 本人 readback 的證據缺口。原始 header、cookie、query、學生代號、檔名、內容及未知欄位名稱都不輸出；輸入、分析深度與輸出均有限制，錯誤也使用固定代碼。
 
 此工具不連網、不重播操作，不會自行開放 adapter。HAR 可被編輯，HTTP 2xx 或完整觀察鏈也不能取代真人校方驗收，報告的 `contractVerified` 永遠是 false。使用方式、輸入限制與缺口說明見 [`scripts/tronclass/README.md`](../../scripts/tronclass/README.md)。原始 HAR 不應提交 Git 或傳入對話。
+
+**目前分析器仍使用原有候選路徑，尚未完整辨識本輪確認的 `submission_list`、`/api/course/activities/{id}/submissions`、二進位上傳及 callback。空報告或缺少 chain 不能解讀成 HAR 中沒有這些動作。** 下一步需連同狀態欄位與附件關聯一起更新分析器；詳見 [公開前端契約查核的工具缺口](tronclass-public-contract-2026-11-16.md#離線分析器的目前缺口)。
 
 ## 環境設定
 
@@ -172,15 +204,26 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、Agent grants／意圖／工具／下載、client、TronClassWorkspace 與既有 Assistant／NuniApp 回歸；另外驗證 Mobile 五個舊 writer 沒有任何網路送出。HAR 測試使用 `node --test scripts/tronclass/analyze-har.test.mjs`，已加入既有 CI。
 
-Agent 追加開發的集中執行結果（Node 22.23.4）：Web **40 個測試檔、711 / 711**（15 個後端／意圖測試檔 293 項、20 個既有助理／頁面回歸檔 372 項、5 個整合 UI／client 檔 46 項）、Mobile 舊 writer **10 / 10**、離線 HAR **12 / 12**，合計 **733 項通過**。涵蓋跨 owner、scope、revision／grant version 變更、撤權後晚到查詢／檔案、未知與部分結果、單一／多個下載目標，以及完整引用／解說文字不執行操作。
+2026-11-16 本輪驗證結果如下。這是本次指定範圍的回歸結果，不代表整個 monorepo 的所有測試均已執行；重跑的子集合不重複累加。
 
-本輪 Web 新增與修改檔 ESLint 零錯誤；Mobile 原有 9 項警告位於未修改區段。完整 Web TypeScript 檢查及 UI design gate 另列於 PR 驗證結果。前一輪 accountDeletion 的 44 項測試已通過，這輪未變更其實作。
+| 範圍 | 結果 |
+| --- | --- |
+| Web 回歸 | **27 個測試檔、599 / 599 通過** |
+| 完整 Web TypeScript 檢查 | 通過，exit 0 |
+| 本輪修改的 Web TypeScript 檔 ESLint | **0 errors** |
+| 共用歷史回應 parser ESLint | `--max-warnings 0` 通過 |
+| nuni UI design gate | `--base origin/main` 通過 |
+| Backend account＋dorm 回歸 | **49 / 49 通過**，為這兩個範圍的合計 |
+| Backend TronClass scraper 回歸 | **88 / 88 通過** |
 
-測試中的 verified provider、帳號、課程及收據都是合成資料，用於證明權限隔離、防重、失敗與恢復行為；不能拿來宣稱真實校方整合已驗收。瀏覽器無法連接本機預覽，後續又受 URL policy 限制，因此本輪沒有宣告桌面／窄螢幕／深色模式的視覺驗證通過。
+本輪涵蓋本人歷史 GET 的來源及身分範圍核對、草稿／退回／教師標記／未知狀態、最新版與來源時間、教師內容移除、分頁與資料上限、小組未支援、歷史與新收據隔離，以及來源隱藏過濾、校方登入失效與晚到結果的重新連接行為。既有 Agent 與作業權限、防重及恢復流程亦在 Web 指定回歸範圍內。前輪 Mobile 舊 writer 與離線 HAR 的測試紀錄不列入本輪數量。
+
+測試中的 verified provider、帳號、課程及收據都是合成資料，用於證明權限隔離、防重、失敗與恢復行為。官方公開 JavaScript 的匿名 GET 查核可證明前端使用的路徑與欄位，不能取代真人帳號回應、真實繳交或教師收件驗收。本輪沒有宣告正式部署，也未宣告桌面／窄螢幕／深色模式的瀏覽器視覺驗證通過；UI design gate 是程式檢查，不等同視覺驗收。
 
 ## 官方依據
 
 - [靜宜大學教學發展中心：TronClass 登入說明](https://tdcenter.pu.edu.tw/p/406-1061-45101,r1105.php?Lang=zh-tw)：校方正式入口與登入帳密說明。
 - [TronClass 官方作業說明](https://support.tronclass.com/tw/question/homework/)：上傳檔案與正式繳交是不同步驟；作業規則與版本需要依實際作業確認。
+- [2026-11-16 官方公開前端契約查核](tronclass-public-contract-2026-11-16.md)：記錄靜宜官方資源 URL、版本、SHA-256、模組及本人歷史／final／upload 證據，並列出完整 schema、CSRF、真實寫入及工具缺口。
 
-這兩份公開說明不提供可直接採用的完整學生 REST 寫入契約。
+公開說明與前端程式提供部分接口證據，尚不足以構成經過受控校方驗收的完整學生 REST 寫入契約。

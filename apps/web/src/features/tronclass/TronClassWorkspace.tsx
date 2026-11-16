@@ -110,6 +110,7 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
   const [submissionBusy, setSubmissionBusy] = useState(false);
   const alive = useRef(true);
   const lock = useRef(false);
+  const connectionRequest = useRef(0);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -118,16 +119,18 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
   }, []);
   useEffect(() => {
     let current = true;
+    const request = ++connectionRequest.current;
     void client.status().then(
       (value) => {
-        if (!current) return;
+        if (!current || request !== connectionRequest.current) return;
         setConnection(value);
         setEditing(!value.connected);
         setAccount(value.account ?? '');
+        setError(!value.connected && value.account ? 'TronClass 登入已失效，請重新連接後繼續。' : '');
         setLoading(false);
       },
       (reason) => {
-        if (!current) return;
+        if (!current || request !== connectionRequest.current) return;
         setError(tronClassErrorMessage(reason));
         setLoading(false);
       },
@@ -137,9 +140,20 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     };
   }, [client, epoch]);
 
-  function reloadStatus() {
-    setConnection(null);
+  function reloadStatus(reason?: unknown) {
+    ++connectionRequest.current;
     setPassword('');
+    setDisconnecting(false);
+    if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_RECONNECT_REQUIRED') {
+      // The local binding TTL may still be valid after the school has rejected
+      // its session. Keep the CAS revision, but retire every dependent view.
+      setConnection((value) => value ? { ...value, connected: false } : value);
+      setEditing(true);
+      setLoading(false);
+      setError('TronClass 登入已失效，請重新連接後繼續。');
+      return;
+    }
+    setConnection(null);
     setLoading(true);
     setError('');
     setEpoch((value) => value + 1);
@@ -149,19 +163,23 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     event.preventDefault();
     if (lock.current || submissionBusy || !account.trim() || !password || !connection) return;
     lock.current = true;
+    const request = ++connectionRequest.current;
+    const expectedRevision = connection.revision;
     setBusy(true);
     setError('');
     const suppliedPassword = password;
     setPassword('');
+    // Retire old reads, downloads and grants before starting a replacement login.
+    setConnection({ ...connection, connected: false });
     try {
-      const value = await client.connect(account.trim(), suppliedPassword, connection.revision);
-      if (!alive.current) return;
+      const value = await client.connect(account.trim(), suppliedPassword, expectedRevision);
+      if (!alive.current || request !== connectionRequest.current) return;
       setConnection(value);
       setAccount(value.account ?? '');
       setEditing(!value.connected);
       setDisconnecting(false);
     } catch (reason) {
-      if (!alive.current) return;
+      if (!alive.current || request !== connectionRequest.current) return;
       if (reason instanceof TronClassRequestError && reason.code.includes('BINDING_CHANGED'))
         reloadStatus();
       else setError(tronClassErrorMessage(reason));
@@ -346,7 +364,7 @@ function ConnectedWorkspace({
   client: TronClassClient;
   revision: string;
   owner: string;
-  onConnectionChanged: () => void;
+  onConnectionChanged: (reason?: unknown) => void;
   onSubmissionBusy: (busy: boolean) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
@@ -377,15 +395,20 @@ function ConnectedWorkspace({
       const value = await client.sync(scope === 'all' ? undefined : Number(scope));
       if (!alive.current || request !== generation.current) return;
       if (value.revision !== revision) {
+        ++generation.current;
+        setSnapshot(null);
         currentConnectionChanged.current();
         return;
       }
       setSnapshot(value);
     } catch (reason) {
       if (!alive.current || request !== generation.current) return;
-      if (reason instanceof TronClassRequestError && reason.code.includes('BINDING_CHANGED'))
-        currentConnectionChanged.current();
-      else setError(tronClassErrorMessage(reason));
+      if (reason instanceof TronClassRequestError &&
+        ['TRONCLASS_BINDING_CHANGED', 'TRONCLASS_RECONNECT_REQUIRED'].includes(reason.code)) {
+        ++generation.current;
+        setSnapshot(null);
+        currentConnectionChanged.current(reason);
+      } else setError(tronClassErrorMessage(reason));
     } finally {
       if (alive.current && request === generation.current) setLoading(false);
     }
@@ -542,7 +565,7 @@ function ConnectedWorkspace({
                         className="btn"
                         onClick={() => setSelected(item)}
                       >
-                        {item.submitted ? '查看繳交內容' : '準備作業'}
+                        {item.submitted ? '查看作業' : '準備作業'}
                       </button>
                     </div>
                   </li>
@@ -589,6 +612,7 @@ function ConnectedWorkspace({
                                   activityId={item.id}
                                   uploadKey={tronClassUploadKey(file.downloadHref)!}
                                   name={file.name}
+                                  onConnectionChanged={onConnectionChanged}
                                 />
                               ) : file.allowDownload && safeTronClassHref(file.downloadHref) ? (
                                 <SourceLink href={file.downloadHref}>

@@ -960,6 +960,60 @@ async function tcFetchActivitiesRaw(cookies, courseId, query = '') {
   return activities;
 }
 
+const HOMEWORK_DETAIL_READ_LIMITS = { timeoutMs: 8000, maxResponseBytes: 1024 * 1024 };
+const HOMEWORK_SUBMISSION_LIST_MAX_ITEMS = 1000;
+
+function homeworkReadError(code, status) {
+  const error = new Error(code);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+function requireHomeworkReadId(id) {
+  if (!Number.isSafeInteger(id) || id <= 0) throw homeworkReadError('TC_HOMEWORK_INVALID_ID', 400);
+}
+
+function isHomeworkResponseObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function readHomeworkJson(url, cookies) {
+  try {
+    return await tcFetchJson(url, cookies, { method: 'GET', ...HOMEWORK_DETAIL_READ_LIMITS });
+  } catch (error) {
+    // JSON parser errors can quote a student's source content. Expose a fixed
+    // failure instead; never convert malformed or failed reads into no history.
+    if (error instanceof SyntaxError) throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+    throw error;
+  }
+}
+
+// Official Providence activityApi.getActivity (98133-ef5ebb8f.js, 2026-11-16).
+// This is a raw read only: callers must still verify course/type/visibility.
+async function tcFetchHomeworkActivityStrict(cookies, activityId) {
+  requireHomeworkReadId(activityId);
+  const data = await readHomeworkJson(`${TC_BASE}/api/activities/${activityId}`, cookies);
+  const id = isHomeworkResponseObject(data) && (
+    typeof data.id === 'number' ? data.id : typeof data.id === 'string' && /^[1-9]\d*$/.test(data.id) ? Number(data.id) : NaN
+  );
+  if (!Number.isSafeInteger(id) || id <= 0) throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+  return data;
+}
+
+// Official student homework detail (55200.e380810d.js / 88788.161d6b6a.js).
+// Preserve the exact { list: [...] } envelope. Do not probe alternate endpoints,
+// add pagination, infer a final status, or fall back to another student's data.
+async function tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId) {
+  requireHomeworkReadId(activityId);
+  requireHomeworkReadId(studentId);
+  const data = await readHomeworkJson(`${TC_BASE}/api/activities/${activityId}/students/${studentId}/submission_list`, cookies);
+  if (!isHomeworkResponseObject(data) || !Array.isArray(data.list) || data.list.length > HOMEWORK_SUBMISSION_LIST_MAX_ITEMS) {
+    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+  }
+  return data;
+}
+
 async function tcFetchHomeworkStatus(cookies, courseId) {
   try {
     const data = await tcFetchJson(
@@ -1398,6 +1452,8 @@ module.exports = {
   tcFetchHomeworkStatus,
   tcFetchHomeworkActivitiesPage,
   tcFetchActivitiesRaw,
+  tcFetchHomeworkActivityStrict,
+  tcFetchStudentHomeworkSubmissionList,
   tcFetchHomeworkScores,
   tcFetchExamStatus,
   tcFetchAnnouncements,

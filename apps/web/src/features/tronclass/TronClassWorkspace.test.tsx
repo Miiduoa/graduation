@@ -323,9 +323,184 @@ describe('TronClass account isolation and course reads', () => {
     await act(async () => older.resolve(json(snapshot)));
     expect(screen.getByText('最新課程公告')).toBeTruthy();
   });
+
+  it('retires an expired school session and reconnects in place without trusting its still-valid local status', async () => {
+    let expired = false;
+    let reconnected = false;
+    const nextRevision = 'c'.repeat(32);
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (String(url) === '/api/tronclass/agent-permissions' && reconnected)
+        return Promise.resolve(json({ revision: nextRevision, version: null,
+          permissions: { readCourseData: false, downloadMaterials: false, prepareHomework: false }, updatedAt: null }));
+      if (input.action === 'connect') {
+        reconnected = true;
+        return Promise.resolve(json({ ...connection, revision: nextRevision }));
+      }
+      if (input.action === 'sync' && expired) return Promise.resolve(reconnected
+        ? json({ ...snapshot, revision: nextRevision, homework: [{ ...homework, title: '重連後的新作業' }] })
+        : json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401));
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await screen.findByRole('heading', { name: '期中報告' });
+    await screen.findByRole('checkbox', { name: /讀取課程、作業/ });
+    expired = true;
+    fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+    const account = await screen.findByLabelText('學校帳號') as HTMLInputElement;
+    expect(account.value).toBe('student-a');
+    expect((screen.getByLabelText('學校密碼') as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('TronClass 登入已失效，請重新連接後繼續。')).toBeTruthy();
+    expect(screen.queryByText('已連接')).toBeNull();
+    expect(screen.queryByText('期中報告')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'TronClass 助理權限' })).toBeNull();
+    expect(fetchMock.mock.calls.filter(([url, init]) =>
+      String(url) === '/api/tronclass' && body(init).action === 'status')).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'new-school-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await screen.findByRole('heading', { name: '重連後的新作業' });
+    expect(screen.getByText('已連接')).toBeTruthy();
+    expect(screen.queryByText('TronClass 登入已失效，請重新連接後繼續。')).toBeNull();
+    expect(body(calls('connect')[0][1])).toMatchObject({ account: 'student-a', expectedRevision: revision });
+    expect(sessionStorage.length).toBe(0);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('ignores old course and grant responses after replacing the school connection', async () => {
+    const oldRead = deferred<Response>();
+    const oldGrant = deferred<Response>();
+    let reads = 0;
+    let reconnected = false;
+    const nextRevision = 'c'.repeat(32);
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (String(url) === '/api/tronclass/agent-permissions') return reconnected
+        ? Promise.resolve(json({ revision: nextRevision, version: null,
+            permissions: { readCourseData: false, downloadMaterials: false, prepareHomework: false }, updatedAt: null }))
+        : oldGrant.promise;
+      if (input.action === 'connect') {
+        reconnected = true;
+        return Promise.resolve(json({ ...connection, revision: nextRevision }));
+      }
+      if (input.action === 'sync') {
+        if (reconnected) return Promise.resolve(json({ ...snapshot, revision: nextRevision,
+          homework: [{ ...homework, title: '目前連線的作業' }] }));
+        if (++reads > 1) return oldRead.promise;
+      }
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await screen.findByRole('heading', { name: '期中報告' });
+    fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+    await waitFor(() => expect(reads).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: '重新連接／更換帳號' }));
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'replacement-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '更新連接' }));
+    await screen.findByRole('heading', { name: '目前連線的作業' });
+    await act(async () => {
+      oldRead.resolve(json({ ...snapshot, homework: [{ ...homework, title: '過時連線的私人作業' }] }));
+      oldGrant.resolve(json({ revision, version: 'd'.repeat(32),
+        permissions: { readCourseData: true, downloadMaterials: true, prepareHomework: true }, updatedAt: null }));
+    });
+    expect(screen.getByRole('heading', { name: '目前連線的作業' })).toBeTruthy();
+    expect(screen.queryByText('過時連線的私人作業')).toBeNull();
+    expect((screen.getByRole('checkbox', { name: /讀取課程、作業/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByLabelText('學校密碼')).toBeNull();
+  });
+
+  it('returns an expired Agent grant to the same connection form without a status reload loop', async () => {
+    fetchMock.mockImplementation((url, init) => String(url) === '/api/tronclass/agent-permissions'
+      ? Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401))
+      : defaultResponse(url, init));
+    render(<TronClassWorkspace />);
+    await screen.findByLabelText('學校密碼');
+    expect(screen.getByText('TronClass 登入已失效，請重新連接後繼續。')).toBeTruthy();
+    expect(screen.queryByText('期中報告')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'TronClass 助理權限' })).toBeNull();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/tronclass/agent-permissions')).toHaveLength(1);
+  });
+
+  it('labels an already-submitted assignment without promising its remote submission content', async () => {
+    fetchMock.mockImplementation((url, init) => body(init).action === 'sync'
+      ? Promise.resolve(json({ ...snapshot, homework: [{ ...homework, submitted: true }] }))
+      : defaultResponse(url, init));
+    render(<TronClassWorkspace />);
+    await screen.findByRole('button', { name: '查看作業' });
+    expect(screen.queryByRole('button', { name: '查看繳交內容' })).toBeNull();
+  });
 });
 
 describe('TronClass submission confirmation', () => {
+  it('returns an expired assignment preparation to the connection form before any write', async () => {
+    fetchMock.mockImplementation((url, init) => body(init).action === 'prepare'
+      ? Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401))
+      : defaultResponse(url, init));
+    render(<TronClassWorkspace />);
+    fireEvent.click(await screen.findByRole('button', { name: '準備作業' }));
+    await screen.findByLabelText('學校密碼');
+    expect(screen.queryByLabelText('作業內容')).toBeNull();
+    expect(calls('submit')).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('stops after an expired upload without advancing to final submission', async () => {
+    fetchMock.mockImplementation((url, init) => init?.method === 'PUT'
+      ? Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401))
+      : defaultResponse(url, init));
+    render(<TronClassWorkspace />);
+    await previewAnswer([new File(['report'], 'report.pdf', { type: 'application/pdf' })]);
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByLabelText('學校密碼');
+    expect(calls('submit')).toHaveLength(0);
+    expect(sessionStorage.length).toBe(0);
+    expect((screen.getByRole('button', { name: '連接 TronClass' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(['submit', 'reconcile'] as const)(
+    'keeps the operation after an expired %s and only verifies it with the replacement session',
+    async (failureAction) => {
+      let reconnected = false;
+      const nextRevision = 'c'.repeat(32);
+      fetchMock.mockImplementation((url, init) => {
+        const input = body(init);
+        if (String(url) === '/api/tronclass/agent-permissions' && reconnected)
+          return Promise.resolve(json({ revision: nextRevision, version: null,
+            permissions: { readCourseData: false, downloadMaterials: false, prepareHomework: false }, updatedAt: null }));
+        if (input.action === 'connect') {
+          reconnected = true;
+          return Promise.resolve(json({ ...connection, revision: nextRevision }));
+        }
+        if (input.action === failureAction && !reconnected)
+          return Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401));
+        if (input.action === 'submit') return Promise.resolve(json({ status: 'unknown', operationId: input.operationId, receipt: null }));
+        if (reconnected && input.action === 'sync') return Promise.resolve(json({ ...snapshot, revision: nextRevision }));
+        if (reconnected && input.action === 'prepare') return Promise.resolve(json({ ...preparation, revision: nextRevision }));
+        return defaultResponse(url, init);
+      });
+      render(<TronClassWorkspace />);
+      await previewAnswer();
+      fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+      if (failureAction === 'reconcile') {
+        await screen.findByText('繳交結果待確認');
+        fireEvent.click(screen.getByRole('button', { name: '查證繳交結果' }));
+      }
+      await screen.findByLabelText('學校密碼');
+      expect(sessionStorage.length).toBe(1);
+      const operationId = body(calls('submit')[0][1]).operationId;
+      expect(sessionStorage.getItem(sessionStorage.key(0)!)).toBe(operationId);
+      fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'reconnected-password' } });
+      fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+      fireEvent.click(await screen.findByRole('button', { name: '準備作業' }));
+      await screen.findByText('繳交結果待確認');
+      expect(screen.queryByRole('button', { name: '確認送出到 TronClass' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '查證繳交結果' }));
+      await screen.findByText('TronClass 已確認收到');
+      expect(calls('submit')).toHaveLength(1);
+      expect(body(calls('reconcile').at(-1)![1])).toMatchObject({ operationId, revision: nextRevision });
+      expect(sessionStorage.length).toBe(0);
+    },
+  );
+
   it('allows local preparation when the tenant cannot submit and never uploads or sends', async () => {
     prepareValue = {
       ...preparation,
@@ -645,6 +820,21 @@ describe('TronClass material downloads', () => {
     expect(screen.getByRole('link', { name: /開啟原始教材/ }).getAttribute('href')).toBe(
       material.href,
     );
+  });
+
+  it('returns an expired material download to the connection form without creating a file', async () => {
+    const create = vi.spyOn(URL, 'createObjectURL');
+    serveMaterial(async () => json(
+      { error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401,
+    ));
+    render(<TronClassWorkspace />);
+    fireEvent.click(await showMaterial());
+    await screen.findByLabelText('學校密碼');
+    expect(screen.getByText('TronClass 登入已失效，請重新連接後繼續。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下載 講義.pdf' })).toBeNull();
+    expect(screen.queryByText('期中教材')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'TronClass 助理權限' })).toBeNull();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('does not download a previous owner’s file after the account changes', async () => {

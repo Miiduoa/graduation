@@ -8,6 +8,9 @@ import {
 } from '@campus/shared/src/puLmsReadonly';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import type { LmsReadonlySource } from './tronClassLmsSource';
+import { isTronClassSourceVisible } from './tronClassSourceVisibility';
+import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { readTronClassSubmissionHistory } from './tronClassSubmissionHistory';
 
 export type TronClassSubmissionBinding = {
   schoolId: 'pu';
@@ -85,6 +88,8 @@ export type TronClassSubmissionSource = {
     attachments: TronClassSourceFile[];
   }): Promise<void>;
   listSubmissions(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope): Promise<TronClassSourceReceipt[]>;
+  /** Read-only historical display; never used to reconcile a new write. */
+  readSubmissionHistory?(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope): Promise<TronClassSubmissionHistory>;
 };
 
 function unavailable(): never { throw new NuniError(503, 'TRONCLASS_SUBMISSION_UNAVAILABLE'); }
@@ -118,7 +123,7 @@ async function schoolRead<T>(run: () => Promise<T>): Promise<T> {
  * no permission or receipt is inferred from guessed fields or a 2xx response.
  */
 export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySource): TronClassSubmissionSource {
-  return {
+  const adapter: TronClassSubmissionSource = {
     contractVerified: false,
     async getAssignment(binding, scope) {
       const source = readonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
@@ -152,7 +157,9 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
         if (progress === 'incomplete') unavailable();
         if (progress === 'complete') break;
       }
-      if (!found) throw new NuniError(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
+      if (!found || !isTronClassSourceVisible(found)) {
+        throw new NuniError(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
+      }
       const title = typeof found.title === 'string' ? found.title.trim().slice(0, 300) : '';
       if (!title) unavailable();
       const rawDeadline = found.deadline ?? found.end_time;
@@ -170,5 +177,12 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
     async uploadFile() { return unavailable(); },
     async submit() { return unavailable(); },
     async listSubmissions() { return unavailable(); },
+    async readSubmissionHistory(binding, scope) {
+      // Recheck ownership/visibility before the student-specific history URL.
+      await adapter.getAssignment(binding, scope);
+      const source = readonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+      return readTronClassSubmissionHistory(source, binding, scope);
+    },
   };
+  return adapter;
 }

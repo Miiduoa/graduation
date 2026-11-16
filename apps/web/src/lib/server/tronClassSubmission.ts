@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
+import { isTronClassSubmissionHistory, type TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import type {
   TronClassAssignment, TronClassHomeworkScope, TronClassSourceReceipt,
   TronClassSubmissionBinding, TronClassSubmissionSource,
@@ -31,6 +32,7 @@ export type TronClassPreparedSubmission = TronClassHomeworkScope & {
   canSubmit: boolean; blockedReason: string | null;
   maxFiles: number; maxFileBytes: number; allowedContentTypes: string[];
   receipt: TronClassSubmissionReceipt | null;
+  history?: TronClassSubmissionHistory;
 };
 
 export type TronClassUploadedAttachment = {
@@ -313,9 +315,29 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
           const receipts = await receiptsFor(ownerKey, binding, scope);
           const latest = receipts.sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt))[0];
           if (latest) receipt = publicReceipt(latest);
-        } catch {
+        } catch (error) {
           await bindings.assertCurrent(ownerKey, binding.revision);
+          // A school session can expire before the locally encrypted binding.
+          // Let the workspace reconnect instead of presenting it as a temporary
+          // receipt failure under an apparently valid connection.
+          if (error instanceof NuniError && ([401, 403].includes(error.status) ||
+            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED'].includes(error.code))) throw error;
           blockedReason = '繳交紀錄暫時無法確認，請重新讀取後再試。';
+        }
+      }
+      let history: TronClassSubmissionHistory | undefined;
+      if (source.readSubmissionHistory) {
+        try {
+          const result = await source.readSubmissionHistory(binding, scope);
+          await bindings.assertCurrent(ownerKey, binding.revision);
+          if (!isTronClassSubmissionHistory(result, scope)) fail(502, 'TRONCLASS_HISTORY_UNAVAILABLE');
+          history = result;
+        } catch (error) {
+          await bindings.assertCurrent(ownerKey, binding.revision);
+          if (error instanceof NuniError && ([401, 403].includes(error.status) ||
+            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED'].includes(error.code))) throw error;
+          history = { source: 'tronclass', ...scope, fetchedAt: new Date(now()).toISOString(),
+            state: 'unavailable', latestId: null, entries: [] };
         }
       }
       await bindings.assertCurrent(ownerKey, binding.revision);
@@ -324,7 +346,8 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
         canSubmit: blockedReason === null, blockedReason,
         maxFiles: Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES),
         maxFileBytes: Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES),
-        allowedContentTypes: [...assignment.allowedContentTypes], receipt };
+        allowedContentTypes: [...assignment.allowedContentTypes], receipt,
+        ...(history ? { history } : {}) };
     },
     async upload(ownerKey: string, input: ScopedOperationInput & {
       fileId: string; name: string; contentType: string; bytes: Uint8Array;

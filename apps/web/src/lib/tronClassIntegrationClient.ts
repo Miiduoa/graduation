@@ -1,3 +1,4 @@
+import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import type {
   TronClassConnection,
   TronClassPreparation,
@@ -256,6 +257,9 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       !(value.receipt === null || isReceipt(value.receipt))
     )
       return invalidResponse();
+    if (value.history !== undefined && !isTronClassSubmissionHistory(value.history, {
+      courseId: input.courseId as number, homeworkId: input.homeworkId as number,
+    })) return invalidResponse();
     if (
       isRecord(value.receipt) &&
       (value.receipt.courseId !== input.courseId || value.receipt.homeworkId !== input.homeworkId)

@@ -66,6 +66,106 @@ describe('independent TronClass source', () => {
     expect(JSON.stringify(result)).not.toContain('hidden-key');
   });
 
+  it('omits hidden and unpublished work, announcements, and materials from the returned snapshot', async () => {
+    const { reader, source } = setup();
+    const deniedFlags = [
+      { is_hidden: true }, { is_hidden: 1 }, { hidden: true }, { hidden: 1 },
+      { published: false }, { published: 0 }, { is_hidden: 1, published: true },
+    ];
+    vi.mocked(source.fetchHomeworkPage).mockResolvedValue({ ok: true, value: {
+      homework_activities: [assignment, ...deniedFlags.map((flags, n) => ({
+        ...assignment, ...flags, id: 210 + n, title: `restricted-homework-${n}`,
+        data: { description: 'restricted-homework-body' },
+      }))], total: 1 + deniedFlags.length,
+    } });
+    vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+      ok: true, value: query ? [] : [
+        { id: 301, course_id: 101, title: '公開講義', type: 'material', published: 1, is_hidden: 0 },
+        { id: 401, course_id: 101, title: '公開活動公告', type: 'announcement', published: true, hidden: false },
+        ...deniedFlags.flatMap((flags, n) => [
+          { id: 310 + n, course_id: 101, type: 'material', ...flags, title: `restricted-material-${n}`,
+            uploads: [{ name: 'restricted-filename.pdf', key: 'restricted-file-key', allow_download: true }] },
+          { id: 410 + n, course_id: 101, type: 'announcement', ...flags,
+            title: `restricted-announcement-${n}`, content: 'restricted-announcement-body' },
+        ]),
+      ],
+    }));
+    vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: true, value: [
+      { id: 501, course_id: 101, title: '公開課程公告', content: '公告內容' },
+      ...deniedFlags.map((flags, n) => ({
+        id: 510 + n, course_id: 101, ...flags, title: `restricted-course-notice-${n}`, content: 'restricted-course-body',
+      })),
+    ] });
+    const result = await reader('platform:pa_fixture', { courseId: 101 });
+    expect(result.partial).toBe(false);
+    expect(result.homework.map((item) => item.id)).toEqual([201]);
+    expect(result.materials.map((item) => item.id)).toEqual([301]);
+    expect(result.announcements.map((item) => item.title)).toEqual(['公開課程公告', '公開活動公告']);
+    expect(JSON.stringify(result)).not.toContain('restricted-');
+  });
+
+  it('does not let a public duplicate override a hidden copy from another activity feed', async () => {
+    const { reader, source } = setup();
+    const rows = [
+      { id: 301, course_id: 101, title: 'restricted-material', type: 'material', published: true },
+      { id: 401, course_id: 101, title: 'restricted-announcement', type: 'announcement', published: 1 },
+    ];
+    vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+      ok: true, value: query ? rows.map((row) => ({ ...row, is_hidden: 1 })) : rows,
+    }));
+    vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: true, value: [
+      { id: 501, title: 'restricted-notice', published: true },
+      { id: 501, title: 'restricted-notice', published: false },
+      // Course notices use an independent namespace from activity IDs.
+      { id: 301, title: '公開課程公告', published: true },
+    ] });
+    const result = await reader('platform:pa_fixture', { courseId: 101 });
+    expect(result.materials).toEqual([]);
+    expect(result.announcements.map((item) => item.title)).toEqual(['公開課程公告']);
+    expect(JSON.stringify(result)).not.toContain('restricted-');
+  });
+
+  it('omits explicitly hidden attachments without removing permitted files from a visible material', async () => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchActivities).mockResolvedValue({ ok: true, value: [{
+      id: 301, course_id: 101, title: '講義', type: 'material', uploads: [
+        { name: 'visible.pdf', key: 'visible-key', allow_download: true },
+        { name: 'restricted-hidden.pdf', key: 'restricted-key', allow_download: true, is_hidden: 1 },
+        { name: 'restricted-unpublished.pdf', key: 'restricted-key-2', allow_download: true, published: false },
+      ],
+    }] });
+    const result = await reader('platform:pa_fixture', { courseId: 101 });
+    expect(result.materials[0].files.map((item) => item.name)).toEqual(['visible.pdf']);
+    expect(JSON.stringify(result)).not.toContain('restricted-');
+  });
+
+  it('counts every source row while reading past a page containing only hidden homework', async () => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchHomeworkPage)
+      .mockResolvedValueOnce({ ok: true, value: {
+        homework_activities: Array.from({ length: 50 }, (_, n) => ({ id: 300 + n, course_id: 101, is_hidden: 1 })), total: 51,
+      } })
+      .mockResolvedValueOnce({ ok: true, value: { homework_activities: [assignment], total: 51 } });
+    const result = await reader('platform:pa_fixture');
+    expect(result).toMatchObject({ partial: false, homework: [{ id: 201 }] });
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).toHaveBeenLastCalledWith(binding.cookies, 101, 2, 50);
+  });
+
+  it.each(['repeated-hidden-id', 'missing-page'] as const)('still reports %s after filtering a full hidden page', async (failure) => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchHomeworkPage)
+      .mockResolvedValueOnce({ ok: true, value: {
+        homework_activities: Array.from({ length: 50 }, (_, n) => ({ ...assignment, id: 300 + n, hidden: true })), total: 51,
+      } })
+      .mockResolvedValueOnce({ ok: true, value: {
+        homework_activities: failure === 'repeated-hidden-id' ? [{ ...assignment, id: 300 }] : [], total: 51,
+      } });
+    const result = await reader('platform:pa_fixture');
+    expect(result).toMatchObject({ partial: true, homework: [], errors: [{ courseId: 101, area: 'homework' }] });
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects another course before reading its activities', async () => {
     const { reader, source } = setup();
     await expect(reader('platform:pa_fixture', { courseId: 999 })).rejects.toMatchObject({ status: 403 });

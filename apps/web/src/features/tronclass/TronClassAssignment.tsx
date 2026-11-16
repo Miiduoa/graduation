@@ -13,6 +13,7 @@ import type {
   TronClassSubmissionResult,
 } from '@/lib/tronClassIntegrationTypes';
 import { SourceLink, tronClassTime } from './TronClassSource';
+import { TronClassSubmissionHistory } from './TronClassSubmissionHistory';
 import styles from './tronclass.module.css';
 
 type Attachment = { id: string; file: File; status: 'ready' | 'uploading' | 'uploaded' | 'failed' };
@@ -20,6 +21,11 @@ type Phase = 'editing' | 'preview' | 'uploading' | 'submitting' | 'unknown' | 's
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 4;
+
+function connectionChanged(reason: unknown): reason is TronClassRequestError {
+  return reason instanceof TronClassRequestError &&
+    ['TRONCLASS_BINDING_CHANGED', 'TRONCLASS_RECONNECT_REQUIRED'].includes(reason.code);
+}
 
 function sizeLabel(size: number): string {
   return size >= 1024 * 1024
@@ -49,7 +55,7 @@ export function TronClassAssignment({
   homework: TronClassHomeworkItem;
   onClose: () => void;
   onBusy: (busy: boolean) => void;
-  onConnectionChanged: () => void;
+  onConnectionChanged: (reason?: unknown) => void;
   onSubmitted: () => void;
   /** An Agent can prepare locally without inheriting manual submission authority. */
   prepareOnly?: boolean;
@@ -138,6 +144,10 @@ export function TronClassAssignment({
       },
       (reason) => {
         if (!current) return;
+        if (connectionChanged(reason)) {
+          callbacks.current.onConnectionChanged(reason);
+          return;
+        }
         setPrepareError(tronClassErrorMessage(reason));
         setPreparing(false);
       },
@@ -337,6 +347,12 @@ export function TronClassAssignment({
         operation.current = null;
         setFiles((items) => items.map((item) => ({ ...item, status: 'ready' })));
       }
+      if (connectionChanged(reason)) {
+        // A dispatched operation keeps its ID for read-only reconciliation
+        // after reconnecting; a session error never proves it was not sent.
+        callbacks.current.onConnectionChanged(reason);
+        return;
+      }
       setPhase(dispatched ? 'unknown' : 'editing');
       setError(
         dispatched ? '尚未收到可核對的繳交結果，請先查證這次送出。' : tronClassErrorMessage(reason),
@@ -358,6 +374,10 @@ export function TronClassAssignment({
       acceptResult(result, operation.current);
     } catch (reason) {
       if (!alive.current) return;
+      if (connectionChanged(reason)) {
+        callbacks.current.onConnectionChanged(reason);
+        return;
+      }
       if (
         reason instanceof TronClassRequestError &&
         reason.code === 'TRONCLASS_SUBMISSION_NOT_STARTED'
@@ -388,6 +408,13 @@ export function TronClassAssignment({
     } catch {
       if (alive.current) setCopyMessage('請選取作業文字後複製。');
     }
+  }
+
+  function retryPreparation() {
+    if (preparing || working) return;
+    setPreparing(true);
+    setPrepareError('');
+    setPrepareEpoch((value) => value + 1);
   }
 
   const previous = preparation?.receipt;
@@ -432,14 +459,19 @@ export function TronClassAssignment({
           <button
             className="btn"
             disabled={preparing || working}
-            onClick={() => {
-              setPreparing(true);
-              setPrepareEpoch((value) => value + 1);
-            }}
+            onClick={retryPreparation}
           >
             重新確認繳交條件
           </button>
         </div>
+      )}
+      {!preparing && !working && !prepareError && preparation?.history && phase !== 'submitted' && phase !== 'unknown' && (
+        <TronClassSubmissionHistory
+          history={preparation.history}
+          sourceHref={homework.href}
+          onRetry={retryPreparation}
+          retryDisabled={working}
+        />
       )}
       {blocked && phase !== 'unknown' && phase !== 'submitted' && (
         <div className={styles.notice}>

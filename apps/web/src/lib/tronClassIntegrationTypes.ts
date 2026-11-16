@@ -1,3 +1,5 @@
+import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+
 export type TronClassConnection = {
   schoolId: 'pu';
   connected: boolean;
@@ -93,6 +95,7 @@ export type TronClassPreparation = {
   maxFileBytes: number;
   allowedContentTypes: string[];
   receipt: TronClassSubmissionReceipt | null;
+  history?: TronClassSubmissionHistory;
 };
 
 export type TronClassSubmissionResult = {
