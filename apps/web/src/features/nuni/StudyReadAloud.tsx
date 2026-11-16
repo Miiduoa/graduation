@@ -6,6 +6,9 @@ import styles from './CourseStudyPanel.module.css';
 // Mobile speech engines can stop unexpectedly on a long single utterance.
 // Split on natural punctuation where possible, preserving every source character.
 const STUDY_SPEECH_CHUNK_LENGTH = 160;
+// Some mobile engines accept speak() but never deliver onend or onerror.
+// Bound each utterance separately so a stalled chunk cannot leave Stop active forever.
+const STUDY_SPEECH_STALL_MS = 180_000;
 // Some older WebViews lack a functioning grapheme segmenter. Preserve common
 // multi-code-point characters in the local fallback, within the speech cap.
 // This is intentionally bounded and not a replacement for Unicode UAX #29.
@@ -205,6 +208,13 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   }, [onSpeakingChange]);
   const active = useRef<SpeechSynthesisUtterance | null>(null);
   const remainingChunks = useRef<string[]>([]);
+  const playbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPlaybackTimeout = () => {
+    if (playbackTimeout.current !== null) {
+      clearTimeout(playbackTimeout.current);
+      playbackTimeout.current = null;
+    }
+  };
 
   useEffect(() => {
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
@@ -228,6 +238,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     try { synthesis.addEventListener('voiceschanged', update); }
     catch { /* Students can retry through the manual voice refresh button. */ }
     return () => {
+      clearPlaybackTimeout();
       refreshVoices.current = null;
       remainingChunks.current = [];
       // A failed listener teardown must never prevent cancelling private speech.
@@ -246,6 +257,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   }, [text]);
 
   function stop(): boolean {
+    clearPlaybackTimeout();
     if (active.current) {
       const utterance = active.current;
       // cancel() may fire onend synchronously. Detach first so a cancelled
@@ -285,6 +297,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     let announced = false;
 
     const finishPlayback = (message = '') => {
+      clearPlaybackTimeout();
       remainingChunks.current = [];
       setSpeaking(false);
       onSpeakingChangeRef.current?.(false);
@@ -325,6 +338,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       active.current = utterance;
       const finishPart = (failed: boolean) => {
         if (active.current !== utterance) return;
+        clearPlaybackTimeout();
         active.current = null;
         utterance.onend = null;
         utterance.onerror = null;
@@ -349,12 +363,22 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
           : '目前無法朗讀，可繼續閱讀文字。');
         return;
       }
-      // An engine may finish a very short chunk inside speak(). Do not
-      // resurrect a completed queue or announce speech more than once.
-      if (active.current === utterance && !announced) {
-        announced = true;
-        setSpeaking(true);
-        onSpeakingChangeRef.current?.(true);
+      // Some installed mobile voices never fire end/error. This is a bounded,
+      // local-only recovery attempt, not proof that speech finished. A timer
+      // belongs to its own chunk and is cleared on end, Stop or source change.
+      // Do not arm it if speak() already completed synchronously.
+      if (active.current === utterance) {
+        playbackTimeout.current = setTimeout(() => {
+          if (active.current !== utterance) return;
+          if (stop()) {
+            setError('裝置語音長時間沒有回應，已嘗試停止；可重新朗讀或繼續閱讀原文。');
+          }
+        }, STUDY_SPEECH_STALL_MS);
+        if (!announced) {
+          announced = true;
+          setSpeaking(true);
+          onSpeakingChangeRef.current?.(true);
+        }
       }
     };
 

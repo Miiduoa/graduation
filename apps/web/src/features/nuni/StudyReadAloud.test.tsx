@@ -787,3 +787,55 @@ it('continues to prefer real sentence punctuation while chunking local speech', 
   expect(chunks[0]).toBe('課'.repeat(140) + '。');
   expect(chunks.join('')).toBe(original);
 });
+
+it('recovers when a mobile speech engine never reports end or error for a chunk', () => {
+  vi.useFakeTimers();
+  try {
+    const changed = vi.fn();
+    const view = render(<StudyReadAloud text="裝置本機中文語音暫時卡住，仍可以閱讀原文。" onSpeakingChange={changed} />);
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+    const silent = speak.mock.calls[0][0] as Utterance;
+    expect(screen.getByRole('button', { name: '停止朗讀' })).toBeTruthy();
+    act(() => vi.advanceTimersByTime(179_999));
+    expect(cancel).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(silent.onend).toBeNull();
+    expect(silent.onerror).toBeNull();
+    expect(changed).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole('status').textContent).toContain('長時間沒有回應');
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+    expect(speak).toHaveBeenCalledTimes(2);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('clears the per-chunk speech timeout on completion, source change and unmount', () => {
+  vi.useFakeTimers();
+  try {
+    const changed = vi.fn();
+    const view = render(<StudyReadAloud text="第一段原文" onSpeakingChange={changed} />);
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+    const first = speak.mock.calls[0][0] as Utterance;
+    act(() => first.onend?.());
+    act(() => vi.advanceTimersByTime(180_000));
+    expect(cancel).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+    const second = speak.mock.calls[1][0] as Utterance;
+    view.rerender(<StudyReadAloud text="第二段原文" onSpeakingChange={changed} />);
+    expect(second.onend).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(180_000));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+    view.unmount();
+    expect(cancel).toHaveBeenCalledTimes(2);
+    act(() => vi.advanceTimersByTime(180_000));
+    expect(cancel).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
