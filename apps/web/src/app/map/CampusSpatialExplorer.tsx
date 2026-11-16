@@ -457,6 +457,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
+    // A gateway can return HTTP 200 with truncated JSON or a payload that
+    // fails our source/geometry contract. Treat that as a rejected source
+    // response rather than letting repeated manual retries hammer Overpass.
+    // Preserve a valid Retry-After when supplied; otherwise pause for 60s.
+    const pauseForInvalidPayload = (seconds: number | null) => {
+      if (!active || timedOut) return;
+      const wait = seconds ?? 60;
+      setFootprintRetryAfter({ until: Date.now() + wait * 1000, minutes: Math.ceil(wait / 60) });
+    };
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
         // Fetch considers 203/206 successful, but the map API contract is a
@@ -488,12 +497,22 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           throw new Error('footprint source unavailable');
         }
         const cooldownSeconds = response.status === 200 ? footprintCooldownSeconds(response) : null;
-        return { payload: await response.json() as unknown, cooldownSeconds };
+        let payload: unknown;
+        try {
+          payload = await response.json() as unknown;
+        } catch {
+          pauseForInvalidPayload(cooldownSeconds);
+          throw new Error('Invalid building outline response body');
+        }
+        return { payload, cooldownSeconds };
       })
       .then(({ payload, cooldownSeconds }) => {
         if (!active || timedOut) return;
         const snapshot = parseProvidenceFootprintSnapshot(payload);
-        if (!snapshot) throw new Error('No recent, source-checked building outlines');
+        if (!snapshot) {
+          pauseForInvalidPayload(cooldownSeconds);
+          throw new Error('No recent, source-checked building outlines');
+        }
         const fetchedMs = Date.parse(snapshot.fetchedAt);
         const replicationMs = snapshot.osmBaseAt === null ? Infinity : Date.parse(snapshot.osmBaseAt);
         const expiresAt = Math.min(fetchedMs + 7 * FOOTPRINT_DAY_MS, replicationMs + 7 * FOOTPRINT_DAY_MS);
