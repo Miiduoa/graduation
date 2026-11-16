@@ -349,7 +349,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     const checkSnapshotAge = () => {
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
-      if (now < nextDeadline) {
+      // The hidden soft-deadline event marks the snapshot stale and moves
+      // nextDeadline to the seven-day hard expiry. A visible resume before
+      // that hard deadline must still perform the deferred revalidation.
+      const softRefreshDeferredFromHiddenTab = !document.hidden && footprintStale &&
+        !staleSnapshotRef.current && now >= footprintClock.staleAt &&
+        now < footprintClock.expiresAt;
+      if (now < nextDeadline && !softRefreshDeferredFromHiddenTab) {
         window.clearTimeout(timer);
         // Bound waits to avoid setTimeout's 32-bit overflow after a large clock change.
         timer = window.setTimeout(checkSnapshotAge, Math.min(FOOTPRINT_DAY_MS, nextDeadline - now));
