@@ -338,7 +338,14 @@ function StudySourceSelection({ table, index, sourceLines }: {
     selectSelectedOriginal();
     let objectUrl: string | null = null;
     try {
-      objectUrl = URL.createObjectURL(new Blob([selectedSource], { type: 'text/plain;charset=utf-8' }));
+      const createdUrl: unknown = URL.createObjectURL(new Blob([selectedSource], { type: 'text/plain;charset=utf-8' }));
+      // Some broken WebViews return undefined, an empty string or a non-Blob
+      // URL without throwing. Never click a link to the current page or an
+      // unexpected site while the student is exporting private lesson text.
+      if (typeof createdUrl !== 'string' || !createdUrl.startsWith('blob:') || createdUrl.length <= 5) {
+        throw new Error('Browser did not create a Blob download URL');
+      }
+      objectUrl = createdUrl;
       const anchor = document.createElement('a');
       anchor.href = objectUrl;
       anchor.download = `nuni-study-table-${index + 1}${rowIndex < 0 ? '' : `-row-${rowIndex + 1}`}.txt`;

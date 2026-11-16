@@ -1416,3 +1416,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 手動複製備援的初次聚焦及關閉後還原焦點改在 DOM 同一次提交時完成（`useLayoutEffect`），避免行動 WebView／鍵盤／讀屏先看到焦點暫時消失。保留原本對已切換教材、已失效剪貼簿請求和不存在的原按鈕的處理，不偽稱剪貼簿實際貼上成功。
 - 既有 JSON 重試回歸已精確檢查焦點、筆記與備份不變；新增「本次筆記」先遭拒絕後再重試成功的模擬 DOM 回歸，核對完整複製字串、還原原按鈕焦點與未保存筆記不消失。此項是程式與自動化測試，尚非 iOS Safari／Android Chrome、VoiceOver／TalkBack 真機驗收。無新套件、付費 API、私人教材外傳或 v1/v2 進度與 v1 練習 checkpoint 變更。
 - 新精確 head 的 Web/Mobile、Build、Lint/TypeCheck、Security Gates、CodeQL／指定 App 5504170 APPROVED 均須另行確認；Maestro、真機及 Ahaboard 同教材同題同機對照未齊前維持 Draft，不合併、不部署。
+
+### 2026-11-16：拒絕不正常 Blob URL，避免手機原文 TXT 下載誤跳頁
+
+- 在行動 WebView 的 `URL.createObjectURL` 異常回傳 `undefined`、空字串、只有 `blob:` 或非 `blob:` 網址時，系統不再建立下載連結或點擊可能指向目前頁面／外部網站的假下載網址。學生仍可長按或以鍵盤複製下方原始表格文字，並收到「無法啟動 TXT 下載」提示；不把嘗試下載當作成功儲存。
+- 新增四組模擬 DOM 回歸，查核未觸發 `a.click()`、沒有殘留下載連結、不錯誤撤銷不存在的 Blob URL、保留原文與選取範圍。正常 `blob:` TXT 下載流程與延後清理維持不變。無新依賴、無私人教材外傳、無進度格式修改。
+- 本輪僅有程式及自動化模擬瀏覽器驗證；精確 head 的 CI／CodeQL、指定 App 5504170、Maestro、iOS/Android 真機和 Ahaboard 同教材同題同裝置實測仍需分別核實，PR 保持 Draft，不合併、不部署。

@@ -1498,3 +1498,40 @@ it('preserves the selectable source if local TXT download cannot start', () => {
     else Reflect.deleteProperty(URL, 'createObjectURL');
   }
 });
+
+
+it.each([
+  { name: 'undefined', returnedUrl: undefined },
+  { name: 'empty', returnedUrl: '' },
+  { name: 'incomplete blob scheme', returnedUrl: 'blob:' },
+  { name: 'unexpected external URL', returnedUrl: 'https://example.invalid/not-a-local-export' },
+])('keeps a manual TXT source without following a malformed $name download URL', ({ returnedUrl }) => {
+  const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const revoke = vi.fn();
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: vi.fn(() => returnedUrl),
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke });
+  try {
+    render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.click(screen.getByRole('button', { name: '下載第 1 張表格原文 TXT' }));
+    expect(click).not.toHaveBeenCalled();
+    expect(document.querySelector('a[download]')).toBeNull();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toContain('無法啟動 TXT 下載');
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toContain('| 計算機概論 | 2 | 205 |');
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
+  } finally {
+    click.mockRestore();
+    if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate);
+    else Reflect.deleteProperty(URL, 'createObjectURL');
+    if (originalRevoke) Object.defineProperty(URL, 'revokeObjectURL', originalRevoke);
+    else Reflect.deleteProperty(URL, 'revokeObjectURL');
+  }
+});
