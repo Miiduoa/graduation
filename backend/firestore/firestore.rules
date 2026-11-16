@@ -1239,7 +1239,7 @@ service cloud.firestore {
                   // to be materialized as public by a legacy post author.
                   && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
                     'published', 'status', 'deleted', 'deletedAt'
-                  ]))
+                  ])))
               && request.resource.data.get('likedBy', []) == resource.data.get('likedBy', [])
               && request.resource.data.get('likes', 0) == resource.data.get('likes', 0)
             )
