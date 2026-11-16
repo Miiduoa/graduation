@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
 import styles from './CourseStudyPanel.module.css';
 
 
 type SourceValueRow = { label: string; original: string; amount: number };
+
+// A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
+// After this limit, restore a clear manual-copy route without changing the source.
+const SOURCE_CLIPBOARD_CONFIRM_MS = 5000;
 
 const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|達成率|合格率|參與率|缺席率|進度|完成度|[%％])/u;
 const ENGLISH_PERCENT_COLUMN =
@@ -251,24 +255,34 @@ function StudySourceSelection({ table, index, sourceLines }: {
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
+  const copyTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invalidateCopy = useCallback(() => {
+    copyRequest.current += 1;
+    if (copyTimeout.current !== null) {
+      clearTimeout(copyTimeout.current);
+      copyTimeout.current = null;
+    }
+  }, []);
   // An asynchronous clipboard result must not announce success for a row or
   // authorized source that the student has already changed.
   useEffect(() => {
-    copyRequest.current += 1;
+    invalidateCopy();
     setRowIndex(-1);
     setCopyFeedback('');
-  }, [sourceLines]);
-  useEffect(() => () => { copyRequest.current += 1; }, []);
+  }, [sourceLines, invalidateCopy]);
+  useEffect(() => () => { invalidateCopy(); }, [invalidateCopy]);
 
   const manualCopy = (request: number) => {
     if (copyRequest.current === request) {
+      invalidateCopy();
       setCopyFeedback('瀏覽器未確認複製；原文仍保留在下方，請長按選取或使用鍵盤複製。');
     }
   };
   const copySelectedOriginal = () => {
     const field = originalText.current;
     if (!field) return;
-    const request = ++copyRequest.current;
+    invalidateCopy();
+    const request = copyRequest.current;
     setCopyFeedback('');
     // Preserve a selectable fallback before any async permission prompt. On
     // mobile, selection can remain useful even if clipboard access is denied.
@@ -286,10 +300,14 @@ function StudySourceSelection({ table, index, sourceLines }: {
         manualCopy(request);
         return;
       }
+      setCopyFeedback('正在等待瀏覽器確認複製；若沒有回應，可長按下方原文手動複製。');
+      copyTimeout.current = setTimeout(() => manualCopy(request), SOURCE_CLIPBOARD_CONFIRM_MS);
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
+          if (copyRequest.current !== request) return;
           if (acknowledged === false) manualCopy(request);
-          else if (copyRequest.current === request) {
+          else {
+            invalidateCopy();
             setCopyFeedback('瀏覽器已接受複製指令；若無法貼上，仍可長按下方原文。');
           }
         },
@@ -315,7 +333,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
           onChange={(event) => {
             const next = Number(event.target.value);
             if (next === -1 || (Number.isInteger(next) && next >= 0 && next < table.rows.length)) {
-              copyRequest.current += 1;
+              invalidateCopy();
               setCopyFeedback('');
               setRowIndex(next);
             }

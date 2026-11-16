@@ -1348,3 +1348,48 @@ it('ignores late clipboard success after the selected source row changes', async
       .toBe('| 計算機概論 | 2 | 205 |');
   });
 });
+
+it('falls back to selectable source when WebView clipboard permission never settles', async () => {
+  let acknowledge: (() => void) | undefined;
+  const pending = new Promise<void>((resolve) => { acknowledge = resolve; });
+  await withSourceClipboard({ value: { writeText: () => pending } }, async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(<StudySourceTables text={source} />);
+      fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+      fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+      expect(screen.getByRole('status').textContent).toContain('正在等待瀏覽器確認複製');
+      await act(async () => { vi.advanceTimersByTime(5000); });
+      expect(screen.getByRole('status').textContent).toContain('未確認複製');
+      const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+      expect(field.selectionStart).toBe(0);
+      expect(field.selectionEnd).toBe(field.value.length);
+      await act(async () => { acknowledge?.(); await pending; });
+      expect(screen.getByRole('status').textContent).toContain('未確認複製');
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it('clears an unconfirmed clipboard timeout when the student changes source row', async () => {
+  const pending = new Promise<void>(() => undefined);
+  await withSourceClipboard({ value: { writeText: () => pending } }, async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(<StudySourceTables text={source} />);
+      fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+      const choice = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
+      fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+      fireEvent.change(choice, { target: { value: '1' } });
+      await act(async () => { vi.advanceTimersByTime(6000); });
+      expect(screen.getByRole('status').textContent).toBe('');
+      expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
+        .toBe('| 計算機概論 | 2 | 205 |');
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
