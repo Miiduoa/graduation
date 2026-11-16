@@ -330,6 +330,41 @@ function StudySourceSelection({ table, index, sourceLines }: {
     }
   };
 
+  const downloadSelectedOriginal = () => {
+    // An explicit local TXT export avoids clipboard permission prompts and
+    // preserves exact CRLF from the authorized lesson (textarea normalizes it).
+    // Do not treat the click as proof that a mobile browser saved the file.
+    invalidateCopy();
+    selectSelectedOriginal();
+    let objectUrl: string | null = null;
+    try {
+      objectUrl = URL.createObjectURL(new Blob([selectedSource], { type: 'text/plain;charset=utf-8' }));
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `nuni-study-table-${index + 1}${rowIndex < 0 ? '' : `-row-${rowIndex + 1}`}.txt`;
+      anchor.hidden = true;
+      document.body.appendChild(anchor);
+      try {
+        anchor.click();
+        setCopyFeedback('已向瀏覽器送出 TXT 下載，請確認下載項目；若未成功，可長按下方原文複製。');
+      } finally {
+        anchor.remove();
+      }
+    } catch {
+      setCopyFeedback('無法啟動 TXT 下載；原文仍可在下方長按或使用鍵盤複製。');
+    } finally {
+      if (objectUrl !== null) {
+        // iOS Safari can consume blob URLs after the click returns; do not
+        // revoke synchronously, but always release the URL eventually.
+        const consumedUrl = objectUrl;
+        setTimeout(() => {
+          try { URL.revokeObjectURL(consumedUrl); }
+          catch { /* Cleanup cannot change the selected source. */ }
+        }, 30_000);
+      }
+    }
+  };
+
   return (
     <details className={styles.sourceTableSelection}>
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
@@ -365,6 +400,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
         {rowIndex < 0
           ? `複製第 ${index + 1} 張表格原文`
           : `複製第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}
+      </button>
+      <button type="button" onClick={downloadSelectedOriginal}>
+        {rowIndex < 0
+          ? `下載第 ${index + 1} 張表格原文 TXT`
+          : `下載第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文 TXT`}
       </button>
       <p className={styles.note} role="status">{copyFeedback}</p>
       <textarea

@@ -1422,3 +1422,79 @@ it('repairs stale readonly WebView text before selecting and copying the authori
     expect(copy).toHaveBeenCalledWith('| 計算機概論 | 2 | 205 |');
   });
 });
+
+
+it('exports the exact authorized CRLF table or chosen row as a local TXT blob', () => {
+  const rawSource = source.replace(/\n/gu, '\r\n');
+  const NativeBlob = Blob;
+  const parts: BlobPart[][] = [];
+  class TrackedBlob extends NativeBlob {
+    constructor(blobParts: BlobPart[], options?: BlobPropertyBag) {
+      super(blobParts, options);
+      parts.push(blobParts);
+    }
+  }
+  const createDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+  const create = vi.fn(() => 'blob:nuni-table-test');
+  const revoke = vi.fn();
+  const downloads: Array<{ filename: string; href: string }> = [];
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ filename: this.download, href: this.href });
+    expect(document.body.contains(this)).toBe(true);
+  });
+  vi.stubGlobal('Blob', TrackedBlob);
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: create });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke });
+  vi.useFakeTimers();
+  try {
+    const view = render(<StudySourceTables text={rawSource} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.click(screen.getByRole('button', { name: '下載第 1 張表格原文 TXT' }));
+    expect(parts[0]).toEqual([source.split('\n').slice(1).join('\r\n')]);
+    expect(downloads[0]).toEqual({ filename: 'nuni-study-table-1.txt', href: 'blob:nuni-table-test' });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(revoke).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toContain('請確認下載項目');
+
+    fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+      { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '下載第 1 張表格第 2 列原文 TXT' }));
+    expect(parts[1]).toEqual(['| 計算機概論 | 2 | 205 |']);
+    expect(downloads[1]).toEqual({ filename: 'nuni-study-table-1-row-2.txt', href: 'blob:nuni-table-test' });
+    expect(parts.every((entry) => entry.length === 1)).toBe(true);
+    expect(document.querySelector('a[download]')).toBeNull();
+    act(() => { vi.advanceTimersByTime(30_000); });
+    expect(revoke).toHaveBeenCalledTimes(2);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    click.mockRestore();
+    if (createDescriptor) Object.defineProperty(URL, 'createObjectURL', createDescriptor);
+    else Reflect.deleteProperty(URL, 'createObjectURL');
+    if (revokeDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeDescriptor);
+    else Reflect.deleteProperty(URL, 'revokeObjectURL');
+  }
+});
+
+it('preserves the selectable source if local TXT download cannot start', () => {
+  const previous = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: () => { throw new Error('WebView download blocked'); },
+  });
+  try {
+    render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.click(screen.getByRole('button', { name: '下載第 1 張表格原文 TXT' }));
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toContain('| 計算機概論 | 2 | 205 |');
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
+    expect(screen.getByRole('status').textContent).toContain('無法啟動 TXT 下載');
+  } finally {
+    if (previous) Object.defineProperty(URL, 'createObjectURL', previous);
+    else Reflect.deleteProperty(URL, 'createObjectURL');
+  }
+});
