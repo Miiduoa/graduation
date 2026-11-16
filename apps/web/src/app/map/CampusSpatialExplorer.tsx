@@ -414,7 +414,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         }
       }
     };
-    timer = window.setTimeout(checkSnapshotAge, Math.max(0, nextDeadline - Date.now()));
+    // An already-stale snapshot can have a hard deadline days away. Clamp the
+    // first timer too: browsers overflow delays above 2^31-1 ms to near-zero.
+    timer = window.setTimeout(checkSnapshotAge,
+      Math.max(0, Math.min(FOOTPRINT_DAY_MS, nextDeadline - Date.now())));
     document.addEventListener('visibilitychange', checkSnapshotAge);
     window.addEventListener('pageshow', checkSnapshotAge);
     return () => {
