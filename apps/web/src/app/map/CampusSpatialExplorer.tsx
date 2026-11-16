@@ -341,9 +341,19 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
 
   useEffect(() => {
     if (school !== 'pu' || footprintClock === null) return;
+    const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
+    // A wall-clock correction may make a previously scheduled browser timer
+    // fire before the source deadline. Keep one timer armed for the absolute
+    // deadline instead of silently losing the seven-day geometry eviction.
+    let timer: number;
     const checkSnapshotAge = () => {
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
+      if (now < nextDeadline) {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(checkSnapshotAge, nextDeadline - now);
+        return;
+      }
       // Keep public Overpass work out of background tabs while a dated volume
       // remains retainable. The next visible resume event checks this same
       // absolute deadline; hard expiry still evicts geometry even when hidden.
@@ -397,8 +407,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         }
       }
     };
-    const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
-    const timer = window.setTimeout(checkSnapshotAge, Math.max(0, nextDeadline - Date.now()));
+    timer = window.setTimeout(checkSnapshotAge, Math.max(0, nextDeadline - Date.now()));
     document.addEventListener('visibilitychange', checkSnapshotAge);
     window.addEventListener('pageshow', checkSnapshotAge);
     return () => {
