@@ -59,7 +59,9 @@ function BoardsContent(props: {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
   const [pendingSubscriptionIds, setPendingSubscriptionIds] = useState<Set<string>>(new Set());
-  const [subscriptionNotice, setSubscriptionNotice] = useState('');
+  const [subscriptionNotices, setSubscriptionNotices] = useState<Map<string, string>>(() => new Map());
+  // Keep a few independent outcomes so a slower board write cannot hide a newer one's result.
+  const subscriptionNotice = [...subscriptionNotices.values()].join(' ');
   // A ref closes the gap between a click and React's next render/disabled update.
   const pendingSubscriptionLock = useRef<Set<string>>(new Set());
   // Lifecycle-only signal: do not cancel a Firestore write or report it as cancelled.
@@ -181,13 +183,31 @@ function BoardsContent(props: {
 
   const grouped = useMemo(() => groupBoardsByType(filtered), [filtered]);
 
+  function reportSubscriptionOutcome(boardId: string, message: string) {
+    setSubscriptionNotices((previous) => {
+      const next = new Map(previous);
+      next.delete(boardId);
+      next.set(boardId, message);
+      // Limit announcements to three recent board outcomes on narrow screens.
+      if (next.size > 3) {
+        const oldest = next.keys().next().value;
+        if (oldest !== undefined) next.delete(oldest);
+      }
+      return next;
+    });
+  }
+
   const onToggleSub = async (b: CampusBoard) => {
     if (!user?.uid || !schoolId) {
       alert('請先登入');
       return;
     }
-    // Clear an earlier result so the next confirmed outcome can be announced again.
-    setSubscriptionNotice('');
+    // Clear only this board's previous outcome; other in-flight boards retain theirs.
+    setSubscriptionNotices((previous) => {
+      const next = new Map(previous);
+      next.delete(b.id);
+      return next;
+    });
     // Keep the action disabled while its write is unresolved, including repeated clicks.
     setPendingSubscriptionIds((previous) => new Set(previous).add(b.id));
     const uid = user.uid;
@@ -202,7 +222,7 @@ function BoardsContent(props: {
       if (wasSub) await unsubscribeFromBoard(uid, schoolId, b.id);
       else await subscribeToBoard(uid, schoolId, b.id);
       if (!subscriptionLifetime.signal.aborted) {
-        setSubscriptionNotice(wasSub ? `已取消訂閱「${b.name}」。` : `已訂閱「${b.name}」。`);
+        reportSubscriptionOutcome(b.id, wasSub ? `已取消訂閱「${b.name}」。` : `已訂閱「${b.name}」。`);
       }
     } catch {
       // Parent remounts on account/school change. Late failures must never alert
@@ -215,7 +235,7 @@ function BoardsContent(props: {
           return next;
         });
         // Report a recoverable failure without a blocking browser alert.
-        setSubscriptionNotice(wasSub
+        reportSubscriptionOutcome(b.id, wasSub
           ? `未能取消訂閱「${b.name}」，已恢復原狀，請重試。`
           : `未能訂閱「${b.name}」，已恢復原狀，請重試。`);
       }
