@@ -141,7 +141,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 }) {
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'deferred' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
@@ -165,7 +165,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     let active = true;
     let visible = true;
     let scene: CampusSpatialScene | null = null;
-    setStatus('loading');
+    setStatus(document.hidden ? 'deferred' : 'loading');
 
     const updateVisibility = () => scene?.setActive(visible && !document.hidden);
     const fail = () => {
@@ -178,31 +178,59 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     let timeout: number | null = null;
     let started = false;
-    // Mobile browsers may restore an already-open dialog while the tab is
-    // hidden. Do not import Three.js, allocate a WebGL context, or start the
-    // 12-second startup deadline until the page is actually foregrounded.
+    let pendingCreate: (() => void) | null = null;
+    // Mobile tabs can be suspended after the dynamic import starts but before
+    // it resolves. Pause the startup deadline and defer WebGL allocation until
+    // the tab is visible again. Resuming must not duplicate the context.
+    const syncPendingStartup = () => {
+      if (!active || !started || scene) return;
+      if (document.hidden) {
+        if (timeout !== null) window.clearTimeout(timeout);
+        timeout = null;
+        setStatus('deferred');
+        return;
+      }
+      if (timeout === null) timeout = window.setTimeout(fail, 12000);
+      setStatus('loading');
+      pendingCreate?.();
+    };
     const startWhenVisible = () => {
       if (!active || started || document.hidden) return;
       started = true;
-      document.removeEventListener('visibilitychange', startWhenVisible);
-      window.removeEventListener('pageshow', startWhenVisible);
-      timeout = window.setTimeout(fail, 12000);
-      // Neither Three.js nor a graphics context is requested before the dialog opens.
+      syncPendingStartup();
       void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
         if (!active) return;
-        scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
-        if (!active) {
-          scene.dispose();
-          scene = null;
-          return;
-        }
-        runtime.current = scene;
-        scene.setView(currentView.current);
-        if (!active) return;
-        updateVisibility();
-        if (timeout !== null) window.clearTimeout(timeout);
-        setStatus('ready');
+        const finishStart = () => {
+          if (!active || document.hidden || scene) return;
+          pendingCreate = null;
+          scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
+          if (!active) {
+            scene.dispose();
+            scene = null;
+            return;
+          }
+          runtime.current = scene;
+          scene.setView(currentView.current);
+          if (!active) return;
+          updateVisibility();
+          if (timeout !== null) window.clearTimeout(timeout);
+          timeout = null;
+          setStatus('ready');
+        };
+        pendingCreate = finishStart;
+        finishStart();
+        // If import resolved after backgrounding, keep the pending factory for
+        // the next visibilitychange/pageshow. Never allocate while hidden.
       }).catch(fail);
+    };
+    const onVisibilityChange = () => {
+      updateVisibility();
+      startWhenVisible();
+      syncPendingStartup();
+    };
+    const onPageShow = () => {
+      startWhenVisible();
+      syncPendingStartup();
     };
 
     const intersection = typeof IntersectionObserver === 'undefined' ? null :
@@ -211,17 +239,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         updateVisibility();
       });
     intersection?.observe(host);
-    document.addEventListener('visibilitychange', updateVisibility);
-    document.addEventListener('visibilitychange', startWhenVisible);
-    window.addEventListener('pageshow', startWhenVisible);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pageshow', onPageShow);
     startWhenVisible();
     return () => {
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
       intersection?.disconnect();
-      document.removeEventListener('visibilitychange', updateVisibility);
-      document.removeEventListener('visibilitychange', startWhenVisible);
-      window.removeEventListener('pageshow', startWhenVisible);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pageshow', onPageShow);
+      pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
     };
@@ -240,7 +267,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       />
       {status !== 'ready' && (
         <div className={styles.sceneMessage} role="status">
-          {status === 'loading' ? <p>正在開啟空間導覽…</p> : <>
+          {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p> : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
             <button className="btn" type="button" onClick={() => setAttempt((value) => value + 1)}>
               重試立體畫面
