@@ -1,3 +1,9 @@
+## 2026-11-17：無效 CSS 覆寫不得讓隱藏的教師表格外顯
+
+- 「來源表格」原本依照同一 CSS 屬性的最後一個宣告判定：但瀏覽器會忽略無效的純文字值，例如 `display:none;display:banana`、`opacity:0;opacity:broken`。舊掃描器會讓無效後值覆蓋有效隱藏值，額外列出原本透明或不顯示的教師備註。現針對 `display`、`visibility`、`content-visibility` 的單一字詞和 `opacity` 的數值與有限函式做語法邊界檢查，忽略明確無效的後宣告，仍按原本 `!important`／順序運作；正常的 `display:flex`、`visibility:visible`、`opacity:.5` 和 `initial` 仍可覆寫。
+- HTML 屬性也會先解出合法命名字元；新增 `&period;`、`&percnt;`、`&plus;`，避免 `opacity&colon;0&period;0` 被誤當成可見內容。補 10 組不可外顯和 7 組合法可見的 Vitest 回歸，不新增相依／傳送教材或修改備份格式。這是原文衍生表格的有限守門，**不是**任意 CSS 的 computed style、存取權限或真機驗收。對多值 CSS、外部規則、變數與動畫不宣稱完整判讀。
+- 必須以本次完整 head 重新驗證 GitHub CI／CodeQL 與 App 5504170；Maestro、iOS／Android 真機、WebGPU 中文教學品質和 Ahaboard 同題同機對照仍各自缺證據。PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-17：CSS 科學記號的零透明度不再使隱藏答案成為衍生公開表格
 
 - 修補「來源表格」的有限可見性掃描：CSS 數值允許指數表示法，教材若使用 `opacity:0e0`、`opacity:.0e-2`、`opacity:0E+3` 或 `0e2%`，先前僅辨識十進位零的規則可能漏掉明確透明的教師備註，將其中 Markdown 管線表格額外列為可展開的公開來源。現在只在合法的**零尾數**允許指數記號，不以浮點數轉換去猜測下溢結果；仍遵守同屬性覆寫順序與 `!important`，保留可見原文表格。

@@ -99,6 +99,7 @@ function decodeHtmlAttributeReferences(value: string): string {
   const cssEntities = new Map<string, string>([
     ['colon', ':'], ['semi', ';'], ['Tab', '\t'], ['NewLine', '\n'],
     ['excl', '!'], ['sol', '/'], ['lpar', '('], ['rpar', ')'],
+    ['period', '.'], ['percnt', '%'], ['plus', '+'],
   ]);
   return value.replace(/&(?:#(?:[xX]([0-9a-fA-F]+)|([0-9]+));?|([A-Za-z]+);)/gu,
     (reference: string, hex: string | undefined, decimal: string | undefined,
@@ -125,6 +126,38 @@ function decodeCssEscapes(value: string): string {
     });
 }
 
+// Browsers discard unsupported literal declarations instead of letting them
+// override an earlier valid hidden value. A fallback such as
+// "display:none;display:not-a-mode" must remain hidden in the derived table.
+// This intentionally covers plain literal values only; function-based and
+// multi-token CSS still require a real browser's computed style.
+const CSS_WIDE_VALUES = new Set(['initial', 'inherit', 'unset', 'revert', 'revert-layer']);
+const CSS_DISPLAY_KEYWORDS = new Set([
+  'none', 'contents', 'block', 'inline', 'run-in', 'flow-root',
+  'inline-block', 'inline-flex', 'inline-grid', 'inline-table',
+  'flex', 'grid', 'table', 'list-item',
+  '-webkit-box', '-webkit-inline-box', '-webkit-flex', '-webkit-inline-flex', '-ms-flexbox',
+  'table-caption', 'table-cell', 'table-column', 'table-column-group',
+  'table-footer-group', 'table-header-group', 'table-row', 'table-row-group',
+  'ruby', 'ruby-base', 'ruby-text', 'ruby-base-container', 'ruby-text-container',
+]);
+function isRecognizedInlineCssValue(name: string, value: string): boolean {
+  if (CSS_WIDE_VALUES.has(value)) return true;
+  if (name === 'opacity') {
+    // CSS <alpha-value>: an ordinary number/percentage, or a functional
+    // expression whose computed value cannot be established by this scanner.
+    return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/iu.test(value) ||
+      /^(?:calc|min|max|clamp|var|env)\(/iu.test(value);
+  }
+  // Reject clearly invalid single identifiers, without trying to parse the
+  // multi-keyword display grammar, custom properties or future CSS functions.
+  if (!/^[a-z-]+$/u.test(value)) return true;
+  if (name === 'display') return CSS_DISPLAY_KEYWORDS.has(value);
+  if (name === 'visibility') return ['visible', 'hidden', 'collapse'].includes(value);
+  if (name === 'content-visibility') return ['visible', 'hidden', 'auto'].includes(value);
+  return true;
+}
+
 function hasExplicitHiddenInlineStyle(style: string): boolean {
   // Only recognize literal inline visibility declarations. CSS properties
   // cascade independently; a visible value for one property cannot override
@@ -141,7 +174,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     const name = property[1].toLowerCase();
     const important = importantSuffix.test(property[2]);
     const value = property[2].replace(importantSuffix, '').trim().toLowerCase();
-    if (!value) continue;
+    if (!value || !isRecognizedInlineCssValue(name, value)) continue;
     const previous = effective.get(name);
     if (!previous || important || !previous.important)
       effective.set(name, { value, important });

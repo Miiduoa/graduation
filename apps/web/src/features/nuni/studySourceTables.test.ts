@@ -1302,3 +1302,43 @@ describe('zero-opacity CSS exponent notation cannot expose unpublished source ta
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+describe('invalid CSS declarations cannot override hidden teacher-only source tables', () => {
+  it.each([
+    '<div style="display:none;display:banana">',
+    '<div style="display:none!important;display:banana!important">',
+    '<section style="visibility:hidden;visibility:pretend">',
+    '<section style="content-visibility:hidden;content-visibility:private">',
+    '<aside style="opacity:0;opacity:transparent">',
+    '<aside style="opacity:0!important;opacity:broken!important">',
+    '<p style="opacity:0e0;opacity:not-a-number">',
+    '<div style="opacity&colon;0&period;0">',
+    '<section style="opacity&colon;0&percnt;">',
+    '<p style="opacity&colon;&plus;0">',
+  ])('does not disclose explicitly invisible source rows when style contains %s', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 教師尚未公開 | 分數 |',
+      '| --- | --- |',
+      '| 不應另列 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<div style="display:none;display:flex">',
+    '<div style="display:none!important;display:grid!important">',
+    '<section style="visibility:hidden;visibility:visible">',
+    '<section style="content-visibility:hidden;content-visibility:auto">',
+    '<aside style="opacity:0;opacity:0.5">',
+    '<aside style="opacity:0!important;opacity:1e0!important">',
+    '<div style="opacity:0;opacity:initial">',
+  ])('keeps legitimate visible CSS overrides eligible for source tables: %s', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
+    expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
+      .toEqual(realTable(2));
+  });
+});
