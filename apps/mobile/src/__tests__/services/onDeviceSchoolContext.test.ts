@@ -469,7 +469,7 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
   expect(result).toContain('期中報告');
   expect(result).toContain('未列出不代表沒有其他作業');
   expect(result).toContain('沒有繳交回條也不能斷言未交');
-  expect(result).toContain('請到原作業頁核對');
+  expect(result).toContain('請到原課程作業頁核對');
 
   // Legacy snapshots do not prove completeness, even if their item count matches.
   expect(format({
