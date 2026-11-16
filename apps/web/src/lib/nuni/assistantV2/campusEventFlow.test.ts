@@ -159,19 +159,22 @@ describe('source-selected public event to verified personal calendar', () => {
   });
 
   it('rechecks time after slow verification and before the first dispatch', async () => {
-    const { fixture, binding, request } = setup();
-    const selected = { ...event, startsAt: new Date(now + 60000).toISOString(), endsAt: new Date(now + 120000).toISOString() };
-    fixture.adapter.publicEvent = vi.fn(async () => ready(selected));
-    const result = await prepareCampusEventRequest(request);
     let clock = now, permissionReads = 0;
-    fixture.adapter.permissions = async () => {
-      if (++permissionReads === 2) clock = now + 60000;
-      return { createPersonalEvent: true, prepareFoodOrder: true };
-    };
-    await expect(confirm(binding, proof(result.cards[0]), secret, now, fixture.adapter, true,
-      () => clock)).rejects.toMatchObject({ code: 'CAMPUS_EVENT_START_PASSED' });
-    expect(permissionReads).toBe(2);
-    expect(fixture.writes).toHaveLength(0);
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const { fixture, binding, request } = setup();
+      const selected = { ...event, startsAt: new Date(now + 60000).toISOString(), endsAt: new Date(now + 120000).toISOString() };
+      fixture.adapter.publicEvent = vi.fn(async () => ready(selected));
+      const result = await prepareCampusEventRequest(request);
+      fixture.adapter.permissions = async () => {
+        if (++permissionReads === 2) clock = now + 60000;
+        return { createPersonalEvent: true, prepareFoodOrder: true };
+      };
+      await expect(confirm(binding, proof(result.cards[0]), secret, now, fixture.adapter, true,
+        () => clock)).rejects.toMatchObject({ code: 'CAMPUS_EVENT_START_PASSED' });
+      expect(permissionReads).toBe(2);
+      expect(fixture.writes).toHaveLength(0);
+    } finally { spy.mockRestore(); }
   });
 
   it('does not issue an already-started card when the last permission read crosses its start time', async () => {

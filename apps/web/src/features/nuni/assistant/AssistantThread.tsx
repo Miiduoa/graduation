@@ -10,7 +10,7 @@ import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantTaskPlan } from './AssistantTaskPlan';
 import { AssistantCampusEvents } from './AssistantCampusEvents';
-import type { AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
+import { parseCampusEventCommand, type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -161,7 +161,7 @@ export function AssistantThread({
   const publicCompound = publicCourseCompoundRequest(question, schoolId);
   const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    ((consent && ready) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+    ((consent && ready) || (onEventTarget && parseCampusEventCommand(question) !== null) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
       (onStudyTarget && courseworkStudyFollowup(question) !== null))));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.

@@ -6,6 +6,7 @@
 .list { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
 .item { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .item h4 { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.ordinal { color: var(--muted); font-weight: 500; }
 .when { margin: 6px 0 0 !important; font-size: 13px; line-height: 1.6; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
 .prepare, .source { box-sizing: border-box; display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }

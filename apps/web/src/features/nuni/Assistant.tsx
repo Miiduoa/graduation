@@ -41,6 +41,7 @@ import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
 import { campusEventIdentity, campusEventPreviewIssue, campusEventTargetKey, parseAssistantCampusEventTargets,
+  parseCampusEventCommand, selectCampusEventTarget,
   type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
@@ -407,7 +408,7 @@ function V2Conversation({
   async function send(action: string, input: object, askSignal?: AbortSignal) {
     const scopeSignal = controller.current!.signal;
     const signal = askSignal ?? scopeSignal;
-    return withAssistantRequestDeadline(signal, action === 'ask' || action === 'retry' ? 65000 : 15000, async (requestSignal) => {
+    return withAssistantRequestDeadline(signal, action === 'ask' || action === 'retry' ? 65000 : action === 'event-preview' ? 25000 : 15000, async (requestSignal) => {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
       credentials: 'same-origin',
@@ -517,13 +518,21 @@ function V2Conversation({
       }
     }
   }
-  async function previewCampusEvent(turn: V2Turn, selected: AssistantCampusEventTarget) {
+  async function previewCampusEvent(turn: V2Turn, selected: AssistantCampusEventTarget, prompt?: string) {
     if (!active() || busy.current || !turns.includes(turn) || turn.reply.campusEventPreview) return;
     const target = parseAssistantCampusEventTargets(turn.reply.eventTargets, schoolId)
       .find(item => campusEventTargetKey(item) === campusEventTargetKey(selected));
+    if (!target) { setError('這筆活動來源尚未通過核對，請重新查詢活動。'); return; }
+    await requestCampusEventPreview({ target }, prompt);
+  }
+  async function requestCampusEventPreview(input: { target: AssistantCampusEventTarget } | { discovery: { index: number } }, prompt?: string) {
+    if (!active() || busy.current) return;
+    const target = 'target' in input ? input.target : undefined;
     const problem = eventPreparationBlockReason(turns, actionStates.current, journalReadyRef.current) ||
-      (target ? campusEventPreviewIssue(target, Date.now()) : '這筆活動來源尚未通過核對，請重新查詢活動。');
-    if (problem || !target) { setError(problem || '請重新查詢活動。'); return; }
+      (target ? campusEventPreviewIssue(target, Date.now()) : null);
+    if (problem) { setError(problem); return; }
+    const current = prompt || (target ? `將「${target.title}」加入個人行事曆` : '查近期活動並準備個人行程');
+    const sourceInput = 'discovery' in input ? { discovery: input.discovery } : { event: campusEventIdentity(input.target) };
     busy.current = true;
     const pendingAsk = new AbortController();
     askRequest.current = pendingAsk;
@@ -535,11 +544,11 @@ function V2Conversation({
     setPendingAction('event');
     setPending(true);
     setError('');
+    if (prompt) setQuestion('');
     try {
       // Event previews have an independent issuance route. Never replace the
       // ordinary conversation or invalidate one of its existing confirmations.
-      const event = campusEventIdentity(target);
-      const bootstrap = await send('event-preview', { conversationId: crypto.randomUUID(), event }, pendingAsk.signal);
+      const bootstrap = await send('event-preview', { conversationId: crypto.randomUUID(), ...sourceInput }, pendingAsk.signal);
       if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
       if (bootstrap?.bootstrap !== true || typeof bootstrap.conversationId !== 'string' ||
         !/^[A-Za-z0-9_-]{1,100}$/.test(bootstrap.conversationId) || bootstrap.conversationId === conversation.current ||
@@ -547,14 +556,16 @@ function V2Conversation({
         throw new Error('活動預覽尚未取得有效的確認路徑，請重新查詢後再試。');
       const eventConversation = bootstrap.conversationId;
       const reply = await send('event-preview', { conversationId: eventConversation,
-        routeToken: bootstrap.routeToken, event }, pendingAsk.signal);
+        routeToken: bootstrap.routeToken, ...sourceInput }, pendingAsk.signal);
       if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
       const freshTargets = parseAssistantCampusEventTargets(reply?.eventTargets, schoolId);
-      if (reply?.version !== 2 || reply.campusEventPreview !== true || typeof reply.answer !== 'string' ||
+      const selectionRequired = 'discovery' in input && reply?.campusEventPreview === false;
+      if (reply?.version !== 2 || (!selectionRequired && reply.campusEventPreview !== true) || typeof reply.answer !== 'string' ||
         !Array.isArray(reply.steps) || reply.steps.length > 16 || reply.steps.some((step: unknown) =>
           !step || typeof step !== 'object' || !['name', 'status', 'summary'].every(key => typeof (step as Record<string, unknown>)[key] === 'string')) ||
-        !Array.isArray(reply.cards) || reply.cards.length > 1 ||
-        freshTargets.length > 1 || freshTargets.some(item => campusEventTargetKey(item) !== campusEventTargetKey(target)) ||
+        !Array.isArray(reply.cards) || reply.cards.length > (selectionRequired ? 0 : 1) ||
+        freshTargets.length > (selectionRequired ? 5 : 1) ||
+        (target && freshTargets.some(item => campusEventTargetKey(item) !== campusEventTargetKey(target))) ||
         (reply.eventTargets !== undefined && (!Array.isArray(reply.eventTargets) || reply.eventTargets.length !== freshTargets.length)))
         throw new Error('活動預覽尚未通過核對，原本的確認內容仍保留。');
       const cards: V2Card[] = reply.cards.map((raw: V2Card) => {
@@ -576,14 +587,19 @@ function V2Conversation({
         return { tool: raw.tool, args: { ...args }, token: raw.token, mutationId: raw.mutationId,
           schoolId, destination: raw.destination, conversationId: eventConversation };
       });
-      setTurns(previous => [...previous, { question: `將「${target.title}」加入個人行事曆`,
+      setTurns(previous => [...previous, { question: current,
+        ...('discovery' in input ? { campusEventDiscovery: true as const } : {}),
         conversationId: eventConversation, reply: { answer: reply.answer, steps: reply.steps, cards,
-          campusEventPreview: true, dataRead: true, eventTargets: freshTargets,
+          campusEventPreview: !selectionRequired, dataRead: true, eventTargets: freshTargets,
           ...(reply.simulation === true ? { simulation: true } : {}) } }]);
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
     } catch (e) {
-      if (!scopeSignal.aborted) setError(pendingAsk.signal.aborted
-        ? '已停止這次活動預覽，原本的結果與確認內容仍保留。'
-        : e instanceof Error ? e.message : '活動預覽未完成，請稍後再試。');
+      if (!scopeSignal.aborted) {
+        setError(pendingAsk.signal.aborted
+          ? '已停止這次活動預覽，原本的結果與確認內容仍保留。'
+          : e instanceof Error ? e.message : '活動預覽未完成，請稍後再試。');
+        if (prompt) setRecoverableQuestion(current);
+      }
     } finally {
       scopeSignal.removeEventListener('abort', abortForScope);
       if (askRequest.current === pendingAsk) askRequest.current = null;
@@ -596,6 +612,45 @@ function V2Conversation({
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim();
     if (!current || busy.current) return;
+    const eventCommand = !selection ? parseCampusEventCommand(current) : null;
+    if (eventCommand) {
+      if (eventCommand.kind === 'discover') {
+        await requestCampusEventPreview({ discovery: { index: eventCommand.index } }, current);
+        return;
+      }
+      const problem = eventPreparationBlockReason(turns, actionStates.current, journalReadyRef.current);
+      if (problem) { setError(problem); return; }
+      // An unqualified "second one" belongs to the latest displayed context.
+      // Explicit activity references can find the last activity list, but an
+      // empty/invalid newer list never falls back to a previous successful one.
+      // A fresh discovery preview also ends the previous query context: its
+      // selected source is not a full list and cannot reveal an older list.
+      const eligible: V2Turn[] = [];
+      for (const turn of [...turns].reverse()) {
+        if (turn.reply.campusEventPreview) {
+          if (turn.campusEventDiscovery) break;
+          continue;
+        }
+        eligible.push(turn);
+      }
+      const source = eventCommand.explicitActivity
+        ? eligible.find(turn => Object.hasOwn(turn.reply, 'eventTargets'))
+        : eligible[0] && Object.hasOwn(eligible[0].reply, 'eventTargets') ? eligible[0] : undefined;
+      const targets = parseAssistantCampusEventTargets(source?.reply.eventTargets, schoolId);
+      const choice = selectCampusEventTarget(targets, eventCommand.selection);
+      if (source && 'target' in choice) {
+        await previewCampusEvent(source, choice.target, current);
+        return;
+      }
+      setTurns(previous => [...previous, { question: current, reply: {
+        answer: 'message' in choice ? choice.message : '請先選擇要加入的活動。', steps: [], cards: [],
+        dataRead: true, eventTargets: targets,
+      } }]);
+      setQuestion('');
+      setError('');
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+      return;
+    }
     if (!selection && isAssistantTaskRetryQuestion(current)) {
       const source = [...turns].reverse().find(turn => {
         const retry = taskRetryForTurn(turn);

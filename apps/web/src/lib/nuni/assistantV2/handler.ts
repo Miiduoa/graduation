@@ -22,6 +22,7 @@ import { readCourseworkFollowup } from './courseworkFollowup';
 import { retryTaskReads } from './taskRetry';
 import { parsePublicEventTarget } from './publicEvent';
 import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventRequest';
+import { parseCampusEventDiscovery, prepareCampusEventDiscovery } from './campusEventDiscovery';
 const ACTIONS = ['capability', 'ask', 'plan', 'event-preview', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
@@ -147,7 +148,7 @@ export async function handleV2(request: NextRequest, action: string) {
         : action === 'plan'
           ? ['schoolId', 'conversationId', 'routeToken', 'task']
           : action === 'event-preview'
-            ? ['schoolId', 'conversationId', 'routeToken', 'event']
+            ? ['schoolId', 'conversationId', 'routeToken', 'event', 'discovery']
           : action === 'followup'
             ? ['schoolId', 'conversationId', 'issuedContext', 'token', 'args']
             : action === 'retry'
@@ -164,7 +165,11 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
-    const selectedEvent = action === 'event-preview' ? parsePublicEventTarget(raw.event) : undefined;
+    if (action === 'event-preview' && Number(Object.hasOwn(raw, 'event')) + Number(Object.hasOwn(raw, 'discovery')) !== 1)
+      throw new V2Error(422, 'INVALID_INPUT');
+    const selectedEvent = action === 'event-preview' && Object.hasOwn(raw, 'event') ? parsePublicEventTarget(raw.event) : undefined;
+    const eventDiscovery = action === 'event-preview' && Object.hasOwn(raw, 'discovery')
+      ? parseCampusEventDiscovery(raw.discovery) : undefined;
     if (selectedEvent && selectedEvent.schoolId !== schoolId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
     if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
         !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
@@ -289,12 +294,13 @@ export async function handleV2(request: NextRequest, action: string) {
     active.add(sessionKey);
     try {
       if (action === 'event-preview') {
-        const result = await prepareCampusEventRequest({
-          target: selectedEvent!, adapter: source.adapter, binding, secret, writes, now, signal,
-        });
+        const options = { adapter: source.adapter, binding, secret, writes, now, signal };
+        const result = eventDiscovery
+          ? await prepareCampusEventDiscovery({ ...options, discovery: eventDiscovery })
+          : { ...await prepareCampusEventRequest({ ...options, target: selectedEvent! }), campusEventPreview: true };
         signal.throwIfAborted();
         return jsonResponse({
-          version: 2, ...result, campusEventPreview: true, modelCalls: 0, simulation: source.adapter.simulation,
+          version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,
           ...(result.cards.length ? { expiresAt: now + 300000 } : {}),
           ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
         });

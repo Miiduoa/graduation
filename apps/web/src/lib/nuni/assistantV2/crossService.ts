@@ -14,7 +14,8 @@ import { findSchoolById } from '@campus/shared/src/schools';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind } from './publicCampus';
 import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
-import { parseAssistantCampusEventTargets, type AssistantCampusEventTarget } from '../../assistantCampusEvent';
+import type { AssistantCampusEventTarget } from '../../assistantCampusEvent';
+import { publicCampusEventTargets } from './publicCampusSelection';
 import type { AssistantCourseworkTarget } from '../../assistantCoursework';
 import type { createTools } from './tools';
 import type { CrossServiceOperation, CrossServiceRequest } from './crossServiceRequest';
@@ -92,11 +93,7 @@ function readPlanEventTargets(request: CrossServiceRequest, plan: AssistantTaskP
         !results.has(operation.id)) continue;
     const read = parsePublicCampusResult(results.get(operation.id), schoolId, 'events');
     if (read.status !== 'ready') continue;
-    const selected = parseAssistantCampusEventTargets(read.items.map(item => ({
-      schoolId, source: read.source, id: item.id, title: item.title, startsAt: item.startsAt,
-      ...(item.endsAt ? { endsAt: item.endsAt } : {}),
-      ...(item.location ? { location: item.location } : {}), href: item.href, checkedAt: read.checkedAt,
-    })), schoolId);
+    const selected = publicCampusEventTargets(read, schoolId);
     for (const target of selected) {
       const key = target.source + ':' + target.id;
       const previous = targets.get(key);

@@ -17,6 +17,8 @@ it('requires an explicit selection and shows source, Taipei time and the confirm
   const onSelect = vi.fn();
   render(<AssistantCampusEvents targets={[first, second]} schoolId="pu" pending={false} onSelect={onSelect} />);
   expect(onSelect).not.toHaveBeenCalled();
+  expect(screen.getByRole('heading', { name: /第 1 筆 ·\s*攝影講座/ })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: /第 2 筆 ·\s*音樂工作坊/ })).toBeTruthy();
   expect(screen.getByText(/確認後才加入個人行事曆/)).toBeTruthy();
   expect(screen.getAllByText(/2030\/11\/16 下午2:00.*2030\/11\/16 下午4:00/)).toHaveLength(2);
   expect(screen.getAllByRole('link', { name: '查看活動來源' })[1].getAttribute('href')).toBe(second.href);

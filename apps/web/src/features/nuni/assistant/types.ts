@@ -25,7 +25,8 @@ export type V2Reply = {
   courseworkDate?: string;
   /** Exact public records offered for an explicit, independently re-read selection. */
   eventTargets?: import('@/lib/assistantCampusEvent').AssistantCampusEventTarget[];
-  /** Source-bound event cards cannot be revised into an unrelated calendar entry. */
+  /** True for a source-bound preview; false for a discovery that still needs
+   * an explicit source choice. A preview's single source is not a new list. */
   campusEventPreview?: boolean;
   /** Server-prepared task results; validate before rendering or linking. */
   taskPlan?: import('@campus/shared/src/assistantTaskPlan').AssistantTaskPlan;
@@ -38,6 +39,9 @@ export type V2Reply = {
 export type V2Turn = {
   question: string;
   reply: V2Reply;
+  /** Local request provenance, never copied from a server reply. A fresh
+   * discovery preview cannot expose an older activity list to later ordinals. */
+  campusEventDiscovery?: true;
   /** Preserve the original conversation when retrying this turn's scoped reads. */
   conversationId?: string;
   /** Local public lookup, outside the model conversation and signed action cards. */

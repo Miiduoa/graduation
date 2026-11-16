@@ -6,7 +6,8 @@ import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@
 import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskPlan';
 import { parseAssistantPublicCourseResults, type AssistantPublicCourseResult } from '@campus/shared/src/assistantPublicCourseResults';
 import { parsePublicCourseArguments, publicCourseArguments, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
-import { parsePublicCampusRead, parsePublicCampusResult } from './publicCampus';
+import { parsePublicCampusRead, parsePublicCampusResult, type PublicCampusRead } from './publicCampus';
+import { CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, publicEventCalendarSourceIntent } from './publicCampusSelection';
 import { lostFoundListInput, parseLostFoundRead, parseLostFoundResult } from './lostFound';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
@@ -823,6 +824,11 @@ export function createTools(
     clubs = new Set<string>();
   const cards: Card[] = [];
   const publicCourseResults: AssistantPublicCourseResult[] = [];
+  const sourceEventRequested = publicEventCalendarSourceIntent(executionQuestion, now);
+  let publicEventReadAttempted = false;
+  let publicEventRead: PublicCampusRead | undefined;
+  let publicEventReadGeneration = 0;
+  const requiresEventSelection = () => sourceEventRequested || publicEventReadAttempted;
   async function requirePermission(key: AssistantPermissionKey) {
     try {
       await requireAssistantPermission(adapter, key);
@@ -940,6 +946,7 @@ export function createTools(
     };
   }
   async function propose(raw: Obj, studyTask?: Task) {
+    if (!studyTask && requiresEventSelection()) return fail('CAMPUS_EVENT_SELECTION_REQUIRED', 409);
     if (!writes)
       return {
         unavailable: 'WRITES_DISABLED',
@@ -953,6 +960,9 @@ export function createTools(
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
     validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(executionQuestion));
     await requirePermission('createPersonalEvent');
+    // A concurrent/late public lookup cannot turn these model-supplied fields
+    // into a source-bound event while ledger or permission reads were pending.
+    if (!studyTask && requiresEventSelection()) return fail('CAMPUS_EVENT_SELECTION_REQUIRED', 409);
     const card = signCard(
       binding,
       'propose_personal_event',
@@ -1442,7 +1452,12 @@ export function createTools(
     cards,
     context,
     get publicCourseResults() { return [...publicCourseResults]; },
+    get publicEventReadAttempted() { return publicEventReadAttempted; },
+    get publicEventRead() { return publicEventRead; },
     recovery(name: string) {
+      if ((name === 'propose_personal_event' && requiresEventSelection()) ||
+          (name === 'propose_study_plan' && sourceEventRequested))
+        return { nextStep: CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, availableIds: [] };
       const next: Record<string, string> = {
         get_dining: '先呼叫 get_dining {} 取得 locationId',
         get_food_locations:
@@ -1488,6 +1503,17 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown, requestQuestion = executionQuestion) {
+      let eventReadGeneration: number | undefined;
+      // Mark the attempt before argument validation or I/O. A failed lookup
+      // must not authorize a guessed event, nor revive a previous choice list.
+      if (name === 'get_campus_events') {
+        publicEventReadAttempted = true;
+        publicEventRead = undefined;
+        eventReadGeneration = ++publicEventReadGeneration;
+      }
+      if ((name === 'propose_personal_event' && requiresEventSelection()) ||
+          (name === 'propose_study_plan' && sourceEventRequested))
+        return fail('CAMPUS_EVENT_SELECTION_REQUIRED', 409);
       const permission = proposalPermission(name);
       if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
@@ -1629,6 +1655,8 @@ export function createTools(
         cache.set(retryKey, dispatch(name, filled));
         value = await cache.get(retryKey);
       }
+      if (name === 'get_campus_events' && eventReadGeneration === publicEventReadGeneration)
+        publicEventRead = parsePublicCampusResult(value, binding.schoolId, 'events');
       remember(value, name);
       return {
         value: ignored.length ? { data: value, note: '已忽略未知參數欄位' } : value,

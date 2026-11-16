@@ -33,7 +33,7 @@ export function AssistantCampusEvents({ targets: raw, schoolId, pending, blocked
       {targets.map((target, index) => {
         const issue = campusEventPreviewIssue(target, now);
         return <li key={campusEventTargetKey(target)} className={styles.item}>
-          <h4>{target.title}</h4>
+          <h4>{!sourceOnly && <span className={styles.ordinal}>第 {index + 1} 筆 · </span>}{target.title}</h4>
           <p className={styles.when}>
             {formatTaipeiDateTime(target.startsAt, { seconds: false })}
             {target.endsAt ? ` ～ ${formatTaipeiDateTime(target.endsAt, { seconds: false })}` : ' · 結束時間未提供'}（台灣時間）

@@ -2,12 +2,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
+import { assistantServiceHref } from '@campus/shared/src/assistantServices';
 import { handleNuni } from '../api';
 import { sealCookie, SESSION_COOKIE, sessionContext } from '../server';
 import { issueRoute, signCard, verifyCard } from './actions';
 import { createAdapter } from './adapter';
 import { fixtureAdapter, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
 import { publicEventArgs, publicEventFingerprint, publicEventHref, publicEventSourcePath, type PublicEventSourceItem } from './publicEvent';
+import { publicCampusSourcePath } from './publicCampus';
 
 const model = vi.hoisted(() => vi.fn());
 vi.mock('./adapter', () => ({ createAdapter: vi.fn() }));
@@ -146,4 +148,78 @@ it('routes subsequent event preparation back to its issuer without creating repl
   expect(response.status).toBe(409);
   expect(response.headers.get('fly-replay')).toBe('instance=event-owner');
   expect(createAdapter).not.toHaveBeenCalled();
+});
+
+function discoverySource(partial = false) {
+  const first = { ...item, id: 'first-event', title: '第一場活動', href: publicEventHref({ ...target, id: 'first-event' }) };
+  return { version: 1, kind: 'events', schoolId, source: target.source,
+    sourcePath: publicCampusSourcePath(schoolId, target.source), checkedAt: new Date(now).toISOString(),
+    status: 'ready', partial, href: assistantServiceHref('events', schoolId),
+    items: [first, item].map(row => ({ id: row.id, schoolId, title: row.title, startsAt: row.startsAt,
+      endsAt: row.endsAt, href: row.href, summary: '' })) };
+}
+async function discoveryBootstrap() {
+  const input = { schoolId, conversationId: 'discovery-client-hint', discovery: { index: 2 } };
+  const response = await send('event-preview', input);
+  expect(response.status).toBe(200);
+  const route = await response.json();
+  expect(route.bootstrap).toBe(true);
+  expect(route.conversationId).not.toBe(input.conversationId);
+  return { ...input, conversationId: route.conversationId, routeToken: route.routeToken };
+}
+
+it('bootstraps a natural-language discovery in the same isolated preview contract with no model or write', async () => {
+  fixture.adapter.publicCampus = vi.fn(async () => discoverySource());
+  const old = signCard(binding(), 'propose_personal_event',
+    { title: '原本讀書', date: '2026-11-04', allDay: false, startTime: '18:00', endTime: '19:00' }, 1, secret, now);
+  const input = await discoveryBootstrap();
+  expect(fixture.adapter.publicCampus).not.toHaveBeenCalled();
+  const response = await send('event-preview', input);
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result).toMatchObject({ version: 2, campusEventPreview: true, dataRead: true, modelCalls: 0,
+    eventTargets: [{ id: target.id }], cards: [{ args: { title: item.title } }] });
+  expect(fixture.adapter.publicCampus).toHaveBeenCalledExactlyOnceWith('events', 5);
+  expect(fixture.adapter.publicEvent).toHaveBeenCalledExactlyOnceWith(target);
+  expect(verifyCard(binding(), { token: old.token, args: old.args }, secret, now).mutationId).toBe(old.mutationId);
+  expect(fixture.adapter.write).not.toHaveBeenCalled();
+  const card = result.cards[0];
+  expect((await send('confirm', { schoolId, conversationId: input.conversationId, token: card.token, args: card.args })).status).toBe(200);
+  expect(fixture.adapter.write).toHaveBeenCalledOnce();
+});
+
+it.each([
+  {}, { event: target, discovery: { index: 1 } }, { event: null, discovery: { index: 1 } },
+  { discovery: null }, { discovery: { index: '2' } }, { discovery: { index: 6 } },
+  { discovery: { index: 2, schoolId: 'another-school' } }, { discovery: { index: 2, title: '模型指定標題' } },
+  { discovery: { index: 2 }, history: [] }, { discovery: { index: 2 }, question: '改用別的日期' },
+])('rejects mixed or caller-authored discovery inputs before any adapter access: %j', async extra => {
+  const response = await send('event-preview', { schoolId, conversationId: 'x', ...extra });
+  expect(response.status).toBe(422);
+  expect(createAdapter).not.toHaveBeenCalled();
+  expect(fixture.adapter.publicEvent).not.toHaveBeenCalled();
+});
+
+it('returns partial discovery as selectable evidence rather than a prepared source card', async () => {
+  fixture.adapter.publicCampus = vi.fn(async () => discoverySource(true));
+  const response = await send('event-preview', await discoveryBootstrap());
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ campusEventPreview: false, dataRead: true, modelCalls: 0, cards: [],
+    stopReason: 'CAMPUS_EVENT_SELECTION_REQUIRED', eventTargets: [{ id: 'first-event' }, { id: target.id }] });
+  expect(fixture.adapter.publicEvent).not.toHaveBeenCalled();
+  expect(fixture.adapter.write).not.toHaveBeenCalled();
+});
+
+it('shares the existing preview quota and never borrows the chat route for discovery', async () => {
+  fixture.adapter.publicCampus = vi.fn(async () => discoverySource());
+  const foreign = await send('event-preview', { schoolId, conversationId: binding().conversationId,
+    routeToken: issueRoute(binding(), secret), discovery: { index: 2 } });
+  expect(foreign.status).toBe(409);
+  expect(fixture.adapter.publicCampus).not.toHaveBeenCalled();
+  expect((await send('event-preview', await bootstrap())).status).toBe(200);
+  for (let index = 0; index < 2; index++)
+    expect((await send('event-preview', await discoveryBootstrap())).status).toBe(200);
+  expect((await send('event-preview', await discoveryBootstrap())).status).toBe(429);
+  expect(fixture.adapter.publicCampus).toHaveBeenCalledTimes(2);
+  expect(fixture.adapter.write).not.toHaveBeenCalled();
 });

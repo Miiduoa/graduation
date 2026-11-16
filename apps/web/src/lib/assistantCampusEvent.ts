@@ -14,6 +14,70 @@ export type AssistantCampusEventTarget = {
   location?: string;
 };
 
+export type CampusEventChoice =
+  | { kind: 'index'; index: number }
+  | { kind: 'single' }
+  | { kind: 'title'; title: string };
+export type CampusEventCommand =
+  | { kind: 'discover'; index: number }
+  | { kind: 'followup'; selection: CampusEventChoice; explicitActivity: boolean };
+
+/** A complete, bounded instruction only. Unsupported filters, edits and extra
+ * tasks cannot silently become a recent-feed query or an unrelated event. */
+export function parseCampusEventCommand(question: string): CampusEventCommand | null {
+  if (typeof question !== 'string' || !question.trim() || question.length > 360 ||
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
+  const value = question.normalize('NFKC').trim().replace(/[。!！?？]+$/, '').trim();
+  const prefix = '(?:(?:請|麻煩(?:你)?|幫我|替我|我想)\\s*)*';
+  const destination = '(?:我的|個人|我的個人)?(?:行事曆|行程|日曆)';
+  const add = `(?:加入|加到|加進|放進|放到)\\s*${destination}`;
+  const ordinal = '(十二|十一|十|一|二|兩|三|四|五|六|七|八|九|1[0-2]|[1-9])';
+  const numerals: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5,
+    六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
+  const number = (raw: string): number => numerals[raw] || Number(raw);
+  const followup = (text: string): Extract<CampusEventCommand, { kind: 'followup' }> | null => {
+    const outer = text.match(new RegExp(`^${prefix}(?:把|將)?\\s*(.+?)\\s*${add}$`));
+    if (!outer) return null;
+    const selected = outer[1].trim();
+    const indexed = selected.match(new RegExp(`^(?:(?:上面|上方|剛才|剛剛)(?:的)?\\s*)?第\\s*${ordinal}\\s*(?:個|筆|場|項)(?:活動)?$`));
+    if (indexed) return { kind: 'followup', selection: { kind: 'index', index: number(indexed[1]) },
+      explicitActivity: /活動$/.test(selected) };
+    if (/^(?:(?:上面|上方|剛才|剛剛)(?:的)?)?(?:那個|這個|那筆|這筆|那場|這場)(?:活動)?$/.test(selected))
+      return { kind: 'followup', selection: { kind: 'single' }, explicitActivity: /活動$/.test(selected) };
+    const named = selected.match(/^(?:活動)?(?:「([^「」]+)」|『([^『』]+)』|"([^\"]+)")(?:活動)?$/);
+    const title = named?.[1] || named?.[2] || named?.[3];
+    if (title && title.trim() === title && title.length <= 160)
+      return { kind: 'followup', selection: { kind: 'title', title },
+        explicitActivity: /^(?:活動)/.test(selected) || /活動$/.test(selected) };
+    return null;
+  };
+  // Only a generic current feed may be selected by a new ordinal lookup.
+  // Named schools, dates, registration and arbitrary query fragments stay out.
+  const discovery = value.match(new RegExp(`^${prefix}(?:查詢|查看|查一下|看一下|看看|查|看|列出)\\s*(?:(?:目前|最近|最新|近期)(?:的)?\\s*)?(?:(?:校園|學校|公開)\\s*)?活動\\s*(?:[,，、;；]\\s*)?(?:並且|然後|接著|並|再|順便)\\s*(.+)$`));
+  if (discovery) {
+    const choice = followup(discovery[1]);
+    return choice?.selection.kind === 'index' && choice.selection.index <= 5
+      ? { kind: 'discover', index: choice.selection.index } : null;
+  }
+  return followup(value);
+}
+
+/** Selection is relative to displayed source rows, never the prose excerpt. */
+export function selectCampusEventTarget(targets: AssistantCampusEventTarget[], choice: CampusEventChoice):
+  { target: AssistantCampusEventTarget } | { message: string } {
+  if (!targets.length) return { message: '目前沒有可承接的活動清單。請先查近期活動，或重新選擇活動來源。' };
+  if (choice.kind === 'index') {
+    const target = targets[choice.index - 1];
+    return target ? { target } : { message: `這份清單只有 ${targets.length} 筆活動，沒有第 ${choice.index} 筆。請從下方選擇要加入的活動。` };
+  }
+  const selected = choice.kind === 'single' ? targets
+    : targets.filter(target => target.title.normalize('NFKC') === choice.title);
+  if (selected.length === 1) return { target: selected[0] };
+  return { message: choice.kind === 'title' && !selected.length
+    ? '目前清單中沒有完全符合這個名稱的活動。請從下方選擇；不會改用相似名稱。'
+    : '目前有多筆可能的活動，請從下方選擇一筆，或指定第幾筆；尚未建立行程。' };
+}
+
 const fields = ['schoolId', 'source', 'id', 'title', 'startsAt', 'endsAt', 'href', 'checkedAt', 'location'];
 const required = fields.filter(field => field !== 'endsAt' && field !== 'location');
 const plain = (value: unknown, max: number): value is string => typeof value === 'string' &&
