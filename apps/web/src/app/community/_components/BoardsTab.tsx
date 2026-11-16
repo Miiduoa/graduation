@@ -277,8 +277,10 @@ function BoardsContent(props: {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           onKeyDown={(event) => {
-            // Escape resets a keyboard search without moving focus or reading Firestore again.
-            if (event.key === 'Escape' && filter) {
+            // Escape selects/cancels IME candidates during Chinese input; it must not discard
+            // the search until composition is truly over. keyCode 229 covers its final key event.
+            if (event.key === 'Escape' && filter
+              && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault();
               setFilter('');
             }
