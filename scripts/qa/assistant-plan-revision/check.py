@@ -690,7 +690,12 @@ async def protected_good_case(page, name):
     if len(before) == 2:
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        # Focus is immediate; the preceding control's native scroll/rAF may
+        # still be moving. Establish a settled baseline without moving the UI.
+        settling = await settled_comparison_geometry(button)
+        assert settling['settled'], f'Pre-Tab control geometry did not settle: {settling}'
         before_tab = await geometry_against_composer(button, await dock.element_handle())
+        before_tab['settling'] = settling
         # Observe only this button instance; every product call delegates unchanged to native.
         await button.evaluate('''node => {
           const original=node.scrollIntoView, requests=[];
