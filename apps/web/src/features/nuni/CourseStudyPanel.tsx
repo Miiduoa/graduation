@@ -403,12 +403,15 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     latestSourceState.current = { hasSource: !!source, hasStudyChanges, hasProgressPaste: progressPaste.length > 0 };
   }, [source, hasStudyChanges, progressPaste]);
 
-  useEffect(() => {
+  // The file read finishes asynchronously. Focus the replacement heading in
+  // the same DOM commit that inserts the confirmation, before a keyboard or
+  // screen-reader user can resume at the previous board heading. Also restore
+  // focus synchronously when the confirmation's active button disappears.
+  useLayoutEffect(() => {
     if (pendingSource) {
       replaceHeading.current?.focus();
       return;
     }
-    // Restore focus after React removes the confirmation and its active element.
     const trigger = replacementReturnTarget.current;
     if (!trigger) return;
     replacementReturnTarget.current = null;

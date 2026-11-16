@@ -1,3 +1,9 @@
+## 2026-11-17：修復非同步講義替換確認時鍵盤焦點偶爾留在舊標題
+
+- 精確 head `71af435e97e9d8750cce6e856fa193d8071a75e9` 的 [CI #43930499576](https://github.com/Miiduoa/graduation/actions/runs/43930499576) 中 Web Tests job `133521293652` 失敗 1 項（16,256 通過、115 略過）：本機 TXT 讀取成功、替換確認標題已出現，但鍵盤焦點仍停留在舊「讀書白板」標題，未即時移到「要改讀另一份教材嗎？」。本版其它 Mobile、Functions、Firestore、Security、Lint、Web/Mobile Build 與 CodeQL 都成功，但不能當成新 SHA 的通過證據。
+- 將來源替換確認的標題聚焦、取消後的焦點還原從被動 `useEffect` 移到 `useLayoutEffect`，確保確認插入或移除時同步處理焦點，避免行動 WebView／鍵盤／讀屏進入已消失的控制元件。補強展開匯入區時的模擬 DOM 回歸，驗證提示出現當下確實聚焦標題、取消後回到仍可操作的檔案選擇器；既有收合匯入區時回摘要與筆記／試答保留測試不變。
+- 這次只修改白板 UI、DOM 測試與文件，不改教材、私有筆記、v1/v2 閱讀進度、v1 練習 checkpoint 或外部傳輸，不增套件。仍須依新 head 的正式 GitHub CI／CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機及 Ahaboard 同教材同題同機核實；PR 維持 Draft、不合併、不部署。
+
 ## 2026-11-17：隱藏段落與標題不得被額外整理成公開表格
 
 - 修補「來源表格」的明確可見性判斷：先前只排除部分 HTML 容器。若教師把尚未公布的答案放在 `<p hidden>`、`<p aria-hidden="true">`、`<label hidden>` 或帶有 `display:none` 的 `<h2>` 內，解析器仍可能把其中管線表格再整理成學生可展開的衍生表格。現在對段落、標籤及 h1–h6 同樣追蹤明確隱藏屬性與樣式，直到相符結束標記；一般可見容器與後續正式教材表格仍保留。

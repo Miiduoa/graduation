@@ -1310,7 +1310,9 @@ it('returns focus to the visible file picker when cancelling a replacement from 
   expect(summary.closest('details')?.hasAttribute('open')).toBe(true);
   const input = screen.getByLabelText('選擇講義') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [new File(['新的例題'], '例題.txt', { type: 'text/plain' })] } });
-  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  const confirmationHeading = await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' });
+  // Async file reads must move focus in the same render as the confirmation.
+  expect(document.activeElement).toBe(confirmationHeading);
   fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
   expect(document.activeElement).toBe(input);
   expect(screen.getByText(material.body)).toBeTruthy();
