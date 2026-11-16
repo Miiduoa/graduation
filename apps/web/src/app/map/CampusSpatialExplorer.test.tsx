@@ -1175,8 +1175,15 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
     const softTimer = timerSpy.mock.calls.find(([, delay]) => delay === 60_000);
     expect(softTimer).toBeTruthy();
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
-    clock += 90_000;
+    const originalClock = clock;
+    // A mobile clock rollback must not consume the only 24h deadline timer.
+    clock -= 120_000;
     act(() => { (softTimer![0] as () => void)(); });
+    expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+    const rearmedSoft = timerSpy.mock.calls.find(([, delay]) => delay === 180_000);
+    expect(rearmedSoft).toBeTruthy();
+    clock = originalClock + 90_000;
+    act(() => { (rearmedSoft![0] as () => void)(); });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
 
@@ -1184,8 +1191,16 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
     const deadline = Date.parse(fetchedAt) + 7 * day;
     const hardTimer = timerSpy.mock.calls.find(([, delay]) => delay === deadline - clock);
     expect(hardTimer).toBeTruthy();
-    clock = deadline + 1_000;
+    // An early hard-expiry callback (after time sync) must re-arm eviction,
+    // rather than leaving old source geometry visible past seven days.
+    clock = deadline - 120_000;
     act(() => { (hardTimer![0] as () => void)(); });
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const rearmedHard = timerSpy.mock.calls.filter(([, delay]) => delay === 120_000).at(-1);
+    expect(rearmedHard).toBeTruthy();
+    clock = deadline + 1_000;
+    act(() => { (rearmedHard![0] as () => void)(); });
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
     await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
