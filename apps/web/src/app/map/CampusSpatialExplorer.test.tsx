@@ -23,6 +23,7 @@ let intersection: IntersectionObserverCallback | null = null;
 const disconnect = vi.fn();
 
 beforeEach(() => {
+  window.sessionStorage.removeItem('nuni:pu:osm-footprint-cooldown-until');
   vi.clearAllMocks();
   media.clear();
   intersection = null;
@@ -655,6 +656,70 @@ it('backs off a failed OSM network request while keeping campus POIs and directi
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
 });
+
+// Closing and reopening a dialog must not bypass an origin-protecting wait.
+// The stored value is only a deadline; no map coordinates or student data.
+it('retains a source cooldown after closing and reopening the spatial dialog', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const firstDialog = await open();
+  const firstRetry = await within(firstDialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(firstRetry.hasAttribute('disabled')).toBe(true));
+  const persisted = window.sessionStorage.getItem('nuni:pu:osm-footprint-cooldown-until');
+  expect(Number(persisted)).toBeGreaterThan(Date.now());
+  fireEvent.click(within(firstDialog).getByRole('button', { name: '關閉視窗' }));
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const reopened = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const retry = await within(reopened).findByRole('button', { name: '重新讀取建築輪廓' });
+  expect(retry.hasAttribute('disabled')).toBe(true);
+  expect(within(reopened).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(within(reopened).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('permits a deliberate retry after a restored cooldown expires, without automatic polling', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const key = 'nuni:pu:osm-footprint-cooldown-until';
+  const future = Date.now() + 60_000;
+  window.sessionStorage.setItem(key, String(future));
+  const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+  vi.stubGlobal('fetch', fetchMock);
+  const now = vi.spyOn(Date, 'now');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    now.mockReturnValue(future + 1000);
+    await act(async () => { fireEvent(window, new Event('pageshow')); });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(window.sessionStorage.getItem(key)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it.each(['not-a-timestamp', String(Date.now() + 3 * 24 * 60 * 60 * 1000)])(
+  'ignores invalid or out-of-range stored OSM cooldown %s', async (badDeadline) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const key = 'nuni:pu:osm-footprint-cooldown-until';
+    window.sessionStorage.setItem(key, badDeadline);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    await open();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(window.sessionStorage.getItem(key)).toBeNull();
+  },
+);
 
 // Synthetic HTTP 200 responses from a proxy can still be corrupt, truncated,
 // or fail the OSM source/geometry contract. Reject them without inviting a
