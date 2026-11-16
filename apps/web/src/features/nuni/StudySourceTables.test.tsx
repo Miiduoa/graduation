@@ -1226,3 +1226,51 @@ it('leaves the original text available if both selection APIs fail', () => {
   expect(field.value).toContain('| 計算機概論 | 2 | 205 |');
   expect(document.activeElement).toBe(field);
 });
+
+
+it('selects an exact individual source row without reconstructing cells or copying other rows', () => {
+  const view = render(<StudySourceTables text={source} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }) as HTMLSelectElement;
+  fireEvent.change(range, { target: { value: '1' } });
+  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  expect(field.value).toBe('| 計算機概論 | 2 | 205 |');
+  expect(field.value).not.toContain('資料庫');
+  fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格第 2 列原文' }));
+  expect(document.activeElement).toBe(field);
+  expect(field.selectionStart).toBe(0);
+  expect(field.selectionEnd).toBe(field.value.length);
+  fireEvent.change(range, { target: { value: '-1' } });
+  expect(field.value).toContain('| 資料庫 | 3 | 301 |');
+  expect(view.container.querySelectorAll('table')).toHaveLength(1);
+});
+
+it('preserves exact escaped pipes and does not expose hidden teacher rows in single-row selection', () => {
+  const sourceText = [
+    '<div hidden>', '| 教師解答 | 分數 |', '| --- | --- |', '| 秘密 | 999 |', '</div>',
+    '| 課程 | 定義 |', '| --- | --- |', '| SQL \\| NoSQL | 兩種資料庫 |',
+    '| 網路 | 通訊 |',
+  ].join('\r\n');
+  render(<StudySourceTables text={sourceText} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }), { target: { value: '0' } });
+  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  expect(field.value).toBe('| SQL \\| NoSQL | 兩種資料庫 |');
+  expect(field.value).not.toContain('秘密');
+  expect(field.value).not.toContain('網路');
+});
+
+it('resets a previously selected row when a same-position source is replaced', () => {
+  const old = ['| 科目 | 次數 |', '| --- | --- |', '| A | 1 |', '| B | 2 |'].join('\n');
+  const replacement = ['| 科目 | 次數 |', '| --- | --- |', '| 新教材 | 7 |'].join('\n');
+  const view = render(<StudySourceTables text={old} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }) as HTMLSelectElement;
+  fireEvent.change(range, { target: { value: '1' } });
+  view.rerender(<StudySourceTables text={replacement} />);
+  const refreshed = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }) as HTMLSelectElement;
+  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  expect(refreshed.value).toBe('-1');
+  expect(field.value).toBe(replacement);
+  expect(field.value).not.toContain('| B | 2 |');
+});

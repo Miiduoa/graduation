@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
 import styles from './CourseStudyPanel.module.css';
 
@@ -210,8 +210,15 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
 }
 
 /** Select only the source's original table lines; never reserialize hidden cells. */
-function tableSourceSelection(lines: string[], table: StudySourceTable): string {
+function tableSourceSelection(lines: string[], table: StudySourceTable, rowIndex: number | null = null): string {
   const start = table.startLine - 1;
+  if (rowIndex !== null) {
+    // A single data row is copied as its exact source line, without
+    // synthesizing headers, omitting a hidden cell or joining non-adjacent rows.
+    if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= table.rows.length) return '';
+    const line = lines[start + 2 + rowIndex] ?? '';
+    return line.endsWith('\r') ? line.slice(0, -1) : line;
+  }
   const end = start + table.rows.length + 2;
   const selected = lines.slice(start, end);
   // The final CR belongs to the CRLF *after* this table, not to its last cell.
@@ -234,11 +241,60 @@ function selectOriginalTableText(field: HTMLTextAreaElement | null) {
   catch { /* The unchanged source remains available for native selection. */ }
 }
 
+/** Keep per-table selection local and reset it when the authorized source changes. */
+function StudySourceSelection({ table, index, sourceLines }: {
+  table: StudySourceTable;
+  index: number;
+  sourceLines: string[];
+}) {
+  const [rowIndex, setRowIndex] = useState(-1);
+  useEffect(() => { setRowIndex(-1); }, [sourceLines]);
+
+  return (
+    <details className={styles.sourceTableSelection}>
+      <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
+      <p className={styles.note}>
+        可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
+        單列不包含欄名，請對照上方表格；可以手機長按或鍵盤複製，不需剪貼簿權限。
+      </p>
+      <label>
+        原文範圍
+        <select aria-label={`第 ${index + 1} 張表格的原文選取範圍`}
+          value={rowIndex}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (next === -1 || (Number.isInteger(next) && next >= 0 && next < table.rows.length))
+              setRowIndex(next);
+          }}>
+          <option value={-1}>整張表格（含欄名）</option>
+          {table.rows.map((row, number) =>
+            <option key={number} value={number}>
+              第 {number + 1} 列（原文第 {table.startLine + 2 + number} 行：{row[0]}）
+            </option>)}
+        </select>
+      </label>
+      <button type="button" onClick={(event) => {
+        const field = event.currentTarget.parentElement?.querySelector('textarea') ?? null;
+        selectOriginalTableText(field);
+      }}>{rowIndex < 0
+        ? `全選第 ${index + 1} 張表格原文`
+        : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}</button>
+      <textarea
+        aria-label={`原文表格 ${index + 1} 的可選取文字`}
+        readOnly
+        spellCheck={false}
+        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : 2}
+        value={tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex)}
+      />
+    </details>
+  );
+}
+
 /** Optional accessible table layout derived solely from the exact source text. */
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
+  const sourceLines = useMemo(() => text.split('\n'), [text]);
   if (!tables.length) return null;
-  const sourceLines = text.split('\n');
 
   return (
     <section className={styles.sourceTableGroup} aria-label="教材原文表格">
@@ -265,24 +321,7 @@ export function StudySourceTables({ text }: { text: string }) {
                     : <td key={column}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
-          <details className={styles.sourceTableSelection}>
-            <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
-            <p className={styles.note}>
-              這是教材原始 Markdown 行，保留原本的欄名與換行。
-              可用手機長按或鍵盤選取複製，也能按下方「全選」後自行複製，不需剪貼簿權限。
-            </p>
-            <button type="button" onClick={(event) => {
-              const field = event.currentTarget.parentElement?.querySelector('textarea') ?? null;
-              selectOriginalTableText(field);
-            }}>全選第 {index + 1} 張表格原文</button>
-            <textarea
-              aria-label={'原文表格 ' + (index + 1) + ' 的可選取文字'}
-              readOnly
-              spellCheck={false}
-              rows={Math.min(8, table.rows.length + 2)}
-              value={tableSourceSelection(sourceLines, table)}
-            />
-          </details>
+          <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
           <StudySourceValueComparison table={table} />
           <StudySourcePercentComparison table={table} />
         </div>
