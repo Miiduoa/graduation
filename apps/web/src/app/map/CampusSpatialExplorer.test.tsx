@@ -1177,7 +1177,7 @@ it('bounds the first hard-expiry timer for an already-stale OSM snapshot', async
     expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
     expect(timerSpy.mock.calls.some(([, delay]) => delay === day)).toBe(true);
     expect(timerSpy.mock.calls.some(([, delay]) =>
-      typeof delay === 'number' && delay > 2_147_483_647)).toBe(false);
+      typeof delay === 'number' && delay > day)).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
