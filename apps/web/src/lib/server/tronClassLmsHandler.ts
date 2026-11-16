@@ -279,6 +279,16 @@ type CachedCourseContents = CourseContents & {
 // A short backoff avoids repeatedly hitting an unavailable school endpoint.
 const PARTIAL_COURSE_RETRY_MS = 60_000;
 
+function baseSnapshotRetryMs(
+  courseErrors: LmsCourseError[],
+  upcomingCoursesError: LmsReadonlySnapshot['upcomingCoursesError'],
+): number {
+  // Missing homework pages or an unreadable upcoming course list must not
+  // hide newly recovered assignments for the full ten-minute cache window.
+  return courseErrors.some((item) => item.area === 'homework') || upcomingCoursesError != null
+    ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS;
+}
+
 async function loadCourseContents(
   source: LmsReadonlySource,
   cookies: Record<string, string>,
@@ -423,6 +433,12 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !Array.isArray(row.courseErrors)) return null;
+  // Legacy partial snapshots can still have an outer ten-minute TTL. Clamp
+  // them by fetchedAt as well, without trusting the stored expiry alone.
+  if (Date.parse(row.fetchedAt as string) + baseSnapshotRetryMs(
+    row.courseErrors as LmsCourseError[],
+    row.upcomingCoursesError as LmsReadonlySnapshot['upcomingCoursesError'],
+  ) <= nowMs) return null;
   return row as LmsReadonlySnapshot;
 }
 
@@ -634,8 +650,12 @@ export function createTronClassLmsHandler({
 
         await verifyLinkedSession();
 
-        const fetchedAt = new Date(now()).toISOString();
-        const expiresAt = new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+        const courseErrors = homeworkResults.flatMap((item) => item.error ? [item.error] : []);
+        const fetchedAtMs = now();
+        const fetchedAt = new Date(fetchedAtMs).toISOString();
+        const expiresAt = new Date(fetchedAtMs + baseSnapshotRetryMs(
+          courseErrors, upcomingCoursesError,
+        )).toISOString();
         snapshot = {
           success: true,
           ownerUid: uid,
@@ -648,7 +668,7 @@ export function createTronClassLmsHandler({
           homework: homeworkResults.flatMap((item) => item.items),
           announcements: [],
           materials: [],
-          courseErrors: homeworkResults.flatMap((item) => item.error ? [item.error] : []),
+          courseErrors,
           siteAnnouncementError: null,
           upcomingCoursesError,
         };
