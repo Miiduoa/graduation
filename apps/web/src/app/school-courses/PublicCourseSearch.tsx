@@ -119,12 +119,13 @@ function queuePublicCourseClipboardWrite(
   return operation;
 }
 
-type ClipboardFeedback = { csv: string; status: 'copied' | 'manual' };
+type ClipboardFeedback = { csv: string; cardId: string; status: 'copied' | 'manual' };
 
-function CatalogCourse({ course, schoolId, importHref, review, copyFeedback, onCopy }: {
+function CatalogCourse({ course, schoolId, importHref, cardId, review, copyFeedback, onCopy }: {
   course: PublicCatalogCourse;
   schoolId: PublicCourseCatalogResponse['schoolId'];
   importHref: string;
+  cardId: string;
   review: (course: PublicCatalogCourse, csv: string) => string;
   copyFeedback: ClipboardFeedback | null;
   onCopy: (csv: string) => void;
@@ -137,7 +138,9 @@ function CatalogCourse({ course, schoolId, importHref, review, copyFeedback, onC
     : null;
   const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
 
-  const copyStatus = copyFeedback?.csv === csv ? copyFeedback.status : 'idle';
+  // Cross-listed rows may serialize to identical CSV but belong to distinct cards.
+  const copyStatus = copyFeedback?.cardId === cardId && copyFeedback?.csv === csv
+    ? copyFeedback.status : 'idle';
   return (
     <li>
       <p className={courseStyles.code}>{formatSemester(course.semester)} · 課號 {course.code || '未提供'} · 班別 {course.section || '未提供'}</p>
@@ -227,7 +230,7 @@ function PublicCourseSearchForm({
   const router = useRouter();
   const context = usePersonalImportScope();
   const importHref = campusServiceHref('/import?kind=timetable', schoolSearch);
-  const copyCourse = useCallback(async (csv: string) => {
+  const copyCourse = useCallback(async (csv: string, cardId: string) => {
     const attempt = ++copyAttempt.current;
     setCopyFeedback(null);
     const status = await queuePublicCourseClipboardWrite(
@@ -236,7 +239,7 @@ function PublicCourseSearchForm({
     // Search/school changes invalidate clipboard feedback even if the old
     // write completes while a fresh result containing the same CSV is shown.
     if (status !== 'superseded' && attempt === copyAttempt.current) {
-      setCopyFeedback({ csv, status });
+      setCopyFeedback({ csv, cardId, status });
     }
   }, []);
 
@@ -452,17 +455,24 @@ function PublicCourseSearchForm({
           {result.fetchedAt && <p>校方資料擷取：{formatPublicCatalogFetchedAt(result.fetchedAt)}（台灣時間；非校方更新時間）</p>}
           {result.courses.length > 0 && (
             <ul className={courseStyles.courses}>
-              {result.courses.map((course) => (
-                <CatalogCourse
-                  key={JSON.stringify([course.semester, course.code, course.section])}
+              {result.courses.map((course, index) => {
+                // Full row identity plus occurrence distinguishes same-code listings.
+                const cardId = JSON.stringify([
+                  course.semester, course.code, course.section, course.title,
+                  course.department, course.teacher, course.time, course.room,
+                  course.credits, course.meetings ?? [], index,
+                ]);
+                return <CatalogCourse
+                  key={cardId}
+                  cardId={cardId}
                   course={course}
                   schoolId={schoolId}
                   importHref={importHref}
                   review={review}
                   copyFeedback={copyFeedback}
-                  onCopy={(csv) => { void copyCourse(csv); }}
-                />
-              ))}
+                  onCopy={(csv) => { void copyCourse(csv, cardId); }}
+                />;
+              })}
             </ul>
           )}
         </>

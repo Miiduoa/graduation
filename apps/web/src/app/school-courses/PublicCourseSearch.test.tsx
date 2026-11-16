@@ -334,6 +334,25 @@ it('searches the public endpoint, distinguishes sections and copies a school-sco
 });
 
 
+it('shows copied CSV feedback only on the selected cross-listed course card', async () => {
+  const crossListed = { ...course, department: '跨領域學程' };
+  expect(ncnuTimetableImportCsv(crossListed)).toBe(ncnuTimetableImportCsv(course));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, crossListed])));
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PublicCourseSearch {...props} />);
+  submit('課');
+  const cards = await screen.findAllByRole('listitem');
+  expect(cards).toHaveLength(2);
+  fireEvent.click(within(cards[1]).getByRole('button', { name: '複製課表匯入資料' }));
+  expect(await within(cards[1]).findByText(/已複製/)).toBeTruthy();
+  expect(within(cards[0]).queryByText(/已複製/)).toBeNull();
+  expect(within(cards[0]).queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+  expect(within(cards[1]).getByRole('link', { name: '前往課表匯入' })).toBeTruthy();
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
+});
+
 it('serializes course clipboard writes and shows confirmation only for the latest selected class', async () => {
   const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
