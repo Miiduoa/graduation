@@ -142,23 +142,34 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       runtime.current = null;
       setStatus('error');
     };
-    const timeout = window.setTimeout(fail, 12000);
-    // Neither Three.js nor a graphics context is requested before the dialog opens.
-    void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
-      if (!active) return;
-      scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
-      if (!active) {
-        scene.dispose();
-        scene = null;
-        return;
-      }
-      runtime.current = scene;
-      scene.setView(currentView.current);
-      if (!active) return;
-      updateVisibility();
-      window.clearTimeout(timeout);
-      setStatus('ready');
-    }).catch(fail);
+    let timeout: number | null = null;
+    let started = false;
+    // Mobile browsers may restore an already-open dialog while the tab is
+    // hidden. Do not import Three.js, allocate a WebGL context, or start the
+    // 12-second startup deadline until the page is actually foregrounded.
+    const startWhenVisible = () => {
+      if (!active || started || document.hidden) return;
+      started = true;
+      document.removeEventListener('visibilitychange', startWhenVisible);
+      window.removeEventListener('pageshow', startWhenVisible);
+      timeout = window.setTimeout(fail, 12000);
+      // Neither Three.js nor a graphics context is requested before the dialog opens.
+      void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
+        if (!active) return;
+        scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
+        if (!active) {
+          scene.dispose();
+          scene = null;
+          return;
+        }
+        runtime.current = scene;
+        scene.setView(currentView.current);
+        if (!active) return;
+        updateVisibility();
+        if (timeout !== null) window.clearTimeout(timeout);
+        setStatus('ready');
+      }).catch(fail);
+    };
 
     const intersection = typeof IntersectionObserver === 'undefined' ? null :
       new IntersectionObserver(([entry]) => {
@@ -167,11 +178,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       });
     intersection?.observe(host);
     document.addEventListener('visibilitychange', updateVisibility);
+    document.addEventListener('visibilitychange', startWhenVisible);
+    window.addEventListener('pageshow', startWhenVisible);
+    startWhenVisible();
     return () => {
       active = false;
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
       intersection?.disconnect();
       document.removeEventListener('visibilitychange', updateVisibility);
+      document.removeEventListener('visibilitychange', startWhenVisible);
+      window.removeEventListener('pageshow', startWhenVisible);
       scene?.dispose();
       runtime.current = null;
     };
