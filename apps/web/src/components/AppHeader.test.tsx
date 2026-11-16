@@ -5,7 +5,8 @@ import { AppHeader } from './AppHeader';
 const state = vi.hoisted(() => ({
   pathname: '/library',
   search: 'campus=pu',
-  schoolId: 'pu',
+  schoolId: 'pu' as string | null,
+  campusLoading: false,
   context: 'session-a' as string | null,
   loading: false,
   pendingLogout: false,
@@ -23,10 +24,11 @@ vi.mock('./AuthGuard', () => ({
 }));
 vi.mock('./SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => ({
-    selectedSchool: { id: state.schoolId, name: state.schoolId },
-    selectedSchoolId: state.schoolId,
+    selectedSchool:
+      !state.campusLoading && state.schoolId ? { id: state.schoolId, name: state.schoolId } : null,
+    selectedSchoolId: state.campusLoading ? null : state.schoolId,
     catalogStatus: 'ready',
-    loading: false,
+    loading: state.campusLoading,
   }),
 }));
 vi.mock('@/features/nuni/Session', () => {
@@ -76,6 +78,7 @@ beforeEach(() => {
   state.pathname = '/library';
   state.search = 'campus=pu';
   state.schoolId = 'pu';
+  state.campusLoading = false;
   state.context = 'session-a';
   state.loading = false;
   state.pendingLogout = false;
@@ -149,6 +152,137 @@ it('resumes a login-return assistant only after the account is ready, and respec
   expect(window.location.hash).toBe('');
   view.rerender(<AppHeader />);
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('keeps a requested assistant open while the first campus resolves without offering a temporary input', async () => {
+  state.pathname = '/life';
+  state.search = '';
+  state.schoolId = null;
+  state.campusLoading = true;
+  window.history.replaceState({}, '', '/life');
+  const start = vi.fn();
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
+    },
+  );
+  const view = render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const panel = screen.getByRole('dialog', { name: '校園助理' });
+  await screen.findByText('正在確認瀏覽校園…');
+  expect(screen.queryByRole('searchbox')).toBeNull();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(screen.queryByRole('button', { name: '使用語音輸入' })).toBeNull();
+
+  state.campusLoading = false;
+  state.schoolId = 'pu';
+  view.rerender(<AppHeader />);
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  expect(screen.getByRole('dialog', { name: '校園助理' })).toBe(panel);
+  await waitFor(() => expect(document.activeElement).toBe(field));
+  expect(start).not.toHaveBeenCalled();
+  expect(state.ask).not.toHaveBeenCalled();
+
+  fireEvent.change(field, { target: { value: '已確認校園的問題' } });
+  state.schoolId = 'nthu';
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByDisplayValue('已確認校園的問題')).toBeNull();
+});
+
+it.each(['account', 'route'] as const)(
+  'does not carry an unresolved campus opening across a different %s',
+  async (changed) => {
+    state.search = '';
+    state.schoolId = null;
+    state.campusLoading = true;
+    const view = render(<AppHeader />);
+    fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+    await screen.findByText('正在確認瀏覽校園…');
+    if (changed === 'account') state.context = 'session-b';
+    else state.pathname = '/calendar';
+    view.rerender(<AppHeader />);
+    state.campusLoading = false;
+    state.schoolId = 'pu';
+    view.rerender(<AppHeader />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(state.ask).not.toHaveBeenCalled();
+  },
+);
+
+it('does not reopen or move focus after the pending campus assistant was closed', async () => {
+  state.search = '';
+  state.schoolId = null;
+  state.campusLoading = true;
+  const view = render(<AppHeader />);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  await screen.findByText('正在確認瀏覽校園…');
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  state.campusLoading = false;
+  state.schoolId = 'pu';
+  view.rerender(<AppHeader />);
+  await act(async () => {});
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(state.ask).not.toHaveBeenCalled();
+});
+
+it('does not treat a confirmed all-campus selection as an unresolved campus', async () => {
+  state.search = 'campus=all';
+  state.schoolId = null;
+  const view = render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const field = await screen.findByRole('searchbox');
+  fireEvent.change(field, { target: { value: '不限校園的搜尋' } });
+  state.schoolId = 'pu';
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByDisplayValue('不限校園的搜尋')).toBeNull();
+});
+
+it('does not revive a confirmed campus conversation after that campus reloads', async () => {
+  const view = render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  fireEvent.change(field, { target: { value: '重新確認校園前的問題' } });
+  state.campusLoading = true;
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  state.campusLoading = false;
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  expect((await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' })).value).toBe(
+    '',
+  );
+  expect(state.ask).not.toHaveBeenCalled();
+});
+
+it('keeps keyboard focus on the page when the first campus resolves after the user moved away', async () => {
+  state.search = '';
+  state.schoolId = null;
+  state.campusLoading = true;
+  const content = () => (
+    <>
+      <button type="button">繼續編輯</button>
+      <AppHeader />
+    </>
+  );
+  const view = render(content());
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByText('正在確認瀏覽校園…');
+  const edit = screen.getByRole('button', { name: '繼續編輯' });
+  edit.focus();
+  state.campusLoading = false;
+  state.schoolId = 'pu';
+  view.rerender(content());
+  await screen.findByRole('textbox', { name: '問題' });
+  await act(async () => {});
+  expect(document.activeElement).toBe(edit);
 });
 
 it.each(['account', 'campus', 'route'] as const)(

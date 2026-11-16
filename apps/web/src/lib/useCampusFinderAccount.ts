@@ -1,6 +1,7 @@
 'use client';
 
 import { sha256 } from 'js-sha256';
+import { useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 
@@ -53,4 +54,18 @@ export function useCampusFinderAccount() {
     status,
     canRemember: status === 'ready' || status === 'guest',
   };
+}
+
+/** null is unresolved; an empty string is a confirmed choice with no campus. */
+export function useCampusFinderDraftScope(ownerScope: string, campus: string | null) {
+  const [binding, setBinding] = useState({ ownerScope, campus, revision: 0 });
+  const ownerChanged = binding.ownerScope !== ownerScope;
+  const campusChanged = campus !== null && binding.campus !== null && campus !== binding.campus;
+  const revision = binding.revision + (ownerChanged || campusChanged ? 1 : 0);
+  if (ownerChanged || (campus !== null && campus !== binding.campus)) {
+    setBinding({ ownerScope, campus, revision });
+  }
+  // First campus resolution and same-campus rechecks retain the current draft.
+  // Each real switch gets a new boundary, including a later return to the old account.
+  return JSON.stringify([ownerScope, revision]);
 }

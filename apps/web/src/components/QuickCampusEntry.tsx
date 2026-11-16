@@ -33,7 +33,7 @@ import {
   type AssistantServiceId,
 } from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
-import { useCampusFinderAccount } from '@/lib/useCampusFinderAccount';
+import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
 import styles from './QuickCampusEntry.module.css';
 
 type Analysis = {
@@ -55,19 +55,32 @@ export function QuickCampusEntry({
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const account = useCampusFinderAccount();
-  const { uid, platformAudience, canInterpret } = account;
+  const { uid, platformAudience } = account;
+  const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
+  const canInterpret = account.canInterpret && campusReady;
+  const canUseAssistant = account.canUseAssistant && campusReady;
+  const canRemember = account.canRemember && campusReady;
   const selected = selection?.selectedSchool;
   const selectedSchoolId = selected?.id || '';
-  const scope = JSON.stringify([account.responseScope, selectedSchoolId]);
-  const draftScope = JSON.stringify([account.ownerScope, selectedSchoolId]);
+  const scope = JSON.stringify([
+    account.responseScope,
+    selectedSchoolId,
+    Boolean(selection?.loading),
+    selection?.catalogStatus,
+  ]);
+  const storageScope = JSON.stringify([account.ownerScope, selectedSchoolId]);
+  const draftScope = useCampusFinderDraftScope(
+    account.ownerScope,
+    campusReady ? selectedSchoolId : null,
+  );
   const campusSearch = buildCampusNavigationSearch(
     null,
     selected ? { id: selected.id, code: selected.code } : null,
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
-  const [draft, setDraft] = useState({ scope: draftScope, query: '' });
+  const [draft, setDraft] = useState({ scope: draftScope, query: '', edited: false });
   const query = draft.scope === draftScope ? draft.query : '';
-  if (draft.scope !== draftScope) setDraft({ scope: draftScope, query: '' });
+  if (draft.scope !== draftScope) setDraft({ scope: draftScope, query: '', edited: false });
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const sequence = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -84,14 +97,15 @@ export function QuickCampusEntry({
     };
   }, [scope]);
   useLayoutEffect(() => {
-    if (!account.canRemember || restoredScope.current === draftScope) return;
-    restoredScope.current = draftScope;
-    const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/', draftScope);
-    if (!snapshot) return;
+    if (!canRemember || restoredScope.current === storageScope) return;
+    restoredScope.current = storageScope;
+    // A deferred history restore must not replace text entered while campus resolution was pending.
+    const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/', storageScope);
+    if (draft.edited || !snapshot) return;
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160) });
-  }, [account.canRemember, draftScope]);
+    setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
+  }, [canRemember, draftScope, storageScope, draft.edited]);
   useEffect(
     () => () => {
       sequence.current += 1;
@@ -127,7 +141,7 @@ export function QuickCampusEntry({
   const primaryHandoff = Boolean(
     phrase &&
     platformAudience &&
-    account.canUseAssistant &&
+    canUseAssistant &&
     !canInterpret &&
     !publicIntent &&
     !serviceIntent &&
@@ -138,17 +152,17 @@ export function QuickCampusEntry({
     sequence.current += 1;
     controller.current?.abort();
     setAnalysis(null);
-    setDraft({ scope: draftScope, query: value.slice(0, 320) });
+    setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
   }
 
   function rememberQuick(href: string) {
-    if (!account.canRemember) return;
+    if (!canRemember) return;
     rememberDirectorySearch('quick', {
       path: window.location.pathname || '/',
       destination: href,
       query,
       open: true,
-      scope: draftScope,
+      scope: storageScope,
     });
   }
 
@@ -199,6 +213,12 @@ export function QuickCampusEntry({
           return;
         }
       }
+      if (
+        request !== sequence.current ||
+        currentScope.current !== requestScope ||
+        activeController.signal.aborted
+      )
+        return;
       if (text.length > 160) {
         setAnalysis({
           phrase: text,
@@ -370,15 +390,19 @@ export function QuickCampusEntry({
           )}
           {!canInterpret && !serviceIntent && !publicIntent && (
             <p className={styles.hint}>
-              {account.status === 'checking'
-                ? '正在確認帳號；你可以先搜尋服務。'
-                : account.status === 'signing-out'
-                  ? '正在確認登出狀態；公開服務仍可瀏覽。'
-                  : account.status === 'error'
-                    ? '暫時無法確認帳號；公開服務仍可瀏覽，請重新確認登入狀態後使用助理。'
-                    : platformAudience
-                      ? '服務捷徑可直接開啟；複合需求可以交給目前帳號的校園助理。'
-                      : '目前顯示服務捷徑；登入 Google 或學校帳號後，可使用校園助理。'}
+              {!campusReady
+                ? selection?.catalogStatus === 'error'
+                  ? '暫時無法確認校園；你可以先搜尋服務，重新確認校園後再分析需求。'
+                  : '正在確認校園；你可以先搜尋服務，輸入的文字會保留。'
+                : account.status === 'checking'
+                  ? '正在確認帳號；你可以先搜尋服務。'
+                  : account.status === 'signing-out'
+                    ? '正在確認登出狀態；公開服務仍可瀏覽。'
+                    : account.status === 'error'
+                      ? '暫時無法確認帳號；公開服務仍可瀏覽，請重新確認登入狀態後使用助理。'
+                      : platformAudience
+                        ? '服務捷徑可直接開啟；複合需求可以交給目前帳號的校園助理。'
+                        : '目前顯示服務捷徑；登入 Google 或學校帳號後，可使用校園助理。'}
             </p>
           )}
           {publicAnswer ||
@@ -428,13 +452,14 @@ export function QuickCampusEntry({
             <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>
               搜尋更多服務
             </Link>
-            {!primaryHandoff && onAsk && account.canUseAssistant ? (
+            {!primaryHandoff && onAsk && canUseAssistant ? (
               <button type="button" onClick={() => onAsk(phrase)}>
                 詢問校園助理
               </button>
             ) : !primaryHandoff &&
               onAsk === undefined &&
-              (account.canUseAssistant || account.status === 'guest') ? (
+              campusReady &&
+              (canUseAssistant || account.status === 'guest') ? (
               <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
                 {account.status === 'guest' ? '登入後詢問助理' : '詢問校園助理'}
               </Link>

@@ -188,6 +188,7 @@ function CampusEntryContent({ returnPath }: { returnPath: string }) {
   )
     return <p role="status">正在確認登入狀態…</p>;
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
+  if (campus.status === 'loading') return <p role="status">正在確認瀏覽校園…</p>;
   const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
   const account: Account | null =
     session && !nuni.error && !preferSchoolEngine

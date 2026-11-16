@@ -22,7 +22,13 @@ const CampusAssistantEntry = lazy(async () => ({
 }));
 
 type HeaderProps = { onOpenAssistant?: () => void; assistantExpanded?: boolean };
-type AssistantPanelState = { scope: string; open: boolean; focusRequest: number };
+type AssistantPanelState = {
+  scope: string;
+  /** undefined waits for the first campus; null is a confirmed all-campus selection. */
+  campusId: string | null | undefined;
+  open: boolean;
+  focusRequest: number;
+};
 
 function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const pathname = usePathname();
@@ -38,19 +44,28 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const quickPanel = useRef<HTMLElement>(null);
   const context = useCampusNavigationSearch(params);
   const campus = useCampusBrowseContext();
+  const campusId = campus.status === 'loading' ? undefined : campus.schoolId;
   const scope = JSON.stringify([
     pathname,
     params?.toString(),
-    campus.schoolId,
     user?.uid,
     nuni.session?.context,
     nuni.session?.platformAccountId,
     nuni.pendingLogout,
     Boolean(nuni.error),
   ]);
-  const panel = assistant?.scope === scope ? assistant : null;
+  const panel =
+    assistant?.scope === scope &&
+    (assistant.campusId === undefined || assistant.campusId === campusId)
+      ? assistant
+      : null;
   const assistantOpen = panel?.open === true;
-  if (assistant && assistant.scope !== scope) setAssistant(null);
+  if (assistant && !panel) setAssistant(null);
+  else if (panel && panel.campusId === undefined && campusId !== undefined) {
+    // Resolve the initial opening once without remounting its focus observer.
+    // A later campus, account or page change must still discard the whole panel.
+    setAssistant({ ...panel, campusId });
+  }
   useLayoutEffect(() => {
     if (assistantOpen) quickPanel.current?.focus({ preventScroll: true });
   }, [assistantOpen]);
@@ -78,6 +93,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const openAssistant = () => {
     setAssistant((current) => ({
       scope,
+      campusId,
       open: true,
       focusRequest: current?.scope === scope ? current.focusRequest + 1 : 1,
     }));
@@ -97,8 +113,17 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
     if (restoredReturn.current === currentPage) return;
     restoredReturn.current = currentPage;
     // Resume the visible task after login, without sending a question or starting audio.
-    setAssistant({ scope, open: true, focusRequest: 1 });
-  }, [hash, currentPage, scope, checking, nuni.pendingLogout, campus.status, onOpenAssistant]);
+    setAssistant({ scope, campusId, open: true, focusRequest: 1 });
+  }, [
+    hash,
+    currentPage,
+    scope,
+    campusId,
+    checking,
+    nuni.pendingLogout,
+    campus.status,
+    onOpenAssistant,
+  ]);
   return (
     <>
       <header className={headerStyles.header} data-campus-navigation="true">

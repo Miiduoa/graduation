@@ -43,7 +43,30 @@ export default function HomePage() {
         : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
-  const assistantScope = JSON.stringify([owner, school?.selectedSchoolId, blocked]);
+  const assistantIdentity = JSON.stringify([owner, blocked]);
+  // Pending selection may settle once; a confirmed null means all campuses.
+  const assistantCampusId =
+    school?.loading || school?.catalogStatus === 'loading'
+      ? undefined
+      : (school?.selectedSchoolId ?? null);
+  const [assistantBoundary, setAssistantBoundary] = useState({
+    identity: assistantIdentity,
+    campusId: assistantCampusId,
+    version: 0,
+  });
+  if (
+    assistantBoundary.identity !== assistantIdentity ||
+    (assistantBoundary.campusId !== undefined && assistantBoundary.campusId !== assistantCampusId)
+  ) {
+    setAssistantBoundary({
+      identity: assistantIdentity,
+      campusId: assistantCampusId,
+      version: assistantBoundary.version + 1,
+    });
+  } else if (assistantBoundary.campusId !== assistantCampusId) {
+    setAssistantBoundary({ ...assistantBoundary, campusId: assistantCampusId });
+  }
+  const assistantScope = JSON.stringify([assistantIdentity, assistantBoundary.version]);
   const [openAssistantScope, setOpenAssistantScope] = useState<string | null>(null);
   const handleAssistantToggle = useCallback(
     (open: boolean) => {
@@ -260,7 +283,7 @@ export default function HomePage() {
   const agent =
     context && accountId && !sessionLoading && !blocked && !nuni.error ? (
       <TodayAgent
-        key={assistantScope}
+        key={JSON.stringify([owner, school?.selectedSchoolId, blocked])}
         context={context}
         accountId={accountId}
         tasks={rows.nuni?.data?.tasks ?? []}

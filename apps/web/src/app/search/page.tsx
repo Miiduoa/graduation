@@ -7,7 +7,9 @@ import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { useCampusFinderAccount } from '@/lib/useCampusFinderAccount';
+import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { findSchoolsByCode } from '@campus/shared/src/schools';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import {
   forgetDirectorySearch,
@@ -42,7 +44,11 @@ function ServiceDirectory() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
   const account = useCampusFinderAccount();
-  const { uid, platformAudience, canInterpret } = account;
+  const selection = useOptionalSelectedSchool();
+  const { uid, platformAudience } = account;
+  const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
+  const canInterpret = account.canInterpret && campusReady;
+  const canRemember = account.canRemember && campusReady;
   const searchInput = useRef<HTMLInputElement>(null);
   const requestSequence = useRef(0);
   useEffect(
@@ -54,11 +60,26 @@ function ServiceDirectory() {
   const schoolSearch = useCampusNavigationSearch(params);
   const options = useSignInOptions();
   const queryString = params.toString();
-  const draftScope = JSON.stringify([account.ownerScope, schoolSearch]);
+  const schoolParams = new URLSearchParams(schoolSearch);
+  const requestedCampus = schoolParams.get('campus') || schoolParams.get('schoolId');
+  const legacySchool = schoolParams.get('school') || '';
+  const legacyMatches = findSchoolsByCode(legacySchool);
+  const campusId = selection
+    ? selection.selectedSchool?.id || ''
+    : requestedCampus
+      ? ['all', 'personal'].includes(requestedCampus)
+        ? ''
+        : requestedCampus
+      : legacyMatches.length === 1
+        ? legacyMatches[0].id
+        : legacySchool;
+  const storageScope = JSON.stringify([account.ownerScope, schoolSearch]);
+  const draftScope = useCampusFinderDraftScope(account.ownerScope, campusReady ? campusId : null);
   const [confirmedScope, setConfirmedScope] = useState<string | null>(
     account.canRemember ? draftScope : null,
   );
   const restoredFilters = useRef<{ scope: string; queryString: string } | null>(null);
+  const editedFilters = useRef<{ scope: string; queryString: string } | null>(null);
   const [filters, setFilters] = useState(() => ({
     scope: draftScope,
     ...readCampusServiceFilters(new URLSearchParams(queryString)),
@@ -70,9 +91,17 @@ function ServiceDirectory() {
   useLayoutEffect(() => {
     if (!account.canRemember) return;
     const changedOwner = confirmedScope !== null && confirmedScope !== draftScope;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (confirmedScope === null) {
+      // Bind edits made during initial account resolution without treating them as an account switch.
+      if (editedFilters.current) editedFilters.current.scope = draftScope;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFilters((current) =>
+        current.scope === draftScope ? current : { ...current, scope: draftScope },
+      );
+    }
     setConfirmedScope(draftScope);
     if (changedOwner) {
+      editedFilters.current = null;
       forgetDirectorySearch('search');
       const url = new URL(window.location.href);
       writeCampusServiceFilters(url.searchParams, '', 'all');
@@ -89,22 +118,34 @@ function ServiceDirectory() {
       setFilters({ scope: draftScope, query: '', category: 'all' });
       return;
     }
+    if (!campusReady) return;
     if (
       restoredFilters.current?.scope === draftScope &&
       restoredFilters.current.queryString === queryString
     )
       return;
     restoredFilters.current = { scope: draftScope, queryString };
+    if (
+      editedFilters.current?.scope === draftScope &&
+      editedFilters.current.queryString === queryString
+    )
+      return;
+    editedFilters.current = null;
     // First arrival keeps an explicitly shared URL; later returns require the same account/campus.
     const next = filtersFromUrlOrSession(
       new URLSearchParams(queryString),
       window.location.pathname || '/search',
-      draftScope,
+      storageScope,
     );
     setFilters({ scope: draftScope, ...next });
-  }, [account.canRemember, confirmedScope, draftScope, queryString]);
+  }, [account.canRemember, campusReady, confirmedScope, draftScope, queryString, storageScope]);
   const term = query.trim();
-  const semanticScope = JSON.stringify([account.responseScope, schoolSearch]);
+  const semanticScope = JSON.stringify([
+    account.responseScope,
+    schoolSearch,
+    Boolean(selection?.loading),
+    selection?.catalogStatus,
+  ]);
   const currentScope = useRef(semanticScope);
   const [analysis, setAnalysis] = useState<{
     scope: string;
@@ -175,14 +216,18 @@ function ServiceDirectory() {
     } catch {
       // The visible filters still work when the browser denies History access.
     }
-    if (account.canRemember && (next.query || next.category !== 'all')) {
+    editedFilters.current = {
+      scope: draftScope,
+      queryString: new URL(window.location.href).searchParams.toString(),
+    };
+    if (canRemember && (next.query || next.category !== 'all')) {
       rememberDirectorySearch('search', {
         path: '/search',
         destination: '/search',
         query: next.query,
         category: next.category,
         open: false,
-        scope: draftScope,
+        scope: storageScope,
       });
     } else {
       forgetDirectorySearch('search');
@@ -193,14 +238,14 @@ function ServiceDirectory() {
     searchInput.current?.focus();
   }
   function rememberLeaving(href: string) {
-    if (!account.canRemember) return;
+    if (!canRemember) return;
     rememberDirectorySearch('search', {
       path: '/search',
       destination: href,
       query,
       category,
       open: false,
-      scope: draftScope,
+      scope: storageScope,
     });
   }
   return (
@@ -244,17 +289,21 @@ function ServiceDirectory() {
             />
           </div>
           <p className={styles.voiceHelp}>
-            {canInterpret
-              ? '語音完成後會分析服務需求；打字可修改後再按「用 AI 理解需求」。若要接著處理任務，可交給校園助理。'
-              : account.status === 'checking'
-                ? '正在確認帳號；關鍵字與分類搜尋仍可使用。'
-                : account.status === 'signing-out'
-                  ? '正在確認登出狀態；公開服務仍可搜尋。'
-                  : account.status === 'error'
-                    ? '暫時無法確認帳號；公開服務仍可搜尋，請重新確認登入狀態後使用助理。'
-                    : platformAudience
-                      ? '輸入或語音轉寫後會搜尋服務；也可以把這段需求帶入校園助理，檢查後再送出。'
-                      : '輸入或語音轉寫後會搜尋服務；登入 Google 或學校帳號後，可使用校園助理。'}
+            {!campusReady
+              ? selection?.catalogStatus === 'error'
+                ? '暫時無法確認校園；關鍵字與分類搜尋仍可使用，重新確認校園後再分析需求。'
+                : '正在確認校園；關鍵字與分類搜尋仍可使用，輸入的文字會保留。'
+              : canInterpret
+                ? '語音完成後會分析服務需求；打字可修改後再按「用 AI 理解需求」。若要接著處理任務，可交給校園助理。'
+                : account.status === 'checking'
+                  ? '正在確認帳號；關鍵字與分類搜尋仍可使用。'
+                  : account.status === 'signing-out'
+                    ? '正在確認登出狀態；公開服務仍可搜尋。'
+                    : account.status === 'error'
+                      ? '暫時無法確認帳號；公開服務仍可搜尋，請重新確認登入狀態後使用助理。'
+                      : platformAudience
+                        ? '輸入或語音轉寫後會搜尋服務；也可以把這段需求帶入校園助理，檢查後再送出。'
+                        : '輸入或語音轉寫後會搜尋服務；登入 Google 或學校帳號後，可使用校園助理。'}
           </p>
           {term && canInterpret && (
             <button
@@ -266,7 +315,7 @@ function ServiceDirectory() {
               {active?.status === 'pending' ? 'AI 正在理解…' : '用 AI 理解需求'}
             </button>
           )}
-          {term && account.canUseAssistant && (
+          {term && campusReady && account.canUseAssistant && (
             <Link
               className={!canInterpret ? styles.aiButton : undefined}
               href={assistantHref}

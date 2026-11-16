@@ -15,6 +15,7 @@ import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todayS
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   selectedSchoolId: 'pu' as string | null,
+  campusLoading: false,
   schoolRole: null as string | null,
   schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
   session: null as null | { context: string; platformAccountId: string },
@@ -44,9 +45,15 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/AppHeader', () => ({
-  AppHeader: ({ onOpenAssistant }: { onOpenAssistant: () => void }) => (
+  AppHeader: ({
+    onOpenAssistant,
+    assistantExpanded,
+  }: {
+    onOpenAssistant: () => void;
+    assistantExpanded?: boolean;
+  }) => (
     <header>
-      <button type="button" onClick={onOpenAssistant}>
+      <button type="button" onClick={onOpenAssistant} aria-expanded={assistantExpanded}>
         頁首助理
       </button>
     </header>
@@ -87,7 +94,10 @@ vi.mock('@/components/AuthGuard', () => ({
   }),
 }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
-  useOptionalSelectedSchool: () => ({ selectedSchoolId: state.selectedSchoolId, loading: false }),
+  useOptionalSelectedSchool: () => ({
+    selectedSchoolId: state.selectedSchoolId,
+    loading: state.campusLoading,
+  }),
 }));
 vi.mock('@/lib/useSchoolRole', async (original) => {
   const actual = await original<typeof import('@/lib/useSchoolRole')>();
@@ -130,6 +140,7 @@ beforeEach(() => {
   window.scrollTo = vi.fn();
   state.uid = 'alice';
   state.selectedSchoolId = 'pu';
+  state.campusLoading = false;
   state.schoolRole = null;
   state.schoolRoleCalls = [];
   state.session = null;
@@ -991,6 +1002,91 @@ it('focuses the Today input from the header when the browser lacks speech recogn
   const input = await screen.findByRole('searchbox');
   expect(document.activeElement).toBe(input);
 });
+
+it('keeps the requested Today disclosure open through the first campus resolution', async () => {
+  state.selectedSchoolId = null;
+  state.campusLoading = true;
+  const start = vi.fn();
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
+    },
+  );
+  try {
+    const view = render(<HomePage />);
+    fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
+    const panel = screen.getByText('打字或語音詢問').closest('details')!;
+    expect(panel.open).toBe(true);
+    await screen.findByText('正在確認瀏覽校園…');
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    state.campusLoading = false;
+    state.selectedSchoolId = 'pu';
+    view.rerender(<HomePage />);
+    const field = await screen.findByRole('searchbox');
+    expect(screen.getByText('打字或語音詢問').closest('details')).toBe(panel);
+    expect(panel.open).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(start).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('respects closing the Today disclosure before its first campus is ready', async () => {
+  state.selectedSchoolId = null;
+  state.campusLoading = true;
+  const view = render(<HomePage />);
+  const trigger = screen.getByRole('button', { name: '頁首助理' });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const panel = screen.getByText('打字或語音詢問').closest('details')!;
+  await screen.findByText('正在確認瀏覽校園…');
+  fireEvent.keyDown(panel, { key: 'Escape' });
+  state.campusLoading = false;
+  state.selectedSchoolId = 'pu';
+  view.rerender(<HomePage />);
+  await act(async () => {});
+  expect(screen.getByText('打字或語音詢問').closest('details')).toBe(panel);
+  expect(panel.open).toBe(false);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(trigger);
+});
+
+it('does not revive the confirmed Today draft after PU reloads as the same campus', async () => {
+  const view = render(<HomePage />);
+  const trigger = screen.getByRole('button', { name: '頁首助理' });
+  fireEvent.click(trigger);
+  const field = await screen.findByRole('searchbox');
+  fireEvent.change(field, { target: { value: '已確認 PU 的舊問題' } });
+  state.campusLoading = true;
+  state.selectedSchoolId = null;
+  view.rerender(<HomePage />);
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+  state.campusLoading = false;
+  state.selectedSchoolId = 'pu';
+  view.rerender(<HomePage />);
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+  fireEvent.click(trigger);
+  expect((await screen.findByRole<HTMLInputElement>('searchbox')).value).toBe('');
+});
+
+it.each(['account', 'campus'] as const)(
+  'clears the Today disclosure after the confirmed %s changes',
+  async (changed) => {
+    state.selectedSchoolId = null;
+    const view = render(<HomePage />);
+    fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
+    const field = await screen.findByRole('searchbox');
+    fireEvent.change(field, { target: { value: '不限校園的問題' } });
+    if (changed === 'account') state.uid = 'bob';
+    else state.selectedSchoolId = 'pu';
+    view.rerender(<HomePage />);
+    expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+    expect(screen.queryByDisplayValue('不限校園的問題')).toBeNull();
+  },
+);
 
 it('keeps the active question on screen while a late course load resolves the teacher view', async () => {
   let finish!: (result: HomeData) => void;

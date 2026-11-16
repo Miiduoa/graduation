@@ -16,6 +16,9 @@ const state = vi.hoisted(() => ({
   platformError: '',
   pendingLogout: false,
   school: null as null | { id: string; code: string },
+  schoolProvider: false,
+  schoolLoading: false,
+  schoolStatus: 'ready' as 'loading' | 'ready' | 'error',
 }));
 vi.mock('./AuthGuard', () => ({
   useAuth: () => ({
@@ -26,11 +29,11 @@ vi.mock('./AuthGuard', () => ({
 }));
 vi.mock('./SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () =>
-    state.school
+    state.schoolProvider || state.school
       ? {
           selectedSchool: state.school,
-          loading: false,
-          catalogStatus: 'ready',
+          loading: state.schoolLoading,
+          catalogStatus: state.schoolStatus,
         }
       : null,
 }));
@@ -67,6 +70,9 @@ beforeEach(() => {
   state.platformError = '';
   state.pendingLogout = false;
   state.school = null;
+  state.schoolProvider = false;
+  state.schoolLoading = false;
+  state.schoolStatus = 'ready';
   vi.clearAllMocks();
   sessionStorage.clear();
   window.history.replaceState({}, '', '/');
@@ -455,6 +461,154 @@ it('does not restore an earlier platform account query after leaving and returni
   view.unmount();
   state.accountId = 'second-account';
   render(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+});
+
+it.each(['pu', 'all', 'personal'])(
+  'keeps the draft when the initial campus resolves to %s',
+  (campus) => {
+    state.schoolProvider = true;
+    state.schoolLoading = true;
+    window.history.replaceState({}, '', campus === 'pu' ? '/' : `/?campus=${campus}`);
+    const view = render(<QuickCampusEntry />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    state.schoolLoading = false;
+    state.school = campus === 'pu' ? { id: 'pu', code: 'PU' } : null;
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    const target = new URL(
+      screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')!,
+      'https://campus.example',
+    );
+    expect(target.searchParams.get('campus')).toBe(campus === 'pu' ? 'pu' : 'all');
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+
+    state.school = { id: 'nthu', code: 'NTHU' };
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  },
+);
+
+it.each(['loading', 'error'] as const)(
+  'does not interpret or save a draft under an unconfirmed campus: %s',
+  (status) => {
+    state.schoolProvider = true;
+    state.schoolLoading = status === 'loading';
+    state.schoolStatus = status;
+    render(<QuickCampusEntry />);
+    fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: /所有服務/ }));
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+      '明天沒課，我想讀書再吃飯',
+    );
+  },
+);
+
+it.each([
+  ['pu', 'loading'],
+  ['all', 'loading'],
+  ['all', 'error'],
+] as const)(
+  'keeps a %s draft through campus %s and rejects an earlier interpretation',
+  async (campus, status) => {
+    state.schoolProvider = true;
+    state.school = campus === 'pu' ? { id: 'pu', code: 'PU' } : null;
+    let finish!: (result: Awaited<ReturnType<typeof interpretCampusRequest>>) => void;
+    vi.mocked(interpretCampusRequest).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const view = render(<QuickCampusEntry />);
+    fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+    state.schoolLoading = status === 'loading';
+    state.schoolStatus = status;
+    // Even a provider retaining its last school while rechecking must invalidate the result.
+    view.rerender(<QuickCampusEntry />);
+    expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
+    await act(async () =>
+      finish({
+        status: 'understood',
+        source: 'model',
+        summary: '重查校園前的結果',
+        destinations: ['/map'],
+        clarifyingQuestion: null,
+      }),
+    );
+    expect(screen.queryByText('重查校園前的結果')).toBeNull();
+    state.schoolLoading = false;
+    state.schoolStatus = 'ready';
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+      '明天沒課，我想讀書再吃飯',
+    );
+    expect(screen.queryByText('重查校園前的結果')).toBeNull();
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['account', 'session'])(
+  'still clears an unconfirmed-campus draft when its %s changes',
+  (change) => {
+    state.platform = true;
+    state.schoolProvider = true;
+    state.schoolLoading = true;
+    const view = render(<QuickCampusEntry />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '私人讀書安排' } });
+    if (change === 'account') state.accountId = 'second-account';
+    else state.context = 'second-session';
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    state.schoolLoading = false;
+    state.school = { id: 'pu', code: 'PU' };
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  },
+);
+
+it.each([false, true])(
+  'defers a saved draft until campus resolution and respects new typing (%s)',
+  (editWhileLoading) => {
+    state.schoolProvider = true;
+    state.school = { id: 'pu', code: 'PU' };
+    const first = render(<QuickCampusEntry />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+    first.unmount();
+    state.school = null;
+    state.schoolLoading = true;
+    const view = render(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    if (editWhileLoading)
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '找公車' } });
+    state.schoolLoading = false;
+    state.school = { id: 'pu', code: 'PU' };
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+      editWhileLoading ? '找公車' : '借書',
+    );
+  },
+);
+
+it('does not revive a saved quick draft after another account types while its campus is pending', () => {
+  state.schoolProvider = true;
+  state.school = { id: 'pu', code: 'PU' };
+  const view = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  state.uid = 'bob';
+  state.schoolLoading = true;
+  view.rerender(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '找公車' } });
+  state.schoolLoading = false;
+  view.rerender(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('找公車');
+  state.uid = 'alice';
+  view.rerender(<QuickCampusEntry />);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
 });
