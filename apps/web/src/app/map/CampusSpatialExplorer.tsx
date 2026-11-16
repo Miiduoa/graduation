@@ -456,6 +456,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       const keepStale = preserveStale && staleSnapshotRef.current;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
+      // A timed-out proxy is not proof that the public OSM source recovered.
+      // Pause manual retries locally even when AbortSignal was ignored.
+      setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
     }, 15_000);
     // A gateway can return HTTP 200 with truncated JSON or a payload that
     // fails our source/geometry contract. Treat that as a rejected source
