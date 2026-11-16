@@ -716,6 +716,62 @@ it.each([
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   });
 
+// Gateway failures may omit Retry-After as well. The local one-minute
+// backoff prevents repeated requests to the public OSM proxy while keeping
+// the previously known place and walking navigation available.
+it.each([
+  { status: 502, retryAfter: null },
+  { status: 503, retryAfter: null },
+  { status: 503, retryAfter: 'invalid HTTP-date' },
+  { status: 504, retryAfter: null },
+])('backs off an OSM gateway outage without a usable Retry-After ($status, $retryAfter)',
+  async ({ status, retryAfter }) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const json = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status,
+      headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+      json,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+    fireEvent.click(retry);
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(json).not.toHaveBeenCalled();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  });
+
+it('allows a single retry when an unlabelled 503 gateway cooldown expires', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503, headers: { get: () => null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    const release = timeoutSpy.mock.calls.find(([, delay]) =>
+      typeof delay === 'number' && delay >= 59_000 && delay <= 60_000)?.[0];
+    expect(typeof release).toBe('function');
+    await act(async () => { (release as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
 // These are synthetic intermediary 429s, not observations from Overpass.
 // 429 may omit Retry-After entirely; invalid/expired values also must not
 // invite a rapid manual retry loop. A one-minute client backoff protects the
@@ -915,8 +971,9 @@ it('retries Providence building data after a temporary outage without closing th
   const buildings = parseProvidenceOsmFootprints({
     elements: [{ type: 'way', id: 255784049, geometry: outline, tags: { building: 'yes' } }],
   });
+  // A generic 500 without a rate-limit hint remains manually retryable.
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce({ ok: false, status: 503 })
+    .mockResolvedValueOnce({ ok: false, status: 500 })
     .mockResolvedValueOnce({ ok: true, json: async () => ({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date().toISOString(), stale: false,
