@@ -18,10 +18,12 @@ import { View, Text, Pressable, TextInput, Linking } from 'react-native';
 const OperationFeedback = React.createContext<{
   error: string;
   target: string;
+  notice: string;
   select: (target: string) => void;
 }>({
   error: '',
   target: '',
+  notice: '',
   select: () => {},
 });
 // Keep the triggering control stable across list polls and record revision updates.
@@ -55,16 +57,18 @@ function AlertText({ children }: Children) {
 }
 function Button({
   label,
+  actionId,
   onPress,
   disabled,
 }: {
   label: string;
+  actionId?: string;
   onPress: () => void;
   disabled?: boolean;
 }) {
   const feedback = React.useContext(OperationFeedback);
   const scope = React.useContext(OperationScope);
-  const id = `${scope}:${label}`;
+  const id = `${scope}:${actionId || label}`;
   return (
     <>
       <Pressable
@@ -243,7 +247,17 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         setRetry((v) => v + 1);
       }
     } catch (e) {
-      if (active.current) setError(e instanceof Error ? e.message : '操作未完成，請重試。');
+      if (active.current) {
+        setError(e instanceof Error ? e.message : '操作未完成，請重試。');
+        const conflict = e as { code?: string; status?: number; message?: string } | null;
+        if (
+          conflict?.code === 'aborted' ||
+          conflict?.code === 'functions/aborted' ||
+          conflict?.status === 409 ||
+          conflict?.message === '另一個視窗已更新這筆紀錄，已為你重新整理。'
+        )
+          setRetry((v) => v + 1);
+      }
     } finally {
       writing.current = false;
       if (active.current) setBusy(false);
@@ -329,6 +343,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
     <OperationFeedback.Provider
       value={{
         error,
+        notice,
         target: errorTarget,
         select: (target) => {
           pendingTarget.current = target;
@@ -352,7 +367,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
           每 1 學分至少 60 小時，依系所公布規則計算；自行登錄不代表已取得學分。每 10 秒更新一次。
         </Body>
         {loadError && <AlertText>{loadError}</AlertText>}
-        {notice && <Body>{notice}</Body>}
+        {notice && errorTarget.startsWith('page:') && <Body>{notice}</Body>}
         <Button label="重新整理實習進度" disabled={busy} onPress={() => setRetry((v) => v + 1)} />
         {!snapshot ? (
           <Body>正在讀取實習進度…</Body>
@@ -638,6 +653,8 @@ function RecordCard({
   execute: (c: Exclude<InternshipCommand, { action: 'list' }>) => Promise<void>;
   addCalendar: (record: InternshipRecord, i: number) => void;
 }) {
+  const feedback = React.useContext(OperationFeedback);
+  const [confirming, setConfirming] = useState(false);
   const p = internshipProgress(r);
   const missing = r.rule.documents.flatMap((d, i) =>
     r.documents[i].verified
@@ -650,6 +667,29 @@ function RecordCard({
   const [urls, setUrls] = useState(r.documents.map((d) => d.url));
   const [messages, setMessages] = useState(r.documents.map((d) => d.message));
   const base = { id: r.id, revision: r.revision };
+  const recordTarget = feedback.target.startsWith(`${r.id}:`)
+    ? feedback.target.slice(r.id.length + 1)
+    : '';
+  const [action, item, intent] = recordTarget.split(':');
+  const document = r.documents[Number(item)];
+  const hour = r.hours.find((h) => h.id === item);
+  const feedbackControlVisible =
+    (action === 'calendar' && !!document && !document.verified) ||
+    (!r.confirmed &&
+      ((action === 'confirm' && uid === r.teacherUid) ||
+        (action === 'hours' && owner) ||
+        (action === 'verifyHours' && !owner && !!hour) ||
+        (action === 'removeHours' && owner && !!hour && !hour.verified) ||
+        (action === 'document' &&
+          owner &&
+          !!document &&
+          !document.verified &&
+          (intent !== 'withdraw' || document.submitted)) ||
+        (['verifyDocument', 'rejectDocument'].includes(action) &&
+          !owner &&
+          !!document &&
+          document.submitted &&
+          !document.verified)));
   return (
     <OperationScope.Provider value={r.id}>
       <Card testID={`internship-${r.id}`}>
@@ -671,7 +711,7 @@ function RecordCard({
         <Progress value={p.percent} />
         <Body>
           {r.confirmed
-            ? '指導老師已確認；學分仍以教務認定為準。'
+            ? '已結案。指導老師已確認；學分仍以教務認定為準。'
             : `目前：${INTERNSHIP_STEPS[p.step]}`}
         </Body>
         {p.next >= 0 && (
@@ -701,6 +741,7 @@ function RecordCard({
             {!r.documents[i].verified && (
               <Button
                 label={`將${d.title}加入行事曆`}
+                actionId={`calendar:${i}`}
                 disabled={busy}
                 onPress={() => addCalendar(r, i)}
               />
@@ -716,6 +757,7 @@ function RecordCard({
                       />
                       <Button
                         label={`登錄已繳交${d.title}`}
+                        actionId={`document:${i}:submit`}
                         disabled={busy}
                         onPress={() =>
                           void execute({
@@ -730,6 +772,7 @@ function RecordCard({
                       {r.documents[i].submitted && (
                         <Button
                           label={`撤回${d.title}繳交登錄`}
+                          actionId={`document:${i}:withdraw`}
                           disabled={busy}
                           onPress={() =>
                             void execute({
@@ -754,6 +797,7 @@ function RecordCard({
                       />
                       <Button
                         label={`確認${d.title}`}
+                        actionId={`verifyDocument:${i}`}
                         disabled={busy}
                         onPress={() =>
                           void execute({
@@ -767,6 +811,7 @@ function RecordCard({
                       />
                       <Button
                         label={`退回${d.title}`}
+                        actionId={`rejectDocument:${i}`}
                         disabled={busy}
                         onPress={() =>
                           void execute({
@@ -794,6 +839,7 @@ function RecordCard({
                   <Box>
                     <Button
                       label={`移除${h.date}未確認時數`}
+                      actionId={`removeHours:${h.id}`}
                       disabled={busy}
                       onPress={() =>
                         void execute({ ...base, action: 'removeHours', entryId: h.id })
@@ -801,6 +847,7 @@ function RecordCard({
                     />
                     <Button
                       label={`更正${h.date}時數`}
+                      actionId={`editHours:${h.id}`}
                       onPress={() => setEntry({ ...h, hours: String(h.hours) })}
                     />
                   </Box>
@@ -808,6 +855,7 @@ function RecordCard({
               ) : (
                 <Button
                   label={`${h.verified ? '撤銷確認' : '確認'}${h.date}時數`}
+                  actionId={`verifyHours:${h.id}`}
                   disabled={busy}
                   onPress={() =>
                     void execute({
@@ -833,6 +881,7 @@ function RecordCard({
             ))}
             <Button
               label="儲存實習時數"
+              actionId="hours"
               disabled={busy}
               onPress={() =>
                 void execute({
@@ -847,13 +896,37 @@ function RecordCard({
         {!r.confirmed && uid === r.teacherUid && (
           <>
             {missing.length > 0 && <Body>還不能結案：{missing.join('、')}</Body>}
-            <Button
-              label="指導老師確認結案"
-              disabled={busy || missing.length > 0}
-              onPress={() => void execute({ ...base, action: 'confirm' })}
-            />
+            {!confirming && (
+              <Button
+                label="指導老師確認結案"
+                actionId="confirm"
+                disabled={busy || missing.length > 0}
+                onPress={() => setConfirming(true)}
+              />
+            )}
+            {confirming && (
+              <Box>
+                <Body>確定要為這筆實習結案？結案後就不能再從這裡撤回。</Body>
+                <Button
+                  label="取消"
+                  actionId="cancelConfirm"
+                  disabled={busy}
+                  onPress={() => setConfirming(false)}
+                />
+                <Button
+                  label="確定結案"
+                  actionId="confirm"
+                  disabled={busy || missing.length > 0}
+                  onPress={() => void execute({ ...base, action: 'confirm' })}
+                />
+              </Box>
+            )}
           </>
         )}
+        {recordTarget && !feedbackControlVisible && feedback.error && (
+          <AlertText>{feedback.error}</AlertText>
+        )}
+        {recordTarget && feedback.notice && <Body>{feedback.notice}</Body>}
       </Card>
     </OperationScope.Provider>
   );
