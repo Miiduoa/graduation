@@ -636,6 +636,26 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
+// Offline, DNS and low-level proxy failures reject fetch with TypeError and
+// carry no Retry-After header. They must not allow a rapid source retry loop;
+// ordinary HTTP 500 responses remain immediately retryable in a separate test.
+it('backs off a failed OSM network request while keeping campus POIs and directions', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+});
+
 // Synthetic HTTP 200 responses from a proxy can still be corrupt, truncated,
 // or fail the OSM source/geometry contract. Reject them without inviting a
 // rapid retry loop, while keeping POIs and the existing walking route available.
