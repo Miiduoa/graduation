@@ -276,6 +276,13 @@ function BoardsContent(props: {
           placeholder="搜尋看板"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(event) => {
+            // Escape resets a keyboard search without moving focus or reading Firestore again.
+            if (event.key === 'Escape' && filter) {
+              event.preventDefault();
+              setFilter('');
+            }
+          }}
           style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
         {access.status === 'allowed' && (
@@ -302,6 +309,12 @@ function BoardsContent(props: {
         style={{ margin: subscriptionNotice ? '0 0 12px' : 0, fontSize: 13 }}>
         {subscriptionNotice}
       </p>
+      {q && !loading && !error && boards.length > 0 && filtered.length > 0 && (
+        <p role="status" aria-label="看板搜尋結果" aria-live="polite" aria-atomic="true"
+          style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--muted)' }}>
+          目前載入的看板中找到 {filtered.length} 個符合「{filter.trim()}」的看板。
+        </p>
+      )}
 
       <section ref={recoveryArea} tabIndex={-1} aria-label="看板建立狀態"
         hidden={!notice && !closedPending && !needsRecovery && !permissionRetryFinished && access.status !== 'loading' && access.status !== 'error'}>
