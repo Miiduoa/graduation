@@ -319,6 +319,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const progressId = useId();
   const directionsNoteId = useId();
   const footprintCooldownNoteId = useId();
+  const footprintRefreshingNoteId = useId();
   const selectPlace = useCallback((id: string) => {
     setSelection(id);
     setOverview(false);
@@ -735,10 +736,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                       {footprintRetryAfter !== null && <span id={footprintCooldownNoteId} role="status">
                         為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                       </span>}
-                      {footprintRefreshing && <span role="status">正在檢查更新，暫時保留舊輪廓。</span>}
+                      {footprintRefreshing && <span id={footprintRefreshingNoteId} role="status">正在檢查更新，暫時保留舊輪廓。</span>}
                       {footprintRefreshFailed && !footprintRefreshing && <span role="status">更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
                       <button className={styles.retryFootprints} type="button"
-                        aria-describedby={footprintRetryAfter !== null ? footprintCooldownNoteId : undefined}
+                        aria-describedby={[
+                          footprintRetryAfter !== null ? footprintCooldownNoteId : '',
+                          footprintRefreshing ? footprintRefreshingNoteId : '',
+                        ].filter(Boolean).join(' ') || undefined}
                         disabled={footprintRetryAfter !== null || footprintRefreshing}
                         onClick={() => {
                           setFootprintRefreshFailed(false);
