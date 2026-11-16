@@ -225,10 +225,22 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       // Some mobile browsers return an empty list at first without firing
       // voiceschanged later. An explicit retry must share this same local-only filter.
       let voices: SpeechSynthesisVoice[];
-      try { voices = synthesis.getVoices().filter((item) => item.localService); }
-      catch { voices = []; }
-      voice.current = voices.find((item) => /^zh[-_]TW$/i.test(item.lang))
-        ?? voices.find((item) => /^zh\b/i.test(item.lang)) ?? null;
+      try {
+        voices = synthesis.getVoices().filter((item) =>
+          item.localService && /^(?:zh|cmn)(?:[-_]|$)/i.test(item.lang));
+      } catch { voices = []; }
+      // Some mobile engines list zh-CN first even when an installed
+      // Traditional/Taiwanese voice is available later. Match BCP 47 subtags
+      // rather than list order; never switch to a network-backed voice.
+      const localeRank = (lang: string) => {
+        const subtags = lang.toLowerCase().replace(/_/g, '-').split('-').slice(1);
+        if (subtags.includes('tw')) return 0;
+        if (subtags.includes('hant')) return 1;
+        if (subtags.includes('hk') || subtags.includes('mo')) return 2;
+        return 3;
+      };
+      voice.current = voices.reduce<SpeechSynthesisVoice | null>((best, candidate) =>
+        !best || localeRank(candidate.lang) < localeRank(best.lang) ? candidate : best, null);
       setAvailable(!!voice.current);
     };
     refreshVoices.current = update;

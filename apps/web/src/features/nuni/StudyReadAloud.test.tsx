@@ -41,6 +41,33 @@ it('uses an installed Chinese voice and clears playback state on completion', ()
   expect(screen.getByRole('button', { name: '朗讀這一段' })).toBeTruthy();
 });
 
+it('prefers an installed Taiwanese voice over a Simplified Chinese voice listed first', () => {
+  const simplified = { lang: 'zh-CN', localService: true };
+  const taiwanese = { lang: 'zh-Hant-TW', localService: true };
+  voices = [simplified, taiwanese];
+  render(<StudyReadAloud text="繁體中文教材" />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(taiwanese);
+});
+
+it('recognizes an installed Mandarin BCP 47 voice even when a Chinese voice precedes it', () => {
+  const simplified = { lang: 'zh-CN', localService: true };
+  const traditional = { lang: 'cmn_Hant_TW', localService: true };
+  voices = [simplified, traditional];
+  render(<StudyReadAloud text="學習與複習" />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(traditional);
+});
+
+it('never chooses a remote Taiwanese voice over an installed Chinese fallback', () => {
+  const remoteTaiwanese = { lang: 'zh-TW', localService: false };
+  const installedFallback = { lang: 'zh-CN', localService: true };
+  voices = [remoteTaiwanese, installedFallback];
+  render(<StudyReadAloud text="個人課程資料" />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(installedFallback);
+});
+
 it('does not fall back to a remote voice when an installed Chinese voice is absent', () => {
   voices = [remote, { lang: 'en-US', localService: true }];
   render(<StudyReadAloud text="課程原文" />);
