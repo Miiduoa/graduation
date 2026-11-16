@@ -24,7 +24,14 @@ import { SourceLink, tronClassTime } from './TronClassSource';
 import { TronClassMaterialDownload } from './TronClassMaterialDownload';
 import { TronClassAgentAccess } from './TronClassAgentAccess';
 import { createTronClassAgentClient } from '@/lib/tronClassAgentClient';
+import { sameTronClassDraftScope, type TronClassLocalDraft } from './tronClassLocalDraft';
 import styles from './tronclass.module.css';
+
+type SchoolDraft = { studentKey: string; draft: TronClassLocalDraft };
+function verifiedStudentKey(connection: TronClassConnection | null): string | null {
+  return connection?.connected && typeof connection.studentKey === 'string' &&
+    /^[a-f0-9]{64}$/.test(connection.studentKey) ? connection.studentKey : null;
+}
 
 export function TronClassWorkspace() {
   const platform = useOptionalNuniSession();
@@ -108,6 +115,9 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
   const [disconnecting, setDisconnecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submissionBusy, setSubmissionBusy] = useState(false);
+  const [recoveryDraft, setRecoveryDraft] = useState<SchoolDraft | null>(null);
+  const activeDraft = useRef<SchoolDraft | null>(null);
+  const draftScope = useRef<{ studentKey: string; revision: string } | null>(null);
   const alive = useRef(true);
   const lock = useRef(false);
   const connectionRequest = useRef(0);
@@ -115,6 +125,8 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     alive.current = true;
     return () => {
       alive.current = false;
+      activeDraft.current = null;
+      draftScope.current = null;
     };
   }, []);
   useEffect(() => {
@@ -123,7 +135,7 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     void client.status().then(
       (value) => {
         if (!current || request !== connectionRequest.current) return;
-        setConnection(value);
+        acceptConnection(value);
         setEditing(!value.connected);
         setAccount(value.account ?? '');
         setError(!value.connected && value.account ? 'TronClass 登入已失效，請重新連接後繼續。' : '');
@@ -140,8 +152,36 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     };
   }, [client, epoch]);
 
+  function acceptConnection(value: TronClassConnection) {
+    const studentKey = verifiedStudentKey(value);
+    draftScope.current = studentKey && value.revision ? { studentKey, revision: value.revision } : null;
+    if (value.connected || !value.account) {
+      setRecoveryDraft((draft) => studentKey && draft?.studentKey === studentKey ? draft : null);
+    }
+    setConnection(value);
+  }
+
+  function suspendDraft() {
+    if (activeDraft.current) setRecoveryDraft(activeDraft.current);
+    activeDraft.current = null;
+    draftScope.current = null;
+  }
+
+  function retainDraft(revision: string, studentKey: string | null, draft: TronClassLocalDraft | null,
+    courseId: number, homeworkId: number) {
+    const current = draftScope.current;
+    if (!alive.current || !studentKey || !current ||
+      current.revision !== revision || current.studentKey !== studentKey) return;
+    activeDraft.current = draft ? { studentKey, draft } : null;
+    // Once the new editor has read its assignment, its local state owns the
+    // recovered text. A close also discards a not-yet-restored backup.
+    setRecoveryDraft((value) => value?.studentKey === studentKey &&
+      sameTronClassDraftScope(value.draft, courseId, homeworkId) ? null : value);
+  }
+
   function reloadStatus(reason?: unknown) {
     ++connectionRequest.current;
+    suspendDraft();
     setPassword('');
     setDisconnecting(false);
     if (reason instanceof TronClassRequestError && reason.code === 'TRONCLASS_RECONNECT_REQUIRED') {
@@ -169,12 +209,13 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     setError('');
     const suppliedPassword = password;
     setPassword('');
+    suspendDraft();
     // Retire old reads, downloads and grants before starting a replacement login.
     setConnection({ ...connection, connected: false });
     try {
       const value = await client.connect(account.trim(), suppliedPassword, expectedRevision);
       if (!alive.current || request !== connectionRequest.current) return;
-      setConnection(value);
+      acceptConnection(value);
       setAccount(value.account ?? '');
       setEditing(!value.connected);
       setDisconnecting(false);
@@ -194,16 +235,24 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     lock.current = true;
     setBusy(true);
     setError('');
+    // Explicit unlink also discards local work even if the request later fails.
+    activeDraft.current = null;
+    draftScope.current = null;
+    setRecoveryDraft(null);
+    setConnection({ ...connection, connected: false });
     try {
       const value = await client.disconnect(connection.revision);
       if (!alive.current) return;
-      setConnection(value);
+      acceptConnection(value);
       setAccount('');
       setPassword('');
       setEditing(true);
       setDisconnecting(false);
     } catch (reason) {
-      if (alive.current) setError(tronClassErrorMessage(reason));
+      if (alive.current) {
+        reloadStatus();
+        setError(tronClassErrorMessage(reason));
+      }
     } finally {
       lock.current = false;
       if (alive.current) setBusy(false);
@@ -232,6 +281,13 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
             {error}
           </p>
         )}
+        {recoveryDraft && !connection?.connected && <div className={styles.notice} role="status">
+          <p>本頁暫時保留了作業文字與附件。重新連接同一個學校帳號後，可以回到剛才的作業。</p>
+          <p>關閉或重新整理頁面會清除這份草稿。</p>
+          <button className={styles.textButton} onClick={() => setRecoveryDraft(null)}>
+            清除保留的草稿
+          </button>
+        </div>}
         {!loading && !connection && (
           <button className="btn" onClick={reloadStatus}>
             重新確認連接
@@ -348,6 +404,10 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
           owner={owner}
           onConnectionChanged={reloadStatus}
           onSubmissionBusy={setSubmissionBusy}
+          recoveryDraft={recoveryDraft?.studentKey === verifiedStudentKey(connection) ? recoveryDraft.draft : null}
+          onDiscardDraft={() => setRecoveryDraft(null)}
+          onDraftChange={(draft, courseId, homeworkId) =>
+            retainDraft(connection.revision!, verifiedStudentKey(connection), draft, courseId, homeworkId)}
         />
       )}
     </div>
@@ -360,12 +420,18 @@ function ConnectedWorkspace({
   owner,
   onConnectionChanged,
   onSubmissionBusy,
+  recoveryDraft,
+  onDiscardDraft,
+  onDraftChange,
 }: {
   client: TronClassClient;
   revision: string;
   owner: string;
   onConnectionChanged: (reason?: unknown) => void;
   onSubmissionBusy: (busy: boolean) => void;
+  recoveryDraft: TronClassLocalDraft | null;
+  onDiscardDraft: () => void;
+  onDraftChange: (draft: TronClassLocalDraft | null, courseId: number, homeworkId: number) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -374,6 +440,7 @@ function ConnectedWorkspace({
   const [tab, setTab] = useState<'homework' | 'announcements' | 'materials'>('homework');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<TronClassHomeworkItem | null>(null);
+  const [selectedDraft, setSelectedDraft] = useState<TronClassLocalDraft | undefined>();
   const alive = useRef(true);
   const generation = useRef(0);
   const currentConnectionChanged = useRef(onConnectionChanged);
@@ -439,6 +506,9 @@ function ConnectedWorkspace({
       : tab === 'announcements'
         ? announcements.length
         : materials.length;
+  const recoveryHomework = recoveryDraft && snapshot?.revision === revision
+    ? snapshot.homework.find((item) => sameTronClassDraftScope(recoveryDraft, item.courseId, item.id))
+    : undefined;
 
   return (
     <>
@@ -476,6 +546,20 @@ function ConnectedWorkspace({
             </ul>
           </div>
         )}
+        {recoveryDraft && !selected && <div className={styles.notice}>
+          <h3>回到剛才的作業</h3>
+          <p>{recoveryHomework
+            ? `已重新取得「${recoveryHomework.title}」，可以取回本頁保留的文字與附件。`
+            : '正在等候重新取得原作業；取得後才能恢復草稿。可同步最新資料或清除草稿。'}</p>
+          <div className={styles.actions}>
+            <button className="btn" disabled={loading || !recoveryHomework} onClick={() => {
+              if (!recoveryHomework) return;
+              setSelectedDraft(recoveryDraft);
+              setSelected(recoveryHomework);
+            }}>繼續編輯保留的草稿</button>
+            <button className={styles.textButton} onClick={onDiscardDraft}>清除保留的草稿</button>
+          </div>
+        </div>}
         {snapshot && (
           <>
             <div className={styles.filters}>
@@ -563,7 +647,11 @@ function ConnectedWorkspace({
                       <button
                         id={`tronclass-homework-${item.courseId}-${item.id}`}
                         className="btn"
-                        onClick={() => setSelected(item)}
+                        onClick={() => {
+                          setSelectedDraft(recoveryDraft && sameTronClassDraftScope(recoveryDraft, item.courseId, item.id)
+                            ? recoveryDraft : undefined);
+                          setSelected(item);
+                        }}
                       >
                         {item.submitted ? '查看作業' : '準備作業'}
                       </button>
@@ -644,11 +732,14 @@ function ConnectedWorkspace({
           revision={revision}
           owner={owner}
           homework={selected}
+          initialDraft={selectedDraft}
+          onDraftChange={(draft) => onDraftChange(draft, selected.courseId, selected.id)}
           onClose={() => {
             document
               .getElementById(`tronclass-homework-${selected.courseId}-${selected.id}`)
               ?.focus();
             setSelected(null);
+            setSelectedDraft(undefined);
           }}
           onBusy={onSubmissionBusy}
           onConnectionChanged={onConnectionChanged}

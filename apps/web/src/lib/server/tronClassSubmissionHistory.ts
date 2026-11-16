@@ -105,27 +105,34 @@ export async function readTronClassSubmissionHistory(
 ): Promise<TronClassSubmissionHistory> {
   if (!source.fetchHomeworkActivity || !source.fetchStudentSubmissionList ||
     !id(scope.courseId) || !id(scope.homeworkId) || !id(binding.userId)) return invalid();
-  const read = async (request: () => Promise<{ ok: true; value: unknown } | { ok: false; status: number | null }>) => {
+  const read = async (request: () => Promise<{ ok: true; value: unknown } | { ok: false; status: number | null }>, activityRead = false) => {
     try {
       const response = await request();
       if (!response.ok) {
         if (response.status === 401) throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
         if (response.status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
+        if (activityRead && (response.status === 404 || response.status === 410)) {
+          throw new NuniError(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
+        }
         return invalid();
       }
       return response.value;
     } catch (error) {
       if (error instanceof NuniError && ([401, 403].includes(error.status) ||
-        ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED'].includes(error.code))) throw error;
-      if (classifySchoolReadError(error) === 'session' || schoolHttpStatus(error) === 401) {
+        ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
+      const status = schoolHttpStatus(error);
+      if (classifySchoolReadError(error) === 'session' || status === 401) {
         throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
       }
+      if (status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
+      if (activityRead && (status === 404 || status === 410)) throw new NuniError(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
       return invalid();
     }
   };
-  const activity = object(await read(() => source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId)));
+  const activity = object(await read(() => source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId), true));
   if (activity.id !== scope.homeworkId || activity.course_id !== scope.courseId ||
-    activity.type !== 'homework' || !isTronClassSourceVisible(activity)) return invalid();
+    activity.type !== 'homework') return invalid();
+  if (!isTronClassSourceVisible(activity)) throw new NuniError(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
   if (activity.submit_by_group === true) {
     return { source: 'tronclass', ...scope, fetchedAt: new Date(now).toISOString(),
       state: 'group-unsupported', latestId: null, entries: [] };

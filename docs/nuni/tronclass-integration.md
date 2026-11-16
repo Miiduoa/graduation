@@ -11,6 +11,8 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 使用 nuni 平台登入或 Firebase 登入綁定 TronClass | 已實作；不依賴 E-campus session |
 | 重新連接、換綁、解除連接 | 已實作，使用 revision 防止舊請求覆蓋新綁定；校方 session 失效時在原頁開啟重新連接表單 |
 | 本人 ongoing / upcoming 課程、作業與截止時間 | 已實作，分頁不完整會顯示部分失敗 |
+| 校方作業詳情與設定 | 已實作本人活動 GET；顯示個人／小組、形式、開放／截止、已用與剩餘次數、重交及撤回設定，不推論寫入權限 |
+| 連接中斷後繼續編輯 | 已實作同一已驗證學生的頁內記憶體恢復；重新同步、重新讀取作業後才恢復文字與 File，不沿用舊上傳狀態 |
 | 本人個人作業的歷次繳交內容 | 已實作官方 GET 來源，顯示本文、附件名稱／大小、來源紀錄時間及五種狀態；與本系統新送出的收據分開 |
 | 選定課程的公告與教材 | 已實作，包含一般活動與 courseware 活動 |
 | 來源隱藏／未發布資料過濾 | 已套用於作業、公告、教材與附件，以及作業歷史的讀取邊界；不因另一旗標允許就忽略明確拒絕 |
@@ -27,6 +29,18 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊作業、討論發文／回覆、問卷與同儕互評 writer 改為明確拒絕，避免假成功 |
 
 TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的收件、附件與教師批改，不是 TronClass 的正式繳交證據。
+
+## 校方最新作業設定與草稿恢復
+
+`getAssignment()` 在本人課程與完整作業清單核對後，讀取固定的 `GET /api/activities/{activityId}`。`prepare.details` 獨立於 `rules`、`canSubmit`，只呈現來源明示的設定：個人／小組、一般／選題作業、開放與截止時間、一般期間狀態、已用與剩餘次數、重交設定與是否允許撤回。公開前端的欄位依據見 [來源查核](tronclass-public-contract-2026-11-16.md)。
+
+缺少資料時保留 `null`／`unknown`，不把未提供期限說成無期限，也不把剩餘零次改成預設額度。次數接受數字及嚴格十進位字串，拒絕空白、前導零、指數、負數、小數及尾隨文字；只有明示有次數限制且上限、已用次數均合法，才計算剩餘次數。這些觀察不等於補交、重交或正式送出的資格。
+
+有可用詳頁時，編輯器與預覽採用最新標題、說明及期限。老師清空說明或期限後，不再回填舊清單的內容。暫時 429／5xx 可保留獨立確認可見的摘要並顯示設定讀取失敗；401、403、活動 404／410、隱藏或範圍錯誤會停止資料回傳。讀取本人歷史途中再次發現活動隱藏、刪除或撤權，也不能被降級為歷史暫時不可讀後回傳較早的內容。只有 `submission_list` 自身的 404 仍可顯示歷史不可讀，不能用它推論活動已刪除。
+
+作業文字與選取的 `File` 只保留在這個頁面的記憶體。連接失效時先撤下資料，重新連接後，比對伺服器產生的 `studentKey`；同一 nuni owner、校方與已驗證的校方使用者才會相同。該值使用既有伺服器密鑰的 HMAC-SHA256，輸入包含用途標記及上述範圍，不公開校方數字 ID，也不是可用來授權 API 的憑證。過期、解除、密文失效時回傳 `null`；舊版回應沒有此欄位可照常連接，但不恢復草稿。
+
+新的同步結果找到原作業後，使用者可按「繼續編輯保留的草稿」；再通過新 revision 的 `prepare`，才顯示文字與附件。重新產生附件本地 ID，狀態回到 `ready`，不保留 revision、上傳 ID、來源權限或收據。若原操作結果不明，仍以原 pending operation ID 查證，不能重新送出。換 nuni owner／平台 session、換校方已驗證使用者、解除連接、明確清除或關閉／重整頁面，都會丟棄草稿。本次沒有建立多份草稿資料庫。
 
 ## 本人歷次作業紀錄
 
@@ -96,7 +110,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 `PUT /api/tronclass` 接收單一附件原始 bytes。query 為 `courseId`, `homeworkId`, `revision`, `operationId`, `fileId`, `name`；Content-Type 為檔案 MIME。單檔最多 10 MiB、每份最多 4 個檔案、總附件最多 20 MiB、文字最多 20,000 字元；校方規則若更嚴格，採更嚴格者。這是應用程式上限，不是校方的通用額度。
 
-`prepare.rules` 為 `{ status: "unknown" }` 或 `{ status: "confirmed", allowsText, allowsAttachments, maxTotalBytes }`；附件數量、單檔上限與 MIME 仍由既有 `maxFiles`、`maxFileBytes`、`allowedContentTypes` 提供。來源 `permissionKnown` 未確認時，不把本頁 4 檔／10 MiB／20 MiB 整理額度當成校方授權。已確認的零值保持為零，不回退成預設額度；較舊的回應若沒有 `rules`，仍能整理與預覽，但不能據此送出。
+`prepare.rules` 為 `{ status: "unknown" }` 或 `{ status: "confirmed", allowsText, allowsAttachments, maxTotalBytes }`；附件數量、單檔上限與 MIME 仍由既有 `maxFiles`、`maxFileBytes`、`allowedContentTypes` 提供。來源 `permissionKnown` 未確認時，不把本頁 4 檔／10 MiB／20 MiB 整理額度當成校方授權。已確認的零值保持為零，不回退成預設額度；較舊的回應若沒有 `rules`，仍能整理與預覽，但不能據此送出。新增的 `prepare.details` 是另一份已去除私有原始欄位的觀察資料，不能取代 `rules`；Client 會核對完整欄位、型別與次數計算一致性，拒絕多出的來源欄位。
 
 使用者確認送出後，UI 先重新取得完整規則，再一次核對文字、所有附件、檔名、空檔、個別大小、合計大小及 MIME。任何一項不合格，都在第一個 upload 前停止並保留草稿。重新讀取失敗會移除舊的送出資格，不讓先前的 `canSubmit` 繼續生效。後端原有規則檢查仍保留。
 
@@ -228,7 +242,7 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、Agent grants／意圖／工具／下載、client、TronClassWorkspace 與既有 Assistant／NuniApp 回歸；另外驗證 Mobile 五個舊 writer 沒有任何網路送出。HAR 測試使用 `node --test scripts/tronclass/analyze-har.test.mjs`，已加入既有 CI。
 
-2026-11-16 續作的驗證結果如下。這是本次指定範圍的回歸結果，不代表整個 monorepo 的所有測試均已執行；重跑的子集合不重複累加。
+前輪（2026-11-16，`ca87994d`）的驗證結果保留如下。這是指定範圍的回歸結果，不代表整個 monorepo 的所有測試均已執行；重跑的子集合不重複累加。最新詳情／草稿恢復的結果另列於下方。
 
 | 範圍 | 結果 |
 | --- | --- |
@@ -243,6 +257,23 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 既有本人歷史、Agent 權限、資料可見性、防重與重新連接亦包含在本輪 Web 指定範圍內。前輪 Backend account＋dorm 49 項、scraper 88 項與其他 Mobile 測試未在本輪重新計數；相應實作本輪沒有變更。
 
 測試中的 verified provider、帳號、課程及收據都是合成資料，用於證明權限隔離、防重、失敗與恢復行為。官方公開 JavaScript 的匿名 GET 查核可證明前端使用的路徑與欄位，不能取代真人帳號回應、真實繳交或教師收件驗收。本輪沒有宣告正式部署，也未宣告桌面／窄螢幕／深色模式的瀏覽器視覺驗證通過；UI design gate 是程式檢查，不等同視覺驗收。
+
+## 本輪詳情與草稿恢復驗證（2026-11-16）
+
+本輪本地使用 Node **24.22.1** 與相同鎖檔的依賴，不修改專案 Node **22.23.5** 要求；該指定 runtime 的結果須另讀新提交的 GitHub CI。
+
+| 範圍 | 本輪結果 |
+| --- | --- |
+| Web 全部非模擬器 TronClass 相關測試及站內連結檢查 | **33 檔、955／955 通過** |
+| 納入 main `ab9c8677` 後的整合回歸 | **34 檔、1,025／1,025 通過**；含上述 955 項及主線地圖變更的 70 項 |
+| 完整 Web TypeScript | 通過，exit 0 |
+| 本輪 TypeScript ESLint | 23 個 Web 檔按 Web config、1 個 shared 檔按其 config，`--max-warnings 0` 通過 |
+| nuni UI design gate、git diff 格式檢查 | 通過 |
+| 瀏覽器視覺、真人校方登入／繳交 | **未完成驗收** |
+
+955 項已包含草稿重連／換帳號、來源設定、client 邊界、原 Assistant、繳交防重與來源失效情境，各子集合不重複累加。main `ab9c867719d8de71660a539c78346f2173a4c0fd` 僅帶入已合併的地圖三檔變更；整合後重新執行上述 34 檔、完整 Web TypeScript 與 UI design gate 均通過。撤權修補先以順序合成回應重現 9 項失敗，再修正為通過；沒有呼叫真實校方 writer。前輪 GitHub Web Tests 的唯一失敗，來自導航掃描將校方 API `path` 誤判為站內路由，本輪改成明確的 `schoolPath`，保留原掃描與固定來源驗證。未修改 workflow、規則或 allowlist。
+
+本輪嘗試瀏覽器畫面驗收，但本機瀏覽器啟動受執行環境限制、連接的瀏覽器不可用，雲端瀏覽器也無法連到本機測試頁；沒有將程式／DOM 檢查宣稱為實際視覺驗收。HAR、Mobile 真機及教師收件本輪未重新驗收。
 
 ## 官方依據
 

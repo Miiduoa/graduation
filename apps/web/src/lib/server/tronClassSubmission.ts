@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
 import { isTronClassSubmissionHistory, type TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
-import type { TronClassSubmissionRules } from '../tronClassIntegrationTypes';
+import type { TronClassAssignmentDetails, TronClassSubmissionRules } from '../tronClassIntegrationTypes';
+import { isTronClassAssignmentDetails } from '../tronClassAssignmentDetails';
 import type {
   TronClassAssignment, TronClassHomeworkScope, TronClassSourceReceipt,
   TronClassSubmissionBinding, TronClassSubmissionSource,
@@ -33,6 +34,7 @@ export type TronClassPreparedSubmission = TronClassHomeworkScope & {
   canSubmit: boolean; blockedReason: string | null;
   maxFiles: number; maxFileBytes: number; allowedContentTypes: string[];
   rules: TronClassSubmissionRules;
+  details?: TronClassAssignmentDetails;
   receipt: TronClassSubmissionReceipt | null;
   history?: TronClassSubmissionHistory;
 };
@@ -105,6 +107,7 @@ function shortString(value: unknown, max: number): value is string {
 function validateAssignment(assignment: TronClassAssignment, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope) {
   if (!assignment || assignment.courseId !== scope.courseId || assignment.homeworkId !== scope.homeworkId ||
     assignment.studentId !== binding.userId || !shortString(assignment.title, 300) ||
+    (assignment.details !== undefined && !isTronClassAssignmentDetails(assignment.details)) ||
     typeof assignment.description !== 'string' || assignment.description.length > 20000 ||
     !['permissionKnown', 'individual', 'canSubmit', 'isClosed', 'allowLate', 'allowsText', 'allowsAttachments']
       .every((key) => typeof assignment[key as keyof TronClassAssignment] === 'boolean') ||
@@ -308,6 +311,7 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
       validateScope(scope);
       const binding = await bindingFor(ownerKey);
       const assignment = await assignmentFor(ownerKey, binding, scope);
+      const details = assignment.details === undefined ? undefined : structuredClone(assignment.details);
       let blockedReason = !writeEnabled() ? '目前暫停站內作業繳交，你仍可查看作業說明。'
         : source.contractVerified !== true ? '此學校目前尚未開放在 nuni 繳交，請使用 TronClass 作業頁。'
           : assignmentBlock(assignment, now());
@@ -323,7 +327,7 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
           // Let the workspace reconnect instead of presenting it as a temporary
           // receipt failure under an apparently valid connection.
           if (error instanceof NuniError && ([401, 403].includes(error.status) ||
-            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED'].includes(error.code))) throw error;
+            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
           blockedReason = '繳交紀錄暫時無法確認，請重新讀取後再試。';
         }
       }
@@ -336,8 +340,10 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
           history = result;
         } catch (error) {
           await bindings.assertCurrent(ownerKey, binding.revision);
+          // A later source check can revoke visibility after the initial detail
+          // read. Never return that earlier snapshot after a definitive denial.
           if (error instanceof NuniError && ([401, 403].includes(error.status) ||
-            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED'].includes(error.code))) throw error;
+            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
           history = { source: 'tronclass', ...scope, fetchedAt: new Date(now()).toISOString(),
             state: 'unavailable', latestId: null, entries: [] };
         }
@@ -345,7 +351,7 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
       await bindings.assertCurrent(ownerKey, binding.revision);
       return { source: 'tronclass', schoolId: 'pu', courseId: scope.courseId, homeworkId: scope.homeworkId, revision: binding.revision,
         title: assignment.title, description: assignment.description, deadline: assignment.deadline,
-        canSubmit: blockedReason === null, blockedReason,
+        canSubmit: blockedReason === null, blockedReason, ...(details === undefined ? {} : { details }),
         maxFiles: Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES),
         maxFileBytes: Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES),
         rules: assignment.permissionKnown ? {

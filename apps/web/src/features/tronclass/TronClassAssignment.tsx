@@ -14,6 +14,8 @@ import type {
 } from '@/lib/tronClassIntegrationTypes';
 import { SourceLink, tronClassTime } from './TronClassSource';
 import { TronClassSubmissionHistory } from './TronClassSubmissionHistory';
+import { TronClassAssignmentDetails } from './TronClassAssignmentDetails';
+import { sameTronClassDraftScope, type TronClassLocalDraft } from './tronClassLocalDraft';
 import styles from './tronclass.module.css';
 
 type Attachment = { id: string; file: File; status: 'ready' | 'uploading' | 'uploaded' | 'failed' };
@@ -70,6 +72,8 @@ export function TronClassAssignment({
   onConnectionChanged,
   onSubmitted,
   prepareOnly = false,
+  initialDraft,
+  onDraftChange,
 }: {
   client: Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'>;
   revision: string;
@@ -81,6 +85,9 @@ export function TronClassAssignment({
   onSubmitted: () => void;
   /** An Agent can prepare locally without inheriting manual submission authority. */
   prepareOnly?: boolean;
+  /** Only the enclosing verified school identity may supply a draft. */
+  initialDraft?: TronClassLocalDraft;
+  onDraftChange?: (draft: TronClassLocalDraft | null) => void;
 }) {
   const fieldId = useId();
   const [preparation, setPreparation] = useState<TronClassPreparation | null>(null);
@@ -96,20 +103,35 @@ export function TronClassAssignment({
   const [restored, setRestored] = useState(false);
   const [checking, setChecking] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
+  const [draftRecovered, setDraftRecovered] = useState(false);
+  const draftToRestore = useRef(!prepareOnly && initialDraft &&
+    sameTronClassDraftScope(initialDraft, homework.courseId, homework.id) ? initialDraft : null);
+  const [awaitingDraftRecovery, setAwaitingDraftRecovery] = useState(!prepareOnly && !!initialDraft &&
+    sameTronClassDraftScope(initialDraft, homework.courseId, homework.id));
   const alive = useRef(true);
   const lock = useRef(false);
   const operation = useRef<string | null>(null);
   const title = useRef<HTMLHeadingElement>(null);
-  const callbacks = useRef({ onConnectionChanged, onBusy, onSubmitted });
+  const callbacks = useRef({ onConnectionChanged, onBusy, onSubmitted, onDraftChange });
   useEffect(() => {
-    callbacks.current = { onConnectionChanged, onBusy, onSubmitted };
-  }, [onConnectionChanged, onBusy, onSubmitted]);
+    callbacks.current = { onConnectionChanged, onBusy, onSubmitted, onDraftChange };
+  }, [onConnectionChanged, onBusy, onSubmitted, onDraftChange]);
   const storageKey = pendingKey(owner, homework.courseId, homework.id);
   const working = phase === 'uploading' || phase === 'submitting' || checking;
   const limits = preparationLimits(preparation);
   const canAddAttachments = limits.allowsAttachments && limits.maxFiles > 0 &&
     limits.maxFileBytes > 0 && limits.maxTotalBytes > 0;
   const submissionAllowed = preparation?.canSubmit === true && limits.confirmed && !prepareError;
+
+  useEffect(() => {
+    // A recovered draft stays hidden until a fresh prepare confirms its scope.
+    // This callback only retains local text/File handles, never upload status.
+    if (prepareOnly || draftToRestore.current) return;
+    callbacks.current.onDraftChange?.(phase === 'submitted' || (!content && !files.length) ? null : {
+      courseId: homework.courseId, homeworkId: homework.id, content,
+      files: files.map(({ file }) => file),
+    });
+  }, [content, files, phase, homework.courseId, homework.id, prepareOnly]);
 
   useEffect(() => {
     alive.current = true;
@@ -154,6 +176,14 @@ export function TronClassAssignment({
           return;
         }
         setPreparation(value);
+        const draft = draftToRestore.current;
+        if (draft) {
+          draftToRestore.current = null;
+          setContent(draft.content);
+          setFiles(draft.files.map((file) => ({ id: crypto.randomUUID(), file, status: 'ready' })));
+          setDraftRecovered(true);
+          setAwaitingDraftRecovery(false);
+        }
         setPrepareError('');
         setPreparing(false);
       },
@@ -174,6 +204,14 @@ export function TronClassAssignment({
     };
   }, [client, homework.courseId, homework.id, revision, prepareEpoch]);
 
+  function rememberLocalDraft(nextContent: string, nextFiles: Attachment[]) {
+    if (prepareOnly) return;
+    callbacks.current.onDraftChange?.(!nextContent && !nextFiles.length ? null : {
+      courseId: homework.courseId, homeworkId: homework.id,
+      content: nextContent, files: nextFiles.map(({ file }) => file),
+    });
+  }
+
   function addFiles(list: FileList | null) {
     if (!list || working || phase !== 'editing') return;
     const next = [
@@ -190,7 +228,9 @@ export function TronClassAssignment({
       return;
     }
     operation.current = null;
-    setFiles(next.map((item) => ({ ...item, status: 'ready' })));
+    const ready = next.map((item) => ({ ...item, status: 'ready' as const }));
+    rememberLocalDraft(content, ready);
+    setFiles(ready);
     setError('');
   }
 
@@ -231,7 +271,7 @@ export function TronClassAssignment({
   }
 
   function preview() {
-    if (working || !restored || phase !== 'editing') return;
+    if (working || !restored || awaitingDraftRecovery || phase !== 'editing') return;
     const issue = validatePayload();
     if (issue) {
       setError(issue);
@@ -254,6 +294,9 @@ export function TronClassAssignment({
       !!result.id &&
       Number.isFinite(Date.parse(result.submittedAt));
     if (verified && result) {
+      draftToRestore.current = null;
+      setAwaitingDraftRecovery(false);
+      callbacks.current.onDraftChange?.(null);
       setReceipt(result);
       setPhase('submitted');
       setError('');
@@ -449,6 +492,9 @@ export function TronClassAssignment({
 
   const previous = preparation?.receipt;
   const blocked = !preparing && !submissionAllowed;
+  const displayTitle = preparation?.title ?? homework.title;
+  const displayDescription = preparation ? preparation.description : homework.description;
+  const displayDeadline = preparation ? preparation.deadline : homework.deadline;
 
   return (
     <section
@@ -459,25 +505,31 @@ export function TronClassAssignment({
         <div>
           <p className={styles.eyebrow}>{homework.courseName}</p>
           <h2 id={`${fieldId}-title`} ref={title} tabIndex={-1}>
-            {homework.title}
+            {displayTitle}
           </h2>
         </div>
-        <button className={styles.textButton} disabled={working} onClick={onClose}>
+        <button className={styles.textButton} disabled={working} onClick={() => {
+          callbacks.current.onDraftChange?.(null);
+          onClose();
+        }}>
           {prepareOnly ? '關閉作業準備' : '返回作業清單'}
         </button>
       </div>
       <p className={styles.muted}>
-        {(preparation?.deadline ?? homework.deadline)
-          ? `${tronClassTime(preparation?.deadline ?? homework.deadline)} 截止`
-          : homework.deadlineLabel || '未提供截止時間'}
+        {displayDeadline
+          ? `${tronClassTime(displayDeadline)} 截止`
+          : (!preparation && homework.deadlineLabel) || '未提供截止時間'}
       </p>
-      {(preparation?.description || homework.description) && (
+      {displayDescription && (
         <div className={styles.assignmentBrief}>
           <h3>作業要求</h3>
-          <p className={styles.bodyText}>{preparation?.description || homework.description}</p>
+          <p className={styles.bodyText}>{displayDescription}</p>
         </div>
       )}
       <SourceLink href={homework.href}>在 TronClass 查看原作業</SourceLink>
+      {draftRecovered && <p className={styles.notice} role="status">
+        已取回本頁保留的文字與附件。請重新核對內容與最新繳交條件；先前的上傳狀態不會沿用。
+      </p>}
       {preparing && (
         <p role="status" className={styles.muted}>
           正在確認繳交條件與既有紀錄…
@@ -494,6 +546,13 @@ export function TronClassAssignment({
             重新確認繳交條件
           </button>
         </div>
+      )}
+      {!preparing && !prepareError && preparation?.details && phase !== 'submitted' && (
+        <TronClassAssignmentDetails
+          details={preparation.details}
+          onRetry={retryPreparation}
+          retryDisabled={working}
+        />
       )}
       {!preparing && !working && !prepareError && preparation?.history && phase !== 'submitted' && phase !== 'unknown' && (
         <TronClassSubmissionHistory
@@ -559,10 +618,12 @@ export function TronClassAssignment({
                 <textarea
                   id={`${fieldId}-answer`}
                   value={content}
+                  disabled={awaitingDraftRecovery}
                   maxLength={20000}
                   rows={9}
                   placeholder="在這裡整理要繳交的內容…"
                   onChange={(event) => {
+                    rememberLocalDraft(event.target.value, files);
                     setContent(event.target.value);
                     setCopyMessage('');
                   }}
@@ -575,7 +636,7 @@ export function TronClassAssignment({
                   id={`${fieldId}-attachments`}
                   type="file"
                   multiple
-                  disabled={!canAddAttachments}
+                  disabled={awaitingDraftRecovery || !canAddAttachments}
                   accept={limits.contentTypes.length ? limits.contentTypes.join(',') : undefined}
                   onChange={(event) => {
                     addFiles(event.target.files);
@@ -601,7 +662,7 @@ export function TronClassAssignment({
               <p className={styles.muted}>
                 課程：{homework.courseName}
                 <br />
-                作業：{homework.title}
+                作業：{displayTitle}
               </p>
               {content ? (
                 <p className={styles.bodyText}>{content}</p>
@@ -633,11 +694,10 @@ export function TronClassAssignment({
                       aria-label={`移除 ${item.file.name}`}
                       onClick={() => {
                         operation.current = null;
-                        setFiles((values) =>
-                          values
-                            .filter((file) => file.id !== item.id)
-                            .map((file) => ({ ...file, status: 'ready' })),
-                        );
+                        const remaining = files.filter((file) => file.id !== item.id)
+                          .map((file) => ({ ...file, status: 'ready' as const }));
+                        rememberLocalDraft(content, remaining);
+                        setFiles(remaining);
                       }}
                     >
                       移除
@@ -659,7 +719,7 @@ export function TronClassAssignment({
           )}
           <div className={styles.actions}>
             {phase === 'editing' ? (
-              <button className="btn primary" disabled={!restored} onClick={preview}>
+              <button className="btn primary" disabled={!restored || awaitingDraftRecovery} onClick={preview}>
                 預覽繳交內容
               </button>
             ) : (

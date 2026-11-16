@@ -40,6 +40,7 @@ const connection = {
   account: 'student-a',
   userName: '同學甲',
   expiresAt: '2026-11-14T01:00:00.000Z',
+  studentKey: 'd'.repeat(64),
 };
 const unconnected = {
   schoolId: 'pu',
@@ -854,5 +855,250 @@ describe('TronClass material downloads', () => {
     await act(async () => pending.resolve(downloadResponse()));
     expect(create).not.toHaveBeenCalled();
     expect(screen.queryByText('已開始下載。')).toBeNull();
+  });
+});
+
+describe('TronClass page-memory draft recovery', () => {
+  const nextRevision = 'e'.repeat(32);
+  const privateText = '尚在整理的私人作業文字';
+  const privateFile = () => new File(['my report'], '本頁報告.pdf', { type: 'application/pdf' });
+
+  function serveRecovery(options: {
+    studentKey?: string | null;
+    missingHomework?: boolean;
+    prepareAfterReconnect?: () => Promise<Response>;
+    expireSubmit?: boolean;
+  } = {}) {
+    const flags = { expired: false, reconnected: false, failConnect: false, disconnected: false };
+    const nextKey = Object.prototype.hasOwnProperty.call(options, 'studentKey')
+      ? options.studentKey : connection.studentKey;
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (String(url) === '/api/tronclass/agent-permissions') return Promise.resolve(json({
+        revision: flags.reconnected ? nextRevision : revision, version: null,
+        permissions: { readCourseData: false, downloadMaterials: false, prepareHomework: false }, updatedAt: null,
+      }));
+      if (input.action === 'status') return Promise.resolve(json(flags.disconnected ? unconnected : connection));
+      if (input.action === 'disconnect') {
+        flags.disconnected = true;
+        return Promise.resolve(json({ ...unconnected, revision: 'f'.repeat(32) }));
+      }
+      if (input.action === 'connect') {
+        if (flags.failConnect) return Promise.resolve(json({ error: 'TRONCLASS_INVALID_CREDENTIALS' }, 401));
+        flags.reconnected = true;
+        flags.disconnected = false;
+        return Promise.resolve(json({ ...connection, revision: nextRevision, studentKey: nextKey }));
+      }
+      if (input.action === 'sync') {
+        if (flags.reconnected) return Promise.resolve(json({ ...snapshot, revision: nextRevision,
+          homework: options.missingHomework ? [] : snapshot.homework }));
+        if (flags.expired) return Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED' }, 401));
+      }
+      if (input.action === 'prepare' && flags.reconnected) return options.prepareAfterReconnect?.() ??
+        Promise.resolve(json({ ...preparation, revision: nextRevision }));
+      if (input.action === 'submit' && options.expireSubmit) {
+        flags.expired = true;
+        return Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED' }, 401));
+      }
+      return defaultResponse(url, init);
+    });
+    return flags;
+  }
+
+  async function editDraft() {
+    await openAssignment();
+    fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: privateText } });
+    fireEvent.change(screen.getByLabelText('作業附件'), { target: { files: [privateFile()] } });
+  }
+
+  async function expire(flags: ReturnType<typeof serveRecovery>) {
+    flags.expired = true;
+    fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+    await screen.findByLabelText('學校密碼');
+    expect(screen.queryByDisplayValue(privateText)).toBeNull();
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+  }
+
+  async function reconnect() {
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'new-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await screen.findByText('已連接');
+    await waitFor(() => expect((screen.getByRole('button', { name: '同步最新資料' }) as HTMLButtonElement).disabled).toBe(false));
+  }
+
+  it('restores text and files only after the same verified school identity and a fresh assignment read', async () => {
+    const pendingPrepare = deferred<Response>();
+    const flags = serveRecovery({ prepareAfterReconnect: () => pendingPrepare.promise });
+    render(<TronClassWorkspace />);
+    await editDraft();
+    await expire(flags);
+    expect(screen.getByText(/本頁暫時保留了作業文字與附件/)).toBeTruthy();
+    expect(sessionStorage.length).toBe(0);
+    expect(localStorage.length).toBe(0);
+    await reconnect();
+    fireEvent.click(await screen.findByRole('button', { name: '繼續編輯保留的草稿' }));
+    const input = await screen.findByLabelText('作業內容') as HTMLTextAreaElement;
+    expect(input.value).toBe('');
+    expect(input.disabled).toBe(true);
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    await act(async () => pendingPrepare.resolve(json({ ...preparation, revision: nextRevision })));
+    expect((await screen.findByDisplayValue(privateText) as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.getByText('本頁報告.pdf')).toBeTruthy();
+    expect(screen.getByText(/已選取/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
+    expect((screen.getByLabelText('我已確認課程、作業內容與附件正確') as HTMLInputElement).checked).toBe(false);
+    expect(calls('submit')).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+    expect(sessionStorage.length).toBe(0);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it.each([undefined, null, 'f'.repeat(64)])(
+    'does not restore for a missing or different verified student key: %s', async (studentKey) => {
+      const flags = serveRecovery({ studentKey });
+      render(<TronClassWorkspace />);
+      await editDraft();
+      await expire(flags);
+      await reconnect();
+      expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+      await openAssignment();
+      expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+      expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    },
+  );
+
+  it.each(['', 'same-student', 'a'.repeat(63), 'A'.repeat(64)])(
+    'rejects a malformed student key without revealing the retained draft: %s', async (studentKey) => {
+      const flags = serveRecovery({ studentKey });
+      render(<TronClassWorkspace />);
+      await editDraft();
+      await expire(flags);
+      fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'new-password' } });
+      fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+      await screen.findByText('尚未收到可確認的回覆，請稍後重新查詢。');
+      expect(screen.queryByText('已連接')).toBeNull();
+      expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+      expect(screen.queryByDisplayValue(privateText)).toBeNull();
+      expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    },
+  );
+
+  it('does not disclose a draft when the reconnected student can no longer read the assignment', async () => {
+    const flags = serveRecovery({ missingHomework: true });
+    render(<TronClassWorkspace />);
+    await editDraft();
+    await expire(flags);
+    await reconnect();
+    const resume = await screen.findByRole('button', { name: '繼續編輯保留的草稿' });
+    expect((resume as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByDisplayValue(privateText)).toBeNull();
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    expect(calls('prepare')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '清除保留的草稿' }));
+    expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+  });
+
+  it('keeps the draft hidden when fresh prepare fails and can retry without losing local files', async () => {
+    let allowRead = false;
+    const flags = serveRecovery({ prepareAfterReconnect: async () => allowRead
+      ? json({ ...preparation, revision: nextRevision })
+      : json({ error: 'TRONCLASS_SUBMISSION_UNAVAILABLE' }, 503) });
+    render(<TronClassWorkspace />);
+    await editDraft();
+    await expire(flags);
+    await reconnect();
+    fireEvent.click(await screen.findByRole('button', { name: '繼續編輯保留的草稿' }));
+    await screen.findByRole('button', { name: '重新確認繳交條件' });
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    allowRead = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新確認繳交條件' }));
+    await screen.findByDisplayValue(privateText);
+    expect(screen.getByText('本頁報告.pdf')).toBeTruthy();
+  });
+
+  it('retains the sealed-off page draft after a failed login until the same student reconnects', async () => {
+    const flags = serveRecovery();
+    render(<TronClassWorkspace />);
+    await editDraft();
+    await expire(flags);
+    flags.failConnect = true;
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'wrong-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: '連接 TronClass' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByDisplayValue(privateText)).toBeNull();
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    flags.failConnect = false;
+    await reconnect();
+    fireEvent.click(await screen.findByRole('button', { name: '繼續編輯保留的草稿' }));
+    await screen.findByDisplayValue(privateText);
+  });
+
+  it.each(['owner', 'platform-context'] as const)('clears retained drafts on a nuni %s change', async (kind) => {
+    const flags = serveRecovery();
+    const view = render(<TronClassWorkspace />);
+    await editDraft();
+    await expire(flags);
+    flags.expired = false;
+    state.platform.session = kind === 'owner'
+      ? { platformAccountId: 'account-b', context: 'context-b' }
+      : { platformAccountId: 'account-a', context: 'context-b' };
+    view.rerender(<TronClassWorkspace />);
+    await openAssignment();
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+    expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+  });
+
+  it('clears local text and files on explicit unlink even if the same student reconnects', async () => {
+    serveRecovery();
+    render(<TronClassWorkspace />);
+    await editDraft();
+    fireEvent.click(screen.getByRole('button', { name: '解除連接' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認解除連接' }));
+    await screen.findByLabelText('學校帳號');
+    fireEvent.change(screen.getByLabelText('學校帳號'), { target: { value: 'student-a' } });
+    await reconnect();
+    expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+    await openAssignment();
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+    expect(screen.queryByText('本頁報告.pdf')).toBeNull();
+  });
+
+  it('honors explicit draft discard before reconnecting', async () => {
+    const flags = serveRecovery();
+    render(<TronClassWorkspace />);
+    await editDraft();
+    await expire(flags);
+    fireEvent.click(screen.getByRole('button', { name: '清除保留的草稿' }));
+    await reconnect();
+    expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+    await openAssignment();
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('resumes an uncertain submission as read-only reconciliation without another upload or send', async () => {
+    serveRecovery({ expireSubmit: true });
+    render(<TronClassWorkspace />);
+    await editDraft();
+    fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
+    fireEvent.click(screen.getByLabelText('我已確認課程、作業內容與附件正確'));
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByLabelText('學校密碼');
+    expect(calls('submit')).toHaveLength(1);
+    expect(sessionStorage.length).toBe(1);
+    const operationId = body(calls('submit')[0][1]).operationId;
+    await reconnect();
+    fireEvent.click(await screen.findByRole('button', { name: '繼續編輯保留的草稿' }));
+    await screen.findByRole('heading', { name: '繳交結果待確認' });
+    expect(screen.queryByRole('button', { name: '確認送出到 TronClass' })).toBeNull();
+    expect(calls('submit')).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '查證繳交結果' }));
+    await screen.findByRole('heading', { name: 'TronClass 已確認收到' });
+    expect(body(calls('reconcile')[0][1])).toMatchObject({ operationId, revision: nextRevision });
+    expect(calls('submit')).toHaveLength(1);
+    expect(sessionStorage.length).toBe(0);
   });
 });

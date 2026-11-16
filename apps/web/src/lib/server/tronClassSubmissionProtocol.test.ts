@@ -36,7 +36,7 @@ describe('synthetic new normal submission protocol', () => {
       operationId: 'synthetic-internal-operation', submission_id: 500, is_draft: true, mode: 'multiple' };
     const request = buildTronClassNewSubmission(input);
     uploadIds.push(999);
-    expect(request).toEqual({ method: 'POST', path: '/api/course/activities/202/submissions', body: {
+    expect(request).toEqual({ method: 'POST', schoolPath: '/api/course/activities/202/submissions', body: {
       comment: 'synthetic report', uploads: [602, 601], slides: [], is_draft: false, mode: 'normal',
       other_resources: [], uploads_in_rich_text: [],
     } });
@@ -83,11 +83,11 @@ describe('synthetic new normal submission protocol', () => {
 describe('synthetic root resource metadata and callback protocol', () => {
   it('uses the personal root and the exact observed metadata defaults', () => {
     expect(buildTronClassUploadMetadata({ ...syntheticFile, parent_id: 202 } as TronClassUploadMetadataInput)).toEqual({
-      method: 'POST', path: '/api/uploads', body: { ...syntheticFile, parent_type: null, parent_id: 0,
+      method: 'POST', schoolPath: '/api/uploads', body: { ...syntheticFile, parent_type: null, parent_id: 0,
         is_scorm: false, is_wmpkg: false, source: '', is_marked_attachment: false, embed_material_type: '' },
     });
     expect(buildTronClassUploadCallback(601)).toEqual({
-      method: 'POST', path: '/internal-api/upload/callback/601', body: { file_key: 601 },
+      method: 'POST', schoolPath: '/internal-api/upload/callback/601', body: { file_key: 601 },
     });
   });
 

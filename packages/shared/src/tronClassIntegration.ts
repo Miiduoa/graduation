@@ -6,6 +6,8 @@ export type TronClassBindingStatus = {
   account: string | null;
   userName: string | null;
   expiresAt: string | null;
+  /** Opaque, owner-scoped school identity for in-memory draft recovery only. */
+  studentKey?: string | null;
 };
 
 export type TronClassConnectInput = {

@@ -134,6 +134,45 @@
   gap: 12px;
   margin-top: 22px;
 }
+.assignmentSettings {
+  margin-block: 24px;
+  padding-block: 20px;
+  border-block: 1px solid var(--border);
+}
+.settingsHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: 16px;
+}
+.settingsHeading h3,
+.settingsHeading p {
+  margin: 0 0 14px;
+}
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px 24px;
+  margin: 0 0 16px;
+}
+.settingsGrid dt {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.settingsGrid dd {
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.settingsDetail {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--muted);
+}
 .form fieldset {
   display: grid;
   gap: 12px;

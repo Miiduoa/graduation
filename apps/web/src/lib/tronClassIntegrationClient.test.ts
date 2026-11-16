@@ -18,6 +18,50 @@ describe('TronClass client response boundary', () => {
   const preparation = { source: 'tronclass', schoolId: 'pu', courseId: 1, homeworkId: 2,
     revision: 'a'.repeat(32), title: '作業', description: '', deadline: null, canSubmit: false,
     blockedReason: '尚未開放', maxFiles: 0, maxFileBytes: 0, allowedContentTypes: [], receipt: null, history };
+  const details = { status: 'available', fetchedAt: '2026-11-16T08:00:00.000Z',
+    submissionType: 'individual', mode: 'normal', opensAt: null, deadline: null,
+    isInProgress: true, isClosed: false,
+    attempts: { unlimited: false, limit: 2, used: 2, remaining: 0 },
+    resubmissionOpen: false, retractAllowed: false };
+
+  it('accepts school settings as observations without changing submission authority or an old response', () => {
+    const value = { ...preparation, details };
+    expect(parseTronClassResult('prepare', value, { courseId: 1, homeworkId: 2 })).toEqual(value);
+    expect(value.canSubmit).toBe(false);
+    expect(value.receipt).toBeNull();
+    expect(parseTronClassResult('prepare', preparation, { courseId: 1, homeworkId: 2 })).not.toHaveProperty('details');
+    expect(parseTronClassResult('prepare', { ...preparation, details: { status: 'unavailable' } },
+      { courseId: 1, homeworkId: 2 })).toHaveProperty('details.status', 'unavailable');
+  });
+
+  it.each([
+    null, { status: 'unavailable', attempts: details.attempts },
+    { ...details, mode: ['normal'] }, { ...details, submissionType: ['individual'] },
+    { ...details, isInProgress: 'true' }, { ...details, fetchedAt: 'bad-time' },
+    { ...details, attempts: { ...details.attempts, remaining: 1 } },
+    { ...details, attempts: { ...details.attempts, used: -1 } },
+    { ...details, attempts: { ...details.attempts, unlimited: true } },
+    { ...details, teacher_answers: ['private answer'] },
+  ])('rejects malformed, contradictory or unprojected assignment settings: %j', value => {
+    expect(() => parseTronClassResult('prepare', { ...preparation, details: value }, { courseId: 1, homeworkId: 2 }))
+      .toThrowError('尚未收到可確認的回覆');
+  });
+
+  it('accepts an optional server student key only for a connected school account', () => {
+    const connection = { schoolId: 'pu', connected: true, revision: 'a'.repeat(32),
+      account: 'test-account', userName: null, expiresAt: '2026-11-16T23:00:00.000Z' };
+    expect(parseTronClassResult('status', connection, {})).not.toHaveProperty('studentKey');
+    expect(parseTronClassResult('connect', { ...connection, studentKey: 'b'.repeat(64) }, {}))
+      .toHaveProperty('studentKey', 'b'.repeat(64));
+    expect(parseTronClassResult('disconnect', { ...connection, connected: false, studentKey: null }, {}))
+      .toHaveProperty('studentKey', null);
+    for (const studentKey of ['12345', 'b'.repeat(63), ['b'.repeat(64)], { id: 12345 }]) {
+      expect(() => parseTronClassResult('status', { ...connection, studentKey }, {}))
+        .toThrowError('尚未收到可確認的回覆');
+    }
+    expect(() => parseTronClassResult('status', { ...connection, connected: false, studentKey: 'b'.repeat(64) }, {}))
+      .toThrowError('尚未收到可確認的回覆');
+  });
 
   it('accepts independently typed read-only history without converting it into a receipt', () => {
     expect(parseTronClassResult('prepare', preparation, { courseId: 1, homeworkId: 2 })).toEqual(preparation);

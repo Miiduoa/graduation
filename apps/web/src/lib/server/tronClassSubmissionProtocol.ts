@@ -9,7 +9,8 @@ export const TRONCLASS_PROTOCOL_MAX_PRIOR_SUBMISSIONS = 1_000;
 
 export type TronClassProtocolRequest = {
   method: 'POST';
-  path: string;
+  /** Relative to the fixed school origin; never a nuni navigation route. */
+  schoolPath: string;
   body: Record<string, unknown>;
 };
 
@@ -95,7 +96,7 @@ export function buildTronClassNewSubmission(input: TronClassNewSubmissionInput):
   const comment = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, '<br>');
   return {
-    method: 'POST', path: `/api/course/activities/${input.activityId}/submissions`,
+    method: 'POST', schoolPath: `/api/course/activities/${input.activityId}/submissions`,
     body: { comment, uploads, slides: [], is_draft: false, mode: 'normal', other_resources: [], uploads_in_rich_text: [] },
   };
 }
@@ -104,7 +105,7 @@ export function buildTronClassNewSubmission(input: TronClassNewSubmissionInput):
 export function buildTronClassUploadMetadata(input: TronClassUploadMetadataInput): TronClassProtocolRequest {
   if (!object(input) || !filename(input.name) || !id(input.size) || input.size > TRONCLASS_PROTOCOL_MAX_FILE_BYTES) return invalid();
   return {
-    method: 'POST', path: '/api/uploads',
+    method: 'POST', schoolPath: '/api/uploads',
     body: {
       name: input.name, size: input.size, parent_type: null, parent_id: 0,
       is_scorm: false, is_wmpkg: false, source: '', is_marked_attachment: false, embed_material_type: '',
@@ -115,7 +116,7 @@ export function buildTronClassUploadMetadata(input: TronClassUploadMetadataInput
 /** Only valid after a separately verified S3/WRPC binary transfer; not an uploader. */
 export function buildTronClassUploadCallback(uploadId: number): TronClassProtocolRequest {
   if (!id(uploadId)) return invalid();
-  return { method: 'POST', path: `/internal-api/upload/callback/${uploadId}`, body: { file_key: uploadId } };
+  return { method: 'POST', schoolPath: `/internal-api/upload/callback/${uploadId}`, body: { file_key: uploadId } };
 }
 
 function validContext(value: TronClassAcknowledgmentContext): boolean {

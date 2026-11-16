@@ -7,6 +7,8 @@ export type TronClassConnection = {
   account: string | null;
   userName: string | null;
   expiresAt: string | null;
+  /** Opaque fingerprint for restoring drafts only after the same school identity reconnects. */
+  studentKey?: string | null;
 };
 
 export type TronClassCourseSummary = {
@@ -85,6 +87,28 @@ export type TronClassSubmissionRules =
   | { status: 'unknown' }
   | { status: 'confirmed'; allowsText: boolean; allowsAttachments: boolean; maxTotalBytes: number };
 
+/** Source observations for display; these never authorize a submission. */
+export type TronClassAssignmentDetails =
+  | { status: 'unavailable' }
+  | {
+    status: 'available';
+    fetchedAt: string;
+    submissionType: 'individual' | 'group' | 'unknown';
+    mode: 'normal' | 'multiple' | 'unknown';
+    opensAt: string | null;
+    deadline: string | null;
+    isInProgress: boolean | null;
+    isClosed: boolean | null;
+    attempts: {
+      unlimited: boolean | null;
+      limit: number | null;
+      used: number | null;
+      remaining: number | null;
+    };
+    resubmissionOpen: boolean | null;
+    retractAllowed: boolean | null;
+  };
+
 export type TronClassPreparation = {
   source: 'tronclass';
   schoolId: 'pu';
@@ -101,6 +125,7 @@ export type TronClassPreparation = {
   allowedContentTypes: string[];
   /** Older responses omit this field and must be treated as unconfirmed. */
   rules?: TronClassSubmissionRules;
+  details?: TronClassAssignmentDetails;
   receipt: TronClassSubmissionReceipt | null;
   history?: TronClassSubmissionHistory;
 };

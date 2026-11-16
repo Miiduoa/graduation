@@ -1,4 +1,5 @@
 import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { isTronClassAssignmentDetails } from './tronClassAssignmentDetails';
 import type {
   TronClassConnection,
   TronClassPreparation,
@@ -161,6 +162,8 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       !isNullableText(value.account) ||
       !isNullableText(value.userName) ||
       !(value.expiresAt === null || isTime(value.expiresAt)) ||
+      !(value.studentKey === undefined || value.studentKey === null ||
+        (value.connected === true && typeof value.studentKey === 'string' && /^[a-f0-9]{64}$/.test(value.studentKey))) ||
       (value.connected && (!isRevision(value.revision) || !isText(value.account) || !value.account))
     )
       return invalidResponse();
@@ -273,6 +276,7 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
     if (value.history !== undefined && !isTronClassSubmissionHistory(value.history, {
       courseId: input.courseId as number, homeworkId: input.homeworkId as number,
     })) return invalidResponse();
+    if (value.details !== undefined && !isTronClassAssignmentDetails(value.details)) return invalidResponse();
     if (
       isRecord(value.receipt) &&
       (value.receipt.courseId !== input.courseId || value.receipt.homeworkId !== input.homeworkId)

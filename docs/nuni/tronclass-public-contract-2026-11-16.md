@@ -103,6 +103,18 @@ module `539963` 判斷「已提交」時，同時檢查教師代標、草稿與�
 
 目前沒有真實上傳回應可確認 storage host、presigned URL、有效期、上傳結果或 callback 成功語意。不得因此允許任意 upload_url、把學校 Cookie 轉送到第三方，或把 metadata 建立當成附件上傳完成。正式 writer 仍需固定可信來源及受控環境驗證。
 
+## 本人作業詳細設定的補充定位
+
+同日續作重新比對上表原始資源的 SHA-256，沿用相同公開 client 版本，沒有另外取得真人作業回應。
+
+| 來源定位 | 已確認使用的欄位 |
+| --- | --- |
+| `88788.161d6b6a.js`，module `150664` | 將 `activity` 指定為學生的 `homework`，直接讀 `submit_times`、`user_submit_count`、`non_submit_times`、`is_in_progress`、`is_closed`、`is_resubmit_open`，以總次數減去已用次數顯示剩餘次數 |
+| `55200.e380810d.js`，module `784582` | `homeworkBasics` 讀取頂層 `start_time`、`end_time`、`non_submit_times`、`submit_times`，以及 `data.mode`、`data.allow_retract` |
+| `66297.9aa2f6d5.js`，module `478401`，字元位置約 57744 | `activityApi.getActivity` 的回呼直接使用 `t.non_submit_times`，並以 `parseInt(t.submit_times, 10)` 更新次數；可定位這些資料來自活動 GET 回應 |
+
+續作 reader 將上述設定投影為唯讀 `prepare.details`，缺值維持未知，次數只接受安全整數或嚴格十進位字串，不使用 `parseInt("2x")` 的寬鬆結果。是否重交或撤回仍受其他逐次條件約束；設定為 true 不代表此時任何版本都可操作。沒有根據公開 client 推測附件大小、格式或可寫入權限，也沒有因此改變 `contractVerified: false`。
+
 ## 尚未取得的證據
 
 - 登入後 Cookie 輪替、CSRF、Origin／Referer 與 session 到期時的真實行為。Angular library 有 `XSRF-TOKEN` → `X-XSRF-TOKEN` 預設支援；這不證明校方伺服器一定要求或一定不要求。

@@ -5,12 +5,15 @@ import {
   classifySchoolReadError,
   homeworkDescriptionText,
   homeworkPageAdvance,
+  schoolHttpStatus,
 } from '@campus/shared/src/puLmsReadonly';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import { readTronClassSubmissionHistory } from './tronClassSubmissionHistory';
+import type { TronClassAssignmentDetails } from '../tronClassIntegrationTypes';
+import { readTronClassAssignmentDetails } from './tronClassAssignmentDetails';
 
 export type TronClassSubmissionBinding = {
   schoolId: 'pu';
@@ -43,6 +46,8 @@ export type TronClassAssignment = TronClassHomeworkScope & {
   maxFileBytes: number;
   maxTotalBytes: number;
   allowedContentTypes: string[];
+  /** Read-only source observations, independent of permissionKnown/canSubmit. */
+  details?: TronClassAssignmentDetails;
 };
 
 export type TronClassSourceFile = {
@@ -105,10 +110,11 @@ function numericId(value: unknown): number | null {
 
 async function schoolRead<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); } catch (error) {
-    if (classifySchoolReadError(error) === 'session' ||
-      (error && typeof error === 'object' && 'status' in error && error.status === 401)) {
+    const status = schoolHttpStatus(error);
+    if (classifySchoolReadError(error) === 'session' || status === 401) {
       throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
     }
+    if (status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
     return unavailable();
   }
 }
@@ -140,6 +146,7 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
       for (let page = 1; page <= HOMEWORK_MAX_PAGES; page += 1) {
         const response = await schoolRead(() => source.fetchHomeworkPage(binding.cookies, scope.courseId, page, HOMEWORK_PAGE_SIZE));
         if (!response.ok && response.status === 401) throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
+        if (!response.ok && response.status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
         if (!response.ok || !Array.isArray(response.value.homework_activities)) unavailable();
         const rows = response.value.homework_activities;
         for (const raw of rows) {
@@ -164,11 +171,13 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
       if (!title) unavailable();
       const rawDeadline = found.deadline ?? found.end_time;
       const deadline = typeof rawDeadline === 'string' ? parseTaipeiInstant(rawDeadline) : null;
+      const detail = await readTronClassAssignmentDetails(source, binding, scope);
       return {
-        courseId: scope.courseId, homeworkId: scope.homeworkId, studentId: binding.userId, title,
-        description: homeworkDescriptionText(record(found.data).description ?? found.description),
-        deadline: deadline === null ? null : new Date(deadline).toISOString(),
-        opensAt: null, permissionKnown: false, individual: false, canSubmit: false,
+        courseId: scope.courseId, homeworkId: scope.homeworkId, studentId: binding.userId, title: detail.title ?? title,
+        description: detail.description ?? homeworkDescriptionText(record(found.data).description ?? found.description),
+        deadline: detail.details.status === 'available' ? detail.details.deadline : deadline === null ? null : new Date(deadline).toISOString(),
+        opensAt: detail.details.status === 'available' ? detail.details.opensAt : null,
+        details: detail.details, permissionKnown: false, individual: false, canSubmit: false,
         isClosed: true, allowLate: false, remainingAttempts: null,
         allowsText: false, allowsAttachments: false,
         maxFiles: 0, maxFileBytes: 0, maxTotalBytes: 0, allowedContentTypes: [],

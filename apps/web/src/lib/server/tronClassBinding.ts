@@ -129,6 +129,7 @@ function publicStatus(row: StoredBinding | null, now: number): TronClassBindingS
     account: linked ? row!.account! : null,
     userName: linked ? row!.userName ?? null : null,
     expiresAt: linked ? new Date(row!.expiresAt!).toISOString() : null,
+    studentKey: null,
   };
 }
 
@@ -193,9 +194,16 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
         if (error instanceof NuniError && error.code === 'TRONCLASS_RECONNECT_REQUIRED') return { ...status, connected: false };
         throw error;
       }
+      return { ...status, studentKey: studentKey(row!) };
     }
     return status;
   };
+
+  // Stable only for the same verified school student and nuni owner. Neither
+  // the supplied account spelling nor a numeric school ID is exposed as a key.
+  const studentKey = (row: StoredBinding): string => createHmac('sha256', key())
+    .update(JSON.stringify(['tronclass-draft-student:v1', row.ownerKey, row.schoolId, row.userId]))
+    .digest('hex');
 
   const connect = async (ownerKey: string, input: TronClassConnectInput): Promise<TronClassBindingStatus> => {
     checkedOwner(ownerKey);
@@ -261,7 +269,8 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       transaction.set(ref, row);
     });
     await assertCurrent(ownerKey, revision);
-    return publicStatus(row, now());
+    const status = publicStatus(row, now());
+    return { ...status, studentKey: status.connected ? studentKey(row) : null };
   };
 
   const disconnect = async (ownerKey: string, expectedRevision: string | null): Promise<TronClassBindingStatus> => {

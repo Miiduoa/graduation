@@ -35,6 +35,7 @@ describe('production TronClass submission source is read-only until its contract
       permissionKnown: false, individual: false, canSubmit: false, isClosed: true,
       allowLate: false, remainingAttempts: null, allowsText: false, allowsAttachments: false,
       maxFiles: 0, maxFileBytes: 0, maxTotalBytes: 0, allowedContentTypes: [],
+      details: { status: 'unavailable' },
     });
     expect(reads.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'ongoing' });
     expect(reads.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'upcoming' });
@@ -121,5 +122,64 @@ describe('production TronClass submission source is read-only until its contract
     await expect(source.listSubmissions(binding, scope)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
     expect(reads.fetchCourses).not.toHaveBeenCalled();
     expect(reads.fetchHomeworkPage).not.toHaveBeenCalled();
+  });
+
+  it('uses current activity details for display without granting submission permission', async () => {
+    const { reads, source } = fixture();
+    reads.fetchHomeworkActivity = vi.fn(async () => ({ ok: true as const, value: {
+      id: 202, course_id: 101, type: 'homework', title: '更新後的作業', published: true,
+      start_time: '2026-11-18 09:30:00', end_time: '2026-11-25 23:59:00', submit_by_group: false,
+      is_in_progress: true, is_closed: false, non_submit_times: false, submit_times: 3, user_submit_count: 1,
+      data: { mode: 'normal', description: '<p>以最新要求為準。</p>', allow_retract: true, reference_answer: 'private answer' },
+      can_submit: true, allow_submission: true,
+    } }));
+    const result = await source.getAssignment(binding, scope);
+    expect(result).toMatchObject({ title: '更新後的作業', description: '以最新要求為準。',
+      opensAt: '2026-11-18T01:30:00.000Z', deadline: '2026-11-25T15:59:00.000Z',
+      permissionKnown: false, canSubmit: false, remainingAttempts: null,
+      details: { status: 'available', submissionType: 'individual', mode: 'normal',
+        attempts: { unlimited: false, limit: 3, used: 1, remaining: 2 } } });
+    expect(reads.fetchHomeworkActivity).toHaveBeenCalledWith(binding.cookies, 202);
+    expect(JSON.stringify(result)).not.toContain('private answer');
+    expect(source.contractVerified).toBe(false);
+  });
+
+  it('preserves the independently authorized summary when activity detail is temporarily unavailable', async () => {
+    const { reads, source } = fixture();
+    reads.fetchHomeworkActivity = vi.fn(async () => ({ ok: false as const, status: 503 }));
+    expect(await source.getAssignment(binding, scope)).toMatchObject({ title: '專題報告',
+      description: '請繳交報告。', deadline: homework.deadline, details: { status: 'unavailable' }, canSubmit: false });
+  });
+
+  it('clears an old summary description and deadline when the current source explicitly clears them', async () => {
+    const { reads, source } = fixture();
+    reads.fetchHomeworkActivity = vi.fn(async () => ({ ok: true as const, value: {
+      id: 202, course_id: 101, type: 'homework', title: '專題報告', data: { description: '' }, end_time: null,
+    } }));
+    expect(await source.getAssignment(binding, scope)).toMatchObject({ description: '', deadline: null,
+      details: { status: 'available', deadline: null } });
+  });
+
+  it('never reads detailed activity data before checking course ownership', async () => {
+    const { reads, source } = fixture();
+    reads.fetchHomeworkActivity = vi.fn();
+    await expect(source.getAssignment(binding, { ...scope, courseId: 999 })).rejects.toMatchObject({ code: 'TRONCLASS_COURSE_ACCESS_DENIED' });
+    expect(reads.fetchHomeworkActivity).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { id: 999 }, { course_id: 999 }, { type: 'exam' }, { is_hidden: true }, { published: false },
+  ])('does not return stale summary content when current activity scope or visibility has changed: %j', async (change) => {
+    const { reads, source } = fixture();
+    reads.fetchHomeworkActivity = vi.fn(async () => ({ ok: true as const, value: {
+      id: 202, course_id: 101, type: 'homework', ...change,
+    } }));
+    await expect(source.getAssignment(binding, scope)).rejects.toMatchObject({ status: expect.any(Number) });
+  });
+
+  it.each([401, 403, 404])('does not turn a definitive activity %s denial into usable summary details', async (status) => {
+    const { reads, source } = fixture();
+    reads.fetchHomeworkActivity = vi.fn(async () => ({ ok: false as const, status }));
+    await expect(source.getAssignment(binding, scope)).rejects.toMatchObject({ status });
   });
 });

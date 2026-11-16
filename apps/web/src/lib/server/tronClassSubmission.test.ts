@@ -2,6 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
+import { normalizeTronClassAssignmentDetails } from './tronClassAssignmentDetails';
+import { createTronClassSubmissionSource } from './tronClassSubmissionSource';
+import type { LmsReadonlySource } from './tronClassLmsSource';
 import {
   createTronClassSubmissionService,
   TRONCLASS_MAX_FILE_BYTES,
@@ -123,6 +126,37 @@ function closeOwner(rows: Map<string, Record<string, unknown>>) {
 }
 
 describe('TronClass submission orchestration (injected verified source only)', () => {
+  it('returns source details independently of write rules without granting a production writer', async () => {
+    const f = fixture();
+    const details = normalizeTronClassAssignmentDetails({ id: SCOPE.homeworkId, course_id: SCOPE.courseId,
+      type: 'homework', submit_by_group: false, is_in_progress: true, is_closed: false,
+      non_submit_times: false, submit_times: 2, user_submit_count: 0, data: { mode: 'normal' },
+    }, SCOPE, NOW).details;
+    Object.assign(f.assignment, { details, permissionKnown: false, canSubmit: false });
+    f.source.contractVerified = false;
+    const result = await f.service.prepare(OWNER, SCOPE);
+    expect(result).toMatchObject({ details, rules: { status: 'unknown' }, canSubmit: false, receipt: null });
+    expect(f.source.listSubmissions).not.toHaveBeenCalled();
+    expect(f.source.submit).not.toHaveBeenCalled();
+    expect(f.source.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed details from a provider before returning preparation', async () => {
+    const f = fixture();
+    Object.assign(f.assignment, { details: { status: 'available', raw: 'private server response' } });
+    await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(f.source.listSubmissions).not.toHaveBeenCalled();
+  });
+
+  it('discards detailed activity data when the binding changes during the source read', async () => {
+    const f = fixture();
+    vi.mocked(f.source.getAssignment).mockImplementationOnce(async () => {
+      f.rebind();
+      return { ...f.assignment, details: { status: 'unavailable' } };
+    });
+    await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  });
+
   it('preserves confirmed zero attachment limits for a text-only assignment', async () => {
     const f = fixture();
     Object.assign(f.assignment, { allowsAttachments: false, maxFiles: 0, maxFileBytes: 0, maxTotalBytes: 0 });
@@ -194,6 +228,7 @@ describe('TronClass submission orchestration (injected verified source only)', (
     { status: 401, code: 'TRONCLASS_RECONNECT_REQUIRED' },
     { status: 409, code: 'TRONCLASS_BINDING_CHANGED' },
     { status: 401, code: 'SIGN_IN_REQUIRED' },
+    { status: 404, code: 'TRONCLASS_HOMEWORK_NOT_FOUND' },
   ])('surfaces expired or replaced sessions while preparing receipt reads: %j', async ({ status, code }) => {
     const f = fixture();
     vi.mocked(f.source.listSubmissions).mockRejectedValueOnce(new NuniError(status, code));
@@ -261,6 +296,70 @@ describe('TronClass submission orchestration (injected verified source only)', (
     f.source.contractVerified = false;
     f.source.readSubmissionHistory = vi.fn(async () => { throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED'); });
     await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ status: 401, code: 'TRONCLASS_RECONNECT_REQUIRED' });
+  });
+
+  it.each([
+    { read: 2, status: 404 }, { read: 2, status: 410 }, { read: 2, hidden: true },
+    { read: 3, status: 404 }, { read: 3, status: 410 }, { read: 3, hidden: true },
+  ])('discards earlier visible details when a later activity read denies access: %j', async denial => {
+    const f = fixture();
+    const activity = { id: SCOPE.homeworkId, course_id: SCOPE.courseId, type: 'homework',
+      title: 'Earlier visible title', published: true, submit_by_group: false,
+      data: { description: 'Earlier visible instructions', mode: 'normal' } };
+    let reads = 0;
+    const source: LmsReadonlySource = {
+      fetchCourses: vi.fn(async (_cookies, options) => options.status === 'ongoing' ? [{ id: SCOPE.courseId }] : []),
+      fetchHomeworkPage: vi.fn(async () => ({ ok: true as const, value: { homework_activities: [activity], total: 1 } })),
+      fetchHomeworkActivity: vi.fn(async () => {
+        reads += 1;
+        if (reads !== denial.read) return { ok: true as const, value: activity };
+        return denial.hidden ? { ok: true as const, value: { ...activity, hidden: true } }
+          : { ok: false as const, status: denial.status! };
+      }),
+      fetchStudentSubmissionList: vi.fn(async () => ({ ok: true as const, value: { list: [] } })),
+      fetchActivities: vi.fn(), fetchCourseAnnouncements: vi.fn(), fetchSiteAnnouncements: vi.fn(),
+    };
+    Object.assign(f.source, createTronClassSubmissionSource(source));
+    const delivered = vi.fn();
+    await expect(f.service.prepare(OWNER, SCOPE).then(delivered)).rejects.toMatchObject({
+      status: 404, code: 'TRONCLASS_HOMEWORK_NOT_FOUND',
+    });
+    expect(delivered).not.toHaveBeenCalled();
+    expect(source.fetchHomeworkActivity).toHaveBeenCalledTimes(denial.read);
+    expect(source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+    expect(f.rows.size).toBe(0);
+  });
+
+  it.each(['courses', 'homework'] as const)('discards earlier details after a later %s membership check returns 403', async stage => {
+    const f = fixture();
+    const activity = { id: SCOPE.homeworkId, course_id: SCOPE.courseId, type: 'homework',
+      title: 'Earlier visible title', published: true, submit_by_group: false,
+      data: { description: 'Earlier visible instructions' } };
+    let courseReads = 0;
+    let homeworkReads = 0;
+    const source: LmsReadonlySource = {
+      fetchCourses: vi.fn(async (_cookies, options) => {
+        courseReads += 1;
+        if (stage === 'courses' && courseReads > 2) throw Object.assign(new Error('source denied'), { status: 403 });
+        return options.status === 'ongoing' ? [{ id: SCOPE.courseId }] : [];
+      }),
+      fetchHomeworkPage: vi.fn(async () => {
+        homeworkReads += 1;
+        return stage === 'homework' && homeworkReads > 1 ? { ok: false as const, status: 403 }
+          : { ok: true as const, value: { homework_activities: [activity], total: 1 } };
+      }),
+      fetchHomeworkActivity: vi.fn(async () => ({ ok: true as const, value: activity })),
+      fetchStudentSubmissionList: vi.fn(async () => ({ ok: true as const, value: { list: [] } })),
+      fetchActivities: vi.fn(), fetchCourseAnnouncements: vi.fn(), fetchSiteAnnouncements: vi.fn(),
+    };
+    Object.assign(f.source, createTronClassSubmissionSource(source));
+    const delivered = vi.fn();
+    await expect(f.service.prepare(OWNER, SCOPE).then(delivered)).rejects.toMatchObject({
+      status: 403, code: 'TRONCLASS_COURSE_ACCESS_DENIED',
+    });
+    expect(delivered).not.toHaveBeenCalled();
+    expect(source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+    expect(f.rows.size).toBe(0);
   });
 
   it.each([

@@ -148,7 +148,7 @@ describe('read-only student submission history', () => {
     expect(source.fetchStudentSubmissionList).not.toHaveBeenCalled();
   });
 
-  it.each([{ id: 999 }, { course_id: 999 }, { type: 'exam' }, { published: false }, { submit_by_group: undefined }])(
+  it.each([{ id: 999 }, { course_id: 999 }, { type: 'exam' }, { submit_by_group: undefined }])(
     'requires a visible owned individual homework activity before listing: %j', async change => {
       const { source } = fixture();
       vi.mocked(source.fetchHomeworkActivity!).mockResolvedValueOnce({ ok: true, value: { ...activity, ...change } });
@@ -156,6 +156,47 @@ describe('read-only student submission history', () => {
       expect(source.fetchStudentSubmissionList).not.toHaveBeenCalled();
     },
   );
+
+  it.each([{ published: false }, { hidden: true }, { is_hidden: 1 }])(
+    'preserves an explicit visibility denial for the enclosing preparation: %j', async flags => {
+      const { source } = fixture();
+      vi.mocked(source.fetchHomeworkActivity!).mockResolvedValueOnce({ ok: true, value: { ...activity, ...flags } });
+      await expect(readTronClassSubmissionHistory(source, binding, scope, now)).rejects.toMatchObject({
+        status: 404, code: 'TRONCLASS_HOMEWORK_NOT_FOUND',
+      });
+      expect(source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([404, 410])('preserves a removed activity status %s, including a thrown transport response', async status => {
+    const { source } = fixture();
+    vi.mocked(source.fetchHomeworkActivity!).mockResolvedValueOnce({ ok: false, status });
+    await expect(readTronClassSubmissionHistory(source, binding, scope, now)).rejects.toMatchObject({
+      status: 404, code: 'TRONCLASS_HOMEWORK_NOT_FOUND',
+    });
+    vi.mocked(source.fetchHomeworkActivity!).mockRejectedValueOnce(Object.assign(new Error('private upstream text'), { status }));
+    await expect(readTronClassSubmissionHistory(source, binding, scope, now)).rejects.toMatchObject({
+      status: 404, code: 'TRONCLASS_HOMEWORK_NOT_FOUND',
+    });
+    expect(source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+  });
+
+  it('does not mistake a missing history endpoint for revocation of the visible activity', async () => {
+    const { source } = fixture();
+    vi.mocked(source.fetchStudentSubmissionList!).mockResolvedValueOnce({ ok: false, status: 404 });
+    await expect(readTronClassSubmissionHistory(source, binding, scope, now)).rejects.toMatchObject({
+      status: 502, code: 'TRONCLASS_HISTORY_UNAVAILABLE',
+    });
+  });
+
+  it.each(['activity', 'history'] as const)('preserves a thrown HTTP 403 from the %s source', async target => {
+    const { source } = fixture();
+    vi.mocked(target === 'activity' ? source.fetchHomeworkActivity! : source.fetchStudentSubmissionList!)
+      .mockRejectedValueOnce(Object.assign(new Error('private upstream text'), { status: 403 }));
+    await expect(readTronClassSubmissionHistory(source, binding, scope, now)).rejects.toMatchObject({
+      status: 403, code: 'TRONCLASS_COURSE_ACCESS_DENIED',
+    });
+  });
 
   it('does not substitute a personal history for a group assignment', async () => {
     const { source } = fixture();

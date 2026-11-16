@@ -264,7 +264,7 @@ export function createTronClassTextSubmissionCandidate(dependencies: {
         // Concurrent calls on this candidate cannot both dispatch after await.
         if (attempted) fail(409, 'TRONCLASS_CANDIDATE_ALREADY_DISPATCHED');
         attempted = true;
-        const response = await fetchSchool(`${ORIGIN}${request.path}`, {
+        const response = await fetchSchool(`${ORIGIN}${request.schoolPath}`, {
           method: request.method, body, headers, redirect: 'manual', cache: 'no-store', signal: controller.signal,
         });
         checkCancelled();

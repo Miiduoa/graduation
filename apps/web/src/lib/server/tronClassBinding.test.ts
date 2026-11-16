@@ -58,10 +58,11 @@ afterEach(() => vi.unstubAllEnvs());
 describe('independent TronClass binding', () => {
   it('connects a platform account without a portal or membership, stores only encrypted cookies, and grants no role', async () => {
     const { service, docs, login } = setup();
-    expect(await service.getStatus(OWNER)).toEqual({ schoolId: 'pu', connected: false, revision: null, account: null, userName: null, expiresAt: null });
+    expect(await service.getStatus(OWNER)).toEqual({ schoolId: 'pu', connected: false, revision: null, account: null, userName: null, expiresAt: null, studentKey: null });
     const status = await service.connect(OWNER, input());
     expect(status).toMatchObject({ connected: true, account: '410123456', userName: '學生甲' });
     expect(status.revision).toMatch(/^[a-f0-9]{32}$/);
+    expect(status.studentKey).toMatch(/^[a-f0-9]{64}$/);
     expect(login).toHaveBeenCalledWith('410123456', PASSWORD, expect.objectContaining({ route: 'student' }));
     expect(await service.requireBinding(OWNER)).toMatchObject({ revision: status.revision, userId: 123, cookies: SOURCE_COOKIES });
     const persisted = JSON.stringify([...docs]);
@@ -84,6 +85,30 @@ describe('independent TronClass binding', () => {
     await service.assertCurrent(OWNER, linked.revision!);
   });
 
+  it('keeps the draft identity stable across a new revision and account spelling only for the same verified student', async () => {
+    const { service, login } = setup();
+    const first = await service.connect(OWNER, input());
+    const sameStudent = await service.connect(OWNER, input(first.revision, 's410123456@pu.edu.tw'));
+    expect(sameStudent.revision).not.toBe(first.revision);
+    expect(sameStudent.studentKey).toBe(first.studentKey);
+    login.mockResolvedValueOnce({ ...loginResult(), userId: 999 });
+    const otherStudent = await service.connect(OWNER, input(sameStudent.revision, 's410123456@pu.edu.tw'));
+    expect(otherStudent.studentKey).not.toBe(first.studentKey);
+    expect(JSON.stringify(otherStudent)).not.toContain('userId');
+  });
+
+  it('scopes the opaque draft identity to its nuni owner and secret', async () => {
+    const { service, db, login, clock } = setup();
+    const first = await service.connect(OWNER, input());
+    const otherOwner = await service.connect('firebase:other-owner', input());
+    expect(otherOwner.studentKey).not.toBe(first.studentKey);
+    const rotated = createTronClassBindingService({ db, login, now: () => clock.value,
+      encryptionSecret: `${SECRET}-rotated` });
+    expect(await rotated.getStatus(OWNER)).toMatchObject({ connected: false, studentKey: null });
+    const afterRotation = await rotated.connect(OWNER, input(first.revision));
+    expect(afterRotation.studentKey).not.toBe(first.studentKey);
+  });
+
   it('rejects a ciphertext transplanted to a different owner', async () => {
     const { service, docs } = setup();
     await service.connect(OWNER, input());
@@ -91,7 +116,7 @@ describe('independent TronClass binding', () => {
     const row = docs.get(bindingPath())!;
     docs.set(bindingPath(otherOwner), { ...row, ownerKey: otherOwner });
     await expect(service.requireBinding(otherOwner)).rejects.toMatchObject({ status: 401, code: 'TRONCLASS_RECONNECT_REQUIRED' });
-    expect(await service.getStatus(otherOwner)).toMatchObject({ connected: false });
+    expect(await service.getStatus(otherOwner)).toMatchObject({ connected: false, studentKey: null });
   });
 
   it('rejects a ciphertext transplanted across revisions for the same owner', async () => {
@@ -106,7 +131,7 @@ describe('independent TronClass binding', () => {
     const { service, docs } = setup();
     const status = await service.connect(OWNER, input());
     const unlinked = await service.disconnect(OWNER, status.revision);
-    expect(unlinked).toMatchObject({ connected: false, account: null, userName: null, expiresAt: null });
+    expect(unlinked).toMatchObject({ connected: false, account: null, userName: null, expiresAt: null, studentKey: null });
     expect(unlinked.revision).not.toBe(status.revision);
     expect(docs.get(bindingPath())).not.toHaveProperty('sealedCookies');
     await expect(service.requireBinding(OWNER)).rejects.toMatchObject({ status: 401 });
@@ -119,7 +144,7 @@ describe('independent TronClass binding', () => {
     const { service, clock } = setup();
     const status = await service.connect(OWNER, input());
     clock.value += TRONCLASS_BINDING_TTL_MS;
-    expect(await service.getStatus(OWNER)).toMatchObject({ connected: false, account: '410123456', revision: status.revision });
+    expect(await service.getStatus(OWNER)).toMatchObject({ connected: false, account: '410123456', revision: status.revision, studentKey: null });
     await expect(service.requireBinding(OWNER)).rejects.toMatchObject({ status: 401 });
     await expect(service.assertCurrent(OWNER, status.revision!)).rejects.toMatchObject({ status: 401 });
   });
