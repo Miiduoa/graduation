@@ -1146,8 +1146,9 @@ describe('HTML named entities must not expose explicitly hidden answer tables', 
     '<section style="color:red&semi;visibility&colon;hidden">',
     '<aside style="display&Tab;&colon;none">',
     '<div style="display&colon;none&semi;display&colon;block&semi;display&colon;none">',
-    '<div style="display&colon;none&semi;display&colon;block&excl;important">',
     '<section style="display&colon;none&excl;important&semi;display&colon;block">',
+    // Equally important declarations use the last one: here it is hidden.
+    '<div style="display&colon;block&excl;important&semi;display&colon;none&excl;important">',
   ])('keeps unpublished rows private when the HTML attribute is %s', (opening) => {
     const tag = /^<([a-z]+)/u.exec(opening)?.[1] ?? 'div';
     const source = [
@@ -1163,6 +1164,9 @@ describe('HTML named entities must not expose explicitly hidden answer tables', 
 
   it.each([
     '<div style="display&colon;none&semi;display&colon;block">',
+    // The later important display:block wins; these rows are actually visible.
+    '<div style="display&colon;none&semi;display&colon;block&excl;important">',
+    '<div style="display&colon;none&excl;important&semi;display&colon;block&excl;important">',
     '<section style="display&amp;colon;none">',
     '<aside style="display&#38;colon;none">',
     '<div title="display&colon;none" style="display:block">',

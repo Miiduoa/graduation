@@ -1435,3 +1435,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修正教材 HTML 內嵌樣式使用 `&colon;`、`&semi;`、`&Tab;` 或 `&excl;` 等有效命名字元參照時，原文表格掃描器因只解碼數字參照而未辨識 `display:none`／`visibility:hidden`，可能將隱藏的教師答案錯當公開可比較表格的問題。僅在分析來源的暫存屬性字串解碼，不變更使用者教材。
 - 命名實體及既有十進位／十六進位參照只做**一次**解碼，避免 `&amp;colon;`、`&#38;colon;` 之類原本非隱藏的可見內容被誤判。新增 6 組隱藏與 4 組可見的來源表格回歸測試，保留原文行號與資料列；不新增套件、模型 API 或傳送私人教材，不改 v1/v2 閱讀進度及 v1 練習 checkpoint 格式。
 - 此修補目前只屬程式與可執行單元測試，並非瀏覽器／真機對 CSS 可見性的完整證明。必須以本輪新 SHA 的 CI、CodeQL、指定 App 5504170 APPROVED 及 iOS／Android／Maestro 實機驗證；Ahaboard 同教材、同題目、同裝置對照未完成前維持 PR Draft，不合併、不部署。
+
+
+### 2026-11-17：修復 CSS important 覆寫的來源表格測試誤判
+
+- 精確前版 head `4e86896534b2853f5d5d1d947f5565f850de4341` 的 Web Tests job 133408123430 在 `studySourceTables.test.ts` 失敗 1 項：`display:none;display:block!important` 應依 CSS cascade 顯示，但新測試誤當為隱藏答案（來源掃描器的實際行為正確）。本輪將該個案移至「可見教材」案例，並補上兩個同等 `!important` 依最後宣告決定可見／隱藏的回歸案例，避免為滿足錯誤測試而把正常教材隱藏。
+- 本輪僅修正測試預期及驗證覆寫優先順序，沒有更動來源掃描器、私人教材或 v1/v2 閱讀／v1 練習 checkpoint；正式 Vitest、全套 CI/CodeQL 及指定 App 5504170 APPROVED 均須以新的精確 commit 核實。Maestro、iOS/Android 真機及 Ahaboard 同教材同題同裝置比較未有足夠證據時 PR 保持 Draft，不合併、不部署。
