@@ -64,6 +64,57 @@ async function open() {
   return screen.getByRole('dialog', { name: '校園空間導覽' });
 }
 
+it('delays hidden-tab WebGL startup and its 12-second deadline until the tour is visible', async () => {
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(within(dialog).getByText(/正在開啟空間導覽/)).toBeTruthy();
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+
+    // Mobile restoration can fire pageshow while the document is still hidden.
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).not.toHaveBeenCalled();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(true);
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).getAttribute('data-spatial-state')).toBeNull();
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).getAttribute('tabindex')).toBe('0');
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timerSpy.mockRestore();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
+it('does not start hidden-tab WebGL after the spatial dialog is closed', async () => {
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(scene.create).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    await act(async () => {
+      fireEvent(document, new Event('visibilitychange'));
+      fireEvent(window, new Event('pageshow'));
+      await Promise.resolve();
+    });
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  } finally {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
 it('opens graphics only on request, uses the current places, and leaves selection unchanged on close', async () => {
   const onSelect = vi.fn();
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={onSelect} />);
