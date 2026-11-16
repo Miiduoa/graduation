@@ -69,6 +69,29 @@ it('treats a failed subscription read as unavailable, not an empty subscription 
   expect(screen.queryByRole('button', { name: '訂閱' })).toBeNull();
 });
 
+it('explains an unmatched board search and returns focus to all loaded boards without refetching', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic' },
+    { id: 'arts', name: '人文討論', type: 'topic' },
+  ]);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('link', { name: /科學討論/ });
+  const search = screen.getByRole('searchbox', { name: '搜尋看板' });
+  fireEvent.change(search, { target: { value: '不存在的研究社' } });
+  expect(screen.getByText('找不到符合「不存在的研究社」的看板。')).toBeTruthy();
+  expect(screen.queryByText('尚無任何看板')).toBeNull();
+  expect(screen.queryByRole('link', { name: /科學討論/ })).toBeNull();
+  const initialReads = mocks.list.mock.calls.length;
+  const clear = screen.getByRole('button', { name: '清除搜尋' });
+  clear.focus();
+  fireEvent.click(clear);
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('link', { name: /科學討論/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /人文討論/ })).toBeTruthy();
+  expect(mocks.list).toHaveBeenCalledTimes(initialReads);
+});
+
 it('does not send ordinary members into a board creation flow they cannot use', async () => {
   mocks.list.mockResolvedValue([]);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
