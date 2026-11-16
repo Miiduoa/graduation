@@ -126,6 +126,69 @@ it('pages homework until total and does not treat a later 500 as an empty course
   ]);
 });
 
+it('retries incomplete homework after a short TTL, including legacy cache entries', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+
+  const first = await (await request()).json();
+  expect(first.result.homework).toEqual([]);
+  expect(first.result.courseErrors).toEqual([
+    expect.objectContaining({ area: 'homework', status: 503 }),
+  ]);
+  const cached = store.docs.get(CACHE)!;
+  const shortTtl = Date.parse(cached.snapshot.cache.expiresAt) - Date.parse(cached.snapshot.fetchedAt);
+  expect(shortTtl).toBeGreaterThan(58_000);
+  expect(shortTtl).toBeLessThanOrEqual(60_000);
+
+  const immediate = await (await request()).json();
+  expect(immediate.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+
+  // An older release stored incomplete homework for ten minutes. Its expiry
+  // alone must not prevent retrying the now-recovered school source.
+  cached.snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  cached.snapshot.cache.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  cached.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS);
+  const recovered = await (await request()).json();
+  expect(recovered.result.cache.hit).toBe(false);
+  expect(recovered.result.homework).toHaveLength(2);
+  expect(recovered.result.courseErrors).toEqual([]);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+  const renewed = store.docs.get(CACHE)!.snapshot;
+  expect(Date.parse(renewed.cache.expiresAt) - Date.parse(renewed.fetchedAt))
+    .toBeGreaterThan(580_000);
+});
+
+it('retries an incomplete upcoming-course list without discarding current homework', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchCourses)
+    .mockResolvedValueOnce([LMS_FIXTURE_COURSE])
+    .mockRejectedValueOnce(new Error('upcoming course source unavailable'));
+
+  const first = await (await request()).json();
+  expect(first.result.homework).toHaveLength(2);
+  expect(first.result.upcomingCoursesError).toEqual({ status: null });
+  const stored = store.docs.get(CACHE)!;
+  expect(Date.parse(stored.snapshot.cache.expiresAt) - Date.parse(stored.snapshot.fetchedAt))
+    .toBeLessThanOrEqual(60_000);
+
+  const immediate = await (await request()).json();
+  expect(immediate.result.cache.hit).toBe(true);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+
+  // Simulate an old partial cache with its ten-minute expiry still intact.
+  stored.snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  stored.snapshot.cache.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  stored.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS);
+  const recovered = await (await request()).json();
+  expect(recovered.result.cache.hit).toBe(false);
+  expect(recovered.result.homework).toHaveLength(2);
+  expect(recovered.result.upcomingCoursesError).toBeNull();
+  expect(source.fetchCourses).toHaveBeenCalledTimes(4);
+  expect(Date.parse(store.docs.get(CACHE)!.snapshot.cache.expiresAt) -
+    Date.parse(store.docs.get(CACHE)!.snapshot.fetchedAt)).toBeGreaterThan(580_000);
+});
+
 it('keeps the page up when one course feature returns 500', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchCourseAnnouncements).mockResolvedValueOnce({ ok: false, status: 500 });
