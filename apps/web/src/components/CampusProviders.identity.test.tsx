@@ -1,3 +1,9 @@
+const profileRead = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/firebase', () => ({ getDb: () => ({}) }));
+vi.mock('firebase/firestore', () => ({
+  doc: (_db: unknown, collection: string, uid: string) => `${collection}/${uid}`,
+  getDoc: profileRead,
+}));
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -53,6 +59,7 @@ afterEach(() => {
   }
 });
 beforeEach(() => {
+  profileRead.mockReset().mockResolvedValue({ get: () => undefined });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); },
@@ -83,7 +90,7 @@ for (const kind of ['platform', 'firebase'] as const) {
     view.rerender(<View />);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect((screen.getByLabelText('草稿') as HTMLInputElement).value).toBe('');
-    expect(screen.getByText('school-a')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('school-a')).toBeTruthy());
     expect(replace).not.toHaveBeenCalled();
   });
 }

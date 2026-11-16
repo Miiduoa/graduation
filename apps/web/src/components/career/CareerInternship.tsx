@@ -16,12 +16,29 @@ import {
   type InternshipCommand,
 } from '@campus/shared/src/careerInternship';
 import styles from './CareerWorkstudy.module.css';
+const OperationFeedback = React.createContext<{
+  error: string;
+  target: string;
+  notice: string;
+  select: (target: string) => void;
+}>({
+  error: '',
+  target: '',
+  notice: '',
+  select: () => {},
+});
+// Keep the triggering control stable across list polls and record revision updates.
+const OperationScope = React.createContext('page');
 type Children = { children: React.ReactNode };
 function Box({ children }: Children) {
   return <div className={styles.stack}>{children}</div>;
 }
-function Card({ children }: Children) {
-  return <section className={styles.card}>{children}</section>;
+function Card({ children, testID }: Children & { testID?: string }) {
+  return (
+    <section data-testid={testID} className={styles.card}>
+      {children}
+    </section>
+  );
 }
 function Heading({ children }: Children) {
   return <h2>{children}</h2>;
@@ -34,32 +51,49 @@ function AlertText({ children }: Children) {
 }
 function Button({
   label,
+  actionId,
   onPress,
   disabled,
 }: {
   label: string;
+  actionId?: string;
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const feedback = React.useContext(OperationFeedback);
+  const scope = React.useContext(OperationScope);
+  const id = `${scope}:${actionId || label}`;
   return (
-    <button type="button" disabled={disabled} onClick={onPress}>
-      {label}
-    </button>
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          feedback.select(id);
+          onPress();
+        }}
+      >
+        {label}
+      </button>
+      {feedback.target === id && feedback.error && <AlertText>{feedback.error}</AlertText>}
+    </>
   );
 }
 function Field({
   label,
   value,
   onChange,
+  type,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  type?: string;
 }) {
   return (
     <label className={styles.field}>
       {label}
-      <input value={value} onChange={(e) => onChange(e.target.value)} />
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
 }
@@ -84,6 +118,15 @@ type Props = {
   onAddCalendar: (item: InternshipCalendarItem) => Promise<unknown>;
 };
 const newId = () => `i${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+function needsReview(record: InternshipRecord) {
+  if (record.confirmed) return false;
+  const progress = internshipProgress(record);
+  return (
+    record.documents.some((d) => d.submitted && !d.verified) ||
+    record.hours.some((h) => !h.verified) ||
+    (progress.next < 0 && progress.verified >= progress.required)
+  );
+}
 export function CareerInternship(props: Props) {
   return <Content key={`${props.schoolId}:${props.ownerKey}:${props.audience}`} {...props} />;
 }
@@ -91,6 +134,9 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   const [snapshot, setSnapshot] = useState<InternshipSnapshot | null>(null);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [errorTarget, setErrorTarget] = useState('');
+  const pendingTarget = useRef('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -100,6 +146,12 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
   const [organization, setOrganization] = useState('');
   const [teacher, setTeacher] = useState('');
   const [teacherUid, setTeacherUid] = useState('');
+  const [advisorKeyword, setAdvisorKeyword] = useState('');
+  const [advisors, setAdvisors] = useState<NonNullable<InternshipSnapshot['advisors']>>([]);
+  const [advisorSearched, setAdvisorSearched] = useState(false);
+  const advisorSearchStarted = useRef(false);
+  const [selectedRuleId, setSelectedRuleId] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [ruleDraft, setRuleDraft] = useState<InternshipRule | null>(null);
   useEffect(() => {
     active.current = true;
@@ -119,7 +171,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
       const timeout = (readTimeout = setTimeout(() => {
         current.abort();
         if (live) {
-          setError('讀取實習進度逾時，請重新整理。');
+          setLoadError('讀取實習進度逾時，請重新整理。');
           controller = null;
         }
       }, 15000));
@@ -127,12 +179,14 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         const result = await service.load(audience, { signal: current.signal });
         if (live && !current.signal.aborted) {
           setSnapshot(result);
-          setError('');
+          if (audience === 'student' && !advisorSearchStarted.current && result.advisors?.length)
+            setAdvisors((current) => (current.length ? current : result.advisors!));
+          setLoadError('');
         }
       } catch (e) {
         if (live && !current.signal.aborted) {
           setSnapshot(null);
-          setError(e instanceof Error ? e.message : '暫時讀不到實習進度，請重試。');
+          setLoadError(e instanceof Error ? e.message : '暫時讀不到實習進度，請重試。');
         }
       } finally {
         clearTimeout(timeout);
@@ -154,6 +208,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
     if (writing.current) return;
     writing.current = true;
     setBusy(true);
+    setErrorTarget(pendingTarget.current);
     setError('');
     setNotice('');
     try {
@@ -163,14 +218,84 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         setRetry((v) => v + 1);
       }
     } catch (e) {
-      if (active.current) setError(e instanceof Error ? e.message : '操作未完成，請重試。');
+      if (active.current) {
+        setError(e instanceof Error ? e.message : '操作未完成，請重試。');
+        const conflict = e as { code?: string; status?: number; message?: string } | null;
+        if (
+          conflict?.code === 'aborted' ||
+          conflict?.code === 'functions/aborted' ||
+          conflict?.status === 409 ||
+          conflict?.message === '另一個視窗已更新這筆紀錄，已為你重新整理。'
+        )
+          setRetry((v) => v + 1);
+      }
     } finally {
       writing.current = false;
       if (active.current) setBusy(false);
     }
   }
+  async function searchAdvisors() {
+    const keyword = advisorKeyword.trim();
+    if (!keyword) {
+      setAdvisorSearched(false);
+      setAdvisors([]);
+      setFieldErrors((previous) => ({
+        ...previous,
+        teacherUid: '請輸入指導老師姓名、學號或學校信箱。',
+      }));
+      return;
+    }
+    if (writing.current) return;
+    writing.current = true;
+    advisorSearchStarted.current = true;
+    setAdvisors([]);
+    setAdvisorSearched(false);
+    setBusy(true);
+    setErrorTarget(pendingTarget.current);
+    setError('');
+    setNotice('');
+    try {
+      const reply = await service.execute({ action: 'advisorSearch', keyword, limit: 20 });
+      if (active.current) {
+        setAdvisors(reply.snapshot?.advisors || []);
+        setAdvisorSearched(true);
+        setNotice('已更新指導老師名單。');
+      }
+    } catch (e) {
+      if (active.current) setError(e instanceof Error ? e.message : '搜尋未完成，請重試。');
+    } finally {
+      writing.current = false;
+      if (active.current) setBusy(false);
+    }
+  }
+  async function submitCreate(rule: InternshipRule | null) {
+    const errors: Record<string, string> = {};
+    if (!organization.trim()) errors.organization = '請填寫實習機構';
+    if (!teacherUid.trim()) errors.teacherUid = '尚未選擇指導老師';
+    if (!rule) errors.ruleId = '請先選擇系所規則';
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
+    await run(async () => {
+      await service.execute({
+        action: 'create',
+        id: createId.current,
+        ruleId: rule!.id,
+        ruleRevision: rule!.revision,
+        organization: organization.trim(),
+        teacher: teacher.trim(),
+        teacherUid: teacherUid.trim(),
+      });
+      createId.current = newId();
+    });
+  }
   const execute = (command: Exclude<InternshipCommand, { action: 'list' }>) =>
     run(() => service.execute(command));
+  function addRecordCalendar(record: InternshipRecord, index: number) {
+    void run(
+      () => onAddCalendar(internshipCalendarItem(record, index)),
+      '已加入個人行事曆。這是期限快照；請至行事曆查看，不會自動發送推播。',
+    );
+  }
   if (!uid)
     return (
       <Card>
@@ -179,199 +304,295 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         <Button label="登入查看實習" onPress={onLogin} />
       </Card>
     );
+  const studentUI =
+    audience === 'student' &&
+    !!snapshot &&
+    (snapshot.viewerRole !== 'teacher' || snapshot.records.some((r) => r.uid === uid)) &&
+    (!snapshot?.records.some((r) => r.teacherUid === uid && r.uid !== uid) ||
+      snapshot.records.some((r) => r.uid === uid));
   return (
-    <Box>
-      <Heading>
-        {audience === 'student'
-          ? '我的實習'
-          : audience === 'ops'
-            ? '實習規則與操作紀錄'
-            : '實習紀錄確認'}
-      </Heading>
-      <Body>實習申請目前在產業實習網，這裡只幫你記進度。</Body>
-      {official && <External label="前往校方實習服務入口" url={official.url} />}
-      <Body>
-        每 1 學分至少 60 小時，依系所公布規則計算；自行登錄不代表已取得學分。每 10 秒更新一次。
-      </Body>
-      {error && <AlertText>{error}</AlertText>}
-      {notice && <Body>{notice}</Body>}
-      <Button label="重新整理實習進度" disabled={busy} onPress={() => setRetry((v) => v + 1)} />
-      {!snapshot ? (
-        <Body>正在讀取實習進度…</Body>
-      ) : (
-        <>
-          {!snapshot.rules.length && <Body>系所尚未設定實習學分規則，請洽系辦確認。</Body>}
-          {snapshot.rules.map((rule) => (
-            <Card key={rule.id}>
-              <Heading>
-                {rule.department} · {rule.term}
-              </Heading>
-              <Body>
-                {rule.credits} 學分 · 每學分 {rule.hoursPerCredit} 小時 · 共{' '}
-                {rule.credits * rule.hoursPerCredit} 小時
-              </Body>
-              <External label="查看系所規則" url={rule.sourceUrl} />
-              <External label="前往產業實習網申請" url={rule.applicationUrl} />
-              {audience === 'staff' && (
-                <Button
-                  label={`編輯${rule.department}規則`}
-                  onPress={() => setRuleDraft(structuredClone(rule))}
+    <OperationFeedback.Provider
+      value={{
+        error,
+        notice,
+        target: errorTarget,
+        select: (target) => {
+          pendingTarget.current = target;
+        },
+      }}
+    >
+      <Box>
+        <Heading>
+          {audience === 'student'
+            ? snapshot?.viewerRole === 'teacher' ||
+              snapshot?.records.some((r) => r.teacherUid === uid && r.uid !== uid)
+              ? '實習紀錄確認'
+              : '我的實習'
+            : audience === 'ops'
+              ? '實習規則與操作紀錄'
+              : '實習紀錄確認'}
+        </Heading>
+        {studentUI && <Body>實習申請目前在產業實習網，這裡只幫你記進度。</Body>}
+        {studentUI && official && <External label="前往校方實習服務入口" url={official.url} />}
+        <Body>
+          每 1 學分至少 60 小時，依系所公布規則計算；自行登錄不代表已取得學分。每 10 秒更新一次。
+        </Body>
+        {loadError && <AlertText>{loadError}</AlertText>}
+        {notice && errorTarget.startsWith('page:') && <Body>{notice}</Body>}
+        <Button label="重新整理實習進度" disabled={busy} onPress={() => setRetry((v) => v + 1)} />
+        {!snapshot ? (
+          <Body>正在讀取實習進度…</Body>
+        ) : (
+          <>
+            {!snapshot.rules.length && <Body>系所尚未設定實習學分規則，請洽系辦確認。</Body>}
+            {snapshot.rules.map((rule) => (
+              <Card key={rule.id}>
+                <Heading>
+                  {rule.department} · {rule.term}
+                </Heading>
+                <Body>
+                  {rule.credits} 學分 · 每學分 {rule.hoursPerCredit} 小時 · 共{' '}
+                  {rule.credits * rule.hoursPerCredit} 小時
+                </Body>
+                <External label="查看系所規則" url={rule.sourceUrl} />
+                {studentUI && <External label="前往產業實習網申請" url={rule.applicationUrl} />}
+                {audience === 'staff' && (
+                  <Button
+                    label={`編輯${rule.department}規則`}
+                    onPress={() => setRuleDraft(structuredClone(rule))}
+                  />
+                )}
+                {studentUI && (
+                  <Button
+                    label={
+                      selectedRuleId === rule.id
+                        ? `已選擇${rule.department}規則`
+                        : `選擇${rule.department}規則`
+                    }
+                    disabled={busy}
+                    onPress={() => {
+                      setSelectedRuleId(rule.id);
+                      setFieldErrors((previous) => {
+                        const next = { ...previous };
+                        delete next.ruleId;
+                        return next;
+                      });
+                    }}
+                  />
+                )}
+              </Card>
+            ))}
+            {studentUI && (
+              <Card>
+                <Heading>建立實習紀錄</Heading>
+                <Field
+                  label="系所規則"
+                  value={
+                    snapshot.rules.find((rule) => rule.id === selectedRuleId)
+                      ? `${snapshot.rules.find((rule) => rule.id === selectedRuleId)!.department} · ${snapshot.rules.find((rule) => rule.id === selectedRuleId)!.term}`
+                      : ''
+                  }
+                  onChange={() => {}}
                 />
-              )}
-              {audience === 'student' && (
+                {!selectedRuleId && <Body>請先在上方選擇系所規則，再填寫以下資料。</Body>}
+                {fieldErrors.ruleId && <AlertText>{fieldErrors.ruleId}</AlertText>}
+                <Field label="實習機構" value={organization} onChange={setOrganization} />
+                {fieldErrors.organization && <AlertText>{fieldErrors.organization}</AlertText>}
+                <Field
+                  label="搜尋本校指導老師（姓名、學號或學校信箱）"
+                  value={advisorKeyword}
+                  onChange={setAdvisorKeyword}
+                />
                 <Button
-                  label={`依${rule.department}規則建立實習`}
+                  label="搜尋指導老師"
+                  disabled={busy}
+                  onPress={() => void searchAdvisors()}
+                />
+                {!advisorSearched && !advisors.length && (
+                  <Body>請輸入姓名、學號或學校信箱搜尋後，從名單選擇指導老師。</Body>
+                )}
+                {advisorSearched && !advisors.length && (
+                  <Body>找不到符合條件的指導老師，請試試姓名、學號或學校信箱。</Body>
+                )}
+                {!!advisors.length && (
+                  <Box>
+                    {advisors.map((advisor) => (
+                      <Button
+                        key={advisor.uid}
+                        label={`${advisor.name}｜${advisor.email}${advisor.department ? `｜${advisor.department}` : ''}`}
+                        disabled={busy}
+                        onPress={() => {
+                          setTeacher(advisor.name);
+                          setTeacherUid(advisor.uid);
+                          setFieldErrors((previous) => {
+                            const next = { ...previous };
+                            delete next.teacherUid;
+                            delete next.teacher;
+                            return next;
+                          });
+                        }}
+                      />
+                    ))}
+                  </Box>
+                )}
+                <Body>
+                  已選擇指導老師：
+                  {teacherUid
+                    ? advisors.find((advisor) => advisor.uid === teacherUid)?.name ||
+                      teacher ||
+                      '已選擇'
+                    : '尚未選擇'}
+                </Body>
+                {fieldErrors.teacherUid && <AlertText>{fieldErrors.teacherUid}</AlertText>}
+                <Body>填好後，按下方按鈕建立實習紀錄。</Body>
+                <Button
+                  label="建立實習紀錄"
                   disabled={busy}
                   onPress={() =>
-                    void run(async () => {
-                      await service.execute({
-                        action: 'create',
-                        id: createId.current,
-                        ruleId: rule.id,
-                        ruleRevision: rule.revision,
-                        organization,
-                        teacher,
-                        teacherUid,
-                      });
-                      createId.current = newId();
-                    })
+                    void submitCreate(
+                      snapshot.rules.find((rule) => rule.id === selectedRuleId) || null,
+                    )
                   }
                 />
-              )}
-            </Card>
-          ))}
-          {audience === 'student' && (
-            <Card>
-              <Heading>建立實習紀錄</Heading>
-              <Field label="實習機構" value={organization} onChange={setOrganization} />
-              <Field label="指導老師姓名" value={teacher} onChange={setTeacher} />
-              <Field
-                label="指導老師帳號編號（請向系辦確認）"
-                value={teacherUid}
-                onChange={setTeacherUid}
-              />
-              <Body>填好後，選擇上方所屬系所與學期的規則建立紀錄。</Body>
-            </Card>
-          )}
-          {audience === 'staff' && (
-            <Button
-              label="新增系所規則"
-              onPress={() =>
-                setRuleDraft({
-                  id: newId(),
-                  revision: 0,
-                  department: '',
-                  term: '',
-                  credits: 1,
-                  hoursPerCredit: 60,
-                  sourceUrl: '',
-                  applicationUrl: '',
-                  documents: INTERNSHIP_STEPS.map((title) => ({
-                    title,
-                    recipient: '',
-                    deadline: '',
-                  })),
-                })
-              }
-            />
-          )}
-          {ruleDraft && (
-            <Card>
-              <Heading>系所實習規則</Heading>
-              <Body>
-                期限請填含時區的日期時間，例如
-                2026-12-01T17:00:00+08:00。既有紀錄保留建立時的規則版本。
-              </Body>
-              {(['department', 'term', 'sourceUrl', 'applicationUrl'] as const).map((key, i) => (
-                <Field
-                  key={key}
-                  label={['系所', '學期', '校方規則網址', '產業實習網網址'][i]}
-                  value={ruleDraft[key]}
-                  onChange={(value) => setRuleDraft({ ...ruleDraft, [key]: value })}
-                />
-              ))}
-              <Field
-                label="所需學分"
-                value={String(ruleDraft.credits)}
-                onChange={(v) => setRuleDraft({ ...ruleDraft, credits: Number(v) })}
-              />
-              <Field
-                label="每學分所需時數"
-                value={String(ruleDraft.hoursPerCredit)}
-                onChange={(v) => setRuleDraft({ ...ruleDraft, hoursPerCredit: Number(v) })}
-              />
-              {ruleDraft.documents.map((d, i) => (
-                <Box key={i}>
-                  <Body>{INTERNSHIP_STEPS[i]}</Body>
-                  {(['title', 'recipient', 'deadline'] as const).map((key, j) => (
-                    <Field
-                      key={key}
-                      label={`${i + 1} ${['文件名稱', '交給誰', '截止時間'][j]}`}
-                      value={d[key]}
-                      onChange={(value) =>
-                        setRuleDraft({
-                          ...ruleDraft,
-                          documents: ruleDraft.documents.map((row, n) =>
-                            n === i ? { ...row, [key]: value } : row,
-                          ),
-                        })
-                      }
-                    />
-                  ))}
-                </Box>
-              ))}
+              </Card>
+            )}
+            {audience === 'staff' && (
               <Button
-                label="儲存系所規則"
-                disabled={busy}
+                label="新增系所規則"
                 onPress={() =>
-                  void run(async () => {
-                    if (ruleDraft.documents.some((d) => !Number.isFinite(Date.parse(d.deadline))))
-                      throw new Error('請填寫有效的截止日期與時間。');
-                    const rule = {
-                      ...ruleDraft,
-                      documents: ruleDraft.documents.map((d) => ({
-                        ...d,
-                        deadline: new Date(d.deadline).toISOString(),
-                      })),
-                    };
-                    await service.execute({ action: 'rule', rule });
-                    if (active.current) setRuleDraft(null);
+                  setRuleDraft({
+                    id: newId(),
+                    revision: 0,
+                    department: '',
+                    term: '',
+                    credits: 1,
+                    hoursPerCredit: 60,
+                    sourceUrl: '',
+                    applicationUrl: '',
+                    documents: INTERNSHIP_STEPS.map((title) => ({
+                      title,
+                      recipient: '',
+                      deadline: '',
+                    })),
                   })
                 }
               />
-              <Button label="取消編輯規則" onPress={() => setRuleDraft(null)} />
-            </Card>
-          )}
-          {!snapshot.records.length && audience !== 'ops' && <Body>目前沒有實習紀錄。</Body>}
-          {audience !== 'ops' &&
-            snapshot.records.map((record) => (
-              <RecordCard
-                key={`${record.id}:${record.revision}`}
-                record={record}
-                uid={uid}
-                busy={busy}
-                execute={execute}
-                addCalendar={(i) =>
-                  void run(
-                    () => onAddCalendar(internshipCalendarItem(record, i)),
-                    '已加入個人行事曆。這是期限快照；請至行事曆查看，不會自動發送推播。',
-                  )
-                }
-              />
-            ))}
-          {audience === 'ops' && (
-            <>
-              <Body>營運檢視不顯示學生名冊。以下為最近 100 筆校務操作中的實習紀錄。</Body>
-              {snapshot.audit.map((a) => (
-                <Body key={a.id}>
-                  {a.at} · {auditLabel(a.action)} · {a.targetId}
+            )}
+            {ruleDraft && (
+              <Card>
+                <Heading>系所實習規則</Heading>
+                <Body>
+                  期限請填含時區的日期時間，例如
+                  2026-12-01T17:00:00+08:00。既有紀錄保留建立時的規則版本。
                 </Body>
-              ))}
-            </>
-          )}
-        </>
-      )}
-    </Box>
+                {(['department', 'term', 'sourceUrl', 'applicationUrl'] as const).map((key, i) => (
+                  <Field
+                    key={key}
+                    label={['系所', '學期', '校方規則網址', '產業實習網網址'][i]}
+                    value={ruleDraft[key]}
+                    onChange={(value) => setRuleDraft({ ...ruleDraft, [key]: value })}
+                  />
+                ))}
+                <Field
+                  label="所需學分"
+                  value={String(ruleDraft.credits)}
+                  onChange={(v) => setRuleDraft({ ...ruleDraft, credits: Number(v) })}
+                />
+                <Field
+                  label="每學分所需時數"
+                  value={String(ruleDraft.hoursPerCredit)}
+                  onChange={(v) => setRuleDraft({ ...ruleDraft, hoursPerCredit: Number(v) })}
+                />
+                {ruleDraft.documents.map((d, i) => (
+                  <Box key={i}>
+                    <Body>{INTERNSHIP_STEPS[i]}</Body>
+                    {(['title', 'recipient', 'deadline'] as const).map((key, j) => (
+                      <Field
+                        key={key}
+                        label={`${i + 1} ${['文件名稱', '交給誰', '截止時間'][j]}`}
+                        value={d[key]}
+                        onChange={(value) =>
+                          setRuleDraft({
+                            ...ruleDraft,
+                            documents: ruleDraft.documents.map((row, n) =>
+                              n === i ? { ...row, [key]: value } : row,
+                            ),
+                          })
+                        }
+                      />
+                    ))}
+                  </Box>
+                ))}
+                <Button
+                  label="儲存系所規則"
+                  disabled={busy}
+                  onPress={() =>
+                    void run(async () => {
+                      if (ruleDraft.documents.some((d) => !Number.isFinite(Date.parse(d.deadline))))
+                        throw new Error('請填寫有效的截止日期與時間。');
+                      const rule = {
+                        ...ruleDraft,
+                        documents: ruleDraft.documents.map((d) => ({
+                          ...d,
+                          deadline: new Date(d.deadline).toISOString(),
+                        })),
+                      };
+                      await service.execute({ action: 'rule', rule });
+                      if (active.current) setRuleDraft(null);
+                    })
+                  }
+                />
+                <Button label="取消編輯規則" onPress={() => setRuleDraft(null)} />
+              </Card>
+            )}
+            {!snapshot.records.length && audience !== 'ops' && <Body>目前沒有實習紀錄。</Body>}
+            {audience !== 'ops' &&
+              [
+                { title: '我的實習', rows: snapshot.records.filter((r) => r.uid === uid) },
+                {
+                  title: '待我確認',
+                  rows: snapshot.records.filter((r) => r.uid !== uid && needsReview(r)),
+                },
+                {
+                  title: '其他實習紀錄',
+                  rows: snapshot.records.filter((r) => r.uid !== uid && !needsReview(r)),
+                },
+              ]
+                .filter((section) => section.rows.length)
+                .map((section) => (
+                  <Box key={section.title}>
+                    {(section.title !== '我的實習' ||
+                      audience !== 'student' ||
+                      snapshot.viewerRole === 'teacher' ||
+                      snapshot.records.some((r) => r.uid !== uid)) && (
+                      <Heading>{section.title}</Heading>
+                    )}
+                    {section.rows.map((record) => (
+                      <RecordCard
+                        key={`${record.id}:${record.revision}`}
+                        record={record}
+                        uid={uid}
+                        busy={busy}
+                        execute={execute}
+                        addCalendar={addRecordCalendar}
+                      />
+                    ))}
+                  </Box>
+                ))}
+            {audience === 'ops' && (
+              <>
+                <Body>營運檢視不顯示學生名冊。以下為最近 100 筆校務操作中的實習紀錄。</Body>
+                {snapshot.audit.map((a) => (
+                  <Body key={a.id}>
+                    {a.at} · {auditLabel(a.action)} · {a.targetId}
+                  </Body>
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </Box>
+    </OperationFeedback.Provider>
   );
 }
 function auditLabel(action: string) {
@@ -401,211 +622,284 @@ function RecordCard({
   uid: string;
   busy: boolean;
   execute: (c: Exclude<InternshipCommand, { action: 'list' }>) => Promise<void>;
-  addCalendar: (i: number) => void;
+  addCalendar: (record: InternshipRecord, i: number) => void;
 }) {
+  const feedback = React.useContext(OperationFeedback);
+  const [confirming, setConfirming] = useState(false);
   const p = internshipProgress(r);
+  const missing = r.rule.documents.flatMap((d, i) =>
+    r.documents[i].verified
+      ? []
+      : [`${d.title}${r.documents[i].submitted ? '尚未確認' : '尚未繳交'}`],
+  );
+  if (p.verified < p.required) missing.push(`已確認時數 ${p.verified}／需要 ${p.required} 小時`);
   const owner = uid === r.uid;
   const [entry, setEntry] = useState({ id: newId(), date: '', hours: '', note: '' });
   const [urls, setUrls] = useState(r.documents.map((d) => d.url));
   const [messages, setMessages] = useState(r.documents.map((d) => d.message));
   const base = { id: r.id, revision: r.revision };
+  const recordTarget = feedback.target.startsWith(`${r.id}:`)
+    ? feedback.target.slice(r.id.length + 1)
+    : '';
+  const [action, item, intent] = recordTarget.split(':');
+  const document = r.documents[Number(item)];
+  const hour = r.hours.find((h) => h.id === item);
+  const feedbackControlVisible =
+    (action === 'calendar' && !!document && !document.verified) ||
+    (!r.confirmed &&
+      ((action === 'confirm' && uid === r.teacherUid) ||
+        (action === 'hours' && owner) ||
+        (action === 'verifyHours' && !owner && !!hour) ||
+        (action === 'removeHours' && owner && !!hour && !hour.verified) ||
+        (action === 'document' &&
+          owner &&
+          !!document &&
+          !document.verified &&
+          (intent !== 'withdraw' || document.submitted)) ||
+        (['verifyDocument', 'rejectDocument'].includes(action) &&
+          !owner &&
+          !!document &&
+          document.submitted &&
+          !document.verified)));
   return (
-    <Card>
-      {!owner && (
-        <Body>
-          學生帳號：{r.uid} · 紀錄編號：{r.id}
-        </Body>
-      )}
-      <Heading>
-        {r.organization} · {r.rule.term}
-      </Heading>
-      <Body>
-        指導老師：{r.teacher} · {r.rule.department} · 規則第 {r.rule.revision} 版
-      </Body>
-      <Body>
-        已登錄 {p.logged}／需要 {p.required} 小時 · 校方已確認 {p.verified} 小時 · {r.rule.credits}{' '}
-        學分
-      </Body>
-      <Progress value={p.percent} />
-      <Body>
-        {r.confirmed
-          ? '指導老師已確認；學分仍以教務認定為準。'
-          : `目前：${INTERNSHIP_STEPS[p.step]}`}
-      </Body>
-      {p.next >= 0 && (
-        <Body>
-          下一份：{r.rule.documents[p.next].title} · 交給{r.rule.documents[p.next].recipient} ·{' '}
-          {new Date(r.rule.documents[p.next].deadline).toLocaleString('zh-TW', {
-            timeZone: 'Asia/Taipei',
-          })}
-          （臺灣時間）
-        </Body>
-      )}
-      <External label="查看這筆實習適用規則" url={r.rule.sourceUrl} />
-      {r.rule.documents.map((d, i) => (
-        <Box key={i}>
+    <OperationScope.Provider value={r.id}>
+      <Card testID={`internship-${r.id}`}>
+        {!owner && (
           <Body>
-            {i + 1}. {INTERNSHIP_STEPS[i]}：{d.title} · 交給{d.recipient} ·{' '}
-            {new Date(d.deadline).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}（臺灣時間）
-            ·{' '}
-            {r.documents[i].verified
-              ? '已確認'
-              : r.documents[i].submitted
-                ? '已登錄繳交，待確認'
-                : internshipDeadlineState(d.deadline)}
+            學生：{r.studentName || '姓名待確認'} · 學號：{r.studentId || '學號未提供'}
           </Body>
-          {r.documents[i].message && <Body>承辦回覆：{r.documents[i].message}</Body>}
-          {r.documents[i].url && <External label={`查看${d.title}`} url={r.documents[i].url} />}
-          {!r.documents[i].verified && (
-            <Button
-              label={`將${d.title}加入行事曆`}
-              disabled={busy}
-              onPress={() => addCalendar(i)}
-            />
-          )}
-          {!r.confirmed &&
-            (owner
-              ? !r.documents[i].verified && (
-                  <>
-                    <Field
-                      label={`${d.title}文件連結`}
-                      value={urls[i]}
-                      onChange={(v) => setUrls(urls.map((x, n) => (n === i ? v : x)))}
-                    />
-                    <Button
-                      label={`登錄已繳交${d.title}`}
-                      disabled={busy}
-                      onPress={() =>
-                        void execute({
-                          ...base,
-                          action: 'document',
-                          index: i,
-                          url: urls[i],
-                          submitted: true,
-                        })
-                      }
-                    />
-                    {r.documents[i].submitted && (
+        )}
+        <Heading>
+          {r.organization} · {r.rule.term}
+        </Heading>
+        <Body>
+          指導老師：{r.teacher} · {r.rule.department} · 規則第 {r.rule.revision} 版
+        </Body>
+        <Body>
+          已登錄 {p.logged}／需要 {p.required} 小時 · 指導老師已確認 {p.verified} 小時 ·{' '}
+          {r.rule.credits} 學分
+        </Body>
+        <Progress value={p.percent} />
+        <Body>
+          {r.confirmed
+            ? '已結案。指導老師已確認；學分仍以教務認定為準。'
+            : `目前：${INTERNSHIP_STEPS[p.step]}`}
+        </Body>
+        {p.next >= 0 && (
+          <Body>
+            下一份：{r.rule.documents[p.next].title} · 交給{r.rule.documents[p.next].recipient} ·{' '}
+            {new Date(r.rule.documents[p.next].deadline).toLocaleString('zh-TW', {
+              timeZone: 'Asia/Taipei',
+            })}
+            （臺灣時間）
+          </Body>
+        )}
+        <External label="查看這筆實習適用規則" url={r.rule.sourceUrl} />
+        {r.rule.documents.map((d, i) => (
+          <Box key={i}>
+            <Body>
+              {i + 1}. {INTERNSHIP_STEPS[i]}：{d.title} · 交給{d.recipient} ·{' '}
+              {new Date(d.deadline).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}
+              （臺灣時間） ·{' '}
+              {r.documents[i].verified
+                ? '已確認'
+                : r.documents[i].submitted
+                  ? '已登錄繳交，待確認'
+                  : internshipDeadlineState(d.deadline)}
+            </Body>
+            {r.documents[i].message && <Body>承辦回覆：{r.documents[i].message}</Body>}
+            {r.documents[i].url && <External label={`查看${d.title}`} url={r.documents[i].url} />}
+            {!r.documents[i].verified && (
+              <Button
+                label={`將${d.title}加入行事曆`}
+                actionId={`calendar:${i}`}
+                disabled={busy}
+                onPress={() => addCalendar(r, i)}
+              />
+            )}
+            {!r.confirmed &&
+              (owner
+                ? !r.documents[i].verified && (
+                    <>
+                      <Field
+                        label={`${d.title}文件連結`}
+                        value={urls[i]}
+                        onChange={(v) => setUrls(urls.map((x, n) => (n === i ? v : x)))}
+                      />
                       <Button
-                        label={`撤回${d.title}繳交登錄`}
+                        label={`登錄已繳交${d.title}`}
+                        actionId={`document:${i}:submit`}
                         disabled={busy}
                         onPress={() =>
                           void execute({
                             ...base,
                             action: 'document',
                             index: i,
-                            url: '',
-                            submitted: false,
+                            url: urls[i],
+                            submitted: true,
                           })
                         }
                       />
-                    )}
-                  </>
+                      {r.documents[i].submitted && (
+                        <Button
+                          label={`撤回${d.title}繳交登錄`}
+                          actionId={`document:${i}:withdraw`}
+                          disabled={busy}
+                          onPress={() =>
+                            void execute({
+                              ...base,
+                              action: 'document',
+                              index: i,
+                              url: '',
+                              submitted: false,
+                            })
+                          }
+                        />
+                      )}
+                    </>
+                  )
+                : r.documents[i].submitted &&
+                  !r.documents[i].verified && (
+                    <>
+                      <Field
+                        label={`${d.title}退回原因`}
+                        value={messages[i]}
+                        onChange={(v) => setMessages(messages.map((x, n) => (n === i ? v : x)))}
+                      />
+                      <Button
+                        label={`確認${d.title}`}
+                        actionId={`verifyDocument:${i}`}
+                        disabled={busy}
+                        onPress={() =>
+                          void execute({
+                            ...base,
+                            action: 'verifyDocument',
+                            index: i,
+                            verified: true,
+                            message: '',
+                          })
+                        }
+                      />
+                      <Button
+                        label={`退回${d.title}`}
+                        actionId={`rejectDocument:${i}`}
+                        disabled={busy}
+                        onPress={() =>
+                          void execute({
+                            ...base,
+                            action: 'verifyDocument',
+                            index: i,
+                            verified: false,
+                            message: messages[i],
+                          })
+                        }
+                      />
+                    </>
+                  ))}
+          </Box>
+        ))}
+        <Heading>時數明細</Heading>
+        {r.hours.map((h) => (
+          <Box key={h.id}>
+            <Body>
+              {h.date} · {h.hours} 小時 · {h.note} · {h.verified ? '已確認' : '待確認'}
+            </Body>
+            {!r.confirmed &&
+              (owner ? (
+                !h.verified && (
+                  <Box>
+                    <Button
+                      label={`移除${h.date}未確認時數`}
+                      actionId={`removeHours:${h.id}`}
+                      disabled={busy}
+                      onPress={() =>
+                        void execute({ ...base, action: 'removeHours', entryId: h.id })
+                      }
+                    />
+                    <Button
+                      label={`更正${h.date}時數`}
+                      actionId={`editHours:${h.id}`}
+                      onPress={() => setEntry({ ...h, hours: String(h.hours) })}
+                    />
+                  </Box>
                 )
-              : r.documents[i].submitted && (
-                  <>
-                    <Field
-                      label={`${d.title}退回原因`}
-                      value={messages[i]}
-                      onChange={(v) => setMessages(messages.map((x, n) => (n === i ? v : x)))}
-                    />
-                    <Button
-                      label={`確認${d.title}`}
-                      disabled={busy}
-                      onPress={() =>
-                        void execute({
-                          ...base,
-                          action: 'verifyDocument',
-                          index: i,
-                          verified: true,
-                          message: '',
-                        })
-                      }
-                    />
-                    <Button
-                      label={`退回${d.title}`}
-                      disabled={busy}
-                      onPress={() =>
-                        void execute({
-                          ...base,
-                          action: 'verifyDocument',
-                          index: i,
-                          verified: false,
-                          message: messages[i],
-                        })
-                      }
-                    />
-                  </>
-                ))}
-        </Box>
-      ))}
-      <Heading>時數明細</Heading>
-      {r.hours.map((h) => (
-        <Box key={h.id}>
-          <Body>
-            {h.date} · {h.hours} 小時 · {h.note} · {h.verified ? '已確認' : '待確認'}
-          </Body>
-          {!r.confirmed &&
-            (owner ? (
-              !h.verified && (
-                <Box>
-                  <Button
-                    label={`移除${h.date}未確認時數`}
-                    disabled={busy}
-                    onPress={() => void execute({ ...base, action: 'removeHours', entryId: h.id })}
-                  />
-                  <Button
-                    label={`更正${h.date}時數`}
-                    onPress={() => setEntry({ ...h, hours: String(h.hours) })}
-                  />
-                </Box>
-              )
-            ) : (
-              <Button
-                label={`${h.verified ? '撤銷確認' : '確認'}${h.date}時數`}
-                disabled={busy}
-                onPress={() =>
-                  void execute({
-                    ...base,
-                    action: 'verifyHours',
-                    entryId: h.id,
-                    verified: !h.verified,
-                  })
-                }
+              ) : (
+                <Button
+                  label={`${h.verified ? '撤銷確認' : '確認'}${h.date}時數`}
+                  actionId={`verifyHours:${h.id}`}
+                  disabled={busy}
+                  onPress={() =>
+                    void execute({
+                      ...base,
+                      action: 'verifyHours',
+                      entryId: h.id,
+                      verified: !h.verified,
+                    })
+                  }
+                />
+              ))}
+          </Box>
+        ))}
+        {owner && !r.confirmed && (
+          <Box>
+            {(['date', 'hours', 'note'] as const).map((k, i) => (
+              <Field
+                key={k}
+                label={['實習日期（西元年-月-日）', '實習時數', '工作內容與佐證說明'][i]}
+                type={k === 'date' ? 'date' : undefined}
+                value={entry[k]}
+                onChange={(v) => setEntry({ ...entry, [k]: v })}
               />
             ))}
-        </Box>
-      ))}
-      {owner && !r.confirmed && (
-        <Box>
-          {(['date', 'hours', 'note'] as const).map((k, i) => (
-            <Field
-              key={k}
-              label={['實習日期（西元年-月-日）', '實習時數', '工作內容與佐證說明'][i]}
-              value={entry[k]}
-              onChange={(v) => setEntry({ ...entry, [k]: v })}
+            <Button
+              label="儲存實習時數"
+              actionId="hours"
+              disabled={busy}
+              onPress={() =>
+                void execute({
+                  ...base,
+                  action: 'hours',
+                  entry: { ...entry, hours: Number(entry.hours) },
+                })
+              }
             />
-          ))}
-          <Button
-            label="儲存實習時數"
-            disabled={busy}
-            onPress={() =>
-              void execute({
-                ...base,
-                action: 'hours',
-                entry: { ...entry, hours: Number(entry.hours) },
-              })
-            }
-          />
-        </Box>
-      )}
-      {!r.confirmed && uid === r.teacherUid && (
-        <Button
-          label="指導老師確認結案"
-          disabled={busy}
-          onPress={() => void execute({ ...base, action: 'confirm' })}
-        />
-      )}
-    </Card>
+          </Box>
+        )}
+        {!r.confirmed && uid === r.teacherUid && (
+          <>
+            {missing.length > 0 && <Body>還不能結案：{missing.join('、')}</Body>}
+            {!confirming && (
+              <Button
+                label="指導老師確認結案"
+                actionId="confirm"
+                disabled={busy || missing.length > 0}
+                onPress={() => setConfirming(true)}
+              />
+            )}
+            {confirming && (
+              <Box>
+                <Body>確定要為這筆實習結案？結案後就不能再從這裡撤回。</Body>
+                <Button
+                  label="取消"
+                  actionId="cancelConfirm"
+                  disabled={busy}
+                  onPress={() => setConfirming(false)}
+                />
+                <Button
+                  label="確定結案"
+                  actionId="confirm"
+                  disabled={busy || missing.length > 0}
+                  onPress={() => void execute({ ...base, action: 'confirm' })}
+                />
+              </Box>
+            )}
+          </>
+        )}
+        {recordTarget && !feedbackControlVisible && feedback.error && (
+          <AlertText>{feedback.error}</AlertText>
+        )}
+        {recordTarget && feedback.notice && <Body>{feedback.notice}</Body>}
+      </Card>
+    </OperationScope.Provider>
   );
 }

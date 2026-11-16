@@ -22,6 +22,8 @@ export type InternshipRecord = {
   id: string;
   revision: number;
   uid: string;
+  studentName?: string;
+  studentId?: string;
   rule: InternshipRule;
   organization: string;
   teacher: string;
@@ -33,12 +35,16 @@ export type InternshipRecord = {
 };
 export type InternshipAudit = { id: string; action: string; targetId: string; at: string };
 export type InternshipSnapshot = {
+  viewerRole?: string;
   rules: InternshipRule[];
   records: InternshipRecord[];
   audit: InternshipAudit[];
+  advisors?: { uid: string; name: string; email: string; department?: string }[];
+  canManage?: boolean;
 };
 export type InternshipCommand =
   | { action: 'list'; audience: InternshipAudience }
+  | { action: 'advisorSearch'; keyword: string; limit?: number }
   | { action: 'rule'; rule: InternshipRule }
   | {
       action: 'create';

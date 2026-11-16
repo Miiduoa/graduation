@@ -20,7 +20,13 @@ vi.mock('./groupService', () => ({
   leaveMemberGroup: vi.fn(),
   loadMyGroups: vi.fn(),
 }));
+vi.mock('./clubPortalService', () => ({ callClubPortal: vi.fn(() => new Promise(() => {})) }));
 vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
+const replace = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace }),
+  useSearchParams: () => new URLSearchParams('schoolId=pu&tab=mine'),
+}));
 const course: MemberGroup = {
   id: 'firestore-course',
   schoolId: 'pu',
@@ -82,17 +88,17 @@ it('uses real group IDs for course navigation, actual counts only, and no fake u
   expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
 });
 
-it('社團分段只顯示真實會籍，找社團使用鎖定空態且沒有入社操作', async () => {
+it('社團分段保留真實會籍，找社團在載入成功前沒有入社操作', async () => {
   render(<ClubsPage />);
   await screen.findByText('本人社團');
   expect(screen.queryByText('本人課程群組 ↗')).toBeNull();
   expect(screen.queryByText(/社團公開列表尚未開放/)).toBeNull();
   expect(screen.getByRole('link', { name: '查看社團' }).getAttribute('href')).toBe(
-    '/groups/firestore-club/club/overview?schoolId=pu',
+    '/clubs/firestore-club?schoolId=pu&tab=mine',
   );
   expect(screen.getByLabelText('邀請碼')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '找社團' }));
-  expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
+  expect(screen.getByText('正在讀取社團資料…')).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '本人社團' })).toBeNull();
   expect(screen.queryByRole('button', { name: '加入群組' })).toBeNull();
   expect(screen.queryByRole('link', { name: '查看社團' })).toBeNull();
@@ -106,6 +112,18 @@ it('社團搜尋與未加入空態不使用假資料', async () => {
   fireEvent.change(screen.getByLabelText('搜尋我的社團'), { target: { value: '不存在' } });
   expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
   expect(screen.queryByText(/程式設計社|王小明/)).toBeNull();
+});
+
+it('社團頁可由 URL tab 直接進入找社團分段', async () => {
+  await act(async () => {
+    render(
+      <Suspense>
+        <ClubsPage searchParams={Promise.resolve({ schoolId: 'pu', tab: 'discover' })} />
+      </Suspense>,
+    );
+  });
+  expect(screen.getByRole('button', { name: '找社團' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText('正在讀取社團資料…')).toBeTruthy();
 });
 
 it('沒有會籍時引導找社團，沒有錯誤的零人數', async () => {
@@ -287,7 +305,6 @@ it.each([false, true])('社團後台入口沿用既有旗標：%s', async (enabl
   vi.mocked(clubEnabled).mockReturnValue(enabled);
   render(<ClubsPage />);
   await screen.findByText('本人社團');
-  expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
   const link = screen.queryByRole('link', { name: '社團後台' });
   if (enabled) expect(link?.getAttribute('href')).toBe('/groups/firestore-club/club?schoolId=pu');
   else expect(link).toBeNull();

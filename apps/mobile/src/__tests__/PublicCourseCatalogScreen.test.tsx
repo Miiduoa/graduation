@@ -324,6 +324,7 @@ test('copying a different course while the old native write is pending leaves th
   const original = globalThis.fetch;
   const secondCourse = {
     ...nthuCourse, code: '11510AES 520401', section: '01', title: '第二門課',
+    time: 'T3T4', room: '第二教室',
     meetings: [{ time: 'T3T4', room: '第二教室' }],
   };
   const clipboard = jest.mocked(Clipboard.setStringAsync);

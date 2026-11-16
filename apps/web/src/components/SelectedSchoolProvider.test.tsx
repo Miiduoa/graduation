@@ -790,3 +790,31 @@ it('cancels event-detail draft confirmation on a platform account change with th
   expect(localStorage.getItem(bobPreference)).toBe(JSON.stringify({ schoolId: 'school-b' }));
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
 });
+
+for (const scenario of [
+  { name: '無偏好時採用帳號學校', expected: '甲校' },
+  { name: '無法解析偏好時採用帳號學校', stored: '{', expected: '甲校' },
+  { name: 'campus=all 優先於帳號學校', query: 'campus=all', expected: '不限校園' },
+  { name: 'schoolId=all 優先於帳號學校', query: 'schoolId=all', expected: '不限校園' },
+  { name: '網址指定其他校優先於帳號學校', query: 'campus=school-b', expected: '乙校' },
+  { name: '已存其他校優先於帳號學校', stored: JSON.stringify({ schoolId: 'school-b' }), expected: '乙校' },
+  { name: '已存不限校園優先於帳號學校', stored: JSON.stringify({ schoolId: null }), expected: '不限校園' },
+]) {
+  it(scenario.name, () => {
+    navigation.search = scenario.query ?? '';
+    const key = schoolPreferenceKey(defaults.ownerKey);
+    if (scenario.stored) localStorage.setItem(key, scenario.stored);
+    render(<View accountSchoolId="school-a" />);
+    expect(screen.getByTestId('selected-school').textContent).toBe(scenario.expected);
+    expect(localStorage.getItem(key)).toBe(scenario.stored ?? null);
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+}
+
+it('訪客或帳號學校不在目前目錄時維持不限校園', () => {
+  const view = render(<View ownerKey={null} />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  view.rerender(<View accountSchoolId="missing" />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect(capturedSelection.requestedUnavailable).toBe(false);
+});

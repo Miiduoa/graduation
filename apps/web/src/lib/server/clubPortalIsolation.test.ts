@@ -1,43 +1,16 @@
 // @vitest-environment node
-import { expect, test, vi } from 'vitest';
-import { dispatchFnRequest } from './fnDispatch';
-import { isHostedWebCallable } from '../hostedCallables';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { expect, test } from 'vitest';
 
-test.each([
-  'join',
-  'leave',
-  'review',
-  'confirmOfficer',
-  'official',
-  'profile',
-  'announcement',
-  'dues',
-  'createEvent',
-  'register',
-  'cancel',
-  'checkIn',
-])('未經獨立審核的社團 %s 操作不進入正式 API 或資料庫', async (action) => {
-  const accessDatabase = vi.fn(() => {
-    throw new Error('隔離中的操作不得讀寫資料庫');
-  });
-  const verifyIdToken = vi.fn();
-  expect(isHostedWebCallable('clubPortal')).toBe(false);
-  const response = await dispatchFnRequest(
-    'clubPortal',
-    new Request('https://nuni.tw/api/fn/clubPortal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
-      body: JSON.stringify({ data: { action, schoolId: 'school', groupId: 'club' } }),
-    }),
-    {
-      get db() {
-        return accessDatabase();
-      },
-      verifyIdToken,
-    },
+test('rules and Functions exports remain isolated', () => {
+  const root = resolve(process.cwd(), '../..');
+  const rules = readFileSync(resolve(root, 'backend/firestore/firestore.rules'), 'utf8');
+  expect(rules).not.toMatch(
+    /careerOpportunities|careerApplications|internshipRecords|internshipRules/,
   );
-  expect(response.status).toBe(404);
-  expect((await response.json()).error.status).toBe('NOT_FOUND');
-  expect(accessDatabase).not.toHaveBeenCalled();
-  expect(verifyIdToken).not.toHaveBeenCalled();
+  const functions = readFileSync(resolve(root, 'backend/functions/index.js'), 'utf8');
+  expect(functions).not.toMatch(
+    /careerWorkstudy|careerInternship|clubPortal|firestore\.rules\.fragment/,
+  );
 });
