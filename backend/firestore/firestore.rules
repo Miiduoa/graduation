@@ -1154,9 +1154,21 @@ service cloud.firestore {
           return activeAuthor() && resource.data.get('kind', 'post') != 'announcement';
         }
 
+        // Apply the same bounded title/body payload as the Web composer at the
+        // Firestore SDK boundary. Optional legacy fields remain optional.
+        function postTextWithinLimits() {
+          return (!('title' in request.resource.data)
+              || (request.resource.data.title is string
+                && request.resource.data.title.size() <= 120))
+            && (!('body' in request.resource.data)
+              || (request.resource.data.body is string
+                && request.resource.data.body.size() <= 8000));
+        }
+
         allow read: if isActiveGroupMember(groupId);
         // 助理回覆的狀態（assistantReply）只由伺服器寫
         allow create: if isActiveGroupMember(groupId)
+          && postTextWithinLimits()
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
           // AI origin fields are server-owned, including legacy/alternate SDK writes.
@@ -1189,9 +1201,11 @@ service cloud.firestore {
             && resource.data.get('deletedAt', null) == null;
         }
 
-        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'authorId', 'assistantReply', 'isAI', 'generatedBy'
-        ])
+        allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['title', 'body'])
+            || postTextWithinLimits())
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'authorId', 'assistantReply', 'isAI', 'generatedBy'
+          ])
           && request.resource.data.get('isAI', false) == false
           && request.resource.data.get('authorName', '') != '助理回覆'
           && (

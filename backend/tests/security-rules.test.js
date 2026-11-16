@@ -225,6 +225,55 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.doc(path('revoked')).delete());
   });
 
+  test('direct group post writes reject oversized text without breaking legacy metadata updates', async () => {
+    const group = 'post-text-resource-boundary';
+    const path = (id) => `groups/${group}/posts/${id}`;
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${group}`).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, school] of [['alice', 'pu'], ['bob', 'pu'], ['mallory', 'other']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({ status: 'active' });
+        await db.doc(`groups/${group}/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      // Older posts can be missing one or both text fields; do not prevent
+      // unrelated ordinary edits from continuing to work.
+      await db.doc(path('legacy')).set({ authorId: 'alice', kind: 'post' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const mallory = testEnv.authenticatedContext('mallory').firestore();
+    const valid = { authorId: 'alice', kind: 'post', title: 'Class notes', body: 'Discussion', likes: 0, likedBy: [] };
+    await assertSucceeds(alice.doc(path('normal')).set(valid));
+    await assertSucceeds(alice.doc(path('edge')).set({ ...valid, title: 'T'.repeat(120), body: 'B'.repeat(8000) }));
+    await assertFails(alice.doc(path('huge-title')).set({ ...valid, title: 'T'.repeat(121) }));
+    await assertFails(alice.doc(path('huge-body')).set({ ...valid, body: 'B'.repeat(8001) }));
+    await assertFails(alice.doc(path('nontext')).set({ ...valid, title: 123 }));
+    await assertFails(alice.doc(path('normal')).update({ title: 'T'.repeat(121) }));
+    await assertFails(alice.doc(path('normal')).update({ body: 'B'.repeat(8001) }));
+    await assertFails(alice.doc(path('normal')).update({ body: { nested: 'not text' } }));
+    await assertFails(bob.doc(path('normal')).update({ body: 'Another user' }));
+    await assertFails(mallory.doc(path('normal')).update({ body: 'Cross-school write' }));
+    await assertSucceeds(alice.doc(path('legacy')).update({ topic: 'Unrelated legacy field' }));
+    await assertSucceeds(alice.doc(path('normal')).update({ title: 'New title', body: 'New content' }));
+
+    // Reusing the same authenticated SDK after revocation must remain denied,
+    // even if the submitted text itself is within all limits.
+    await seedFirestore((db) => db.doc(`groups/${group}/members/alice`).update({ status: 'revoked' }));
+    await assertFails(alice.doc(path('normal')).update({ body: 'Stale session replay' }));
+    await seedFirestore(async (db) => {
+      await db.doc(`groups/${group}/members/alice`).update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(path('normal')).update({ body: 'School revoked' }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('users/alice').update({ status: 'suspended' });
+    });
+    await assertFails(alice.doc(path('normal')).update({ body: 'Suspended account' }));
+    await seedFirestore((db) => db.doc('users/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(path('normal')).update({ body: 'Authorized again' }));
+  });
+
   test('legacy root message read receipts cannot impersonate peers or replay stale lists', async () => {
     const conversationId = 'dm_pu_alice_bob';
     const message = 'messages/read-receipt';

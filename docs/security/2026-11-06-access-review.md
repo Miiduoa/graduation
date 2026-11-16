@@ -828,3 +828,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **隔離回歸：** `backend/tests/security-rules.test.js` 新增合成 Firebase Emulator 測試，包括九種隱藏／撤回狀態、同校他人／跨校／匿名拒絕、合法作者刪除與管理者刪除、管理員撤回後的舊會話重放，以及停權、群組撤權、校籍撤權與恢復。須以新 head CI 實際執行結果決定通過與否，未經執行不得宣稱已驗收。
 - **相容性限制：** 不具管理權的作者不能直接硬刪自己已進入未發布／撤回狀態的草稿；此類清理須走有授權的管理流程。既有 UI 若提供草稿刪除功能，須另行檢查顯示與錯誤引導，不能把此開發分支變更說成已正式上線。
 - **仍未結案：** 群組父貼文的 Firestore GET/LIST 仍可能直接曝光未發布資料，需要 Web/Mobile feed 查詢與歷史欄位安全過渡；已發 GCS/Supabase URL 撤權、真隔離 Storage CAS、歷史附件引用、minimatch 兩套鎖檔、目前 main 整合、App 5504170 的精確 head APPROVED 與正式發布／回復驗證也均未完成。本輪不合併或部署，不觸碰正式資料、金鑰、附件 token、migration、E 校園，也不重送受限制 npm/pnpm audit。
+
+
+## 2026-11-16：群組貼文 SDK 輸入文字資源上限（PR #577）
+
+- **缺口：** Web 討論發文介面限制 title 120／body 8000 字，但 Firestore groups/{groupId}/posts/{postId} 的 create 與普通內容 update 缺少同等伺服器規則。具有效校籍／群組資格的帳號能直接用 SDK 建立或更新超長文字，消耗額外儲存及讀取資源（仍受 Firestore 文件實際總大小限制）。這不是跨帳號讀取漏洞，也不能視為已解決未發布貼文曝光。
+- **修補：** 在規則建立專屬 title/body 型別與長度檢查，title 不超過 120、body 不超過 8000；只在建立或實際修改此兩個文字欄位時要求驗證。歷史文章欄位缺失時，其他 metadata 更新、按讚及管理流程不因本變更被一概封鎖。未新增對正式資料的讀寫。
+- **合成回歸：** backend/tests/security-rules.test.js 測試合法、邊界、超長、非字串、正常改文、跨帳號／跨校拒絕、群組與校籍撤權、停權、舊 SDK replay 及恢復。只有對此精確 head 執行成功的 Firebase emulator／主 CI／CodeQL 才能標記驗證；發布前不借用舊 head 成果。
+- **明確限制：** 其他非 title/body 欄位及大量發文頻率並未由此上限全面處理；未發布父貼文 GET/LIST、GCS/Supabase 已簽 URL 撤銷、真隔離 Storage CAS、歷史附件資料補證、minimatch 雙依賴圖、正式部署與回復，以及指定 App 5504170 精確 head APPROVED 仍未結案。維持 PR Draft，不自行合併、部署、清理正式 token／金鑰、migration、E 校園連線或受限制的 npm/pnpm audit。
