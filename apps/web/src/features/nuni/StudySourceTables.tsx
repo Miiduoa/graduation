@@ -252,6 +252,9 @@ function StudySourceSelection({ table, index, sourceLines }: {
   sourceLines: string[];
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
+  // Use the authorized source, not textarea.value: textareas normalize CRLF
+  // to LF, and a stale WebView DOM value is not evidence from the lesson.
+  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex);
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -278,6 +281,14 @@ function StudySourceSelection({ table, index, sourceLines }: {
       setCopyFeedback('瀏覽器未確認複製；原文仍保留在下方，請長按選取或使用鍵盤複製。');
     }
   };
+  const selectSelectedOriginal = () => {
+    const field = originalText.current;
+    if (!field) return;
+    // Readonly DOM values can still drift after an embedded WebView glitch.
+    // Repair the long-press fallback before selection and clipboard access.
+    if (field.value !== selectedSource.replace(/\r\n?/gu, '\n')) field.value = selectedSource;
+    selectOriginalTableText(field);
+  };
   const copySelectedOriginal = () => {
     const field = originalText.current;
     if (!field) return;
@@ -286,14 +297,14 @@ function StudySourceSelection({ table, index, sourceLines }: {
     setCopyFeedback('');
     // Preserve a selectable fallback before any async permission prompt. On
     // mobile, selection can remain useful even if clipboard access is denied.
-    selectOriginalTableText(field);
+    selectSelectedOriginal();
     try {
       const clipboard = navigator.clipboard;
       if (typeof clipboard?.writeText !== 'function') {
         manualCopy(request);
         return;
       }
-      const result: unknown = clipboard.writeText(field.value);
+      const result: unknown = clipboard.writeText(selectedSource);
       // A few WebViews return undefined/false rather than a Promise while
       // silently doing nothing. Never report that as a confirmed copy.
       if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
@@ -345,7 +356,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
             </option>)}
         </select>
       </label>
-      <button type="button" onClick={() => selectOriginalTableText(originalText.current)}>
+      <button type="button" onClick={selectSelectedOriginal}>
         {rowIndex < 0
           ? `全選第 ${index + 1} 張表格原文`
           : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}
@@ -362,7 +373,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
         readOnly
         spellCheck={false}
         rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : 2}
-        value={tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex)}
+        value={selectedSource}
       />
     </details>
   );

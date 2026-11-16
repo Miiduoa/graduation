@@ -1376,3 +1376,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 若 iOS／Android 內嵌 WebView 的 `navigator.clipboard.writeText()` 回傳 Promise 卻永遠不回覆，原先複製按鈕沒有任何結果提示；現在先顯示等待狀態，5 秒仍未確認則明確顯示手動長按／鍵盤複製提示，保留唯讀原文與已選取範圍。
 - 切換資料列或教材、關閉表格元件時會取消舊等待計時器與回覆授權，避免過期的成功或逾時通知覆蓋新來源；5 秒後才抵達的成功亦不得宣稱當次複製已確認。新增兩組模擬 DOM／WebView 計時回歸。僅更動原文表格複製 UI，沒有改動教材、私人筆記、JSON v1/v2 備份或模型服務。
 - 本輪是程式與模擬瀏覽器驗證，不等於 iOS Safari／Android Chrome 真機已能貼上；完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro、WebGPU 中文教學品質及 Ahaboard 同教材同題同機比較仍須依新 SHA 另驗。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-16：手機表格複製保持原始 CRLF、修復唯讀選取內容失同步
+
+- 系統剪貼簿直接使用授權教材擷取的表格或資料列原文，而不把 `textarea.value` 視為原始內容；後者在 iOS／WebView 會把 CRLF 正規化為 LF。現在完整表格複製可保留原文行間 CRLF，無重新組合儲存格、猜測欄位或外傳教材。
+- 手機唯讀文字區即使意外殘留過期／被修改的 DOM 字串，全選及複製前也會重新顯示目前來源文字，失敗時的長按／鍵盤備援不再指向舊內容。新增兩組 DOM 模擬回歸，涵蓋 CRLF 原文及失同步後的單列來源；不改 v1/v2 進度或練習 checkpoint，不增加依賴。
+- 此處是程式與模擬 DOM 改善，真實 iOS Safari、Android Chrome／Maestro、WebGPU 中文教學及 Ahaboard 同教材同題同裝置實測仍需驗證。所有 gate、CodeQL 與指定 App 5504170 必須按新 head 重核，PR 維持 Draft，不合併、不部署。

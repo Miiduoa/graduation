@@ -1393,3 +1393,32 @@ it('clears an unconfirmed clipboard timeout when the student changes source row'
     }
   });
 });
+
+it('copies exact CRLF from the course table, not normalized textarea line endings', async () => {
+  const crlfSource = source.replace(/\n/gu, '\r\n');
+  const copy = vi.fn(() => Promise.resolve());
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    const view = render(<StudySourceTables text={crlfSource} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    const field = view.container.querySelector('textarea');
+    expect(field?.value).not.toContain('\r');
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+    expect(copy).toHaveBeenCalledWith(source.split('\n').slice(1).join('\r\n'));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('瀏覽器已接受複製指令'));
+  });
+});
+
+it('repairs stale readonly WebView text before selecting and copying the authorized row', async () => {
+  const copy = vi.fn(() => Promise.resolve());
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    const view = render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }), { target: { value: '1' } });
+    const field = view.container.querySelector('textarea');
+    expect(field).not.toBeNull();
+    field!.value = '| 其他教材 | 999 |';
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 2 列原文' }));
+    expect(field!.value).toBe('| 計算機概論 | 2 | 205 |');
+    expect(copy).toHaveBeenCalledWith('| 計算機概論 | 2 | 205 |');
+  });
+});
