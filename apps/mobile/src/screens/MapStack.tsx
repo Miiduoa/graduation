@@ -19,6 +19,8 @@ import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import SchoolInfoScreen from './SchoolInfoScreen';
 import { DormitoryScreen } from './DormitoryScreen';
 import { CareerScreen } from './CareerScreen';
+import { GroupsScreen } from './GroupsScreen';
+import { ClubDetailScreen } from './ClubDetailScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
 import { LibraryCatalogScreen } from './LibraryCatalogScreen';
@@ -161,6 +163,12 @@ export function MapStack() {
         name="Career"
         component={CareerScreen}
         options={{ title: '職涯', headerShown: false }}
+      />
+      <Stack.Screen name="Clubs" component={GroupsScreen} options={{ title: '社團' }} />
+      <Stack.Screen
+        name="ClubDetail"
+        component={ClubDetailScreen}
+        options={{ title: '社團詳情' }}
       />
       <Stack.Screen
         name="SchoolInfo"

@@ -80,10 +80,11 @@ it.each(['/groups/club-1/club', '/groups/club-1/club/overview', '/groups/club-1/
     navigation.search = 'schoolId=pu&campus=pu&school=PU&session=private';
     render(<ServiceBreadcrumbs title="攝影社" />);
     const nav = screen.getByRole('navigation', { name: '目前位置' });
-    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual([
-      '生活',
-      '社團活動',
-    ]);
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['生活', '社團活動']);
     expect(within(nav).getByRole('link', { name: '生活' }).getAttribute('href')).toBe(
       '/life?school=PU&schoolId=pu&campus=pu',
     );
@@ -106,6 +107,42 @@ it('keeps ordinary group pages inside the coursework journey', () => {
     '/classroom?campus=nthu',
   );
   expect(screen.queryByRole('link', { name: '社團活動' })).toBeNull();
+});
+
+it('returns a teaching workspace to courses without directing teachers to appeals', () => {
+  navigation.pathname = '/teacher/course/cs101';
+  navigation.search = 'schoolId=pu&campus=pu&session=private';
+  render(<ServiceBreadcrumbs title="資料庫系統" />);
+  const nav = screen.getByRole('navigation', { name: '目前位置' });
+  expect(
+    within(nav)
+      .getAllByRole('link')
+      .map((link) => link.textContent),
+  ).toEqual(['課務', '課程與作業']);
+  expect(within(nav).getByRole('link', { name: '課程與作業' }).getAttribute('href')).toBe(
+    '/classroom?schoolId=pu&campus=pu',
+  );
+  expect(within(nav).queryByRole('link', { name: '課務申訴審核' })).toBeNull();
+});
+
+it.each(['attendance', 'gradebook', 'quizzes'])(
+  'returns the teaching %s tool to the same course workspace and campus',
+  (tool) => {
+    navigation.pathname = `/teacher/course/course%20one/${tool}`;
+    navigation.search = 'schoolId=pu&campus=pu&session=private';
+    render(<ServiceBreadcrumbs title="課堂工具" />);
+    expect(screen.getByRole('link', { name: '課程工作台' }).getAttribute('href')).toBe(
+      '/teacher/course/course%20one?schoolId=pu&campus=pu',
+    );
+    expect(screen.queryByRole('link', { name: '課務申訴審核' })).toBeNull();
+  },
+);
+
+it('keeps the separate teacher appeals desk in its original place', () => {
+  navigation.pathname = '/teacher';
+  render(<ServiceBreadcrumbs />);
+  expect(screen.getByText('課務申訴審核').getAttribute('aria-current')).toBe('page');
+  expect(screen.queryByRole('link', { name: '課程工作台' })).toBeNull();
 });
 
 it.each(['feedback', 'semester'])(

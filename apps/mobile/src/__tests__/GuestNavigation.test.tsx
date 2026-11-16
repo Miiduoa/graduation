@@ -406,7 +406,9 @@ test.each(['cold', 'warm'])(
       await waitFor(() => expect(mockLinkListener).toBeDefined());
       act(() => mockLinkListener?.({ url }));
     }
-    expect(await view.findByText(/個人職涯資料尚未連結到校方系統/)).toBeTruthy();
+    expect(
+      await view.findByRole('link', { name: '登入後可申請校內工讀與查看實習學分' }),
+    ).toBeTruthy();
     expect(navigation.getCurrentRoute()?.name).toBe('Career');
     expect(view.getByText('生活 › 職涯 · 國立清華大學')).toBeTruthy();
     expect(view.queryByTestId('school-login-form')).toBeNull();

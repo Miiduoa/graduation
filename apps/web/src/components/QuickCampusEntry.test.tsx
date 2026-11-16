@@ -3,18 +3,47 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
 
-const state = vi.hoisted(() => ({ uid: 'alice' as string | null, platform: false }));
+const state = vi.hoisted(() => ({
+  uid: 'alice' as string | null,
+  loading: false,
+  error: null as Error | null,
+  platform: false,
+  accountId: 'platform-account',
+  context: 'platform-context',
+  platformLoading: false,
+  platformError: '',
+  pendingLogout: false,
+  school: null as null | { id: string; code: string },
+}));
 vi.mock('./AuthGuard', () => ({
-  useAuth: () => ({ user: state.uid ? { uid: state.uid } : null }),
+  useAuth: () => ({
+    user: state.uid ? { uid: state.uid } : null,
+    loading: state.loading,
+    error: state.error,
+  }),
 }));
 vi.mock('./SelectedSchoolProvider', () => ({
-  useOptionalSelectedSchool: () => null,
+  useOptionalSelectedSchool: () =>
+    state.school
+      ? {
+          selectedSchool: state.school,
+          loading: false,
+          catalogStatus: 'ready',
+        }
+      : null,
 }));
 vi.mock('@/features/nuni/Session', () => ({
-  useOptionalNuniSession: () => state.platform
-    ? { session: { account: { id: 'platform-account' } }, loading: false, error: null, pendingLogout: false }
-    : null,
+  useOptionalNuniSession: () =>
+    state.platform
+      ? {
+          session: { platformAccountId: state.accountId, context: state.context },
+          loading: state.platformLoading,
+          error: state.platformError,
+          pendingLogout: state.pendingLogout,
+        }
+      : null,
 }));
 vi.mock('@/lib/campusIntentClient', () => ({
   interpretCampusRequest: vi.fn(),
@@ -29,7 +58,15 @@ vi.mock('./VoiceDictationButton', () => ({
 
 beforeEach(() => {
   state.uid = 'alice';
+  state.loading = false;
+  state.error = null;
   state.platform = false;
+  state.accountId = 'platform-account';
+  state.context = 'platform-context';
+  state.platformLoading = false;
+  state.platformError = '';
+  state.pendingLogout = false;
+  state.school = null;
   vi.clearAllMocks();
   sessionStorage.clear();
   window.history.replaceState({}, '', '/');
@@ -38,7 +75,8 @@ afterEach(() => vi.unstubAllEnvs());
 
 it('sends the finished voice transcript through AI and renders multiple validated actions', async () => {
   vi.mocked(interpretCampusRequest).mockResolvedValue({
-    status: 'understood', source: 'model',
+    status: 'understood',
+    source: 'model',
     summary: '想確認空堂，再找地方讀書和吃飯。',
     destinations: ['/timetable', '/library', '/cafeteria'],
     clarifyingQuestion: null,
@@ -46,7 +84,9 @@ it('sends the finished voice transcript through AI and renders multiple validate
   render(<QuickCampusEntry />);
   fireEvent.click(screen.getByText('模擬語音輸入'));
   expect(interpretCampusRequest).toHaveBeenCalledWith({
-    uid: 'alice', schoolId: '', utterance: '明天沒課，我想讀書再吃飯',
+    uid: 'alice',
+    schoolId: '',
+    utterance: '明天沒課，我想讀書再吃飯',
   });
   expect(await screen.findByText('想確認空堂，再找地方讀書和吃飯。')).toBeTruthy();
   expect(screen.getByText('AI 建議先開啟')).toBeTruthy();
@@ -56,12 +96,16 @@ it('sends the finished voice transcript through AI and renders multiple validate
 
 it('keeps manually typed questions private until the user asks for AI interpretation', async () => {
   vi.mocked(interpretCampusRequest).mockResolvedValue({
-    status: 'clarify', source: 'model',
-    summary: '還需要再確認。', destinations: [],
+    status: 'clarify',
+    source: 'model',
+    summary: '還需要再確認。',
+    destinations: [],
     clarifyingQuestion: '要讀書還是借書？',
   });
   render(<QuickCampusEntry />);
-  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), { target: { value: '有點累' } });
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+    target: { value: '有點累' },
+  });
   expect(interpretCampusRequest).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '用 AI 理解這句話' }));
   expect(await screen.findByText('要讀書還是借書？')).toBeTruthy();
@@ -69,8 +113,12 @@ it('keeps manually typed questions private until the user asks for AI interpreta
 
 it('offers an explicit private-message destination without sending the instruction to a model', () => {
   render(<QuickCampusEntry />);
-  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), { target: { value: '開啟私人訊息' } });
-  expect(screen.getByRole('link', { name: /^訊息查看自己的私人對話/ }).getAttribute('href')).toBe('/dms');
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+    target: { value: '開啟私人訊息' },
+  });
+  expect(screen.getByRole('link', { name: /^訊息查看自己的私人對話/ }).getAttribute('href')).toBe(
+    '/dms',
+  );
   expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
   expect(interpretCampusRequest).not.toHaveBeenCalled();
 });
@@ -83,7 +131,9 @@ it.each([
   state.platform = true;
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
   const view = render(<QuickCampusEntry />);
-  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), { target: { value: phrase } });
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+    target: { value: phrase },
+  });
   const link = screen.getByRole('link', { name: (name) => name.startsWith(label) });
   expect(link.getAttribute('href')).toBe(href);
   fireEvent.click(link);
@@ -91,8 +141,12 @@ it.each([
   window.history.replaceState({}, '', href);
   window.history.replaceState({}, '', '/');
   render(<QuickCampusEntry />);
-  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(phrase);
-  expect(screen.getByRole('link', { name: (name) => name.startsWith(label) }).getAttribute('href')).toBe(href);
+  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
+    phrase,
+  );
+  expect(
+    screen.getByRole('link', { name: (name) => name.startsWith(label) }).getAttribute('href'),
+  ).toBe(href);
   expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
   expect(interpretCampusRequest).not.toHaveBeenCalled();
 });
@@ -110,25 +164,56 @@ it('presents the resolved platform food availability without offering disabled A
   expect(screen.queryByRole('link', { name: /^App 餐廳訂單/ })).toBeNull();
 });
 
-it.each([false, true])('applies the readonly flag to explicit school service commands (%s)', (enabled) => {
-  render(<SchoolLmsReadonlyProvider enabled={enabled}><QuickCampusEntry /></SchoolLmsReadonlyProvider>);
-  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), { target: { value: '開啟玩課雲作業' } });
-  expect(Boolean(screen.queryByRole('link', { name: (_, el) => el.getAttribute('href') === '/school-lms' }))).toBe(enabled);
-  expect(interpretCampusRequest).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+  'applies the readonly flag to explicit school service commands (%s)',
+  (enabled) => {
+    render(
+      <SchoolLmsReadonlyProvider enabled={enabled}>
+        <QuickCampusEntry />
+      </SchoolLmsReadonlyProvider>,
+    );
+    fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+      target: { value: '開啟玩課雲作業' },
+    });
+    expect(
+      Boolean(
+        screen.queryByRole('link', { name: (_, el) => el.getAttribute('href') === '/school-lms' }),
+      ),
+    ).toBe(enabled);
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+  },
+);
 
 it('never exposes a previous AI answer after a transcript change or logout', async () => {
   let resolve!: (result: Awaited<ReturnType<typeof interpretCampusRequest>>) => void;
-  vi.mocked(interpretCampusRequest).mockReturnValue(new Promise(done => { resolve = done; }));
+  vi.mocked(interpretCampusRequest).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
   const view = render(<QuickCampusEntry />);
   fireEvent.click(screen.getByText('模擬語音輸入'));
-  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), { target: { value: '我要交作業' } });
-  await act(async () => resolve({ status: 'understood', source: 'model', summary: '舊的結果', destinations: ['/map'], clarifyingQuestion: null }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+    target: { value: '我要交作業' },
+  });
+  await act(async () =>
+    resolve({
+      status: 'understood',
+      source: 'model',
+      summary: '舊的結果',
+      destinations: ['/map'],
+      clarifyingQuestion: null,
+    }),
+  );
   expect(screen.queryByText('舊的結果')).toBeNull();
   state.uid = null;
   view.rerender(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '想安排讀書時間' } });
   expect(screen.queryByText('用 AI 理解這句話')).toBeNull();
-  expect(screen.getByText('目前為基本捷徑。登入學校帳號後，可使用 AI 理解較複雜的需求。')).toBeTruthy();
+  expect(
+    screen.getByText('目前顯示服務捷徑；登入 Google 或學校帳號後，可使用校園助理。'),
+  ).toBeTruthy();
 });
 
 it('does not claim AI understanding if the provider is unavailable', async () => {
@@ -139,21 +224,41 @@ it('does not claim AI understanding if the provider is unavailable', async () =>
   expect(screen.queryByText('AI 建議先開啟')).toBeNull();
 });
 
-it.each([false, true])('filters readonly destinations from voice results with enabled=%s', async (enabled) => {
-  vi.mocked(interpretCampusRequest).mockResolvedValue(JSON.parse(JSON.stringify({
-    status: 'understood', source: 'model', summary: '查看作業',
-    destinations: ['/school-lms', '/classroom'], clarifyingQuestion: null,
-  })));
-  render(<SchoolLmsReadonlyProvider enabled={enabled}><QuickCampusEntry /></SchoolLmsReadonlyProvider>);
-  fireEvent.click(screen.getByText('模擬語音輸入'));
-  await screen.findByText('查看作業');
-  expect(
-    Boolean(screen.queryByRole('link', { name: (_, el) => el.getAttribute('href') === '/school-lms' })),
-  ).toBe(enabled);
-  expect(
-    screen.getByRole('link', { name: (_, el) => (el.getAttribute('href') || '').startsWith('/classroom') }).getAttribute('href'),
-  ).toContain('/classroom');
-});
+it.each([false, true])(
+  'filters readonly destinations from voice results with enabled=%s',
+  async (enabled) => {
+    vi.mocked(interpretCampusRequest).mockResolvedValue(
+      JSON.parse(
+        JSON.stringify({
+          status: 'understood',
+          source: 'model',
+          summary: '查看作業',
+          destinations: ['/school-lms', '/classroom'],
+          clarifyingQuestion: null,
+        }),
+      ),
+    );
+    render(
+      <SchoolLmsReadonlyProvider enabled={enabled}>
+        <QuickCampusEntry />
+      </SchoolLmsReadonlyProvider>,
+    );
+    fireEvent.click(screen.getByText('模擬語音輸入'));
+    await screen.findByText('查看作業');
+    expect(
+      Boolean(
+        screen.queryByRole('link', { name: (_, el) => el.getAttribute('href') === '/school-lms' }),
+      ),
+    ).toBe(enabled);
+    expect(
+      screen
+        .getByRole('link', {
+          name: (_, el) => (el.getAttribute('href') || '').startsWith('/classroom'),
+        })
+        .getAttribute('href'),
+    ).toContain('/classroom');
+  },
+);
 
 it('keeps the quick-entry query after returning from a matched service', () => {
   const view = render(<QuickCampusEntry />);
@@ -201,14 +306,155 @@ it('does not restore the quick-entry query after starting over', () => {
 
 it('offers semester grades and their preview when the model returns the shared grades destination', async () => {
   vi.mocked(interpretCampusRequest).mockResolvedValue({
-    status: 'understood', source: 'model', summary: '查詢學期成績',
-    destinations: ['/grades'], clarifyingQuestion: null,
-    previews: [{ destination: '/grades', status: 'available', source: 'campus-platform',
-      message: '已匯入兩筆成績', items: [{ title: '資料庫', detail: '91 分' }] }],
+    status: 'understood',
+    source: 'model',
+    summary: '查詢學期成績',
+    destinations: ['/grades'],
+    clarifyingQuestion: null,
+    previews: [
+      {
+        destination: '/grades',
+        status: 'available',
+        source: 'campus-platform',
+        message: '已匯入兩筆成績',
+        items: [{ title: '資料庫', detail: '91 分' }],
+      },
+    ],
   });
   render(<QuickCampusEntry />);
   fireEvent.click(screen.getByText('模擬語音輸入'));
   const grades = await screen.findByRole('link', { name: /已匯入兩筆成績/ });
   expect(grades.getAttribute('href')).toBe('/grades?tab=semester');
   expect(grades.textContent).toContain('資料庫 · 91 分');
+});
+
+it('hands a Google account request to the inline assistant only after an explicit action', () => {
+  state.uid = null;
+  state.platform = true;
+  state.school = { id: 'pu', code: 'PU' };
+  const onAsk = vi.fn();
+  render(<QuickCampusEntry onAsk={onAsk} />);
+  fireEvent.click(screen.getByText('模擬語音輸入'));
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  expect(onAsk).not.toHaveBeenCalled();
+  expect(screen.queryByText(/登入學校帳號後，可使用 AI/)).toBeNull();
+  expect(screen.queryByRole('link', { name: /校園助理/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '交給校園助理' }));
+  expect(onAsk).toHaveBeenCalledExactlyOnceWith('明天沒課，我想讀書再吃飯');
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
+it('carries the platform request and selected campus to the full assistant without school analysis', () => {
+  state.uid = null;
+  state.platform = true;
+  state.school = { id: 'pu', code: 'PU' };
+  render(<QuickCampusEntry />);
+  const phrase = '明天讀書 & 午餐，要怎麼安排？';
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: phrase } });
+  const handoff = screen.getByRole('link', { name: '交給校園助理' });
+  const url = new URL(handoff.getAttribute('href')!, 'https://campus.example');
+  expect(url.pathname).toBe('/ai-assistant');
+  expect(url.searchParams.get('q')).toBe(phrase);
+  expect(url.searchParams.get('schoolId')).toBe('pu');
+  expect(url.searchParams.get('campus')).toBe('pu');
+  expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
+  fireEvent.click(handoff);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).not.toContain('platform-context');
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
+it('respects an explicitly unavailable inline composer instead of offering a second assistant route', () => {
+  state.uid = null;
+  state.platform = true;
+  render(<QuickCampusEntry onAsk={null} />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '想安排明天' } });
+  expect(screen.queryByRole('button', { name: /校園助理/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /校園助理/ })).toBeNull();
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
+it.each(['school-loading', 'school-error', 'platform-loading', 'platform-error', 'signing-out'])(
+  'keeps unavailable account states out of school analysis and assistant handoff: %s',
+  (status) => {
+    if (status === 'school-loading') state.loading = true;
+    if (status === 'school-error') state.error = new Error('expired');
+    if (status.startsWith('platform') || status === 'signing-out') {
+      state.uid = null;
+      state.platform = true;
+      state.platformLoading = status === 'platform-loading';
+      state.platformError = status === 'platform-error' ? 'expired' : '';
+      state.pendingLogout = status === 'signing-out';
+    }
+    const onAsk = vi.fn();
+    render(<QuickCampusEntry onAsk={onAsk} />);
+    fireEvent.click(screen.getByText('模擬語音輸入'));
+    expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /校園助理/ })).toBeNull();
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+    expect(onAsk).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['account', 'session', 'campus'])(
+  'clears the earlier draft and rejects a late response after changing %s',
+  async (change) => {
+    state.platform = true;
+    let resolve!: (result: Awaited<ReturnType<typeof interpretCampusRequest>>) => void;
+    vi.mocked(interpretCampusRequest).mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const view = render(<QuickCampusEntry />);
+    fireEvent.click(screen.getByText('模擬語音輸入'));
+    if (change === 'account') state.accountId = 'second-account';
+    if (change === 'session') state.context = 'second-session';
+    if (change === 'campus') state.school = { id: 'nthu', code: 'NTHU' };
+    view.rerender(<QuickCampusEntry />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    await act(async () =>
+      resolve({
+        status: 'understood',
+        source: 'model',
+        summary: '上一個範圍的私人結果',
+        destinations: ['/map'],
+        clarifyingQuestion: null,
+      }),
+    );
+    expect(screen.queryByText('上一個範圍的私人結果')).toBeNull();
+    state.accountId = 'platform-account';
+    state.context = 'platform-context';
+    state.school = null;
+    view.rerender(<QuickCampusEntry />);
+    expect(screen.queryByText('上一個範圍的私人結果')).toBeNull();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  },
+);
+
+it('keeps the same account draft during session refresh without allowing analysis while checking', () => {
+  state.platform = true;
+  const view = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '下週想安排讀書' } });
+  state.platformLoading = true;
+  view.rerender(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('下週想安排讀書');
+  expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
+  state.platformLoading = false;
+  view.rerender(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('下週想安排讀書');
+  expect(screen.getByRole('button', { name: '用 AI 理解這句話' })).toBeTruthy();
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
+it('does not restore an earlier platform account query after leaving and returning', () => {
+  state.uid = null;
+  state.platform = true;
+  const view = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  view.unmount();
+  state.accountId = 'second-account';
+  render(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
 });

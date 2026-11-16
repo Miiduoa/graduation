@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import {
-  CAREER_EMPTY,
   CAREER_JOBS_UNAVAILABLE,
   CAREER_LINKS,
   careerCalendarUrl,
@@ -11,6 +10,7 @@ import {
   type CareerFeed,
 } from '../../../../packages/shared/src/career';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
+import { CareerHost } from '../components/career/CareerHost';
 import { useSchool } from '../state/school';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -96,13 +96,10 @@ function Content({ schoolId }: { schoolId: string }) {
         />
       </AICard>
       <AICard title="校內工讀與實習">
-        <Body>{CAREER_EMPTY}</Body>
         {official && (
           <AIButton label={`前往${official.label}`} onPress={() => open(official.url)} />
         )}
-        <Body>
-          個人職涯資料尚未連結到校方系統。此頁提供公開資訊，尚未接上校內工讀申請及實習學分系統。申請、權益說明與學分認定請洽校方；這裡不受理投遞或登錄時數。
-        </Body>
+        <CareerHost schoolId={schoolId} />
       </AICard>
       <AICard title="校方職涯公告">
         <Body>只顯示標題、公告日期與原文連結；公告日期不是截止日。</Body>
@@ -151,7 +148,7 @@ function Content({ schoolId }: { schoolId: string }) {
       </AICard>
       <AICard title="給學生、職涯承辦與平台營運">
         <Body>
-          訪客與登入者看到相同的公開資訊。承辦與營運可從來源連結核對公告；本頁沒有上架、申請審核、學生名冊或實習紀錄管理功能。諮詢預約請依校方網站流程辦理。
+          公開資訊與校方連結持續提供。登入後依校方授權顯示申請與承辦工作台；諮詢預約請依校方網站流程辦理。
         </Body>
       </AICard>
       {!!error && (

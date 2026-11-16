@@ -683,23 +683,27 @@ it('does not steal focus when restoring an open directory', () => {
   expect(document.activeElement).toBe(page);
 });
 
-it('uses the existing Today assistant when its header voice shortcut is pressed', () => {
+it('uses the existing Today conversation when its header assistant shortcut is pressed', () => {
   navigation.pathname = '/';
-  const openTodayVoice = vi.fn();
-  render(<AppHeader onOpenVoice={openTodayVoice} />);
-  fireEvent.click(screen.getByRole('button', { name: '開啟校園語音 AI' }));
-  expect(openTodayVoice).toHaveBeenCalledOnce();
+  const openTodayAssistant = vi.fn();
+  render(<AppHeader onOpenAssistant={openTodayAssistant} />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  expect(openTodayAssistant).toHaveBeenCalledOnce();
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-it('opens a keyboard-dismissible voice AI entry without leaving the current service', () => {
+it('opens a keyboard-dismissible assistant on the current service with a login return for guests', async () => {
   const view = render(<AppHeader />);
-  fireEvent.click(view.getByRole('button', { name: '開啟校園語音 AI' }));
-  const dialog = view.getByRole('dialog', { name: '校園語音與 AI 快速操作' });
+  const trigger = view.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  const dialog = view.getByRole('dialog', { name: '校園助理' });
   expect(dialog).toBeTruthy();
-  expect(view.getByRole('heading', { name: '說出想做的事，直接找到入口。' })).toBeTruthy();
+  const login = await view.findByRole('link', { name: '登入後，接著詢問校園助理' });
+  expect(new URL(login.getAttribute('href')!, window.location.origin).searchParams.get('returnUrl'))
+    .toBe('/map#campus-assistant-entry');
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(view.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
 });
 
 it('hides readonly homework by default and restores it when enabled', () => {

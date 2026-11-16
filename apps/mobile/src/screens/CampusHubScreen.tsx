@@ -115,6 +115,13 @@ const sections: Array<{ title: string; searchOnly?: boolean; items: ServiceItem[
         keywords: ['失物', '招領', '撿到', '遺失'],
       },
       {
+        icon: 'ic_people_community',
+        label: '社團',
+        screen: 'Clubs',
+        description: '找社團、查看已加入社團與活動',
+        keywords: ['社團', '學會', '招新', '入社', '社員', '幹部', '社課'],
+      },
+      {
         icon: 'ic_school',
         label: '職涯',
         screen: 'Career',

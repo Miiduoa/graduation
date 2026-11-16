@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -8,6 +8,16 @@ import {
   type CareerFeed,
 } from '@campus/shared/src/career';
 import CareerPage from './page';
+import { opportunity } from '@campus/shared/testFixtures/careerWorkstudy';
+const identity = vi.hoisted(() => ({ user: null as { uid: string } | null }));
+vi.mock('@/components/AuthGuard', () => ({ useAuth: () => identity }));
+vi.mock('@/lib/firebase', () => ({
+  getAuth: () => ({
+    currentUser: identity.user && { ...identity.user, getIdToken: async () => 'fixture' },
+  }),
+  getCloudFunctionUrl: (name: string) => `/api/fn/${name}`,
+}));
+vi.mock('@/lib/timetable/store', () => ({ loadPersonalTimetable: async () => ({ courses: [] }) }));
 const campus = vi.hoisted(() => ({ schoolId: 'pu' }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/career',
@@ -36,6 +46,7 @@ function respond(feed: CareerFeed) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => feed }));
 }
 beforeEach(() => {
+  identity.user = null;
   campus.schoolId = 'pu';
   respond({ ...emptyCareerFeed(), announcementsUnavailable: false, jobsUnavailable: false });
 });
@@ -139,4 +150,118 @@ it('handles a failed feed without replacing the official school link', async () 
   render(<CareerPage />);
   expect(await screen.findByText(CAREER_JOBS_UNAVAILABLE)).toBeTruthy();
   expect(screen.getByRole('link', { name: /靜宜職涯/ })).toBeTruthy();
+});
+
+it('mounts authenticated callable hosts, keeping forms hidden while unavailable and until retry succeeds', async () => {
+  identity.user = { uid: 'student' };
+  let available = false;
+  const calls = vi.fn(async (url: string, init?: RequestInit) => {
+    if (!url.startsWith('/api/fn/')) return { ok: true, json: async () => emptyCareerFeed() };
+    const data = JSON.parse(String(init?.body)).data;
+    if (!available || data.audience === 'staff')
+      return { ok: false, json: async () => ({ error: { message: '尚未啟用' } }) };
+    return {
+      ok: true,
+      json: async () => ({
+        result: {
+          snapshot: url.endsWith('careerWorkstudy')
+            ? {
+                opportunities: [opportunity],
+                applications: [],
+                events: [],
+                audit: [],
+                sources: null,
+                canReview: false,
+                canOperate: false,
+              }
+            : { rules: [], records: [], audit: [] },
+        },
+      }),
+    };
+  });
+  vi.stubGlobal('fetch', calls);
+  render(<CareerPage />);
+  expect(screen.getByText('我的實習')).toBeTruthy();
+  expect(screen.queryByText('新增系所規則')).toBeNull();
+  expect(screen.queryByText('申請名單')).toBeNull();
+  expect((await screen.findAllByText('尚未啟用')).length).toBe(2);
+  expect(screen.queryByRole('button', { name: `應徵${opportunity.title}` })).toBeNull();
+  available = true;
+  await act(async () => {
+    fireEvent.click(screen.getByText('重新整理實習進度'));
+    fireEvent.click(screen.getByText('重新整理工讀資料'));
+  });
+  expect(await screen.findByRole('button', { name: `應徵${opportunity.title}` })).toBeTruthy();
+  expect(screen.getByText('系所尚未設定實習學分規則，請洽系辦確認。')).toBeTruthy();
+  expect(
+    calls.mock.calls
+      .filter(([url]) => url.startsWith('/api/fn/'))
+      .every(
+        ([, init]) => (init?.headers as Record<string, string>).Authorization === 'Bearer fixture',
+      ),
+  ).toBe(true);
+});
+
+it('shows independent internship department review while workstudy staff and ops stay hidden', async () => {
+  identity.user = { uid: 'reviewer' };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.startsWith('/api/fn/')
+          ? {
+              result: {
+                snapshot: url.endsWith('careerWorkstudy')
+                  ? {
+                      opportunities: [],
+                      applications: [],
+                      events: [],
+                      audit: [],
+                      sources: null,
+                      canReview: false,
+                      canOperate: false,
+                    }
+                  : { rules: [], records: [], audit: [], canManage: true },
+              },
+            }
+          : emptyCareerFeed(),
+    })),
+  );
+  render(<CareerPage />);
+  expect(await screen.findByText('新增系所規則')).toBeTruthy();
+  expect(screen.getByText('實習紀錄確認')).toBeTruthy();
+  expect(screen.queryByText('新增機會')).toBeNull();
+  expect(screen.queryByText('職涯來源與操作紀錄')).toBeNull();
+});
+it('mounts the granted workstudy staff and ops workbenches after the student snapshot', async () => {
+  identity.user = { uid: 'admin' };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.startsWith('/api/fn/')
+          ? {
+              result: {
+                snapshot: url.endsWith('careerWorkstudy')
+                  ? {
+                      opportunities: [],
+                      applications: [],
+                      events: [],
+                      audit: [],
+                      sources: null,
+                      canReview: true,
+                      canOperate: true,
+                    }
+                  : { rules: [], records: [], audit: [], canManage: true },
+              },
+            }
+          : emptyCareerFeed(),
+    })),
+  );
+  render(<CareerPage />);
+  expect(await screen.findByText('新增機會')).toBeTruthy();
+  expect(await screen.findByText('職涯來源與操作紀錄')).toBeTruthy();
+  expect(await screen.findByText('實習規則與操作紀錄')).toBeTruthy();
 });

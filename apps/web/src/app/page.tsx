@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
 import { StudentCardEntry } from '@/components/StudentCardEntry';
-import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/TodayCampusEntry';
+import { TodayAssistantDisclosure, type TodayAssistantHandle } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
@@ -25,7 +25,7 @@ const courseHref = (course: HomeCourse) =>
   course.href ?? `/course/${encodeURIComponent(course.id)}`;
 
 export default function HomePage() {
-  const voiceEntry = useRef<TodayVoiceHandle>(null);
+  const assistantEntry = useRef<TodayAssistantHandle>(null);
   const hydrated = useClientHydrated();
   const { user, loading: authLoading } = useAuth();
   const nuni = useNuniSession();
@@ -253,7 +253,7 @@ export default function HomePage() {
   const assistant = (
     <TodayAssistantDisclosure
       key={assistantScope}
-      ref={voiceEntry}
+      ref={assistantEntry}
       onOpenChange={handleAssistantToggle}
     />
   );
@@ -275,7 +275,10 @@ export default function HomePage() {
       <a href="#today-content" className={styles.skip}>
         跳到主要內容
       </a>
-      <AppHeader onOpenVoice={() => voiceEntry.current?.openVoice()} />
+      <AppHeader
+        onOpenAssistant={() => assistantEntry.current?.openAssistant()}
+        assistantExpanded={openAssistantScope === assistantScope}
+      />
       <main id="today-content" className={styles.main} tabIndex={-1}>
         <StudentCardEntry />
         {blocked ? (

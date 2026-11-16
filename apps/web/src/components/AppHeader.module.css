@@ -384,9 +384,10 @@
 .voicePanel {
   position: fixed;
   z-index: 90;
-  width: min(440px, calc(100vw - 28px));
+  width: min(560px, calc(100vw - 28px));
   max-height: min(660px, calc(100dvh - 115px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   top: 78px;
   right: max(14px, env(safe-area-inset-right, 0px));
   border: 1px solid var(--border);
@@ -395,15 +396,26 @@
   background: var(--bg);
   box-shadow: 0 24px 70px color-mix(in srgb, var(--text) 17%, transparent);
 }
+.voicePanel[hidden] {
+  display: none;
+}
 .voicePanelHeading {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 4px 12px;
+  padding: 12px 4px;
+  background: var(--bg);
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
+}
+.voicePanelHeading h2 {
+  margin: 0;
+  font: inherit;
 }
 .voicePanelHeading button {
   min-height: 40px;

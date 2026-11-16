@@ -612,7 +612,12 @@ describe('controlled spatial camera input', () => {
     for (let index = 0; index < 20; index += 1) keyboard(container, '-');
     expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(MIN_SPATIAL_ZOOM);
     keyboard(container, 'Home');
+    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: MIN_SPATIAL_ZOOM });
+    expect(keyboard(container, '0').defaultPrevented).toBe(true);
     expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: 1 });
+    const callsAtNormalZoom = onCameraChange.mock.calls.length;
+    keyboard(container, '0');
+    expect(onCameraChange).toHaveBeenCalledTimes(callsAtNormalZoom);
     drawFrame();
     expect(frames.size).toBe(0);
     expect(document.activeElement).toBe(container);
@@ -623,7 +628,7 @@ describe('controlled spatial camera input', () => {
     drawFrame();
     const button = [...container.querySelectorAll('button')].find((label) => !label.hidden)!;
     button.focus();
-    for (const key of ['ArrowLeft', '+', 'Home']) expect(keyboard(button, key).defaultPrevented).toBe(false);
+    for (const key of ['ArrowLeft', '+', 'Home', '0']) expect(keyboard(button, key).defaultPrevented).toBe(false);
     button.click();
     expect(onSelect).toHaveBeenCalledTimes(1);
     const select = document.createElement('select');
@@ -639,6 +644,7 @@ describe('controlled spatial camera input', () => {
     container.focus();
     for (const init of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
       expect(keyboard(container, '+', init).defaultPrevented).toBe(false);
+      expect(keyboard(container, '0', init).defaultPrevented).toBe(false);
     }
     for (const key of ['ArrowUp', 'ArrowDown', 'Escape', 'Tab']) {
       expect(keyboard(container, key).defaultPrevented).toBe(false);
@@ -711,6 +717,35 @@ describe('controlled spatial camera input', () => {
     pointer(button, 'pointerup');
     button.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true }));
     expect(onSelect).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a second touch from turning a claimed drag into an accidental place selection', () => {
+    const { container, onSelect, onCameraChange, captured } = setupControlled();
+    drawFrame();
+    const button = [...container.querySelectorAll('button')].find((label) => !label.hidden)!;
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 300 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    expect(captured.has(1)).toBe(true);
+
+    // A second finger must release pointer capture without re-enabling the
+    // synthesized click that can arrive after the original finger lifts.
+    pointer(container, 'pointerdown', { pointerId: 2, isPrimary: false });
+    expect(captured.size).toBe(0);
+    pointer(container, 'pointerup', { clientX: 300 });
+    const accidentalClick = new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true });
+    button.dispatchEvent(accidentalClick);
+    expect(accidentalClick.defaultPrevented).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // The next deliberate single-finger tap on a location still works.
+    pointer(button, 'pointerdown');
+    pointer(button, 'pointerup');
+    const deliberateClick = new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true });
+    button.dispatchEvent(deliberateClick);
+    expect(deliberateClick.defaultPrevented).toBe(false);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
   });
 
   it.each(['pointercancel', 'lostpointercapture', 'blur', 'second-touch', 'resize', 'selection']) (
@@ -1022,4 +1057,45 @@ it('keeps a nearby but off-outline POI on the ground instead of inventing a roof
   expect(onRoof.buildingVolumes).toBe(1);
   expect(onGround.buildingVolumes).toBe(1);
   expect(illustrative.buildingVolumes).toBe(1);
+});
+
+
+it('does not lift POIs on OSM wall boundaries or corners onto a claimed rooftop', () => {
+  // Synthetic geometry only: a POI on an OSM wall/corner does not establish an
+  // entrance, roof, floor or building height even if a source height tag exists.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const point = campus.points[0];
+  const x = point.location.lng;
+  const y = point.location.lat;
+  const footprint = (outline: [number, number][]): ProvidenceFootprint => ({
+    poiId: point.id, name: point.name, sourceUrl: library.sourceUrl,
+    outline, heightMeters: 18, heightBasis: 'osm-tag',
+  });
+  const markerY = (outline: [number, number][]) => {
+    const { renderer } = setup(campus, undefined, [footprint(outline)]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = graph.children.find((item): item is InstancedMesh =>
+      item instanceof InstancedMesh && item.geometry.type === 'SphereGeometry')!;
+    const transform = new Matrix4();
+    caps.getMatrixAt(0, transform);
+    return new Vector3().setFromMatrixPosition(transform).y;
+  };
+
+  const interior = markerY([
+    [x - 0.00004, y - 0.00004], [x + 0.00004, y - 0.00004],
+    [x + 0.00004, y + 0.00004], [x - 0.00004, y + 0.00004],
+  ]);
+  const wall = markerY([
+    [x, y - 0.00004], [x + 0.00008, y - 0.00004],
+    [x + 0.00008, y + 0.00004], [x, y + 0.00004],
+  ]);
+  const corner = markerY([
+    [x, y], [x + 0.00008, y],
+    [x + 0.00008, y + 0.00008], [x, y + 0.00008],
+  ]);
+  expect(interior).toBeGreaterThan(18);
+  expect(wall).toBeLessThan(18);
+  expect(corner).toBeLessThan(18);
 });

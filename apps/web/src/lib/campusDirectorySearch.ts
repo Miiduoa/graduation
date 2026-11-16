@@ -12,6 +12,8 @@ export type DirectorySearchSnapshot = {
   query: string;
   category: ServiceCategory | 'all';
   open: boolean;
+  /** Optional opaque account/campus binding. Unscoped callers keep their existing behavior. */
+  scope?: string;
 };
 
 type DirectorySearchStore = Partial<Record<DirectorySearchSource, DirectorySearchSnapshot>>;
@@ -52,7 +54,8 @@ function isSnapshot(value: unknown): value is DirectorySearchSnapshot {
     typeof item.destination === 'string' &&
     typeof item.query === 'string' &&
     isCategory(item.category) &&
-    typeof item.open === 'boolean'
+    typeof item.open === 'boolean' &&
+    (item.scope === undefined || (typeof item.scope === 'string' && item.scope.length <= 1024))
   );
 }
 
@@ -92,6 +95,7 @@ export function rememberDirectorySearch(
     query: string;
     category?: ServiceCategory | 'all';
     open?: boolean;
+    scope?: string;
   },
 ): void {
   const path = internalPathname(snapshot.path);
@@ -104,6 +108,7 @@ export function rememberDirectorySearch(
     query: sanitizeQuery(snapshot.query),
     category: isCategory(snapshot.category) ? snapshot.category : 'all',
     open: snapshot.open !== false,
+    ...(snapshot.scope !== undefined ? { scope: snapshot.scope.slice(0, 1024) } : {}),
   };
   writeStore(store);
 }
@@ -118,11 +123,16 @@ export function forgetDirectorySearch(source: DirectorySearchSource): void {
 export function restoreDirectorySearch(
   source: DirectorySearchSource,
   currentPath: string,
+  scope?: string,
 ): DirectorySearchSnapshot | null {
   const current = internalPathname(currentPath);
   if (!current) return null;
   const snapshot = readStore()[source];
   if (!snapshot) return null;
+  if (scope !== undefined && snapshot.scope !== scope) {
+    forgetDirectorySearch(source);
+    return null;
+  }
   const path = internalPathname(snapshot.path);
   const destination = internalSitePath(snapshot.destination);
   if (!path || !destination || path !== snapshot.path || destination !== snapshot.destination) {
@@ -136,5 +146,6 @@ export function restoreDirectorySearch(
     query: sanitizeQuery(snapshot.query),
     category: snapshot.category,
     open: snapshot.open,
+    ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
   };
 }

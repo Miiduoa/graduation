@@ -77,6 +77,20 @@ test('同一個職涯連結在學校容器返回生活，在訪客容器返回�
   expect(getPathFromState(guest!, preAuthLinking.config)).toBe(`/${path}`);
 });
 
+test.each([
+  ['clubs', 'Clubs', undefined],
+  ['clubs/photo', 'ClubDetail', { groupId: 'photo' }],
+] as const)('社團連結 %s 保留生活首頁，訪客不會取得學校社團入口', (path, screen, params) => {
+  const state = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
+  expect(state?.routes[0]).toMatchObject({
+    name: '校園',
+    state: { index: 1, routes: [{ name: 'CampusHome' }, { name: screen }] },
+  });
+  expect(state?.routes[0].state?.routes[1].params).toEqual(params);
+  expect(getPathFromState(state!, schoolLinking.config)).toBe(`/${path}`);
+  expect(preAuthLinking.getStateFromPath?.(path, preAuthLinking.config)).toBeUndefined();
+});
+
 test('抽出配置後，舊店家入口仍只保留校園提示並轉平台餐飲', () => {
   const state = schoolLinking.getStateFromPath?.(
     'shops?schoolId=pu&role=admin&tab=merchant&returnUrl=%2Fadmin',

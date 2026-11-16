@@ -66,6 +66,8 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
           Library: 'library',
           Dormitory: 'dormitory',
           Career: 'career',
+          Clubs: 'clubs',
+          ClubDetail: 'clubs/:groupId',
           SchoolInfo: 'school-info',
           Health: 'health',
           PrintService: 'print',

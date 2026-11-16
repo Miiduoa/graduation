@@ -81,9 +81,19 @@ test('unverified semesters, missing meetings and invalid identities have no dire
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });
 
+test('mismatched public schedule display never enables a direct phone import', () => {
+  const wrongRoom = { ...nthu, room: '教室甲\n錯誤教室' };
+  const wrongTime = { ...nthu, time: 'M3M4\nT5T6' };
+  expect(preparePublicCourseTimetableImport('nthu', wrongRoom)).toBeNull();
+  expect(preparePublicCourseTimetableImport('nthu', wrongTime)).toBeNull();
+  const view = render(<PublicCourseImportAction schoolId="nthu" course={wrongTime} />);
+  expect(view.queryByText('核對並加入課表')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
 test('ambiguous overlapping official meetings cannot be added in one tap', () => {
   const ambiguousNthu: PublicCatalogCourse = {
-    ...nthu,
+    ...nthu, time: 'M3M4\nM4', room: '教室甲\n教室乙',
     meetings: [{ time: 'M3M4', room: '教室甲' }, { time: 'M4', room: '教室乙' }],
   };
   // The same school's two source fragments overlap during M4.
@@ -92,7 +102,8 @@ test('ambiguous overlapping official meetings cannot be added in one tap', () =>
   expect(preparePublicCourseTimetableImport('ncnu', { ...ncnu, time: '4eff' })).toBeNull();
   // Adjacent fragments are valid, so this does not disable split meetings.
   expect(preparePublicCourseTimetableImport('nthu', {
-    ...nthu, meetings: [{ time: 'M3', room: '教室甲' }, { time: 'M4', room: '教室甲' }],
+    ...nthu, time: 'M3\nM4', room: '教室甲\n教室甲',
+    meetings: [{ time: 'M3', room: '教室甲' }, { time: 'M4', room: '教室甲' }],
   })?.rows).toHaveLength(2);
   const view = render(<PublicCourseImportAction schoolId="nthu" course={ambiguousNthu} />);
   expect(view.queryByText('核對並加入課表')).toBeNull();
@@ -101,7 +112,8 @@ test('ambiguous overlapping official meetings cannot be added in one tap', () =>
 
 test('requires explicit review and confirmation, preserves existing records and both draft stores', async () => {
   const existing = preparePublicCourseTimetableImport('nthu', {
-    ...nthu, code: '11510AES 520400', title: '既有課程', meetings: [{ time: 'T1T2', room: '原教室' }],
+    ...nthu, code: '11510AES 520400', title: '既有課程',
+    time: 'T1T2', room: '原教室', meetings: [{ time: 'T1T2', room: '原教室' }],
   })!;
   await ledger.appendPersonalImports(scope, existing.rows);
   const key = ledger.personalImportStorageKey(scope);
@@ -208,7 +220,8 @@ test('a changed instructor is rejected at first review without a misleading seco
 });
 
 test.each([
-  ['教室', { meetings: [{ time: 'M3M4', room: '原本的教室' }, { time: 'R5R6', room: '教室乙' }] }],
+  ['教室', { room: '原本的教室\n教室乙',
+    meetings: [{ time: 'M3M4', room: '原本的教室' }, { time: 'R5R6', room: '教室乙' }] }],
   ['課名', { title: '原本的課名' }],
 ])('a changed official %s shows an actionable preflight warning without creating a duplicate', async (field, changes) => {
   const existing = preparePublicCourseTimetableImport('nthu', { ...nthu, ...changes })!;
@@ -227,7 +240,7 @@ test.each([
 
 test.each([
   { schoolId: 'nthu' as const, oldCourse: nthu,
-    updated: { ...nthu, meetings: [
+    updated: { ...nthu, time: 'T3T4\nR5R6', meetings: [
       { time: 'T3T4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' },
     ] } },
   { schoolId: 'ncnu' as const, oldCourse: ncnu,
@@ -271,7 +284,7 @@ test('the storage write lock rejects moved official meetings without a UI prefli
   const previous = preparePublicCourseTimetableImport('nthu', nthu)!;
   await ledger.appendPersonalImports(scope, previous.rows);
   const updated = preparePublicCourseTimetableImport('nthu', {
-    ...nthu, meetings: [{ time: 'T3T4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' }],
+    ...nthu, time: 'T3T4\nR5R6', meetings: [{ time: 'T3T4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' }],
   })!;
   const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
   await expect(ledger.appendPersonalImports(scope, updated.rows, () => true, {
@@ -323,7 +336,7 @@ test('leaving and returning invalidates pending work, rejects double taps and pe
 test('warns about same-term overlapping imported classes before writing, requiring a second confirmation', async () => {
   const existing = preparePublicCourseTimetableImport('nthu', {
     ...nthu, code: '11510AES 520400', title: '既有課程', teacher: '另一位教授',
-    meetings: [{ time: 'M3M4', room: '原教室' }],
+    time: 'M3M4', room: '原教室', meetings: [{ time: 'M3M4', room: '原教室' }],
   })!;
   await ledger.appendPersonalImports(scope, existing.rows);
   jest.clearAllMocks();
@@ -378,7 +391,8 @@ test('overlap check respects school, term, distinct weekdays, adjacent periods a
 
 test('an intervening timetable update invalidates an acknowledged overlap before commit', async () => {
   const existing = preparePublicCourseTimetableImport('nthu', {
-    ...nthu, code: '11510AES 520400', title: '衝突課程', meetings: [{ time: 'M3M4', room: '原教室' }],
+    ...nthu, code: '11510AES 520400', title: '衝突課程',
+    time: 'M3M4', room: '原教室', meetings: [{ time: 'M3M4', room: '原教室' }],
   })!;
   await ledger.appendPersonalImports(scope, existing.rows);
   const view = renderAction();
@@ -386,7 +400,8 @@ test('an intervening timetable update invalidates an acknowledged overlap before
   confirm(view);
   await view.findByText('仍要加入（保留兩門課）');
   const another = preparePublicCourseTimetableImport('nthu', {
-    ...nthu, code: '11510AES 520500', title: '另一門新課', meetings: [{ time: 'T1T2', room: '新教室' }],
+    ...nthu, code: '11510AES 520500', title: '另一門新課',
+    time: 'T1T2', room: '新教室', meetings: [{ time: 'T1T2', room: '新教室' }],
   })!;
   await ledger.appendPersonalImports(scope, another.rows);
   const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
@@ -401,7 +416,7 @@ test('an intervening timetable update invalidates an acknowledged overlap before
 test('undo removes only this newly imported batch and preserves pre-existing classes', async () => {
   const existing = preparePublicCourseTimetableImport('nthu', {
     ...nthu, code: '11510AES 520400', title: '原有課程',
-    meetings: [{ time: 'T1T2', room: '原教室' }],
+    time: 'T1T2', room: '原教室', meetings: [{ time: 'T1T2', room: '原教室' }],
   })!;
   await ledger.appendPersonalImports(scope, existing.rows);
   const before = (await ledger.loadPersonalImports(scope)).records[0];
@@ -421,7 +436,7 @@ test('a later import blocks stale undo instead of deleting another batch', async
   await view.findByText('已加入 2 個上課時段。');
   const later = preparePublicCourseTimetableImport('nthu', {
     ...nthu, code: '11510AES 520500', title: '稍後加入的課程',
-    meetings: [{ time: 'T1T2', room: '另一教室' }],
+    time: 'T1T2', room: '另一教室', meetings: [{ time: 'T1T2', room: '另一教室' }],
   })!;
   await ledger.appendPersonalImports(scope, later.rows);
   const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
@@ -461,7 +476,7 @@ test('an updated official classroom closes a previous review for the same course
   // A refreshed catalog row can retain its semester/code/section FlatList key.
   // Confirmation must not carry over when the source changes the proposed room.
   const updated: PublicCatalogCourse = {
-    ...nthu,
+    ...nthu, room: '新教室\n教室乙',
     meetings: [{ time: 'M3M4', room: '新教室' }, { time: 'R5R6', room: '教室乙' }],
   };
   view.rerender(<PublicCourseImportAction schoolId="nthu" course={updated} navigation={navigation} />);
@@ -494,7 +509,7 @@ test('a refreshed offering that later returns to its prior details still require
   const view = renderAction();
   review(view);
   const updated: PublicCatalogCourse = {
-    ...nthu,
+    ...nthu, room: '新教室\n教室乙',
     meetings: [{ time: 'M3M4', room: '新教室' }, { time: 'R5R6', room: '教室乙' }],
   };
   view.rerender(<PublicCourseImportAction schoolId="nthu" course={updated} navigation={navigation} />);

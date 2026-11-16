@@ -70,6 +70,9 @@ it.each([
   ['/classroom/material-bookmarks', '課程與作業', 'timetable'],
   ['/course/cs101', '課程與作業', 'timetable'],
   ['/course/cs101/attendance', '課程與作業', 'timetable'],
+  ['/teacher/course/cs101', '課程與作業', 'timetable'],
+  ['/teacher/course/cs101/attendance', '課程與作業', 'timetable'],
+  ['/teacher/course/cs101/gradebook', '課程與作業', 'timetable'],
   ['/groups', '課程與作業', 'timetable'],
   ['/groups/group-123', '課程與作業', 'timetable'],
   ['/groups/group-123/assignments', '課程與作業', 'timetable'],
@@ -144,6 +147,8 @@ it.each(['invalid', '115|', '115|1|2'])('does not forward an invalid timetable t
 it.each([
   '/admin',
   '/teacher',
+  '/teacher/course',
+  '/teacher/course-other/cs101',
   '/classroom/grades',
   '/classroom/account',
   '/classroom/account/settings',
@@ -171,7 +176,11 @@ it('hides readonly homework navigation by default and keeps shared labels', () =
   expect(screen.queryByRole('link', { name: '校方作業與教材' })).toBeNull();
   expect(screen.queryByRole('link', { name: '作業與教材' })).toBeNull();
   const nav = screen.getByRole('navigation', { name: '課務導覽' });
-  expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(defaultLabels);
+  expect(
+    within(nav)
+      .getAllByRole('link')
+      .map((link) => link.textContent),
+  ).toEqual(defaultLabels);
   expect(destination('課表').pathname).toBe('/timetable');
   expect(destination('課程與作業').pathname).toBe('/classroom');
   expect(destination('校方課程').pathname).toBe('/school-courses');

@@ -762,7 +762,6 @@ test('realtime keeps the open text story and grid during refresh and network fai
   expect(view.queryByText(story.text)).toBeNull();
 });
 
-
 test('從交流開啟社群有可見返回入口，返回不重建其他分區', () => {
   const goBack = jest.fn();
   const navigation = {
@@ -777,4 +776,24 @@ test('從交流開啟社群有可見返回入口，返回不重建其他分區',
   fireEvent.press(view.getByRole('button', { name: '返回上一頁' }));
   expect(goBack).toHaveBeenCalledTimes(1);
   expect(mockNavigate).not.toHaveBeenCalled();
+});
+
+test('feed board chip is a standalone accessible button and does not open the surrounding post', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  jest.mocked(listBoards).mockResolvedValueOnce([board]);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText(post.title);
+
+  const boardButton = view.getByRole('button', { name: '開啟讀書會看板' });
+  const stopPropagation = jest.fn();
+  fireEvent.press(boardButton, { stopPropagation });
+  expect(stopPropagation).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).toHaveBeenCalledWith('BoardDetail', {
+    boardId: 'board', boardName: '讀書會',
+  });
+
+  mockNavigate.mockClear();
+  fireEvent.press(view.getByText(post.title));
+  expect(mockNavigate).toHaveBeenCalledWith('PostDetail', { postId: 'post' });
 });

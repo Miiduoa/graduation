@@ -42,7 +42,7 @@ test('我的社團可搜尋並開啟既有 GroupDetail，找社團不冒充正�
   fireEvent.changeText(screen.getByLabelText('搜尋我的社團'), '熱舞');
   expect(screen.getByText('沒有符合條件的結果')).toBeTruthy();
   fireEvent.press(screen.getByText('找社團'));
-  expect(screen.getByText('學校還沒提供社團名單。')).toBeTruthy();
+  expect(screen.getByText('登入後查看學校社團。')).toBeTruthy();
   expect(screen.queryByText('查看社團：攝影社')).toBeNull();
   expect(screen.queryByText('申請加入')).toBeNull();
 });
@@ -92,10 +92,10 @@ test.each(['owner', 'admin'])('管理已啟用時，%s 不顯示未開放說明'
   expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
 });
 
-test.each([false, true])('社團目錄管理說明沿用既有旗標：%s', (enabled) => {
+test.each([false, true])('社團目錄不再顯示還沒開放的矛盾說明：%s', (enabled) => {
   jest.mocked(clubSummaryEnabled).mockReturnValue(enabled);
   render(<ClubDirectory clubs={[]} onOpen={jest.fn()} />);
-  expect(Boolean(screen.queryByText('這所學校還沒開放社團管理。'))).toBe(!enabled);
+  expect(screen.queryByText('這所學校還沒開放社團管理。')).toBeNull();
 });
 
 test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async () => {

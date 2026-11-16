@@ -348,31 +348,34 @@ async def camera_controls(page, _requests, _resources):
         await assert_same_scene(page, canvas, context, selected)
         states[key] = state
 
-    # Check the actual displayed bounds and disabled controls, including a key
-    # that attempts to exceed each bound while the scene itself is focused.
-    for name, bound, key in [("放大空間圖", 250, "Shift+Equal"), ("縮小空間圖", 65, "Minus")]:
+    # Native disabled buttons leave the tab order. Verify both the displayed
+    # zoom bounds and the actual focus order, not stale aria-disabled semantics.
+    for name, bound, key, before_name, after_name in [
+        ("放大空間圖", 250, "Shift+Equal", "縮小空間圖", "回到北向"),
+        ("縮小空間圖", 65, "Minus", "向右旋轉", "放大空間圖"),
+    ]:
         button = dialog.get_by_role("button", name=name, exact=True)
         for _ in range(12):
-            if await button.get_attribute("aria-disabled") == "true":
+            if await button.is_disabled():
                 break
             await button.click()
-        await expect(button).to_have_attribute("aria-disabled", "true")
         await expect(button).to_be_disabled()
+        await expect(button).not_to_have_attribute("aria-disabled", "true")
         await expect(dialog.get_by_text(f"縮放 {bound}%", exact=True)).to_be_visible()
-        await expect(button).to_be_focused()
-        await page.keyboard.press("Enter")
+        await dialog.get_by_role("button", name=before_name, exact=True).focus()
+        await page.keyboard.press("Tab")
+        await expect(dialog.get_by_role("button", name=after_name, exact=True)).to_be_focused()
         assert (await camera_readout(page))["zoomPercent"] == bound
-        await expect(button).to_be_focused()
-        states[f"limit{bound}"] = {"zoomPercent": bound, "focusRetainedAfterEnter": True}
+        states[f"limit{bound}"] = {"zoomPercent": bound, "disabledSkippedByTab": True}
         await host.focus()
         await page.keyboard.press(key)
         assert (await camera_readout(page))["zoomPercent"] == bound
         await assert_same_scene(page, canvas, context, selected)
 
-    # Home resets both a rotated view and a non-default zoom.
+    # Home restores north without losing the current (minimum) zoom.
     await page.keyboard.press("ArrowLeft")
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect(dialog.get_by_text("縮放 65%", exact=True)).to_be_visible()
     assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
     rotated = await click_camera("向右旋轉")
     await click_camera("放大空間圖")
@@ -390,7 +393,18 @@ async def camera_controls(page, _requests, _resources):
     await assert_idle_renderer(page)
     await click_camera("放大空間圖")
     states["northReset"] = await click_camera("回到北向")
-    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 100}
+    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 125}
+    states["restoreZoomButton"] = await click_camera("還原 100% 縮放")
+    assert states["restoreZoomButton"] == {"northDegrees": 0, "zoomPercent": 100}
+    await expect(dialog.get_by_role("button", name="還原 100% 縮放", exact=True)).to_be_disabled()
+    await click_camera("放大空間圖")
+    await host.focus()
+    before = await clears(page)
+    await page.keyboard.press("0")
+    await wait_for_repaint(page, before)
+    states["restoreZoomKey"] = await camera_readout(page)
+    assert states["restoreZoomKey"] == {"northDegrees": 0, "zoomPercent": 100}
+    await assert_same_scene(page, canvas, context, selected)
     idle = await assert_idle_renderer(page)
     await page.screenshot(path=str(OUT / "camera-controls.png"))
     await context.dispose()

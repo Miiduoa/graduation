@@ -9,6 +9,7 @@ import {
   useCampusNavigationSearch,
 } from '@/lib/campusNavigation';
 import { PRIMARY_DESTINATIONS, primaryNavigationSection } from '@/lib/primaryNavigation';
+import { teacherCourseWorkspacePath } from '@/lib/campusNavigationLinks';
 import { useSchoolLmsReadonlyEnabled } from './SchoolLmsReadonlyProvider';
 import styles from './ServiceBreadcrumbs.module.css';
 
@@ -28,7 +29,11 @@ export function ServiceBreadcrumbs({ title }: { title?: string }) {
     .filter((item) => campusServiceMatches(item.href, pathname, params))
     .sort((first, second) => second.href.length - first.href.length)[0];
   const parentHref = service?.parentHref ?? service?.href;
-  const parent = services.find((item) => item.href === parentHref);
+  const workspacePath = teacherCourseWorkspacePath(pathname);
+  const parent =
+    workspacePath && workspacePath !== pathname
+      ? { href: workspacePath, name: '課程工作台' }
+      : services.find((item) => item.href === parentHref);
   const parentPath = parent?.href.split(/[?#]/, 1)[0];
   // Tabs of one page are siblings, not a hierarchy (feedback must not lead into school-only grades).
   const parentIsCurrent = parentPath === pathname;

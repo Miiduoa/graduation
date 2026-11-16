@@ -91,7 +91,7 @@ test('closed modules stay out of the directory while official information has cl
   const view = render(<CampusHubScreen />);
   expect(view.getByText('宿舍')).toBeTruthy();
   expect(view.getByText('職涯')).toBeTruthy();
-  expect(view.queryByText('社團')).toBeNull();
+  expect(view.getByText('社團')).toBeTruthy();
   expect(view.queryByText('校園錢包')).toBeNull();
   expect(view.queryByText('報修')).toBeNull();
   expect(view.queryByText('住宿資訊')).toBeNull();
@@ -113,6 +113,20 @@ test('frequent services open their actual routes without duplicate map entries',
     expect.any(Object),
   );
 });
+
+test.each(['社團', '入社', '幹部', '社課'])(
+  '搜尋 %s 直接進社團目錄，沒有重複的活動替代捷徑',
+  (keyword) => {
+    const navigation = { navigate: jest.fn() };
+    const view = render(<CampusHubScreen navigation={navigation} />);
+    fireEvent.changeText(view.getByLabelText('搜尋校園服務'), keyword);
+    fireEvent.press(view.getByRole('button', { name: '社團，找社團、查看已加入社團與活動' }));
+    expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Clubs', undefined, {
+      fallbackMessage: '「社團」目前無法開啟。',
+    });
+    expect(view.queryByRole('button', { name: '依需求前往社團' })).toBeNull();
+  },
+);
 
 test('lost-found uses the Google platform entry while its screen retains the explicit legacy source', () => {
   const navigation = { navigate: jest.fn() };

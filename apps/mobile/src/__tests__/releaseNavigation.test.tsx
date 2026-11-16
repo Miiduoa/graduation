@@ -497,6 +497,11 @@ jest.mock('../screens/GroupsScreen', () => {
   const { Text } = require('react-native');
   return { __esModule: true, GroupsScreen: () => React.createElement(Text, null, 'GroupsScreen') };
 });
+jest.mock('../screens/ClubDetailScreen', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return { ClubDetailScreen: () => React.createElement(Text, null, 'ClubDetailScreen') };
+});
 jest.mock('../screens/HealthScreen', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -1136,16 +1141,13 @@ test.each(['AIAgentConsole', 'AIAgentObservatory'])(
     expect(view.queryByText('AIAgentConsoleScreen')).toBeNull();
   },
 );
-test.each(['Clubs', 'DormitoryScreen'])(
-  'Map %s is not registered; old placeholder routes do not open unavailable dorm pages',
-  async (route) => {
-    const { view, navigation } = await mount(MapStack);
-    act(() => navigation.navigate(route));
-    expect(view.queryByText(/尚未開放/)).toBeNull();
-    expect(view.queryByText('前往靜宜住宿服務組官網')).toBeNull();
-    expect(view.queryByText(`${route}Screen`)).toBeNull();
-  },
-);
+test('Map retired DormitoryScreen is not registered and does not open an unavailable dorm page', async () => {
+  const { view, navigation } = await mount(MapStack);
+  act(() => navigation.navigate('DormitoryScreen'));
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  expect(view.queryByText(/尚未開放/)).toBeNull();
+  expect(view.queryByText('前往靜宜住宿服務組官網')).toBeNull();
+});
 
 test('Map has a dedicated dormitory workspace route', async () => {
   const { view, navigation } = await mount(MapStack);
@@ -1160,7 +1162,8 @@ test('Map opens the real selected-school career page and returns to life', async
   const { view, navigation } = await mount(MapStack);
   act(() => navigation.navigate('Career'));
   expect(navigation.getCurrentRoute()?.name).toBe('Career');
-  expect(await view.findByText(/個人職涯資料尚未連結到校方系統/)).toBeTruthy();
+  expect(await view.findByRole('header', { name: '校內工讀' })).toBeTruthy();
+  expect(view.getByRole('header', { name: '我的實習' })).toBeTruthy();
   expect(view.getByRole('button', { name: '前往成大生涯發展與就業輔導組' })).toBeTruthy();
   expect(view.queryByText('新增紀錄')).toBeNull();
   act(() => navigation.goBack());
@@ -1442,3 +1445,56 @@ test('career announcements open Today while life preserves the selected-school c
   expect(state.routes[state.index].name).toBe('校園');
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
+
+test('club discovery and details keep the life stack and return through the same directory', async () => {
+  const { navigation, view, onUnhandledAction } = await mountRootTabs();
+  act(() => safeNavigate(navigation, 'Clubs'));
+  expect(navigation.getCurrentRoute()?.name).toBe('Clubs');
+  expect(view.getByText('GroupsScreen')).toBeTruthy();
+  const directoryKey = navigation.getCurrentRoute()?.key;
+  act(() => safeNavigate(navigation, 'ClubDetail', { groupId: 'photo' }));
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'ClubDetail',
+    params: { groupId: 'photo' },
+  });
+  expect(view.getByText('ClubDetailScreen')).toBeTruthy();
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'Clubs', key: directoryKey });
+  act(() => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+  const state = navigation.getRootState();
+  expect(state.routes[state.index].name).toBe('校園');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test.each(['clubs', 'clubs/photo'])(
+  'cold club link %s returns to life without sending an unhandled action',
+  async (path) => {
+    const Tabs = createBottomTabNavigator<RootTabParamList, undefined>();
+    const navigation = createNavigationContainerRef<RootTabParamList>();
+    const onUnhandledAction = jest.fn();
+    const state = schoolLinking.getStateFromPath?.(path, schoolLinking.config);
+    render(
+      <mockAuthContext.Provider value={mockAuth}>
+        <NavigationContainer
+          ref={navigation}
+          initialState={state}
+          onUnhandledAction={onUnhandledAction}
+        >
+          <Tabs.Navigator id={undefined} screenOptions={{ headerShown: false }}>
+            <Tabs.Screen name="Today" component={HomeStack} />
+            <Tabs.Screen name="學習" component={LearnStack} />
+            <Tabs.Screen name="校園" component={MapStack} />
+            <Tabs.Screen name="訊息" component={MessagesStack} />
+            <Tabs.Screen name="我的" component={MeStack} />
+          </Tabs.Navigator>
+        </NavigationContainer>
+      </mockAuthContext.Provider>,
+    );
+    await waitFor(() => expect(navigation.isReady()).toBe(true));
+    expect(navigation.getCurrentRoute()?.name).toBe(path === 'clubs' ? 'Clubs' : 'ClubDetail');
+    act(() => navigation.goBack());
+    expect(navigation.getCurrentRoute()?.name).toBe('CampusHome');
+    expect(onUnhandledAction).not.toHaveBeenCalled();
+  },
+);

@@ -2,9 +2,16 @@ import { findSchoolById } from '@campus/shared/src/schools';
 
 type SearchLike = { get(key: string): string | null } | null | undefined;
 
-/** Club detail routes use group IDs, but their service directory is campus life. */
+/** Teaching tools belong to their course workspace, not the /teacher appeals desk. */
+export function teacherCourseWorkspacePath(pathname: string): string | null {
+  return pathname.match(/^(\/teacher\/course\/[^/]+)(?:\/|$)/u)?.[1] ?? null;
+}
+
+/** Resolve task ownership before matching the catalog's broader route prefixes. */
 export function campusServicePathname(pathname: string): string {
-  return /^\/groups\/[^/]+\/club(?:\/|$)/u.test(pathname) ? '/clubs' : pathname;
+  if (/^\/groups\/[^/]+\/club(?:\/|$)/u.test(pathname)) return '/clubs';
+  if (teacherCourseWorkspacePath(pathname)) return '/classroom';
+  return pathname;
 }
 
 export function buildCampusNavigationSearch(

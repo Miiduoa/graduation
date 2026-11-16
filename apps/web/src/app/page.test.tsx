@@ -44,10 +44,10 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/AppHeader', () => ({
-  AppHeader: ({ onOpenVoice }: { onOpenVoice: () => void }) => (
+  AppHeader: ({ onOpenAssistant }: { onOpenAssistant: () => void }) => (
     <header>
-      <button type="button" onClick={onOpenVoice}>
-        頁首語音
+      <button type="button" onClick={onOpenAssistant}>
+        頁首助理
       </button>
     </header>
   ),
@@ -953,7 +953,7 @@ it.each([
   },
 );
 
-it('starts Today dictation from the header and keeps an active recording running', async () => {
+it('opens the Today text input from the header and starts recording only from its explicit voice control', async () => {
   state.uid = null;
   const start = vi.fn();
   vi.stubGlobal(
@@ -967,12 +967,15 @@ it('starts Today dictation from the header and keeps an active recording running
     render(<HomePage />);
     const panel = screen.getByText('打字或語音詢問').closest('details')!;
     expect(panel.open).toBe(false);
-    const shortcut = screen.getByRole('button', { name: '頁首語音' });
+    const shortcut = screen.getByRole('button', { name: '頁首助理' });
     fireEvent.click(shortcut);
     expect(panel.open).toBe(true);
-    const mic = await screen.findByRole('button', { name: '停止語音輸入' });
+    const input = await screen.findByRole('searchbox');
+    expect(document.activeElement).toBe(input);
+    expect(start).not.toHaveBeenCalled();
+    const mic = await screen.findByRole('button', { name: '使用語音輸入' });
+    fireEvent.click(mic);
     expect(start).toHaveBeenCalledOnce();
-    expect(document.activeElement).toBe(mic);
     fireEvent.click(shortcut);
     expect(start).toHaveBeenCalledOnce();
     expect(mic.getAttribute('aria-pressed')).toBe('true');
@@ -984,7 +987,7 @@ it('starts Today dictation from the header and keeps an active recording running
 it('focuses the Today input from the header when the browser lacks speech recognition', async () => {
   state.uid = null;
   render(<HomePage />);
-  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
   const input = await screen.findByRole('searchbox');
   expect(document.activeElement).toBe(input);
 });
@@ -997,7 +1000,7 @@ it('keeps the active question on screen while a late course load resolves the te
     }),
   );
   render(<HomePage />);
-  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
   const question = await screen.findByRole('searchbox');
   fireEvent.change(question, { target: { value: '我今天要去哪間教室？' } });
   await act(async () =>
