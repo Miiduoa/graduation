@@ -68,7 +68,8 @@ async function readBoundedCatalogBody(response: Response, signal: AbortSignal): 
     return text;
   }
 
-  const decoder = new TextDecoder();
+  // Reject invalid UTF-8 instead of silently replacing damaged official course names.
+  const decoder = new TextDecoder('utf-8', { fatal: true });
   const fragments: string[] = [];
   let bytes = 0;
   let finished = false;

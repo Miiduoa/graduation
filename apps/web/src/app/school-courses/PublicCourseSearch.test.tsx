@@ -531,6 +531,28 @@ it('decodes UTF-8 courses correctly when a streaming chunk splits a Chinese char
   expect(screen.getByRole('button', { name: '帶入課表核對' })).toBeTruthy();
 });
 
+it('rejects malformed UTF-8 course names rather than preparing corrupted timetable imports', async () => {
+  const bytes = new TextEncoder().encode(await response([course]).text());
+  const courseCharacter = bytes.findIndex(byte => byte >= 0xe0);
+  expect(courseCharacter).toBeGreaterThan(0);
+  // An invalid byte inside an otherwise valid JSON string must not be replaced
+  // with U+FFFD and then accepted as an authoritative course title.
+  bytes[courseCharacter] = 0xff;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, courseCharacter + 1));
+      controller.enqueue(bytes.subarray(courseCharacter + 1));
+      controller.close();
+    },
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(screen.queryByRole('heading', { name: course.title })).toBeNull();
+  expect(screen.queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
 it('handles malformed or wrong-campus replies as failure, retries, and explains the result limit', async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(response([course], { schoolId: 'pu' }))
     .mockResolvedValueOnce(response([course], { truncated: true }));

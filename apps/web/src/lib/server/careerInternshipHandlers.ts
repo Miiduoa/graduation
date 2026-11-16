@@ -141,14 +141,24 @@ export function createCareerInternshipHandlers({
         const limit = Math.max(1, Math.min(50, max || 20));
         const lowered = keyword.toLocaleLowerCase('zh-TW');
         const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lowered);
-        const ids = new Set<string>();
-        const take = async (query: Query) => {
-          const snap = await tx.get(query.limit(20));
-          snap.docs.forEach((doc) => ids.add(doc.id));
+        // Includes query documents and profile/member hydration; never scan without a bound.
+        let remaining = 200;
+        const seen = new Set<string>();
+        const advisors: ReturnType<typeof advisorView>[] = [];
+        const matches = (row: ReturnType<typeof advisorView>) => {
+          const haystack =
+            `${row.name} ${row.email} ${row.department} ${row.identifier}`.toLocaleLowerCase(
+              'zh-TW',
+            );
+          return haystack.includes(lowered) || (!isEmail && row.name.startsWith(keyword));
+        };
+        const pending: { query: Query; paginate: boolean; memberQuery: boolean }[] = [];
+        const take = async (query: Query, paginate = false, memberQuery = false) => {
+          pending.push({ query, paginate, memberQuery });
         };
         for (const field of ['studentId', 'student_id', 'login']) {
           for (const value of new Set([keyword, keyword.toUpperCase(), lowered])) {
-            await take(members.where(field, '==', value));
+            await take(members.where(field, '==', value), false, true);
             await take(directory.where(field, '==', value));
             await take(db.collection('users').where(field, '==', value));
           }
@@ -156,54 +166,65 @@ export function createCareerInternshipHandlers({
         if (isEmail) {
           const emails = Array.from(new Set([keyword, lowered]));
           for (const email of emails) {
-            await take(members.where('email', '==', email));
+            await take(members.where('email', '==', email), false, true);
             await take(directory.where('email', '==', email));
             await take(db.collection('users').where('email', '==', email));
           }
         } else {
           const names = Array.from(new Set([keyword]));
           for (const name of names) {
-            await take(members.where('displayName', '==', name));
-            await take(directory.where('displayName', '==', name));
+            await take(members.where('displayName', '==', name), true, true);
+            await take(directory.where('displayName', '==', name), true);
             await take(
               members.where('displayName', '>=', name).where('displayName', '<=', `${name}\uf8ff`),
+              true,
+              true,
             );
             await take(
               directory
                 .where('displayName', '>=', name)
                 .where('displayName', '<=', `${name}\uf8ff`),
+              true,
             );
           }
         }
-        if (!ids.size) return [];
-        const refs = Array.from(ids).slice(0, 40);
-        const memberDocs = await tx.getAll(...refs.map((id) => members.doc(id)));
-        const profileDocs = await tx.getAll(...refs.map((id) => directory.doc(id)));
-        const userDocs = await tx.getAll(...refs.map((id) => db.collection('users').doc(id)));
-        return memberDocs
-          .map((doc, index) =>
-            isAdvisor(doc.data())
-              ? advisorView(
-                  doc.id,
-                  doc.data() as Record<string, unknown>,
-                  {
-                    ...userDocs[index]?.data(),
-                    ...profileDocs[index]?.data(),
-                  },
-                  userDocs[index]?.data(),
-                )
-              : null,
-          )
-          .filter((row): row is NonNullable<typeof row> => Boolean(row))
-          .filter((row) => {
-            const haystack =
-              `${row.name} ${row.email} ${row.department} ${row.identifier}`.toLocaleLowerCase(
-                'zh-TW',
-              );
-            return isEmail
-              ? haystack.includes(lowered)
-              : haystack.includes(lowered) || row.name.startsWith(keyword);
-          })
+        // Keep the legacy first page of each query ahead of all continuation pages.
+        // Reserve a candidate's worst-case reads for every later source, so a busy
+        // members query cannot prevent directory, users or another field from running.
+        while (pending.length && remaining >= 4 && advisors.length < limit) {
+          const { query, paginate, memberQuery } = pending.shift()!;
+          const available = remaining - pending.length * 4;
+          const size = Math.min(20, Math.floor(available / 4));
+          const snap = await tx.get(query.limit(size));
+          remaining -= Math.max(1, snap.size);
+          for (const doc of snap.docs) {
+            if (seen.has(doc.id)) continue;
+            const memberDoc = memberQuery ? doc : await tx.get(members.doc(doc.id));
+            if (!memberQuery) remaining--;
+            seen.add(doc.id);
+            if (!isAdvisor(memberDoc.data())) continue;
+            const [profile, user] = await tx.getAll(
+              directory.doc(doc.id),
+              db.collection('users').doc(doc.id),
+            );
+            remaining -= 2;
+            const row = advisorView(
+              doc.id,
+              memberDoc.data()!,
+              { ...user.data(), ...profile.data() },
+              user.data(),
+            );
+            if (matches(row)) advisors.push(row);
+            if (advisors.length >= limit) break;
+          }
+          if (paginate && snap.size === size && remaining >= (pending.length + 1) * 4)
+            pending.push({
+              query: query.startAfter(snap.docs[snap.docs.length - 1]),
+              paginate,
+              memberQuery,
+            });
+        }
+        return advisors
           .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
           .slice(0, limit)
           .map(({ uid, name, email, department }) => ({ uid, name, email, department }));
@@ -364,7 +385,7 @@ export function createCareerInternshipHandlers({
       const assignedTeacher = teacherEligible && r.teacherUid === uid;
       const reviewer = staff || departments.includes(r.rule.department) || assignedTeacher;
       if (!owner && !reviewer) fail('permission-denied', '無法查看這筆實習紀錄。');
-      if (c.revision !== r.revision) fail('aborted', '紀錄已更新，請重新整理後再操作。');
+      if (c.revision !== r.revision) fail('aborted', '另一個視窗已更新這筆紀錄，已為你重新整理。');
       if (r.confirmed) fail('failed-precondition', '老師已確認此紀錄，如需更正請洽承辦。');
       if (c.action === 'hours') {
         if (!owner) fail('permission-denied', '只能登錄自己的實習時數。');
