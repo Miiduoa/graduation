@@ -121,7 +121,7 @@ it('controls camera without changing the place or recreating its context and res
   fireEvent.click(within(dialog).getByRole('button', { name: '向右旋轉' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
-  const scaleAnnouncement = within(dialog).getByText('縮放 125%');
+  const scaleAnnouncement = within(dialog).getByText('視角方位 57° · 縮放 125%');
   expect(scaleAnnouncement.getAttribute('role')).toBe('status');
   expect(scaleAnnouncement.getAttribute('aria-live')).toBe('polite');
   expect(scaleAnnouncement.getAttribute('aria-atomic')).toBe('true');
@@ -134,13 +134,13 @@ it('controls camera without changing the place or recreating its context and res
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '回到北向' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1.25 }));
-  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
+  expect(within(dialog).getByText('視角方位 0° · 縮放 125%')).toBeTruthy();
   expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
   const restoreZoom = within(dialog).getByRole('button', { name: '還原 100% 縮放' }) as HTMLButtonElement;
   expect(restoreZoom.disabled).toBe(false);
   fireEvent.click(restoreZoom);
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: 0, zoom: 1 }));
-  expect(within(dialog).getByText('縮放 100%')).toBeTruthy();
+  expect(within(dialog).getByText('視角方位 0° · 縮放 100%')).toBeTruthy();
   expect(restoreZoom.disabled).toBe(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
@@ -157,11 +157,13 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   const callsAtMaximum = scene.setView.mock.calls.length;
   fireEvent.click(zoomIn);
   expect(scene.setView).toHaveBeenCalledTimes(callsAtMaximum);
-  expect(within(dialog).getByText('縮放 250%')).toBeTruthy();
+  expect(within(dialog).getByText('視角方位 60° · 縮放 250%')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '向左旋轉' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 30, zoom: MAX_SPATIAL_ZOOM }));
+  expect(within(dialog).getByText('視角方位 30° · 縮放 250%')).toBeTruthy();
   act(() => changed({ bearing: -60, zoom: 0 }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 300, zoom: MIN_SPATIAL_ZOOM }));
+  expect(within(dialog).getByText('視角方位 300° · 縮放 65%')).toBeTruthy();
   const zoomOut = within(dialog).getByRole('button', { name: '縮小空間圖' }) as HTMLButtonElement;
   expect(zoomOut.disabled).toBe(true);
   expect(zoomOut.hasAttribute('aria-disabled')).toBe(false);
@@ -172,6 +174,7 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   expect(restoreZoom.disabled).toBe(false);
   fireEvent.click(restoreZoom);
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: 300, zoom: 1 }));
+  expect(within(dialog).getByText('視角方位 300° · 縮放 100%')).toBeTruthy();
   expect(restoreZoom.disabled).toBe(true);
   expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
   expect(scene.create).toHaveBeenCalledTimes(1);

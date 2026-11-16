@@ -213,7 +213,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         <button className="btn" type="button" onClick={() => onCameraChange({ ...camera, bearing: 0 })}>回到北向</button>
         <button className="btn" type="button" disabled={camera.zoom === 1}
           onClick={() => onCameraChange({ ...camera, zoom: 1 })}>還原 100% 縮放</button>
-        <span role="status" aria-live="polite" aria-atomic="true">縮放 {Math.round(camera.zoom * 100)}%</span>
+        <span role="status" aria-live="polite" aria-atomic="true">視角方位 {Math.round(camera.bearing)}° · 縮放 {Math.round(camera.zoom * 100)}%</span>
         <span className={styles.compass}>
           <svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
             <g transform={`rotate(${spatialNorthRotationDegrees(camera.bearing, overhead)} 20 20)`}>
