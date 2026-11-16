@@ -1223,3 +1223,50 @@ describe('explicitly hidden paragraph, label and heading notes', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(2));
   });
 });
+
+describe('source table boundaries for explicitly zero-opacity HTML wrappers', () => {
+  it.each([
+    '<div style="opacity:0">',
+    '<section style="opacity:0%">',
+    '<aside style="opacity:.000!important; opacity:1">',
+    '<p style="opacity:1; opacity:-0.00">',
+    '<section style="opacity&colon;0&semi;display&colon;block">',
+    '<div style="opacity:0; visibility:visible">',
+  ])('does not reconstruct invisible teacher-only rows inside %s', (opening) => {
+    const tag = /^<([a-z]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 尚未公布的答案 | 分數 |',
+      '| --- | --- |',
+      '| 教師用資料 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<div style="opacity:0; opacity:1">',
+    '<section style="opacity:0!important; opacity:1!important">',
+    '<aside style="opacity:0; opacity:.2">',
+    '<p title="opacity:0" style="opacity:1">',
+    '<div style="--opacity:0; opacity:1">',
+    '<section style="opacity:1; display:block">',
+  ])('preserves visible or non-literal-opacity course source tables in %s', (opening) => {
+    const tag = /^<([a-z]+)/u.exec(opening)?.[1] ?? 'div';
+    expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
+      .toEqual(realTable(2));
+  });
+
+  it('keeps the important zero opacity even when a later ordinary value says 1', () => {
+    const source = [
+      '<div style="opacity:0!important; opacity:1">',
+      '| 教師答案 | 分數 |',
+      '| --- | --- |',
+      '| 不應另外顯示 | 100 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+});

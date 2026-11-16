@@ -136,7 +136,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
   const importantSuffix = /\s*!\s*important\s*$/iu;
   for (const declaration of splitInlineCssDeclarations(style)) {
     const part = decodeCssEscapes(declaration);
-    const property = /^\s*(display|visibility|content-visibility)\s*:\s*(.*?)\s*$/iu.exec(part);
+    const property = /^\s*(display|visibility|content-visibility|opacity)\s*:\s*(.*?)\s*$/iu.exec(part);
     if (!property) continue;
     const name = property[1].toLowerCase();
     const important = importantSuffix.test(property[2]);
@@ -146,9 +146,14 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     if (!previous || important || !previous.important)
       effective.set(name, { value, important });
   }
+  // Explicit zero opacity hides the whole wrapper even when display/visibility
+  // are otherwise visible. Do not infer variables, calc(), animations or
+  // external CSS; only literal zero numbers/percentages with cascade applied.
+  const opacity = effective.get('opacity')?.value;
   return effective.get('display')?.value === 'none' ||
     ['hidden', 'collapse'].includes(effective.get('visibility')?.value ?? '') ||
-    effective.get('content-visibility')?.value === 'hidden';
+    effective.get('content-visibility')?.value === 'hidden' ||
+    (opacity !== undefined && /^[+-]?(?:0+(?:\.0+)?|\.0+)%?$/u.test(opacity));
 }
 
 function hasHiddenHtmlAttribute(token: string): boolean {
