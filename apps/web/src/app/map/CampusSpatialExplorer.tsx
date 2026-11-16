@@ -351,7 +351,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       const now = Date.now();
       if (now < nextDeadline) {
         window.clearTimeout(timer);
-        timer = window.setTimeout(checkSnapshotAge, nextDeadline - now);
+        // Bound waits to avoid setTimeout's 32-bit overflow after a large clock change.
+        timer = window.setTimeout(checkSnapshotAge, Math.min(FOOTPRINT_DAY_MS, nextDeadline - now));
         return;
       }
       // Keep public Overpass work out of background tabs while a dated volume
