@@ -83,8 +83,9 @@ it('delays hidden-tab WebGL startup and its 12-second deadline until the tour is
     fireEvent(window, new Event('pageshow'));
     await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
     expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(true);
-    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).getAttribute('data-spatial-state')).toBeNull();
-    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).getAttribute('tabindex')).toBe('0');
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(graphics.getAttribute('tabindex')).toBe('0');
     fireEvent(window, new Event('pageshow'));
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
