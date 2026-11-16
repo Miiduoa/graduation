@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { expect, it, vi } from 'vitest';
 import { StudySourceTables } from './StudySourceTables';
 import { extractStudySourceTables } from './studySourceTables';
 
@@ -1273,4 +1273,78 @@ it('resets a previously selected row when a same-position source is replaced', (
   expect(refreshed.value).toBe('-1');
   expect(field.value).toBe(replacement);
   expect(field.value).not.toContain('| B | 2 |');
+});
+
+/** Restore the real browser property after each WebView clipboard simulation. */
+async function withSourceClipboard(descriptor: PropertyDescriptor, run: () => Promise<void>) {
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, ...descriptor });
+  try {
+    await run();
+  } finally {
+    if (previous) Object.defineProperty(navigator, 'clipboard', previous);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+}
+
+it('copies only the exact chosen source row and confirms only after a clipboard promise resolves', async () => {
+  const copy = vi.fn(() => Promise.resolve());
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+      { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 2 列原文' }));
+    expect(copy).toHaveBeenCalledWith('| 計算機概論 | 2 | 205 |');
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('瀏覽器已接受複製指令'));
+  });
+});
+
+it('preserves selectable original source when the clipboard permission rejects', async () => {
+  await withSourceClipboard({ value: {
+    writeText: vi.fn(() => Promise.reject(new Error('NotAllowedError'))),
+  } }, async () => {
+    render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('未確認複製'));
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toContain('| 資料庫 | 3 | 301 |');
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
+  });
+});
+
+it('does not claim success when a WebView clipboard getter throws or returns no promise', async () => {
+  await withSourceClipboard({ get() { throw new DOMException('blocked', 'SecurityError'); } }, async () => {
+    render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    expect(() => fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }))).not.toThrow();
+    expect(screen.getByRole('status').textContent).toContain('未確認複製');
+  });
+  await withSourceClipboard({ value: { writeText: () => undefined } }, async () => {
+    render(<StudySourceTables text={source.replace('課堂資料', '本週資料')} />);
+    fireEvent.click(screen.getAllByText('選取第 1 張表格的原文（可複製）')[1]);
+    fireEvent.click(screen.getAllByRole('button', { name: '複製第 1 張表格原文' })[1]);
+    expect(screen.getAllByRole('status')[1].textContent).toContain('未確認複製');
+  });
+});
+
+it('ignores late clipboard success after the selected source row changes', async () => {
+  let acknowledge: (() => void) | undefined;
+  const pending = new Promise<void>((resolve) => { acknowledge = resolve; });
+  await withSourceClipboard({ value: { writeText: () => pending } }, async () => {
+    render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    const choice = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+    fireEvent.change(choice, { target: { value: '1' } });
+    await act(async () => { acknowledge?.(); await pending; });
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
+      .toBe('| 計算機概論 | 2 | 205 |');
+  });
 });

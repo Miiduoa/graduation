@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
 import styles from './CourseStudyPanel.module.css';
 
@@ -248,14 +248,65 @@ function StudySourceSelection({ table, index, sourceLines }: {
   sourceLines: string[];
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
-  useEffect(() => { setRowIndex(-1); }, [sourceLines]);
+  const [copyFeedback, setCopyFeedback] = useState('');
+  const originalText = useRef<HTMLTextAreaElement>(null);
+  const copyRequest = useRef(0);
+  // An asynchronous clipboard result must not announce success for a row or
+  // authorized source that the student has already changed.
+  useEffect(() => {
+    copyRequest.current += 1;
+    setRowIndex(-1);
+    setCopyFeedback('');
+  }, [sourceLines]);
+  useEffect(() => () => { copyRequest.current += 1; }, []);
+
+  const manualCopy = (request: number) => {
+    if (copyRequest.current === request) {
+      setCopyFeedback('瀏覽器未確認複製；原文仍保留在下方，請長按選取或使用鍵盤複製。');
+    }
+  };
+  const copySelectedOriginal = () => {
+    const field = originalText.current;
+    if (!field) return;
+    const request = ++copyRequest.current;
+    setCopyFeedback('');
+    // Preserve a selectable fallback before any async permission prompt. On
+    // mobile, selection can remain useful even if clipboard access is denied.
+    selectOriginalTableText(field);
+    try {
+      const clipboard = navigator.clipboard;
+      if (typeof clipboard?.writeText !== 'function') {
+        manualCopy(request);
+        return;
+      }
+      const result: unknown = clipboard.writeText(field.value);
+      // A few WebViews return undefined/false rather than a Promise while
+      // silently doing nothing. Never report that as a confirmed copy.
+      if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+        manualCopy(request);
+        return;
+      }
+      void Promise.resolve(result as PromiseLike<unknown>).then(
+        (acknowledged) => {
+          if (acknowledged === false) manualCopy(request);
+          else if (copyRequest.current === request) {
+            setCopyFeedback('瀏覽器已接受複製指令；若無法貼上，仍可長按下方原文。');
+          }
+        },
+        () => manualCopy(request),
+      );
+    } catch {
+      // Accessing navigator.clipboard itself may throw in some WebViews.
+      manualCopy(request);
+    }
+  };
 
   return (
     <details className={styles.sourceTableSelection}>
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
       <p className={styles.note}>
         可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
-        單列不包含欄名，請對照上方表格；可以手機長按或鍵盤複製，不需剪貼簿權限。
+        單列不包含欄名，請對照上方表格；可以直接複製，若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取原文。
       </p>
       <label>
         原文範圍
@@ -263,8 +314,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
           value={rowIndex}
           onChange={(event) => {
             const next = Number(event.target.value);
-            if (next === -1 || (Number.isInteger(next) && next >= 0 && next < table.rows.length))
+            if (next === -1 || (Number.isInteger(next) && next >= 0 && next < table.rows.length)) {
+              copyRequest.current += 1;
+              setCopyFeedback('');
               setRowIndex(next);
+            }
           }}>
           <option value={-1}>整張表格（含欄名）</option>
           {table.rows.map((row, number) =>
@@ -273,13 +327,19 @@ function StudySourceSelection({ table, index, sourceLines }: {
             </option>)}
         </select>
       </label>
-      <button type="button" onClick={(event) => {
-        const field = event.currentTarget.parentElement?.querySelector('textarea') ?? null;
-        selectOriginalTableText(field);
-      }}>{rowIndex < 0
-        ? `全選第 ${index + 1} 張表格原文`
-        : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}</button>
+      <button type="button" onClick={() => selectOriginalTableText(originalText.current)}>
+        {rowIndex < 0
+          ? `全選第 ${index + 1} 張表格原文`
+          : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}
+      </button>
+      <button type="button" onClick={copySelectedOriginal}>
+        {rowIndex < 0
+          ? `複製第 ${index + 1} 張表格原文`
+          : `複製第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}
+      </button>
+      <p className={styles.note} role="status">{copyFeedback}</p>
       <textarea
+        ref={originalText}
         aria-label={`原文表格 ${index + 1} 的可選取文字`}
         readOnly
         spellCheck={false}
