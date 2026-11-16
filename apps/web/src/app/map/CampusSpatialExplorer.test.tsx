@@ -1145,6 +1145,47 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
   }
 });
 
+it('bounds the first hard-expiry timer for an already-stale OSM snapshot', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  // A valid two-day-old API snapshot has five days until hard expiry.
+  // Unbounded setTimeout would overflow the browser's signed 32-bit delay.
+  const fetchedAt = new Date(now - 2 * day).toISOString();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === day)).toBe(true);
+    expect(timerSpy.mock.calls.some(([, delay]) =>
+      typeof delay === 'number' && delay > 2_147_483_647)).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
 it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
@@ -1198,7 +1239,9 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
 
     // The soft timeout must schedule a *new* seven-day expiry timeout.
     const deadline = Date.parse(fetchedAt) + 7 * day;
-    const hardTimer = timerSpy.mock.calls.find(([, delay]) => delay === deadline - clock);
+    // The initial hard-expiry timer must be bounded too; its callback will
+    // re-arm as the seven-day absolute deadline approaches.
+    const hardTimer = timerSpy.mock.calls.filter(([, delay]) => delay === day).at(-1);
     expect(hardTimer).toBeTruthy();
     // An early hard-expiry callback (after time sync) must re-arm eviction,
     // rather than leaving old source geometry visible past seven days.
