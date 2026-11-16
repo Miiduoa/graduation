@@ -297,6 +297,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           current?.until === footprintRetryAfter.until ? null : current);
         return;
       }
+      // A mobile clock correction can make the original timeout fire early.
+      // Rearm from the absolute deadline even if the rounded minute display
+      // did not change; background intervals may be heavily throttled.
+      window.clearTimeout(timer);
+      timer = window.setTimeout(synchronizeCooldown, Math.min(FOOTPRINT_DAY_MS, remaining));
       const minutes = Math.ceil(remaining / 60_000);
       setFootprintRetryAfter((current) =>
         current?.until === footprintRetryAfter.until && current.minutes !== minutes
@@ -305,8 +310,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     // Browser timers are monotonic, but the server cooldown deadline uses wall time.
     // If the user sets the clock backwards while a timer is pending, its old
     // timeout can fire before the absolute deadline. Recheck before unlocking.
-    const timer = window.setTimeout(synchronizeCooldown,
-      Math.max(0, footprintRetryAfter.until - Date.now()));
+    let timer = window.setTimeout(synchronizeCooldown,
+      Math.min(FOOTPRINT_DAY_MS, Math.max(0, footprintRetryAfter.until - Date.now())));
     const interval = window.setInterval(synchronizeCooldown, 60_000);
     document.addEventListener('visibilitychange', synchronizeCooldown);
     window.addEventListener('pageshow', synchronizeCooldown);
