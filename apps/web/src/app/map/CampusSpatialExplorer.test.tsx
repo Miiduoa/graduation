@@ -230,6 +230,41 @@ it('applies live system and site motion preferences without recreating the graph
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
+it('keeps motion and theme preferences reactive on Safari with legacy MediaQueryList listeners', async () => {
+  const legacyMedia = new Map<string, { matches: boolean; listeners: Set<() => void> }>();
+  vi.stubGlobal('matchMedia', (query: string) => {
+    if (!legacyMedia.has(query)) legacyMedia.set(query, { matches: false, listeners: new Set() });
+    const entry = legacyMedia.get(query)!;
+    return {
+      get matches() { return entry.matches; },
+      // Older iOS Safari exposes only addListener/removeListener.
+      addListener: (notify: () => void) => entry.listeners.add(notify),
+      removeListener: (notify: () => void) => entry.listeners.delete(notify),
+    };
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const motion = legacyMedia.get('(prefers-reduced-motion: reduce)')!;
+  const theme = legacyMedia.get('(prefers-color-scheme: dark)')!;
+  expect(motion.listeners.size).toBe(1);
+  expect(theme.listeners.size).toBe(1);
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: true, dark: false }));
+  act(() => {
+    motion.matches = true;
+    motion.listeners.forEach((notify) => notify());
+  });
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: false, dark: false }));
+  act(() => {
+    theme.matches = true;
+    theme.listeners.forEach((notify) => notify());
+  });
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: false, dark: true }));
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+  expect(motion.listeners.size).toBe(0);
+  expect(theme.listeners.size).toBe(0);
+});
+
 it('suspends graphics when the page is hidden or the canvas is outside the viewport', async () => {
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={vi.fn()} />);
   await open();
