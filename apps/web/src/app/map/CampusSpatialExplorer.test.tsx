@@ -369,7 +369,9 @@ it('adds source-checked Providence building shapes without changing navigation o
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints', expect.objectContaining({ signal: expect.anything() }));
-  expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+  // Only the loading state belongs to the live region, not its source links.
+  expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/).getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' }).closest('[role="status"]')).toBeNull();
   const outline = [
     { lat: 24.22624, lon: 120.58131 },
     { lat: 24.22624, lon: 120.58143 },
@@ -391,7 +393,8 @@ it('adds source-checked Providence building shapes without changing navigation o
   });
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
-  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/).getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('link', { name: '靜宜官方校園圖與實境導覽' }).closest('[role="status"]')).toBeNull();
   // Both provenance labels can show the same calendar day; anchor by meaning.
   expect(within(dialog).getByText(new RegExp(`^資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
   expect(within(dialog).getByText(new RegExp(`OSM 資料庫同步：${osmBaseAt.slice(0, 10)}.*非現地查證`))).toBeTruthy();
@@ -497,7 +500,9 @@ it('keeps the spatial map usable when Providence building geometry is unavailabl
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  const unavailableNotice = await within(dialog).findByText(/公開建築輪廓目前無法取得/);
+  expect(unavailableNotice.getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).closest('[role="status"]')).toBeNull();
   expect(within(dialog).getByRole('button', { name: '在平面地圖查看' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
