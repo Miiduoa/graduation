@@ -1138,3 +1138,37 @@ describe('Markdown backslash escapes do not create hidden HTML lesson blocks', (
     expect(extractStudySourceTables(source)).toEqual([]);
   });
 });
+
+
+describe('HTML named entities must not expose explicitly hidden answer tables', () => {
+  it.each([
+    '<div style="display&colon;none">',
+    '<section style="color:red&semi;visibility&colon;hidden">',
+    '<aside style="display&Tab;&colon;none">',
+    '<div style="display&colon;none&semi;display&colon;block&semi;display&colon;none">',
+    '<div style="display&colon;none&semi;display&colon;block&excl;important">',
+    '<section style="display&colon;none&excl;important&semi;display&colon;block">',
+  ])('keeps unpublished rows private when the HTML attribute is %s', (opening) => {
+    const tag = /^<([a-z]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 尚未公布的解答 | 分數 |',
+      '| --- | --- |',
+      '| 教師專用 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<div style="display&colon;none&semi;display&colon;block">',
+    '<section style="display&amp;colon;none">',
+    '<aside style="display&#38;colon;none">',
+    '<div title="display&colon;none" style="display:block">',
+  ])('preserves a visible source table and does not double-decode %s', (opening) => {
+    const tag = /^<([a-z]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [opening, ...visibleTable, `</${tag}>`].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});

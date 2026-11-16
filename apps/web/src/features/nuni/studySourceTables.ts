@@ -90,13 +90,24 @@ function splitInlineCssDeclarations(style: string): string[] {
 // HTML decodes numeric character references inside quoted attribute values
 // before applying inline styles / ARIA. Only decode numeric references here;
 // this is not a complete HTML entity or CSS cascade implementation.
-function decodeNumericHtmlAttributeReferences(value: string): string {
-  return value.replace(/&#(?:x([0-9a-f]+)|([0-9]+));?/giu, (_, hex: string | undefined, decimal: string | undefined) => {
-    const codePoint = Number.parseInt(hex ?? decimal ?? '', hex === undefined ? 10 : 16);
-    return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff &&
-      (codePoint < 0xd800 || codePoint > 0xdfff)
-      ? String.fromCodePoint(codePoint) : '\uFFFD';
-  });
+// HTML resolves character references in quoted attributes before parsing
+// CSS/ARIA. Decode one pass only: &amp;colon; represents literal &colon; in
+// the DOM, not a second colon escape. These named references affect explicit
+// hidden styles; this is intentionally not a full HTML entity parser.
+function decodeHtmlAttributeReferences(value: string): string {
+  const cssEntities: Record<string, string> = {
+    colon: ':', semi: ';', Tab: '\t', NewLine: '\n',
+    excl: '!', sol: '/', lpar: '(', rpar: ')',
+  };
+  return value.replace(/&(?:#(?:[xX]([0-9a-fA-F]+)|([0-9]+));?|([A-Za-z]+);)/gu,
+    (reference: string, hex: string | undefined, decimal: string | undefined,
+      name: string | undefined) => {
+      if (name !== undefined) return cssEntities[name] ?? reference;
+      const codePoint = Number.parseInt(hex ?? decimal ?? '', hex === undefined ? 10 : 16);
+      return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff &&
+        (codePoint < 0xd800 || codePoint > 0xdfff)
+        ? String.fromCodePoint(codePoint) : '\uFFFD';
+    });
 }
 
 // CSS identifiers may use a backslash followed by up to six hex digits and
@@ -148,7 +159,7 @@ function hasHiddenHtmlAttribute(token: string): boolean {
   const attributes = token.slice(opening[0].length);
   for (const match of attributes.matchAll(/\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\x60=<>]+)))?/gu)) {
     const name = match[1].toLowerCase();
-    const attributeValue = decodeNumericHtmlAttributeReferences(match[2] ?? match[3] ?? match[4] ?? '');
+    const attributeValue = decodeHtmlAttributeReferences(match[2] ?? match[3] ?? match[4] ?? '');
     // HTML's boolean hidden attribute is active even when written hidden="false".
     if (name === 'hidden') return true;
     if (name === 'style' && hasExplicitHiddenInlineStyle(attributeValue))
