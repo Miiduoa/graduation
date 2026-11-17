@@ -249,7 +249,12 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       if (!isPublicCourseCatalog(data, schoolId, filters)) throw new Error();
       if (current()) setResult({ status: 'ready', query: term, filters, data });
     } catch {
-      if (current()) setResult({ status: 'error', query: term, filters });
+      if (current()) {
+        // Fetch can resolve headers while the response body is still downloading.
+        // Stop rejected/oversized/invalid responses instead of leaving that body open.
+        controller.abort();
+        setResult({ status: 'error', query: term, filters });
+      }
     } finally {
       clearTimeout(timer);
       if (pending.current?.controller === controller) pending.current = null;
