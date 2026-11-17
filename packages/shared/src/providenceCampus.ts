@@ -179,15 +179,19 @@ export const PROVIDENCE_BUS_STOPS: readonly ProvidencePlace[] = [
   { id: 'pu-bus-jingyuan', name: '靜宜大學靜園餐廳', category: '公車站', description: '301 往台中車站或往校內，方向請到公車頁確認。到站時間請到公車頁查詢。', lat: 24.227364, lng: 120.581741, sourceUrl: PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl, verification: 'cross-checked', transitStopIds: ['TCOD_aa06abf0361ecf11cd5e97609aa9b851ff0e3a3d', 'TCOD_aa355281c75ccfb3b062cb7d80a530d77c287a6d'] },
 ];
 
-function samePlaceIdentity(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  if (a.id !== b.id || a.name !== b.name) return false;
-  // Local tangent-plane distance is accurate at campus scale. Only provenance
-  // is withheld when the server's marker has drifted; the marker itself stays.
+function samePlaceCoordinates(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
+  // Local tangent-plane distance is accurate at campus scale. Reject corrupt
+  // coordinates; an invalid marker must not inherit a source or hide a bus stop.
   const northMeters = (a.lat - b.lat) * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS;
   const eastMeters = (a.lng - b.lng) * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS *
     Math.cos((a.lat + b.lat) / 2 * DEGREES_TO_RADIANS);
   return Number.isFinite(northMeters) && Number.isFinite(eastMeters) &&
     Math.hypot(northMeters, eastMeters) <= MAX_PLACE_IDENTITY_DISPLACEMENT_METERS;
+}
+
+function samePlaceIdentity(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
+  // Only provenance is withheld when the marker drifts; the marker itself stays.
+  return a.id === b.id && a.name === b.name && samePlaceCoordinates(a, b);
 }
 
 function allBundledProvidencePlaces(): readonly ProvidencePlace[] {
@@ -203,9 +207,9 @@ export function isBusStopLocation(location: CampusMapPlaceLike): boolean {
 }
 
 function samePlace(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  const latGap = Math.abs(a.lat - b.lat);
-  const lngGap = Math.abs(a.lng - b.lng);
-  return a.name === b.name && latGap < PLACE_COORD_EPSILON && lngGap < PLACE_COORD_EPSILON;
+  // Server-bundled stop deduplication uses the same metre-based tolerance as
+  // provenance matching; two 53m-diagonal stops must not be collapsed.
+  return a.name === b.name && samePlaceCoordinates(a, b);
 }
 
 /**
