@@ -61,6 +61,7 @@ const {
 } = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
 const { relevantItems } = require('../lib/assistantRelevance');
+const { resolveAssignmentPlanningTarget } = require('../lib/assignmentPlanningTarget');
 const { runTool } = require('./tools/registry');
 const {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
@@ -1026,7 +1027,15 @@ async function executeCampusAssistantCore({
       ? prefetched.assignments
       : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     response.debug.sourcesUsed = pendingAssignments.length;
-    const target = pendingAssignments[0];
+    const selection = resolveAssignmentPlanningTarget(lastUserMessage, pendingAssignments);
+    const target = selection.target;
+
+    if (selection.reason === 'clarify') {
+      response.content =
+        '我還不能唯一確認你要拆解哪一份作業。請提供完整作業名稱；若有同名作業，請一併指定課程，例如：拆解「課程名稱」的「作業名稱」。';
+      response.suggestions = ['查看作業', '今日摘要'];
+      return await finalizeResponse();
+    }
 
     if (!target) {
       response.content =
