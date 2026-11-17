@@ -77,8 +77,10 @@ export type ProvidencePlace = CampusMapPlaceLike & {
   transitStopIds?: readonly string[];
 };
 
-/** 同一地點識別：名稱相同且座標差在約 50 公尺內，避免只靠撞 ID 誤標來源。 */
-const PLACE_COORD_EPSILON = 0.0005;
+/** 來源歸屬需用實際平面距離核對，而非兩軸各 0.0005°（斜向可偏離超過 70 公尺）。 */
+const MAX_PLACE_IDENTITY_DISPLACEMENT_METERS = 50;
+const EARTH_RADIUS_METERS = 6_371_008.8;
+const DEGREES_TO_RADIANS = Math.PI / 180;
 
 const osmWay = (id: number) => `https://www.openstreetmap.org/way/${id}`;
 const osmNode = (id: number) => `https://www.openstreetmap.org/node/${id}`;
@@ -178,12 +180,14 @@ export const PROVIDENCE_BUS_STOPS: readonly ProvidencePlace[] = [
 ];
 
 function samePlaceIdentity(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  return (
-    a.id === b.id &&
-    a.name === b.name &&
-    Math.abs(a.lat - b.lat) < PLACE_COORD_EPSILON &&
-    Math.abs(a.lng - b.lng) < PLACE_COORD_EPSILON
-  );
+  if (a.id !== b.id || a.name !== b.name) return false;
+  // Local tangent-plane distance is accurate at campus scale. Only provenance
+  // is withheld when the server's marker has drifted; the marker itself stays.
+  const northMeters = (a.lat - b.lat) * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS;
+  const eastMeters = (a.lng - b.lng) * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS *
+    Math.cos((a.lat + b.lat) / 2 * DEGREES_TO_RADIANS);
+  return Number.isFinite(northMeters) && Number.isFinite(eastMeters) &&
+    Math.hypot(northMeters, eastMeters) <= MAX_PLACE_IDENTITY_DISPLACEMENT_METERS;
 }
 
 function allBundledProvidencePlaces(): readonly ProvidencePlace[] {
