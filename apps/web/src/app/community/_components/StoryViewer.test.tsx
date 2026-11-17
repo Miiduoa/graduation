@@ -153,3 +153,45 @@ it('gives keyboard readers a focusable story surface for deliberate arrow naviga
   fireEvent.keyDown(video, { key: 'ArrowRight' });
   expect(viewer.next).toHaveBeenCalledOnce();
 });
+
+
+it('pauses timed text stories while a keyboard reader focuses the story content, then resumes the remaining time', () => {
+  vi.useFakeTimers();
+  const viewer = {
+    group: {
+      authorUid: 'one',
+      latestAt: 0,
+      stories: [{
+        id: 'text-reading',
+        schoolId: 'pu',
+        authorUid: 'one',
+        kind: 'text' as const,
+        text: '學生會活動時間與地點',
+      }],
+    },
+    viewerUid: 'reader',
+    isOwner: false,
+    index: 0,
+    hasPrevious: false,
+    hasNext: true,
+    next: vi.fn(),
+    previous: vi.fn(),
+    close: vi.fn(),
+    switchAuthor: vi.fn(),
+  };
+  render(<StoryViewer author="同學" viewer={viewer} />);
+  fireEvent.click(screen.getByRole('button', { name: '自動播放' }));
+  act(() => vi.advanceTimersByTime(3_000));
+
+  const readingRegion = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
+  act(() => readingRegion.focus());
+  expect(document.activeElement).toBe(readingRegion);
+  act(() => vi.advanceTimersByTime(10_000));
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  act(() => screen.getByRole('button', { name: '暫停' }).focus());
+  act(() => vi.advanceTimersByTime(3_999));
+  expect(viewer.next).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(1));
+  expect(viewer.next).toHaveBeenCalledOnce();
+});
