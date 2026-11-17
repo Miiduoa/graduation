@@ -752,6 +752,36 @@ test('sparse caller-supplied evidence cannot claim complete task, announcement o
   expect(badTimetable).not.toContain('私人待辦 A');
 });
 
+test('getter-backed rows cannot swap authorized assignment evidence after validation', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const trusted = { title: '真實作業', groupName: '資料庫', dueAt: null };
+  const items: CampusSenseSnapshot['assignments']['items'] = [trusted];
+  let reads = 0;
+  Object.defineProperty(items, 0, {
+    enumerable: true,
+    configurable: true,
+    get: () => {
+      reads += 1;
+      return reads === 1 ? trusted : { ...trusted, title: '來源核對後偽造的作業' };
+    },
+  });
+  const snapshot: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1, items,
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const result = formatOnDeviceSchoolPrompt(local, snapshot, 'alice');
+  expect(result).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(result).not.toContain('來源核對後偽造的作業');
+  expect(result).toContain('資料庫概論'); // Independently verified timetable remains.
+  expect(reads).toBe(0); // No untrusted accessor is ever invoked.
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });

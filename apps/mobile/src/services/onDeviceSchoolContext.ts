@@ -144,7 +144,10 @@ function safePromptEvidenceText(value: unknown, maxLength: number, optional = fa
 // prove that a row exists in the actual student source either.
 function allOwnArrayItems<T>(items: readonly T[], isValid: (item: T) => boolean): boolean {
   for (let index = 0; index < items.length; index += 1) {
-    if (!Object.prototype.hasOwnProperty.call(items, index) || !isValid(items[index])) return false;
+    // Do not execute a caller-supplied getter: it can return valid evidence
+    // during verification and different private/prompt text when serialized.
+    const own = Object.getOwnPropertyDescriptor(items, index);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value') || !isValid(own.value as T)) return false;
   }
   return true;
 }
