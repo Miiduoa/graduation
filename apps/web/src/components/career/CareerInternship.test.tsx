@@ -455,3 +455,116 @@ it('keeps conflict feedback on the card when reload removes the document control
   await waitFor(() => expect(view.queryByText('確認申請')).toBeNull());
   expect(within(view.getByTestId(`internship-${record.id}`)).getByText(message)).toBeTruthy();
 });
+
+it('preserves document and hours drafts through polling and failed reads, with current revision on submit', async () => {
+  vi.useFakeTimers();
+  try {
+    const { view, props, record, snapshot } = setup();
+    await act(async () => {});
+    change(view.getByLabelText('申請文件連結'), 'https://example.test/draft');
+    change(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-17');
+    change(view.getByLabelText('實習時數'), '8');
+    change(view.getByLabelText('工作內容與佐證說明'), '未送出的時數草稿');
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d) => ({ ...d, url: 'https://example.test/server' })),
+        },
+      ],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/draft',
+    );
+    expect((view.getByLabelText('計畫書文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/server',
+    );
+    expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe('8');
+    expect((view.getByLabelText('工作內容與佐證說明') as HTMLInputElement).value).toBe(
+      '未送出的時數草稿',
+    );
+    expect(view.getByText(/這筆實習紀錄已更新，尚未送出的草稿已保留/)).toBeTruthy();
+    props.service.load.mockRejectedValueOnce(new Error('讀取失敗'));
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(view.getByText('讀取失敗')).toBeTruthy();
+    expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/draft',
+    );
+    await act(async () => {
+      fireEvent.click(view.getByText('登錄已繳交申請'));
+    });
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'document',
+        revision: 2,
+        url: 'https://example.test/draft',
+      }),
+    );
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('preserves reply drafts when a polled record changes review sections', async () => {
+  vi.useFakeTimers();
+  try {
+    const { view, props, record, snapshot } = setup('student', 'teacher');
+    record.documents[0].submitted = true;
+    await act(async () => {});
+    expect(view.getByText('待我確認')).toBeTruthy();
+    change(view.getByLabelText('申請退回原因'), '未送出的回覆');
+    // A submitted, verified document leaves the pending review group.
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [{ ...record, revision: 2, confirmed: true }],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(view.getByText('其他實習紀錄')).toBeTruthy();
+    expect(view.getByText(/尚未送出的草稿已保留/)).toBeTruthy();
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [{ ...record, revision: 3 }],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect((view.getByLabelText('申請退回原因') as HTMLInputElement).value).toBe('未送出的回覆');
+    await act(async () => {
+      fireEvent.click(view.getByText('退回申請'));
+    });
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'verifyDocument',
+        revision: 3,
+        message: '未送出的回覆',
+      }),
+    );
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('shows an initial load error with retry instead of loading or an empty result', async () => {
+  const { view, props } = setup();
+  props.service.load.mockRejectedValueOnce(new Error('暫時無法讀取'));
+  // The first read is already in flight; request a fresh scope to exercise an initial failure.
+  view.rerender(<CareerInternship {...props} schoolId="other" />);
+  await waitFor(() => expect(view.getByText('暫時無法讀取')).toBeTruthy());
+  expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+  expect(view.queryByText('目前沒有實習紀錄。')).toBeNull();
+  fireEvent.click(view.getByText('重試讀取實習進度'));
+  await waitFor(() => expect(view.getByText(/測試用機構/)).toBeTruthy());
+  expect(view.queryByText('暫時無法讀取')).toBeNull();
+});

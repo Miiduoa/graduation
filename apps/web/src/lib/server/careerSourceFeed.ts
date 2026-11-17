@@ -1,4 +1,4 @@
-/** Approval-isolated source policy. The existing public /career/data route does not import this. */
+/** Read-only source policy shared by the public career route. */
 import type { Firestore } from 'firebase-admin/firestore';
 import { careerTimeline, type CareerFeed } from '@campus/shared/src/career';
 import type { CareerSources } from '@campus/shared/src/careerWorkstudy';

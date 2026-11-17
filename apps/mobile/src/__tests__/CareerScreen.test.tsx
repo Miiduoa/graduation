@@ -37,10 +37,11 @@ afterEach(() => {
   global.fetch = originalFetch;
   jest.restoreAllMocks();
 });
-test('guests see real public resources and exact empty text without personal write controls', async () => {
+test('guests see public resources and an honest sign-in state without personal write controls', async () => {
   const view = render(<CareerScreen />);
   await view.findByText('目前沒有可確認日期的近期截止日或活動。');
-  expect(view.getByText(CAREER_EMPTY)).toBeTruthy();
+  expect(view.queryByText(CAREER_EMPTY)).toBeNull();
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
   expect(view.getByText('登入後可申請校內工讀與查看實習學分')).toBeTruthy();
   expect(view.queryByText('新增紀錄')).toBeNull();
   expect(view.queryByText('登入以使用個人工作區')).toBeNull();
@@ -88,7 +89,8 @@ test('TaiwanJobs failure keeps campus resources visible and retry recovers', asy
   respond(emptyCareerFeed());
   const view = render(<CareerScreen />);
   expect(await view.findByText(CAREER_JOBS_UNAVAILABLE)).toBeTruthy();
-  expect(view.getByText(CAREER_EMPTY)).toBeTruthy();
+  expect(view.queryByText(CAREER_EMPTY)).toBeNull();
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
   respond({ ...emptyCareerFeed(), announcementsUnavailable: false, jobsUnavailable: false });
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新整理' })));
   await waitFor(() => expect(view.queryByText(CAREER_JOBS_UNAVAILABLE)).toBeNull());
@@ -155,7 +157,7 @@ test('authenticated official screen uses hosted callables and hides forms until 
   expect(view.queryByText('新增系所規則')).toBeNull();
   expect(view.queryByText('系所尚未設定實習學分規則，請洽系辦確認。')).toBeNull();
   available = true;
-  await act(async () => fireEvent.press(view.getByText('重新整理實習進度')));
+  await act(async () => fireEvent.press(view.getByText('重試讀取實習進度')));
   expect(await view.findByText('系所尚未設定實習學分規則，請洽系辦確認。')).toBeTruthy();
   const calls = (fetch as jest.Mock).mock.calls.filter(([url]) => url.includes('/api/fn/'));
   expect(

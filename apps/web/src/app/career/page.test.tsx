@@ -44,7 +44,8 @@ afterEach(() => {
 it('opens the public career page with locked empty copy and official link without requiring login', async () => {
   render(<CareerPage />);
   expect(await screen.findByText('目前沒有可確認日期的近期截止日或活動。')).toBeTruthy();
-  expect(screen.getByText(CAREER_EMPTY)).toBeTruthy();
+  expect(screen.queryByText(CAREER_EMPTY)).toBeNull();
+  expect(screen.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
   expect(screen.getByRole('link', { name: /靜宜職涯/ }).getAttribute('href')).toBe(
     'https://cdif.pu.edu.tw/',
   );
@@ -89,7 +90,8 @@ it('keeps campus sections visible when TaiwanJobs fails and allows retry', async
   respond(emptyCareerFeed());
   fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
   expect(await screen.findByText(CAREER_JOBS_UNAVAILABLE)).toBeTruthy();
-  expect(screen.getByText(CAREER_EMPTY)).toBeTruthy();
+  expect(screen.queryByText(CAREER_EMPTY)).toBeNull();
+  expect(screen.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
   expect(screen.getByRole('heading', { name: '校方職涯公告' })).toBeTruthy();
 });
 it('labels TaiwanJobs records and links directly to the original job page', async () => {
@@ -162,8 +164,8 @@ it('mounts authenticated callable hosts, keeping forms hidden while unavailable 
   expect(screen.queryByRole('button', { name: `應徵${opportunity.title}` })).toBeNull();
   available = true;
   await act(async () => {
-    fireEvent.click(screen.getByText('重新整理實習進度'));
-    fireEvent.click(screen.getByText('重新整理工讀資料'));
+    fireEvent.click(screen.getByText('重試讀取實習進度'));
+    fireEvent.click(screen.getByText('重新整理職涯機會'));
   });
   expect(await screen.findByRole('button', { name: `應徵${opportunity.title}` })).toBeTruthy();
   expect(screen.getByText('系所尚未設定實習學分規則，請洽系辦確認。')).toBeTruthy();
