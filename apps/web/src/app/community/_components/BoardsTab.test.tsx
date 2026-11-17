@@ -252,6 +252,23 @@ it('makes a pending subscription a single action and announces its current state
   await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
 });
 
+it('keeps subscribe and unsubscribe touch targets at least 44 CSS pixels while preserving toggles', async () => {
+  mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const subscribe = await screen.findByRole('button', { name: '訂閱科學討論' });
+  expect((subscribe as HTMLButtonElement).style.minHeight).toBe('44px');
+  expect((subscribe as HTMLButtonElement).style.minWidth).toBe('44px');
+  expect(subscribe.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(subscribe);
+  await waitFor(() => expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
+  const unsubscribe = screen.getByRole('button', { name: '取消訂閱科學討論' });
+  expect((unsubscribe as HTMLButtonElement).style.minHeight).toBe('44px');
+  expect((unsubscribe as HTMLButtonElement).style.minWidth).toBe('44px');
+  expect(unsubscribe.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(unsubscribe);
+  await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
+});
+
 it('prevents two subscription writes from rapid clicks before React commits the disabled state', async () => {
   mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
   const pending = deferred<void>();

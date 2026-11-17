@@ -537,6 +537,10 @@ function BoardsContent(props: {
                           alignItems: 'center',
                           gap: 4,
                           padding: '6px 10px',
+                          // The student's primary action stays finger-sized on a narrow Web view.
+                          minHeight: 44,
+                          minWidth: 44,
+                          justifyContent: 'center',
                           borderRadius: 999,
                           border: '1px solid var(--brand)',
                           background: isSub ? 'var(--brand)' : 'transparent',
