@@ -170,7 +170,8 @@ it('withholds source attribution when a same-name POI moves over 50 metres', () 
     expect(isProvidencePendingVerification('pu', moved)).toBe(false);
   }
 
-  // A small import/rounding offset still refers to the same surveyed source.
+  // A small import/rounding offset can still match the bundled OSM source;
+  // this is not evidence of a campus field survey.
   const near = { ...library, lat: library.lat + 0.0002, lng: library.lng + 0.0002 };
   expect(providencePlaceSourceUrl('pu', near)).toBe(library.sourceUrl);
   expect(providencePlaceSourceUrl('nthu', near)).toBeNull();
