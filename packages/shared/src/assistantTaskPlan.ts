@@ -90,7 +90,11 @@ const capabilityDescriptions = {
     tools: ['get_campus_events', 'propose_personal_event'],
   },
   library: handoff('可提供圖書館服務與官方來源入口；此工具不會查借閱紀錄、續借或預約座位。'),
-  map: handoff('可提供所選校園的地圖與官方來源入口；此工具不會建立實際導航路線。'),
+  map: {
+    modes: ['read'],
+    summary: '可查所選校園的地點、已有來源的樓層與設施，並由下一堂課的教室接續查位置；同名、缺漏及預載資料會分別標示，路線需在地圖核對。',
+    tools: ['get_campus_map'],
+  },
   bus: {
     modes: ['read'],
     summary: '可查所選校園的站點與到站資料；保留來源失敗、即時或表定狀態。',

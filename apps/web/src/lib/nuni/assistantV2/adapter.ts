@@ -20,6 +20,8 @@ import { readPublicCampus } from './publicCampusAdapter';
 import { readPublicEvent } from './publicEventAdapter';
 import { parsePublicEventTarget } from './publicEvent';
 import { readLostFound } from './lostFoundAdapter';
+import { parseCampusMapArguments } from './campusMap';
+import { readCampusMap } from './campusMapAdapter';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
   if (!Array.isArray(v[key])) throw new V2Error(502, 'INVALID_RESPONSE');
@@ -184,6 +186,36 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
         check();
         const db = publicCampusFirestore();
         return readPublicCampus({ kind, schoolId, limit, guard: {
+          db,
+          beforeRead() {
+            check();
+            if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+          },
+          afterRead: check,
+        } });
+      }, active, 4000);
+    },
+    campusMap: async (requested) => {
+      const args = parseCampusMapArguments(requested);
+      const active = AbortSignal.any([signal, ...(operationSignal() ? [operationSignal()!] : [])]);
+      active.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
+        throw new V2Error(422, 'INVALID_INPUT');
+      return bounded(async (child) => {
+        const check = () => {
+          child.throwIfAborted();
+          active.throwIfAborted();
+          if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        };
+        const { publicCampusFirestore } = await import('../../server/publicCampusFirestore');
+        check();
+        let db: ReturnType<typeof publicCampusFirestore> | undefined;
+        try { db = publicCampusFirestore(); }
+        catch { check(); }
+        // The map's reviewed bundled snapshot stays useful when its anonymous
+        // source is not configured. Its reader keeps that coverage explicit.
+        return readCampusMap({ schoolId, args, guard: {
           db,
           beforeRead() {
             check();

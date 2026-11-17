@@ -1,5 +1,6 @@
 import {
   getAssistantServiceCapability,
+  parseAssistantTaskPlan,
   type AssistantTaskPlan,
   type AssistantTaskStep,
 } from '@campus/shared/src/assistantTaskPlan';
@@ -14,13 +15,17 @@ import { findSchoolById } from '@campus/shared/src/schools';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind } from './publicCampus';
 import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
+import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult, type CampusMapRead } from './campusMap';
 import type { AssistantCampusEventTarget } from '../../assistantCampusEvent';
 import { publicCampusEventTargets } from './publicCampusSelection';
+import { parsePublicEventTarget, type PublicEventTarget } from './publicEvent';
 import type { AssistantCourseworkTarget } from '../../assistantCoursework';
 import type { createTools } from './tools';
 import type { CrossServiceOperation, CrossServiceRequest } from './crossServiceRequest';
 
 type Tools = ReturnType<typeof createTools>;
+/** Server-held identities selected from a verified event reader, keyed by map step. */
+export type EventMapSelections = Readonly<Record<string, PublicEventTarget>>;
 const record = (value: unknown): Obj => value && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
 const rows = (value: unknown): Obj[] => Array.isArray(value) ? value.map(record) : [];
 const unwrap = (value: unknown): Obj => {
@@ -31,6 +36,74 @@ const label = (value: unknown, fallback = '未提供') => typeof value === 'stri
   ? clip(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').trim(), 240) : fallback;
 const partial = (value: Obj) => value.partial === true || value.truncated === true ||
   value.incomplete === true || Boolean(value.nextCursor) || Number(value.unplaced || 0) > 0;
+
+function mapStepStatus(read: CampusMapRead): AssistantTaskStep['status'] {
+  if (read.status !== 'ready' || read.resolution === 'unmatched') return 'blocked';
+  return read.partial || read.resolution !== 'matched' ? 'partial' : 'completed';
+}
+// Task-plan links have a stricter bound than a valid encoded map search URL.
+// Keep the answer and original query when a long Chinese name exceeds it.
+const taskMapHref = (read: CampusMapRead) => parseAssistantTaskPlan({ version: 1, steps: [{
+  id: 'map-source', label: '校園地點', serviceId: 'map', dependsOn: [], status: 'completed',
+  summary: '已核對地點來源。', href: read.href,
+}] }) ? read.href : undefined;
+
+function eventMapSource(value: unknown, schoolId: string, index: number, expected?: PublicEventTarget):
+  { query: string; title: string; target: PublicEventTarget } | { reason: string; target?: PublicEventTarget } {
+  const read = parsePublicCampusResult(value, schoolId, 'events');
+  const choices = publicCampusEventTargets(read, schoolId);
+  const ordered = read.items.every((item, position, items) => !position ||
+    items[position - 1].startsAt!.localeCompare(item.startsAt!) < 0 ||
+    (items[position - 1].startsAt === item.startsAt && items[position - 1].id.localeCompare(item.id) <= 0));
+  if (read.status !== 'ready' || read.partial || choices.length !== read.items.length || !ordered ||
+      !Number.isInteger(index) || index < 1 || index > 5)
+    return { reason: '活動清單或來源順序尚未完整核對，沒有直接選取第幾筆活動的地點。' };
+  if (expected && (expected.schoolId !== schoolId || expected.source !== read.source))
+    return { reason: '原選定活動的校園或資料來源已變更，沒有改查其他活動。' };
+  const selected = expected ? choices.find(choice => choice.schoolId === expected.schoolId &&
+    choice.source === expected.source && choice.id === expected.id) : choices[index - 1];
+  if (!selected) return { reason: expected ? '完整清單內已找不到原選定活動，沒有按新順序改查其他活動。'
+    : `這次清單只有 ${choices.length} 筆，沒有第 ${index} 筆活動，沒有改選其他活動。` };
+  const target = parsePublicEventTarget({ schoolId: selected.schoolId, source: selected.source, id: selected.id });
+  if (!selected.location?.trim()) return { reason: '所選活動沒有提供可核對的地點，沒有改查其他活動。', target };
+  return { query: selected.location.trim(), title: selected.title, target };
+}
+
+/** The calendar reader already authorizes the ledger against this binding.
+ * Select from its structured, complete rows, not from an answer or model text.
+ * Every date/time is checked again so a malformed earlier row cannot make a
+ * later classroom look like the next class. Equal start times need a choice. */
+function nextClassMapSource(value: unknown, read: DirectRead, schoolId: string, now: number):
+  { query: string; title: string } | { reason: string } {
+  const source = unwrap(value);
+  const incomplete = { reason: '課表來源尚未完整核對，現在無法可靠選定下一堂課的教室。' };
+  if (source.source !== 'personal-imports' || source.hasTimetableSource !== true || source.unplaced !== 0 ||
+      partial(source) || source.unavailable || (source.schoolId !== undefined && source.schoolId !== schoolId) ||
+      !Array.isArray(source.classes) || read.kind !== 'next-class' || !Number.isFinite(now)) return incomplete;
+  const classes: { start: number; row: Obj }[] = [];
+  for (const entry of source.classes) {
+    const row = record(entry);
+    if (typeof row.title !== 'string' || !row.title.trim() || typeof row.date !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(Date.parse(row.date)) ||
+        new Date(row.date).toISOString().slice(0, 10) !== row.date ||
+        row.date < read.args.from || row.date > read.args.to ||
+        typeof row.startTime !== 'string' || typeof row.endTime !== 'string' ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(row.startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(row.endTime) ||
+        row.startTime >= row.endTime) return incomplete;
+    const start = Date.parse(row.date + 'T' + row.startTime + ':00+08:00');
+    if (start > Math.max(now, Date.parse(read.args.from + 'T00:00:00+08:00') - 1)) classes.push({ start, row });
+  }
+  classes.sort((left, right) => left.start - right.start);
+  if (!classes.length) return { reason: '這次已同步的課表範圍內沒有下一堂課，尚未查詢教室位置。' };
+  if (classes.filter(entry => entry.start === classes[0].start).length !== 1)
+    return { reason: '下一個上課時段有多堂課同時開始，請先在課表選擇要去的課程，再查該教室位置。' };
+  const { row } = classes[0];
+  if (typeof row.location !== 'string' || !row.location.trim() || row.location.length > 120 ||
+      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(row.location) ||
+      /^(?:未提供|未設定|待定|待公告|線上(?:教學|上課|課程)?|遠距(?:教學|上課|課程)?|online|tba|https?:)/i.test(row.location.trim()))
+    return { reason: '下一堂課沒有可核對的校園教室名稱，請先補齊課表地點，沒有改查其他課程。' };
+  return { query: row.location.trim(), title: row.title as string };
+}
 
 function failureMessage(error: unknown): string {
   switch ((error as { code?: string })?.code) {
@@ -159,6 +232,10 @@ export async function runCrossService(input: {
   now: number;
   /** Retry may preserve an earlier date but must not suggest an elapsed slot. */
   availableAfter?: number;
+  /** Only verified retry proofs may populate these exact event identities. */
+  eventMapSelections?: EventMapSelections;
+  /** Captures a selected identity before its map lookup can fail. Never client data. */
+  onEventMapSelection?: (stepId: string, target: PublicEventTarget) => void;
 }) {
   const { request, tools, binding, signal, now } = input;
   const foreignPublicSource = request.operations.some(operation =>
@@ -205,7 +282,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -239,14 +316,49 @@ export async function runCrossService(input: {
       } else if (operation.kind === 'read') {
         const value = await call(operation.tool!, operation.args);
         results.set(operation.id, value);
-        const result = unwrap(value);
-        step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
-        const sourceSummary = publicCampusToolKind(operation.tool) || operation.tool === 'get_lost_found';
-        step.summary = result.unavailable && !sourceSummary
-          ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
-        if (operation.tool === 'get_lost_found') step.href = parseLostFoundResult(value, binding.schoolId, operation.args).href;
-        else if (sourceSummary) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
-        if (partial(result) && !sourceSummary) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
+        if (operation.tool === 'get_campus_map') {
+          const read = parseCampusMapResult(value, binding.schoolId, parseCampusMapArguments(operation.args));
+          step.status = mapStepStatus(read);
+          step.summary = formatCampusMapRead(read);
+          const href = taskMapHref(read);
+          if (href) step.href = href;
+        } else {
+          const result = unwrap(value);
+          step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
+          const sourceSummary = publicCampusToolKind(operation.tool) || operation.tool === 'get_lost_found';
+          step.summary = result.unavailable && !sourceSummary
+            ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
+          if (operation.tool === 'get_lost_found') step.href = parseLostFoundResult(value, binding.schoolId, operation.args).href;
+          else if (sourceSummary) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
+          if (partial(result) && !sourceSummary) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
+        }
+      } else if (operation.kind === 'map-location') {
+        const source = operation.dependsOn.length === 1
+          ? request.operations.find(previous => previous.id === operation.dependsOn[0]) : undefined;
+        if (!source || !results.has(source.id) || (operation.mapSource?.kind === 'event'
+          ? source.tool !== 'get_campus_events' : !source.directRead || source.tool !== 'get_schedule')) {
+          step.summary = '尚未確認這次地點查詢對應的來源，沒有猜測地點。';
+          continue;
+        }
+        const boundEvent = input.eventMapSelections?.[operation.id];
+        if (operation.mapSource?.kind === 'event' && boundEvent) step.label = '查原選定活動的位置';
+        const selected = operation.mapSource?.kind === 'event'
+          ? eventMapSource(results.get(source.id), binding.schoolId, operation.mapSource.index, boundEvent)
+          : nextClassMapSource(results.get(source.id), source.directRead!, binding.schoolId, now);
+        if ('target' in selected && selected.target)
+          input.onEventMapSelection?.(operation.id, parsePublicEventTarget(selected.target));
+        if ('reason' in selected) {
+          step.summary = selected.reason;
+          continue;
+        }
+        const args = parseCampusMapArguments({ query: selected.query, limit: 5 });
+        const value = await call('get_campus_map', args);
+        const read = parseCampusMapResult(value, binding.schoolId, args);
+        results.set(operation.id, value);
+        step.status = mapStepStatus(read);
+        step.summary = `${label(selected.title)}｜${operation.mapSource?.kind === 'event' ? '活動地點' : '課表教室'}：${label(selected.query)}\n` + formatCampusMapRead(read);
+        const href = taskMapHref(read);
+        if (href) step.href = href;
       } else if (operation.kind === 'free-time') {
         const value = await call('find_free_time', operation.args, operation.question);
         const originalSlots = rows(unwrap(value).slots);

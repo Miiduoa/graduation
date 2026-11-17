@@ -8,12 +8,13 @@ import { studyWindow } from './tools';
 import { publicCourseArguments } from './publicCourses';
 import { parsePublicCampusRead } from './publicCampus';
 import { parseLostFoundRead } from './lostFound';
+import { parseCampusMapClause, parseCampusMapCommand } from './campusMapRequest';
 
 export type CrossServiceOperation = {
   id: string;
   label: string;
   serviceId: AssistantServiceId;
-  kind: 'read' | 'study' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course';
+  kind: 'read' | 'study' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course' | 'map-location';
   tool?: string;
   args: Obj;
   dependsOn: string[];
@@ -21,6 +22,7 @@ export type CrossServiceOperation = {
   informationRead?: InformationRead;
   question?: string;
   publicCourseIntent?: PublicCourseAssistantIntent;
+  mapSource?: { kind: 'event'; index: number };
 };
 export type CrossServiceRequest = { operations: CrossServiceOperation[] };
 
@@ -100,10 +102,11 @@ const genericPrefix = /^(?:(?:幫我|替我|請問|請|麻煩|我想|我的|我|
 export function crossServiceRequest(question: string, now: number, schoolId = ''): CrossServiceRequest | null {
   if (!Number.isFinite(new Date(now).getTime()) || !question.trim() || question.length > 1000 ||
       /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  const text = question.normalize('NFKC').trim();
+  const normalized = question.normalize('NFKC').trim();
+  const text = parseCampusMapCommand(normalized)?.kind === 'next-class' ? '下一堂課教室在哪裡' : normalized;
   if (/不要|不用|不必|不需要|無須|別幫|先別|不是要|翻譯|這句話|假設|如果|例如|範例|之前|曾經|昨天|前天|剛才|剛剛|每天|每日|每週|每月|自動|持續/.test(text)) return null;
   const split = (value: string) => value.split(/(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、])+/)
-    .flatMap(part => parseLostFoundRead(part) ? [part] : part.split(/[和與]+/))
+    .flatMap(part => parseLostFoundRead(part) || parseCampusMapClause(part) ? [part] : part.split(/[和與]+/))
     .map(part => part.trim()).filter(Boolean).map(question => ({ question, publicCourseIntent: null }));
   const compound = publicCourseCompoundRequest(text, schoolId);
   const clauses: { question: string; publicCourseIntent: PublicCourseAssistantIntent | null }[] = compound
@@ -119,8 +122,11 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
   const inheritedDays = [...new Set(days.filter((day): day is string => typeof day === 'string'))];
   const inheritedDay = inheritedDays.length === 1 ? inheritedDays[0] : taipeiDate(now);
   const requested: CrossServiceOperation[] = [];
-  const add = (operation: Omit<CrossServiceOperation, 'id' | 'dependsOn'>) =>
-    requested.push({ ...operation, id: 'task-' + (requested.length + 1), dependsOn: [] });
+  const add = (operation: Omit<CrossServiceOperation, 'id' | 'dependsOn'>) => {
+    const next: CrossServiceOperation = { ...operation, id: 'task-' + (requested.length + 1), dependsOn: [] };
+    requested.push(next);
+    return next;
+  };
   for (let index = 0; index < clauses.length; index++) {
     const publicCourseIntent = clauses[index].publicCourseIntent;
     if (publicCourseIntent) {
@@ -131,6 +137,38 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
       continue;
     }
     const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
+    const map = parseCampusMapClause(clause);
+    if (map?.kind === 'place') {
+      add({ kind: 'read', label: '查校園地點', serviceId: 'map', tool: 'get_campus_map',
+        args: { query: map.query, limit: 5 } });
+      continue;
+    }
+    if (map?.kind === 'previous-event') {
+      const source = requested.findLast(previous => previous.kind === 'read' && previous.tool === 'get_campus_events');
+      if (!source) return null;
+      const destination = add({ kind: 'map-location', label: `查第 ${map.index} 筆活動的位置`, serviceId: 'map', args: {},
+        mapSource: { kind: 'event', index: map.index } });
+      destination.dependsOn = [source.id];
+      continue;
+    }
+    if (map?.kind === 'next-class' || map?.kind === 'previous-next-class') {
+      let source: CrossServiceOperation | undefined;
+      if (map.kind === 'next-class') {
+        const read = directReads('查' + ('dayPhrase' in map ? map.dayPhrase : '') + '下一堂課', now)[0];
+        if (!read || read.kind !== 'next-class') return null;
+        source = add({ kind: 'read', label: READ_LABELS[read.kind], serviceId: 'timetable',
+          tool: read.tool, args: read.args, directRead: read });
+      } else {
+        // A bare classroom follow-up belongs only to the immediately preceding
+        // verified next-class read, never another service or a whole-day list.
+        const previous = requested.at(-1);
+        if (previous?.kind !== 'read' || previous.tool !== 'get_schedule' || previous.directRead?.kind !== 'next-class') return null;
+        source = previous;
+      }
+      const destination = add({ kind: 'map-location', label: '查下一堂課的教室位置', serviceId: 'map', args: {} });
+      destination.dependsOn = [source.id];
+      continue;
+    }
     const lostFound = parseLostFoundRead(clause);
     if (lostFound) {
       add({ kind: 'read', label: lostFound.args.mine ? '查我發布的失物招領' : '查平台失物招領',
@@ -213,9 +251,9 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
   const singleSourceRead = requested.length === 1 && requested[0].kind === 'read' &&
-    ['get_campus_announcements', 'get_campus_events', 'get_lost_found'].includes(requested[0].tool || '');
+    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map'].includes(requested[0].tool || '');
   if ((!singleSourceRead && requested.length < 2) || requested.length > 12 || (!singleSourceRead &&
-      new Set(requested.map(op => op.kind === 'public-course' ? op.kind + ':' + JSON.stringify(op.args)
+      new Set(requested.map(op => op.kind === 'public-course' || op.tool === 'get_campus_map' ? op.kind + ':' + JSON.stringify(op.args)
         : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2)) return null;
   const operations: CrossServiceOperation[] = [];
   let serial = requested.length;

@@ -3,15 +3,16 @@ import { parseAssistantTaskPlan, type AssistantTaskPlan } from '@campus/shared/s
 import { parseAssistantTaskRetry, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { canonical, hash, V2Error, type Adapter, type Binding, type Obj } from './contracts';
 import { crossServiceRequest, type CrossServiceOperation, type CrossServiceRequest } from './crossServiceRequest';
-import { runCrossService } from './crossService';
+import { runCrossService, type EventMapSelections } from './crossService';
 import { createTools } from './tools';
+import { parsePublicEventTarget, type PublicEventTarget } from './publicEvent';
 
 const RETRY_TTL_MS = 15 * 60 * 1000;
 const READ_TOOLS = new Set([
   'get_schedule', 'get_calendar', 'get_due_work', 'get_imported_academics', 'get_dining',
-  'list_food_orders', 'get_campus_announcements', 'get_campus_events', 'get_lost_found',
+  'list_food_orders', 'get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map',
 ]);
-const READ_KINDS = new Set(['free-time', 'materials', 'clubs', 'transit', 'public-course']);
+const READ_KINDS = new Set(['free-time', 'materials', 'clubs', 'transit', 'public-course', 'map-location']);
 const invalid = (): never => { throw new V2Error(409, 'TASK_RETRY_INVALID'); };
 
 function isRead(operation: CrossServiceOperation): boolean {
@@ -21,13 +22,17 @@ function isRead(operation: CrossServiceOperation): boolean {
 }
 
 /** Include only the selected reads and their exact, read-only source dependencies. */
-function readClosure(request: CrossServiceRequest, stepIds: string[]): CrossServiceRequest | null {
+function readClosure(request: CrossServiceRequest, stepIds: string[], eventMapSelections: EventMapSelections = {}): CrossServiceRequest | null {
   const byId = new Map(request.operations.map(operation => [operation.id, operation]));
   const selected = new Set<string>(), visiting = new Set<string>();
   const visit = (id: string): boolean => {
     if (selected.has(id)) return true;
     const operation = byId.get(id);
     if (!operation || !isRead(operation) || visiting.has(id)) return false;
+    // Replaying an ordinal against a fresh event list can silently select a
+    // different event. An event-map continuation always needs its original ID.
+    if (operation.kind === 'map-location' && operation.mapSource?.kind === 'event' &&
+        !Object.hasOwn(eventMapSelections, id)) return false;
     visiting.add(id);
     if (!operation.dependsOn.every(visit)) return false;
     visiting.delete(id);
@@ -36,6 +41,26 @@ function readClosure(request: CrossServiceRequest, stepIds: string[]): CrossServ
   };
   if (!stepIds.length || !stepIds.every(visit)) return null;
   return { operations: request.operations.filter(operation => selected.has(operation.id)) };
+}
+
+function verifiedEventMapSelections(raw: unknown, request: CrossServiceRequest, schoolId: string): Record<string, PublicEventTarget> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(raw))) return invalid();
+  const entries = Object.getOwnPropertyDescriptors(raw);
+  if (Reflect.ownKeys(entries).length > 16) return invalid();
+  const selections: Record<string, PublicEventTarget> = {};
+  for (const stepId of Reflect.ownKeys(entries)) {
+    if (typeof stepId !== 'string') return invalid();
+    const operation = request.operations.find(item => item.id === stepId);
+    const descriptor = entries[stepId];
+    if (operation?.kind !== 'map-location' || operation.mapSource?.kind !== 'event' ||
+        !descriptor.enumerable || !('value' in descriptor)) return invalid();
+    let target: PublicEventTarget;
+    try { target = parsePublicEventTarget(descriptor.value); } catch { return invalid(); }
+    if (target.schoolId !== schoolId) return invalid();
+    selections[stepId] = target;
+  }
+  return selections;
 }
 
 function mac(body: string, secret: string): string {
@@ -51,18 +76,28 @@ export function issueTaskRetry(input: {
   secret: string;
   now: number;
   parsedAt?: number;
+  /** Produced by the server's verified event selection, never a client hint. */
+  eventMapSelections?: EventMapSelections;
 }): AssistantTaskRetry | undefined {
   const plan = parseAssistantTaskPlan(input.plan);
   if (!plan) return undefined;
+  let eventMapSelections: Record<string, PublicEventTarget>;
+  try { eventMapSelections = verifiedEventMapSelections(input.eventMapSelections ?? {}, input.request, input.binding.schoolId); }
+  catch { return undefined; }
   const stepIds = plan.steps.filter(step => ['blocked', 'partial'].includes(step.status) && !step.cardIds?.length &&
-    readClosure(input.request, [step.id])).map(step => step.id);
+    readClosure(input.request, [step.id], eventMapSelections)).map(step => step.id);
   if (!stepIds.length) return undefined;
+  const closure = readClosure(input.request, stepIds, eventMapSelections)!;
+  const selectedEvents = Object.fromEntries(closure.operations.flatMap(operation =>
+    Object.hasOwn(eventMapSelections, operation.id) ? [[operation.id, eventMapSelections[operation.id]]] : []));
+  const bindsEvents = Object.keys(selectedEvents).length > 0;
   const parsedAt = input.parsedAt ?? input.now;
   const expiresAt = parsedAt + RETRY_TTL_MS;
   if (!Number.isSafeInteger(parsedAt) || !Number.isSafeInteger(expiresAt) || input.now < parsedAt || input.now >= expiresAt)
     return undefined;
-  const payload = { version: 1, binding: hash(input.binding), question: input.question,
-    parsedAt, expiresAt, requestHash: hash(input.request), stepIds };
+  const payload = { version: bindsEvents ? 2 : 1, binding: hash(input.binding), question: input.question,
+    parsedAt, expiresAt, requestHash: hash(input.request), stepIds,
+    ...(bindsEvents ? { eventMapSelections: selectedEvents } : {}) };
   const body = Buffer.from(canonical(payload)).toString('base64url');
   return parseAssistantTaskRetry({ version: 1, token: body + '.' + mac(body, input.secret), stepIds, expiresAt }, plan) ?? undefined;
 }
@@ -79,8 +114,10 @@ function retryProof(input: { token: unknown; stepIds: unknown; binding: Binding;
     if (!proof || Array.isArray(proof) || typeof proof !== 'object' ||
         Buffer.from(canonical(proof)).toString('base64url') !== body) return invalid();
   } catch { return invalid(); }
-  if (Object.keys(proof).sort().join(',') !== 'binding,expiresAt,parsedAt,question,requestHash,stepIds,version' ||
-      proof.version !== 1 || proof.binding !== hash(input.binding) ||
+  const keys = Object.keys(proof).sort().join(',');
+  const versioned = proof.version === 1 ? keys === 'binding,expiresAt,parsedAt,question,requestHash,stepIds,version'
+    : proof.version === 2 && keys === 'binding,eventMapSelections,expiresAt,parsedAt,question,requestHash,stepIds,version';
+  if (!versioned || proof.binding !== hash(input.binding) ||
       typeof proof.question !== 'string' || proof.question.length > 1000 ||
       !Number.isSafeInteger(proof.parsedAt) || !Number.isSafeInteger(proof.expiresAt) ||
       (proof.expiresAt as number) - (proof.parsedAt as number) !== RETRY_TTL_MS ||
@@ -93,9 +130,11 @@ function retryProof(input: { token: unknown; stepIds: unknown; binding: Binding;
   // The graph fingerprint also rejects a changed grammar after a deployment.
   const request = crossServiceRequest(proof.question, proof.parsedAt as number, input.binding.schoolId);
   if (!request || hash(request) !== proof.requestHash) return invalid();
-  const subset = readClosure(request, selected.stepIds);
+  const eventMapSelections = verifiedEventMapSelections(proof.version === 2 ? proof.eventMapSelections : {}, request, input.binding.schoolId);
+  if (proof.version === 2 && !Object.keys(eventMapSelections).length) return invalid();
+  const subset = readClosure(request, selected.stepIds, eventMapSelections);
   if (!subset) return invalid();
-  return { request, subset, question: proof.question, parsedAt: proof.parsedAt as number };
+  return { request, subset, question: proof.question, parsedAt: proof.parsedAt as number, eventMapSelections };
 }
 
 /** No model, proposals, writes, or proposal-generation reset. Replays are fresh reads only. */
@@ -115,11 +154,12 @@ export async function retryTaskReads(input: {
   // any tools used in this read-only continuation.
   const tools = createTools(input.adapter, input.binding, input.secret, input.now, false);
   const result = await runCrossService({ request: proof.subset, tools, binding: input.binding,
-    now: input.now, signal: input.signal, availableAfter: input.now });
+    now: input.now, signal: input.signal, availableAfter: input.now, eventMapSelections: proof.eventMapSelections });
   input.signal.throwIfAborted();
   if (result.cards.length) throw new V2Error(503, 'TASK_RETRY_UNSAFE');
   const taskRetry = issueTaskRetry({ question: proof.question, request: proof.request, plan: result.taskPlan,
-    binding: input.binding, secret: input.secret, now: input.now + Math.max(0, Date.now() - started), parsedAt: proof.parsedAt });
+    binding: input.binding, secret: input.secret, now: input.now + Math.max(0, Date.now() - started), parsedAt: proof.parsedAt,
+    eventMapSelections: proof.eventMapSelections });
   return { version: 2, ...result, ...(taskRetry ? { taskRetry } : {}),
     answer: result.answer.replace('已依這次需求逐項處理：', '已重新核對選取的項目與必要來源；其他結果及待確認內容保留在原處：'),
     modelCalls: 0, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, simulation: input.adapter.simulation };

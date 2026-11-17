@@ -216,6 +216,8 @@ export type Adapter = {
   publicCourses?(search: import('@campus/shared/src/publicCourseAssistant').PublicCourseAssistantSearch): Promise<unknown>;
   /** Anonymous public content in this adapter's fixed school, never a private school login. */
   publicCampus?(kind: import('./publicCampus').PublicCampusKind, limit: number): Promise<unknown>;
+  /** Public campus locations in this adapter's fixed school, with source coverage. */
+  campusMap?(args: import('./campusMap').CampusMapArguments): Promise<unknown>;
   /** Re-read one selected public event in its exact, fixed-school source. */
   publicEvent?(target: import('./publicEvent').PublicEventTarget): Promise<unknown>;
   /** Platform-authenticated list summaries only; never contact details or publication. */

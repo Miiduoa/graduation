@@ -9,6 +9,8 @@ import { parsePublicCourseArguments, publicCourseArguments, publicCourseSearches
 import { parsePublicCampusRead, parsePublicCampusResult, type PublicCampusRead } from './publicCampus';
 import { CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, publicEventCalendarSourceIntent } from './publicCampusSelection';
 import { lostFoundListInput, parseLostFoundRead, parseLostFoundResult } from './lostFound';
+import { parseCampusMapArguments, parseCampusMapResult } from './campusMap';
+import { parseCampusMapCommand } from './campusMapRequest';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
@@ -56,6 +58,8 @@ const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
   get_campus_announcements: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_campus_events: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_campus_map: [{ query: { type: 'string', minLength: 1, maxLength: 120 },
+    limit: { type: 'integer', minimum: 1, maximum: 5 } }, ['query']],
   get_lost_found: [{
     q: { type: 'string', minLength: 1, maxLength: 100 },
     type: { enum: ['lost', 'found'] },
@@ -461,6 +465,9 @@ export const toolNames = Object.keys(definitions);
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
 function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
+  const campusMap = parseCampusMapCommand(question);
+  if (campusMap) return campusMap.kind === 'next-class'
+    ? [['課表／行程', 'get_schedule'], ['校園位置', 'get_campus_map']] : [['校園位置', 'get_campus_map']];
   const lostFound = parseLostFoundRead(question);
   if (lostFound) return [['失物招領', lostFound.tool]];
   const publicCampus = parsePublicCampusRead(question);
@@ -521,6 +528,9 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
     : '';
 }
 export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
+  const campusMap = parseCampusMapCommand(question);
+  if (campusMap) return campusMap.kind === 'next-class'
+    ? ['get_schedule', 'get_campus_map'] : ['get_campus_map'];
   const lostFound = parseLostFoundRead(question);
   if (lostFound) return [lostFound.tool];
   const publicCampus = parsePublicCampusRead(question);
@@ -644,6 +654,7 @@ export function validateTool(name: string, raw: unknown): Obj {
   const a = object(raw, Object.keys(props));
   if (required.some((k) => a[k] === undefined)) return fail();
   if (name === 'get_public_courses') return publicCourseArguments(parsePublicCourseArguments(a));
+  if (name === 'get_campus_map') return { ...parseCampusMapArguments(a) };
   if (name === 'propose_food_order') return { ...cartArgs(a) };
   for (const [key, value] of Object.entries(a)) {
     const spec = props[key] as Obj;
@@ -980,6 +991,12 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_campus_map': {
+        const args = parseCampusMapArguments(a);
+        if (!adapter.campusMap) return fail('CAMPUS_MAP_UNAVAILABLE', 503);
+        const result = await adapter.campusMap(args);
+        return parseCampusMapResult(result, binding.schoolId, args);
+      }
       case 'get_lost_found': {
         lostFoundListInput(a, binding.schoolId);
         if (!adapter.lostFound) return fail('LOST_FOUND_UNAVAILABLE', 503);
@@ -1574,7 +1591,7 @@ export function createTools(
         cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
       // Public content readers do not reinterpret unsupported school, date or
       // endpoint fields as an unfiltered query for the bound campus.
-      if (name === 'get_campus_announcements' || name === 'get_campus_events' || name === 'get_lost_found') validateTool(name, cleaned);
+      if (name === 'get_campus_announcements' || name === 'get_campus_events' || name === 'get_lost_found' || name === 'get_campus_map') validateTool(name, cleaned);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);

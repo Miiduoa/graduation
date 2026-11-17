@@ -23,7 +23,8 @@ import { retryTaskReads } from './taskRetry';
 import { parsePublicEventTarget } from './publicEvent';
 import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventRequest';
 import { parseCampusEventDiscovery, prepareCampusEventDiscovery } from './campusEventDiscovery';
-const ACTIONS = ['capability', 'ask', 'plan', 'event-preview', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
+import { parseCampusMapReadTask, readCampusMapRequest } from './campusMapReadRequest';
+const ACTIONS = ['capability', 'ask', 'plan', 'event-preview', 'map-read', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 const followupHits = new Map<string, number[]>();
@@ -149,6 +150,8 @@ export async function handleV2(request: NextRequest, action: string) {
           ? ['schoolId', 'conversationId', 'routeToken', 'task']
           : action === 'event-preview'
             ? ['schoolId', 'conversationId', 'routeToken', 'event', 'discovery']
+          : action === 'map-read'
+            ? ['schoolId', 'conversationId', 'task']
           : action === 'followup'
             ? ['schoolId', 'conversationId', 'issuedContext', 'token', 'args']
             : action === 'retry'
@@ -170,13 +173,14 @@ export async function handleV2(request: NextRequest, action: string) {
     const selectedEvent = action === 'event-preview' && Object.hasOwn(raw, 'event') ? parsePublicEventTarget(raw.event) : undefined;
     const eventDiscovery = action === 'event-preview' && Object.hasOwn(raw, 'discovery')
       ? parseCampusEventDiscovery(raw.discovery) : undefined;
+    const mapTask = action === 'map-read' ? parseCampusMapReadTask(raw.task) : undefined;
     if (selectedEvent && selectedEvent.schoolId !== schoolId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
     if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
         !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
     const preparing = action === 'ask' || action === 'plan' || action === 'event-preview';
     const routePurpose = action === 'event-preview' ? 'event-preview' : 'chat';
-    const target = action === 'reconcile' || action === 'followup' || action === 'retry' ? undefined : preparing || action === 'revise'
+    const target = action === 'reconcile' || action === 'followup' || action === 'retry' || action === 'map-read' ? undefined : preparing || action === 'revise'
       ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret, routePurpose)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
@@ -193,6 +197,17 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId,
       schoolId,
     };
+    if (action === 'map-read') {
+      const release = claimFollowupRead(principal.platformAccountId, Date.now());
+      try {
+        return jsonResponse(await readCampusMapRequest({ task: mapTask, binding, secret,
+          now: Date.now(), adapter: source.adapter, signal }));
+      } catch (error) {
+        if (request.signal.aborted) throw new V2Error(499, 'ABORTED');
+        if (signal.aborted) throw new V2Error(504, 'DEADLINE_EXCEEDED');
+        throw error;
+      } finally { release(); }
+    }
     if (action === 'followup') {
       const release = claimFollowupRead(principal.platformAccountId, Date.now());
       try {

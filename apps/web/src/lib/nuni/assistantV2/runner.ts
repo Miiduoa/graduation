@@ -7,6 +7,7 @@ import { crossServiceRequest } from './crossServiceRequest';
 import { runCrossService } from './crossService';
 import { issueTaskRetry } from './taskRetry';
 import { formatPublicCampusRead } from './publicCampus';
+import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult } from './campusMap';
 import { CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, publicCampusEventTargets, publicEventCalendarSourceIntent } from './publicCampusSelection';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS, publicCourseArguments, publicCourseClarifications, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
 import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
@@ -385,9 +386,11 @@ export async function run(input: RunInput) {
     }
     const taskRequest = input.planRevision ? null : crossServiceRequest(input.question, now, input.binding.schoolId);
     if (taskRequest) {
-      const result = await runCrossService({ request: taskRequest, tools, binding: input.binding, signal, now });
+      const eventMapSelections: Record<string, import('./publicEvent').PublicEventTarget> = {};
+      const result = await runCrossService({ request: taskRequest, tools, binding: input.binding, signal, now,
+        onEventMapSelection: (stepId, target) => { eventMapSelections[stepId] = target; } });
       const taskRetry = issueTaskRetry({ question: input.question, request: taskRequest, plan: result.taskPlan,
-        binding: input.binding, secret: input.secret, now });
+        binding: input.binding, secret: input.secret, now, eventMapSelections });
       steps.push(...result.steps);
       stopReason = result.stopReason;
       log('assistant.completed');
@@ -952,6 +955,15 @@ export async function run(input: RunInput) {
       // neither a guessed score nor a graduation decision can replace them.
       finalAnswer = partialAnswer(evidence, tools.cards, executionQuestion, now);
     }
+    if (steps.some((step) => step.name === 'get_campus_map')) {
+      // Location excerpts have source-specific uncertainty. Model prose must
+      // not replace candidates with a guessed room, floor, route or ETA.
+      finalAnswer = partialAnswer(evidence, tools.cards, executionQuestion, now);
+      if (steps.some((step) => step.name === 'get_campus_map' && step.status === 'error')) {
+        finalAnswer = '部分地點來源尚未核對完成；以下僅列已取得的資料。\n' + finalAnswer;
+        stopReason ||= 'SOURCE_UNAVAILABLE';
+      }
+    }
     if (input.planRevision && tools.cards.length)
       finalAnswer = '已重新預覽行程，請核對下方新卡的日期、時間與保留內容；確認前不會寫入。';
     if (input.signal.aborted) throw new V2Error(499, 'ABORTED');
@@ -1103,6 +1115,17 @@ export function partialAnswer(
     if (e.tool === 'get_imported_academics') {
       lines.push('已同步的個人匯入紀錄：\n' + formatImportedAcademicSummary(result as ImportedAcademicSummary));
       pages.add('/import');
+      continue;
+    }
+    if (e.tool === 'get_campus_map') {
+      try {
+        const args = parseCampusMapArguments({ query: result.query, limit: result.limit });
+        const read = parseCampusMapResult(result, typeof result.schoolId === 'string' ? result.schoolId : '', args);
+        lines.push(formatCampusMapRead(read));
+        pages.add(read.href);
+      } catch {
+        // Unverified location payloads cannot contribute names or links.
+      }
       continue;
     }
     if (e.tool === 'get_campus_info') {

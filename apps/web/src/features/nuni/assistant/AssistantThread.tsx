@@ -11,6 +11,7 @@ import { AssistantCardStack } from './AssistantCards';
 import { AssistantTaskPlan } from './AssistantTaskPlan';
 import { AssistantCampusEvents } from './AssistantCampusEvents';
 import { parseCampusEventCommand, type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
+import { parseCampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -161,7 +162,7 @@ export function AssistantThread({
   const publicCompound = publicCourseCompoundRequest(question, schoolId);
   const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    ((consent && ready) || (onEventTarget && parseCampusEventCommand(question) !== null) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+    ((consent && ready) || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
       (onStudyTarget && courseworkStudyFollowup(question) !== null))));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
@@ -205,7 +206,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (

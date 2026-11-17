@@ -8,6 +8,7 @@ import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssis
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { isAssistantTaskRetryQuestion, parseAssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
+import { parseCampusMapCommand, type CampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
@@ -248,6 +249,7 @@ const ASSISTANT_PENDING_STATUS = {
   ask: '正在整理回覆',
   retry: '正在重查未完成的資料',
   event: '正在重新核對活動並準備行程預覽',
+  map: '正在核對教室與校園地點',
   confirm: '正在確認操作結果',
   reconcile: '正在核對執行結果',
   cancel: '正在確認撤銷結果',
@@ -408,7 +410,7 @@ function V2Conversation({
   async function send(action: string, input: object, askSignal?: AbortSignal) {
     const scopeSignal = controller.current!.signal;
     const signal = askSignal ?? scopeSignal;
-    return withAssistantRequestDeadline(signal, action === 'ask' || action === 'retry' ? 65000 : action === 'event-preview' ? 25000 : 15000, async (requestSignal) => {
+    return withAssistantRequestDeadline(signal, action === 'ask' || action === 'retry' ? 65000 : action === 'event-preview' ? 25000 : action === 'map-read' ? 20000 : 15000, async (requestSignal) => {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
       credentials: 'same-origin',
@@ -525,6 +527,56 @@ function V2Conversation({
     if (!target) { setError('這筆活動來源尚未通過核對，請重新查詢活動。'); return; }
     await requestCampusEventPreview({ target }, prompt);
   }
+  async function requestCampusMap(task: CampusMapCommand, current: string) {
+    if (!active() || busy.current || !journalReadyRef.current) return;
+    busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('map');
+    setPending(true);
+    setError('');
+    setQuestion('');
+    const sourceConversation = crypto.randomUUID();
+    try {
+      // This independent read does not bootstrap or replace the chat route and
+      // cannot retire any pending or unresolved calendar/food confirmation.
+      const reply = await send('map-read', { task, conversationId: sourceConversation }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      const taskPlan = parseAssistantTaskPlan(reply?.taskPlan);
+      const taskRetry = reply?.taskRetry === undefined ? undefined : parseAssistantTaskRetry(reply.taskRetry, taskPlan);
+      if (reply?.version !== 2 || reply.modelCalls !== 0 || reply.dataRead !== true ||
+          typeof reply.answer !== 'string' || reply.answer.length > 18000 ||
+          !Array.isArray(reply.cards) || reply.cards.length || !taskPlan || taskPlan.steps.length > 2 ||
+          taskPlan.steps.some(step => !['map', 'timetable'].includes(step.serviceId) || step.cardIds?.length ||
+            !['completed', 'partial', 'blocked'].includes(step.status)) ||
+          !Array.isArray(reply.steps) || reply.steps.length > 2 || reply.steps.some((step: unknown) =>
+            !step || typeof step !== 'object' || !['get_schedule', 'get_campus_map'].includes((step as Record<string, unknown>).name as string) ||
+            !['ok', 'cached', 'error'].includes((step as Record<string, unknown>).status as string) ||
+            typeof (step as Record<string, unknown>).summary !== 'string') ||
+          (reply.taskRetry !== undefined && !taskRetry))
+        throw new Error('地點查詢結果尚未通過核對，請重新查詢。');
+      setTurns(previous => [...previous, { question: current, conversationId: sourceConversation,
+        reply: { answer: reply.answer, steps: reply.steps, cards: [], dataRead: true, taskPlan,
+          ...(taskRetry ? { taskRetry } : {}), ...(reply.simulation === true ? { simulation: true } : {}) } }]);
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+    } catch (cause) {
+      if (!scopeSignal.aborted) {
+        setError(pendingAsk.signal.aborted ? '已停止這次地點查詢，原本的結果與確認內容仍保留。'
+          : cause instanceof Error ? cause.message : '地點查詢未完成，請稍後再試。');
+        setRecoverableQuestion(current);
+      }
+    } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
+      busy.current = false;
+      if (!scopeSignal.aborted) { setAsking(false); setPending(false); }
+    }
+  }
   async function requestCampusEventPreview(input: { target: AssistantCampusEventTarget } | { discovery: { index: number } }, prompt?: string) {
     if (!active() || busy.current) return;
     const target = 'target' in input ? input.target : undefined;
@@ -612,6 +664,11 @@ function V2Conversation({
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim();
     if (!current || busy.current) return;
+    const mapCommand = !selection ? parseCampusMapCommand(current) : null;
+    if (mapCommand) {
+      await requestCampusMap(mapCommand, current);
+      return;
+    }
     const eventCommand = !selection ? parseCampusEventCommand(current) : null;
     if (eventCommand) {
       if (eventCommand.kind === 'discover') {
