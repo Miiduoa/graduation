@@ -188,7 +188,9 @@ test('separates measured offline failure from a missing offline measurement', ()
   const second = structuredClone(paired.trials[0]);
   second.caseId = 'pair-2';
   second.results[0].offlineCompleted = null;
-  second.results[1].offlineCompleted = true;
+  // This pair has a genuinely completed Ahaboard run. Failed runs must not
+  // claim successful offline completion, even in a comparison fixture.
+  second.results[1] = result('Ahaboard');
   paired.trials.push(second);
   const report = auditStudyComparisons(paired);
   assert.deepEqual(report.pairedOfflineCounts, {
