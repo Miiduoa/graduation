@@ -45,3 +45,14 @@ test('可讀的課程群組也不能呈現為社團', async () => {
   } as never);
   await expect(loadClubProfile('one', 'pu', 'course')).rejects.toThrow('這不是社團');
 });
+
+test('社團頁保留群組讀取取得的已儲存介紹與社課時間', async () => {
+  vi.mocked(loadGroupDiscussionPage).mockResolvedValue({
+    group: { type: 'club', description: '新版介紹', meetingTime: '週三 18:00' },
+    page: { posts: [] },
+  } as never);
+  expect(await loadClubProfile('one', 'pu', 'club')).toMatchObject({
+    description: '新版介紹',
+    meetingTime: '週三 18:00',
+  });
+});

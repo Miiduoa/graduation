@@ -170,6 +170,33 @@ test('待審與不通過理由僅本人讀取，通過重驗身分且不重複�
     call('officer', { action: 'review', targetUid: 'student', decision: 'approved' }),
   ).rejects.toHaveProperty('code', 'failed-precondition');
   expect(store.docs.get('groups/club')?.memberCount).toBe(2);
+  expect(store.docs.get('groups/club/members/student')?.displayName).toBe('姓名待確認');
+});
+
+test('學生可取消待審入社申請，之後仍可重新申請', async () => {
+  store.docs.get('groups/club')!.clubProfile = { joinPolicy: 'review' };
+  await call('student', { action: 'join' });
+  await call('student', { action: 'cancelJoin' });
+  expect(store.docs.get('groups/club/joinRequests/student')?.status).toBe('cancelled');
+  await call('student', { action: 'join' });
+  expect(store.docs.get('groups/club/joinRequests/student')?.status).toBe('pending');
+});
+
+test('社課時間預設值只作為顯示，不會寫回資料庫', async () => {
+  const group = store.docs.get('groups/club') as Record<string, any>;
+  group.clubProfile = { meetingTime: '社課時間未提供', joinPolicy: 'open', recruiting: false };
+  expect((await call('student', { action: 'directory' })).clubs?.[0].meetingTime).toBe('');
+  await call('officer', {
+    action: 'profile',
+    name: '攝影社',
+    description: '介紹',
+    meetingTime: '社課時間未提供',
+    recruiting: false,
+    joinPolicy: 'open',
+    instagram: '',
+    line: '',
+  });
+  expect((store.docs.get('groups/club') as { clubProfile?: { meetingTime?: string } } | undefined)?.clubProfile?.meetingTime).toBe('');
 });
 test('未核可及停權不能學號加入，但邀請碼不加限制', async () => {
   store.docs.delete('schools/school/clubs/club');

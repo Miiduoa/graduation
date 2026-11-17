@@ -114,7 +114,7 @@ export function ClubBoard({
       {view && (
         <>
           <p>
-            身分：{view.role === 'owner' ? '會長' : officer ? '幹部' : '社員'} · 社員{' '}
+            身分：{view.role === 'owner' ? '社長' : officer ? '幹部' : '社員'} · 社員{' '}
             {view.members.length} 位{!view.rosterOnly && <> · 活動 {view.events.length} 場</>}
           </p>
           {officer && (
@@ -142,7 +142,7 @@ export function ClubBoard({
                         <th>電話</th>
                       </>
                     )}
-                    {view.role === 'owner' && <th>幹部設定</th>}
+                    {clubRoleLabel(view.role) === '社長' && <th>幹部設定</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -156,9 +156,9 @@ export function ClubBoard({
                           <td>{m.phone || '未提供'}</td>
                         </>
                       )}
-                      {view.role === 'owner' && (
+                      {clubRoleLabel(view.role) === '社長' && (
                         <td>
-                          {m.role !== '會長' && (
+                          {clubRoleLabel(m.role) !== '社長' && (
                             <button
                               className="btn"
                               disabled={busy}
@@ -166,11 +166,11 @@ export function ClubBoard({
                                 void perform({
                                   action: 'role',
                                   targetUid: m.id,
-                                  role: m.role === '幹部' ? 'member' : 'admin',
+                                  role: clubRoleLabel(m.role) === '幹部' ? 'member' : 'admin',
                                 })
                               }
                             >
-                              {m.role === '幹部' ? '改為社員' : '設為幹部'}
+                              {clubRoleLabel(m.role) === '幹部' ? '改為社員' : '設為幹部'}
                             </button>
                           )}
                         </td>

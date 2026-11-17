@@ -1,9 +1,16 @@
+let mockUser: { uid: string } | null = null;
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
+jest.mock('../services/personalTimetable', () => ({
+  loadPersonalTimetable: async () => ({ courses: [] }),
+}));
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 import { CareerScreen } from '../screens/CareerScreen';
 import {
   CAREER_EMPTY,
+  CAREER_FEED_UNAVAILABLE,
+  CAREER_SOURCES_STALE,
   CAREER_JOBS_UNAVAILABLE,
   emptyCareerFeed,
   type CareerFeed,
@@ -20,6 +27,10 @@ function respond(feed: CareerFeed) {
   global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => feed });
 }
 beforeEach(() => {
+  mockUser = null;
+  jest.spyOn(require('../firebase'), 'getAuthInstance').mockImplementation(() => ({
+    currentUser: mockUser && { ...mockUser, getIdToken: async () => 'fixture' },
+  }));
   mockSchool = { id: 'pu', name: '靜宜大學' };
   respond({ ...emptyCareerFeed(), announcementsUnavailable: false, jobsUnavailable: false });
   jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
@@ -28,11 +39,12 @@ afterEach(() => {
   global.fetch = originalFetch;
   jest.restoreAllMocks();
 });
-test('guests see real public resources and exact empty text without personal write controls', async () => {
+test('guests see public resources and an honest sign-in state without personal write controls', async () => {
   const view = render(<CareerScreen />);
   await view.findByText('目前沒有可確認日期的近期截止日或活動。');
-  expect(view.getByText(CAREER_EMPTY)).toBeTruthy();
-  expect(view.getByText(/個人職涯資料尚未連結到校方系統/)).toBeTruthy();
+  expect(view.queryByText(CAREER_EMPTY)).toBeNull();
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
+  expect(view.getByText('登入後可申請校內工讀與查看實習學分')).toBeTruthy();
   expect(view.queryByText('新增紀錄')).toBeNull();
   expect(view.queryByText('登入以使用個人工作區')).toBeNull();
   await act(async () =>
@@ -79,7 +91,8 @@ test('TaiwanJobs failure keeps campus resources visible and retry recovers', asy
   respond(emptyCareerFeed());
   const view = render(<CareerScreen />);
   expect(await view.findByText(CAREER_JOBS_UNAVAILABLE)).toBeTruthy();
-  expect(view.getByText(CAREER_EMPTY)).toBeTruthy();
+  expect(view.queryByText(CAREER_EMPTY)).toBeNull();
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
   respond({ ...emptyCareerFeed(), announcementsUnavailable: false, jobsUnavailable: false });
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新整理' })));
   await waitFor(() => expect(view.queryByText(CAREER_JOBS_UNAVAILABLE)).toBeNull());
@@ -111,4 +124,81 @@ test('preserves the school-announcements entry even when career sources are unav
   await view.findByText(CAREER_JOBS_UNAVAILABLE);
   fireEvent.press(view.getByRole('button', { name: '查看校方公告' }));
   expect(navigation.navigate).toHaveBeenCalledWith('公告總覽');
+});
+
+test('authenticated official screen uses hosted callables and hides forms until a successful retry', async () => {
+  mockUser = { uid: 'student' };
+  let available = false;
+  global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (!url.includes('/api/fn/')) return { ok: true, json: async () => emptyCareerFeed() };
+    const data = JSON.parse(String(init?.body)).data;
+    if (!available || data.audience === 'staff')
+      return { ok: false, json: async () => ({ error: { message: '尚未啟用' } }) };
+    return {
+      ok: true,
+      json: async () => ({
+        result: {
+          snapshot: url.endsWith('careerWorkstudy')
+            ? {
+                opportunities: [],
+                applications: [],
+                events: [],
+                audit: [],
+                sources: null,
+                canReview: false,
+                canOperate: false,
+              }
+            : { rules: [], records: [], audit: [] },
+        },
+      }),
+    };
+  }) as unknown as typeof fetch;
+  const view = render(<CareerScreen />);
+  await waitFor(() => expect(view.getAllByText('尚未啟用').length).toBe(2));
+  expect(view.queryByText('新增機會')).toBeNull();
+  expect(view.queryByText('新增系所規則')).toBeNull();
+  expect(view.queryByText('系所尚未設定實習學分規則，請洽系辦確認。')).toBeNull();
+  available = true;
+  await act(async () => fireEvent.press(view.getByText('重試讀取實習進度')));
+  expect(await view.findByText('系所尚未設定實習學分規則，請洽系辦確認。')).toBeTruthy();
+  const calls = (fetch as jest.Mock).mock.calls.filter(([url]) => url.includes('/api/fn/'));
+  expect(
+    calls.every(
+      ([url, init]) =>
+        url.startsWith('https://nuni.tw/api/fn/') &&
+        init.headers.Authorization === 'Bearer fixture',
+    ),
+  ).toBe(true);
+});
+
+test.each(['network', 'settings'])(
+  'shows a total feed failure and recovers on retry: %s',
+  async (failure) => {
+    global.fetch =
+      failure === 'network'
+        ? jest.fn().mockRejectedValue(Error('offline'))
+        : jest
+            .fn()
+            .mockResolvedValue({
+              ok: false,
+              status: 503,
+              json: async () => ({ error: '設定讀取失敗' }),
+            });
+    const view = render(<CareerScreen />);
+    expect(await view.findByText(CAREER_FEED_UNAVAILABLE)).toBeTruthy();
+    expect(view.queryByText(CAREER_JOBS_UNAVAILABLE)).toBeNull();
+    expect(view.queryByText(/部分校方公告/)).toBeNull();
+    expect(view.queryByText(/目前沒有/)).toBeNull();
+    expect(view.queryByText('正在讀取公開職涯資訊…')).toBeNull();
+    expect(view.getByRole('button', { name: '前往校方職涯資源 ↗' })).toBeTruthy();
+    respond({ ...emptyCareerFeed(), announcementsUnavailable: false, jobsUnavailable: false });
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '重新整理' })));
+    expect(await view.findByText('目前沒有可確認日期的近期截止日或活動。')).toBeTruthy();
+    expect(view.queryByText(CAREER_FEED_UNAVAILABLE)).toBeNull();
+  },
+);
+test('discloses last-known source settings during recovery', async () => {
+  respond({ ...emptyCareerFeed(), sourceSettingsStale: true });
+  const view = render(<CareerScreen />);
+  expect(await view.findByText(CAREER_SOURCES_STALE)).toBeTruthy();
 });

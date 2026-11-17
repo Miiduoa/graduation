@@ -34,11 +34,31 @@ type Props = {
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 
-// A dated stale fallback may return HTTP 200 together with Retry-After.
-// Validate the seconds before disabling the manual retry on mobile.
+// Rate limits can carry Retry-After as delay-seconds or an HTTP-date.
+// Accept only a canonical IMF-fixdate, rejecting malformed/expired dates so a
+// proxy cannot indefinitely lock mobile controls. Cap the pause at one day.
 function footprintCooldownSeconds(response: Response): number | null {
   const raw = response.headers?.get('retry-after')?.trim();
-  return raw && /^[1-9]\d{0,5}$/.test(raw) ? Math.min(86_400, Number(raw)) : null;
+  if (!raw) return null;
+  // RFC 9110 delay-seconds is 1*DIGIT: leading zeroes and long positive
+  // values are valid. Cap their effect at 24h, but bound header size before
+  // parsing so malformed or excessively long headers cannot lock controls.
+  if (/^\d{1,64}$/.test(raw)) {
+    const seconds = Number(raw);
+    return seconds > 0 ? Math.min(86_400, seconds) : null;
+  }
+  const until = Date.parse(raw);
+  if (!Number.isFinite(until) || new Date(until).toUTCString() !== raw) return null;
+  // A mobile device can be minutes ahead of the origin. HTTP-date and Date
+  // are both origin-clock values; a client-only subtraction could treat a
+  // still-active 429/503 cooldown as already expired and hammer Overpass.
+  // Never shorten the locally calculated wait, and cap both at 24 hours.
+  const serverDate = response.headers?.get('date')?.trim() ?? '';
+  const serverTime = Date.parse(serverDate);
+  const serverWait = serverDate && Number.isFinite(serverTime) &&
+    new Date(serverTime).toUTCString() === serverDate ? until - serverTime : -Infinity;
+  const seconds = Math.ceil(Math.max(until - Date.now(), serverWait) / 1000);
+  return seconds > 0 ? Math.min(86_400, seconds) : null;
 }
 
 function readAppearance() {
@@ -53,7 +73,14 @@ function readAppearance() {
 function subscribeAppearance(notify: () => void) {
   const media = ['(prefers-reduced-motion: reduce)', '(prefers-color-scheme: dark)']
     .map((query) => window.matchMedia?.(query));
-  for (const query of media) query?.addEventListener('change', notify);
+  // iOS Safari versions with legacy MediaQueryList listeners do not expose
+  // addEventListener/removeEventListener. Keep reduced-motion and theme changes
+  // reactive instead of breaking the spatial dialog on those devices.
+  for (const query of media) {
+    if (!query) continue;
+    if (typeof query.addEventListener === 'function') query.addEventListener('change', notify);
+    else query.addListener?.(notify);
+  }
   const observer = new MutationObserver(notify);
   observer.observe(document.documentElement, {
     attributes: true,
@@ -61,7 +88,11 @@ function subscribeAppearance(notify: () => void) {
   });
   return () => {
     observer.disconnect();
-    for (const query of media) query?.removeEventListener('change', notify);
+    for (const query of media) {
+      if (!query) continue;
+      if (typeof query.removeEventListener === 'function') query.removeEventListener('change', notify);
+      else query.removeListener?.(notify);
+    }
   };
 }
 
@@ -182,7 +213,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         <button className="btn" type="button" onClick={() => onCameraChange({ ...camera, bearing: 0 })}>回到北向</button>
         <button className="btn" type="button" disabled={camera.zoom === 1}
           onClick={() => onCameraChange({ ...camera, zoom: 1 })}>還原 100% 縮放</button>
-        <span role="status" aria-live="polite" aria-atomic="true">縮放 {Math.round(camera.zoom * 100)}%</span>
+        <span role="status" aria-live="polite" aria-atomic="true">視角方位 {Math.round(camera.bearing)}° · 縮放 {Math.round(camera.zoom * 100)}%</span>
         <span className={styles.compass}>
           <svg viewBox="0 0 40 40" width="32" height="32" aria-hidden="true">
             <g transform={`rotate(${spatialNorthRotationDegrees(camera.bearing, overhead)} 20 20)`}>
@@ -221,6 +252,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
   const footprintExpiresAtRef = useRef<number | null>(null);
   const footprintRequestActiveRef = useRef(false);
+  // A hidden tab must evict expired geometry without fetching; retry when visible.
+  const deferredExpiredRefreshRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
@@ -269,7 +302,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         current?.until === footprintRetryAfter.until && current.minutes !== minutes
           ? { ...current, minutes } : current);
     };
-    const timer = window.setTimeout(() => setFootprintRetryAfter(null),
+    // Browser timers are monotonic, but the server cooldown deadline uses wall time.
+    // If the user sets the clock backwards while a timer is pending, its old
+    // timeout can fire before the absolute deadline. Recheck before unlocking.
+    const timer = window.setTimeout(synchronizeCooldown,
       Math.max(0, footprintRetryAfter.until - Date.now()));
     const interval = window.setInterval(synchronizeCooldown, 60_000);
     document.addEventListener('visibilitychange', synchronizeCooldown);
@@ -283,10 +319,61 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   }, [footprintRetryAfter]);
 
   useEffect(() => {
+    if (school !== 'pu') {
+      deferredExpiredRefreshRef.current = false;
+      return;
+    }
+    const resumeExpiredRefresh = () => {
+      if (!deferredExpiredRefreshRef.current || document.hidden ||
+          footprintRetryAfter !== null || footprintRequestActiveRef.current) return;
+      deferredExpiredRefreshRef.current = false;
+      setFootprintAttempt((value) => value + 1);
+    };
+    // Also retry when a Retry-After that blocked the foreground resume ends.
+    resumeExpiredRefresh();
+    document.addEventListener('visibilitychange', resumeExpiredRefresh);
+    window.addEventListener('pageshow', resumeExpiredRefresh);
+    return () => {
+      document.removeEventListener('visibilitychange', resumeExpiredRefresh);
+      window.removeEventListener('pageshow', resumeExpiredRefresh);
+    };
+  }, [school, footprintRetryAfter]);
+
+  useEffect(() => {
     if (school !== 'pu' || footprintClock === null) return;
+    const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
+    // A wall-clock correction may make a previously scheduled browser timer
+    // fire before the source deadline. Keep one timer armed for the absolute
+    // deadline instead of silently losing the seven-day geometry eviction.
+    let timer: number;
     const checkSnapshotAge = () => {
       if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
       const now = Date.now();
+      // The hidden soft-deadline event marks the snapshot stale and moves
+      // nextDeadline to the seven-day hard expiry. A visible resume before
+      // that hard deadline must still perform the deferred revalidation.
+      const softRefreshDeferredFromHiddenTab = !document.hidden && footprintStale &&
+        !staleSnapshotRef.current && now >= footprintClock.staleAt &&
+        now < footprintClock.expiresAt;
+      if (now < nextDeadline && !softRefreshDeferredFromHiddenTab) {
+        window.clearTimeout(timer);
+        // Bound waits to avoid setTimeout's 32-bit overflow after a large clock change.
+        timer = window.setTimeout(checkSnapshotAge, Math.min(FOOTPRINT_DAY_MS, nextDeadline - now));
+        return;
+      }
+      // Keep public Overpass work out of background tabs while a dated volume
+      // remains retainable. The next visible resume event checks this same
+      // absolute deadline; hard expiry still evicts geometry even when hidden.
+      if (document.hidden && now < footprintClock.expiresAt) {
+        // The soft deadline timer still has to arm the seven-day hard
+        // deadline. Otherwise returning while hidden leaves no later timer
+        // to evict old geometry until the user brings the tab back.
+        // Keep staleSnapshotRef false so foreground resume revalidates once.
+        if (now >= footprintClock.staleAt && !footprintStale) {
+          setFootprintStale(true);
+        }
+        return;
+      }
       if (now >= footprintClock.expiresAt) {
         // Seven days is the source's *hard* retention limit, not a trigger to
         // keep an unverified building on screen indefinitely during an outage.
@@ -301,17 +388,37 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintBaseDate(null);
         setFootprintStale(false);
         setFootprintRefreshFailed(false);
-        setFootprintStatus('unavailable');
+        // A freshness refresh may already be in flight when a suspended tab
+        // resumes past the seven-day retention limit. Hide expired geometry,
+        // but keep the loading state until that bounded request finishes.
+        const refreshing = footprintRequestActiveRef.current;
+        setFootprintStatus(refreshing ? 'loading' : 'unavailable');
+        if (!refreshing) {
+          if (document.hidden || footprintRetryAfter !== null) {
+            // The hard deadline clears geometry even in the background, but
+            // network revalidation waits for a visible tab and server cooldown.
+            deferredExpiredRefreshRef.current = true;
+          } else {
+            setFootprintAttempt((value) => value + 1);
+          }
+        }
+      } else if (now >= footprintClock.staleAt && !staleSnapshotRef.current) {
+        // Mark the dated source stale immediately on tab resume, and revalidate
+        // it once without making the user search for a manual retry button.
+        // The ref prevents duplicate network calls from timer/pageshow races.
+        // Do not bypass a server Retry-After or start concurrent requests.
+        staleSnapshotRef.current = true;
+        setFootprintStale(true);
         if (!footprintRequestActiveRef.current && footprintRetryAfter === null) {
           setFootprintAttempt((value) => value + 1);
         }
-      } else if (now >= footprintClock.staleAt) {
-        staleSnapshotRef.current = true;
-        setFootprintStale(true);
       }
     };
-    const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
-    const timer = window.setTimeout(checkSnapshotAge, Math.max(0, nextDeadline - Date.now()));
+    // A retainable but already-stale snapshot may have a hard deadline days
+    // away. Recheck the absolute deadline at least daily, including after
+    // device clock adjustments, rather than waiting several days initially.
+    timer = window.setTimeout(checkSnapshotAge,
+      Math.max(0, Math.min(FOOTPRINT_DAY_MS, nextDeadline - Date.now())));
     document.addEventListener('visibilitychange', checkSnapshotAge);
     window.addEventListener('pageshow', checkSnapshotAge);
     return () => {
@@ -331,6 +438,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     // A freshness deadline may retain a dated snapshot; the seven-day hard
     // source expiry never may.
     const preserveStale = staleSnapshotRef.current;
+    // A manual refresh or an already-triggered request supersedes deferral.
+    deferredExpiredRefreshRef.current = false;
     footprintRequestActiveRef.current = true;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
@@ -347,7 +456,19 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       const keepStale = preserveStale && staleSnapshotRef.current;
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
+      // A timed-out proxy is not proof that the public OSM source recovered.
+      // Pause manual retries locally even when AbortSignal was ignored.
+      setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
     }, 15_000);
+    // A gateway can return HTTP 200 with truncated JSON or a payload that
+    // fails our source/geometry contract. Treat that as a rejected source
+    // response rather than letting repeated manual retries hammer Overpass.
+    // Preserve a valid Retry-After when supplied; otherwise pause for 60s.
+    const pauseForInvalidPayload = (seconds: number | null) => {
+      if (!active || timedOut) return;
+      const wait = seconds ?? 60;
+      setFootprintRetryAfter({ until: Date.now() + wait * 1000, minutes: Math.ceil(wait / 60) });
+    };
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
         // Fetch considers 203/206 successful, but the map API contract is a
@@ -356,21 +477,45 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const contentRange = response.headers?.get('content-range') ?? null;
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null) {
-          // Only our 503 responses use this contract. Ignore malformed or
-          // unreasonably large intermediary values rather than freezing the UI.
-          const seconds = response.status === 503 ? footprintCooldownSeconds(response) : null;
+          // Match the API's fail-closed response policy: an upstream/proxy can
+          // request a cooldown on 408, gateway failures, or partial content,
+          // not only 429/503. Do not hammer a source that rejected a full map.
+          const status = response.status;
+          const rateLimitedOrIncomplete = status === 206 || status === 408 ||
+            status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
+            contentRange !== null;
+          // A proxy can return an incomplete 206/Content-Range document or
+          // a 408 without Retry-After. These responses cannot be trusted as
+          // complete OSM geometry and should not trigger a manual retry loop.
+          // Back off 60s alongside 429 and 502/503/504. Explicit valid
+          // Retry-After still wins; an ordinary 500 keeps its existing retry.
+          const fallbackBackoff = status === 206 || status === 408 || status === 429 ||
+            status === 502 || status === 503 || status === 504 || contentRange !== null;
+          const seconds = rateLimitedOrIncomplete
+            ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
+            : null;
           if (active && !timedOut && seconds !== null) {
             setFootprintRetryAfter({ until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60) });
           }
           throw new Error('footprint source unavailable');
         }
         const cooldownSeconds = response.status === 200 ? footprintCooldownSeconds(response) : null;
-        return { payload: await response.json() as unknown, cooldownSeconds };
+        let payload: unknown;
+        try {
+          payload = await response.json() as unknown;
+        } catch {
+          pauseForInvalidPayload(cooldownSeconds);
+          throw new Error('Invalid building outline response body');
+        }
+        return { payload, cooldownSeconds };
       })
       .then(({ payload, cooldownSeconds }) => {
         if (!active || timedOut) return;
         const snapshot = parseProvidenceFootprintSnapshot(payload);
-        if (!snapshot) throw new Error('No recent, source-checked building outlines');
+        if (!snapshot) {
+          pauseForInvalidPayload(cooldownSeconds);
+          throw new Error('No recent, source-checked building outlines');
+        }
         const fetchedMs = Date.parse(snapshot.fetchedAt);
         const replicationMs = snapshot.osmBaseAt === null ? Infinity : Date.parse(snapshot.osmBaseAt);
         const expiresAt = Math.min(fetchedMs + 7 * FOOTPRINT_DAY_MS, replicationMs + 7 * FOOTPRINT_DAY_MS);
@@ -466,12 +611,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             </div>
             <p className={styles.note}>選擇地點或拖動導覽進度，讓視角跟著移動。步行路線請使用導航。</p>
             {school === 'pu' && (
-              <div className={styles.footprintInfo} role="status">
-                {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
+              <div className={styles.footprintInfo}>
+                {footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
                 {footprintStatus === 'unavailable' && <>
-                  <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
+                  <span role="status">公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
                   {footprintRetryAfter !== null && <span>
-                    來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
+                    為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
                   <button className={styles.retryFootprints} type="button"
                     disabled={footprintRetryAfter !== null}
@@ -481,17 +626,17 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </>}
                 {footprintStatus === 'ready' && (
                   <>
-                    <strong>{visibleFootprints.length} 棟公開建築輪廓</strong>
+                    <strong role="status">{visibleFootprints.length} 棟公開建築輪廓</strong>
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
                     {footprintStale && <>
                       <span>目前使用有日期標註的舊輪廓，可手動檢查是否已有更新；原始地點與步行導航不受影響。</span>
                       {footprintRetryAfter !== null && <span>
-                        來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
+                        為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                       </span>}
-                      {footprintRefreshing && <span>正在檢查更新，暫時保留舊輪廓。</span>}
-                      {footprintRefreshFailed && !footprintRefreshing && <span>更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
+                      {footprintRefreshing && <span role="status">正在檢查更新，暫時保留舊輪廓。</span>}
+                      {footprintRefreshFailed && !footprintRefreshing && <span role="status">更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
                       <button className={styles.retryFootprints} type="button"
                         disabled={footprintRetryAfter !== null || footprintRefreshing}
                         onClick={() => {

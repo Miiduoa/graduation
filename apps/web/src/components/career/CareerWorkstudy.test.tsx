@@ -87,6 +87,49 @@ test('student sees conflicts without losing opportunities, reads rights and send
   });
   expect(view.getAllByText('已送出').length).toBeGreaterThan(0);
 });
+test('student can withdraw early-stage applications and apply again later', async () => {
+  const { view, data, service } = setup();
+  data.applications = [{ ...application, state: 'submitted' }];
+  await view.findByText('我的申請');
+  fireEvent.click(view.getByRole('button', { name: '撤回申請' }));
+  expect(service.execute).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole('button', { name: '確認撤回申請' }));
+  data.applications = [{ ...application, state: 'withdrawn' }];
+  await waitFor(() =>
+    expect(service.execute).toHaveBeenCalledWith({
+      action: 'withdraw',
+      applicationId: application.id,
+      revision: application.revision,
+    }),
+  );
+  await waitFor(() => expect(view.getByText('已撤回申請。')).toBeTruthy());
+  expect(view.getByText(/已撤回$/)).toBeTruthy();
+  expect(view.getByRole('button', { name: `應徵${opportunity.title}` })).toBeTruthy();
+});
+
+test('work-study filters can narrow by unit, slot and credit with empty-state feedback', async () => {
+  const { view, data } = setup();
+  data.opportunities = [
+    opportunity,
+    {
+      ...opportunity,
+      id: 'second',
+      title: '第二份工讀',
+      unit: '圖書館',
+      credit: false,
+      slots: [{ day: 4, start: '13:00', end: '15:00' }],
+    },
+  ];
+  await view.findByText('測試用工讀');
+  fireEvent.change(view.getByLabelText('單位'), { target: { value: '圖書館' } });
+  expect(view.getByText('第二份工讀')).toBeTruthy();
+  expect(view.queryByText('測試用工讀')).toBeNull();
+  fireEvent.change(view.getByLabelText('時段'), { target: { value: '週三 09:00–11:00' } });
+  expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy();
+  fireEvent.change(view.getByLabelText('時段'), { target: { value: '全部' } });
+  fireEvent.change(view.getByLabelText('學分'), { target: { value: 'credit' } });
+  expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy();
+});
 test('guest action asks host to log in and never sends a command', async () => {
   const { view, service, onLogin } = setup('student', null);
   fireEvent.click(await view.findByRole('button', { name: '應徵測試用工讀' }));
@@ -283,7 +326,7 @@ test('slow reads coalesce subscription and manual triggers into one latest snaps
     changed();
     changed();
   });
-  fireEvent.click(view.getByRole('button', { name: '重新整理工讀資料' }));
+  fireEvent.click(view.getByRole('button', { name: '重新整理職涯機會' }));
   expect(service.load).toHaveBeenCalledTimes(1);
   await act(async () => {
     finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
@@ -320,7 +363,7 @@ test('account remount and unmount abort pending reads and discard late failures'
       rejectUnmount = reject;
     });
   });
-  fireEvent.click(view.getByRole('button', { name: '重新整理工讀資料' }));
+  fireEvent.click(view.getByRole('button', { name: '重新整理職涯機會' }));
   view.unmount();
   expect(unmountSignal?.aborted).toBe(true);
   await act(async () => {
@@ -396,3 +439,79 @@ test('a cancelled read cannot overwrite the newer result after a write', async (
   expect(view.queryByText('已取消的舊結果')).toBeNull();
   expect(service.load).toHaveBeenCalledTimes(3);
 });
+
+test('withdrawn applications stay visible without staff review controls', async () => {
+  const { view, data } = setup('staff');
+  data.applications = [{ ...application, state: 'withdrawn' }];
+  await view.findByText('職涯工作台');
+  fireEvent.click(view.getByText('申請'));
+  await waitFor(() => expect(view.getByText(/已撤回$/)).toBeTruthy());
+  expect(view.queryByText('改為單位已讀')).toBeNull();
+  expect(view.queryByText('改為約面談')).toBeNull();
+});
+
+test('hides student work-study chrome for teachers without applications and keeps staff tools', async () => {
+  const { view, data, service } = setup();
+  data.viewerRole = 'teacher';
+  data.applications = [];
+  await waitFor(() => expect(service.load).toHaveBeenCalled());
+  await act(async () => {});
+  expect(view.queryByText('我的申請')).toBeNull();
+  expect(view.queryByText(/應徵/)).toBeNull();
+  view.unmount();
+  const staff = setup('staff');
+  staff.data.viewerRole = 'teacher';
+  await waitFor(() => expect(staff.view.getByText('新增機會')).toBeTruthy());
+});
+
+test('shows every published opportunity type and filters without exposing unpublished records', async () => {
+  const { view, data, changed } = setup();
+  data.opportunities = [
+    opportunity,
+    { ...opportunity, id: 'internship', type: 'internship', title: '測試實習' },
+    { ...opportunity, id: 'fair', type: 'fair', title: '測試校徵' },
+    { ...opportunity, id: 'hidden', type: 'internship', title: '未上架機會', published: false },
+  ];
+  await view.findByText('測試實習');
+  expect(view.getByText('類型：工讀')).toBeTruthy();
+  expect(view.getByText('類型：實習')).toBeTruthy();
+  expect(view.getByText('類型：校徵')).toBeTruthy();
+  expect(view.queryByText('未上架機會')).toBeNull();
+  fireEvent.change(view.getByLabelText('類型'), { target: { value: 'internship' } });
+  expect(view.queryByText('測試用工讀')).toBeNull();
+  expect(view.queryByText('測試校徵')).toBeNull();
+  expect(view.getByText('測試實習')).toBeTruthy();
+  data.opportunities = data.opportunities.filter((o) => o.type !== 'internship');
+  await act(async () => {
+    changed();
+  });
+  await waitFor(() => expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy());
+});
+
+test.each([
+  ['internship', true],
+  ['fair', true],
+  ['internship', false],
+  ['fair', false],
+] as const)(
+  '%s directs students to the school announcement (source: %s)',
+  async (type, hasSource) => {
+    const { view, data, service } = setup();
+    data.opportunities = [
+      { ...opportunity, type, sourceUrl: hasSource ? opportunity.sourceUrl : '' },
+    ];
+    await view.findByText('此類機會請依校方公告方式報名');
+    expect(view.queryByRole('button', { name: `應徵${opportunity.title}` })).toBeNull();
+    expect(view.queryByText('工讀權益')).toBeNull();
+    expect(view.queryByLabelText('聯絡方式')).toBeNull();
+    expect(view.queryByRole('button', { name: '送出申請' })).toBeNull();
+    if (hasSource) {
+      expect(view.getByRole('link', { name: '校方原始公告 ↗' }).getAttribute('href')).toBe(
+        opportunity.sourceUrl,
+      );
+    } else {
+      expect(view.queryByRole('link', { name: '校方原始公告 ↗' })).toBeNull();
+    }
+    expect(service.execute).not.toHaveBeenCalled();
+  },
+);

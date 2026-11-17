@@ -1,4 +1,4 @@
-import { clubSummaryEnabled } from '../services/clubSummary';
+import { ClubPortal } from './ClubPortal';
 import React, { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { Button, Card } from '../ui/components';
@@ -6,8 +6,12 @@ import { theme } from '../ui/theme';
 
 export function ClubDirectory({
   clubs,
+  uid,
+  schoolId,
   onOpen,
 }: {
+  uid?: string;
+  schoolId?: string;
   clubs: { groupId: string; name: string }[];
   onOpen: (groupId: string) => void;
 }) {
@@ -52,12 +56,16 @@ export function ClubDirectory({
         }}
       />
       {segment === 'discover' ? (
-        <>
-          <Text style={textStyle}>學校還沒提供社團名單。</Text>
-          <Text style={textStyle}>
-            尚未串接課外組核可名單，因此這裡不列出一般群組，也不提供入社或申請。
-          </Text>
-        </>
+        uid && schoolId ? (
+          <ClubPortal
+            key={`${uid}:${schoolId}`}
+            uid={uid}
+            schoolId={schoolId}
+            searchQuery={search}
+          />
+        ) : (
+          <Text style={textStyle}>登入後查看學校社團。</Text>
+        )
       ) : !clubs.length ? (
         <Text style={textStyle}>還沒加入社團，可以到「找社團」看看。</Text>
       ) : !visible.length ? (
@@ -66,7 +74,7 @@ export function ClubDirectory({
         visible.map((club) => (
           <View key={club.groupId} style={{ paddingVertical: 12, gap: 8 }}>
             <Text style={textStyle}>{club.name}</Text>
-            <Text style={textStyle}>已加入 · 下一場活動尚未串接 · 未讀公告數未提供</Text>
+            <Text style={textStyle}>已加入</Text>
             <Button text={`查看社團：${club.name}`} onPress={() => onOpen(club.groupId)} />
           </View>
         ))
@@ -74,7 +82,6 @@ export function ClubDirectory({
       <Text style={textStyle}>
         「我的社團」列出已加入的群組，是否為正式社團仍以課外組名單為準。
       </Text>
-      {!clubSummaryEnabled() && <Text style={textStyle}>這所學校還沒開放社團管理。</Text>}
     </Card>
   );
 }

@@ -136,7 +136,7 @@ it.each(['fetch', 'body'])('cancels a same-keyword lookup when a filter is edite
     finish = () => resolve(stage === 'fetch' ? original : originalBody);
   });
   const fetcher = vi.fn()
-    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, headers: new Headers(), text: async () => JSON.stringify(await delayed) }))
     .mockResolvedValueOnce(filteredResponse([], { weekday: 3, credits: 3 }));
   vi.stubGlobal('fetch', fetcher);
   render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['3']} />);
@@ -260,7 +260,7 @@ it.each(['fetch', 'body'])('cancels a linked query when the URL query changes an
     });
   });
   const fetcher = vi.fn()
-    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, headers: new Headers(), text: async () => JSON.stringify(await delayed) }))
     .mockResolvedValueOnce(response([]));
   vi.stubGlobal('fetch', fetcher);
   const view = render(<PublicCourseSearch {...props} queryParameters={['前一筆']} />);
@@ -333,6 +333,25 @@ it('searches the public endpoint, distinguishes sections and copies a school-sco
   expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
 });
 
+
+it('shows copied CSV feedback only on the selected cross-listed course card', async () => {
+  const crossListed = { ...course, department: '跨領域學程' };
+  expect(ncnuTimetableImportCsv(crossListed)).toBe(ncnuTimetableImportCsv(course));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, crossListed])));
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  render(<PublicCourseSearch {...props} />);
+  submit('課');
+  const cards = await screen.findAllByRole('listitem');
+  expect(cards).toHaveLength(2);
+  fireEvent.click(within(cards[1]).getByRole('button', { name: '複製課表匯入資料' }));
+  expect(await within(cards[1]).findByText(/已複製/)).toBeTruthy();
+  expect(within(cards[0]).queryByText(/已複製/)).toBeNull();
+  expect(within(cards[0]).queryByRole('link', { name: '前往課表匯入' })).toBeNull();
+  expect(within(cards[1]).getByRole('link', { name: '前往課表匯入' })).toBeTruthy();
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(writeText).toHaveBeenCalledWith(ncnuTimetableImportCsv(course));
+});
 
 it('serializes course clipboard writes and shows confirmation only for the latest selected class', async () => {
   const second = { ...course, code: '005077', title: '資料科學實作', time: '3cd4i' };
@@ -463,6 +482,157 @@ it('keeps only the latest result, including when the previous response arrives l
   expect(screen.queryByText(course.title)).toBeNull();
 });
 
+
+it('does not consume a late cancelled fetch reply even without a readable stream', async () => {
+  let finishOld!: (reply: Response) => void;
+  const lateText = vi.fn().mockResolvedValue(await response([course]).text());
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(new Promise<Response>((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  submit('前一筆');
+  submit('下一筆');
+  expect((await screen.findByText(/沒有找到「下一筆」課程/)).textContent).toContain('下一筆');
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  await act(async () => {
+    finishOld({ ok: true, headers: new Headers(), text: lateText } as unknown as Response);
+  });
+  expect(lateText).not.toHaveBeenCalled();
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('cancels an unread late streaming response after the student changes the search', async () => {
+  let finishOld!: (reply: Response) => void;
+  const cancelled = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{')); },
+    cancel: cancelled,
+  });
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(new Promise<Response>((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  submit('前一筆');
+  submit('下一筆');
+  await screen.findByText(/沒有找到「下一筆」課程/);
+  await act(async () => { finishOld(new Response(stream, { status: 200 })); });
+  expect(cancelled).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('refuses an announced oversized catalog before reading its body or preparing a draft', async () => {
+  const readBody = vi.fn().mockResolvedValue('{}');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, headers: new Headers({ 'content-length': '524289' }), text: readBody,
+  }));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(readBody).not.toHaveBeenCalled();
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it.each([
+  { reason: 'announced oversize', status: 200, contentLength: '524289' },
+  { reason: 'HTTP error', status: 503, contentLength: '8' },
+])('cancels the unread stream on $reason before it can enter a timetable', async ({ status, contentLength }) => {
+  const cancelBody = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array([123])); },
+    cancel: cancelBody,
+  });
+  const fetcher = vi.fn().mockResolvedValue(new Response(stream, {
+    status, headers: { 'content-length': contentLength },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(cancelBody).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('rejects a UTF-8-oversized catalog without a content-length header', async () => {
+  // 60,000 Chinese characters use 540,000 UTF-8 bytes, beyond 512 KiB.
+  // The response would otherwise be a valid course in the correct school.
+  const oversized = await response([{ ...course, title: '資料庫課程'.repeat(36_000) }]).text();
+  const readBody = vi.fn().mockResolvedValue(oversized);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, headers: new Headers(), text: readBody,
+  }));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(readBody).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('stops a streaming oversized catalog before buffering the remaining response', async () => {
+  const huge = new TextEncoder().encode(await response([{ ...course, title: '資料'.repeat(180_000) }]).text());
+  expect(huge.byteLength).toBeGreaterThan(512 * 1024);
+  let pulls = 0;
+  const cancelled = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls++;
+      if (pulls === 1) controller.enqueue(huge.subarray(0, 350_000));
+      else if (pulls === 2) controller.enqueue(huge.subarray(350_000, 600_000));
+      else controller.enqueue(huge.subarray(600_000));
+    },
+    cancel: cancelled,
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(cancelled).toHaveBeenCalledTimes(1);
+  expect(pulls).toBeLessThanOrEqual(3);
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('decodes UTF-8 courses correctly when a streaming chunk splits a Chinese character', async () => {
+  const bytes = new TextEncoder().encode(await response([course]).text());
+  const splitAt = bytes.findIndex(byte => byte >= 0xe0) + 1;
+  expect(splitAt).toBeGreaterThan(1);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, splitAt));
+      controller.enqueue(bytes.subarray(splitAt));
+      controller.close();
+    },
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '帶入課表核對' })).toBeTruthy();
+});
+
+it('rejects malformed UTF-8 course names rather than preparing corrupted timetable imports', async () => {
+  const bytes = new TextEncoder().encode(await response([course]).text());
+  const courseCharacter = bytes.findIndex(byte => byte >= 0xe0);
+  expect(courseCharacter).toBeGreaterThan(0);
+  // An invalid byte inside an otherwise valid JSON string must not be replaced
+  // with U+FFFD and then accepted as an authoritative course title.
+  bytes[courseCharacter] = 0xff;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, courseCharacter + 1));
+      controller.enqueue(bytes.subarray(courseCharacter + 1));
+      controller.close();
+    },
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(screen.queryByRole('heading', { name: course.title })).toBeNull();
+  expect(screen.queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
 it('handles malformed or wrong-campus replies as failure, retries, and explains the result limit', async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(response([course], { schoolId: 'pu' }))
     .mockResolvedValueOnce(response([course], { truncated: true }));
@@ -487,7 +657,7 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
     });
   });
   const fetcher = vi.fn()
-    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, headers: new Headers(), text: async () => JSON.stringify(await delayed) }))
     .mockResolvedValueOnce(response([]));
   vi.stubGlobal('fetch', fetcher);
   render(<PublicCourseSearch {...props} />);

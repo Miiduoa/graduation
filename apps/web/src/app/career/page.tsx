@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import {
-  CAREER_EMPTY,
   CAREER_JOBS_UNAVAILABLE,
   CAREER_LINKS,
   careerCalendarUrl,
   careerSoon,
-  emptyCareerFeed,
+  CAREER_FEED_UNAVAILABLE,
+  CAREER_SOURCES_STALE,
   fetchCareerFeed,
   type CareerFeed,
 } from '@campus/shared/src/career';
@@ -14,8 +14,10 @@ import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServ
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import styles from './career.module.css';
+import { CareerHost } from '@/components/career/CareerHost';
 function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
   const [feed, setFeed] = useState<CareerFeed | null>(null);
+  const [feedFailed, setFeedFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   useEffect(() => {
@@ -25,7 +27,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
         if (!controller.signal.aborted) setFeed(data);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setFeed(emptyCareerFeed());
+        if (!controller.signal.aborted) setFeedFailed(true);
       });
     return () => controller.abort();
   }, [schoolId, retry]);
@@ -34,7 +36,9 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
       <section className={styles.panel}>
         <h2>接下來</h2>
         <p>職產處、系所與校園徵才的明確日期，最多顯示 5 筆。日期來自標題，詳細時段請回原文確認。</p>
-        {!feed ? (
+        {feedFailed ? (
+          <p role="alert">{CAREER_FEED_UNAVAILABLE}</p>
+        ) : !feed ? (
           <p role="status">正在讀取公開職涯資訊…</p>
         ) : !feed.timeline.length ? (
           <p>目前沒有可確認日期的近期截止日或活動。</p>
@@ -61,12 +65,14 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
         <p className={styles.muted}>
           點選日期列可「加入行事曆」，將開啟 Google 日曆確認；不會自動建立或發送提醒。
         </p>
+        {feed?.sourceSettingsStale && <p role="status">{CAREER_SOURCES_STALE}</p>}
         {feed?.announcementsUnavailable && (
           <p role="status">部分校方公告暫時讀不到，仍可前往官方網站。</p>
         )}
         <button
           onClick={() => {
             setFeed(null);
+            setFeedFailed(false);
             setRetry((v) => v + 1);
           }}
         >
@@ -75,15 +81,12 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
       </section>
       <section className={styles.panel}>
         <h2>校內工讀與實習</h2>
-        <p>{CAREER_EMPTY}</p>
         {official && (
           <a href={official.url} target="_blank" rel="noopener noreferrer">
             {official.label} ↗
           </a>
         )}
-        <p>
-          此頁提供公開資訊，尚未接上校內工讀申請及實習學分系統。申請、權益說明與學分認定請洽校方；這裡不受理投遞或登錄時數。
-        </p>
+        <CareerHost schoolId={schoolId} />
       </section>
       <section className={styles.panel}>
         <h2>校方職涯公告</h2>
@@ -103,7 +106,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
             ))}
           </ul>
         ) : (
-          <p>目前沒有可顯示的公告。</p>
+          feed && <p>目前沒有可顯示的公告。</p>
         )}
         {official && (
           <p>
@@ -154,7 +157,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
       <aside className={styles.panel}>
         <h2>給學生、職涯承辦與平台營運</h2>
         <p>
-          訪客與登入者看到相同的公開資訊。承辦與營運可從來源連結核對公告；本頁沒有上架、申請審核、學生名冊或實習紀錄管理功能。諮詢預約請依校方網站流程辦理。
+          公開資訊與校方連結持續提供。登入後依校方授權顯示申請與承辦工作台；諮詢預約請依校方網站流程辦理。
         </p>
       </aside>
     </>
