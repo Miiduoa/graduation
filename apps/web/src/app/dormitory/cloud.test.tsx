@@ -2,11 +2,13 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import DormitoryPage from './page';
+import { subscribeDormCloud } from './cloud';
 import {
   emptyDormCloud,
   projectDormParcel,
   projectDormRepair,
   watchDormCloud,
+  watchDormParcels,
   type DormCloudState,
 } from '@campus/shared/src/dormitoryCloud';
 
@@ -82,6 +84,7 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
   expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
   expect(screen.getByText('預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）')).toBeTruthy();
+  expect(screen.queryByText(/登錄退件／領取期限/)).toBeNull();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('私密掛號信')).toBeNull();
   expect(screen.getByRole('heading', { name: '我自己記的' })).toBeTruthy();
@@ -93,6 +96,40 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
   expect(document.body.textContent).not.toMatch(/已送出|單號|你抽中了|通行證|已扣款/);
   fireEvent.click(screen.getByRole('button', { name: '關閉領取碼' }));
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it.each([
+  ['2026-11-20T02:00:00Z', '2026/11/20 10:00:00'],
+  ['2026-11-15T02:00:00Z', '2026/11/15 10:00:00'],
+])('有登錄期限 %s 時，包裹卡片顯示台灣日期，不使用三天推算', (pickupDeadline, date) => {
+  render(<DormitoryPage />);
+  act(() => mock.listeners[0]({
+    ...state(),
+    packages: [projectDormParcel('official', {
+      description: '有登錄期限的包裹',
+      arrivedAt: Date.now() - 2 * 86400000,
+      pickupDeadline,
+    })],
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  expect(screen.getByText(`登錄退件／領取期限：${date}（台灣時間）`)).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日|已退件/)).toBeNull();
+});
+
+it.each(['picked_up', 'returned'])('包裹狀態 %s 不顯示待退件提示', (status) => {
+  render(<DormitoryPage />);
+  act(() => mock.listeners[0]({
+    ...state(),
+    packages: [projectDormParcel('completed', {
+      description: '已處理的包裹',
+      arrivedAt: Date.now() - 4 * 86400000,
+      returnAt: '2026-11-15T02:00:00Z',
+      status,
+    })],
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  expect(within(screen.getByRole('region', { name: '校方登錄包裹' })).getByText(status === 'returned' ? '已退件' : '已領取')).toBeTruthy();
+  expect(screen.queryByText(/登錄退件／領取期限|預估|依到件日加三天推算|已到件多日/)).toBeNull();
 });
 
 it('updates repair status timestamps live, keeps private staff references out and clears school/account subscriptions', () => {
@@ -270,4 +307,38 @@ it('polls the backend parcel projection and ignores late results after unsubscri
   await Promise.resolve();
   expect(rows).not.toHaveBeenCalled();
   expect(error).not.toHaveBeenCalled();
+});
+
+
+it.each([false, true])('API 成功後保留實際期限，legacy 較晚到達：%s', async (apiFirst) => {
+  type Rows = Array<{ id: string; data: Record<string, unknown> }>;
+  let snapshot!: (rows: Rows) => void;
+  let finish!: (value: { rows: Rows }) => void;
+  vi.mocked(subscribeDormCloud).mockImplementationOnce((_school, _uid, update) => watchDormCloud({
+    watch: (name, _field, rows, error) => {
+      if (name !== 'packages') { rows([]); return () => {}; }
+      return watchDormParcels(
+        (next) => { snapshot = next; return () => {}; },
+        (change) => { change(true); return () => {}; },
+        () => new Promise((resolve) => { finish = resolve; }), rows, error,
+      );
+    },
+    identity: () => () => {},
+  }, update));
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  const legacy = [{ id: 'legacy', data: {
+    publicId: 'dw_public', description: '有登錄期限的包裹',
+    arrivedAt: Date.now() - 2 * 86400000, pickupDeadline: '2026-11-25T02:00:00Z',
+  } }];
+  if (!apiFirst) act(() => snapshot(legacy));
+  await act(async () => finish({ rows: [{ id: 'dw_public', data: {
+    description: '有登錄期限的包裹', arrivedAt: Date.now() - 2 * 86400000, status: 'arrived',
+  } }] }));
+  if (apiFirst) act(() => snapshot(legacy));
+  expect(screen.getAllByText('有登錄期限的包裹')).toHaveLength(1);
+  expect(screen.getByText('登錄退件／領取期限：2026/11/25 10:00:00（台灣時間）')).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日/)).toBeNull();
+  act(() => snapshot([{ ...legacy[0], data: { ...legacy[0].data, pickupDeadline: '2026-11-26T02:00:00Z' } }]));
+  expect(screen.getByText('登錄退件／領取期限：2026/11/26 10:00:00（台灣時間）')).toBeTruthy();
 });
