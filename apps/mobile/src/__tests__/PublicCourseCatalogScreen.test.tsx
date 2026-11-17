@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { FlatList, Linking } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
 import { queryCatalog } from '../services/courseCatalogClient';
 
@@ -87,6 +88,48 @@ test('cross-listed mobile catalog cards have unique keys and only the latest tap
     await waitFor(() => expect(view.getAllByText('已複製，請到匯入頁貼上並核對上課時間。')).toHaveLength(1));
     expect(jest.mocked(Clipboard.setStringAsync).mock.calls[0][0])
       .toBe(jest.mocked(Clipboard.setStringAsync).mock.calls[1][0]);
+  } finally { globalThis.fetch = original; }
+});
+
+test('overlapping review taps on different course cards cannot overwrite the first owner-scoped import draft', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const secondCourse = {
+    ...nthuCourse, code: '11510AES 520401', section: '01', title: '第二門課',
+    time: 'T3T4', room: '第二教室',
+    meetings: [{ time: 'T3T4', room: '第二教室' }],
+  };
+  let finishFirstRead: ((value: string | null) => void) | undefined;
+  const getItem = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key) => {
+    if (key.endsWith(':grid-draft:v1') && !finishFirstRead) {
+      return new Promise<string | null>((resolve) => { finishFirstRead = resolve; });
+    }
+    return Promise.resolve(null);
+  });
+  const setItem = jest.spyOn(AsyncStorage, 'setItem').mockResolvedValue(undefined);
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalImport'] }) };
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson([nthuCourse, secondCourse]));
+    const view = render(<CourseCatalogScreen navigation={navigation} route={{ params: { filter: { keyword: 'AES' } } }} />);
+    await view.findByText('第二門課');
+    const buttons = view.getAllByText('帶入課表核對');
+    expect(buttons).toHaveLength(2);
+    fireEvent.press(buttons[0]);
+    await waitFor(() => expect(finishFirstRead).toBeDefined());
+    const reviewReads = () => getItem.mock.calls.filter(([key]) => key.endsWith(':grid-draft:v1'));
+    expect(reviewReads()).toHaveLength(1);
+    fireEvent.press(buttons[1]);
+    expect(view.getByText('另一門課正在建立匯入草稿，請稍後再試。')).toBeTruthy();
+    // Both cards used to read the empty draft and race to overwrite it.
+    expect(reviewReads()).toHaveLength(1);
+    expect(setItem).not.toHaveBeenCalled();
+
+    await act(async () => { finishFirstRead!(null); });
+    await waitFor(() => expect(setItem).toHaveBeenCalledTimes(1));
+    expect(setItem.mock.calls[0][1]).toContain('11510AES 520300');
+    expect(setItem.mock.calls[0][1]).not.toContain('11510AES 520401');
+    await waitFor(() => expect(navigation.navigate).toHaveBeenCalledTimes(1));
+    view.unmount();
   } finally { globalThis.fetch = original; }
 });
 
