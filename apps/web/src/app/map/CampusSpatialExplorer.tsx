@@ -673,7 +673,17 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
           // The status and Retry-After headers remain usable after cancellation.
-          if (response.body) void response.body.cancel().catch(() => {});
+          if (response.body) {
+            try {
+              // A locked stream or some WebView implementations can throw
+              // synchronously rather than returning a rejected promise.
+              // Disposal is best-effort; never skip the status-derived
+              // Retry-After cooldown because cancellation itself failed.
+              void Promise.resolve(response.body.cancel()).catch(() => {});
+            } catch {
+              // Continue to evaluate the HTTP status and Retry-After below.
+            }
+          }
           // Match the API's fail-closed response policy: an upstream/proxy can
           // request a cooldown on 408, gateway failures, or partial content,
           // not only 429/503. Do not hammer a source that rejected a full map.
