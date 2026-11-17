@@ -274,11 +274,17 @@ function createDeleteUserAccountHandler({
     });
 
     // Career records belong to the student uid, never the referenced teacher.
-    // Filter exact school paths before recursively removing private descendants.
+    // Scan like other collection groups so deletion does not depend on a new
+    // collection-group uid index. Filter exact school paths and the owner uid.
     for (const collection of ['careerApplications', 'internshipRecords']) {
-      await scanPages(db.collectionGroup(collection).where('uid', '==', uid), async (doc) => {
+      await scanPages(db.collectionGroup(collection), async (doc) => {
         const parts = doc.ref.path.split('/');
-        if (parts.length === 4 && parts[0] === 'schools' && parts[2] === collection)
+        if (
+          parts.length === 4 &&
+          parts[0] === 'schools' &&
+          parts[2] === collection &&
+          doc.data()?.uid === uid
+        )
           await db.recursiveDelete(doc.ref);
       });
     }
