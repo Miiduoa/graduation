@@ -291,10 +291,11 @@ it.each([
   if (settleWriteFirst) await act(async () => write.resolve(undefined));
   // Stale subscription list still says "not subscribed" although the local write is newer.
   await act(async () => staleRead.resolve([science]));
-  expect(subscribe.getAttribute('aria-pressed')).toBe('true');
+  // The refresh replaces the loading card DOM. Query the NEW button, not a detached element.
+  expect(screen.getByRole('button', { name: '取消訂閱科學討論' }).getAttribute('aria-pressed')).toBe('true');
   if (!settleWriteFirst) await act(async () => write.resolve(undefined));
 
-  expect(subscribe.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: '取消訂閱科學討論' }).getAttribute('aria-pressed')).toBe('true');
   expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
 });
 
