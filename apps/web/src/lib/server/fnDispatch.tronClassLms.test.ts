@@ -6,6 +6,7 @@ import { resetUidRateLimitForTests } from './uidRateLimit';
 import { getCloudFunctionUrl } from '../cloudFunctions';
 import { LMS_CACHE_COLLECTION, LMS_SNAPSHOT_TTL_MS } from '@campus/shared/src/puLmsReadonly';
 import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadonlySnapshot } from '../tronClassLmsTypes';
 import {
   LMS_FIXTURE_ANNOUNCEMENT,
   LMS_FIXTURE_COURSE,
@@ -135,7 +136,7 @@ it('retries incomplete homework after a short TTL, including legacy cache entrie
   expect(first.result.courseErrors).toEqual([
     expect.objectContaining({ area: 'homework', status: 503 }),
   ]);
-  const cached = store.docs.get(CACHE)!;
+  const cached = store.docs.get(CACHE)! as { snapshot: LmsReadonlySnapshot; expiresAt: Date };
   const shortTtl = Date.parse(cached.snapshot.cache.expiresAt) - Date.parse(cached.snapshot.fetchedAt);
   expect(shortTtl).toBeGreaterThan(58_000);
   expect(shortTtl).toBeLessThanOrEqual(60_000);
@@ -154,7 +155,7 @@ it('retries incomplete homework after a short TTL, including legacy cache entrie
   expect(recovered.result.homework).toHaveLength(2);
   expect(recovered.result.courseErrors).toEqual([]);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
-  const renewed = store.docs.get(CACHE)!.snapshot;
+  const renewed = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
   expect(Date.parse(renewed.cache.expiresAt) - Date.parse(renewed.fetchedAt))
     .toBeGreaterThan(580_000);
 });
@@ -168,7 +169,7 @@ it('retries an incomplete upcoming-course list without discarding current homewo
   const first = await (await request()).json();
   expect(first.result.homework).toHaveLength(2);
   expect(first.result.upcomingCoursesError).toEqual({ status: null });
-  const stored = store.docs.get(CACHE)!;
+  const stored = store.docs.get(CACHE)! as { snapshot: LmsReadonlySnapshot; expiresAt: Date };
   expect(Date.parse(stored.snapshot.cache.expiresAt) - Date.parse(stored.snapshot.fetchedAt))
     .toBeLessThanOrEqual(60_000);
 
@@ -185,8 +186,8 @@ it('retries an incomplete upcoming-course list without discarding current homewo
   expect(recovered.result.homework).toHaveLength(2);
   expect(recovered.result.upcomingCoursesError).toBeNull();
   expect(source.fetchCourses).toHaveBeenCalledTimes(4);
-  expect(Date.parse(store.docs.get(CACHE)!.snapshot.cache.expiresAt) -
-    Date.parse(store.docs.get(CACHE)!.snapshot.fetchedAt)).toBeGreaterThan(580_000);
+  expect(Date.parse((store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot).cache.expiresAt) -
+    Date.parse((store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot).fetchedAt)).toBeGreaterThan(580_000);
 });
 
 it('keeps the page up when one course feature returns 500', async () => {
