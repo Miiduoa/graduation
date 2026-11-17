@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Text } from 'react-native';
 import { getDormWorkflowConfig } from '../services/dormitoryCloud';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
@@ -40,7 +41,17 @@ export function DormStaffHome({
       active = false;
     };
   }, [school.id, user?.uid, capabilityKey]);
-  if (available !== true) return <>{fallback()}</>;
+  if (available !== true)
+    return (
+      <>
+        {fallback(capability?.key === capabilityKey && user?.uid ? (
+          <AICard>
+            <Text>此頁供宿舍輔導員使用；你的帳號目前沒有輔導員工作台；需要服務請到宿舍頁。</Text>
+            <AIButton label="需要服務請到宿舍頁" onPress={() => onOpen('Dormitory')} />
+          </AICard>
+        ) : undefined)}
+      </>
+    );
   return (
     <>
       {fallback(

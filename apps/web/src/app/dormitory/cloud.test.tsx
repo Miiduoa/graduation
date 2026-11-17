@@ -127,9 +127,11 @@ it('distinguishes loading, denied reads and the locked empty state without hidin
   act(() => mock.listeners[0]({ ...state(), packagesState: 'error' }));
   expect(screen.getByRole('alert').textContent).toContain('包裹讀取失敗');
   expect(screen.getByRole('alert').textContent).toContain('私有包裹暫時保留上次紀錄，可能尚未更新');
-  expect(screen.queryByText('這所學校的宿舍還沒用 nuni 登錄包裹。')).toBeNull();
+  expect(screen.queryByText('目前沒有登錄給你的包裹。')).toBeNull();
   act(() => mock.listeners[0](state()));
-  expect(screen.getByText('這所學校的宿舍還沒用 nuni 登錄包裹。')).toBeTruthy();
+  expect(screen.getByText('目前沒有登錄給你的包裹。')).toBeTruthy();
+  act(() => mock.listeners[0]({ ...state(), packages: [projectDormParcel('postal', { location: '郵局' })] }));
+  expect(screen.getByText('目前沒有登錄給你的包裹。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '總覽' }));
   expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
 });
