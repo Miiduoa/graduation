@@ -159,6 +159,29 @@ it('does not attach bundled provenance to a colliding id with different content'
   expect(providencePlaceSourceUrl('pu', parkingCollision)).toBeNull();
 });
 
+it('withholds source attribution when a same-name POI moves over 50 metres', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  // The previous 0.0005-degree *per-axis* check accepted both of these
+  // relocated markers; their actual distances exceed 50 metres.
+  const diagonalShift = { ...library, lat: library.lat + 0.00035, lng: library.lng + 0.00035 };
+  const northShift = { ...library, lat: library.lat + 0.00049 };
+  for (const moved of [diagonalShift, northShift]) {
+    expect(providencePlaceSourceUrl('pu', moved)).toBeNull();
+    expect(isProvidencePendingVerification('pu', moved)).toBe(false);
+  }
+
+  // A small import/rounding offset still refers to the same surveyed source.
+  const near = { ...library, lat: library.lat + 0.0002, lng: library.lng + 0.0002 };
+  expect(providencePlaceSourceUrl('pu', near)).toBe(library.sourceUrl);
+  expect(providencePlaceSourceUrl('nthu', near)).toBeNull();
+  // NaN from corrupt incoming coordinates must never inherit OSM provenance.
+  expect(providencePlaceSourceUrl('pu', { ...library, lat: Number.NaN })).toBeNull();
+
+  const gate = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  expect(isProvidencePendingVerification('pu', gate)).toBe(true);
+  expect(isProvidencePendingVerification('pu', { ...gate, lat: gate.lat + 0.00049 })).toBe(false);
+});
+
 it('attaches provenance only for Providence when id, name and coordinates match', () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
