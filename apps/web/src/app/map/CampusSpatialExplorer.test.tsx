@@ -2343,9 +2343,17 @@ it('uses current official Providence Hall floor unit names without inventing cla
   render(<CampusSpatialExplorer school="pu" locations={[zhugu]} selected={zhugu} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(within(dialog).getByRole('heading', { name: '主顧樓' })).toBeTruthy();
-  const floors = within(dialog).getByText(/4 樓：資訊管理學系、人工智慧應用學系/);
-  expect(floors.textContent).toContain('5 樓：資訊工程學系');
-  expect(floors.textContent).toContain('6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）');
+  // Every floor must stay individually scannable on narrow screens, even if
+  // Overpass is unavailable. These are official *unit locations*, not rooms.
+  expect(within(dialog).getByText('4 樓：資訊管理學系、人工智慧應用學系。')).toBeTruthy();
+  expect(within(dialog).getByText('5 樓：資訊工程學系。')).toBeTruthy();
+  expect(within(dialog).getByText('6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。')).toBeTruthy();
+  expect(within(dialog).getByText('7 樓：會計室、校友聯絡暨就業輔導室、國際暨兩岸事務處。')).toBeTruthy();
+  expect(within(dialog).getByText('8 樓：校長室、副校長室、秘書室、研發處、人事室。')).toBeTruthy();
+  const officialUnits = within(dialog).getByRole('link', { name: '查看校史資料室主顧樓單位清單' });
+  expect(officialUnits.getAttribute('href')).toBe('https://c067.pu.edu.tw/p/412-1121-4218.php');
+  expect(officialUnits.getAttribute('target')).toBe('_blank');
+  expect(officialUnits.getAttribute('rel')).toBe('noopener noreferrer');
   expect(within(dialog).queryByText(/資訊傳播工程學系/)).toBeNull();
   expect(within(dialog).getByText(/依校方校史資料室公開的主顧樓樓層單位資訊/).textContent)
     .toContain('這不是教室座標');
