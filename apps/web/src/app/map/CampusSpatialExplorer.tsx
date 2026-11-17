@@ -48,31 +48,43 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // Fallback is only for non-streaming WebViews / synthetic fetch stubs.
-async function readBoundedFootprintJson(response: Response): Promise<unknown> {
+async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   if (!response.body || typeof response.body.getReader !== 'function') {
     return response.json() as Promise<unknown>;
   }
   const reader = response.body.getReader();
+  // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
+  // while response-body streaming is still pending. Abort the *reader* as well
+  // as fetch, so background tabs stop consuming OSM data on WebViews whose
+  // fetch signal does not automatically cancel a handed-off body.
+  const cancelReader = () => {
+    try {
+      void Promise.resolve(reader.cancel()).catch(() => {});
+    } catch {
+      // Cancellation is best effort; never delay UI cleanup.
+    }
+  };
+  signal?.addEventListener('abort', cancelReader, { once: true });
   // Grow a single buffer rather than retaining an unbounded number of tiny
   // ReadableStream chunks (whose per-object overhead is not byte-limited).
   let bytes = new Uint8Array(16_384);
   let total = 0;
   let chunks = 0;
   try {
+    if (signal?.aborted) {
+      cancelReader();
+      throw new Error('Building outline read aborted');
+    }
     while (true) {
       const { done, value } = await reader.read();
+      if (signal?.aborted) throw new Error('Building outline read aborted');
       if (done) break;
       // Count even empty chunks: a stream can otherwise loop forever while
       // retaining zero bytes, and microtasks can starve the 15s timeout.
       if (++chunks > MAX_FOOTPRINT_STREAM_CHUNKS ||
           value.byteLength > MAX_DECLARED_FOOTPRINT_BYTES - total) {
-        // Reader cancellation is best effort and must not block failure
-        // handling if an unusual WebView rejects or throws synchronously.
-        try {
-          void Promise.resolve(reader.cancel()).catch(() => {});
-        } catch {
-          // The decoded-body limit still fails closed.
-        }
+        // Do not let a locked or unusual stream prevent the rejection path.
+        cancelReader();
         throw new Error('Building outline response exceeded byte/chunk limit');
       }
       const end = total + value.byteLength;
@@ -86,8 +98,10 @@ async function readBoundedFootprintJson(response: Response): Promise<unknown> {
       total = end;
     }
   } finally {
+    signal?.removeEventListener('abort', cancelReader);
     reader.releaseLock();
   }
+  if (signal?.aborted) throw new Error('Building outline read aborted');
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
@@ -782,7 +796,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const cooldownSeconds = response.status === 200 ? footprintCooldownSeconds(response) : null;
         let payload: unknown;
         try {
-          payload = await readBoundedFootprintJson(response);
+          payload = await readBoundedFootprintJson(response, controller.signal);
         } catch {
           pauseForInvalidPayload(cooldownSeconds);
           throw new Error('Invalid building outline response body');
