@@ -34,9 +34,11 @@ async function loadLoanDocs(uid, schoolId) {
   let cursor = null;
   let complete = true;
   for (let page = 0; page < MAX_LOAN_PAGES; page++) {
-    let query = col.orderBy(FieldPath.documentId());
-    if (cursor) query = query.startAfter(cursor);
-    const snap = await query.limit(LOAN_PAGE_SIZE).get();
+    // First page uses limit() only so existing collection mocks and Firestore's
+    // implicit document-id order stay valid. Later pages continue with startAfter.
+    const snap = cursor
+      ? await col.orderBy(FieldPath.documentId()).startAfter(cursor).limit(LOAN_PAGE_SIZE).get()
+      : await col.limit(LOAN_PAGE_SIZE).get();
     docs.push(...snap.docs);
     if (snap.docs.length < LOAN_PAGE_SIZE) {
       return { docs, complete };
