@@ -733,8 +733,46 @@ it('accepts a complete, correctly sized JSON snapshot with a valid Content-Lengt
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(json).toHaveBeenCalledTimes(1);
+  // A native streaming Response must use bounded decoded-byte reading,
+// not Response.json(), which buffers without an actual byte ceiling.
+  expect(json).not.toHaveBeenCalled();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+// Content-Length is optional and can be incorrect. A decoded-byte cap must
+// reject a too-large streaming 200 response before JSON parsing and keep
+// campus POIs/navigation usable without hammering the public API.
+it.each([
+  { description: 'no Content-Length', contentLength: null },
+  { description: 'an understated Content-Length', contentLength: '20' },
+])('rejects more than 2 MB of decoded OSM JSON with $description', async ({ contentLength }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const cancel = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1_000_000));
+      controller.enqueue(new Uint8Array(1_000_001));
+    },
+    cancel,
+  });
+  const response = new Response(stream, {
+    status: 200,
+    headers: contentLength === null ? undefined : { 'Content-Length': contentLength },
+  });
+  const json = vi.spyOn(response, 'json');
+  const fetchMock = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  fireEvent.click(retry);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
