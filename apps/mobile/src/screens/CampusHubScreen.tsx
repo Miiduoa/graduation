@@ -213,6 +213,7 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const s = useThemeStyleSheet(createStyles);
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const keyword = query.normalize('NFKC').trim().toLowerCase();
   const paymentsEnabled = isFeatureEnabled('payments');
   const filtered = useMemo(() => {
@@ -237,8 +238,10 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const matchCount = filtered.reduce((count, section) => count + section.items.length, 0);
   const quickActions = keyword
     ? getMobileQuickActions(query).filter(
-        (action) => !filtered.some((section) =>
-          section.items.some((item) => item.screen === action.route && !item.params)),
+        (action) =>
+          !filtered.some((section) =>
+            section.items.some((item) => item.screen === action.route && !item.params),
+          ),
       )
     : [];
   const openService = (item: ServiceItem) => {
@@ -296,62 +299,94 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
       </View>
       {keyword ? (
         <Text accessibilityLiveRegion="polite" style={s.searchCaption}>
-          找到 {matchCount} 項清單服務{quickActions.length ? '，另有 ' + quickActions.length + ' 項捷徑' : ''}
+          找到 {matchCount} 項清單服務
+          {quickActions.length ? '，另有 ' + quickActions.length + ' 項捷徑' : ''}
         </Text>
       ) : (
         <OpenOrderCard navigation={navigation} />
       )}
       {filtered.map((section) => {
         const isFrequent = !keyword && section.title === '常用服務';
+        const collapsible = !keyword && !isFrequent;
+        const expanded = !collapsible || expandedSections.has(section.title);
         return (
           <View key={section.title} style={s.section}>
-            <Text accessibilityRole="header" style={s.sectionTitle}>
-              {section.title}
-            </Text>
-            <View style={isFrequent ? s.quickGrid : s.serviceList}>
-              {section.items.map((item, index) => (
-                <Pressable
-                  key={item.screen}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.label}，${item.description}`}
-                  testID={
-                    item.screen === 'MapV2'
-                      ? 'e2e-campus-open-map'
-                      : item.screen === '餐廳總覽'
-                        ? 'e2e-campus-open-cafeteria'
-                        : undefined
-                  }
-                  onPress={() => openService(item)}
-                  style={({ pressed }) => [
-                    isFrequent ? s.quickCard : s.serviceRow,
-                    !isFrequent && index > 0 && s.rowBorder,
-                    pressed && s.pressed,
-                  ]}
-                >
-                  <View style={isFrequent ? s.quickIcon : s.rowIcon}>
-                    <AppActionIcon
-                      name={item.icon}
-                      size={isFrequent ? 23 : 21}
-                      fallback="ionicon"
-                      color={theme.colors.accent}
-                    />
-                  </View>
-                  <View style={s.serviceCopy}>
-                    <Text style={s.serviceTitle}>{item.label}</Text>
-                    <Text style={s.serviceDetail}>{item.description}</Text>
-                  </View>
-                  {!isFrequent ? (
-                    <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
-                  ) : null}
-                </Pressable>
-              ))}
-            </View>
+            {collapsible ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${expanded ? '收合' : '展開'}${section.title}，共 ${section.items.length} 項服務`}
+                accessibilityState={{ expanded }}
+                onPress={() =>
+                  setExpandedSections((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(section.title)) next.delete(section.title);
+                    else next.add(section.title);
+                    return next;
+                  })
+                }
+                style={({ pressed }) => [s.sectionToggle, pressed && s.pressed]}
+              >
+                <Text style={s.sectionToggleTitle}>{section.title}</Text>
+                <Text style={s.sectionCount}>{section.items.length}</Text>
+                <Ionicons
+                  name={expanded ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={theme.colors.muted}
+                />
+              </Pressable>
+            ) : (
+              <Text accessibilityRole="header" style={s.sectionTitle}>
+                {section.title}
+              </Text>
+            )}
+            {expanded ? (
+              <View style={isFrequent ? s.quickGrid : s.serviceList}>
+                {section.items.map((item, index) => (
+                  <Pressable
+                    key={item.screen}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.label}，${item.description}`}
+                    testID={
+                      item.screen === 'MapV2'
+                        ? 'e2e-campus-open-map'
+                        : item.screen === '餐廳總覽'
+                          ? 'e2e-campus-open-cafeteria'
+                          : undefined
+                    }
+                    onPress={() => openService(item)}
+                    style={({ pressed }) => [
+                      isFrequent ? s.quickCard : s.serviceRow,
+                      !isFrequent && index > 0 && s.rowBorder,
+                      pressed && s.pressed,
+                    ]}
+                  >
+                    <View style={isFrequent ? s.quickIcon : s.rowIcon}>
+                      <AppActionIcon
+                        name={item.icon}
+                        size={isFrequent ? 23 : 21}
+                        fallback="ionicon"
+                        color={theme.colors.accent}
+                      />
+                    </View>
+                    <View style={s.serviceCopy}>
+                      <Text style={s.serviceTitle}>{item.label}</Text>
+                      <Text style={s.serviceDetail}>{item.description}</Text>
+                    </View>
+                    {!isFrequent ? (
+                      <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
+                    ) : null}
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
           </View>
         );
       })}
       {quickActions.length > 0 ? (
         <View style={s.section}>
-          <Text accessibilityRole="header" style={s.sectionTitle}>可以直接做</Text>
+          <Text accessibilityRole="header" style={s.sectionTitle}>
+            可以直接做
+          </Text>
           <View style={s.serviceList}>
             {quickActions.map((action) => (
               <Pressable
@@ -428,7 +463,7 @@ const createStyles = () =>
       fontSize: 15,
       paddingVertical: 12,
     },
-    clearSearch: { minHeight: 44, minWidth: 36, alignItems: 'center', justifyContent: 'center' },
+    clearSearch: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
     searchCaption: { color: theme.colors.muted, fontSize: 12, lineHeight: 20, paddingTop: 12 },
     section: { marginTop: 24 },
     sectionTitle: {
@@ -438,6 +473,28 @@ const createStyles = () =>
       fontWeight: '600',
       marginBottom: 10,
     },
+    sectionToggle: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      backgroundColor: theme.colors.surface,
+    },
+    sectionToggleTitle: {
+      flex: 1,
+      minWidth: 0,
+      color: theme.colors.text,
+      fontSize: 15,
+      lineHeight: 22,
+      fontWeight: '600',
+    },
+    sectionCount: { color: theme.colors.muted, fontSize: 13, lineHeight: 20 },
     quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
     quickCard: {
       flexBasis: '45%',

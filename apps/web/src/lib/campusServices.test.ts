@@ -60,10 +60,9 @@ it('lists the read-only homework surface as a searchable secondary', () => {
   expect(service?.access).toBe('public');
 });
 
-it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
+it.each(['總機', '職涯', '實習'])('keeps official school information searchable through %s', (query) => {
   const services = searchCampusServices(query);
   expect(services.some((service) => service.href === '/school-info')).toBe(true);
-  expect(services.some((service) => service.href.includes('career'))).toBe(false);
 });
 
 it('exposes a separate public campus-events entry beside clubs', () => {
@@ -175,4 +174,8 @@ it('finds the student card by its everyday names', () => {
     expect(searchCampusServices(term).some((service) => service.href === '/student-card')).toBe(true);
   }
   expect(directoryCampusServices().some((service) => service.href === '/student-card')).toBe(true);
+});
+
+it.each(['職涯', '實習', '工讀'])('finds the existing career workspace through %s', (query) => {
+  expect(searchCampusServices(query).some((service) => service.href === '/career')).toBe(true);
 });
