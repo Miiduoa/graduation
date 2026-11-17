@@ -1,6 +1,8 @@
 import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
 import { courseworkStudyGuard, verifyCourseworkStudyGuard } from './courseworkStudy';
+import { courseworkRecoveryGuard, courseworkRecoveryId, verifyCourseworkRecoveryCalendar,
+  type CourseworkRecoveryGuard } from './courseworkRecovery';
 import { parsePublicEventGuard, type PublicEventGuard } from './publicEvent';
 import { verifyPublicEventGuard } from './campusEventGuard';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -138,16 +140,19 @@ export function signCard(
   previousEvent?: Card,
   studyGuard?: CourseworkStudyGuard,
   publicEventGuard?: PublicEventGuard,
+  recoveryGuard?: CourseworkRecoveryGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
   if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail();
+  if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || previousEvent)) return fail();
   const args =
     tool === 'propose_food_order'
       ? foodCardArgs(raw)
       : tool === 'propose_personal_event'
         ? { ...eventArgs(raw) }
         : pageArgs(raw);
-  const mutationId = 'av2_' + randomUUID().replaceAll('-', '');
+  const mutationId = recoveryGuard ? courseworkRecoveryId(binding, courseworkRecoveryGuard(recoveryGuard).mutationId)
+    : 'av2_' + randomUUID().replaceAll('-', '');
   const payload = {
     v: 2,
     proposalSeq,
@@ -159,6 +164,7 @@ export function signCard(
     argsHash: hash(args),
     ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
     ...(publicEventGuard ? { publicEventGuard: parsePublicEventGuard(publicEventGuard) } : {}),
+    ...(recoveryGuard ? { recoveryGuard: courseworkRecoveryGuard(recoveryGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -244,6 +250,10 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   const publicEventGuard = p.publicEventGuard === undefined ? undefined : parsePublicEventGuard(p.publicEventGuard);
   if (publicEventGuard && (p.tool !== 'propose_personal_event' || studyGuard ||
       publicEventGuard.target.schoolId !== binding.schoolId)) return fail('CONFIRMATION_INVALID', 409);
+  const recoveryGuard = p.recoveryGuard === undefined ? undefined : courseworkRecoveryGuard(p.recoveryGuard);
+  if (recoveryGuard && (p.tool !== 'propose_personal_event' || !studyGuard || publicEventGuard ||
+      p.previousEventHash !== undefined ||
+      p.mutationId !== courseworkRecoveryId(binding, recoveryGuard.mutationId))) return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -263,6 +273,7 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
       args,
       ...(studyGuard ? { studyGuard } : {}),
       ...(publicEventGuard ? { publicEventGuard } : {}),
+      ...(recoveryGuard ? { recoveryGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -338,6 +349,8 @@ export function verifyRevokedCalendarPlan(
   const authenticated = raw.map(value => authenticatedCard(binding, value, secret, now));
   const current = liveAuthorization(binding, authenticated[0].payload, now, true);
   const cards = authenticated.map(value => value.card);
+  // A generic plan revision must not strip recovery provenance or allocate a new child ID.
+  if (cards.some(card => card.recoveryGuard)) return fail('INVALID_PLAN_REVISION', 409);
   if (cards.length !== current.issued.length ||
       cards.some((card, index) => card.tool !== 'propose_personal_event' || card.publicEventGuard ||
         card.mutationId !== current.issued[index]) ||
@@ -599,6 +612,8 @@ export async function confirm(
       return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
     }
     const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
+    if (p.recoveryGuard && p.studyGuard)
+      verifyCourseworkRecoveryCalendar(binding, p.recoveryGuard, p.studyGuard, ledger, currentTime());
     if (p.studyGuard)
       await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
     if (p.publicEventGuard)

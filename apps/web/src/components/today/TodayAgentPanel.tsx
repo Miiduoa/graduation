@@ -24,7 +24,7 @@ export type TodayAgentPanelProps = {
   tracking?: boolean;
   planningBlocked?: boolean;
   onRefreshFollowups?: () => void;
-  onPlan: (task: HomeTask) => void;
+  onPlan: (task: HomeTask, recoveryMutationId?: string) => void;
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
   onReconcile: (card: V2Card) => void;
@@ -34,6 +34,27 @@ export type TodayAgentPanelProps = {
 /** Presentation identity only; callers pass the original IDs to the action API. */
 export function todayAgentTaskKey(task: HomeTask): string {
   return `${task.courseId}:${task.kind ?? 'assignment'}:${task.id}`;
+}
+
+/** Display eligibility only. The server re-authenticates the saved proof and current sources. */
+export function recoverableTodayArrangement(
+  task: HomeTask, followups: readonly AssistantCourseworkFollowup[], now: number,
+): AssistantCourseworkFollowup | null {
+  if (!Number.isFinite(now)) return null;
+  const tracked = followups.filter(row => row.task &&
+    `${row.task.workspaceId}:${row.task.kind}:${row.task.taskId}` === todayAgentTaskKey(task));
+  const end = (row: AssistantCourseworkFollowup) => parseTaipeiInstant(
+    `${row.event.endDate || row.event.date}T${row.event.allDay ? '23:59' : row.event.endTime}:00+08:00`,
+  );
+  if (!tracked.length || tracked.some(row => {
+    const due = row.source?.dueAt ? parseTaipeiInstant(row.source.dueAt) : null;
+    const ended = end(row);
+    return row.source?.state !== 'open' || row.source.submitted !== false || due === null || due <= now ||
+      row.status !== 'elapsed' || row.calendar !== 'matching' || ended === null || ended > now;
+  })) return null;
+  // Keep historical parents, but continue from the latest eligible arrangement.
+  return [...tracked].sort((left, right) => (end(right) ?? 0) - (end(left) ?? 0) ||
+    right.mutationId.localeCompare(left.mutationId))[0];
 }
 
 const pendingLabels = {
@@ -78,9 +99,11 @@ function followupCopy(row: AssistantCourseworkFollowup): { label: string; note?:
   }
 }
 
-function TrackedArrangement({ row, showTitle = false }: {
+function TrackedArrangement({ row, showTitle = false, onRecover, disabled }: {
   row: AssistantCourseworkFollowup;
   showTitle?: boolean;
+  onRecover?: () => void;
+  disabled?: boolean;
 }) {
   const title = row.source?.title ?? row.event.title;
   const copy = followupCopy(row);
@@ -113,6 +136,10 @@ function TrackedArrangement({ row, showTitle = false }: {
       {copy.note && <p className={styles.followupNote}>{copy.note}</p>}
       {calendarNote && <p className={styles.followupNote}>{calendarNote}</p>}
       <div className={styles.followupActions}>
+        {onRecover && <button type="button" className={styles.textButton} disabled={disabled}
+          aria-label={`替「${title}」重新找 30 分鐘準備時間`} onClick={onRecover}>
+          重新找 30 分鐘
+        </button>}
         <Link href={calendarHref} aria-label={`查看「${title}」的行程`}>
           {row.calendar === 'matching' ? '查看安排' : '查看行事曆'}
         </Link>
@@ -180,6 +207,15 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
     ['unknown', 'checking', 'executing', 'conflict', 'absent'].includes(state.status) ||
     (state.status === 'verified' && (state.local !== 'ready' || !!state.verificationWarning)));
   const blocked = waiting || tracking || !!props.planningBlocked || !!props.pending || activePlan || unresolved;
+  const recoveryTasks = new Map(unique.flatMap(task => {
+    const row = clockReady ? recoverableTodayArrangement(task, followups, clock) : null;
+    return row ? [[row.mutationId, task] as const] : [];
+  }));
+  const arrangement = (row: AssistantCourseworkFollowup, showTitle = false) => {
+    const task = recoveryTasks.get(row.mutationId);
+    return <TrackedArrangement key={row.mutationId} row={row} showTitle={showTitle} disabled={blocked}
+      onRecover={task ? () => props.onPlan(task, row.mutationId) : undefined} />;
+  };
   const completed = cards.length > 0 && calendarOnly && cards.every((card) =>
     props.states[card.mutationId]?.status === 'verified');
   const step = completed ? 3 : cards.length ? 2 : 1;
@@ -243,7 +279,7 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
                       <h3>{task.title}</h3>
                       <p>{task.courseName}</p>
                       <p className={styles.deadline}>{due} 截止</p>
-                      {tracked.map((row) => <TrackedArrangement key={row.mutationId} row={row} />)}
+                      {tracked.map((row) => arrangement(row))}
                     </div>
                     {!tracked.length && <button type="button" className={styles.planButton} disabled={blocked}
                       aria-label={`替「${task.title}」找 30 分鐘準備時間`}
@@ -279,7 +315,7 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
         </summary>
         <ul className={styles.recentList} aria-label="最近安排的追蹤狀態">
           {otherFollowups.map((row) => <li key={row.mutationId}>
-            <TrackedArrangement row={row} showTitle />
+            {arrangement(row, true)}
           </li>)}
         </ul>
       </details>}

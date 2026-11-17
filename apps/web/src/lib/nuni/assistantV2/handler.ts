@@ -19,6 +19,7 @@ import { run, safeCode } from './runner';
 import { courseworkStudyTarget } from './courseworkStudy';
 import { COURSEWORK_STUDY_MESSAGES, prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import { readCourseworkFollowup } from './courseworkFollowup';
+import { courseworkRecoveryProof, prepareCourseworkRecoveryRequest } from './courseworkRecovery';
 import { retryTaskReads } from './taskRetry';
 import { parsePublicEventTarget } from './publicEvent';
 import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventRequest';
@@ -147,7 +148,7 @@ export async function handleV2(request: NextRequest, action: string) {
       action === 'ask'
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget']
         : action === 'plan'
-          ? ['schoolId', 'conversationId', 'routeToken', 'task']
+          ? ['schoolId', 'conversationId', 'routeToken', 'task', 'recovery']
           : action === 'event-preview'
             ? ['schoolId', 'conversationId', 'routeToken', 'event', 'discovery']
           : action === 'map-read'
@@ -164,6 +165,7 @@ export async function handleV2(request: NextRequest, action: string) {
       ? courseworkStudyTarget(raw.task)
       : action === 'ask' && raw.studyTarget !== undefined
         ? courseworkStudyTarget(raw.studyTarget) : undefined;
+    const recovery = action === 'plan' && raw.recovery !== undefined ? courseworkRecoveryProof(raw.recovery) : undefined;
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
@@ -323,9 +325,10 @@ export async function handleV2(request: NextRequest, action: string) {
       if (action === 'plan') {
         // An in-app task selection is a source hint, never a chat prompt or
         // execution authority. Re-read it through the existing guarded planner.
-        const result = await prepareCourseworkStudyRequest({
-          target: studyTarget!, adapter: source.adapter, binding, secret, writes, now, signal,
-        });
+        const options = { target: studyTarget!, adapter: source.adapter, binding, secret, writes, now, signal };
+        const result = recovery
+          ? await prepareCourseworkRecoveryRequest({ ...options, recovery })
+          : await prepareCourseworkStudyRequest(options);
         signal.throwIfAborted();
         return jsonResponse({
           version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,

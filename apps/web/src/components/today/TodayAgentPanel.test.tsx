@@ -345,6 +345,71 @@ it('does not turn elapsed preparation time into a submitted assignment', () => {
   expect(screen.queryByText('作業仍待繳交。')).toBeNull();
 });
 
+const elapsedFollowup = (change: Partial<AssistantCourseworkFollowup> = {}) => followup({
+  status: 'elapsed',
+  event: { ...followup().event, date: '2026-11-12' },
+  ...change,
+});
+it('offers an explicit new preview for an elapsed arrangement and preserves its original history', () => {
+  const original = elapsedFollowup();
+  const input = props({ followups: [original] });
+  render(<TodayAgentPanel {...input} />);
+
+  expect(screen.getByText('準備時間已結束')).toBeTruthy();
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' }));
+
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], original.mutationId);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+  expect(input.onCancel).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '查看「作業 one」的行程' }).getAttribute('href'))
+    .toContain(original.mutationId);
+});
+it.each([
+  { status: 'scheduled' },
+  { status: 'in_progress' },
+  { status: 'unavailable', source: null, calendar: 'unavailable' },
+  { status: 'event_changed', calendar: 'changed' },
+  { status: 'event_missing', calendar: 'missing' },
+  { status: 'submitted', source: { ...followup().source!, submitted: true } },
+  { status: 'closed', source: { ...followup().source!, state: 'closed' } },
+  { source: { ...followup().source!, dueAt: '2026-11-13T07:59:00+08:00' } },
+  { event: followup().event },
+] as Partial<AssistantCourseworkFollowup>[])(
+  'does not offer recovery for a source or arrangement that is not a verified elapsed task: %j',
+  change => {
+    render(<TodayAgentPanel {...props({ followups: [elapsedFollowup(change)] })} />);
+    expect(screen.queryByRole('button', { name: /重新找 30 分鐘/ })).toBeNull();
+  },
+);
+it.each(['scheduled', 'unavailable'] as const)('another %s arrangement for the same task blocks recovery of its old parent', status => {
+  const active = followup({ mutationId: 'other-arrangement', status,
+    ...(status === 'unavailable' ? { source: null, calendar: 'unavailable' as const } : {}) });
+  render(<TodayAgentPanel {...props({ followups: [elapsedFollowup(), active] })} />);
+  expect(screen.queryByRole('button', { name: /重新找 30 分鐘/ })).toBeNull();
+});
+it('continues only the latest elapsed arrangement while retaining older parents', () => {
+  const old = elapsedFollowup({ mutationId: 'older-parent', event: { ...followup().event, date: '2026-11-11' } });
+  const latest = elapsedFollowup();
+  const input = props({ followups: [old, latest] });
+  render(<TodayAgentPanel {...input} />);
+  const buttons = screen.getAllByRole('button', { name: /重新找 30 分鐘/ });
+  expect(buttons).toHaveLength(1);
+  fireEvent.click(buttons[0]);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], latest.mutationId);
+  expect(screen.getAllByText('準備時間已結束')).toHaveLength(2);
+});
+it('keeps recovery available in recent arrangements outside the first three pending tasks', () => {
+  const fourth = task('four', '2026-11-15T12:00:00+08:00');
+  const row = elapsedFollowup({ task: { workspaceId: fourth.courseId, taskId: fourth.id, kind: 'assignment' },
+    source: { ...followup().source!, title: fourth.title, dueAt: fourth.dueAt! } });
+  const input = props({ tasks: [task('one'), task('two'), task('three'), fourth], followups: [row] });
+  render(<TodayAgentPanel {...input} />);
+  fireEvent.click(screen.getByText(/最近安排（1）/));
+  fireEvent.click(screen.getByRole('button', { name: '替「作業 four」重新找 30 分鐘準備時間' }));
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(fourth, row.mutationId);
+});
+
 it('shows changed or missing calendar evidence without inventing a replacement operation', () => {
   const input = props({ followups: [followup({ status: 'event_changed', calendar: 'changed' })] });
   const view = render(<TodayAgentPanel {...input} />);
