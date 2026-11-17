@@ -1,3 +1,9 @@
+## 2026-11-17：修復混合換行原文選取的 TypeScript 編譯失敗
+
+- 精確前版 `2d6da64ef5d0e909f4d07da9b6cae380563b3bc3` 的 [CI #44017346227](https://github.com/Miiduoa/graduation/actions/runs/44017346227) Lint & Type Check job `133818342739` 失敗：`StudySourceTables.tsx:268` 傳入 `string[]` 型別註記給要求 `OriginalSourceLine[]` 的原文選取 helper，並於第 471 行把分行物件陣列傳給舊的 `string[]` props。Web／Mobile／Functions／Assistant／Security／Firestore tests 和 CodeQL 為成功，但 Build Web／Mobile 因 typecheck 失敗略過，不能當作本輪新 SHA 驗收。
+- 將 `StudySourceSelection` 的 `sourceLines` props 型別修正為 `OriginalSourceLine[]`，與 `splitOriginalSourceLines()`、`tableSourceSelection()` 實際資料結構一致。保留先前 CR／LF／CRLF 原始行及換行符號、原文選取、複製與 TXT 下載行為；不轉換文字、不更動教材、私有筆記或 checkpoint 格式，亦不新增套件。
+- 本輪變更需以新精確 SHA 的 Web／Mobile／Build／Lint／TypeCheck／Security／CodeQL 查核；指定 GitHub App 5504170 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同教材同題同機比較仍須獨立驗證。PR #534 保持 Draft，不合併、不部署。
+
 ## 2026-11-17：CR-only 講解題目不得提前揭露參考答案
 
 - 裝置端模型產生的新自我檢查題若使用舊式 Mac 單獨 CR 換行，之前的題目答案檢查只依 LF／CRLF 辨識換行，可能略過 CR-only 的 Markdown 表格「Answer」欄、獨立「答案」標題、列表及 fenced code block，令參考回答在學生試答前顯示。

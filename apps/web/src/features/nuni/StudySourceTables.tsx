@@ -260,7 +260,7 @@ function selectOriginalTableText(field: HTMLTextAreaElement | null) {
 function StudySourceSelection({ table, index, sourceLines }: {
   table: StudySourceTable;
   index: number;
-  sourceLines: string[];
+  sourceLines: OriginalSourceLine[];
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
   // Use the authorized source, not textarea.value: textareas normalize CRLF
