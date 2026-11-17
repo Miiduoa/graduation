@@ -158,6 +158,11 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
       (assignments.status === 'unavailable' && assignments.count !== null) ||
       !Array.isArray(assignments.items) || assignments.items.length > 400 ||
       (assignments.count !== null && assignments.items.length > assignments.count) ||
+      // A positive authorized pending total always yields a nonempty first page,
+      // even for an older snapshot without coverage metadata. A restored empty
+      // first page cannot prove that no assignments remain.
+      (assignments.status === 'available' && assignments.count !== null &&
+        assignments.count > 0 && assignments.items.length === 0) ||
       !Array.isArray(announcements.items) || announcements.items.length > 12 ||
       (assignments.status === 'unavailable' && assignments.items.length > 0) ||
       (announcements.status === 'unavailable' && announcements.items.length > 0)) return false;
