@@ -135,7 +135,9 @@ export function StoryViewer({
           e.metaKey ||
           e.ctrlKey ||
           e.shiftKey ||
-          e.target instanceof HTMLVideoElement
+          e.target instanceof HTMLVideoElement ||
+          (e.target instanceof Element &&
+            e.target.closest('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable="true"]') !== null)
         )
           return;
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
