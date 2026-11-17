@@ -730,16 +730,16 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintRefreshFailed(false);
         setFootprintStatus('ready');
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         requestPending = false;
         if (!active || timedOut) return;
-        // Fetch can reject without an HTTP response as TypeError (offline),
-        // DOMException (some browser/network layers), or a proxy error.
-        // Bound deliberate retries for *all* unsettled transport failures.
-        // Intentional background/unmount aborts and the 15s timeout are
-        // already quarantined by active/timedOut above; real HTTP responses
-        // keep their existing Retry-After and HTTP 500 behavior.
-        if (!receivedResponse) {
+        // Some mobile WebViews reject network failures as DOMException
+        // NetworkError instead of TypeError. Both lack an HTTP Retry-After;
+        // avoid a rapid retry loop without rate-limiting arbitrary application
+        // errors, intentional aborts, or an actual retryable HTTP 500.
+        const networkFailure = error instanceof TypeError ||
+          (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'NetworkError');
+        if (!receivedResponse && networkFailure) {
           setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
         }
         // Preserve only a still-retainable dated snapshot on refresh failure.
