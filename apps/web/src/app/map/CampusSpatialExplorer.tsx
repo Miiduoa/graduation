@@ -39,6 +39,10 @@ const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 // Keep the same cap for decoded response bytes. Content-Length alone is
 // advisory: a proxy may omit it or advertise a shorter body than it sends.
 const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
+// A hostile stream can emit unlimited zero-byte/tiny chunks without ever
+// reaching the byte cap, starving the browser's timeout and map controls.
+// The public endpoint's 500 KB ceiling makes this generous for real responses.
+const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 
 // Response.json() buffers the entire document before our snapshot validator
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
@@ -53,11 +57,15 @@ async function readBoundedFootprintJson(response: Response): Promise<unknown> {
   // ReadableStream chunks (whose per-object overhead is not byte-limited).
   let bytes = new Uint8Array(16_384);
   let total = 0;
+  let chunks = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.byteLength > MAX_DECLARED_FOOTPRINT_BYTES - total) {
+      // Count even empty chunks: a stream can otherwise loop forever while
+      // retaining zero bytes, and microtasks can starve the 15s timeout.
+      if (++chunks > MAX_FOOTPRINT_STREAM_CHUNKS ||
+          value.byteLength > MAX_DECLARED_FOOTPRINT_BYTES - total) {
         // Reader cancellation is best effort and must not block failure
         // handling if an unusual WebView rejects or throws synchronously.
         try {
@@ -65,7 +73,7 @@ async function readBoundedFootprintJson(response: Response): Promise<unknown> {
         } catch {
           // The decoded-body limit still fails closed.
         }
-        throw new Error('Building outline response exceeded byte limit');
+        throw new Error('Building outline response exceeded byte/chunk limit');
       }
       const end = total + value.byteLength;
       if (end > bytes.byteLength) {
