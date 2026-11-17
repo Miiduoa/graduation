@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Linking } from 'react-native';
+import { FlatList, Linking } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
 import { queryCatalog } from '../services/courseCatalogClient';
@@ -50,6 +50,46 @@ function nthuJson(courses: unknown[] = [nthuCourse], extra: Record<string, unkno
     truncated: false, courses, ...extra,
   }) };
 }
+test('cross-listed mobile catalog cards have unique keys and only the latest tapped card reports a successful copy', async () => {
+  setBrowsingSchoolId('ncnu');
+  const original = globalThis.fetch;
+  // Two departments can publish the same code/class slot and exactly the
+  // same import CSV; the provider may also repeat an identical public row.
+  const courses = [
+    ncnuDatabaseCourse,
+    { ...ncnuDatabaseCourse, department: '跨院學程' },
+    { ...ncnuDatabaseCourse },
+  ];
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(ncnuJson(courses));
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: '130032' } } }} />);
+    await waitFor(() => expect(view.getAllByText('資料庫管理系統')).toHaveLength(3));
+
+    // The old semester/code/section key collided for all three rows.
+    const list = view.UNSAFE_getByType(FlatList);
+    const key = list.props.keyExtractor as (course: typeof ncnuDatabaseCourse, index: number) => string;
+    expect(new Set(courses.map((row, index) => key(row, index))).size).toBe(3);
+    expect(key(courses[0], 0)).toBe(key(courses[0], 0));
+
+    const buttons = view.getAllByText('複製課表匯入資料');
+    expect(buttons).toHaveLength(3);
+    // Screen readers must identify the exact row, even for official duplicate
+    // entries with identical titles, class sections and import CSV content.
+    expect(view.getByLabelText('複製課表匯入資料：第1筆，資料庫管理系統，課號130032，班別0，資管系')).toBeTruthy();
+    expect(view.getByLabelText('複製課表匯入資料：第2筆，資料庫管理系統，課號130032，班別0，跨院學程')).toBeTruthy();
+    expect(view.getByLabelText('複製課表匯入資料：第3筆，資料庫管理系統，課號130032，班別0，資管系')).toBeTruthy();
+    expect(view.getByLabelText('帶入課表核對：第2筆，資料庫管理系統，課號130032，班別0，跨院學程')).toBeTruthy();
+    fireEvent.press(buttons[0]);
+    expect(await view.findByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeTruthy();
+    fireEvent.press(buttons[1]);
+    await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledTimes(2));
+    // Before this fix both cards retained independent "copied" feedback.
+    await waitFor(() => expect(view.getAllByText('已複製，請到匯入頁貼上並核對上課時間。')).toHaveLength(1));
+    expect(jest.mocked(Clipboard.setStringAsync).mock.calls[0][0])
+      .toBe(jest.mocked(Clipboard.setStringAsync).mock.calls[1][0]);
+  } finally { globalThis.fetch = original; }
+});
+
 test('NTHU preserves classroom pairs and provides reviewed CSV import without writing private records', async () => {
   setBrowsingSchoolId('nthu');
   const original = globalThis.fetch;
@@ -324,6 +364,7 @@ test('copying a different course while the old native write is pending leaves th
   const original = globalThis.fetch;
   const secondCourse = {
     ...nthuCourse, code: '11510AES 520401', section: '01', title: '第二門課',
+    time: 'T3T4', room: '第二教室',
     meetings: [{ time: 'T3T4', room: '第二教室' }],
   };
   const clipboard = jest.mocked(Clipboard.setStringAsync);

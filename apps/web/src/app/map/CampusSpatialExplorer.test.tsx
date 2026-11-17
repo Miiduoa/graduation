@@ -121,7 +121,7 @@ it('controls camera without changing the place or recreating its context and res
   fireEvent.click(within(dialog).getByRole('button', { name: '向右旋轉' }));
   fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
-  const scaleAnnouncement = within(dialog).getByText('縮放 125%');
+  const scaleAnnouncement = within(dialog).getByText('視角方位 57° · 縮放 125%');
   expect(scaleAnnouncement.getAttribute('role')).toBe('status');
   expect(scaleAnnouncement.getAttribute('aria-live')).toBe('polite');
   expect(scaleAnnouncement.getAttribute('aria-atomic')).toBe('true');
@@ -134,13 +134,13 @@ it('controls camera without changing the place or recreating its context and res
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
   fireEvent.click(within(dialog).getByRole('button', { name: '回到北向' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1.25 }));
-  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
+  expect(within(dialog).getByText('視角方位 0° · 縮放 125%')).toBeTruthy();
   expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
   const restoreZoom = within(dialog).getByRole('button', { name: '還原 100% 縮放' }) as HTMLButtonElement;
   expect(restoreZoom.disabled).toBe(false);
   fireEvent.click(restoreZoom);
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: 0, zoom: 1 }));
-  expect(within(dialog).getByText('縮放 100%')).toBeTruthy();
+  expect(within(dialog).getByText('視角方位 0° · 縮放 100%')).toBeTruthy();
   expect(restoreZoom.disabled).toBe(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
@@ -157,11 +157,13 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   const callsAtMaximum = scene.setView.mock.calls.length;
   fireEvent.click(zoomIn);
   expect(scene.setView).toHaveBeenCalledTimes(callsAtMaximum);
-  expect(within(dialog).getByText('縮放 250%')).toBeTruthy();
+  expect(within(dialog).getByText('視角方位 60° · 縮放 250%')).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '向左旋轉' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 30, zoom: MAX_SPATIAL_ZOOM }));
+  expect(within(dialog).getByText('視角方位 30° · 縮放 250%')).toBeTruthy();
   act(() => changed({ bearing: -60, zoom: 0 }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 300, zoom: MIN_SPATIAL_ZOOM }));
+  expect(within(dialog).getByText('視角方位 300° · 縮放 65%')).toBeTruthy();
   const zoomOut = within(dialog).getByRole('button', { name: '縮小空間圖' }) as HTMLButtonElement;
   expect(zoomOut.disabled).toBe(true);
   expect(zoomOut.hasAttribute('aria-disabled')).toBe(false);
@@ -172,6 +174,7 @@ it('reflects gesture camera changes in accessible bounded controls without reloa
   expect(restoreZoom.disabled).toBe(false);
   fireEvent.click(restoreZoom);
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: 300, zoom: 1 }));
+  expect(within(dialog).getByText('視角方位 300° · 縮放 100%')).toBeTruthy();
   expect(restoreZoom.disabled).toBe(true);
   expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
   expect(scene.create).toHaveBeenCalledTimes(1);
@@ -228,6 +231,41 @@ it('applies live system and site motion preferences without recreating the graph
   await act(async () => { document.documentElement.dataset.theme = 'dark'; });
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ dark: true, motion: false }));
   expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('keeps motion and theme preferences reactive on Safari with legacy MediaQueryList listeners', async () => {
+  const legacyMedia = new Map<string, { matches: boolean; listeners: Set<() => void> }>();
+  vi.stubGlobal('matchMedia', (query: string) => {
+    if (!legacyMedia.has(query)) legacyMedia.set(query, { matches: false, listeners: new Set() });
+    const entry = legacyMedia.get(query)!;
+    return {
+      get matches() { return entry.matches; },
+      // Older iOS Safari exposes only addListener/removeListener.
+      addListener: (notify: () => void) => entry.listeners.add(notify),
+      removeListener: (notify: () => void) => entry.listeners.delete(notify),
+    };
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const motion = legacyMedia.get('(prefers-reduced-motion: reduce)')!;
+  const theme = legacyMedia.get('(prefers-color-scheme: dark)')!;
+  expect(motion.listeners.size).toBe(1);
+  expect(theme.listeners.size).toBe(1);
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: true, dark: false }));
+  act(() => {
+    motion.matches = true;
+    motion.listeners.forEach((notify) => notify());
+  });
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: false, dark: false }));
+  act(() => {
+    theme.matches = true;
+    theme.listeners.forEach((notify) => notify());
+  });
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: false, dark: true }));
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+  expect(motion.listeners.size).toBe(0);
+  expect(theme.listeners.size).toBe(0);
 });
 
 it('suspends graphics when the page is hidden or the canvas is outside the viewport', async () => {
@@ -369,7 +407,9 @@ it('adds source-checked Providence building shapes without changing navigation o
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints', expect.objectContaining({ signal: expect.anything() }));
-  expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+  // Only the loading state belongs to the live region, not its source links.
+  expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/).getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' }).closest('[role="status"]')).toBeNull();
   const outline = [
     { lat: 24.22624, lon: 120.58131 },
     { lat: 24.22624, lon: 120.58143 },
@@ -391,7 +431,8 @@ it('adds source-checked Providence building shapes without changing navigation o
   });
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
-  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/).getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('link', { name: '靜宜官方校園圖與實境導覽' }).closest('[role="status"]')).toBeNull();
   // Both provenance labels can show the same calendar day; anchor by meaning.
   expect(within(dialog).getByText(new RegExp(`^資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
   expect(within(dialog).getByText(new RegExp(`OSM 資料庫同步：${osmBaseAt.slice(0, 10)}.*非現地查證`))).toBeTruthy();
@@ -423,6 +464,13 @@ it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores 
     await act(async () => { (callback as () => void)(); });
     expect(signal?.aborted).toBe(true);
     expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    // Timeout must throttle subsequent requests even if AbortSignal is ignored.
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+    fireEvent.click(retry);
+    fireEvent(window, new Event('pageshow'));
+    expect(window.fetch).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
@@ -448,6 +496,8 @@ it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores 
     });
     expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
     expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(window.fetch).toHaveBeenCalledTimes(1);
     expect(scene.create).toHaveBeenCalledTimes(1);
   } finally {
     timeoutSpy.mockRestore();
@@ -497,7 +547,9 @@ it('keeps the spatial map usable when Providence building geometry is unavailabl
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  const unavailableNotice = await within(dialog).findByText(/公開建築輪廓目前無法取得/);
+  expect(unavailableNotice.getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).closest('[role="status"]')).toBeNull();
   expect(within(dialog).getByRole('button', { name: '在平面地圖查看' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
@@ -532,6 +584,79 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
+// Synthetic HTTP 200 responses from a proxy can still be corrupt, truncated,
+// or fail the OSM source/geometry contract. Reject them without inviting a
+// rapid retry loop, while keeping POIs and the existing walking route available.
+it.each([
+  { label: 'truncated JSON', brokenJson: true, retryAfter: null, minutes: 1 },
+  { label: 'untrusted OSM source', brokenJson: false, retryAfter: null, minutes: 1 },
+  { label: 'truncated JSON with Retry-After', brokenJson: true, retryAfter: '600', minutes: 10 },
+])('backs off an untrusted HTTP 200 footprint body ($label)', async ({ brokenJson, retryAfter, minutes }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const json = vi.fn().mockImplementation(async () => {
+    if (brokenJson) throw new SyntaxError('Unexpected end of JSON input');
+    return { schoolId: 'untrusted-campus', source: 'OpenStreetMap', buildings: [] };
+  });
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200,
+    headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(new RegExp(`約 ${minutes} 分鐘冷卻，到期後可再試`))).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(json).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('keeps a dated stale outline when a subsequent HTTP 200 refresh has invalid JSON', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+    })
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => { throw new SyntaxError('Truncated body'); },
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+  fireEvent.click(retry);
+  expect(await within(dialog).findByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(new RegExp(`資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('honors the API Retry-After cooldown without hammering Overpass or blocking navigation', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
@@ -555,6 +680,10 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
       fetchedAt: new Date().toISOString(), stale: false,
     }) });
   vi.stubGlobal('fetch', fetchMock);
+  // The scheduled callback must run after the absolute wall-clock deadline.
+  // Invoking a timer early must never bypass a server cooldown.
+  let now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const timeoutSpy = vi.spyOn(window, 'setTimeout');
   try {
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -571,6 +700,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     // not a real public Overpass rate-limit observation.
     const release = timeoutSpy.mock.calls.find(([, delay]) => typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
     expect(typeof release).toBe('function');
+    now += 600_001;
     await act(async () => { (release as () => void)(); });
     expect(retry.hasAttribute('disabled')).toBe(false);
     fireEvent.click(retry);
@@ -579,7 +709,196 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     expect(within(dialog).queryByText(/約 10 分鐘冷卻，到期後可再試/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
+    nowSpy.mockRestore();
   }
+});
+
+it.each([
+  { status: 429, kind: 'delay-seconds', header: '600', minutes: 10 },
+  { status: 503, kind: 'HTTP-date', header: null, minutes: 10 },
+  { status: 429, kind: 'zero-padded delay-seconds', header: '00000600', minutes: 10 },
+  { status: 503, kind: 'long delay-seconds capped to 24h', header: '1000000', minutes: 1440 },
+])('does not repeatedly retry a rate-limited OSM source ($status, $kind)', async ({ status, kind, header, minutes }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  // RFC 9110 permits leading zeroes and arbitrarily long digit strings.
+  // The client limits a genuine wait to 24h; these are synthetic responses,
+  // not observed Overpass headers.
+  const retryAfter = kind === 'HTTP-date'
+    ? new Date(Date.now() + 10 * 60_000).toUTCString()
+    : header;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status,
+    headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(new RegExp(`約 ${minutes} 分鐘冷卻，到期後可再試`))).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+});
+
+it.each([
+  { status: 206, contentRange: 'bytes 0-63/4096' },
+  { status: 408, contentRange: null },
+  { status: 502, contentRange: null },
+  { status: 504, contentRange: null },
+  { status: 200, contentRange: 'bytes 0-63/4096' },
+])('honors Retry-After on rejected incomplete or gateway footprints ($status)', async ({ status, contentRange }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const json = vi.fn();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300, status,
+    headers: { get: (name: string) =>
+      name === 'retry-after' ? '600' : name === 'content-range' ? contentRange : null },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 10 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+// A suspended/incorrectly configured phone may disagree with the response
+// server's Date header. HTTP-date Retry-After is on the origin's time scale.
+// These are synthetic 429/503 responses, not real Overpass observations.
+it.each([
+  { status: 429, serverOffsetMinutes: -20, retryOffsetMinutes: -10, expectedMinutes: 10 },
+  { status: 503, serverOffsetMinutes: 20, retryOffsetMinutes: 30, expectedMinutes: 30 },
+  { status: 429, serverOffsetMinutes: null, retryOffsetMinutes: 10, expectedMinutes: 10 },
+])('keeps the longer valid HTTP-date cooldown with clock skew ($status, server $serverOffsetMinutes)',
+  async ({ status, serverOffsetMinutes, retryOffsetMinutes, expectedMinutes }) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const now = Date.now();
+    const serverDate = serverOffsetMinutes === null ? 'invalid Date'
+      : new Date(now + serverOffsetMinutes * 60_000).toUTCString();
+    const retryDate = new Date(now + retryOffsetMinutes * 60_000).toUTCString();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status,
+      headers: { get: (name: string) =>
+        name === 'retry-after' ? retryDate : name === 'date' ? serverDate : null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(new RegExp(`約 ${expectedMinutes} 分鐘冷卻，到期後可再試`))).toBeTruthy();
+    fireEvent.click(retry);
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  });
+
+// 408s, incomplete intermediary responses (206 or Content-Range on a 200),
+// and gateway failures may omit Retry-After. A one-minute local backoff avoids
+// repeated requests while original POIs and walking directions stay usable.
+// These are synthetic proxy responses, not observed Overpass behavior.
+it.each([
+  { status: 206, retryAfter: null, contentRange: null },
+  { status: 206, retryAfter: null, contentRange: 'bytes 0-63/4096' },
+  { status: 200, retryAfter: null, contentRange: 'bytes 0-63/4096' },
+  { status: 408, retryAfter: null, contentRange: null },
+  { status: 502, retryAfter: null, contentRange: null },
+  { status: 503, retryAfter: null, contentRange: null },
+  { status: 503, retryAfter: 'invalid HTTP-date', contentRange: null },
+  { status: 504, retryAfter: null, contentRange: null },
+])('backs off an incomplete or failed OSM response without usable Retry-After ($status, $retryAfter, $contentRange)',
+  async ({ status, retryAfter, contentRange }) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const json = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: status >= 200 && status < 300, status,
+      headers: { get: (name: string) => name === 'retry-after' ? retryAfter :
+        name === 'content-range' ? contentRange : null },
+      json,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+    fireEvent.click(retry);
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(json).not.toHaveBeenCalled();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  });
+
+it('allows a single retry when an unlabelled 503 gateway cooldown expires', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503, headers: { get: () => null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  // The scheduled callback must run after the absolute wall-clock deadline.
+  // Invoking a timer early must never bypass a server cooldown.
+  let now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    const release = timeoutSpy.mock.calls.find(([, delay]) =>
+      typeof delay === 'number' && delay >= 59_000 && delay <= 60_000)?.[0];
+    expect(typeof release).toBe('function');
+    now += 60_001;
+    await act(async () => { (release as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  } finally {
+    timeoutSpy.mockRestore();
+    nowSpy.mockRestore();
+  }
+});
+
+// These are synthetic intermediary 429s, not observations from Overpass.
+// 429 may omit Retry-After entirely; invalid/expired values also must not
+// invite a rapid manual retry loop. A one-minute client backoff protects the
+// API without treating malformed headers as arbitrary 24-hour lockouts.
+it.each([
+  'Sun, 32 Nov 2026 01:02:03 GMT',
+  'Sun, 01 Nov 2026 01:02:03 GMT',
+  'not a date',
+  '0',
+  null,
+])('backs off a 429 without a usable Retry-After (%s)', async (retryAfter) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 429,
+    headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
 });
 
 it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
@@ -617,6 +936,10 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
       }),
     });
   vi.stubGlobal('fetch', fetchMock);
+  // The scheduled callback must run after the absolute wall-clock deadline.
+  // Invoking a timer early must never bypass a server cooldown.
+  let now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const timeoutSpy = vi.spyOn(window, 'setTimeout');
   try {
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -632,6 +955,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     const release = timeoutSpy.mock.calls.find(([, delay]) =>
       typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
     expect(typeof release).toBe('function');
+    now += 600_001;
     await act(async () => { (release as () => void)(); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
     fireEvent.click(retry);
@@ -654,6 +978,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
+    nowSpy.mockRestore();
   }
 });
 
@@ -740,6 +1065,47 @@ it('releases a server cooldown after a suspended mobile tab resumes, without aut
   }
 });
 
+it('keeps an OSM cooldown locked if a mobile clock moves backwards before its timer fires', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503,
+    headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  let clock = Date.now();
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const cooldownTimer = timerSpy.mock.calls.find(([, delay]) => delay === 600_000);
+    expect(cooldownTimer).toBeTruthy();
+
+    // The timeout was scheduled before an NTP/time-zone clock correction.
+    // A browser timer firing must not bypass the server's absolute cooldown.
+    clock -= 2 * 60_000;
+    act(() => { (cooldownTimer![0] as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByText(/約 12 分鐘冷卻/)).toBeTruthy();
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    clock += 12 * 60_000 + 1;
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
 it('retries Providence building data after a temporary outage without closing the tour', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const outline = [
@@ -752,8 +1118,9 @@ it('retries Providence building data after a temporary outage without closing th
   const buildings = parseProvidenceOsmFootprints({
     elements: [{ type: 'way', id: 255784049, geometry: outline, tags: { building: 'yes' } }],
   });
+  // A generic 500 without a rate-limit hint remains manually retryable.
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce({ ok: false, status: 503 })
+    .mockResolvedValueOnce({ ok: false, status: 500 })
     .mockResolvedValueOnce({ ok: true, json: async () => ({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date().toISOString(), stale: false,
@@ -806,12 +1173,30 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
     expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
 
-    // No network event: a backgrounded modal must no longer advertise fresh data.
+    // Crossing the freshness boundary on tab resume must mark the saved
+    // geometry stale AND start exactly one bounded revalidation, rather than
+    // leaving the map stale until the user finds the manual retry action.
     clock += 2 * 60_000;
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     fireEvent(document, new Event('visibilitychange'));
+    // Do not spend public OSM quota refreshing an unseen, still-retainable map.
+    // The visible resume must do exactly one revalidation instead.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    // Hidden soft expiry has already advanced the timer to seven-day hard
+    // expiry. Visibility and pageshow must still revalidate exactly once.
+    fireEvent(window, new Event('pageshow'));
     expect(await within(dialog).findByText(/暫用舊快照/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    // A second resume event while the refresh is pending must not issue an
+    // extra request or recreate WebGL geometry.
+    const sceneCountWhileStale = scene.create.mock.calls.length;
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(scene.create).toHaveBeenCalledTimes(sceneCountWhileStale);
 
     // A suspended device can pass the seven-day deadline before timers fire.
     clock += 6 * day;
@@ -838,6 +1223,133 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
     expect(within(dialog).getByText(`資料讀取：${new Date(clock).toISOString().slice(0, 10)}`)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   } finally {
+    clockSpy.mockRestore();
+  }
+});
+
+it('bounds the first hard-expiry timer for an already-stale OSM snapshot', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  // A valid two-day-old snapshot has five days until hard expiry.
+  // Recheck its absolute deadline in daily steps instead of waiting five days.
+  const fetchedAt = new Date(now - 2 * day).toISOString();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === day)).toBe(true);
+    expect(timerSpy.mock.calls.some(([, delay]) =>
+      typeof delay === 'number' && delay > day)).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    timerSpy.mockRestore();
+    clockSpy.mockRestore();
+  }
+});
+
+it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  const fetchedAt = new Date(clock - day + 60_000).toISOString();
+  const fetchMock = vi.fn().mockResolvedValueOnce({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+  }).mockReturnValueOnce(new Promise(() => {}));
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+
+    // Simulate the real timeout callback while the browser is backgrounded.
+    // No visibilitychange event should be needed to enforce hard retention.
+    const softTimer = timerSpy.mock.calls.find(([, delay]) => delay === 60_000);
+    expect(softTimer).toBeTruthy();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    const originalClock = clock;
+    // An extreme wall-clock correction must not schedule a timeout larger
+    // than a day (which could overflow the browser's 32-bit timer).
+    clock -= 30 * day;
+    act(() => { (softTimer![0] as () => void)(); });
+    expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+    const boundedTimer = timerSpy.mock.calls.filter(([, delay]) => delay === day).at(-1);
+    expect(boundedTimer).toBeTruthy();
+    // The next timer may also fire early after the clock is corrected again.
+    clock = originalClock - 120_000;
+    act(() => { (boundedTimer![0] as () => void)(); });
+    const rearmedSoft = timerSpy.mock.calls.find(([, delay]) => delay === 180_000);
+    expect(rearmedSoft).toBeTruthy();
+    clock = originalClock + 90_000;
+    act(() => { (rearmedSoft![0] as () => void)(); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+
+    // The soft timeout must schedule a *new* seven-day expiry timeout.
+    const deadline = Date.parse(fetchedAt) + 7 * day;
+    // The initial hard-expiry timer must be bounded too; its callback will
+    // re-arm as the seven-day absolute deadline approaches.
+    const hardTimer = timerSpy.mock.calls.filter(([, delay]) => delay === day).at(-1);
+    expect(hardTimer).toBeTruthy();
+    // An early hard-expiry callback (after time sync) must re-arm eviction,
+    // rather than leaving old source geometry visible past seven days.
+    clock = deadline - 120_000;
+    act(() => { (hardTimer![0] as () => void)(); });
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const rearmedHard = timerSpy.mock.calls.filter(([, delay]) => delay === 120_000).at(-1);
+    expect(rearmedHard).toBeTruthy();
+    clock = deadline + 1_000;
+    act(() => { (rearmedHard![0] as () => void)(); });
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    // Hard expiry must remove unverified geometry but must not wake the
+    // public OSM origin while the browser stays in the background.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+    // pageshow can follow visibilitychange on mobile; only one request is valid.
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    timerSpy.mockRestore();
     clockSpy.mockRestore();
   }
 });

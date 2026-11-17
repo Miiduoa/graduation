@@ -52,6 +52,12 @@ function safeLink(value: unknown, host: string) {
     return '';
   }
 }
+const MEETING_TIME_PLACEHOLDER = '社課時間未提供';
+const EMPTY_NAME_LABEL = '姓名待確認';
+function cleanMeetingTime(value: unknown): string {
+  const result = typeof value === 'string' ? value.trim() : '';
+  return result && result !== MEETING_TIME_PLACEHOLDER ? result : '';
+}
 function listing(
   groupId: string,
   group: Record<string, any>,
@@ -61,7 +67,7 @@ function listing(
     id: groupId,
     name: String(group.name || '未命名社團'),
     category: String(official.category || '未分類'),
-    meetingTime: String(group.clubProfile?.meetingTime || '社課時間未提供'),
+    meetingTime: cleanMeetingTime(group.clubProfile?.meetingTime),
     recruiting: group.clubProfile?.recruiting === true,
     approval: String(official.status || 'unverified'),
     joinPolicy: group.clubProfile?.joinPolicy === 'review' ? 'review' : 'open',
@@ -191,7 +197,7 @@ export function createClubPortal({
             tx.set(requestRef, {
               uid,
               status: 'pending',
-              displayName: String(seat.displayName || account.displayName || '未提供姓名'),
+              displayName: String(seat.displayName || account.displayName || EMPTY_NAME_LABEL),
               requestedAt: FieldValue.serverTimestamp(),
             });
           return { success: true, office, status: 'pending' };
@@ -213,16 +219,26 @@ export function createClubPortal({
           });
         return { success: true, office, status: 'active' };
       }
+      if (action === 'cancelJoin') {
+        if (application.status !== 'pending')
+          throw new HttpsError('failed-precondition', '目前沒有待審中的入社申請。');
+        tx.update(requestRef, {
+          status: 'cancelled',
+          cancelledAt: FieldValue.serverTimestamp(),
+        });
+        return { success: true, office, status: 'none' };
+      }
       if (action === 'review') {
         if (!officer) denied();
         const targetUid = id(input.targetUid),
           targetRef = groupRef.collection('members').doc(targetUid),
           appRef = groupRef.collection('joinRequests').doc(targetUid);
-        const [appDoc, targetDoc, targetSeat, targetAccount] = await tx.getAll(
+        const [appDoc, targetDoc, targetSeat, targetAccount, targetDirectory] = await tx.getAll(
           appRef,
           targetRef,
           school.collection('members').doc(targetUid),
           db.collection('users').doc(targetUid),
+          school.collection('directory').doc(targetUid),
         );
         if (!['approved', 'declined'].includes(input.decision))
           throw new HttpsError('invalid-argument', '審核結果無效');
@@ -239,6 +255,13 @@ export function createClubPortal({
           if (targetDoc.data()?.status !== 'active') {
             const membership = {
               uid: targetUid,
+              displayName: String(
+                appDoc.data()?.displayName ||
+                  targetDirectory.data()?.displayName ||
+                  targetSeat.data()?.displayName ||
+                  targetAccount.data()?.displayName ||
+                  EMPTY_NAME_LABEL,
+              ),
               role: 'member',
               status: 'active',
               joinedAt: FieldValue.serverTimestamp(),
@@ -300,7 +323,10 @@ export function createClubPortal({
           name,
           description: text(input.description),
           clubProfile: {
-            meetingTime: text(input.meetingTime, 200),
+            meetingTime:
+              typeof input.meetingTime === 'string' && input.meetingTime.length <= 200
+                ? cleanMeetingTime(input.meetingTime)
+                : '',
             recruiting: input.recruiting === true,
             joinPolicy: input.joinPolicy,
             instagram: link(input.instagram, 'instagram.com'),
@@ -547,7 +573,7 @@ export function createClubPortal({
             office,
             message: old.checkedInAt
               ? `已簽到 ${new Date(old.checkedInAt).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })}`
-              : `${String(targetDirectory.data()?.displayName || targetMember.data()?.displayName || targetSeat.data()?.displayName || '未提供姓名')} 已簽到`,
+              : `${String(targetDirectory.data()?.displayName || targetMember.data()?.displayName || targetSeat.data()?.displayName || EMPTY_NAME_LABEL)} 已簽到`,
           };
         } else {
           if (!active && !(approved && event.visibility === 'public')) denied('此活動只限社員');
@@ -716,7 +742,7 @@ export function createClubPortal({
               ...batch.map((r) => school.collection('directory').doc(r.id)),
             );
             batch.forEach((r, index) =>
-              attendeeNames.set(r.id, String(names[index].data()?.displayName || '未提供姓名')),
+              attendeeNames.set(r.id, String(names[index].data()?.displayName || EMPTY_NAME_LABEL)),
             );
           }
         }
@@ -745,7 +771,7 @@ export function createClubPortal({
                 registrationCursor: rosterPage.next,
                 registrations: rosterPage.docs.map((r) => ({
                   uid: r.id,
-                  name: attendeeNames.get(r.id) || '未提供姓名',
+                  name: attendeeNames.get(r.id) || EMPTY_NAME_LABEL,
                   checkedInAt: r.data().checkedInAt || null,
                 })),
               }
@@ -768,7 +794,10 @@ export function createClubPortal({
         members: members.map((m, index) => ({
           id: m.id,
           name: String(
-            directories[index]?.data()?.displayName || m.data().displayName || '未提供姓名',
+              directories[index]?.data()?.displayName ||
+                m.data().displayName ||
+                m.data().name ||
+                EMPTY_NAME_LABEL,
           ),
           role: m.data().role,
           phone: officer
@@ -789,7 +818,7 @@ export function createClubPortal({
         })),
         requests: requests.map((r) => ({
           id: r.id,
-          name: String(r.data().displayName || '未提供姓名'),
+          name: String(r.data().displayName || EMPTY_NAME_LABEL),
         })),
         announcements: posts
           .filter((p: any) => p.data().kind === 'announcement')
