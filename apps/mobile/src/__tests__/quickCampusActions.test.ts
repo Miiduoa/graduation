@@ -10,6 +10,8 @@ test.each([
   ['我要看玩課雲', '/school-courses', 'CoursesHome'],
   ['我想查公車到站時間', '/bus', 'BusV2'],
   ['宿舍報修', '/dormitory', 'Dormitory'],
+  ['我找不到我的東西', '/lost-found', 'PlatformLostFound'],
+  ['遺失錢包了', '/lost-found', 'PlatformLostFound'],
   ['請幫我看今天課表', '/timetable', 'PersonalTimetable'],
 ])('offers an existing destination for %s', (utterance, destination, screen) => {
   const actions = getMobileQuickActions(utterance);
@@ -41,4 +43,17 @@ test('keeps branded school navigation separate from general course and timetable
   expect(getMobileQuickActions('課堂教材').map((action) => action.destination)).toEqual(['/classroom']);
   expect(getMobileQuickActions('查課表').map((action) => action.destination)).toEqual(['/timetable']);
   expect(getMobileQuickActions('tronclassroom')).toEqual([]);
+});
+
+
+test('失物捷徑與平台 Google 入口一致，並支援從其他 tab 開啟', () => {
+  const [action] = getMobileActionsForDestinations(['/lost-found']);
+  expect(action).toEqual({
+    destination: '/lost-found',
+    route: 'PlatformLostFound',
+    label: '失物招領',
+    description: '使用 Google 帳號查看、刊登與管理失物',
+  });
+  expect(ROUTE_TO_TAB.PlatformLostFound).toBe('校園');
+  expect(ROUTE_TO_TAB.LostFound).toBe('校園');
 });

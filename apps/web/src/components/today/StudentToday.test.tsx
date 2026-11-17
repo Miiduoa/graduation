@@ -101,14 +101,32 @@ it('keeps the assistant mounted after the planner while the day finishes loading
   expect((draft as HTMLInputElement).value).toBe('下一堂課在哪裡？');
 });
 
-it('keeps the task agent visible before the timetable and preserves it while home data refreshes', () => {
+it('keeps the actual day before the task agent and preserves the agent while home data refreshes', () => {
   const agent = <button type="button">首頁代辦測試</button>;
   const result = view({ skeleton: true, agent });
   const button = screen.getByRole('button', { name: '首頁代辦測試' });
   result.rerender(todayElement({ classes: [klass()], agent }));
   expect(screen.getByRole('button', { name: '首頁代辦測試' })).toBe(button);
   const planner = screen.getByTestId('today-unified-flow');
-  expect(button.compareDocumentPosition(planner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(button.compareDocumentPosition(planner) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+});
+
+it('groups planning and conversation before optional suggestions without resetting either draft', () => {
+  const agent = <input aria-label="代辦測試" defaultValue="保留原本的安排" />;
+  const assistant = <input aria-label="助理草稿測試" defaultValue="接著幫我找教室" />;
+  const personalization = <section aria-label="個人化安排">生活與年級偏好</section>;
+  const view = render(todayElement({ agent, assistant, personalization, classes: [klass()] }));
+  const planning = screen.getByRole('textbox', { name: '代辦測試' });
+  const conversation = screen.getByRole('textbox', { name: '助理草稿測試' });
+  const assistance = screen.getByTestId('today-assistance');
+  expect(assistance.contains(planning)).toBe(true);
+  expect(assistance.contains(conversation)).toBe(true);
+  expect(assistance.compareDocumentPosition(screen.getByRole('region', { name: '個人化安排' })) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  view.rerender(todayElement({ agent, assistant, personalization, skeleton: true }));
+  expect(screen.getByRole('textbox', { name: '代辦測試' })).toBe(planning);
+  expect(screen.getByRole('textbox', { name: '助理草稿測試' })).toBe(conversation);
+  expect((conversation as HTMLInputElement).value).toBe('接著幫我找教室');
 });
 
 it('keeps immediate coursework before personalized suggestions and preserves the assistant draft', () => {

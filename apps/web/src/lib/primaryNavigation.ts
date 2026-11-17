@@ -13,8 +13,8 @@ export function primaryNavigationSection(
 ): PrimaryNavigationSection | null {
   if (!pathname) return null;
   // /today、/hub 有轉址 page 進首頁；區塊別名仍對應 today／life。
-  if (pathname === '/' || pathname === '/today' || pathname === '/today-v2') return 'today';
-  if (pathname === '/life' || pathname === '/hub') return 'life';
+  if (pathname === '/' || pathname === '/today' || pathname === '/today-v2' || pathname === '/hub') return 'today';
+  if (pathname === '/life') return 'life';
   if (includesRoute(pathname, '/orders') || includesRoute(pathname, '/food') || pathname === '/shops')
     return 'life';
   if (pathname === '/me') return 'me';

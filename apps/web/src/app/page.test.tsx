@@ -1005,9 +1005,20 @@ it('gives the homepage agent only platform tasks, retaining their exact source I
   await waitFor(() => expect(vi.mocked(TodayAgent).mock.calls.some(([input]) =>
     input.tasks.some((task) => task.id === 'source-task-id'))).toBe(true));
   const input = vi.mocked(TodayAgent).mock.calls.at(-1)![0];
-  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false });
+  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false, compact: true });
   expect(input.tasks).toEqual(platform.tasks);
   expect(input.tasks.some((task) => task.courseName === '學校課程')).toBe(false);
+});
+
+it('keeps the day and its next action before the student card utility', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(data('今天的課程'));
+  render(<HomePage />);
+  await screen.findByText('今天的課程 作業');
+  const today = screen.getByRole('heading', { level: 1, name: '今天' });
+  const card = screen.getByRole('link', { name: /數位學生證.*開啟卡片/ });
+  expect(today.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByTestId('today-unified-flow').compareDocumentPosition(card) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it('removes the platform agent while its session is uncertain even when school auth remains', async () => {

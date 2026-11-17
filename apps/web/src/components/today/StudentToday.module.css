@@ -66,6 +66,16 @@
   min-width: 0;
 }
 
+.assistance {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.assistance:empty {
+  display: none;
+}
+
 .section {
   display: flex;
   flex-direction: column;

@@ -21,6 +21,7 @@ import type { V2ActionState, V2ActionStates, V2Card, V2Reply } from './assistant
 
 type Scope = { context: string; accountId: string; schoolId: string };
 type Props = {
+  compact?: boolean;
   context: string;
   accountId: string;
   tasks: HomeTask[];
@@ -553,7 +554,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     // The component lifetime is fixed to one account and campus. Reads use stateRef and never dispatch a write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <TodayAgentPanel tasks={state.ready ? props.tasks : []} now={props.now}
+  return <TodayAgentPanel compact={props.compact} tasks={state.ready ? props.tasks : []} now={props.now}
     loading={props.loading || (!state.ready && !state.error)} error={state.error || state.trackingError || props.error}
     selectedTaskId={state.selectedTaskId} reply={state.reply} states={state.states} pending={state.pending}
     followups={state.followups} tracking={state.pending === 'followup'} planningBlocked={!state.trackingReady}

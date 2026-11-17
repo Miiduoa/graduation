@@ -98,3 +98,16 @@ it('does not throw when sessionStorage rejects reads and writes', () => {
   expect(restoreDirectorySearch('menu', '/map')).toBeNull();
   expect(() => forgetDirectorySearch('menu')).not.toThrow();
 });
+
+
+it('restores only known directory expansions and supports older snapshots', () => {
+  rememberDirectorySearch('search', {
+    path: '/search', destination: '/grades?tab=feedback', query: '', open: false,
+    expanded: ['group:study', 'service:/grades?tab=semester', 'group:study', 'service:https://outside.test', 'arbitrary'],
+  });
+  expect(restoreDirectorySearch('search', '/search')?.expanded).toEqual([
+    'group:study', 'service:/grades?tab=semester',
+  ]);
+  rememberDirectorySearch('search', { path: '/search', destination: '/map', query: '教室' });
+  expect(restoreDirectorySearch('search', '/search')?.expanded).toBeUndefined();
+});

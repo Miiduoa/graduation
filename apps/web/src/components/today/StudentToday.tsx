@@ -152,7 +152,6 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
-      {props.agent}
       {!props.skeleton && props.unsigned && action.type !== 'class' && (
         <TodayWelcome
           importHref={props.importHref}
@@ -179,8 +178,11 @@ export function StudentToday(props: Props) {
           <TodayUnreadNotifications unsigned={props.unsigned} />
         </div>
       )}
+      <div className={styles.assistance} data-testid="today-assistance">
+        {props.agent}
+        {props.assistant}
+      </div>
       {props.personalization}
-      {props.assistant}
       {props.updatedAt || props.refreshing ? (
         <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
           {props.refreshing ? '正在更新課程待辦…' : formatUpdatedAt(props.updatedAt!)}

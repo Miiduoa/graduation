@@ -14,6 +14,7 @@ import {
   forgetDirectorySearch,
   rememberDirectorySearch,
   restoreDirectorySearch,
+  expandedDirectorySections,
 } from '@/lib/campusDirectorySearch';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
@@ -26,9 +27,11 @@ import {
   searchCampusServices,
   secondaryCampusServices,
   countCampusSearchResults,
+  groupCampusServiceEntries,
   writeCampusServiceFilters,
   readCampusServiceFilters,
   type ServiceCategory,
+  type CampusService,
 } from '@/lib/campusServices';
 
 function filtersFromUrlOrSession(params: URLSearchParams, pathname: string) {
@@ -47,6 +50,8 @@ function ServiceDirectory() {
   const platformAudience = !!(platform?.session && !platform.loading && !platform.error && !platform.pendingLogout);
   const uid = user?.uid || '';
   const searchInput = useRef<HTMLInputElement>(null);
+  const directory = useRef<HTMLDivElement>(null);
+  const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const requestSequence = useRef(0);
   useEffect(() => () => { requestSequence.current += 1; }, []);
   const schoolSearch = useCampusNavigationSearch(params);
@@ -63,6 +68,7 @@ function ServiceDirectory() {
     // Restore URL or session filters after history navigation without painting an empty directory.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFilters(next);
+    setRestoredExpanded(restoreDirectorySearch('search', window.location.pathname || '/search')?.expanded ?? []);
   }, []);
   useEffect(() => {
     // Restore the URL state on history navigation or an external link to this directory.
@@ -141,6 +147,7 @@ function ServiceDirectory() {
     }
   }
   function resetFilters() {
+    setRestoredExpanded([]);
     updateFilters({ query: '', category: 'all' });
     searchInput.current?.focus();
   }
@@ -151,14 +158,52 @@ function ServiceDirectory() {
       query,
       category,
       open: false,
+      expanded: expandedDirectorySections(directory.current),
     });
+  }
+  function renderServiceLink(service: CampusService, secondary = false) {
+    return (
+      <Link
+        key={service.href}
+        className={`${styles.service}${secondary ? ` ${styles.secondaryService}` : ''}`}
+        href={campusServiceHref(service.href, schoolSearch)}
+        onClick={() => rememberLeaving(campusServiceHref(service.href, schoolSearch))}
+      >
+        <div>
+          <h3>{service.name}</h3>
+          <p>{service.text}</p>
+          <small className={styles.access}>{serviceAccessLabel(service.access, options)}</small>
+        </div>
+        <span aria-hidden="true">→</span>
+      </Link>
+    );
+  }
+  function renderService(service: CampusService) {
+    const children = browsing ? secondaryCampusServices(service.href, schoolLmsEnabled) : [];
+    return (
+      <div key={service.href} className={styles.serviceEntry}>
+        {renderServiceLink(service)}
+        {children.length > 0 && (
+          <details
+            className={styles.related}
+            data-directory-section={`service:${service.href}`}
+            open={restoredExpanded.includes(`service:${service.href}`) || undefined}
+          >
+            <summary aria-label={`${service.name}的相關服務`}>
+              相關服務 <span>{children.length}</span>
+            </summary>
+            {children.map((child) => renderServiceLink(child, true))}
+          </details>
+        )}
+      </div>
+    );
   }
   return (
     <SiteShell
       title="所有服務"
-      subtitle="搜尋要做的事，或依分類查找。學校帳號與 Google 帳號可使用的服務不同。"
+      subtitle="先選常用服務，或直接搜尋你要做的事。"
     >
-      <div className={styles.directory}>
+      <div ref={directory} className={styles.directory}>
         <form
           className={styles.searchPanel}
           role="search"
@@ -272,9 +317,10 @@ function ServiceDirectory() {
           </div>
         )}
         <div className={styles.resultSummary}>
-          <p role="status" aria-live="polite" aria-atomic="true">
-            找到 {directoryCount} 項服務
-          </p>
+          <div>
+            <p role="status" aria-live="polite" aria-atomic="true">找到 {directoryCount} 項服務</p>
+            {browsing && category === 'all' && <p className={styles.browseHelp}>先顯示常用入口，其餘服務可在各分類展開。</p>}
+          </div>
           {(term || category !== 'all') && (
             <button type="button" onClick={resetFilters}>
               清除篩選
@@ -285,6 +331,7 @@ function ServiceDirectory() {
           SERVICE_CATEGORIES.map((group) => {
             const services = matches.filter((service) => service.category === group.id);
             if (!services.length) return null;
+            const entries = groupCampusServiceEntries(services, group.id, browsing && category === 'all');
             return (
               <section
                 className={styles.category}
@@ -295,51 +342,18 @@ function ServiceDirectory() {
                   <h2 id={`category-${group.id}`}>{group.label}</h2>
                   <p>{group.description}</p>
                 </div>
-                <div className={styles.services}>
-                  {services.map((service) => {
-                    const children = browsing
-                      ? secondaryCampusServices(service.href, schoolLmsEnabled)
-                      : [];
-                    return (
-                      <div key={service.href} className={styles.serviceEntry}>
-                        <Link
-                          className={styles.service}
-                          href={campusServiceHref(service.href, schoolSearch)}
-                          onClick={() =>
-                            rememberLeaving(campusServiceHref(service.href, schoolSearch))
-                          }
-                        >
-                          <div>
-                            <h3>{service.name}</h3>
-                            <p>{service.text}</p>
-                            <small className={styles.access}>
-                              {serviceAccessLabel(service.access, options)}
-                            </small>
-                          </div>
-                          <span aria-hidden="true">→</span>
-                        </Link>
-                        {children.map((child) => (
-                          <Link
-                            key={child.href}
-                            className={`${styles.service} ${styles.secondaryService}`}
-                            href={campusServiceHref(child.href, schoolSearch)}
-                            onClick={() =>
-                              rememberLeaving(campusServiceHref(child.href, schoolSearch))
-                            }
-                          >
-                            <div>
-                              <h3>{child.name}</h3>
-                              <p>{child.text}</p>
-                              <small className={styles.access}>
-                                {serviceAccessLabel(child.access, options)}
-                              </small>
-                            </div>
-                            <span aria-hidden="true">→</span>
-                          </Link>
-                        ))}
-                      </div>
-                    );
-                  })}
+                <div className={styles.categoryContent}>
+                  <div className={styles.services}>{entries.primary.map(renderService)}</div>
+                  {entries.more.length > 0 && (
+                    <details
+                      className={styles.moreServices}
+                      data-directory-section={`group:${group.id}`}
+                      open={restoredExpanded.includes(`group:${group.id}`) || undefined}
+                    >
+                      <summary>更多{group.label}服務 <span>{entries.more.length}</span></summary>
+                      <div className={styles.services}>{entries.more.map(renderService)}</div>
+                    </details>
+                  )}
                 </div>
               </section>
             );

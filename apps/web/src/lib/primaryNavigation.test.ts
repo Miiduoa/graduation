@@ -20,10 +20,11 @@ it.each([
   ['/cafeteria/restaurant-1', 'life'],
   ['/food', 'life'],
   ['/shops', 'life'],
-  ['/hub', 'life'],
+  ['/hub', 'today'],
   ['/bus/registered', 'life'],
   ['/library', 'life'],
   ['/events/talk-1', 'life'],
+  ['/career', 'life'],
   ['/community/post/topic-1', 'life'],
   ['/settings', 'me'],
   ['/classroom/account', 'me'],
@@ -48,7 +49,7 @@ it.each([
 
 it('treats legacy /today and /hub only as section aliases, not as link targets from header vocabulary', () => {
   expect(primaryNavigationSection('/today')).toBe('today');
-  expect(primaryNavigationSection('/hub')).toBe('life');
+  expect(primaryNavigationSection('/hub')).toBe('today');
   expect(primaryNavigationSection('/')).toBe('today');
   expect(primaryNavigationSection('/life')).toBe('life');
 });

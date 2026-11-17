@@ -258,6 +258,7 @@ export default function HomePage() {
   const agent = context && accountId && !sessionLoading && !blocked && !nuni.error ? (
     <TodayAgent
       key={assistantScope}
+      compact
       context={context}
       accountId={accountId}
       tasks={rows.nuni?.data?.tasks ?? []}
@@ -274,7 +275,6 @@ export default function HomePage() {
       </a>
       <AppHeader onOpenVoice={() => voiceEntry.current?.openVoice()} />
       <main id="today-content" className={styles.main} tabIndex={-1}>
-        <StudentCardEntry />
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
             <h2 id="session-title">
@@ -417,6 +417,9 @@ export default function HomePage() {
             </div>
           </section>
         ) : null}
+        <div className={styles.personalTools}>
+          <StudentCardEntry />
+        </div>
         {signedIn && context && accountId ? (
           <AccountIdentity
             key={`identity:${accountId}:${context}`}
