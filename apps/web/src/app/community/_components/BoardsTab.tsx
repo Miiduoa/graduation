@@ -89,6 +89,9 @@ function BoardsContent(props: {
   const [subscriptionLifetime] = useState(() => new AbortController());
   useEffect(() => () => subscriptionLifetime.abort(), [subscriptionLifetime]);
   const [filter, setFilter] = useState('');
+  // A local view over the already loaded board list. School/account changes remount BoardsContent.
+  const [subscribedOnly, setSubscribedOnly] = useState(false);
+  const subscribedOnlyButton = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [composeEpoch, setComposeEpoch] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -199,13 +202,11 @@ function BoardsContent(props: {
 
   const q = filter.trim().toLowerCase();
   const filtered = useMemo(
-    () =>
-      q
-        ? boards.filter((b) =>
-            `${b.name} ${b.slug ?? ''} ${b.rules ?? ''}`.toLowerCase().includes(q),
-          )
-        : boards,
-    [boards, q],
+    () => boards.filter((board) => {
+      if (subscribedOnly && !subscribed.has(board.id)) return false;
+      return !q || `${board.name} ${board.slug ?? ''} ${board.rules ?? ''}`.toLowerCase().includes(q);
+    }),
+    [boards, q, subscribedOnly, subscribed],
   );
 
   const grouped = useMemo(() => groupBoardsByType(filtered), [filtered]);
@@ -321,6 +322,25 @@ function BoardsContent(props: {
           }}
           style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
+        {user && (
+          <button
+            ref={subscribedOnlyButton}
+            type="button"
+            className="btn"
+            aria-label="只看已訂閱看板"
+            aria-pressed={subscribedOnly}
+            onClick={() => setSubscribedOnly((current) => !current)}
+            style={{
+              minHeight: 44,
+              minWidth: 44,
+              flexShrink: 0,
+              padding: '8px 12px',
+              borderColor: subscribedOnly ? 'var(--brand)' : undefined,
+            }}
+          >
+            {subscribedOnly ? '✓ 只看已訂閱' : '只看已訂閱'}
+          </button>
+        )}
         {q && filtered.length > 0 && !loading && !error && (
           <button
             type="button"
@@ -360,10 +380,15 @@ function BoardsContent(props: {
         style={{ margin: subscriptionNotice ? '0 0 12px' : 0, fontSize: 13 }}>
         {subscriptionNotice}
       </p>
+      {subscribedOnly && !loading && !error && boards.length > 0 && (
+        <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--muted)' }}>
+          僅篩選目前載入的看板。
+        </p>
+      )}
       {q && !loading && !error && boards.length > 0 && filtered.length > 0 && (
         <p role="status" aria-label="看板搜尋結果" aria-live="polite" aria-atomic="true"
           style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--muted)' }}>
-          目前載入的看板中找到 {filtered.length} 個符合「{filter.trim()}」的看板。
+          目前載入的{subscribedOnly ? '已訂閱' : ''}看板中找到 {filtered.length} 個符合「{filter.trim()}」的看板。
         </p>
       )}
 
@@ -411,19 +436,35 @@ function BoardsContent(props: {
       ) : filtered.length === 0 ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           <p aria-live="polite" style={{ margin: '0 0 12px' }}>
-            找不到符合「{filter.trim()}」的看板。
+            {subscribedOnly
+              ? q
+                ? `已訂閱的看板中找不到符合「${filter.trim()}」的結果。`
+                : '目前載入的看板中沒有已訂閱項目。'
+              : `找不到符合「${filter.trim()}」的看板。`}
           </p>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              setFilter('');
-              // The clear button disappears with the empty state. Keep keyboard focus in the search field.
-              searchInputRef.current?.focus();
-            }}
-          >
-            清除搜尋
-          </button>
+          {q ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setFilter('');
+                searchInputRef.current?.focus();
+              }}
+            >
+              清除搜尋
+            </button>
+          ) : subscribedOnly ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setSubscribedOnly(false);
+                subscribedOnlyButton.current?.focus();
+              }}
+            >
+              顯示所有看板
+            </button>
+          ) : null}
         </div>
       ) : (
         (['department', 'course', 'topic', 'anon'] as CampusBoardType[]).map((t) => {
@@ -527,7 +568,12 @@ function BoardsContent(props: {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => handleSubscriptionClick(b)}
+                        onClick={() => {
+                          // Unsubscribing removes the focused row from this filtered view.
+                          // Move focus to the remaining filter control before that happens.
+                          if (subscribedOnly && isSub) subscribedOnlyButton.current?.focus();
+                          handleSubscriptionClick(b);
+                        }}
                         disabled={subscriptionPending}
                         aria-pressed={isSub}
                         aria-busy={subscriptionPending}
