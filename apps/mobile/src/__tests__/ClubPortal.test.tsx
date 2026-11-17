@@ -367,3 +367,124 @@ test('手機退出社團需再次確認', async () => {
     expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', { action: 'leave', groupId: 'club' }),
   );
 });
+
+test.each(['none', 'past', 'mixed'])('活動篩選後提供空態與已載入的過往活動：%s', async (kind) => {
+  const now = Date.now();
+  const past = {
+    id: 'past',
+    title: '過往社課',
+    location: '教室',
+    startsAt: now - 20000,
+    endsAt: now - 10000,
+    capacity: 10,
+    registrationDeadline: now - 30000,
+    cancellationDeadline: now - 30000,
+    visibility: 'public',
+    registered: 0,
+    checkedIn: 0,
+    mine: false,
+    myCheckIn: false,
+  };
+  jest.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    events:
+      kind === 'none'
+        ? []
+        : kind === 'past'
+          ? [past]
+          : [
+              past,
+              {
+                ...past,
+                id: 'next',
+                title: '下次社課',
+                startsAt: now + 100000,
+                endsAt: now + 200000,
+              },
+            ],
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('近期活動');
+  expect(!!screen.queryByText('目前沒有即將舉行的活動')).toBe(kind !== 'mixed');
+  expect(screen.queryByText(/過往社課/)).toBeNull();
+  if (kind === 'none') {
+    expect(screen.queryByText('查看過往活動')).toBeNull();
+  } else {
+    fireEvent.press(screen.getByText('查看過往活動'));
+    expect(screen.getByText(/過往社課/)).toBeTruthy();
+    fireEvent.press(screen.getByText('只看近期活動'));
+    expect(screen.queryByText(/過往社課/)).toBeNull();
+  }
+  expect(callClubPortal).toHaveBeenCalledTimes(1);
+});
+
+test.each(['owner', 'admin', 'member', 'visitor'])(
+  '缺漏資料只向本社幹部提供既有編輯入口：%s',
+  async (role) => {
+    jest.mocked(callClubPortal).mockResolvedValue({
+      ...profile,
+      role,
+      status: 'active',
+      office: role === 'visitor',
+      club: { ...profile.club!, meetingTime: '社課時間未提供', description: '  ' },
+    });
+    render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+    await screen.findByText('社團尚未提供介紹。');
+    if (role === 'owner' || role === 'admin') {
+      fireEvent.press(screen.getByText('填寫社課時間'));
+      expect(screen.getByText('編輯社團介紹')).toBeTruthy();
+      fireEvent.press(screen.getByText('管理'));
+      fireEvent.press(screen.getByText('填寫社團介紹'));
+      expect(screen.getByText('編輯社團介紹')).toBeTruthy();
+    } else {
+      expect(screen.queryByText('填寫社課時間')).toBeNull();
+      expect(screen.queryByText('填寫社團介紹')).toBeNull();
+    }
+    expect(callClubPortal).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('幹部不通過申請失敗後可保留理由重試，成功後更新待審名單', async () => {
+  const officerView = {
+    ...profile,
+    role: 'admin',
+    status: 'active',
+    requests: [{ id: 'applicant', name: '申請人' }],
+  };
+  jest.mocked(callClubPortal).mockResolvedValue(officerView);
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('管理');
+  fireEvent.press(screen.getByText('管理'));
+  fireEvent.changeText(screen.getByLabelText('不通過理由：申請人'), '請補充資料');
+  jest.mocked(callClubPortal).mockRejectedValueOnce(new Error('連線中斷，請重試'));
+  fireEvent.press(screen.getByText('不通過'));
+  await screen.findByText('連線中斷，請重試');
+  jest.mocked(callClubPortal).mockResolvedValue({ ...officerView, requests: [] });
+  fireEvent.press(screen.getByText('不通過'));
+  await screen.findByText('目前沒有待審申請。');
+  expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', {
+    action: 'review',
+    groupId: 'club',
+    targetUid: 'applicant',
+    decision: 'declined',
+    reason: '請補充資料',
+  });
+});
+
+test('學生申請失敗可重試，未通過後也能重新申請', async () => {
+  jest.mocked(callClubPortal).mockResolvedValue({
+    ...profile,
+    status: 'declined',
+    reason: '請補充資料',
+    club: { ...profile.club!, joinPolicy: 'review' },
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('申請未通過：請補充資料');
+  jest.mocked(callClubPortal).mockRejectedValueOnce(new Error('連線中斷，請重試'));
+  fireEvent.press(screen.getByText('申請加入'));
+  await screen.findByText('連線中斷，請重試');
+  jest.mocked(callClubPortal).mockResolvedValue({ ...profile, status: 'pending' });
+  fireEvent.press(screen.getByText('申請加入'));
+  await screen.findByText('已送出申請，等幹部回覆');
+  expect(callClubPortal).toHaveBeenCalledWith('one', 'pu', { action: 'join', groupId: 'club' });
+});

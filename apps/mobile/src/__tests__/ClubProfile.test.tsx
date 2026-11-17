@@ -4,6 +4,12 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { ClubProfile } from '../screens/ClubProfile';
 import { ClubDirectory } from '../screens/ClubDirectory';
 import { loadClubProfile } from '../services/clubProfile';
+jest.mock('../screens/ClubPortal', () => ({
+  ClubPortal: ({ uid, schoolId, groupId }: { uid: string; schoolId: string; groupId: string }) => {
+    const { Text } = require('react-native');
+    return <Text>{`管理入口：${uid}/${schoolId}/${groupId}`}</Text>;
+  },
+}));
 jest.mock('../services/clubProfile', () => ({ loadClubProfile: jest.fn() }));
 jest.mock('../ui/components', () => {
   const { View, Text, Pressable } = require('react-native');
@@ -112,3 +118,24 @@ test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async ()
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByText('社課通知')).toBeTruthy();
 });
+
+test.each(['owner', 'admin', 'member'])(
+  '舊版介紹頁可透過既有管理入口補齊資料並返回：%s',
+  async (role) => {
+    jest.mocked(clubSummaryEnabled).mockReturnValue(true);
+    jest.mocked(loadClubProfile).mockResolvedValue({ ...profile, role, description: '' });
+    render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+    await screen.findByText('社團尚未提供介紹。');
+    if (role === 'member') {
+      expect(screen.queryByText('填寫社課時間')).toBeNull();
+      expect(screen.queryByText('填寫社團介紹')).toBeNull();
+    } else {
+      fireEvent.press(screen.getByText('填寫社團介紹'));
+      expect(screen.getByText('管理入口：one/pu/club')).toBeTruthy();
+      fireEvent.press(screen.getByText('回社團介紹'));
+      await screen.findByText('社團尚未提供介紹。');
+      fireEvent.press(screen.getByText('填寫社課時間'));
+      expect(screen.getByText('管理入口：one/pu/club')).toBeTruthy();
+    }
+  },
+);

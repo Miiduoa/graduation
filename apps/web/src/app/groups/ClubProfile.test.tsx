@@ -91,3 +91,18 @@ test('重新讀取成功後，忽略先前請求延遲回傳的錯誤', async ()
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByText('社課通知')).toBeTruthy();
 });
+
+test.each(['owner', 'admin', 'member'])(
+  '舊版介紹頁依既有管理開放條件提供補齊連結：%s',
+  async (role) => {
+    vi.mocked(clubEnabled).mockReturnValue(true);
+    vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role, description: '' });
+    render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+    await screen.findByText('社團尚未提供介紹。');
+    for (const name of ['填寫社課時間', '填寫社團介紹']) {
+      const link = screen.queryByRole('link', { name });
+      if (role === 'member') expect(link).toBeNull();
+      else expect(link?.getAttribute('href')).toBe('/groups/club/club?schoolId=pu');
+    }
+  },
+);

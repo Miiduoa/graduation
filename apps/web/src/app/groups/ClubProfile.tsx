@@ -49,6 +49,14 @@ export function ClubProfile({
             {group.memberCount === null ? '社員數未提供' : `${group.memberCount} 位社員`} ·
             社課時間未提供
           </p>
+          {clubEnabled() && ['owner', 'admin'].includes(group.role) && (
+            <Link
+              className="btn"
+              href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
+            >
+              填寫社課時間
+            </Link>
+          )}
           <button className="btn" style={{ minHeight: 44 }} disabled>
             已加入
           </button>
@@ -80,7 +88,19 @@ export function ClubProfile({
           </section>
           <section>
             <h2>介紹</h2>
-            <p style={{ whiteSpace: 'pre-wrap' }}>{group.description || '社團尚未提供介紹。'}</p>
+            <p style={{ whiteSpace: 'pre-wrap' }}>
+              {group.description?.trim() || '社團尚未提供介紹。'}
+            </p>
+            {clubEnabled() &&
+              ['owner', 'admin'].includes(group.role) &&
+              !group.description?.trim() && (
+                <Link
+                  className="btn"
+                  href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
+                >
+                  填寫社團介紹
+                </Link>
+              )}
             <p>僅供現有社員閱讀。IG、LINE 官方連結尚未提供。</p>
           </section>
           {!clubEnabled() && ['owner', 'admin'].includes(group.role) && (
