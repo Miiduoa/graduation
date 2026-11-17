@@ -213,25 +213,36 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
   );
 }
 
+/** Keep every original newline separately so CR-only Mac files and mixed files
+ * can be exported verbatim. HTML textarea.value may normalize these delimiters. */
+type OriginalSourceLine = { text: string; separator: string };
+function splitOriginalSourceLines(source: string): OriginalSourceLine[] {
+  const lines: OriginalSourceLine[] = [];
+  let from = 0;
+  for (const boundary of source.matchAll(/\r\n|\r|\n/gu)) {
+    const offset = boundary.index;
+    lines.push({ text: source.slice(from, offset), separator: boundary[0] });
+    from = offset + boundary[0].length;
+  }
+  lines.push({ text: source.slice(from), separator: '' });
+  return lines;
+}
+
 /** Select only the source's original table lines; never reserialize hidden cells. */
-function tableSourceSelection(lines: string[], table: StudySourceTable, rowIndex: number | null = null): string {
+function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null): string {
   const start = table.startLine - 1;
   if (rowIndex !== null) {
     // A single data row is copied as its exact source line, without
     // synthesizing headers, omitting a hidden cell or joining non-adjacent rows.
     if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= table.rows.length) return '';
-    const line = lines[start + 2 + rowIndex] ?? '';
-    return line.endsWith('\r') ? line.slice(0, -1) : line;
+    return lines[start + 2 + rowIndex]?.text ?? '';
   }
   const end = start + table.rows.length + 2;
   const selected = lines.slice(start, end);
-  // The final CR belongs to the CRLF *after* this table, not to its last cell.
-  // Keep CRLF separators in the extracted text; textarea.value may normalize them to LF.
-  if (end < lines.length && selected.length) {
-    const last = selected.length - 1;
-    if (selected[last].endsWith('\r')) selected[last] = selected[last].slice(0, -1);
-  }
-  return selected.join('\n');
+  // Preserve each interior newline byte-for-byte, but not the delimiter
+  // AFTER the last row. Do not add a later paragraph or a hidden source line.
+  return selected.map((line, index) =>
+    line.text + (index < selected.length - 1 ? line.separator : '')).join('');
 }
 
 // A few iOS Safari and in-app WebViews throw when select() is called on a
@@ -429,7 +440,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
 /** Optional accessible table layout derived solely from the exact source text. */
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
-  const sourceLines = useMemo(() => text.split('\n'), [text]);
+  const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
   if (!tables.length) return null;
 
   return (

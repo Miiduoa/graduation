@@ -1508,3 +1508,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 精確前版 `b9ae7459c03ea36f9db3483179b92f0ee9a2a710` 的 Web Tests job `133747422913` 在 `studySourceTables.test.ts` 的「CR-only multiline hidden wrapper」失敗（16309 通過、1 失敗）；實際掃描會額外輸出教師未公開答案表格。原因是前版雖將掃描分行與換行符號正規化支援 CR，但預先折疊跨行 HTML 標籤仍只判斷 `token.includes('\\n')`，未處理只有 `\\r` 的標籤。
 - 現在對完整受追蹤 HTML 標籤以 `/[\\r\\n]/` 判斷是否需要折疊，將 CR、LF 與 CRLF 都視為換行；僅修改掃描副本，不變更使用者原始教材。既有 CR-only 隱藏容器回歸持續保留，新增跨行 `display:none` 與 `aria-hidden=true` 情境，確認隱藏答案不可成為公開衍生表格、容器結束後的合法表格仍能顯示。
 - 只涉及讀書白板來源掃描器、測試與本文件。未新增套件、外傳私人教材或修改 v1/v2 閱讀進度與 v1 練習 checkpoint 格式。CI／CodeQL／App 5504170 仍需以本次新 head 重新驗證；未有 iOS／Android／Maestro／Ahaboard 同題同機實測前，PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-17：修復 CR-only／混合換行講義的手機原文表格備份
+
+- 前版的來源掃描器已能辨識傳統 Mac CR-only 講義中的 Markdown 表格，但原文選取、剪貼簿及 TXT 匯出仍沿用只以 LF 分行的 UI：CR-only 全表可能選出空字串或其他段落。現在依原始 CR、LF、CRLF 分隔逐行定位，**完整保留每個內部原始換行**，且不包含表格後方的下一段；單列只複製授權原文行，不重新拼接儲存格或推論數值。
+- 新增 CR-only、混合換行且後接段落的 DOM／模擬剪貼簿回歸，核對整表逐字內容、單列選取和後續段落隔離；TXT 使用相同的選取字串。原始教材、使用者筆記、v1/v2 閱讀及 v1 練習 checkpoint 不變；不新增套件、付費 API 或私人教材傳輸。
+- 此為程式與模擬瀏覽器測試，尚非 iOS Safari／Android Chrome、Maestro 真機的下載／貼上驗收。完整 CI、CodeQL、指定 App 5504170 APPROVED、WebGPU 中文教學及 Ahaboard 同教材同題同機對照仍需按新 head 查核；PR 保持 Draft，不合併、不部署。

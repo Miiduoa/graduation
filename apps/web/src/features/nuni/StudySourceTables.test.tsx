@@ -1535,3 +1535,44 @@ it.each([
     else Reflect.deleteProperty(URL, 'revokeObjectURL');
   }
 });
+
+
+it.each([
+  {
+    label: 'classic Mac CR-only',
+    material: source.replace(/\n/gu, '\r'),
+    expected: source.split('\n').slice(1).join('\r'),
+  },
+  {
+    label: 'mixed CR / CRLF / LF with a later paragraph',
+    material: [
+      '導言\r', '| 科目 | 學分 | 教室 |\r\n', '| :--- | ---: | --- |\n',
+      '| 資料庫 | 3 | 301 |\r', '| 計算機概論 | 2 | 205 |\n', '後續段落不可複製',
+    ].join(''),
+    expected: [
+      '| 科目 | 學分 | 教室 |\r\n', '| :--- | ---: | --- |\n',
+      '| 資料庫 | 3 | 301 |\r', '| 計算機概論 | 2 | 205 |',
+    ].join(''),
+  },
+])('copies verbatim $label course-table source without a stale or empty selection', async ({
+  material, expected,
+}) => {
+  const copy = vi.fn(() => Promise.resolve());
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    expect(extractStudySourceTables(material)).toHaveLength(1);
+    const view = render(<StudySourceTables text={material} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toContain('資料庫');
+    expect(field.value).not.toContain('後續段落');
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+    expect(copy).toHaveBeenLastCalledWith(expected);
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('瀏覽器已接受複製指令'));
+    fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+      { target: { value: '1' } });
+    expect(field.value).toBe('| 計算機概論 | 2 | 205 |');
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 2 列原文' }));
+    expect(copy).toHaveBeenLastCalledWith('| 計算機概論 | 2 | 205 |');
+    view.unmount();
+  });
+});
