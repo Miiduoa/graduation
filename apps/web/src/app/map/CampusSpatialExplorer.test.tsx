@@ -1120,6 +1120,68 @@ it('quarantines an in-flight OSM response on Safari pagehide even before documen
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
+it('quarantines an in-flight OSM response when a mobile tab hides without pagehide', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  let resolveFirst: ((response: {
+    ok: boolean; status: number; headers: { get: () => null }; json: () => Promise<unknown>;
+  }) => void) | undefined;
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+    .mockResolvedValue({ ok: false, status: 503, headers: { get: () => null } });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const firstSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+  expect(firstSignal.aborted).toBe(false);
+
+  // Switching apps can hide a tab without pagehide; its in-flight OSM
+  // geometry must be aborted rather than continuing to load in the background.
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+  fireEvent(document, new Event('visibilitychange'));
+  expect(firstSignal.aborted).toBe(true);
+  expect(within(dialog).getByText(/返回導覽後才會讀取靜宜建築輪廓/).getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  // A proxy that ignores AbortSignal must not install its late valid shape.
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 }, { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 }, { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  await act(async () => {
+    resolveFirst?.({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date().toISOString(), stale: false,
+      }),
+    });
+  });
+  expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+
+  fireEvent(window, new Event('pageshow')); // No real foreground transition yet.
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  fireEvent(document, new Event('visibilitychange'));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+  fireEvent(document, new Event('visibilitychange'));
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('does not re-fetch settled OSM errors just because Safari restores a page', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, headers: { get: () => null } });
