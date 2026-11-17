@@ -964,7 +964,11 @@ it.each([
 });
 
 it.each([
+  { status: 202, contentRange: null },
+  { status: 204, contentRange: null },
+  { status: 205, contentRange: null },
   { status: 206, contentRange: 'bytes 0-63/4096' },
+  { status: 304, contentRange: null },
   { status: 408, contentRange: null },
   { status: 502, contentRange: null },
   { status: 504, contentRange: null },
@@ -1024,12 +1028,18 @@ it.each([
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   });
 
-// 408s, incomplete intermediary responses (206 or Content-Range on a 200),
-// and gateway failures may omit Retry-After. A one-minute local backoff avoids
+// Incomplete success responses (202/204/205/206), unexpected 304, 408,
+// 200 with Content-Range, and gateway failures may omit Retry-After.
+// A one-minute local backoff avoids
 // repeated requests while original POIs and walking directions stay usable.
 // These are synthetic proxy responses, not observed Overpass behavior.
 it.each([
+  { status: 202, retryAfter: null, contentRange: null },
+  { status: 204, retryAfter: null, contentRange: null },
+  { status: 205, retryAfter: null, contentRange: null },
   { status: 206, retryAfter: null, contentRange: null },
+  { status: 207, retryAfter: null, contentRange: null },
+  { status: 304, retryAfter: null, contentRange: null },
   { status: 206, retryAfter: null, contentRange: 'bytes 0-63/4096' },
   { status: 200, retryAfter: null, contentRange: 'bytes 0-63/4096' },
   { status: 408, retryAfter: null, contentRange: null },
