@@ -838,12 +838,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       .catch((error: unknown) => {
         requestPending = false;
         if (!active || timedOut) return;
-        // Some mobile WebViews reject network failures as DOMException
-        // NetworkError instead of TypeError. Both lack an HTTP Retry-After;
-        // avoid a rapid retry loop without rate-limiting arbitrary application
-        // errors, intentional aborts, or an actual retryable HTTP 500.
+        // WebView bridges can surface an offline fetch rejection as a normal
+        // Error named NetworkError (not always a DOMException). Do not let
+        // that representation bypass the same one-minute origin backoff.
+        // An AbortError or unrelated app error must not be rate-limited.
         const networkFailure = error instanceof TypeError ||
-          (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'NetworkError');
+          (error instanceof Error && error.name === 'NetworkError');
         if (!receivedResponse && networkFailure) {
           setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
         }
