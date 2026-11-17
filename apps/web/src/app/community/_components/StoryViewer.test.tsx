@@ -135,3 +135,21 @@ it('does not change stories on arrow keys used by focused controls, but keeps di
   expect(viewer.next).toHaveBeenCalledOnce();
   expect(viewer.previous).toHaveBeenCalledOnce();
 });
+
+
+it('gives keyboard readers a focusable story surface for deliberate arrow navigation', () => {
+  const { viewer, video } = renderVideo();
+  const canvas = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
+
+  expect(canvas).toHaveProperty('tabIndex', 0);
+  canvas.focus();
+  expect(document.activeElement).toBe(canvas);
+  fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+  fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+  expect(viewer.next).toHaveBeenCalledOnce();
+  expect(viewer.previous).toHaveBeenCalledOnce();
+
+  video.focus();
+  fireEvent.keyDown(video, { key: 'ArrowRight' });
+  expect(viewer.next).toHaveBeenCalledOnce();
+});
