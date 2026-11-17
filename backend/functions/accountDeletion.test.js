@@ -172,6 +172,130 @@ function store(seed = []) {
   };
 }
 
+test('cleans only owned canonical career and club records while preserving shared history', async () => {
+  const removed = [
+    ['schools/pu/careerApplications/application', { uid: 'alice' }],
+    ['schools/pu/careerApplications/application/private/contact', { email: 'private' }],
+    ['schools/other/internshipRecords/record', { uid: 'alice', teacherUid: 'bob' }],
+    ['schools/other/internshipRecords/record/reports/private', { text: 'private' }],
+    ['groups/club/clubMemberRecords/alice', { duesPaid: true, updatedBy: 'bob' }],
+    ['groups/club/clubMemberRecords/alice/history/private', { duesPaid: false }],
+  ];
+  const retained = [
+    ['schools/pu/careerApplications/bob', { uid: 'bob' }],
+    ['schools/pu/careerApplications/alice', { contact: 'legacy without uid' }],
+    ['schools/pu/internshipRecords/alice', { teacherUid: 'alice' }],
+    ['schools/pu/internshipRecords/bob', { uid: 'bob', teacherUid: 'alice' }],
+    ['schools/pu/internshipRecords/bob/reports/report', { text: 'keep' }],
+    ['schools/pu/careerOpportunities/job', { uid: 'alice' }],
+    ['schools/pu/internshipRules/rule', { uid: 'alice' }],
+    ['schools/pu/adminLogs/log', { uid: 'alice' }],
+    ['schools/pu/clubs/club', { confirmedBy: 'alice', status: 'approved' }],
+    ['schools/pu/clubs/club/officers/bob', { role: 'secretary', confirmedBy: 'alice' }],
+    ['groups/club/clubMemberRecords/bob', { duesPaid: true, updatedBy: 'alice' }],
+    ['groups/club/clubEvents/event', { createdBy: 'alice' }],
+    ['schools/pu/clubEvents/event', { createdBy: 'alice' }],
+    ['groups/club/posts/post', { authorId: 'alice' }],
+    ['groups/club/assignments/work/submissions/alice', { uid: 'alice' }],
+    ['groups/club/transactions/payment', { uid: 'alice' }],
+  ];
+  for (const collection of [
+    'careerApplications',
+    'internshipRecords',
+    'clubMemberRecords',
+    'officers',
+  ]) {
+    retained.push([`misc/x/${collection}/alice`, { uid: 'alice' }]);
+    retained.push([`schools/pu/archive/x/${collection}/alice`, { uid: 'alice' }]);
+  }
+  retained.push(['groups/club/officers/alice', { role: 'keep' }]);
+  const officerPath = 'schools/pu/clubs/club/officers/alice';
+  const state = store([
+    ...removed,
+    ...retained,
+    [
+      officerPath,
+      {
+        role: 'president',
+        confirmedAt: 123,
+        confirmedBy: 'bob',
+        uid: 'alice',
+        name: 'Private',
+        email: 'private@example.com',
+      },
+    ],
+    ['schools/other/clubs/club/officers/alice', { name: 'Legacy private name' }],
+  ]);
+  await state.handler(request());
+  for (const [path] of removed) expect(state.docs.has(path)).toBe(false);
+  for (const [path, data] of retained) expect(state.docs.get(path)).toEqual(data);
+  expect(state.docs.get(officerPath)).toEqual({
+    role: 'president',
+    confirmedAt: 123,
+    accountClosed: true,
+  });
+  expect(state.docs.get('schools/other/clubs/club/officers/alice')).toEqual({ accountClosed: true });
+  expect(state.operations.at(-1)).toEqual(['deleteAuth', 'alice']);
+});
+
+test('deleting a teacher preserves student internships and teacher attribution', async () => {
+  const path = 'schools/pu/internshipRecords/student';
+  const data = { uid: 'alice', teacherUid: 'teacher', hours: 40 };
+  const state = store([[path, data]]);
+  await state.handler(request({}, 'teacher'));
+  expect(state.docs.get(path)).toEqual(data);
+});
+
+test('career and club cleanup scans every page even after deleting the previous cursor', async () => {
+  const seed = [];
+  for (let i = 0; i < 405; i++) {
+    const id = String(i).padStart(3, '0');
+    seed.push([`schools/s${id}/careerApplications/own`, { uid: 'alice' }]);
+    seed.push([`schools/s${id}/internshipRecords/own`, { uid: 'alice' }]);
+    seed.push([`groups/g${id}/clubMemberRecords/alice`, { duesPaid: true }]);
+    seed.push([`schools/s${id}/clubs/club/officers/alice`, { role: 'officer', name: 'Private' }]);
+  }
+  const state = store(seed);
+  await state.handler(request());
+  for (const [path] of seed) {
+    if (path.includes('/officers/'))
+      expect(state.docs.get(path)).toEqual({ role: 'officer', accountClosed: true });
+    else expect(state.docs.has(path)).toBe(false);
+  }
+});
+
+test.each([
+  ['recursiveDelete', 'schools/pu/careerApplications/own'],
+  ['recursiveDelete', 'schools/pu/internshipRecords/own'],
+  ['recursiveDelete', 'groups/club/clubMemberRecords/alice'],
+  ['set', 'schools/pu/clubs/club/officers/alice'],
+])('career/club failure at %s %s retains Auth and retries idempotently', async (operation, path) => {
+  const seed = [
+    ['schools/pu/careerApplications/own', { uid: 'alice' }],
+    ['schools/pu/internshipRecords/own', { uid: 'alice' }],
+    ['groups/club/clubMemberRecords/alice', { duesPaid: true }],
+    [
+      'schools/pu/clubs/club/officers/alice',
+      { role: 'president', confirmedAt: 123, name: 'Private' },
+    ],
+    ['groups/club', { memberCount: 2 }],
+    ['groups/club/members/alice', { status: 'active', role: 'member' }],
+  ];
+  const state = store(seed);
+  state.fail(operation, path);
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  await expect(state.handler(request())).resolves.toMatchObject({ success: true });
+  await expect(state.handler(request())).resolves.toMatchObject({ success: true });
+  for (const [removedPath] of seed.slice(0, 3)) expect(state.docs.has(removedPath)).toBe(false);
+  expect(state.docs.get('schools/pu/clubs/club/officers/alice')).toEqual({
+    role: 'president',
+    confirmedAt: 123,
+    accountClosed: true,
+  });
+  expect(state.docs.get('groups/club')).toEqual({ memberCount: 1 });
+});
+
 test.each([NaN, Infinity, undefined, '1893499200', NOW / 1000 + 1, NOW / 1000 - 601, 0])(
   'rejects invalid or stale recent login %s before changing data',
   async (authTime) => {
