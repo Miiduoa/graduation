@@ -27,7 +27,7 @@ const onCall = createAccountGuardedOnCall({
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { TAIPEI_TIME_ZONE, taipeiDateKey, taipeiDayStart, shiftDateKey } = require('../lib/taipeiDay');
 
-const { writeOrderPatch, writeOrderTransition, identifier } = require('../orderTransitions');
+const { writeOrderPatch, writeOrderTransition, validateOrder, identifier } = require('../orderTransitions');
 const { normalizeCafeteriaOperatorRecord } = require('../authz');
 const { assertOnlineOrderingEnabled } = require('../lib/onlineOrdering');
 
@@ -118,6 +118,18 @@ async function allocateQueueSerial(db, { schoolId, vendorId, now = new Date() })
 
 const CLOSED_ORDER_STATUSES = ['completed', 'cancelled'];
 
+// Only in-process callers can consume this evidence. Public queue requests still
+// receive failed-precondition; arbitrary provider messages/details are not state.
+class ClosedOrderError extends HttpsError {
+  constructor(order, schoolId, orderId) {
+    validateOrder(order, schoolId, orderId);
+    super('failed-precondition', 'Order is already closed');
+    this.orderState = Object.freeze({
+      schoolId, orderId, userId: order.userId, status: order.status,
+    });
+  }
+}
+
 /**
  * 幫一筆訂單拿號碼牌，和 assignQueueNumber 共用同一個計數器（以訂單的 cafeteriaId 為店）。
  * - 訂單已有號碼就直接回那個號碼，不會再發一次。
@@ -177,9 +189,18 @@ async function assignNumberForOrder(
         reason: 'account-deletion',
       });
     }
+    // createOrder supplies its authenticated buyer. A later owner change must
+    // not attach another buyer's state/number or allocate against their order.
+    // Trusted internal calls without uid retain their canonical-owner contract.
+    if (role === 'system' && uid != null && uid !== order.userId) {
+      throw new HttpsError('failed-precondition', 'Order owner changed before numbering');
+    }
+    // Existing numbers can return without a patch. Validate their source too,
+    // before a caller adopts this transaction's observed order status.
+    validateOrder(order, schoolId, orderId);
     // Legacy cancelled orders may retain a number; never revive their queue.
     if (order.status === 'cancelled')
-      throw new HttpsError('failed-precondition', 'Order is already closed');
+      throw new ClosedOrderError(order, schoolId, orderId);
     if (typeof order.queueNumber === 'number' && order.queueNumber > 0) {
       // 已經有號碼：回同一個號碼。店家按「給號碼並接單」時，還沒接的單照樣接下來
       if (role === 'merchant' && order.status === 'pending') {
@@ -194,7 +215,7 @@ async function assignNumberForOrder(
       return { queueNumber: order.queueNumber, queueStatus: 'assigned', reused: true, status: order.status };
     }
     if (CLOSED_ORDER_STATUSES.includes(order.status))
-      throw new HttpsError('failed-precondition', 'Order is already closed');
+      throw new ClosedOrderError(order, schoolId, orderId);
     const plan = await readNextSerial(tx, countersRef, cafeteriaId, date);
     plan.write();
     const numberPatch = {
@@ -290,6 +311,7 @@ async function runDailyQueueReset(db, now = new Date()) {
 
 module.exports.allocateQueueSerial = allocateQueueSerial;
 module.exports.assignNumberForOrder = assignNumberForOrder;
+module.exports.ClosedOrderError = ClosedOrderError;
 module.exports.assignQueueNumberHandler = assignQueueNumberHandler;
 module.exports.runDailyQueueReset = runDailyQueueReset;
 module.exports.counterDocId = counterDocId;
