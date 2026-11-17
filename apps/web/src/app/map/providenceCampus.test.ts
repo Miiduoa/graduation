@@ -208,3 +208,35 @@ it('attaches provenance only for Providence when id, name and coordinates match'
   expect(providencePlaceSourceUrl('nthu', library)).toBeNull();
   expect(isProvidencePendingVerification('nthu', gate)).toBe(false);
 });
+
+
+it('does not misattribute a building source when Firestore reclassifies a place', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  // Same ID, name and coordinates are insufficient: a reclassified bus stop
+  // must not inherit the library's OSM building outline or official source.
+  const reclassifiedLibrary = { ...library, category: '公車站' };
+  expect(providencePlaceSourceUrl('pu', reclassifiedLibrary)).toBeNull();
+  expect(providencePlaceSourceUrl('pu', library)).toBe(library.sourceUrl);
+
+  const gate = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  expect(isProvidencePendingVerification('pu', { ...gate, category: '教學' })).toBe(false);
+  expect(isProvidencePendingVerification('pu', gate)).toBe(true);
+});
+
+it('retains a public bus stop beside a same-name non-stop marker', () => {
+  const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-zhugu')!;
+  const building: MapLocation = {
+    id: 'custom-zhugu-landmark',
+    name: stop.name,
+    category: '教學',
+    description: 'Synthetic colliding name; not an audited campus building',
+    lat: stop.lat,
+    lng: stop.lng,
+  };
+  const merged = withProvidenceCampusPlaces('pu', [building]);
+  // Coincident coordinates must not hide the actual transport option.
+  expect(merged.some((place) => place.id === building.id)).toBe(true);
+  expect(merged.find((place) => place.id === stop.id)).toEqual(stop);
+  expect(merged.filter((place) => place.name === stop.name)).toHaveLength(2);
+  expect(new Set(merged.map((place) => place.id)).size).toBe(merged.length);
+});
