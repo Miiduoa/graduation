@@ -57,7 +57,12 @@ export function ClubDirectory({
       />
       {segment === 'discover' ? (
         uid && schoolId ? (
-          <ClubPortal key={`${uid}:${schoolId}`} uid={uid} schoolId={schoolId} />
+          <ClubPortal
+            key={`${uid}:${schoolId}`}
+            uid={uid}
+            schoolId={schoolId}
+            searchQuery={search}
+          />
         ) : (
           <Text style={textStyle}>登入後查看學校社團。</Text>
         )

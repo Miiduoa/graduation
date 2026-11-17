@@ -73,6 +73,12 @@ test('cross-listed mobile catalog cards have unique keys and only the latest tap
 
     const buttons = view.getAllByText('複製課表匯入資料');
     expect(buttons).toHaveLength(3);
+    // Screen readers must identify the exact row, even for official duplicate
+    // entries with identical titles, class sections and import CSV content.
+    expect(view.getByLabelText('複製課表匯入資料：第1筆，資料庫管理系統，課號130032，班別0，資管系')).toBeTruthy();
+    expect(view.getByLabelText('複製課表匯入資料：第2筆，資料庫管理系統，課號130032，班別0，跨院學程')).toBeTruthy();
+    expect(view.getByLabelText('複製課表匯入資料：第3筆，資料庫管理系統，課號130032，班別0，資管系')).toBeTruthy();
+    expect(view.getByLabelText('帶入課表核對：第2筆，資料庫管理系統，課號130032，班別0，跨院學程')).toBeTruthy();
     fireEvent.press(buttons[0]);
     expect(await view.findByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeTruthy();
     fireEvent.press(buttons[1]);

@@ -54,9 +54,10 @@ type Props = {
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 
-function CourseCard({ course, schoolId, navigation, cardId, copyFeedback, onCopy }: Props & {
+function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy }: Props & {
   course: PublicCatalogCourse;
   cardId: string;
+  rowNumber: number;
   copyFeedback: ClipboardFeedback | null;
   onCopy: (csv: string, cardId: string) => void;
 }) {
@@ -112,6 +113,10 @@ function CourseCard({ course, schoolId, navigation, cardId, copyFeedback, onCopy
     : ncnuCourseMeetings(course.time, course.semester)?.map(meeting => ({ ...meeting, room: course.room }));
   const rawMeetings = course.meetings ?? [{ time: course.time, room: course.room }];
   const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
+  // Course codes and titles can repeat across departments and even in the
+  // official feed. Include the visible row position so VoiceOver/TalkBack users
+  // know which course will be copied or added to their import review.
+  const spokenCourse = `第${rowNumber}筆，${course.title}，課號${course.code}，班別${course.section || '未提供'}，${course.department || '未提供系所'}`;
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
   // Show copy feedback only on the last tapped row, even when two cross-listed
   // cards produce identical CSV. Keeping this in the list parent also clears
@@ -133,16 +138,16 @@ function CourseCard({ course, schoolId, navigation, cardId, copyFeedback, onCopy
     <Text style={body}>{course.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期').replace(/^(\d{3})3$/, '$1 學年度暑期')}</Text>
     {!csv && <Text style={body}>校方課號或上課節次尚無法安全匯入（可能缺漏或重複），請先開啟官方課程目錄核對。</Text>}
     {csv && <View style={{ gap: 8, marginTop: 8 }}>
-      <Button text="帶入課表核對" kind="primary" onPress={() => { void review(course); }} />
+      <Button text="帶入課表核對" accessibilityLabel={`帶入課表核對：${spokenCourse}`} kind="primary" onPress={() => { void review(course); }} />
       {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
       <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
-      <Button text="複製課表匯入資料" kind="ghost" onPress={() => onCopy(csv, cardId)} />
+      <Button text="複製課表匯入資料" accessibilityLabel={`複製課表匯入資料：${spokenCourse}`} kind="ghost" onPress={() => onCopy(csv, cardId)} />
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
         <Text style={body}>請選取下方資料複製，再到匯入頁貼上。</Text>
         <Text accessibilityLabel="可複製的課表資料" selectable style={body}>{csv}</Text>
       </>}
-      {(copied || manualCopy) && <Button text="前往課表匯入" kind="primary" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />}
+      {(copied || manualCopy) && <Button text="前往課表匯入" accessibilityLabel={`前往課表匯入：${spokenCourse}`} kind="primary" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />}
     </View>}
   </Card>;
 }
@@ -366,7 +371,8 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
           </Text>}
         </View>}
         renderItem={({ item, index }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation}
-          cardId={publicCourseCardKey(item, index)} copyFeedback={copyFeedback} onCopy={copyCourse} />}
+          cardId={publicCourseCardKey(item, index)} rowNumber={index + 1}
+          copyFeedback={copyFeedback} onCopy={copyCourse} />}
       />
     </Screen>
   );
