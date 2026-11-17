@@ -319,7 +319,30 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
     });
   }
   const execute = (command: Exclude<InternshipCommand, { action: 'list' }>) =>
-    run(() => service.execute(command));
+    run(async () => {
+      await service.execute(command);
+      // Keep saved document values if the following refresh fails.
+      if (active.current && command.action === 'document') {
+        setSnapshot(
+          (previous) =>
+            previous && {
+              ...previous,
+              records: previous.records.map((record) =>
+                record.id === command.id
+                  ? {
+                      ...record,
+                      documents: record.documents.map((document, index) =>
+                        index === command.index
+                          ? { ...document, url: command.url, submitted: command.submitted }
+                          : document,
+                      ),
+                    }
+                  : record,
+              ),
+            },
+        );
+      }
+    });
   function addRecordCalendar(record: InternshipRecord, index: number) {
     void run(
       () => onAddCalendar(internshipCalendarItem(record, index)),

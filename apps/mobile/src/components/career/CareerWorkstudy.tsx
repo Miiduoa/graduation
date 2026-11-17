@@ -548,9 +548,11 @@ function Workspace({
                 {conflicts.known && !conflicts.names.length && (
                   <Muted>與目前課表沒有衝堂，排班仍請與單位確認。</Muted>
                 )}
-                <External label="校方原始公告 ↗" url={o.sourceUrl} />
+                {o.sourceUrl && <External label="校方原始公告 ↗" url={o.sourceUrl} />}
                 {audience === 'staff' ? (
                   <Button label={`編輯${o.title}`} onPress={() => edit(o)} />
+                ) : o.type !== 'workstudy' ? (
+                  <Body>此類機會請依校方公告方式報名</Body>
                 ) : application ? (
                   <Body>{APPLICATION_LABELS[application.state]}</Body>
                 ) : closed ? (

@@ -562,3 +562,27 @@ it('shows an initial load error with retry instead of loading or an empty result
   await waitFor(() => expect(view.getByText(/測試用機構/)).toBeTruthy());
   expect(view.queryByText('暫時無法讀取')).toBeNull();
 });
+
+it('keeps the saved document URL when refresh fails and resubmits the saved value', async () => {
+  const { view, props, record } = setup();
+  const oldUrl = 'https://example.test/old';
+  const savedUrl = 'https://example.test/saved';
+  record.documents[0].url = oldUrl;
+  await waitFor(() => expect(view.getByLabelText('申請文件連結').props.value).toBe(oldUrl));
+  props.service.load.mockRejectedValue(new Error('儲存後讀取失敗'));
+  fireEvent.changeText(view.getByLabelText('申請文件連結'), savedUrl);
+  await act(async () => {
+    fireEvent.press(view.getByText('登錄已繳交申請'));
+  });
+  await waitFor(() => expect(view.getByText('儲存後讀取失敗')).toBeTruthy());
+  expect(props.service.execute).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('申請文件連結').props.value).toBe(savedUrl);
+  await act(async () => {
+    fireEvent.press(view.getByText('登錄已繳交申請'));
+  });
+  expect(props.service.execute).toHaveBeenCalledTimes(2);
+  expect(props.service.execute).toHaveBeenLastCalledWith(
+    expect.objectContaining({ action: 'document', index: 0, url: savedUrl, submitted: true }),
+  );
+  expect(view.getByLabelText('申請文件連結').props.value).toBe(savedUrl);
+});

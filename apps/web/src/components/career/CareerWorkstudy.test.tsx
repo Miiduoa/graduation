@@ -487,3 +487,31 @@ test('shows every published opportunity type and filters without exposing unpubl
   });
   await waitFor(() => expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy());
 });
+
+test.each([
+  ['internship', true],
+  ['fair', true],
+  ['internship', false],
+  ['fair', false],
+] as const)(
+  '%s directs students to the school announcement (source: %s)',
+  async (type, hasSource) => {
+    const { view, data, service } = setup();
+    data.opportunities = [
+      { ...opportunity, type, sourceUrl: hasSource ? opportunity.sourceUrl : '' },
+    ];
+    await view.findByText('此類機會請依校方公告方式報名');
+    expect(view.queryByRole('button', { name: `應徵${opportunity.title}` })).toBeNull();
+    expect(view.queryByText('工讀權益')).toBeNull();
+    expect(view.queryByLabelText('聯絡方式')).toBeNull();
+    expect(view.queryByRole('button', { name: '送出申請' })).toBeNull();
+    if (hasSource) {
+      expect(view.getByRole('link', { name: '校方原始公告 ↗' }).getAttribute('href')).toBe(
+        opportunity.sourceUrl,
+      );
+    } else {
+      expect(view.queryByRole('link', { name: '校方原始公告 ↗' })).toBeNull();
+    }
+    expect(service.execute).not.toHaveBeenCalled();
+  },
+);
