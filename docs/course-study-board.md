@@ -1580,3 +1580,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 某些 iOS／Android 內嵌瀏覽器的 `navigator.clipboard.writeText()` 會回傳永不 settle 的 Promise；原本只有拒絕或缺少 API 才會提供手動長按複製，導致學生點「複製本次筆記」或「複製閱讀／練習進度 JSON」後一直無法取得本機備份。
 - 現在共用剪貼簿寫入器最多等候 5 秒確認；未回應時走原有完整、可選取的 TXT／JSON 手動備份路徑，不改寫內容也不聲稱真的已複製。超時後才傳回的成功不會變成成功提示；如果學生在等待時已修改筆記或切換內容，舊請求不會覆蓋新的狀態。新增 DOM／模擬剪貼簿回歸測試涵蓋筆記、進度 JSON、遲到成功及改稿後逾時。未新增依賴或外傳教材，既有 v1/v2 閱讀與 v1 練習 checkpoint 不變。
 - 此為模擬瀏覽器測試，仍非實際 iOS Safari／Android Chrome 剪貼簿或下載驗收。CI、CodeQL、指定 App 5504170 APPROVED、Maestro 與 Ahaboard 同教材同題同裝置對照仍須以本次新 head 查證；保持 Draft、不合併、不部署。
+
+### 2026-11-18：手機剪貼簿非標準成功回覆不再誤報備份完成
+
+- 標準 Clipboard.writeText() 應回傳 Promise<void>，完成時取得 undefined。行動 WebView／橋接實作可能回傳已 fulfilled 的 null、true、0 或字串，即使尚未真正將筆記寫入剪貼簿。前版僅拒絕 false，現在對非 undefined 的成功值一律不宣稱完成，並保留當次本機 TXT／完整閱讀進度 JSON 的唯讀可選取備援；標準 Promise<void> 成功行為不變。
+- 擴充原有模擬剪貼簿回歸：非標準 fulfilled 值亦需保留原筆記和教材、可還原 JSON、重試不誤報完成且不啟動裝置端模型。不新增套件、付費服務、私人教材傳輸，也不改 v1/v2 閱讀進度或 v1 練習 checkpoint。
+- 以上只是原始 Web 程式及 DOM 模擬驗證，非 iOS Safari／Android Chrome／Maestro 真機貼上結果。CI／CodeQL、指定 GitHub App 5504170 APPROVED、WebGPU 中文教學、Ahaboard 同教材同題同裝置實測仍需依新 head 分別核查；保持 PR Draft，不合併、不部署。

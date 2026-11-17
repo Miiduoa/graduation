@@ -83,7 +83,11 @@ function studyClipboardWriter(): ((text: string) => Promise<void>) | null {
         void Promise.resolve(result as PromiseLike<unknown>).then(
           (acknowledged) => {
             clearTimeout(timeout);
-            if (acknowledged === false) reject(new Error('clipboard write was rejected'));
+            // Clipboard.writeText() is Promise<void>: a confirmed native write
+            // resolves with undefined. WebView bridges sometimes resolve null,
+            // true, 0 or a message without writing anything. Treat those as
+            // unconfirmed and retain the exact selectable TXT/JSON backup.
+            if (acknowledged !== undefined) reject(new Error('clipboard write was not confirmed'));
             else resolve();
           },
           (error: unknown) => {

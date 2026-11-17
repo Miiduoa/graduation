@@ -2123,11 +2123,20 @@ it.each([
   ['no promise', undefined],
   ['synchronous false', false],
   ['resolved false', 'resolve-false'],
+  ['resolved null', 'resolve-null'],
+  ['resolved true', 'resolve-true'],
+  ['resolved zero', 'resolve-zero'],
+  ['resolved success text', 'resolve-message'],
 ] as const)(
   'does not claim TXT or JSON was copied when a WebView clipboard bridge returns %s',
   async (_label, result) => {
     const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
-    const writeText = vi.fn(() => result === 'resolve-false' ? Promise.resolve(false) : result);
+    const nonstandardValues: Record<string, unknown> = {
+      'resolve-false': false, 'resolve-null': null, 'resolve-true': true,
+      'resolve-zero': 0, 'resolve-message': 'ok',
+    };
+    const writeText = vi.fn(() => result.startsWith('resolve-')
+      ? Promise.resolve(nonstandardValues[result]) : result);
     Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
     try {
       render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
