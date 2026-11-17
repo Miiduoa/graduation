@@ -29,6 +29,19 @@ const maxBytes = 512 * 1024;
 const publicCatalogEndpoint = 'https://nuni.tw/api/public-course-catalog';
 const filterErrorMessage = '請選擇星期一到星期日；學分請輸入 0–40 的數字，最多 2 位小數，留白表示不限。';
 
+// A cross-listed course can share semester, code and section across departments;
+// identical official rows can also repeat. Use the complete visible row and
+// position to keep FlatList card state/clipboard feedback on the tapped row.
+// Including the position is intentional: genuinely identical rows must not
+// reuse the same React key, and reordering safely resets per-card feedback.
+function publicCourseCardKey(course: PublicCatalogCourse, index: number): string {
+  return JSON.stringify([
+    course.semester, course.code, course.section, course.department,
+    course.title, course.teacher, course.credits, course.time, course.room,
+    course.meetings, index,
+  ]);
+}
+
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   initialQuery?: string;
@@ -256,7 +269,7 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       <FlatList
         keyboardShouldPersistTaps="handled"
         data={result?.status === 'ready' ? result.data.courses : []}
-        keyExtractor={row => [row.semester, row.code, row.section].join('-')}
+        keyExtractor={publicCourseCardKey}
         contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
         ListHeaderComponent={<View style={{ gap: 10 }}>
           {currentSchoolName && <Text style={body}>正在瀏覽{fullSchoolName}的公開課程；目前選校仍為{currentSchoolName}。</Text>}
