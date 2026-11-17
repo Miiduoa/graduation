@@ -452,8 +452,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     if (school !== 'pu' || footprintStatus !== 'ready' || model.unavailableReason) {
       return NO_VISIBLE_FOOTPRINTS;
     }
-    const pointIds = new Set(model.points.map((point) => point.id));
-    const matching = footprints.filter((footprint) => pointIds.has(footprint.poiId));
+    // A source-checked OSM outline belongs to the bundled, audited POI
+    // identity, not merely an ID string. Firestore or filtered map data may
+    // reuse the same ID at a different name/position; never attach that real
+    // building geometry to a displaced marker or advertise the wrong source.
+    const verifiedPointIds = new Set(model.points
+      .filter((point) => providencePlaceSourceUrl(school, point.location) !== null)
+      .map((point) => point.id));
+    const matching = footprints.filter((footprint) => verifiedPointIds.has(footprint.poiId));
     return matching.length ? matching : NO_VISIBLE_FOOTPRINTS;
   }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
   const sourceFootprint = place
