@@ -573,6 +573,80 @@ it('adds source-checked Providence building shapes without changing navigation o
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A Firestore/custom marker can reuse a bundled Providence POI ID after
+// its name or coordinates have changed. A valid API snapshot still must not
+// attach an audited building outline to that different map location.
+it.each([
+  { reason: 'same ID at a moved coordinate', override: { lat: 24.237 } },
+  { reason: 'same ID under a different name', override: { name: '另一棟圖書館' } },
+])('does not misattribute a valid OSM building to $reason', async ({ override }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const mapPlace: MapLocation = { ...library, ...override };
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+    }),
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[mapPlace]} selected={mapPlace} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/0 棟公開建築輪廓/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).queryByRole('link', { name: '查看此棟建築的 OpenStreetMap 原始輪廓' })).toBeNull();
+  expect(within(dialog).getByText(/沒有可用的已核對 OSM 建築外框/)).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
+});
+
+it('withdraws a visible OSM building when the map POI identity changes while the dialog is open', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const moved: MapLocation = { ...library, lat: library.lat + 0.01 };
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+    }),
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const onSelect = vi.fn();
+  const { rerender } = render(
+    <CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={onSelect} />,
+  );
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  rerender(<CampusSpatialExplorer school="pu" locations={[moved]} selected={moved} onSelect={onSelect} />);
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+  expect(within(dialog).getByText(/0 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).queryByRole('link', { name: '查看此棟建築的 OpenStreetMap 原始輪廓' })).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
 it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores late success', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let signal: AbortSignal | undefined;
