@@ -1,3 +1,9 @@
+## 2026-11-18：同題競品比較可逐案追查，避免匯總數據掩蓋失敗
+
+- `scripts/qa/course-study/compare.mjs` 現在除既有同案例冷／暖啟、步數、記憶體與實際費用差值外，輸出 `caseIds`，以及與每個 case 位置一一對應的 `pairedVerifiedOutcomes`、`pairedOfflineOutcomes`。人工審查可直接查出哪題只有一方有原文證據、哪題雙方未完成來源核對、哪題根本沒有實測離線，而不是只看到總和。統計總數仍以同一份逐案分類累積，不改動既有欄位及輸入 schema v1。
+- 新增 Node 正反回歸，驗證案例順序、成對差值與分類一致、失敗和未測量不被算作另一方獲勝。報告不包含私人教材內容、問答全文或人工審查者姓名，也不自動評分或宣稱超越 Ahaboard。
+- 僅為本機對照報告的可稽核性改善，**不是**同題同機真人實測、iOS／Android 真機或 WebGPU 中文講解驗收。完整 CI/CodeQL、Security Gates、指定 GitHub App 5504170 APPROVED、Maestro 及競品實測仍須依新 head 個別核對；未齊前維持 Draft，不合併、不部署。
+
 ## 2026-11-18：競品同案例步數／記憶體／實際費用／離線結果成對判讀
 
 - 先前比較工具只列冷啟與暖啟的同案例差值。現在新增 `pairedStepsDeltas`、`pairedPeakMemoryDeltasMiB`、`pairedCostDeltasTwd`（nuni 減 Ahaboard）；**任一方未量測就保留 null**，不拿其他題目的結果湊平均或當成免費／零步數。

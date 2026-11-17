@@ -47,6 +47,12 @@ export function auditStudyComparisons(raw) {
   if (input.schemaVersion !== 1 || !Array.isArray(input.trials) || !input.trials.length)
     fail('manifest', 'schemaVersion 1 and paired trials required');
   const ids = new Set();
+  // Preserve the order of the actual paired fixtures in every reported delta.
+  // Without case IDs and per-case outcomes, a low aggregate can conceal which
+  // licensed question failed or where a measurement was absent.
+  const caseIds = [];
+  const pairedVerifiedOutcomes = [];
+  const pairedOfflineOutcomes = [];
   const observations = { nuni: [], Ahaboard: [] };
   const pairedColdStartDeltasMs = [];
   const pairedWarmStartDeltasMs = [];
@@ -67,6 +73,7 @@ export function auditStudyComparisons(raw) {
     const id = text(trial.caseId, `${key}.caseId`);
     if (ids.has(id)) fail(key, 'duplicate caseId');
     ids.add(id);
+    caseIds.push(id);
     for (const digest of ['sourceSha256', 'questionSha256']) {
       if (typeof trial[digest] !== 'string' || !/^[a-f0-9]{64}$/i.test(trial[digest]))
         fail(`${key}.${digest}`, 'SHA-256 fixture digest required');
@@ -126,17 +133,17 @@ export function auditStudyComparisons(raw) {
     pairedCostDeltasTwd.push(pairedDifference('costTwd'));
     const nuniOffline = pair.nuni.offlineCompleted;
     const ahaboardOffline = pair.Ahaboard.offlineCompleted;
-    if (nuniOffline === null || ahaboardOffline === null) pairedOfflineCounts.unmeasured += 1;
-    else if (nuniOffline && ahaboardOffline) pairedOfflineCounts.both += 1;
-    else if (nuniOffline) pairedOfflineCounts.nuniOnly += 1;
-    else if (ahaboardOffline) pairedOfflineCounts.ahaboardOnly += 1;
-    else pairedOfflineCounts.neither += 1;
+    const offlineOutcome = nuniOffline === null || ahaboardOffline === null
+      ? 'unmeasured' : nuniOffline && ahaboardOffline
+        ? 'both' : nuniOffline ? 'nuniOnly' : ahaboardOffline ? 'ahaboardOnly' : 'neither';
+    pairedOfflineOutcomes.push(offlineOutcome);
+    pairedOfflineCounts[offlineOutcome] += 1;
     const nuniVerified = pair.nuni.completed && pair.nuni.correct && pair.nuni.sourceVerified;
     const ahaboardVerified = pair.Ahaboard.completed && pair.Ahaboard.correct && pair.Ahaboard.sourceVerified;
-    if (nuniVerified && ahaboardVerified) pairedVerifiedCounts.both += 1;
-    else if (nuniVerified) pairedVerifiedCounts.nuniOnly += 1;
-    else if (ahaboardVerified) pairedVerifiedCounts.ahaboardOnly += 1;
-    else pairedVerifiedCounts.neither += 1;
+    const verifiedOutcome = nuniVerified && ahaboardVerified
+      ? 'both' : nuniVerified ? 'nuniOnly' : ahaboardVerified ? 'ahaboardOnly' : 'neither';
+    pairedVerifiedOutcomes.push(verifiedOutcome);
+    pairedVerifiedCounts[verifiedOutcome] += 1;
   });
   const summary = {};
   for (const [product, values] of Object.entries(observations)) {
@@ -168,7 +175,8 @@ export function auditStudyComparisons(raw) {
       costNotMeasured: values.filter((v) => v.costTwd === null).length,
     };
   }
-  return { trialCount: input.trials.length, summary, pairedColdStartDeltasMs,
+  return { trialCount: input.trials.length, summary, caseIds,
+    pairedVerifiedOutcomes, pairedOfflineOutcomes, pairedColdStartDeltasMs,
     pairedWarmStartDeltasMs, pairedStepsDeltas, pairedPeakMemoryDeltasMiB,
     pairedCostDeltasTwd, pairedOfflineCounts, pairedVerifiedCounts,
     sourceOfTruth: 'manually recorded observations, not automatic grading or proof of superiority' };

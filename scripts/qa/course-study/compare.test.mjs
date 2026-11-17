@@ -198,3 +198,32 @@ test('separates measured offline failure from a missing offline measurement', ()
   });
   assert.equal(report.summary.Ahaboard.offlineCompleted, 1);
 });
+
+test('keeps case IDs aligned to measured deltas and per-case verification/offline outcomes', () => {
+  const paired = fixture(); // nuni verified, Ahaboard failed; offline unknown for failed
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = 'pair-2';
+  second.results = [result('nuni', false), result('Ahaboard')];
+  paired.trials.push(second);
+  const third = structuredClone(paired.trials[0]);
+  third.caseId = 'pair-3';
+  third.results = [
+    { ...result('nuni'), sourceVerified: false, offlineCompleted: false },
+    { ...result('Ahaboard'), correct: false, offlineCompleted: false },
+  ];
+  paired.trials.push(third);
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.caseIds, ['pair-1', 'pair-2', 'pair-3']);
+  assert.deepEqual(report.pairedVerifiedOutcomes, ['nuniOnly', 'ahaboardOnly', 'neither']);
+  assert.deepEqual(report.pairedOfflineOutcomes, ['unmeasured', 'unmeasured', 'neither']);
+  assert.deepEqual(report.pairedColdStartDeltasMs, [null, null, 0]);
+  assert.deepEqual(report.pairedVerifiedCounts, {
+    both: 0, nuniOnly: 1, ahaboardOnly: 1, neither: 1,
+  });
+  assert.deepEqual(report.pairedOfflineCounts, {
+    both: 0, nuniOnly: 0, ahaboardOnly: 0, neither: 1, unmeasured: 2,
+  });
+  // A report must not echo source text or pretend to have graded it.
+  assert.equal('winner' in report, false);
+  assert.equal(JSON.stringify(report).includes('human test operator'), false);
+});
