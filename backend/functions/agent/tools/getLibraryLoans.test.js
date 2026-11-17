@@ -1,13 +1,39 @@
 'use strict';
 
 const mockGet = jest.fn();
-const mockLimit = jest.fn((maximum) => ({
-  get: async () => {
-    const snapshot = await mockGet();
-    return { ...snapshot, docs: snapshot.docs.slice(0, maximum) };
-  },
-}));
-const mockCollectionLoans = jest.fn(() => ({ limit: mockLimit }));
+const mockLimit = jest.fn();
+const mockOrderBy = jest.fn();
+const mockStartAfter = jest.fn();
+
+function createLoanQuery(afterId) {
+  const query = {
+    orderBy: (...args) => {
+      mockOrderBy(...args);
+      return query;
+    },
+    startAfter: (doc) => {
+      mockStartAfter(doc);
+      return createLoanQuery(doc && doc.id);
+    },
+    limit: (maximum) => {
+      mockLimit(maximum);
+      return {
+        get: async () => {
+          const snapshot = await mockGet();
+          let docs = snapshot.docs;
+          if (afterId) {
+            const index = docs.findIndex((row) => row.id === afterId);
+            docs = index >= 0 ? docs.slice(index + 1) : docs;
+          }
+          return { ...snapshot, docs: docs.slice(0, maximum) };
+        },
+      };
+    },
+  };
+  return query;
+}
+
+const mockCollectionLoans = jest.fn(() => createLoanQuery());
 const mockDocSchool = jest.fn(() => ({ collection: mockCollectionLoans }));
 const mockCollectionSchools = jest.fn(() => ({ doc: mockDocSchool }));
 const mockDocUser = jest.fn(() => ({ collection: mockCollectionSchools }));
@@ -110,7 +136,7 @@ describe('getLibraryLoans tool', () => {
 
     expect(result).toMatchObject({ ok: true, count: 1 });
     expect(result.loans.map((loan) => loan.id)).toEqual(['active-51']);
-    expect(mockLimit).toHaveBeenCalledWith(501);
+    expect(mockLimit).toHaveBeenCalledWith(500);
     expect(mockGet).toHaveBeenCalledTimes(1);
   });
 
@@ -139,11 +165,13 @@ describe('getLibraryLoans tool', () => {
 
     expect(result).toMatchObject({ ok: true, count: 1 });
     expect(result.loans.map((loan) => loan.id)).toEqual(['active-500']);
-    expect(mockLimit).toHaveBeenCalledWith(501);
-    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(result).not.toHaveProperty('complete');
+    expect(mockLimit.mock.calls).toEqual([[500], [500]]);
+    expect(mockStartAfter).toHaveBeenCalledTimes(1);
+    expect(mockGet).toHaveBeenCalledTimes(2);
   });
 
-  test.each([false, true])('rejects an oversized history before exposing a partial list (onlyOverdue=%s)', async (onlyOverdue) => {
+  test.each([false, true])('pages past five hundred historical rows and still returns unpaid loans (onlyOverdue=%s)', async (onlyOverdue) => {
     mockLoans([
       { id: 'visible-first', bookTitle: 'Must not be offered from a partial list', dueAt: Timestamp.fromMillis(now - 1) },
       ...Array.from({ length: 500 }, (_, index) => ({ id: `returned-${index}`, status: 'returned' })),
@@ -151,10 +179,12 @@ describe('getLibraryLoans tool', () => {
 
     const result = await getLibraryLoans.execute({ uid: 'alice', schoolId: 'pu' }, { onlyOverdue });
 
-    expect(result).toEqual({ ok: false, error: 'library_loans_limit_exceeded', loans: [] });
-    expect(result).not.toHaveProperty('count');
-    expect(mockLimit).toHaveBeenCalledWith(501);
-    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, count: 1 });
+    expect(result).not.toHaveProperty('complete');
+    expect(result.loans.map((loan) => loan.id)).toEqual(['visible-first']);
+    expect(mockLimit.mock.calls).toEqual([[500], [500]]);
+    expect(mockStartAfter).toHaveBeenCalledTimes(1);
+    expect(mockGet).toHaveBeenCalledTimes(2);
   });
 
   test.each(['unavailable', 'permission-denied'])('preserves a %s query failure instead of claiming an empty history', async (code) => {
@@ -265,7 +295,7 @@ describe('getLibraryLoans tool', () => {
     expect(mockCollectionSchools.mock.calls).toEqual([['schools'], ['schools'], ['schools']]);
     expect(mockDocSchool.mock.calls).toEqual([['pu'], ['ntu'], ['pu']]);
     expect(mockCollectionLoans.mock.calls).toEqual([['libraryLoans'], ['libraryLoans'], ['libraryLoans']]);
-    expect(mockLimit.mock.calls).toEqual([[501], [501], [501]]);
+    expect(mockLimit.mock.calls).toEqual([[500], [500], [500]]);
     expect([first, second, third].map((result) => result.loans[0].id)).toEqual(['alice-pu', 'alice-ntu', 'bob-pu']);
   });
 });
