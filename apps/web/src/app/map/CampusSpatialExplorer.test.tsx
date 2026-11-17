@@ -931,6 +931,36 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
   }
 });
 
+// Rejected HTTP headers arrive before the response body. An overloaded
+// intermediary may continue streaming an error page or partial JSON unless
+// we explicitly cancel the unused body; only headers determine the backoff.
+it.each([
+  { status: 503, ok: false, contentRange: null },
+  { status: 200, ok: true, contentRange: 'bytes 0-99/200' },
+])('cancels the unused OSM response body on rejected HTTP $status / range $contentRange',
+  async ({ status, ok, contentRange }) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const json = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok, status,
+      headers: { get: (name: string) => name === 'content-range' ? contentRange : null },
+      body: { cancel },
+      json,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(json).not.toHaveBeenCalled();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(retry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  });
+
 it.each([
   { status: 429, kind: 'delay-seconds', header: '600', minutes: 10 },
   { status: 503, kind: 'HTTP-date', header: null, minutes: 10 },
