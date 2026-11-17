@@ -361,7 +361,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     (token, tag: string, offset: number) => {
       // Do not fold a Markdown-escaped example into an active HTML tag.
       if (isEscapedMarkdownTag(source, offset)) return token;
-      if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !token.includes('\n')) return token;
+      if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
       const newlines = token.match(/\r\n|\r|\n/gu) ?? [];
       return token.replace(/\r\n|\r|\n/gu, ' ') + '\n'.repeat(newlines.length);
     },

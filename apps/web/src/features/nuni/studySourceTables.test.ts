@@ -1360,6 +1360,24 @@ describe('classic Mac and mixed-line-ending course handouts', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(7));
   });
 
+  it('keeps CR-only multiline display:none CSS inside its hidden wrapper', () => {
+    const source = [
+      '<div', ' style="display:none">',
+      '| 尚未公開 | 分數 |', '| --- | --- |', '| 答案 | 99 |',
+      '</div>', ...visibleTable,
+    ].join('\r');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('keeps CR-only multiline aria-hidden teacher notes out of later public tables', () => {
+    const source = [
+      '<section', ' aria-hidden="true">',
+      '| 私人筆記 | 分數 |', '| --- | --- |', '| 未發布 | 100 |',
+      '</section>', ...visibleTable,
+    ].join('\r');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
   it('ignores a fenced example across CR line endings but finds later CRLF public rows', () => {
     const source = ['~~~markdown', ...visibleTable, '~~~'].join('\r') +
       '\n' + visibleTable.join('\r\n');
