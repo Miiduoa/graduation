@@ -843,6 +843,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // that representation bypass the same one-minute origin backoff.
         // An AbortError or unrelated app error must not be rate-limited.
         const networkFailure = error instanceof TypeError ||
+          (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'NetworkError') ||
           (error instanceof Error && error.name === 'NetworkError');
         if (!receivedResponse && networkFailure) {
           setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
