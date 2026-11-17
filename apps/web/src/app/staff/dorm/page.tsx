@@ -10,7 +10,7 @@ export default function DormStaffPage() {
     <SiteShell title="輔導員工作台" subtitle="職員服務" schoolName={schoolName}>
       {!user && <p>請先登入校園帳號。</p>}
       {schoolId && <DormWorkflow schoolId={schoolId} uid={user?.uid} initialStaff />}
-      <a href={'/dormitory?schoolId=' + encodeURIComponent(schoolId || '')}>宿舍服務</a>
+      <a href={'/dormitory?schoolId=' + encodeURIComponent(schoolId || '')}>需要服務請到宿舍頁</a>
     </SiteShell>
   );
 }

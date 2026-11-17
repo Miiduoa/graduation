@@ -243,21 +243,22 @@ test('cloud parcels show arrival and identity, keep postal items separate, and p
   subscribe.mockImplementationOnce((_school, _uid, change) => {
     change({ packagesState: 'ready', repairsState: 'ready',
       identity: { studentId: 'S123456', name: '林同學' },
-      packages: [projectDormParcel('arrival', { description: '家人寄的衣服', location: '希嘉學苑服務台', createdAt: Date.now() - 4 * 86400000 }), projectDormParcel('postal', { description: '不混入的掛號', courier: '中華郵政' })],
+      packages: [projectDormParcel('estimate', { description: '預估提醒包裹', arrivedAt: Date.now() - 2 * 86400000 }), projectDormParcel('arrival', { description: '家人寄的衣服', location: '希嘉學苑服務台', createdAt: Date.now() - 4 * 86400000 }), projectDormParcel('postal', { description: '不混入的掛號', courier: '中華郵政' })],
       repairs: [projectDormRepair('r', { description: '冷氣不冷', status: 'completed', completedAt: Date.now(), reference: 'PRIVATE-REF' })],
     });
     return jest.fn();
   });
   const screen = render(<DormApp />);
   await screen.findByText('我的住宿備忘');
-  expect(screen.getByText(/待領包裹 1 件/)).toBeTruthy();
+  expect(screen.getByText(/待領包裹 2 件/)).toBeTruthy();
   fireEvent.press(screen.getByText('包裹領取'));
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
   expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
+  expect(screen.getByText('預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）')).toBeTruthy();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('不混入的掛號')).toBeNull();
   expect(screen.getByText('我自己記的')).toBeTruthy();
-  fireEvent.press(screen.getByText('領取碼'));
+  fireEvent.press(screen.getAllByText('領取碼')[0]);
   expect(screen.getByText('S123456')).toHaveStyle({ fontSize: 34 });
   expect(screen.getByText('林同學')).toHaveStyle({ fontSize: 34 });
   fireEvent.press(screen.getByText('關閉領取碼'));
@@ -295,4 +296,30 @@ test('cancelled repairs show their timestamp without counting as pending tasks',
   fireEvent.press(screen.getByText('設備問題'));
   expect(screen.getByText(`備忘標記：已取消 · ${dormCloudDate(cancelledAt)}`)).toBeTruthy();
   expect(screen.queryByText(/尚未確認輔導員接手/)).toBeNull();
+});
+
+
+test.each([false, true])('包裹清單為空或只有郵件時顯示個人空狀態（只有郵件：%s）', async (postalOnly) => {
+  const { emptyDormCloud, projectDormParcel } = require('@campus/shared/src/dormitoryCloud');
+  let update!: (state: ReturnType<typeof emptyDormCloud>) => void;
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    update = change;
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  const emptyCopy = '此處目前沒有顯示登錄給你的包裹；郵局包裹及掛號郵件請至櫃檯領取。';
+  expect(screen.getByText('正在讀取包裹…')).toBeTruthy();
+  expect(screen.queryByText(emptyCopy)).toBeNull();
+  act(() => update({ ...emptyDormCloud(), packagesState: 'error' }));
+  expect(screen.getByText(/包裹讀取失敗/)).toBeTruthy();
+  expect(screen.queryByText(emptyCopy)).toBeNull();
+  act(() => update({
+    ...emptyDormCloud(),
+    packagesState: 'ready',
+    packages: postalOnly ? [projectDormParcel('postal', { description: '掛號信', location: '郵局' })] : [],
+  }));
+  expect(screen.getByText(emptyCopy)).toBeTruthy();
+  expect(screen.queryByText('掛號信')).toBeNull();
 });

@@ -4,7 +4,8 @@ import { Linking } from 'react-native';
 import { CareerHost } from '../components/career/CareerHost';
 import type { CareerWorkbenchEvent } from '@campus/shared/src/careerWorkstudy';
 let mockEvents: (filter: { category: 'career'; event?: CareerWorkbenchEvent }) => void;
-jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'staff' } }) }));
+let mockUser: { uid: string } | null = { uid: 'staff' };
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('../firebase', () => ({
   getAuthInstance: () => ({ currentUser: { uid: 'staff', getIdToken: async () => 'fixture' } }),
 }));
@@ -59,4 +60,13 @@ test('opens the school event list and both event sources on nuni.tw', async () =
       'https://nuni.tw/events/event%20%2F1?schoolId=pu&source=' + source,
     );
   }
+});
+
+test('shows an honest sign-in state for guests before querying opportunities', () => {
+  mockUser = null;
+  const view = render(<CareerHost schoolId="pu" />);
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
+  expect(view.queryByText(/職產處還沒/)).toBeNull();
+  expect(view.queryByText(/實習工作區/)).toBeNull();
+  mockUser = { uid: 'staff' };
 });
