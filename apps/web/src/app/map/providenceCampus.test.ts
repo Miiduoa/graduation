@@ -131,6 +131,22 @@ it('keeps unique bus ids and the canonical server stop when a bundled id is reus
   expect(new Set(merged.map((place) => place.id)).size).toBe(merged.length);
 });
 
+it('uses metre-distance stop deduplication without collapsing diagonal 53m stops', () => {
+  const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-zhugu')!;
+  const near = { ...stop, id: 'server-zhugu-stop', lat: stop.lat + 0.0002, lng: stop.lng + 0.0002 };
+  const far = { ...stop, id: 'server-zhugu-stop', lat: stop.lat + 0.00035, lng: stop.lng + 0.00035 };
+
+  const nearMerged = withProvidenceCampusPlaces('pu', [near]);
+  expect(nearMerged.find((place) => place.id === near.id)).toEqual(near);
+  expect(nearMerged.some((place) => place.id === stop.id)).toBe(false);
+
+  const farMerged = withProvidenceCampusPlaces('pu', [far]);
+  expect(farMerged.find((place) => place.id === far.id)).toEqual(far);
+  expect(farMerged.find((place) => place.id === stop.id)).toEqual(stop);
+  // Identical names alone do not prove the two markers are the same stop.
+  expect(farMerged.filter((place) => place.name === stop.name)).toHaveLength(2);
+});
+
 it('never lends Providence places or stops to another school', () => {
   expect(withProvidenceCampusPlaces('nthu', [])).toEqual([]);
   expect(withProvidenceCampusPlaces('nthu', [firestoreLibrary])).toEqual([firestoreLibrary]);
