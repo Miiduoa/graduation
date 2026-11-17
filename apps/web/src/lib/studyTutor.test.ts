@@ -138,6 +138,38 @@ describe('lossless study passages', () => {
   });
 });
 
+describe('classic Mac and mixed line-ending study navigation', () => {
+  it('splits at the original CR-only paragraph boundary rather than cutting a sentence', () => {
+    const original = '甲'.repeat(1_000) + '\r' + '乙'.repeat(1_900);
+    const chunks = splitStudySection({ id: 'mac', label: '講義', text: original });
+    expect(chunks[0].text).toBe('甲'.repeat(1_000) + '\r');
+    expect(chunks[1].text.startsWith('乙')).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+
+  it('chooses the last available original separator across CR, CRLF and LF', () => {
+    const original = '甲'.repeat(900) + '\r' + '乙'.repeat(400) + '\r\n' +
+      '丙'.repeat(150) + '\n' + '丁'.repeat(2_000);
+    const chunks = splitStudySection({ id: 'mixed', label: '講義', text: original });
+    expect(chunks[0].text).toBe('甲'.repeat(900) + '\r' + '乙'.repeat(400) + '\r\n' +
+      '丙'.repeat(150) + '\n');
+    expect(chunks[1].text.startsWith('丁')).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+
+  it('does not split CRLF when the CR falls exactly at the passage limit', () => {
+    const original = '甲'.repeat(STUDY_TUTOR_LIMITS.passageCharacters - 1) +
+      '\r\n' + '乙'.repeat(1_700);
+    const chunks = splitStudySection({ id: 'crlf', label: '講義', text: original });
+    expect(chunks[0].text).toBe('甲'.repeat(STUDY_TUTOR_LIMITS.passageCharacters - 1));
+    expect(chunks[1].text.startsWith('\r\n')).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(original);
+    expect(chunks.every((chunk) => chunk.text.length <= STUDY_TUTOR_LIMITS.passageCharacters)).toBe(true);
+  });
+});
+
 describe('readable Unicode passage boundaries', () => {
   it.each([
     { label: 'combining accent', prefixLength: 1_599, cluster: 'e\u0301' },

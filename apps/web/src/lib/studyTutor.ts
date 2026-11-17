@@ -165,7 +165,10 @@ export function splitStudySection(section: StudySection): StudyPassage[] {
     let end = Math.min(offset + STUDY_TUTOR_LIMITS.passageCharacters, section.text.length);
     if (end < section.text.length) {
       const window = section.text.slice(offset, end);
-      const newline = window.lastIndexOf('\n') + 1;
+      // Honor classic Mac CR as well as LF/CRLF when choosing a readable
+      // paragraph boundary. Do not normalize or discard any source character;
+      // keepStudyGraphemeTogether still avoids splitting a CRLF pair at the cap.
+      const newline = Math.max(window.lastIndexOf('\n'), window.lastIndexOf('\r')) + 1;
       const punctuation = Math.max(...['。', '！', '？', '；', '. ', '! ', '? ', '; ']
         .map((separator) => {
           const index = window.lastIndexOf(separator);
