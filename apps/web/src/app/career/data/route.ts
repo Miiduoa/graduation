@@ -6,6 +6,20 @@ import { createCareerFeedCache } from './feedCache';
 
 export const runtime = 'nodejs';
 const cachedFeed = createCareerFeedCache(loadCareerFeed);
+const sourceFeed = createCareerSourceFeed({
+  loadFeed: cachedFeed,
+  loadSources: async () => {
+    const admin = await getFirebaseAdmin();
+    if (!admin) throw new Error('career source settings unavailable');
+    const configured = (await admin.db.doc('schools/pu/settings/careerSources').get()).data();
+    return {
+      office: configured?.office !== false,
+      departments: configured?.departments !== false,
+      taiwanjobs: configured?.taiwanjobs !== false,
+      revision: Number(configured?.revision) || 0,
+    };
+  },
+});
 export async function GET(request: Request) {
   const school = new URL(request.url).searchParams.get('school') ?? '';
   const headers = {
@@ -14,13 +28,10 @@ export async function GET(request: Request) {
   };
   if (!careerIsPu(school)) return Response.json(await cachedFeed(school), { headers });
   try {
-    const admin = await getFirebaseAdmin();
-    if (admin) {
-      // Keep the upstream cache independent of source choices, so saved settings
-      // apply on the next public read even when upstream data is cached.
-      const feed = await createCareerSourceFeed({ db: admin.db, loadFeed: cachedFeed })('pu');
-      return Response.json(feed, { headers });
-    }
+    const feed = await sourceFeed('pu');
+    return Response.json(feed, {
+      headers: feed.sourceSettingsStale ? { ...headers, 'Cache-Control': 'no-store' } : headers,
+    });
   } catch {
     // A settings read failure must not silently re-enable a disabled source.
   }

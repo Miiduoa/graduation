@@ -9,6 +9,8 @@ import { Linking } from 'react-native';
 import { CareerScreen } from '../screens/CareerScreen';
 import {
   CAREER_EMPTY,
+  CAREER_FEED_UNAVAILABLE,
+  CAREER_SOURCES_STALE,
   CAREER_JOBS_UNAVAILABLE,
   emptyCareerFeed,
   type CareerFeed,
@@ -167,4 +169,36 @@ test('authenticated official screen uses hosted callables and hides forms until 
         init.headers.Authorization === 'Bearer fixture',
     ),
   ).toBe(true);
+});
+
+test.each(['network', 'settings'])(
+  'shows a total feed failure and recovers on retry: %s',
+  async (failure) => {
+    global.fetch =
+      failure === 'network'
+        ? jest.fn().mockRejectedValue(Error('offline'))
+        : jest
+            .fn()
+            .mockResolvedValue({
+              ok: false,
+              status: 503,
+              json: async () => ({ error: '設定讀取失敗' }),
+            });
+    const view = render(<CareerScreen />);
+    expect(await view.findByText(CAREER_FEED_UNAVAILABLE)).toBeTruthy();
+    expect(view.queryByText(CAREER_JOBS_UNAVAILABLE)).toBeNull();
+    expect(view.queryByText(/部分校方公告/)).toBeNull();
+    expect(view.queryByText(/目前沒有/)).toBeNull();
+    expect(view.queryByText('正在讀取公開職涯資訊…')).toBeNull();
+    expect(view.getByRole('button', { name: '前往校方職涯資源 ↗' })).toBeTruthy();
+    respond({ ...emptyCareerFeed(), announcementsUnavailable: false, jobsUnavailable: false });
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '重新整理' })));
+    expect(await view.findByText('目前沒有可確認日期的近期截止日或活動。')).toBeTruthy();
+    expect(view.queryByText(CAREER_FEED_UNAVAILABLE)).toBeNull();
+  },
+);
+test('discloses last-known source settings during recovery', async () => {
+  respond({ ...emptyCareerFeed(), sourceSettingsStale: true });
+  const view = render(<CareerScreen />);
+  expect(await view.findByText(CAREER_SOURCES_STALE)).toBeTruthy();
 });

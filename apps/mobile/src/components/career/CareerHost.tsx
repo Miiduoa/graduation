@@ -136,7 +136,9 @@ function createPorts(
     try {
       return await fetch(input, init);
     } catch {
-      throw new Error('職涯服務暫時無法使用，請重新整理。');
+      throw Object.assign(new Error('職涯服務暫時無法使用，請重新整理。'), {
+        code: 'network-request-failed',
+      });
     }
   };
   const workstudy = createWorkstudyService(
