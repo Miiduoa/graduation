@@ -33,6 +33,9 @@ type Props = {
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
+// Link the original university building-unit listing, not the virtual tour.
+// No university photographs or floor plans are copied into nuni.
+const PROVIDENCE_OFFICIAL_BUILDING_UNITS_URL = 'https://c067.pu.edu.tw/p/412-1121-4218.php';
 // The API bounds decoded upstream Overpass to 500 KB. A very large or
 // ambiguous downstream Content-Length must not make mobile JSON parsing
 // allocate unbounded memory if an intermediary changes the response.
@@ -1031,9 +1034,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {school === 'pu' && place.id === 'pu-zhugu' && (
                   <div className={styles.officialFloors}>
                     <strong>主顧樓 · 校方公開樓層資訊</strong>
-                    <p>4 樓：資訊管理學系、人工智慧應用學系。5 樓：資訊工程學系。6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。</p>
-                    <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
-                      查看官方建築資料
+                    <p>4 樓：資訊管理學系、人工智慧應用學系。</p>
+                    <p>5 樓：資訊工程學系。</p>
+                    <p>6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。</p>
+                    <p>7 樓：會計室、校友聯絡暨就業輔導室、國際暨兩岸事務處。</p>
+                    <p>8 樓：校長室、副校長室、秘書室、研發處、人事室。</p>
+                    <a href={PROVIDENCE_OFFICIAL_BUILDING_UNITS_URL} target="_blank" rel="noopener noreferrer">
+                      查看校史資料室主顧樓單位清單
                     </a>
                     <small>依校方校史資料室公開的主顧樓樓層單位資訊整理；單位可能調整，請以校方最新公告為準。這不是教室座標，不代表建築入口或室內動線已查證。</small>
                   </div>
