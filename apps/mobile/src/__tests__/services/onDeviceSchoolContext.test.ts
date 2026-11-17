@@ -543,6 +543,11 @@ test('restored partial assignment metadata matches legacy or eight-page reader b
     },
   };
   expect(format(legacy)).toContain('來源總數：401；本次已取得：50；完整性：僅讀取部分資料');
+  // A genuinely empty older source remains usable, without a false
+  // assertion that missing coverage proves all historical work was read.
+  expect(format({ ...legacy, assignments: {
+    ...legacy.assignments, count: 0, items: [], coverage: undefined,
+  } })).toContain('來源總數：0；本次已取得：0；完整性：未能核對是否完整');
 
   // The real reader cannot return 51 legacy rows or exhaust its eight-page
   // budget with fewer than 400 rows. A saved JSON snapshot can forge either.
@@ -555,6 +560,19 @@ test('restored partial assignment metadata matches legacy or eight-page reader b
     } },
     { ...base, assignments: {
       ...base.assignments, items: rows.slice(0, 399),
+    } },
+    // The first (legacy) page cannot be empty if the source reports pending
+    // tasks. Do not mistake contradictory restored data for "no homework".
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: [],
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [],
+    } },
+    // Older JSON snapshots may lack coverage metadata entirely. This still
+    // cannot be the first page of a source reporting any pending assignments.
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [], coverage: undefined,
     } },
     { ...legacy, assignments: {
       ...legacy.assignments, coverage: { complete: false, reason: 'legacy-partial', pages: 2 },

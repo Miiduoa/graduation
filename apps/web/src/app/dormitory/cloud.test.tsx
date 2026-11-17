@@ -63,6 +63,10 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
       location: '希嘉學苑服務台',
       status: 'arrived',
     }),
+    projectDormParcel('estimate', {
+      description: '預估提醒包裹',
+      arrivedAt: Date.now() - 2 * 86400000,
+    }),
     projectDormParcel('p2', {
       description: '私密掛號信',
       courier: '中華郵政',
@@ -72,15 +76,16 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
   ];
   act(() => mock.listeners[0](next));
   expect(
-    within(screen.getByRole('region', { name: '今晚宿舍' })).getByText(/待領包裹 1 件/),
+    within(screen.getByRole('region', { name: '今晚宿舍' })).getByText(/待領包裹 2 件/),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
   expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
+  expect(screen.getByText('預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）')).toBeTruthy();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('私密掛號信')).toBeNull();
   expect(screen.getByRole('heading', { name: '我自己記的' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '領取碼' }));
+  fireEvent.click(screen.getAllByRole('button', { name: '領取碼' })[0]);
   const identity = within(screen.getByRole('dialog', { name: '領取碼' }));
   expect(identity.getByText('S123456').style.fontSize).toBe('34px');
   expect(identity.getByText('王同學').style.fontSize).toBe('34px');
@@ -120,16 +125,18 @@ it('updates repair status timestamps live, keeps private staff references out an
   expect(mock.stops[1]).toHaveBeenCalled();
 });
 
-it('distinguishes loading, denied reads and the locked empty state without hiding local notes', () => {
+it('distinguishes loading, denied reads and the personal empty state without hiding local notes', () => {
   render(<DormitoryPage />);
   fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
   expect(screen.getByText('正在讀取包裹…')).toBeTruthy();
   act(() => mock.listeners[0]({ ...state(), packagesState: 'error' }));
   expect(screen.getByRole('alert').textContent).toContain('包裹讀取失敗');
   expect(screen.getByRole('alert').textContent).toContain('私有包裹暫時保留上次紀錄，可能尚未更新');
-  expect(screen.queryByText('這所學校的宿舍還沒用 nuni 登錄包裹。')).toBeNull();
+  expect(screen.queryByText('此處目前沒有顯示登錄給你的包裹；郵局包裹及掛號郵件請至櫃檯領取。')).toBeNull();
   act(() => mock.listeners[0](state()));
-  expect(screen.getByText('這所學校的宿舍還沒用 nuni 登錄包裹。')).toBeTruthy();
+  expect(screen.getByText('此處目前沒有顯示登錄給你的包裹；郵局包裹及掛號郵件請至櫃檯領取。')).toBeTruthy();
+  act(() => mock.listeners[0]({ ...state(), packages: [projectDormParcel('postal', { location: '郵局' })] }));
+  expect(screen.getByText('此處目前沒有顯示登錄給你的包裹；郵局包裹及掛號郵件請至櫃檯領取。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '總覽' }));
   expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
 });
