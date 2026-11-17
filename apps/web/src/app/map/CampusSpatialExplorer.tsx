@@ -585,7 +585,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     let active = true;
     let timedOut = false;
     let requestPending = true;
-    let suspendedByPageHide = false;
+    let suspendedInBackground = false;
     // Distinguish fetch-level network errors from a server response. Do not
     // overwrite a valid Retry-After from an HTTP or JSON-contract failure.
     let receivedResponse = false;
@@ -621,12 +621,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // Pause manual retries locally even when AbortSignal was ignored.
       setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
     }, 15_000);
-    // On Safari bfcache navigation, pagehide can precede visibilitychange
-    // while document.hidden is still false. Abort and quarantine in-flight
-    // geometry; resume exactly once after a real foreground return.
-    const suspendForPageHide = () => {
+    // Ordinary mobile app/tab switches can fire visibilitychange without
+    // pagehide. Stop the pending public OSM response in either suspension
+    // path: AbortSignal is advisory, so quarantine late success as well.
+    // A successful/failed settled request must not refetch on resume.
+    const suspendForBackground = () => {
+      if (!document.hidden && !pageSuspendedRef.current) return;
       if (!active || timedOut || !requestPending) return;
-      suspendedByPageHide = true;
+      suspendedInBackground = true;
       active = false;
       footprintRequestActiveRef.current = false;
       window.clearTimeout(timeout);
@@ -634,14 +636,18 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       setFootprintRefreshing(false);
       setFootprintStatus(canRetainStale() ? 'ready' : 'deferred');
     };
-    const resumeAfterPageShow = () => {
-      if (!suspendedByPageHide || document.hidden || pageSuspendedRef.current) return;
-      suspendedByPageHide = false;
+    const resumeAfterForeground = () => {
+      if (!suspendedInBackground || document.hidden || pageSuspendedRef.current) return;
+      suspendedInBackground = false;
       setFootprintAttempt((value) => value + 1);
     };
-    window.addEventListener('pagehide', suspendForPageHide);
-    window.addEventListener('pageshow', resumeAfterPageShow);
-    document.addEventListener('visibilitychange', resumeAfterPageShow);
+    const onVisibilityChange = () => {
+      if (document.hidden) suspendForBackground();
+      else resumeAfterForeground();
+    };
+    window.addEventListener('pagehide', suspendForBackground);
+    window.addEventListener('pageshow', resumeAfterForeground);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     // A gateway can return HTTP 200 with truncated JSON or a payload that
     // fails our source/geometry contract. Treat that as a rejected source
     // response rather than letting repeated manual retries hammer Overpass.
@@ -745,9 +751,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       active = false;
       footprintRequestActiveRef.current = false;
       window.clearTimeout(timeout);
-      window.removeEventListener('pagehide', suspendForPageHide);
-      window.removeEventListener('pageshow', resumeAfterPageShow);
-      document.removeEventListener('visibilitychange', resumeAfterPageShow);
+      window.removeEventListener('pagehide', suspendForBackground);
+      window.removeEventListener('pageshow', resumeAfterForeground);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       controller.abort();
     };
   }, [school, model.unavailableReason, footprintAttempt]);
