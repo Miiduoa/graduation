@@ -265,8 +265,11 @@ it('keeps subscribe and unsubscribe touch targets at least 44 CSS pixels while p
   expect((unsubscribe as HTMLButtonElement).style.minHeight).toBe('44px');
   expect((unsubscribe as HTMLButtonElement).style.minWidth).toBe('44px');
   expect(unsubscribe.getAttribute('aria-pressed')).toBe('true');
+  // A write must settle before a student can issue the opposite action.
+  await waitFor(() => expect((unsubscribe as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(unsubscribe);
   await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
+  await waitFor(() => expect(screen.getByRole('button', { name: '訂閱科學討論' }).getAttribute('aria-pressed')).toBe('false'));
 });
 
 it('prevents two subscription writes from rapid clicks before React commits the disabled state', async () => {
