@@ -159,9 +159,7 @@ async def basic_comparison(page):
     assert await snapshot(page) == ledger, 'Reading the comparison caused an API call or write'
 
 
-async def geometry_against_composer(target, dock_element):
-    # Read target and the entire composer dock in one layout snapshot.
-    return await target.evaluate('''(node, dock) => {
+GEOMETRY_AGAINST_COMPOSER = '''(node, dock) => {
       const box = element => {const r=element.getBoundingClientRect();
         return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
       const style=getComputedStyle(node), visual=window.visualViewport, scrolling=document.scrollingElement;
@@ -172,10 +170,70 @@ async def geometry_against_composer(target, dock_element):
           scrollMarginBlockStart:style.scrollMarginBlockStart,scrollMarginBlockEnd:style.scrollMarginBlockEnd},
         visualViewport:visual?{width:visual.width,height:visual.height,offsetLeft:visual.offsetLeft,
           offsetTop:visual.offsetTop,pageLeft:visual.pageLeft,pageTop:visual.pageTop,scale:visual.scale}:null};
+    }'''
+
+
+async def geometry_against_composer(target, dock_element):
+    # Read target and the entire composer dock in one layout snapshot.
+    return await target.evaluate(GEOMETRY_AGAINST_COMPOSER, dock_element)
+
+
+async def observe_next_forward_tab(button, dock_element):
+    # Previous native focus may still be scrolling between Playwright commands.
+    # Observe the real keydown before product handlers, without changing focus or scrolling.
+    await button.evaluate('''(node, dock) => {
+      const geometry = ''' + GEOMETRY_AGAINST_COMPOSER + ''';
+      node.__qaFocusProbe?.stop();
+      const original=node.scrollIntoView;
+      const probe={requests:[],keydown:null,timeline:[],maxFrames:30,maxDurationMs:750};
+      const active=()=>({tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null});
+      const sample=phase=>({phase,time:performance.now(),active:active(),geometry:geometry(node,dock)});
+      const scrollSample=()=>{const value=geometry(node,dock);
+        return {button:value.target,scroll:value.scroll,documentScrollingElement:value.documentScrollingElement,
+          time:performance.now(),active:active()};};
+      let frame=0,timer=0,frames=0,stopped=false,started=0;
+      const onKeydown=event=>{
+        if(event.key!=='Tab' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)return;
+        document.removeEventListener('keydown',onKeydown,true);
+        started=performance.now();
+        probe.keydown={key:event.key,shiftKey:event.shiftKey,isTrusted:event.isTrusted,
+          defaultPreventedAtCapture:event.defaultPrevented,defaultPreventedAfterDispatch:null,
+          target:{tag:event.target?.tagName ?? null,id:event.target?.id ?? null},
+          before:geometry(node,dock)};
+        probe.timeline.push(sample('keydown capture'));
+        const tick=()=>{
+          if(stopped)return;
+          frames+=1;
+          // The event has finished dispatching by the first animation frame.
+          probe.keydown.defaultPreventedAfterDispatch=event.defaultPrevented;
+          probe.timeline.push(sample('animation frame'));
+          if(frames>=probe.maxFrames || performance.now()-started>=probe.maxDurationMs)probe.stop();
+          else frame=requestAnimationFrame(tick);
+        };
+        frame=requestAnimationFrame(tick);
+        timer=setTimeout(probe.stop,probe.maxDurationMs);
+      };
+      const observedScroll=function(options){
+        const request={options:options ?? null,before:scrollSample()};
+        probe.requests.push(request);
+        try{return original.call(this,options);}
+        finally{request.after=scrollSample();}
+      };
+      probe.stop=()=>{
+        if(stopped)return;
+        stopped=true;clearTimeout(timer);cancelAnimationFrame(frame);
+        document.removeEventListener('keydown',onKeydown,true);
+        if(node.scrollIntoView===observedScroll)node.scrollIntoView=original;
+      };
+      node.__qaFocusProbe=probe;
+      node.scrollIntoView=observedScroll;
+      // The listener is consumed by the next forward Tab or removed with this
+      // page context. The recording deadline begins at keydown, not installation.
+      document.addEventListener('keydown',onKeydown,true);
     }''', dock_element)
 
 
-async def focused_action_readability(page, button, name, before_tab=None):
+async def focused_action_readability(page, button, name, before_tab_observation=None, require_no_scroll=False):
     # Observe native Tab scrolling only. Do not repair visibility with scrollIntoView/focus.
     await expect(button).to_be_focused()
     await page.evaluate('''() => new Promise(resolve => {
@@ -186,9 +244,21 @@ async def focused_action_readability(page, button, name, before_tab=None):
     evidence = await geometry_against_composer(button, await dock.element_handle())
     evidence['focused'] = await button.evaluate('node => document.activeElement === node')
     evidence['action'] = await button.inner_text()
-    probe = await button.evaluate("node => ({installed:!!node.__qaScrollRequests,requests:node.__qaScrollRequests || []})")
+    probe = await button.evaluate('''node => {
+      const probe=node.__qaFocusProbe;
+      probe?.stop();
+      return {installed:!!probe,requests:probe?.requests ?? [],keydown:probe?.keydown ?? null,
+        timeline:probe?.timeline ?? [],maxFrames:probe?.maxFrames,maxDurationMs:probe?.maxDurationMs};
+    }''')
     evidence['scrollRequests'] = probe['requests']
     evidence['scrollProbe'] = 'Single-element observer delegates the original native scrollIntoView' if probe['installed'] else None
+    if before_tab_observation is not None:
+        evidence['beforeTabObservation'] = before_tab_observation
+        evidence['beforeTabSampleTiming'] = 'Document capture listener during the real Tab keydown, before product handlers and native focus'
+        evidence['tabEvent'] = probe['keydown']
+        evidence['focusTimeline'] = probe['timeline']
+        evidence['focusTimelineLimits'] = {key: probe.get(key) for key in ['maxFrames', 'maxDurationMs']}
+    before_tab = probe['keydown']['before'] if probe['keydown'] is not None else None
     if before_tab is not None:
         evidence['beforeTab'] = before_tab
         previous, previous_dock, previous_viewport = before_tab['target'], before_tab['dock'], before_tab['viewport']
@@ -199,6 +269,12 @@ async def focused_action_readability(page, button, name, before_tab=None):
     evidence['viewportScreenshot'] = f'{name}-viewport.png'
     (OUT / f'{name}.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
     await page.screenshot(path=str(OUT / evidence['viewportScreenshot']), full_page=False)
+    if before_tab_observation is not None:
+        assert probe['installed'] and probe['keydown'] is not None, f'Missing real Tab keydown capture: {evidence}'
+        assert (probe['keydown']['isTrusted'] and probe['keydown']['key'] == 'Tab'
+                and not probe['keydown']['shiftKey'] and probe['keydown']['defaultPreventedAfterDispatch'] is not None), evidence
+    if require_no_scroll:
+        assert evidence.get('noScrollExpected') is True, f'Visible forward Tab did not exercise the no-scroll precondition: {evidence}'
     target, dock_box, viewport = evidence['target'], evidence['dock'], evidence['viewport']
     assert (evidence['focused'] and target['width'] > 0 and target['height'] > 0
             and target['top'] >= 0 and target['bottom'] <= min(dock_box['top'], viewport['height'])
@@ -687,27 +763,24 @@ async def protected_good_case(page, name):
     await no_overflow(page)
     await page.screenshot(path=str(OUT / f'protected-{name}-selection-viewport.png'), full_page=False)
     focused_action = None
+    visible_forward_tab = None
     if len(before) == 2:
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
-        before_tab = await geometry_against_composer(button, await dock.element_handle())
-        # Observe only this button instance; every product call delegates unchanged to native.
-        await button.evaluate('''node => {
-          const original=node.scrollIntoView, requests=[];
-          const sample=target=>{const r=target.getBoundingClientRect(), scrolling=document.scrollingElement;
-            return {button:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height},
-              scroll:{x:scrollX,y:scrollY},documentScrollingElement:scrolling?{
-                scrollHeight:scrolling.scrollHeight,clientHeight:scrolling.clientHeight,scrollTop:scrolling.scrollTop}:null};};
-          node.__qaScrollRequests=requests;
-          node.scrollIntoView=function(options){
-            const request={options:options ?? null,before:sample(this)};
-            requests.push(request);
-            try {return original.call(this,options);}
-            finally {request.after=sample(this);}
-          };
-        }''')
+        dock_element = await dock.element_handle()
+        before_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
         await page.keyboard.press('Tab')
         focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus', before_tab)
+        # A native keyboard roundtrip now exercises an already visible target;
+        # the strict no-scroll branch must run even if the first Tab needed reveal.
+        await page.keyboard.press('Shift+Tab')
+        await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_be_focused()
+        before_visible_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
+        await page.keyboard.press('Tab')
+        visible_forward_tab = await focused_action_readability(
+            page, button, f'protected-{name}-visible-forward-tab-focus', before_visible_tab, require_no_scroll=True)
         await page.keyboard.press('Enter')
     else:
         await page.get_by_role('button', name='重新預覽', exact=True).click()
@@ -719,7 +792,7 @@ async def protected_good_case(page, name):
     await capture(page, f'protected-{name}-confirmed')
     return {'mode': 'native protection selection and manual confirmations against fixed fake API',
             'protectedIndices': indices, 'fixtureOriginal': before, 'fixtureRevised': after,
-            'readability': readability, 'focusedPreview': focused_action}
+            'readability': readability, 'focusedPreview': focused_action, 'visibleForwardTab': visible_forward_tab}
 
 
 async def protected_all_case(page):
