@@ -63,7 +63,9 @@ function fallbackStudySpeechUnits(text: string): string[] {
 // new chunk. This only changes the preferred pause point, not the 160-unit cap.
 function isStudySpeechNaturalPause(units: string[], index: number): boolean {
   const token = units[index];
-  if (!/[。！？；，、\n.!?;:：]/u.test(token)) return false;
+  // A classic Mac TXT can contain CR-only paragraph boundaries. CRLF is
+  // one grapheme in modern WebViews; both forms should be natural pauses.
+  if (!/[。！？；，、\r\n.!?;:：]/u.test(token)) return false;
   const previous = units[index - 1] ?? '';
   const next = units[index + 1] ?? '';
   if ((token === '.' || token === ',') &&

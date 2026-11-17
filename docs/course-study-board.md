@@ -1568,3 +1568,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - `scripts/qa/course-study/compare.mjs` 原先輸出已量測筆數中的平均啟動時間，但未同步列出哪些案例沒有測量，容易讓少數成功案例的低平均值被誤認為全體結果。現在為操作步數、冷／暖啟、峰值記憶體、離線、費用新增 `measuredCounts`，分母仍是 `trialCount`，缺測不是零；冷暖啟成對差值只在兩產品同案例皆有數據時才計算，否則為 `null`。
 - 新增 `pairedWarmStartDeltasMs` 作為與既有冷啟相同順序的逐案例數值；另拒收「本次學生任務失敗但標示離線完成」的自相矛盾觀測，避免離線成功數虛增。新增三組 Node 回歸，驗證缺測覆蓋率、成對暖啟與失敗邊界。
 - 這是資料稽核工具和 CI 回歸，**尚未產生任何 Ahaboard 真人同機實測紀錄**；程式測試通過不表示 WebGPU 教學或圖表理解正確。PR 仍保持 Draft，待新 head 的 GitHub CI、CodeQL、指定 GitHub App 5504170 APPROVED、Maestro／手機真機與同教材同題同機對照後才能評估。
+
+### 2026-11-17：本機中文朗讀保留傳統 Mac 與 Windows 教材段落停頓
+
+- `StudyReadAloud` 原先只有 LF 是偏好的自然分段點；CR-only 的舊版 Mac TXT 講義在約 160 UTF-16 單位長的朗讀區塊中，可能忽略原始段落邊界，改在句子中間斷開。現在將 CR 視為自然停頓，CRLF 仍作為同一組換行，原文不更動，仍使用裝置已安裝的本機中文語音，不傳送私人教材。
+- 新增 CR-only、CRLF、LF 三組 DOM／模擬語音引擎測試，另驗證缺少 `Intl.Segmenter` 的舊 WebView 回退路徑；核對首段停在原始換行、全文無遺失、每次朗讀長度保持在 160 UTF-16 單位內。未更改 JSON 備份／練習 checkpoint 或增加套件。
+- 這些是模擬瀏覽器回歸與程式修補，不等同 iOS Safari／Android Chrome、Maestro 真機朗讀效果；仍缺指定 App 5504170 的正式 APPROVED、WebGPU 中文教學和 Ahaboard 同教材同題同機比較。新 head 的 GitHub CI／CodeQL 需獨立驗證；PR 保持 Draft，不合併、不部署。

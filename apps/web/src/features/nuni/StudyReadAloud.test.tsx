@@ -858,6 +858,35 @@ it('still prefers the teaching sentence colon between two Chinese clauses', () =
   expect(chunks.join('')).toBe(original);
 });
 
+it.each([
+  { label: 'classic Mac CR-only', separator: '\r' },
+  { label: 'Windows CRLF', separator: '\r\n' },
+  { label: 'Unix LF', separator: '\n' },
+])('prefers the original $label lesson paragraph boundary for local speech', ({ separator }) => {
+  const original = '課'.repeat(130) + separator + '後'.repeat(180);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks = speak.mock.calls.map(([utterance]) => (utterance as Utterance).text);
+  expect(chunks[0]).toBe('課'.repeat(130) + separator);
+  expect(chunks.join('')).toBe(original);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+  expect(chunks.every((chunk, index) => index === 0 || !chunk.startsWith('\n'))).toBe(true);
+});
+
+it('keeps a CRLF lesson paragraph intact with the older WebView fallback', () => {
+  const nativeIntl = Intl;
+  vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), { Segmenter: undefined }));
+  const original = '課'.repeat(130) + '\r\n' + '後'.repeat(180);
+  speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text={original} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const chunks = speak.mock.calls.map(([utterance]) => (utterance as Utterance).text);
+  expect(chunks[0]).toBe('課'.repeat(130) + '\r\n');
+  expect(chunks.join('')).toBe(original);
+  expect(chunks.every((chunk) => chunk.length > 0 && chunk.length <= 160)).toBe(true);
+});
+
 it('continues to prefer real sentence punctuation while chunking local speech', () => {
   const original = '課'.repeat(140) + '。' + '後'.repeat(80);
   speak.mockImplementation((utterance: Utterance) => utterance.onend?.());
