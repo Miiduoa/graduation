@@ -66,3 +66,22 @@ test.each([
   await expect(loadClubProfile('one', 'pu', 'club')).rejects.toThrow('無法確認社團資格');
   expect(mockDocs).not.toHaveBeenCalled();
 });
+
+test.each([
+  [{ meetingTime: ' 週三 18:00 ' }, '週三 18:00'],
+  [{ meetingTime: '  ' }, ''],
+  [{ meetingTime: {} }, ''],
+  [undefined, ''],
+])('沿用群組讀取取得管理頁儲存的介紹與社課時間：%j', async (clubProfile, meetingTime) => {
+  mockDoc.mockImplementation(async (path: string) => ({
+    data: () =>
+      path.endsWith('/members/one')
+        ? { status: 'active', role: 'member' }
+        : { type: 'club', schoolId: 'pu', description: '新版介紹', clubProfile },
+  }));
+  expect(await loadClubProfile('one', 'pu', 'club')).toMatchObject({
+    description: '新版介紹',
+    meetingTime,
+  });
+  expect(mockDoc).toHaveBeenCalledTimes(2);
+});
