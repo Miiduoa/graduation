@@ -31,6 +31,7 @@ jest.mock('../services/clubSummary', () => ({ clubSummaryEnabled: jest.fn() }));
 const profile = {
   name: '攝影社',
   description: '週三社課',
+  meetingTime: '',
   role: 'member',
   memberCount: 3,
   announcements: [{ id: 'post', title: '社課通知', body: '帶相機' }],
@@ -139,3 +140,64 @@ test.each(['owner', 'admin', 'member'])(
     }
   },
 );
+
+test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位空白時顯示：%s', async (enabled) => {
+  jest.mocked(clubSummaryEnabled).mockReturnValue(enabled);
+  const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  for (const role of ['owner', 'admin', 'member']) {
+    for (const [meetingTime, description] of [
+      ['  ', '  '],
+      ['週三 18:00', '  '],
+      ['  ', '新版介紹'],
+      ['週三 18:00', '新版介紹'],
+    ]) {
+      jest
+        .mocked(loadClubProfile)
+        .mockResolvedValue({ ...profile, role, meetingTime, description });
+      fireEvent.press(screen.getByText('重新讀取社團資料'));
+      await screen.findByText('攝影社');
+      for (const [name, value] of [
+        ['填寫社課時間', meetingTime],
+        ['填寫社團介紹', description],
+      ]) {
+        const entry = screen.queryByText(name);
+        const show = enabled && role !== 'member' && !value.trim();
+        expect(entry !== null).toBe(show);
+      }
+      expect(screen.queryByText(/社課時間未提供/) !== null).toBe(!meetingTime.trim());
+    }
+  }
+  view.unmount();
+});
+
+test('從管理返回及重新讀取後會顯示已儲存欄位並隱藏補資料入口', async () => {
+  jest.mocked(clubSummaryEnabled).mockReturnValue(true);
+  jest.mocked(loadClubProfile).mockResolvedValue({ ...profile, role: 'admin', description: '' });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('填寫社課時間');
+  fireEvent.press(screen.getByText('填寫社課時間'));
+  expect(screen.getByText('管理入口：one/pu/club')).toBeTruthy();
+  jest.mocked(loadClubProfile).mockResolvedValue({
+    ...profile,
+    role: 'admin',
+    meetingTime: '週三 18:00',
+    description: '新版介紹',
+  });
+  fireEvent.press(screen.getByText('回社團介紹'));
+  await screen.findByText('新版介紹');
+  expect(screen.getByText(/週三 18:00/)).toBeTruthy();
+  expect(screen.queryByText('填寫社課時間')).toBeNull();
+  expect(screen.queryByText('填寫社團介紹')).toBeNull();
+  jest.mocked(loadClubProfile).mockResolvedValue({
+    ...profile,
+    role: 'admin',
+    meetingTime: '週四 19:00',
+    description: '更新介紹',
+  });
+  fireEvent.press(screen.getByText('重新讀取社團資料'));
+  await screen.findByText('更新介紹');
+  expect(screen.getByText(/週四 19:00/)).toBeTruthy();
+  expect(screen.queryByText('填寫社課時間')).toBeNull();
+  expect(screen.queryByText('填寫社團介紹')).toBeNull();
+  expect(loadClubProfile).toHaveBeenCalledTimes(3);
+});

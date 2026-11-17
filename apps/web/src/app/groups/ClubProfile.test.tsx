@@ -13,6 +13,7 @@ const profile = {
   role: 'member',
   name: '攝影社',
   description: '週三社課',
+  meetingTime: '',
   memberCount: 3,
   announcements: [
     {
@@ -106,3 +107,53 @@ test.each(['owner', 'admin', 'member'])(
     }
   },
 );
+
+test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位空白時顯示：%s', async (enabled) => {
+  vi.mocked(clubEnabled).mockReturnValue(enabled);
+  const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  for (const role of ['owner', 'admin', 'member']) {
+    for (const [meetingTime, description] of [
+      ['  ', '  '],
+      ['週三 18:00', '  '],
+      ['  ', '新版介紹'],
+      ['週三 18:00', '新版介紹'],
+    ]) {
+      vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role, meetingTime, description });
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
+      await screen.findByText('攝影社');
+      for (const [name, value] of [
+        ['填寫社課時間', meetingTime],
+        ['填寫社團介紹', description],
+      ]) {
+        const entry = screen.queryByRole('link', { name });
+        const show = enabled && role !== 'member' && !value.trim();
+        expect(entry !== null).toBe(show);
+      }
+      expect(screen.queryByText(/社課時間未提供/) !== null).toBe(!meetingTime.trim());
+    }
+  }
+  view.unmount();
+});
+
+test('儲存後重新讀取或返回介紹頁會顯示最新資料並隱藏補資料入口', async () => {
+  vi.mocked(clubEnabled).mockReturnValue(true);
+  vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role: 'admin', description: '' });
+  const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByRole('link', { name: '填寫社課時間' });
+  vi.mocked(loadClubProfile).mockResolvedValue({
+    ...profile,
+    role: 'admin',
+    meetingTime: '週三 18:00',
+    description: '新版介紹',
+  });
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
+  await screen.findByText('新版介紹');
+  expect(screen.getByText(/週三 18:00/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /填寫社/ })).toBeNull();
+  view.unmount();
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('新版介紹');
+  expect(screen.getByText(/週三 18:00/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /填寫社/ })).toBeNull();
+  expect(loadClubProfile).toHaveBeenCalledTimes(3);
+});

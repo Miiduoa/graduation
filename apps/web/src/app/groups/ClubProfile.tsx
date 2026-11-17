@@ -46,17 +46,19 @@ export function ClubProfile({
           <h1 style={{ fontSize: 28 }}>{group.name}</h1>
           <p>
             類別未提供 ·{' '}
-            {group.memberCount === null ? '社員數未提供' : `${group.memberCount} 位社員`} ·
-            社課時間未提供
+            {group.memberCount === null ? '社員數未提供' : `${group.memberCount} 位社員`} ·{' '}
+            {group.meetingTime?.trim() || '社課時間未提供'}
           </p>
-          {clubEnabled() && ['owner', 'admin'].includes(group.role) && (
-            <Link
-              className="btn"
-              href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
-            >
-              填寫社課時間
-            </Link>
-          )}
+          {clubEnabled() &&
+            ['owner', 'admin'].includes(group.role) &&
+            !group.meetingTime?.trim() && (
+              <Link
+                className="btn"
+                href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
+              >
+                填寫社課時間
+              </Link>
+            )}
           <button className="btn" style={{ minHeight: 44 }} disabled>
             已加入
           </button>

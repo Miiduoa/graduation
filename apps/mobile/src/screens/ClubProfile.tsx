@@ -65,10 +65,12 @@ export function ClubProfile({
           </Text>
           <Text style={textStyle}>
             類別未提供 ·{' '}
-            {profile.memberCount === null ? '社員數未提供' : `${profile.memberCount} 位社員`} ·
-            社課時間未提供
+            {profile.memberCount === null ? '社員數未提供' : `${profile.memberCount} 位社員`} ·{' '}
+            {profile.meetingTime?.trim() || '社課時間未提供'}
           </Text>
-          {clubSummaryEnabled() && ['owner', 'admin'].includes(profile.role) ? (
+          {clubSummaryEnabled() &&
+          ['owner', 'admin'].includes(profile.role) &&
+          !profile.meetingTime?.trim() ? (
             <Button text="填寫社課時間" onPress={() => setManage(true)} />
           ) : null}
           <Button text="已加入" disabled />
