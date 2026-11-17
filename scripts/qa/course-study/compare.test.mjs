@@ -42,3 +42,27 @@ test('calculates only observed paired timing deltas without declaring a winner',
   assert.equal(report.summary.Ahaboard.correctAndSourceVerified, 1);
   assert.equal('winner' in report, false);
 });
+
+
+test('preserves unknown actual cost instead of treating it as a free service', () => {
+  const unknown = fixture();
+  unknown.trials[0].results[1].costTwd = null;
+  const report = auditStudyComparisons(unknown);
+  assert.equal(report.summary.Ahaboard.totalCostTwd, null);
+  assert.equal(report.summary.Ahaboard.measuredCostTotalTwd, 0);
+  assert.equal(report.summary.Ahaboard.costNotMeasured, 1);
+  assert.equal(report.summary.nuni.totalCostTwd, 0);
+  assert.equal(report.summary.nuni.costNotMeasured, 0);
+  const missing = fixture();
+  delete missing.trials[0].results[1].costTwd;
+  assert.throws(() => auditStudyComparisons(missing), /finite nonnegative/);
+});
+
+test('rejects impossible calendar dates, including non-leap February 29', () => {
+  const impossible = fixture();
+  impossible.trials[0].environment.date = '2026-02-30';
+  assert.throws(() => auditStudyComparisons(impossible), /valid ISO date/);
+  const leap = fixture();
+  leap.trials[0].environment.date = '2024-02-29';
+  assert.equal(auditStudyComparisons(leap).trialCount, 1);
+});

@@ -48,7 +48,8 @@ export function auditStudyComparisons(raw) {
     for (const field of ['date', 'device', 'browser', 'network'])
       text(env[field], `${key}.environment.${field}`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(env.date) ||
-        !Number.isFinite(Date.parse(`${env.date}T00:00:00Z`)))
+        (!Number.isFinite(Date.parse(`${env.date}T00:00:00Z`)) ||
+         new Date(`${env.date}T00:00:00Z`).toISOString().slice(0, 10) !== env.date))
       fail(key, 'valid ISO date required');
     if (!Array.isArray(trial.results) || trial.results.length !== 2)
       fail(key, 'exactly one nuni and one Ahaboard result required');
@@ -72,7 +73,8 @@ export function auditStudyComparisons(raw) {
       const peakMemoryMiB = number(run.peakMemoryMiB, `${where}.peakMemoryMiB`, true);
       const offlineCompleted = run.offlineCompleted === null ? null :
         bool(run.offlineCompleted, `${where}.offlineCompleted`);
-      const costTwd = number(run.costTwd, `${where}.costTwd`);
+      // An unmeasured actual cost is unknown, not a measured NT$0.
+      const costTwd = number(run.costTwd, `${where}.costTwd`, true);
       const measurement = { completed, correct, sourceVerified, steps, coldStartMs,
         warmStartMs, peakMemoryMiB, offlineCompleted, costTwd };
       observations[run.product].push(measurement);
@@ -96,7 +98,11 @@ export function auditStudyComparisons(raw) {
       averageColdStartMs: mean(measured('coldStartMs')),
       averageWarmStartMs: mean(measured('warmStartMs')),
       averagePeakMemoryMiB: mean(measured('peakMemoryMiB')),
-      totalCostTwd: values.reduce((sum, v) => sum + v.costTwd, 0),
+      // Do not report a "total" if even one trial's cost was not measured.
+      totalCostTwd: values.some((v) => v.costTwd === null) ? null :
+        values.reduce((sum, v) => sum + v.costTwd, 0),
+      measuredCostTotalTwd: values.reduce((sum, v) => sum + (v.costTwd ?? 0), 0),
+      costNotMeasured: values.filter((v) => v.costTwd === null).length,
     };
   }
   return { trialCount: input.trials.length, summary, pairedColdStartDeltasMs,

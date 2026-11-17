@@ -1,3 +1,9 @@
+## 2026-11-17：競品對照避免將未量測費用誤判為免費、無效日期誤判為有效
+
+- 本地執行的 Ahaboard／nuni 成對測試紀錄現在允許將個別實際成本 `costTwd` 設為 `null`，表示尚未量測；真正測得免費才填數字 `0`。若任何一次成本未知，該產品的 `totalCostTwd` 回傳 `null`，同時另列 `measuredCostTotalTwd`（已量測小計）與 `costNotMeasured`（未知筆數），避免將未量測當作零元優勢；漏掉欄位仍為錯誤。
+- `environment.date` 除 ISO 字面格式外也核對真實曆法，拒絕像 2026-02-30 的日期，允許真實閏日。新增 Node 原生測試檢查已知／未知成本及日期正反例；其他同教材 SHA-256、同題目、同裝置網路、人工來源審核、失敗樣本分母不變。
+- 這是**比較資料正確性**修補，沒有蒐集 Ahaboard 實測成績，也不能宣稱競品優勢；無私人教材上傳、新套件或付費 API。仍須新 head 的 CI／CodeQL、App 5504170 APPROVED、iOS／Android／Maestro 與同條件競品實測；PR 保持 Draft、不合併、不部署。
+
 ## 2026-11-17：修復混合換行原文選取的 TypeScript 編譯失敗
 
 - 精確前版 `2d6da64ef5d0e909f4d07da9b6cae380563b3bc3` 的 [CI #44017346227](https://github.com/Miiduoa/graduation/actions/runs/44017346227) Lint & Type Check job `133818342739` 失敗：`StudySourceTables.tsx:268` 傳入 `string[]` 型別註記給要求 `OriginalSourceLine[]` 的原文選取 helper，並於第 471 行把分行物件陣列傳給舊的 `string[]` props。Web／Mobile／Functions／Assistant／Security／Firestore tests 和 CodeQL 為成功，但 Build Web／Mobile 因 typecheck 失敗略過，不能當作本輪新 SHA 驗收。
