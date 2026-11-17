@@ -591,7 +591,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     let receivedResponse = false;
     // A freshness deadline may retain a dated snapshot; the seven-day hard
     // source expiry never may.
-    const preserveStale = staleSnapshotRef.current;
+    // A once-fresh snapshot also becomes retainable stale geometry when the
+    // local 24-hour soft deadline passes. Its first automatic revalidation
+    // must not hide verified outlines while the seven-day retention holds.
+    const preserveStale = (staleSnapshotRef.current || footprintStale) &&
+      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
+    // Retention may expire during a pending response; never restore that
+    // geometry after the seven-day hard deadline has passed.
+    const canRetainStale = () => preserveStale && footprintExpiresAtRef.current !== null &&
+      Date.now() < footprintExpiresAtRef.current;
     // A manual refresh or an already-triggered request supersedes deferral.
     deferredExpiredRefreshRef.current = false;
     footprintRequestActiveRef.current = true;
@@ -607,7 +615,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale && staleSnapshotRef.current;
+      const keepStale = canRetainStale();
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       // A timed-out proxy is not proof that the public OSM source recovered.
@@ -625,7 +633,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       window.clearTimeout(timeout);
       controller.abort();
       setFootprintRefreshing(false);
-      setFootprintStatus(preserveStale && staleSnapshotRef.current ? 'ready' : 'deferred');
+      setFootprintStatus(canRetainStale() ? 'ready' : 'deferred');
     };
     const resumeAfterPageShow = () => {
       if (!suspendedByPageHide || document.hidden || pageSuspendedRef.current) return;
@@ -726,7 +734,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Preserve only a still-retainable dated snapshot on refresh failure.
         // Once source retention expires, all failures stay marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale && staleSnapshotRef.current;
+        const keepStale = canRetainStale();
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
