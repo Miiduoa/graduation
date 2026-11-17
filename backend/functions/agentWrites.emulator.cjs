@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { getApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { HttpsError } = require('firebase-functions/v2/https');
 
 const local = /^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$/.exec(process.env.FIRESTORE_EMULATOR_HOST || '');
 if (!local || Number(local[1]) < 1 || Number(local[1]) > 65535) {
@@ -281,6 +282,136 @@ async function libraryProposal(toolName, loanId) {
   action.data.toolName = toolName;
   action.data.input = input;
   return action;
+}
+
+async function actorGuardProposal(toolName) {
+  if (toolName === 'renewBook') {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    return libraryProposal(toolName, loan.loanId);
+  }
+  const input = seatInput();
+  await db.doc('users/alice/settings/assistantPermissions').set({ [toolName]: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+async function serviceRecordSnapshot() {
+  const collections = [
+    'schools/pu/libraryLoans', 'users/alice/schools/pu/libraryLoans',
+    'schools/pu/libraryBooks',
+    'schools/pu/seatReservations', 'users/alice/schools/pu/seatReservations',
+    'schools/pu/serviceWriteGuards', 'users/alice/schools/pu/serviceWriteGuards',
+  ];
+  const snapshots = await Promise.all(collections.map((path) => db.collection(path).get()));
+  return snapshots.flatMap((snapshot) => snapshot.docs.map((doc) => ({
+    path: doc.ref.path, data: doc.data(), updateTime: doc.updateTime,
+  }))).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Intercept only the local emulator SDK in this test. The proposal claim commits
+ * through the actual Firestore transaction before we change the account, and the
+ * real callable cannot start its service transaction until the change completes.
+ */
+async function runAfterCommittedClaim(action, change) {
+  const originalRunTransaction = db.runTransaction;
+  const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
+  let changedAfterClaim = false;
+  let failedAccountReads = 0;
+  db.runTransaction = async function (callback, ...options) {
+    const result = await originalRunTransaction.call(this, async (tx) => {
+      if (!changedAfterClaim || !change.failAccountRead) return callback(tx);
+      const originalGet = tx.get;
+      tx.get = function (reference, ...args) {
+        if (reference.path === 'users/alice') {
+          failedAccountReads += 1;
+          return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
+        }
+        return originalGet.call(this, reference, ...args);
+      };
+      try {
+        return await callback(tx);
+      } finally {
+        tx.get = originalGet;
+      }
+    }, ...options);
+    if (!changedAfterClaim) {
+      const claim = (await runRef.get()).data()?.actionClaims?.['0'];
+      if (claim?.status === 'started') {
+        changedAfterClaim = true;
+        await change.apply(db.doc('users/alice'));
+      }
+    }
+    return result;
+  };
+  try {
+    return await executeAgentWrite.run(action);
+  } finally {
+    db.runTransaction = originalRunTransaction;
+    assert.equal(changedAfterClaim, true, 'the source change must occur after a committed claim');
+    if (change.failAccountRead) assert.ok(failedAccountReads > 0, 'the service transaction must attempt the account read');
+  }
+}
+
+const blockedAccountChanges = [
+  ...['disabled', 'suspended', 'inactive', 'deleted'].map((status) => ({
+    label: status, apply: (account) => account.update({ status }), code: 'failed-precondition',
+  })),
+  { label: 'deletion marker', apply: (account) => account.update({ accountDeletionInProgress: true }), code: 'failed-precondition' },
+  {
+    label: 'account read failure', apply: async () => {}, failAccountRead: true, code: 'unavailable',
+  },
+];
+
+for (const toolName of ['renewBook', 'reserveSeat']) {
+  for (const change of blockedAccountChanges) {
+    test(`an Agent ${toolName} stops after a committed claim when the account becomes ${change.label}`, async () => {
+      const action = await actorGuardProposal(toolName);
+      const before = await serviceRecordSnapshot();
+
+      await assert.rejects(runAfterCommittedClaim(action, change), { code: change.code });
+
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'loan, mirror, inventory, reservation and service guard documents must remain unchanged');
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'unverified');
+      assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+      assert.equal(run.steps.some((step) => step.output?.success === true), false);
+    });
+  }
+
+  for (const change of [
+    { label: 'active profile', apply: (account) => account.update({ status: 'active' }) },
+    { label: 'missing root profile with valid membership', apply: (account) => account.delete() },
+  ]) {
+    test(`an Agent ${toolName} preserves ${change.label} compatibility after the claim`, async () => {
+      const action = await actorGuardProposal(toolName);
+      const receipt = await runAfterCommittedClaim(action, change);
+
+      assert.equal(receipt.success, true);
+      assert.equal(receipt.toolName, toolName);
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'completed');
+      assert.equal((await db.doc('users/alice').get()).exists, change.label === 'active profile');
+      if (toolName === 'renewBook') {
+        const loan = await read(`schools/pu/libraryLoans/${action.data.input.loanId}`);
+        assert.equal(loan.renewCount, 1);
+        assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${action.data.input.loanId}`), loan);
+      } else {
+        const canonical = await db.collection('schools/pu/seatReservations').get();
+        const mirror = await db.collection('users/alice/schools/pu/seatReservations').get();
+        assert.equal(canonical.size, 1);
+        assert.equal(mirror.size, 1);
+        assert.equal(canonical.docs[0].data().seatId, action.data.input.seatId);
+        assert.deepEqual(mirror.docs[0].data(), canonical.docs[0].data());
+      }
+    });
+  }
 }
 
 for (const toolName of ['renewBook', 'returnBook']) {
