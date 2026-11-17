@@ -49,7 +49,9 @@ async function readBoundedFootprintJson(response: Response): Promise<unknown> {
     return response.json() as Promise<unknown>;
   }
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  // Grow a single buffer rather than retaining an unbounded number of tiny
+  // ReadableStream chunks (whose per-object overhead is not byte-limited).
+  let bytes = new Uint8Array(16_384);
   let total = 0;
   try {
     while (true) {
@@ -66,18 +68,20 @@ async function readBoundedFootprintJson(response: Response): Promise<unknown> {
         }
         throw new Error('Building outline response exceeded byte limit');
       }
-      chunks.push(value);
+      const end = total + value.byteLength;
+      if (end > bytes.byteLength) {
+        const larger = new Uint8Array(Math.min(MAX_DECLARED_FOOTPRINT_BYTES,
+          Math.max(bytes.byteLength * 2, end)));
+        larger.set(bytes.subarray(0, total));
+        bytes = larger;
+      }
+      bytes.set(value, total);
+      total = end;
     }
   } finally {
     reader.releaseLock();
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
 
