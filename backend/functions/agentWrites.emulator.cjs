@@ -25,6 +25,7 @@ const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
+const { libraryLoanVersion } = require('./agent/libraryLoanSource');
 const read = async (path) => (await db.doc(path).get()).data();
 const scope = (uid = 'alice') => ({ uid, schoolId: 'pu' });
 const request = (uid, data) => ({ auth: { uid }, data: { schoolId: 'pu', ...data } });
@@ -224,7 +225,7 @@ test('an Agent return with a whitespace-only saved book title confirms its recei
   assert.equal((await bookRef.get()).data().availableCopies, 0);
   assert.equal((await bookRef.get()).data().available, 0);
 
-  const input = { loanId: loan.loanId };
+  const input = { loanId: loan.loanId, expectedLoanVersion: libraryLoanVersion(borrowed) };
   // 還書測例只開歸還權限；其餘維持預設關閉（與 main 請假權限 seed 模式一致）。
   await db.doc('users/alice/settings/assistantPermissions').set({ returnBook: true });
   const action = await proposal(
@@ -267,6 +268,70 @@ test('an Agent return with a whitespace-only saved book title confirms its recei
   assert.equal(savedRun.steps[0].tool, 'returnBook');
   assert.deepEqual(savedRun.steps[0].input, input);
   assert.deepEqual(savedRun.steps[0].output, receipt);
+});
+
+async function libraryProposal(toolName, loanId) {
+  const source = await read(`schools/pu/libraryLoans/${loanId}`);
+  const input = { loanId, expectedLoanVersion: libraryLoanVersion(source) };
+  await db.doc('users/alice/settings/assistantPermissions').set({ [toolName]: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+for (const toolName of ['renewBook', 'returnBook']) {
+  test(`an Agent ${toolName} rejects a changed canonical book after preview without rewriting service data`, async () => {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    const action = await libraryProposal(toolName, loan.loanId);
+    const loanRef = db.doc(`schools/pu/libraryLoans/${loan.loanId}`);
+    await loanRef.update({ bookId: 'B2', bookTitle: 'Changed book after preview' });
+    const watched = [
+      loanRef,
+      db.doc(`users/alice/schools/pu/libraryLoans/${loan.loanId}`),
+      db.doc('schools/pu/libraryBooks/B1'),
+      db.doc('schools/pu/libraryBooks/B2'),
+      db.doc('users/alice/schools/pu/serviceWriteGuards/library'),
+    ];
+    const before = await db.getAll(...watched);
+
+    await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+
+    const after = await db.getAll(...watched);
+    after.forEach((snapshot, index) => {
+      assert.deepEqual(snapshot.data(), before[index].data());
+      assert.equal(snapshot.updateTime.isEqual(before[index].updateTime), true,
+        `a stale confirmation must not rewrite ${snapshot.ref.path}`);
+    });
+    const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+    assert.equal(run.actionClaims['0'].status, 'unverified');
+    assert.equal(run.steps.some((step) => step.output?.success === true), false);
+  });
+}
+
+test('a normal renewal makes an older Agent renewal confirmation stale', async () => {
+  const loan = await borrow.execute(scope(), { bookId: 'B1' });
+  const action = await libraryProposal('renewBook', loan.loanId);
+  await service.renewBook.run(request('alice', { loanId: loan.loanId }));
+  const watched = [
+    db.doc(`schools/pu/libraryLoans/${loan.loanId}`),
+    db.doc(`users/alice/schools/pu/libraryLoans/${loan.loanId}`),
+    db.doc('schools/pu/libraryBooks/B1'),
+  ];
+  const before = await db.getAll(...watched);
+  assert.equal(before[0].data().renewCount, 1);
+
+  await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+
+  const after = await db.getAll(...watched);
+  after.forEach((snapshot, index) => {
+    assert.deepEqual(snapshot.data(), before[index].data());
+    assert.equal(snapshot.updateTime.isEqual(before[index].updateTime), true);
+  });
+  assert.equal(after[0].data().renewCount, 1);
 });
 
 test('one Agent proposal can be claimed once and never accepts a client group override', async () => {

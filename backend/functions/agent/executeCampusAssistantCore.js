@@ -70,6 +70,7 @@ const {
 } = require('../lib/assistantWritePermissions');
 const { getIntentWritePlan } = require('./intentWritePlan');
 const { parseLibraryLoanRequest, chooseLibraryLoan } = require('./libraryLoanSelection');
+const { projectLibraryLoan, libraryLoanVersion } = require('./libraryLoanSource');
 
 const db = getFirestore();
 
@@ -117,22 +118,43 @@ function resolvePermissionScope(intent, hasAuth) {
 async function resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage }) {
   const target = parseLibraryLoanRequest(lastUserMessage);
   if (target.kind === 'clarify') return { selectionIssue: 'clarify' };
-  if (target.kind === 'id') return { input: { loanId: target.loanId }, loan: { id: target.loanId } };
+  let selected;
+  if (target.kind !== 'id') {
+    const result = await runTool(
+      'getLibraryLoans',
+      { uid, schoolId, timeZone, prefetched: {} },
+      { onlyOverdue: target.onlyOverdue },
+    ).catch((error) => {
+      if (isAuthorizationFailure(error)) throw error;
+      return null;
+    });
+    if (result?.ok !== true || !Array.isArray(result.loans)) return { unavailable: true };
+    const selection = chooseLibraryLoan(result.loans, target);
+    if (selection?.selectionIssue) return selection;
+    selected = selection?.loan;
+    if (!selected?.id) return null;
+  }
 
-  const result = await runTool(
-    'getLibraryLoans',
-    { uid, schoolId, timeZone, prefetched: {} },
-    { onlyOverdue: target.onlyOverdue },
-  ).catch((error) => {
+  // The personal mirror is a discovery source, not authority to mutate a loan.
+  // Bind the displayed state to the canonical record before saving a proposal.
+  const loanId = target.kind === 'id' ? target.loanId : String(selected.id);
+  const snapshot = await db.doc(`schools/${schoolId}/libraryLoans/${loanId}`).get().catch((error) => {
     if (isAuthorizationFailure(error)) throw error;
     return null;
   });
-  if (result?.ok !== true || !Array.isArray(result.loans)) return { unavailable: true };
-  const selection = chooseLibraryLoan(result.loans, target);
-  if (selection?.selectionIssue) return selection;
-  const loan = selection?.loan;
-  if (!loan?.id) return null;
-  return { input: { loanId: String(loan.id) }, loan };
+  if (!snapshot) return { unavailable: true };
+  const source = snapshot.exists ? snapshot.data() : null;
+  if (!source || source.userId !== uid || !['borrowed', 'active'].includes(source.status)) {
+    return { selectionIssue: 'not-found' };
+  }
+  const expectedLoanVersion = libraryLoanVersion(source);
+  if (selected && libraryLoanVersion(selected) !== expectedLoanVersion) {
+    return { sourceChanged: true };
+  }
+  return {
+    input: { loanId, expectedLoanVersion },
+    loan: projectLibraryLoan(loanId, source),
+  };
 }
 
 /**
@@ -823,6 +845,11 @@ async function executeCampusAssistantCore({
     }
 
     const resolvedLoan = await resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage });
+    if (resolvedLoan?.sourceChanged) {
+      response.content = '借閱資料已變更，暫時無法建立這筆確認。請重新查詢，或到圖書館頁核對目前書目與期限後，再準備續借或還書。';
+      response.suggestions = ['我有哪些書還沒還？', '查看借閱', '功能說明'];
+      return await finalizeResponse();
+    }
     if (resolvedLoan?.unavailable) {
       response.content = '目前無法完整讀取平台借閱紀錄，暫時無法確認要處理哪一本書。請稍後重試，或到圖書館頁核對借閱紀錄；這不代表沒有未歸還的書。';
       response.suggestions = ['查看借閱', '我有哪些書還沒還？', '功能說明'];

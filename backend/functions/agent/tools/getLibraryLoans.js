@@ -2,7 +2,7 @@
 
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
-const { toJsDate } = require('../../lib/assistantFormat');
+const { projectLibraryLoan } = require('../libraryLoanSource');
 
 // Bound the complete source snapshot, including returned/legacy records. The
 // extra row proves whether the list is exhaustive before it can drive actions.
@@ -19,22 +19,6 @@ function loanPath(uid, schoolId) {
     .collection('schools')
     .doc(schoolId)
     .collection('libraryLoans');
-}
-
-function parseLoanDate(raw) {
-  try {
-    let date;
-    if (raw && typeof raw.toMillis === 'function') {
-      const milliseconds = raw.toMillis();
-      if (typeof milliseconds !== 'number' || !Number.isFinite(milliseconds)) return null;
-      date = new Date(milliseconds);
-    } else {
-      date = toJsDate(raw);
-    }
-    return date && Number.isFinite(date.getTime()) ? date : null;
-  } catch {
-    return null;
-  }
 }
 
 function isActiveLoan(row) {
@@ -64,20 +48,12 @@ async function execute(ctx, rawInput) {
   for (const doc of snap.docs) {
     const row = { id: doc.id, ...doc.data() };
     if (!isActiveLoan(row)) continue;
-    const dueDate = parseLoanDate(row.dueAt ?? row.dueDate);
+    const loan = projectLibraryLoan(doc.id, row);
     const overdueByStatus = String(row.status || '').toLowerCase() === 'overdue';
-    const overdueByDate = dueDate != null && dueDate.getTime() < now;
+    const overdueByDate = loan.dueAt != null && Date.parse(loan.dueAt) < now;
     if (input.onlyOverdue && !overdueByStatus && !overdueByDate) continue;
 
-    loans.push({
-      id: doc.id,
-      bookId: row.bookId != null ? String(row.bookId) : undefined,
-      bookTitle: row.bookTitle != null ? String(row.bookTitle) : row.title != null ? String(row.title) : undefined,
-      borrowedAt: parseLoanDate(row.borrowedAt)?.toISOString(),
-      dueAt: dueDate?.toISOString(),
-      status: row.status != null ? String(row.status) : 'borrowed',
-      renewCount: typeof row.renewCount === 'number' ? row.renewCount : 0,
-    });
+    loans.push(loan);
   }
 
   return { ok: true, count: loans.length, loans };
