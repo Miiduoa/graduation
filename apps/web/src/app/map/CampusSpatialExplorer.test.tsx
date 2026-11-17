@@ -723,10 +723,20 @@ it('accepts a complete, correctly sized JSON snapshot with a valid Content-Lengt
     schoolId: 'pu', source: 'OpenStreetMap', buildings,
     fetchedAt: new Date().toISOString(), stale: false,
   });
-  const response = new Response(payload, {
+  const bytes = new TextEncoder().encode(payload);
+  // Deliberately fragment the stream to verify byte offsets and UTF-8
+  // reconstruction, rather than relying on a single Response body chunk.
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      const split = Math.floor(bytes.byteLength / 2);
+      controller.enqueue(bytes.subarray(0, split));
+      controller.enqueue(bytes.subarray(split));
+      controller.close();
+    },
+  }), {
     status: 200,
     headers: { 'Content-Type': 'application/json',
-      'Content-Length': String(new TextEncoder().encode(payload).byteLength) },
+      'Content-Length': String(bytes.byteLength) },
   });
   const json = vi.spyOn(response, 'json');
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
