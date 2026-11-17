@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   INTERNSHIP_STEPS,
   internshipProgress,
+  isTransientInternshipReadError,
   internshipCalendarItem,
   internshipDeadlineState,
   type InternshipAudience,
@@ -185,6 +186,22 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         }
       } catch (e) {
         if (live && !current.signal.aborted) {
+          if (!isTransientInternshipReadError(e)) {
+            // Unmount record forms to discard document, hours and review drafts.
+            setSnapshot(null);
+            setOrganization('');
+            setTeacher('');
+            setTeacherUid('');
+            setAdvisorKeyword('');
+            setAdvisors([]);
+            setAdvisorSearched(false);
+            advisorSearchStarted.current = false;
+            setSelectedRuleId('');
+            setFieldErrors({});
+            setRuleDraft(null);
+            setError('');
+            setNotice('');
+          }
           setLoadError(e instanceof Error ? e.message : '暫時讀不到實習進度，請重試。');
         }
       } finally {

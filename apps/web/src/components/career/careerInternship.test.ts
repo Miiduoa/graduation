@@ -148,3 +148,25 @@ it('forwards read cancellation and bounds even an uncooperative fetch or auth pr
     vi.useRealTimers();
   }
 });
+
+it.each([
+  [403, 'PERMISSION_DENIED', 'PERMISSION_DENIED'],
+  [401, 'UNAUTHENTICATED', 'UNAUTHENTICATED'],
+  [404, 'NOT_FOUND', 'NOT_FOUND'],
+  [503, 'UNAVAILABLE', 'UNAVAILABLE'],
+  [504, 'DEADLINE_EXCEEDED', 'DEADLINE_EXCEEDED'],
+  [500, 'INTERNAL', 'INTERNAL'],
+  [403, undefined, 'permission-denied'],
+  [503, undefined, 'unavailable'],
+])('preserves callable read error codes for HTTP %s / %s', async (status, code, expected) => {
+  const transport = createInternshipCallableTransport({
+    endpoint: '/internship',
+    authHeaders: async () => ({}),
+    fetcher: async () =>
+      Response.json({ error: { message: '讀取失敗', status: code } }, { status }),
+  });
+  await expect(transport('pu', { action: 'list', audience: 'student' })).rejects.toMatchObject({
+    message: '讀取失敗',
+    code: expected,
+  });
+});
