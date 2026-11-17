@@ -2360,6 +2360,33 @@ it('uses current official Providence Hall floor unit names without inventing cla
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A colliding Firestore POI ID is not proof that the selected map marker is
+// the audited campus building. Do not label a different position as the
+// university's official floor units, even when the OSM service is unavailable.
+it.each([
+  { mismatch: 'displaced coordinates', displaced: true },
+  { mismatch: 'different name', displaced: false },
+])('does not attach official Zhugu floor units to a $mismatch POI', async ({ displaced }) => {
+  const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const unverified: MapLocation = displaced
+    ? { ...zhugu, lat: zhugu.lat + 0.004 }
+    : { ...zhugu, name: '主顧樓（位置待查）' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: false, status: 503, headers: { get: () => null }, body: null,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[unverified]} selected={unverified} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(within(dialog).getByRole('heading', { name: unverified.name })).toBeTruthy();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).queryByText('主顧樓 · 校方公開樓層資訊')).toBeNull();
+  expect(within(dialog).queryByText(/4 樓：資訊管理學系/)).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '查看校史資料室主顧樓單位清單' })).toBeNull();
+  const notice = within(dialog).getByText(/尚未與校園已核對資料對上.*暫不顯示校方樓層單位/);
+  expect(notice.getAttribute('role')).toBe('status');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).queryByRole('link', { name: '查看地點資料來源 ↗' })).toBeNull();
+});
+
 it('withdraws filtered-out Providence volumes and counts only buildings in the current map', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
