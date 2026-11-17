@@ -814,6 +814,44 @@ it('stops an OSM stream of empty chunks without parsing JSON or hammering the so
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// Fetch may resolve its headers before a suspended WebView delivers the rest
+// of the OSM body. Abort must cancel the acquired reader, not only the fetch
+// controller, so closing or backgrounding the map stops unneeded data work.
+it.each(['pagehide', 'dialog close'] as const)(
+  'cancels a pending OSM response body on mobile %s',
+  async (reason) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const cancel = vi.fn();
+    // A valid 200 response whose stream has not finished (and will not
+    // deliver more bytes until explicitly canceled).
+    const response = new Response(new ReadableStream<Uint8Array>({
+      pull() {},
+      cancel,
+    }), { status: 200 });
+    const json = vi.spyOn(response, 'json');
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    await waitFor(() => expect(response.body?.locked).toBe(true));
+
+    if (reason === 'pagehide') {
+      fireEvent(window, new Event('pagehide'));
+      expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    } else {
+      fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    }
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    expect(json).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    if (reason === 'pagehide') {
+      fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    }
+  },
+);
+
 it('keeps the spatial map usable when Providence building geometry is unavailable', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
