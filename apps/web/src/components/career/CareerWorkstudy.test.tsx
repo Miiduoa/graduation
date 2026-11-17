@@ -720,7 +720,7 @@ test.each([false, true])(
       ['權益公告網址', opportunity.rightsUrl],
       ['權益公告內容', opportunity.rightsText],
     ]) {
-      fireEvent.change(view.getByRole('textbox', { name: label, exact: true }), {
+      fireEvent.change(view.getByRole('textbox', { name: label }), {
         target: { value },
       });
     }
