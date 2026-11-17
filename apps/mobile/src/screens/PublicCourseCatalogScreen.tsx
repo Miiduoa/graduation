@@ -42,6 +42,8 @@ function publicCourseCardKey(course: PublicCatalogCourse, index: number): string
   ]);
 }
 
+type ClipboardFeedback = { csv: string; cardId: string; status: 'copied' | 'manual' };
+
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   initialQuery?: string;
@@ -52,7 +54,12 @@ type Props = {
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 
-function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCatalogCourse }) {
+function CourseCard({ course, schoolId, navigation, cardId, copyFeedback, onCopy }: Props & {
+  course: PublicCatalogCourse;
+  cardId: string;
+  copyFeedback: ClipboardFeedback | null;
+  onCopy: (csv: string, cardId: string) => void;
+}) {
   const scope = usePersonalImportScope();
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -100,31 +107,17 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
     }
   }
 
-  const [copyState, setCopyState] = useState<{ csv: string; status: 'copied' | 'manual' } | null>(null);
-  const copyAttempt = useRef(0);
   const meetings = schoolId === 'nthu'
     ? nthuCourseMeetings(course.meetings ?? [], course.semester)
     : ncnuCourseMeetings(course.time, course.semester)?.map(meeting => ({ ...meeting, room: course.room }));
   const rawMeetings = course.meetings ?? [{ time: course.time, room: course.room }];
   const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
-  // A second tap or a new course invalidates a pending clipboard result.
-  // The displayed feedback must describe the exact CSV currently on screen.
-  const copied = copyState?.csv === csv && copyState.status === 'copied';
-  const manualCopy = copyState?.csv === csv && copyState.status === 'manual';
-  useEffect(() => () => { copyAttempt.current += 1; }, [csv]);
-  async function copy() {
-    if (!csv) return;
-    const attempt = ++copyAttempt.current;
-    setCopyState(null);
-    // Native clipboard writes cannot be cancelled. Queue all course-card writes
-    // so a slow earlier copy cannot replace a different course copied later.
-    const status = await queuePublicCourseClipboardCopy(
-      () => Clipboard.setStringAsync(csv),
-      () => attempt === copyAttempt.current,
-    );
-    if (status !== 'superseded') setCopyState({ csv, status });
-  }
+  // Show copy feedback only on the last tapped row, even when two cross-listed
+  // cards produce identical CSV. Keeping this in the list parent also clears
+  // an earlier success as soon as another card starts a copy.
+  const copied = copyFeedback?.cardId === cardId && copyFeedback.csv === csv && copyFeedback.status === 'copied';
+  const manualCopy = copyFeedback?.cardId === cardId && copyFeedback.csv === csv && copyFeedback.status === 'manual';
   // Keep the title separate: grouping the whole Card as an accessible header
   // prevents VoiceOver from reaching its nested review and copy controls.
   return <Card>
@@ -143,7 +136,7 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
       <Button text="帶入課表核對" kind="primary" onPress={() => { void review(course); }} />
       {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
       <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
-      <Button text="複製課表匯入資料" kind="ghost" onPress={() => void copy()} />
+      <Button text="複製課表匯入資料" kind="ghost" onPress={() => onCopy(csv, cardId)} />
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
         <Text style={body}>請選取下方資料複製，再到匯入頁貼上。</Text>
@@ -167,6 +160,22 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
   const [credits, setCredits] = useState(entryFilters?.credits === undefined ? '' : String(entryFilters.credits));
   const [inputError, setInputError] = useState(entryFilters ? '' : filterErrorMessage);
   const [result, setResult] = useState<Result | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<ClipboardFeedback | null>(null);
+  const copyAttempt = useRef(0);
+  useEffect(() => () => { copyAttempt.current += 1; }, []);
+  const copyCourse = useCallback(async (csv: string, cardId: string) => {
+    const attempt = ++copyAttempt.current;
+    setCopyFeedback(null);
+    // An OS write cannot be cancelled. The shared queue waits for an older
+    // write and suppresses its stale feedback before accepting the latest tap.
+    const status = await queuePublicCourseClipboardCopy(
+      () => Clipboard.setStringAsync(csv),
+      () => attempt === copyAttempt.current,
+    );
+    if (status !== 'superseded' && attempt === copyAttempt.current) {
+      setCopyFeedback({ csv, cardId, status });
+    }
+  }, []);
   const [linkError, setLinkError] = useState(false);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const schoolName = schoolId === 'nthu' ? '清大' : '暨大';
@@ -182,6 +191,8 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
 
   const search = useCallback(async (keyword: string, requestedFilters: PublicCourseFilters) => {
     cancelSearch();
+    copyAttempt.current += 1;
+    setCopyFeedback(null);
     const filters = parsePublicCourseFilters(requestedFilters);
     if (!filters || !isPublicCourseOperationQuery(keyword)) {
       setResult(null);
@@ -236,6 +247,8 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
 
   function invalidateSearch() {
     cancelSearch();
+    copyAttempt.current += 1;
+    setCopyFeedback(null);
     setResult(null);
     setInputError('');
   }
@@ -270,6 +283,7 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
         keyboardShouldPersistTaps="handled"
         data={result?.status === 'ready' ? result.data.courses : []}
         keyExtractor={publicCourseCardKey}
+        extraData={copyFeedback}
         contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
         ListHeaderComponent={<View style={{ gap: 10 }}>
           {currentSchoolName && <Text style={body}>正在瀏覽{fullSchoolName}的公開課程；目前選校仍為{currentSchoolName}。</Text>}
@@ -351,7 +365,8 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
             另有 {result.data.unresolvedCount} 筆課程的篩選資料不足，未列入符合結果。
           </Text>}
         </View>}
-        renderItem={({ item }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation} />}
+        renderItem={({ item, index }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation}
+          cardId={publicCourseCardKey(item, index)} copyFeedback={copyFeedback} onCopy={copyCourse} />}
       />
     </Screen>
   );
