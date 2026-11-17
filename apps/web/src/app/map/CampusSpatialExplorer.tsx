@@ -344,6 +344,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const footprintRequestActiveRef = useRef(false);
   // A hidden tab must evict expired geometry without fetching; retry when visible.
   const deferredExpiredRefreshRef = useRef(false);
+  // Safari may fire pagehide while document.hidden is still false. The public
+  // OSM source must share the same bfcache suspension boundary as WebGL.
+  const pageSuspendedRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(readStoredFootprintCooldown);
@@ -378,6 +381,17 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
   const sourceFootprint = place
     ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
+
+  useEffect(() => {
+    const onPageHide = () => { pageSuspendedRef.current = true; };
+    const onPageShow = () => { pageSuspendedRef.current = false; };
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, []);
 
   useEffect(() => {
     if (school === 'pu') storeFootprintCooldown(footprintRetryAfter?.until ?? null);
@@ -427,7 +441,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       return;
     }
     const resumeExpiredRefresh = () => {
-      if (!deferredExpiredRefreshRef.current || document.hidden ||
+      if (!deferredExpiredRefreshRef.current || document.hidden || pageSuspendedRef.current ||
           footprintRetryAfter !== null || footprintRequestActiveRef.current) return;
       deferredExpiredRefreshRef.current = false;
       setFootprintAttempt((value) => value + 1);
@@ -455,7 +469,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // The hidden soft-deadline event marks the snapshot stale and moves
       // nextDeadline to the seven-day hard expiry. A visible resume before
       // that hard deadline must still perform the deferred revalidation.
-      const softRefreshDeferredFromHiddenTab = !document.hidden && footprintStale &&
+      const softRefreshDeferredFromHiddenTab = !document.hidden && !pageSuspendedRef.current && footprintStale &&
         !staleSnapshotRef.current && now >= footprintClock.staleAt &&
         now < footprintClock.expiresAt;
       if (now < nextDeadline && !softRefreshDeferredFromHiddenTab) {
@@ -467,7 +481,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // Keep public Overpass work out of background tabs while a dated volume
       // remains retainable. The next visible resume event checks this same
       // absolute deadline; hard expiry still evicts geometry even when hidden.
-      if (document.hidden && now < footprintClock.expiresAt) {
+      if ((document.hidden || pageSuspendedRef.current) && now < footprintClock.expiresAt) {
         // The soft deadline timer still has to arm the seven-day hard
         // deadline. Otherwise returning while hidden leaves no later timer
         // to evict old geometry until the user brings the tab back.
@@ -497,7 +511,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const refreshing = footprintRequestActiveRef.current;
         setFootprintStatus(refreshing ? 'loading' : 'unavailable');
         if (!refreshing) {
-          if (document.hidden || footprintRetryAfter !== null) {
+          if (document.hidden || pageSuspendedRef.current || footprintRetryAfter !== null) {
             // The hard deadline clears geometry even in the background, but
             // network revalidation waits for a visible tab and server cooldown.
             deferredExpiredRefreshRef.current = true;
@@ -547,7 +561,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     // The dialog can mount while a tab is suspended (e.g. restored from a
     // mobile browser session). Do not start a fresh public OSM request until
     // the user returns. The original POIs and walking link still work.
-    if (document.hidden) {
+    if (document.hidden || pageSuspendedRef.current) {
       // Do not announce an active OSM fetch when mobile has suspended it.
       // Keep POIs and navigation usable while waiting for a visible tab.
       // Preserve previously verified, still-retainable outlines while a
@@ -555,7 +569,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       setFootprintStatus((current) => current === 'ready' ? current : 'deferred');
       let resumed = false;
       const fetchWhenVisible = () => {
-        if (resumed || document.hidden) return;
+        if (resumed || document.hidden || pageSuspendedRef.current) return;
         resumed = true;
         document.removeEventListener('visibilitychange', fetchWhenVisible);
         window.removeEventListener('pageshow', fetchWhenVisible);
@@ -570,6 +584,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }
     let active = true;
     let timedOut = false;
+    let requestPending = true;
+    let suspendedByPageHide = false;
     // Distinguish fetch-level network errors from a server response. Do not
     // overwrite a valid Retry-After from an HTTP or JSON-contract failure.
     let receivedResponse = false;
@@ -598,6 +614,27 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // Pause manual retries locally even when AbortSignal was ignored.
       setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
     }, 15_000);
+    // On Safari bfcache navigation, pagehide can precede visibilitychange
+    // while document.hidden is still false. Abort and quarantine in-flight
+    // geometry; resume exactly once after a real foreground return.
+    const suspendForPageHide = () => {
+      if (!active || timedOut || !requestPending) return;
+      suspendedByPageHide = true;
+      active = false;
+      footprintRequestActiveRef.current = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+      setFootprintRefreshing(false);
+      setFootprintStatus(preserveStale && staleSnapshotRef.current ? 'ready' : 'deferred');
+    };
+    const resumeAfterPageShow = () => {
+      if (!suspendedByPageHide || document.hidden || pageSuspendedRef.current) return;
+      suspendedByPageHide = false;
+      setFootprintAttempt((value) => value + 1);
+    };
+    window.addEventListener('pagehide', suspendForPageHide);
+    window.addEventListener('pageshow', resumeAfterPageShow);
+    document.addEventListener('visibilitychange', resumeAfterPageShow);
     // A gateway can return HTTP 200 with truncated JSON or a payload that
     // fails our source/geometry contract. Treat that as a rejected source
     // response rather than letting repeated manual retries hammer Overpass.
@@ -649,6 +686,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         return { payload, cooldownSeconds };
       })
       .then(({ payload, cooldownSeconds }) => {
+        requestPending = false;
         if (!active || timedOut) return;
         const snapshot = parseProvidenceFootprintSnapshot(payload);
         if (!snapshot) {
@@ -677,6 +715,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintStatus('ready');
       })
       .catch((error: unknown) => {
+        requestPending = false;
         if (!active || timedOut) return;
         // A rejected fetch (offline/DNS/proxy failure) has no HTTP status or
         // Retry-After. Rate-limit manual retries without changing explicit
@@ -699,6 +738,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       active = false;
       footprintRequestActiveRef.current = false;
       window.clearTimeout(timeout);
+      window.removeEventListener('pagehide', suspendForPageHide);
+      window.removeEventListener('pageshow', resumeAfterPageShow);
+      document.removeEventListener('visibilitychange', resumeAfterPageShow);
       controller.abort();
     };
   }, [school, model.unavailableReason, footprintAttempt]);
