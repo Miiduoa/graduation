@@ -1342,3 +1342,33 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
       .toEqual(realTable(2));
   });
 });
+
+
+describe('classic Mac and mixed-line-ending course handouts', () => {
+  it('reconstructs a public Markdown table from CR-only TXT without changing the source line', () => {
+    const source = ['講義封面', '', ...visibleTable].join('\r');
+    expect(extractStudySourceTables(source)).toEqual(realTable(3));
+  });
+
+  it('keeps a CR-only multiline hidden wrapper closed until its real end tag', () => {
+    const source = [
+      '<section', ' hidden>',
+      '| 教師未公開答案 | 分數 |', '| --- | --- |', '| 私有資料 | 99 |',
+      '</section>',
+      ...visibleTable,
+    ].join('\r');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('ignores a fenced example across CR line endings but finds later CRLF public rows', () => {
+    const source = ['~~~markdown', ...visibleTable, '~~~'].join('\r') +
+      '\n' + visibleTable.join('\r\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('counts CRLF as one source line while preserving mixed CR, LF and CRLF boundaries', () => {
+    const source = ['第一節', '第二節', ...visibleTable].join('\r\n')
+      .replace('第一節\r\n第二節\r\n', '第一節\r第二節\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(3));
+  });
+});

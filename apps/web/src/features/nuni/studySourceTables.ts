@@ -354,18 +354,19 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
   // that hidden wrapper and expose a teacher-only table as a public table.
   // Fold only complete, tracked HTML tags in the scanner's temporary copy.
   // Move each original line break after its tag so source line numbers stay
-  // unchanged; never rewrite or export the student's original source.
+  // unchanged, including classic Mac CR and mixed line endings. Never rewrite
+  // or export the student's original source.
   const scanSource = source.replace(
     /<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gu,
     (token, tag: string, offset: number) => {
       // Do not fold a Markdown-escaped example into an active HTML tag.
       if (isEscapedMarkdownTag(source, offset)) return token;
       if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !token.includes('\n')) return token;
-      const newlines = token.match(/\r?\n/gu) ?? [];
-      return token.replace(/\r?\n/gu, ' ') + '\n'.repeat(newlines.length);
+      const newlines = token.match(/\r\n|\r|\n/gu) ?? [];
+      return token.replace(/\r\n|\r|\n/gu, ' ') + '\n'.repeat(newlines.length);
     },
   );
-  const lines = scanSource.split(/\r?\n/u);
+  const lines = scanSource.split(/\r\n|\r|\n/u);
   const tables: StudySourceTable[] = [];
   let fence: { character: string; length: number } | null = null;
   let inHtmlComment = false;

@@ -1489,3 +1489,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 部分內嵌 WebView／相容層可能在已接受 TXT／JSON 下載後，對 URL.revokeObjectURL 拋錯；原流程會把已觸發的第二次下載誤判為失敗。若下載連結本身失敗，回收 Blob URL 再拋錯甚至會中斷完整手動備份顯示。現在將 Blob URL 釋放視為 best-effort，回收例外不再阻擋新的下載狀態、手動 JSON 備援、確認換教材或卸載白板；仍保留原本按需清除 URL 的意圖，不宣稱瀏覽器一定釋放記憶體。
 - 新增 3 組模擬瀏覽器 DOM 回歸：舊 URL 回收失敗後第二份筆記仍可選取；下載點擊與回收都失敗仍可取得可解析、含原筆記的閱讀進度 JSON；確認換教材時回收失敗也不會留下舊筆記。沒有新增套件、付費 API、外傳私人教材、改動 v1/v2 進度或 v1 練習 checkpoint。
 - 這只驗證程式與模擬 WebView 的錯誤恢復，不代表 iOS Safari／Android Chrome、Maestro 真機、WebGPU 中文教學或 Ahaboard 同教材同題同裝置比較已通過。最新 SHA 的 GitHub CI／CodeQL 與指定 App 5504170 APPROVED 仍須獨立查核；PR 維持 Draft、不合併、不部署。
+
+### 2026-11-17：舊版 Mac TXT 的 CR 換行也能辨識原文表格
+
+- 原始講義若使用經典 Mac 的單獨 CR 換行，來源表格掃描器先前只按 LF／CRLF 分行，可能完全找不到有學分、數值的合法 Markdown 表格。現在掃描用副本統一辨識 CR、LF 與 CRLF；原文仍逐字保留，原始來源行數與行號標示不被正規化。
+- 同步修正跨行 HTML 標籤的暫存折疊：CR-only 的 section 隱藏容器仍會保持教師隱藏內容不列入衍生表格；封閉後的公開資料照常可看。新增四組 Node／Vitest 回歸，覆蓋公開 CR 表格、跨行隱藏容器、混合程式區塊，以及 CR/LF/CRLF 行號。
+- 本改動僅修正「來源表格」純文字分行與資料界線，不新增套件、對外傳送教材或修改 JSON 備份；非 iOS／Android 真機、Maestro、WebGPU 或 Ahaboard 競品對測。PR 保持 Draft，完整 CI／CodeQL／指定 App 審查均須以新 head 重新核對，不合併、不部署。
