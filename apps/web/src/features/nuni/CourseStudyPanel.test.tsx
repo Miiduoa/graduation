@@ -2135,7 +2135,7 @@ it.each([
       'resolve-false': false, 'resolve-null': null, 'resolve-true': true,
       'resolve-zero': 0, 'resolve-message': 'ok',
     };
-    const writeText = vi.fn(() => result.startsWith('resolve-')
+    const writeText = vi.fn(() => typeof result === 'string' && result.startsWith('resolve-')
       ? Promise.resolve(nonstandardValues[result]) : result);
     Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
     try {
