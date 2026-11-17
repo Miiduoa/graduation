@@ -23,7 +23,25 @@ function bool(value, where) {
   if (typeof value !== 'boolean') fail(where, 'boolean required');
   return value;
 }
-function mean(list) { return list.length ? list.reduce((sum, n) => sum + n, 0) / list.length : null; }
+// An ordinary sum can overflow even when every observed value is finite
+// (for example, two large valid latency readings). Keep the mean finite.
+function mean(list) {
+  if (!list.length) return null;
+  let average = list[0];
+  for (let index = 1; index < list.length; index += 1)
+    average += (list[index] - average) / (index + 1);
+  return average;
+}
+// Never emit Infinity in a report: JSON.stringify would silently turn it
+// into null and misrepresent a measured amount as missing.
+function finiteTotal(list, where) {
+  let total = 0;
+  for (const value of list) {
+    total += value;
+    if (!Number.isFinite(total)) fail(where, 'measured total exceeds finite numeric range');
+  }
+  return total;
+}
 export function auditStudyComparisons(raw) {
   const input = object(raw, 'manifest');
   if (input.schemaVersion !== 1 || !Array.isArray(input.trials) || !input.trials.length)
@@ -115,8 +133,8 @@ export function auditStudyComparisons(raw) {
       averagePeakMemoryMiB: mean(measured('peakMemoryMiB')),
       // Do not report a "total" if even one trial's cost was not measured.
       totalCostTwd: values.some((v) => v.costTwd === null) ? null :
-        values.reduce((sum, v) => sum + v.costTwd, 0),
-      measuredCostTotalTwd: values.reduce((sum, v) => sum + (v.costTwd ?? 0), 0),
+        finiteTotal(measured('costTwd'), `${product}.totalCostTwd`),
+      measuredCostTotalTwd: finiteTotal(measured('costTwd'), `${product}.measuredCostTotalTwd`),
       costNotMeasured: values.filter((v) => v.costTwd === null).length,
     };
   }

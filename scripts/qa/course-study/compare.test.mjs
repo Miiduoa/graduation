@@ -103,3 +103,31 @@ test('rejects an offline completion claim when the student task failed', () => {
   paired.trials[0].results[1].offlineCompleted = true;
   assert.throws(() => auditStudyComparisons(paired), /failed attempt cannot count as offline-completed/);
 });
+
+
+test('keeps finite latency and memory averages when their raw sum would overflow', () => {
+  const large = fixture();
+  large.trials[0].results[1] = {
+    ...result('Ahaboard'), coldStartMs: 1e308, warmStartMs: 1e308, peakMemoryMiB: 1e308,
+  };
+  const another = structuredClone(large.trials[0]);
+  another.caseId = 'pair-2';
+  large.trials.push(another);
+  const report = auditStudyComparisons(large);
+  for (const key of ['averageColdStartMs', 'averageWarmStartMs', 'averagePeakMemoryMiB']) {
+    assert.equal(report.summary.Ahaboard[key], 1e308);
+  }
+  assert.ok(!JSON.stringify(report).includes('"averageColdStartMs":null'));
+});
+
+test('rejects overflowing measured costs instead of serializing Infinity as unknown', () => {
+  const large = fixture();
+  large.trials[0].results[0].costTwd = 1e308;
+  const another = structuredClone(large.trials[0]);
+  another.caseId = 'pair-2';
+  large.trials.push(another);
+  assert.throws(() => auditStudyComparisons(large), /measured total exceeds finite numeric range/);
+  // Unknown individual costs do not excuse overflowing known-cost subtotals.
+  large.trials[0].results[1].costTwd = null;
+  assert.throws(() => auditStudyComparisons(large), /measured total exceeds finite numeric range/);
+});
