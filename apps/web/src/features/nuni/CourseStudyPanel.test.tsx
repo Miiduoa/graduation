@@ -2813,3 +2813,67 @@ it('still replaces the explicitly confirmed source when old download URL cleanup
     vi.unstubAllGlobals();
   }
 });
+
+it.each([
+  ['複製本次筆記', '手動複製本次筆記', '可選取的本次筆記文字'],
+  ['複製閱讀進度 JSON', '手動複製閱讀進度 JSON', '可選取的閱讀進度 JSON'],
+] as const)(
+  'recovers the full %s export if a mobile clipboard promise never settles',
+  async (actionLabel, regionLabel, fieldLabel) => {
+    const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+    let resolveLate!: () => void;
+    const writeText = vi.fn(() => new Promise<void>((resolve) => { resolveLate = resolve; }));
+    Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+    vi.useFakeTimers();
+    const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+      material={material} onClose={vi.fn()} />);
+    try {
+      fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '手機還沒備份的逐字私人筆記' } });
+      fireEvent.click(screen.getByRole('button', { name: actionLabel }));
+      expect(writeText).toHaveBeenCalledOnce();
+      expect(screen.queryByRole('region', { name: regionLabel })).toBeNull();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
+      const fallback = screen.getByRole('textbox', { name: fieldLabel }) as HTMLTextAreaElement;
+      expect(fallback.value).toContain('手機還沒備份的逐字私人筆記');
+      if (actionLabel === '複製閱讀進度 JSON')
+        expect(parseCourseStudyProgress(fallback.value, scope).passages['0:0'].note)
+          .toBe('手機還沒備份的逐字私人筆記');
+      expect(screen.getByRole('region', { name: regionLabel })).toContain(fallback);
+
+      // A delayed acknowledgement cannot undo the rescue or claim a success.
+      await act(async () => { resolveLate(); });
+      expect(screen.getByRole('textbox', { name: fieldLabel })).toBe(fallback);
+      expect(screen.queryByText(/已複製完整進度 JSON|已複製本次筆記到剪貼簿/)).toBeNull();
+      expect(inputValue(noteLabel)).toBe('手機還沒備份的逐字私人筆記');
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+      if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+      else Reflect.deleteProperty(window.navigator, 'clipboard');
+    }
+  },
+);
+
+it('does not resurface an obsolete mobile clipboard backup after the note changes before timeout', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  const writeText = vi.fn(() => new Promise<void>(() => {}));
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+  vi.useFakeTimers();
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '舊草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '較新的私人筆記' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
+    expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(inputValue(noteLabel)).toBe('較新的私人筆記');
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});

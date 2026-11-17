@@ -1574,3 +1574,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - `StudyReadAloud` 原先只有 LF 是偏好的自然分段點；CR-only 的舊版 Mac TXT 講義在約 160 UTF-16 單位長的朗讀區塊中，可能忽略原始段落邊界，改在句子中間斷開。現在將 CR 視為自然停頓，CRLF 仍作為同一組換行，原文不更動，仍使用裝置已安裝的本機中文語音，不傳送私人教材。
 - 新增 CR-only、CRLF、LF 三組 DOM／模擬語音引擎測試，另驗證缺少 `Intl.Segmenter` 的舊 WebView 回退路徑；核對首段停在原始換行、全文無遺失、每次朗讀長度保持在 160 UTF-16 單位內。未更改 JSON 備份／練習 checkpoint 或增加套件。
 - 這些是模擬瀏覽器回歸與程式修補，不等同 iOS Safari／Android Chrome、Maestro 真機朗讀效果；仍缺指定 App 5504170 的正式 APPROVED、WebGPU 中文教學和 Ahaboard 同教材同題同機比較。新 head 的 GitHub CI／CodeQL 需獨立驗證；PR 保持 Draft，不合併、不部署。
+
+### 2026-11-17：手機剪貼簿永遠不回應時保住 TXT／JSON 備份
+
+- 某些 iOS／Android 內嵌瀏覽器的 `navigator.clipboard.writeText()` 會回傳永不 settle 的 Promise；原本只有拒絕或缺少 API 才會提供手動長按複製，導致學生點「複製本次筆記」或「複製閱讀／練習進度 JSON」後一直無法取得本機備份。
+- 現在共用剪貼簿寫入器最多等候 5 秒確認；未回應時走原有完整、可選取的 TXT／JSON 手動備份路徑，不改寫內容也不聲稱真的已複製。超時後才傳回的成功不會變成成功提示；如果學生在等待時已修改筆記或切換內容，舊請求不會覆蓋新的狀態。新增 DOM／模擬剪貼簿回歸測試涵蓋筆記、進度 JSON、遲到成功及改稿後逾時。未新增依賴或外傳教材，既有 v1/v2 閱讀與 v1 練習 checkpoint 不變。
+- 此為模擬瀏覽器測試，仍非實際 iOS Safari／Android Chrome 剪貼簿或下載驗收。CI、CodeQL、指定 App 5504170 APPROVED、Maestro 與 Ahaboard 同教材同題同裝置對照仍須以本次新 head 查證；保持 Draft、不合併、不部署。

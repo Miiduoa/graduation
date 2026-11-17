@@ -57,6 +57,10 @@ const MANUAL_COPY_LABELS: Record<ManualCopyKind, { region: string; field: string
   'practice-progress': { region: '手動複製練習與閱讀進度 JSON', field: '可選取的練習與閱讀進度 JSON' },
 };
 
+// A mobile WebView clipboard bridge may never settle. Restore the same exact
+// selectable TXT/JSON snapshot instead of leaving the student waiting forever.
+const STUDY_CLIPBOARD_CONFIRM_MS = 5000;
+
 // Mobile browsers and embedded WebViews may throw SecurityError merely when
 // reading navigator.clipboard or clipboard.writeText. Fall back to a selectable
 // local snapshot instead of losing the student's export before a write starts.
@@ -72,8 +76,21 @@ function studyClipboardWriter(): ((text: string) => Promise<void>) | null {
       if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
         return Promise.reject(new Error('clipboard write was not confirmed'));
       }
-      return Promise.resolve(result as PromiseLike<unknown>).then((acknowledged) => {
-        if (acknowledged === false) throw new Error('clipboard write was rejected');
+      return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('clipboard write acknowledgement timed out'));
+        }, STUDY_CLIPBOARD_CONFIRM_MS);
+        void Promise.resolve(result as PromiseLike<unknown>).then(
+          (acknowledged) => {
+            clearTimeout(timeout);
+            if (acknowledged === false) reject(new Error('clipboard write was rejected'));
+            else resolve();
+          },
+          (error: unknown) => {
+            clearTimeout(timeout);
+            reject(error);
+          },
+        );
       });
     };
   } catch {
