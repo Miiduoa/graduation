@@ -51,6 +51,22 @@ function focusGeometry(target: HTMLElement) {
     visible: !block && bounds.width > 0 && bounds.height > 0 && bounds.left >= left && bounds.right <= left + width };
 }
 
+function hasClippingOrScrollingAncestor(target: HTMLElement): boolean {
+  for (let parent = target.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
+    const style = window.getComputedStyle(parent);
+    if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) return true;
+  }
+  return false;
+}
+
+function focusRevisionControl(target: HTMLElement | null) {
+  if (!target) return;
+  // The focus handler reveals document-level controls instantly. Nested scroll
+  // containers still need native focus to reveal their clipped descendants.
+  if (hasClippingOrScrollingAncestor(target)) target.focus();
+  else target.focus({ preventScroll: true });
+}
+
 function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft, protectedSelection, onProtectedSelectionChange }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
   const panel = useRef<HTMLElement>(null);
@@ -80,7 +96,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       focusFrame.current = null;
     };
   }, []);
-  useEffect(() => { if (open) field.current?.focus(); }, [open]);
+  useEffect(() => { if (open) focusRevisionControl(field.current); }, [open]);
   const pristine = isUnattemptedCalendarPlan(turn, states);
   // The owner resumes only this registered revision, cancelling remaining cards first.
   const retryable = started && turn.reply.cards.every(card =>
@@ -120,13 +136,10 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
     if (!next || !focusGeometry(next).visible) return;
     // Inline threads can have their own clipping/scroller. Leave those to native
     // Tab rather than preventing a needed scroll of an ancestor.
-    for (let parent = next.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
-      const style = window.getComputedStyle(parent);
-      if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) return;
-    }
+    if (hasClippingOrScrollingAncestor(next)) return;
     event.preventDefault();
     // preventScroll blocks a new focus scroll, but not one already in flight.
-    // Stop document motion at its current offset before transferring focus.
+    // Request cancellation at the current offset before transferring focus.
     window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: 'instant' });
     next.focus({ preventScroll: true });
   }
@@ -147,7 +160,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
 
   function closeEditor() {
     setOpen(false);
-    if (entry.current && !entry.current.disabled) entry.current.focus();
+    if (entry.current && !entry.current.disabled) focusRevisionControl(entry.current);
     else panel.current?.focus();
   }
 
@@ -163,7 +176,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       setProtectedIndices([]);
       setMessage('');
       setDraftNotice({ text: result.message || '修改內容已清除，原確認卡未變更。', error: false });
-      field.current?.focus();
+      focusRevisionControl(field.current);
     } catch (cause) {
       setDraftNotice({ text: cause instanceof Error ? cause.message : '修改內容尚未清除，原內容仍保留。', error: true });
     }
@@ -181,7 +194,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       setProtectedIndices([...result.content.protectedIndices]);
       setMessage('');
       setDraftNotice({ text: result.message || '草稿已帶入，請核對後再重新預覽。', error: false });
-      field.current?.focus();
+      focusRevisionControl(field.current);
     } catch (cause) {
       setDraftNotice({ text: cause instanceof Error ? cause.message : '草稿尚未套用，原修改內容仍保留。', error: true });
     }
@@ -194,7 +207,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
     try { buildPlanRevisionQuestion(turn, instruction, selection); }
     catch (cause) {
       setMessage(cause instanceof Error ? cause.message : '請先確認修改條件與保留項目，再重新預覽。');
-      field.current?.focus();
+      focusRevisionControl(field.current);
       return;
     }
     busy.current = true;
@@ -215,7 +228,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
   }
 
   if (!open && !started && !pristine) return null;
-  return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議"
+  return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議" data-assistant-plan-revision="true"
     onKeyDown={focusVisibleTabControl}
     onFocusCapture={event => revealFocusedControl(event.target)}>
     {complete ? <p role="status" className={styles.notice}>{message}</p> : <>

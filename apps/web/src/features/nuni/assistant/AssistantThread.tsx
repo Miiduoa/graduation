@@ -111,6 +111,7 @@ export function AssistantThread({
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
+  const revisionFocus = useRef(false);
   const [showJump, setShowJump] = useState(false);
   const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
   useEffect(() => {
@@ -145,12 +146,26 @@ export function AssistantThread({
   }, [inline, turns.length]);
   useEffect(() => {
     if (!followLatest.current || (!turns.length && !pending && !error)) return;
+    const active = document.activeElement;
+    // After a disabled-control blur, a later external focus does not bubble
+    // through this thread. Treat a real destination differently from body/html.
+    if (revisionFocus.current && active instanceof Element && active !== document.body &&
+      active !== document.documentElement && !shell.current?.contains(active)) revisionFocus.current = false;
+    if (revisionFocus.current) {
+      // Reply updates must not move the form while someone is editing a plan.
+      // The existing jump action or a new question explicitly resumes following.
+      followLatest.current = false;
+      setShowJump(true);
+      return;
+    }
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+    // Automatic updates must finish before the next keyboard interaction. An
+    // in-flight smooth scroll can outlive a later focus({ preventScroll: true }).
+    // Only the explicit jump action below requests animated scrolling.
+    end.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
   }, [inline, turns, pending, error]);
   useEffect(() => {
     const node = field.current;
@@ -167,6 +182,7 @@ export function AssistantThread({
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
+    revisionFocus.current = false;
     followLatest.current = true;
     setShowJump(false);
     setDraft(sendComposerDraft(draft, question));
@@ -193,7 +209,18 @@ export function AssistantThread({
     </label>
   );
   return (
-    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
+    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2"
+      onFocusCapture={event => {
+        const target = event.target;
+        // Keep this intent if pending disables the editor and the browser blurs it.
+        // A deliberate focus elsewhere in this thread replaces the intent.
+        revisionFocus.current = target instanceof HTMLElement && !!log.current?.contains(target) &&
+          !!target.closest('[data-assistant-plan-revision="true"]');
+      }}
+      onBlurCapture={event => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
+      }}>
       {!inline && (
         <>
           <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
@@ -338,6 +365,7 @@ export function AssistantThread({
             type="button"
             className={styles.jumpLatest}
             onClick={() => {
+              revisionFocus.current = false;
               followLatest.current = true;
               setShowJump(false);
               if (inline) {

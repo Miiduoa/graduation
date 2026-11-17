@@ -4,6 +4,7 @@ No model, school system, deployed backend or real account is used. Normal cases
 use native UI actions. Explicit controlled faults alter only fixture API replies.
 Build with build.mjs first. Artifacts include screenshots, requests and fake writes.
 """
+import argparse
 import asyncio
 import functools
 import hashlib
@@ -955,6 +956,180 @@ async def controlled_native_smooth_tab_case(page):
         (OUT / f'{name}-evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+async def observe_revision_scroll_policy(page):
+    # Record actual product scroll requests without adding a scroll/focus call.
+    await page.evaluate('''() => {
+      const original=Element.prototype.scrollIntoView;
+      const inRevision=()=>Boolean(document.activeElement?.closest('[data-assistant-plan-revision="true"]'));
+      const offsets=()=>({time:performance.now(),x:scrollX,y:scrollY,inRevision:inRevision()});
+      const probe={requests:[],checkpoints:[]};
+      const observed=function(...args){
+        const value=args[0];
+        const options=value && typeof value==='object'
+          ? {behavior:value.behavior,block:value.block,inline:value.inline} : value ?? null;
+        const request={options,target:{tag:this.tagName,id:this.id,
+          inAssistantLog:Boolean(this.closest('[role="log"]')),
+          isThreadEnd:this.parentElement?.getAttribute('role')==='log' && this===this.parentElement.lastElementChild},before:offsets()};
+        probe.requests.push(request);
+        try{return original.apply(this,args);}
+        finally{request.after=offsets();}
+      };
+      probe.checkpoint=name=>{
+        const value={name,...offsets(),rootScrollBehavior:getComputedStyle(document.documentElement).scrollBehavior,
+          reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
+          active:{tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null}};
+        probe.checkpoints.push(value);return value;
+      };
+      probe.stop=()=>{if(Element.prototype.scrollIntoView===observed)Element.prototype.scrollIntoView=original;};
+      Element.prototype.scrollIntoView=observed;
+      window.__qaRevisionScrollPolicy=probe;
+    }''')
+
+
+async def observe_revision_focus_stability(button, dock_element):
+    # A bounded read-only observation after the real keydown. The existing
+    # keydown probe independently records the first frames of the transition.
+    return await button.evaluate('''(node,dock) => new Promise(resolve => {
+      const geometry = ''' + GEOMETRY_AGAINST_COMPOSER + ''';
+      const timeoutMs=750,maxFrames=240,started=performance.now();
+      const evidence={timeoutMs,maxFrames,started,keydown:node.__qaFocusProbe?.keydown ?? null,timeline:[]};
+      let frame=0,frames=0,finished=false;
+      const sample=phase=>({phase,time:performance.now(),focused:document.activeElement===node,
+        rootScrollBehavior:getComputedStyle(document.documentElement).scrollBehavior,geometry:geometry(node,dock)});
+      const finish=reason=>{
+        if(finished)return;
+        finished=true;clearTimeout(timer);cancelAnimationFrame(frame);
+        evidence.finishReason=reason;evidence.timeline.push(sample('observation end'));resolve(evidence);
+      };
+      const tick=()=>{
+        if(finished)return;
+        frames+=1;evidence.timeline.push(sample('animation frame'));
+        if(frames>=maxFrames){finish('frame limit');return;}
+        frame=requestAnimationFrame(tick);
+      };
+      const timer=setTimeout(()=>finish('sampling deadline'),timeoutMs);
+      evidence.timeline.push(sample('after real keyboard command'));
+      frame=requestAnimationFrame(tick);
+    })''', dock_element)
+
+
+async def revision_native_focus_policy_case(page):
+    name = 'revision-native-focus-policy-320'
+    evidence = {'mode': 'real product auto-follow, editor and native keyboard focus; no test scroll or focus repair',
+                'checkpoints': []}
+    await observe_revision_scroll_policy(page)
+
+    async def checkpoint(label, expected, in_revision):
+        value = await page.evaluate('name => window.__qaRevisionScrollPolicy.checkpoint(name)', label)
+        evidence['checkpoints'].append(value)
+        assert value['rootScrollBehavior'] == expected and value['inRevision'] is in_revision, value
+        assert value['reducedMotion'] is False, value
+        return value
+
+    try:
+        await checkpoint('before plan: global smooth policy', 'smooth', False)
+        await start_plan(page)
+        ledger = await snapshot(page)
+        automatic = await page.evaluate('window.__qaRevisionScrollPolicy.requests.filter(request=>request.target.isThreadEnd)')
+        evidence['automaticFollowRequests'] = automatic
+        assert automatic and all(isinstance(request['options'], dict)
+                                 and request['options'].get('behavior') == 'instant'
+                                 for request in automatic), (
+                                     f'Actual product auto-follow did not use instant scrolling: {automatic}')
+        await checkpoint('before opening revision', 'smooth', False)
+        await page.get_by_role('button', name='修改時間或條件', exact=True).first.click()
+        field = page.get_by_role('textbox', name='修改條件', exact=True)
+        await expect(field).to_be_focused()
+        await checkpoint('revision opened with native click', 'auto', True)
+        await field.fill(CHANGE)
+        await page.keyboard.press('Shift+Tab')
+        await expect(protection_checkbox(page, 1)).to_be_focused()
+        await checkpoint('native backward Tab to second checkbox', 'auto', True)
+        await page.keyboard.press('Shift+Tab')
+        await expect(protection_checkbox(page, 0)).to_be_focused()
+        await checkpoint('native backward Tab to first checkbox', 'auto', True)
+        await page.keyboard.press('Space')
+        await expect(protection_checkbox(page, 0)).to_be_checked()
+        await expect(protection_checkbox(page, 1)).not_to_be_checked()
+        await page.keyboard.press('Tab')
+        await expect(protection_checkbox(page, 1)).to_be_focused()
+        await checkpoint('native forward Tab to second checkbox', 'auto', True)
+        await page.keyboard.press('Tab')
+        await expect(field).to_be_focused()
+        await expect(field).to_have_value(CHANGE)
+        await checkpoint('native forward Tab to textarea', 'auto', True)
+        button = page.get_by_role('button', name='重新預覽', exact=True)
+        dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        dock_element = await dock.element_handle()
+        before_first_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
+        await page.keyboard.press('Tab')
+        evidence['firstPreviewFocus'] = await focused_action_readability(
+            page, button, name + '-first-preview', before_first_tab)
+        # The real first Tab can reveal the button. The native roundtrip then
+        # requires the visible/no-scroll branch, without any setup scroll call.
+        await page.keyboard.press('Shift+Tab')
+        await expect(field).to_be_focused()
+        await checkpoint('native roundtrip before visible preview', 'auto', True)
+        before_visible_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
+        await page.keyboard.press('Tab')
+        stability = await observe_revision_focus_stability(button, dock_element)
+        evidence['stability'] = stability
+        focus = await focused_action_readability(
+            page, button, name + '-visible-preview', before_visible_tab, require_no_scroll=True)
+        evidence['visiblePreviewFocus'] = focus
+        keydown = focus['tabEvent']
+        assert keydown['defaultPreventedAtCapture'] is False and keydown['defaultPreventedAfterDispatch'] is True, focus
+        expected_scroll = focus['beforeTab']['scroll']
+        frames = [value for value in stability['timeline'] if value['phase'] == 'animation frame']
+        assert len(frames) >= 4 and frames[-1]['time'] - stability['started'] >= 500, stability
+        assert all(value['focused'] and value['rootScrollBehavior'] == 'auto'
+                   and value['geometry']['target']['top'] >= 0
+                   and value['geometry']['target']['bottom'] <= min(
+                       value['geometry']['dock']['top'], value['geometry']['viewport']['height'])
+                   for value in stability['timeline']), stability
+        observed_geometry = [value['geometry'] for value in stability['timeline']]
+        observed_geometry.extend(value['geometry'] for value in focus['focusTimeline'])
+        assert all(abs(value['scroll'][axis] - expected_scroll[axis]) <= 1
+                   for value in observed_geometry for axis in ['x', 'y']), (
+                       f'Visible native Tab changed position during continuous observation: {evidence}')
+        assert focus['scrollRequests'] == [], f'Visible preview needed a corrective scrollIntoView: {focus}'
+        requests = await page.evaluate('window.__qaRevisionScrollPolicy.requests')
+        tab_time = next(value['time'] for value in focus['focusTimeline'] if value['phase'] == 'keydown capture')
+        assert not any(request['before']['time'] >= tab_time for request in requests), (
+            f'Visible native Tab triggered a product scrollIntoView: {requests}')
+        assert not any(request['options'] and isinstance(request['options'], dict)
+                       and request['options'].get('behavior') == 'smooth' and request['before']['inRevision']
+                       for request in requests), requests
+        await checkpoint('visible preview after continuous observation', 'auto', True)
+        # Walk out with actual keyboard input; never move focus with evaluate.
+        for index in range(16):
+            await page.keyboard.press('Tab')
+            value = await page.evaluate('name => window.__qaRevisionScrollPolicy.checkpoint(name)', f'exit Tab {index + 1}')
+            evidence['checkpoints'].append(value)
+            if not value['inRevision']:
+                assert value['rootScrollBehavior'] == 'smooth', value
+                break
+            assert value['rootScrollBehavior'] == 'auto', value
+        else:
+            raise AssertionError('Native Tab did not leave the revision panel within 16 controls')
+        await expect(page.get_by_role('form', name='修改安排再預覽', exact=True)).to_have_count(1)
+        await expect(field).to_have_value(CHANGE)
+        await expect(protection_checkbox(page, 0)).to_be_checked()
+        assert await snapshot(page) == ledger, 'Editor keyboard flow caused an API request or write'
+        await no_writes(page)
+        await no_overflow(page)
+        await page.screenshot(path=str(OUT / f'{name}-restored-global-policy.png'), full_page=False)
+        return evidence
+    finally:
+        evidence['scrollPolicyProbe'] = await page.evaluate('''() => {
+          const probe=window.__qaRevisionScrollPolicy;probe?.stop();
+          return probe?{requests:probe.requests,checkpoints:probe.checkpoints}:null;
+        }''')
+        (OUT / f'{name}-evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
 async def protected_all_case(page):
     await start_plan(page)
     await open_revision(page, keyboard=True)
@@ -1469,10 +1644,15 @@ def build_evidence():
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
 
-async def main():
+async def main(diagnose_native_smooth_scroll=False):
     report = {'scope': 'Production React UI in Chromium; fixed fake API/account/campus; no model or real backend',
               'modelLimitation': 'Fixture returns predefined revised cards; this does not test model interpretation or generation quality',
+              'runKind': 'engine-diagnostic' if diagnose_native_smooth_scroll else 'product-acceptance',
               'build': build_evidence(), 'cases': []}
+    report_path = OUT / ('native-smooth-scroll-diagnostic-results.json' if diagnose_native_smooth_scroll else 'results.json')
+    if diagnose_native_smooth_scroll:
+        report['diagnosticScope'] = ('Manually injected native smooth animation; preserves the strict no-scroll assertions. '
+                                     'This is a browser-engine diagnostic, not one of the product acceptance cases.')
     handler = functools.partial(QuietHandler, directory=str(OUT))
     server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1498,7 +1678,7 @@ async def main():
                 cases.extend([
                     ('protected-single-1440', 1440, lambda p: protected_good_case(p, 'single-1440')),
                     ('protected-single-320', 320, lambda p: protected_good_case(p, 'single-320')),
-                    ('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case),
+                    ('revision-native-focus-policy-320', 320, revision_native_focus_policy_case),
                     ('protected-multiple-reordered', 1440, lambda p: protected_good_case(p, 'multiple-reordered')),
                     ('protected-all-320', 320, protected_all_case),
                     ('protected-partial-exact-duplicates', 1440, protected_partial_duplicate_case),
@@ -1523,8 +1703,11 @@ async def main():
                     ('draft-pending-ask', 1440, lambda p: draft_pending_case(p, 'ask')),
                     ('draft-pending-confirm', 1440, lambda p: draft_pending_case(p, 'confirm')),
                 ])
+                if diagnose_native_smooth_scroll:
+                    cases = [('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case)]
                 for name, width, run in cases:
-                    motion = 'no-preference' if name in ['protected-single-320', 'controlled-native-smooth-scroll-320'] else 'reduce'
+                    motion = 'no-preference' if name in ['protected-single-320', 'revision-native-focus-policy-320',
+                                                       'controlled-native-smooth-scroll-320'] else 'reduce'
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
                                                         reduced_motion=motion, locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')
                     page = await context.new_page()
@@ -1557,7 +1740,7 @@ async def main():
                             result['ledgerUnavailable'] = str(evidence_error)
                         report['cases'].append(result)
                         (OUT / f'{name}-ledger.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-                        (OUT / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+                        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
                         await context.close()
             finally:
                 await browser.close()
@@ -1565,11 +1748,15 @@ async def main():
         report['failure'] = traceback.format_exc()
         raise
     finally:
-        (OUT / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         server.shutdown()
         server.server_close()
-    print(json.dumps({'passed': len(report['cases']), 'artifacts': str(OUT)}, ensure_ascii=False))
+    print(json.dumps({'passed': len(report['cases']), 'runKind': report['runKind'], 'artifacts': str(OUT)}, ensure_ascii=False))
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--diagnose-native-smooth-scroll', action='store_true',
+                        help='Run only the strict external native-animation engine diagnostic, outside product acceptance')
+    arguments = parser.parse_args()
+    asyncio.run(main(diagnose_native_smooth_scroll=arguments.diagnose_native_smooth_scroll))

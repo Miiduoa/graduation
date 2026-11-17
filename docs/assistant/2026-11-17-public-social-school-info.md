@@ -41,7 +41,21 @@
 
 瀏覽器焦點驗收保留送鍵前的幾何觀測，並新增真實 Tab keydown capture 當下的同步快照；是否原本可見以按鍵事件的座標判定。事件、產品的 scrollIntoView 呼叫與有界逐幀紀錄都存入 CI artifact。原本的 12px 空間、最多 1px 位移與遮擋斷言保留；自然 Shift+Tab → Tab 往返要求確實執行可見控制項不捲動的驗收。
 
-後續 CI 的事件快照證實一項產品時序問題：按鍵當下按鈕已可見、Tab 已被接管，但先前的平滑捲動仍在下一幀移動畫面。現在只在既有「相鄰普通控制項完整可見、沒有祖先捲動或裁切容器」條件成立時，以當下 x/y 執行 instant scroll 中止舊動畫，再移動焦點；不在後續幀回捲到先前的位置。這符合 [CSSOM View 目前草案的 scroll 演算法](https://drafts.csswg.org/cssom-view/#dom-window-scroll)：同座標但仍有平滑捲動時，仍需中止原捲動。其他原生 Tab 分支保持原樣；另加入真實 Chromium 的受控進行中平滑捲動案例，要求可信任 Tab 當下目的地尚未到達，且切換後位置持續不變。
+### 修訂編輯期間的焦點與捲動
+
+產品現在預防自己啟動的捲動與鍵盤操作競爭：對話自動跟隨改成 instant；明確點擊「回到最新回覆」仍可平滑捲動。編輯器持有焦點時，背景更新保留目前閱讀位置，使用者可從既有入口恢復跟隨。焦點意圖在 pending 停用表單、瀏覽器暫時失焦時也會保留。
+
+修訂面板持有焦點時，只將根元素的 `scroll-behavior` 改為 `auto`，焦點離開後恢復全站原設定。元件自己聚焦一般控制項時，使用 `preventScroll` 與既有的必要 instant reveal；內層捲動／裁切容器與停用入口的 panel fallback 仍保留原生聚焦。可見 Tab 的同座標 instant 呼叫只表示請求取消既有動畫，不保證瀏覽器已排程的更新同步消失。
+
+原本 40 個產品案例及其位移／遮擋斷言均保留。第 41 個案例改為驗證真實產品來源：記錄實際 auto-follow、進入修訂後原生鍵盤移動、可見 Tab 後至少 500ms 的逐幀原位與可讀性，以及離開修訂後根元素設定恢復；測試不在按鍵後修補幾何。原先額外注入外部 smooth 的嚴格實驗保留為獨立診斷，沒有調高容差後改報成功。
+
+### Chromium 已知的取消限制
+
+在 [1cdc7d82 的瀏覽器紀錄](https://github.com/Miiduoa/graduation/actions/runs/44049912119) 中，Chrome 143.0.7499.4 的可信任 Tab、產品 instant 請求參數、呼叫前與呼叫後皆為 y=1924，下一幀才變成 y=1935；後續 59 幀維持不變，沒有補救 `scrollIntoView`。這證明單幀位移發生在取消請求返回之後，並非較早的測試快照或 handler 讀錯座標。
+
+同版本的 [Chromium 官方測試](https://chromium.googlesource.com/chromium/src/+/143.0.7499.4/content/browser/renderer_host/input/scroll_behavior_browsertest.cc) 保留 `DISABLED_InstantScriptScrollAbortsSmoothScriptScroll` 與 `crbug.com/40722572` 註解；[取消狀態機](https://chromium.googlesource.com/chromium/src/+/143.0.7499.4/third_party/blink/renderer/core/scroll/scroll_animator_compositor_coordinator.cc) 也顯示 compositor 取消會等後續更新處理。這些證據與本次現象相符，但不代表 Chromium 已確認此專案的特定重現。
+
+因此本次驗收要求產品自己的自動跟隨、焦點顯示與修訂鍵盤流程不互相干擾，**不宣稱可以同步凍結任意外部已啟動的原生動畫**。可執行 `python3 scripts/qa/assistant-plan-revision/check.py --diagnose-native-smooth-scroll` 重現原本嚴格的外部動畫診斷；它獨立報告結果並保留原 1px 斷言，已知引擎限制仍可能使該診斷失敗。這不是一般產品案例的通過證據。
 
 ## 驗證與後續範圍
 

@@ -410,41 +410,21 @@ it.each([false, true])('focuses the visible adjacent control without native scro
   expect(scroll).not.toHaveBeenCalled();
 });
 
-it.each([false, true])('stops pending document motion at the current offset before visible Tab focus (shift=%s)', shiftKey => {
-  const { button, field, back, bounds, scroll, documentScroll, focus, flush } = visibleTabFixture(406.84375);
+it.each([false, true])('requests same-position instant cancellation before visible Tab focus (shift=%s)', shiftKey => {
+  const { button, field, back, scroll, documentScroll, focus, flush } = visibleTabFixture(406.84375);
   const from = shiftKey ? back : field;
   act(() => from.focus());
   const position = { x: 31.25, y: 1920.5 };
   vi.stubGlobal('scrollX', position.x);
   vi.stubGlobal('scrollY', position.y);
-  let moving = true;
-  // jsdom has no native smooth scrolling. Model the pending browser frame;
-  // real Chromium coverage verifies that an instant scroll cancels this motion.
-  const motionFrame = window.requestAnimationFrame(() => {
-    if (!moving) return;
-    vi.stubGlobal('scrollY', position.y - 62);
-    bounds.mockReturnValue(new DOMRect(29, 468.84375, 88, 44));
-  });
-  documentScroll.mockImplementation((value: unknown) => {
-    const options = value as ScrollToOptions;
-    if (options?.behavior !== 'instant') return;
-    moving = false;
-    window.cancelAnimationFrame(motionFrame);
-    vi.stubGlobal('scrollX', options.left ?? window.scrollX);
-    vi.stubGlobal('scrollY', options.top ?? window.scrollY);
-  });
-  const motionAtFocus: boolean[] = [];
-  focus.mockImplementation(options => {
-    motionAtFocus.push(moving);
-    HTMLElement.prototype.focus.call(button, options);
-  });
-
+  // jsdom verifies request order and arguments only. It cannot model a native
+  // compositor update that was queued before cancellation; browser QA observes it.
   expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(false);
-  expect(motionAtFocus).toEqual([false]);
   expect(document.activeElement).toBe(button);
   expect({ x: window.scrollX, y: window.scrollY }).toEqual(position);
   expect(documentScroll).toHaveBeenCalledExactlyOnceWith({ left: position.x, top: position.y, behavior: 'instant' });
   expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  expect(documentScroll.mock.invocationCallOrder[0]).toBeLessThan(focus.mock.invocationCallOrder[0]);
   flush();
   expect({ x: window.scrollX, y: window.scrollY }).toEqual(position);
   expect(scroll).not.toHaveBeenCalled();
@@ -540,6 +520,67 @@ it('does not intercept modified Tab shortcuts or ordinary typing', () => {
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
   expect(documentScroll).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('keeps owned editor focus reachable with a nested scroller present=%s', nested => {
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  const onPreview = vi.fn();
+  render(<div style={nested ? { overflowY: 'auto' } : undefined}>
+    <AssistantPlanRevision {...base} turn={turn()} draft={draftBridge()} onPreview={onPreview} />
+  </div>);
+  const expectOwnedFocus = (target: HTMLElement) => {
+    expect(document.activeElement).toBe(target);
+    if (nested) expect(focus).toHaveBeenCalledExactlyOnceWith();
+    else expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  };
+  open();
+  const field = screen.getByLabelText('修改條件');
+  expectOwnedFocus(field);
+  const clickFromFocus = (name: string) => {
+    const button = screen.getByRole('button', { name });
+    act(() => button.focus({ preventScroll: true }));
+    focus.mockClear();
+    fireEvent.click(button);
+  };
+  clickFromFocus('套用已恢復的草稿');
+  expectOwnedFocus(field);
+  clickFromFocus('清除修改內容');
+  expectOwnedFocus(field);
+  enter('改'.repeat(301));
+  act(() => screen.getByRole('button', { name: '重新預覽' }).focus({ preventScroll: true }));
+  focus.mockClear();
+  submit();
+  expectOwnedFocus(field);
+  expect(onPreview).not.toHaveBeenCalled();
+  clickFromFocus('收起修改');
+  expectOwnedFocus(screen.getByRole('button', { name: '修改時間或條件' }));
+});
+
+it('reveals the owned textarea focus instantly after opening without starting native focus scrolling', () => {
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  const { flush } = focusScrollFixture();
+  const field = screen.getByLabelText('修改條件');
+  const scroll = vi.fn();
+  Object.defineProperty(field, 'scrollIntoView', { configurable: true, value: scroll });
+  vi.spyOn(field, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, 730, 200, 96));
+  expect(document.activeElement).toBe(field);
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  expect(scroll).not.toHaveBeenCalled();
+  flush();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'end', inline: 'nearest', behavior: 'instant' });
+});
+
+it('preserves native focus reveal for the panel fallback when its entry is disabled', () => {
+  const original = turn();
+  const onPreview = vi.fn();
+  const view = render(<AssistantPlanRevision {...base} turn={original} onPreview={onPreview} />);
+  open();
+  view.rerender(<AssistantPlanRevision {...base} enabled={false} turn={original} onPreview={onPreview} />);
+  const panel = screen.getByRole('region', { name: '修改行程提議' });
+  const focus = vi.spyOn(panel, 'focus');
+  fireEvent.click(screen.getByRole('button', { name: '收起修改' }));
+  expect(document.activeElement).toBe(panel);
+  expect(focus).toHaveBeenCalledExactlyOnceWith();
 });
 
 function draftBridge() {

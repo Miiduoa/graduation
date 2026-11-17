@@ -6,6 +6,8 @@
   width: min(100%, 520px);
   color: var(--text);
 }
+/* Native keyboard focus in this panel should not start viewport animations. */
+:global(html):has(.panel:focus-within) { scroll-behavior: auto; }
 .editor {
   display: grid;
   gap: 10px;
