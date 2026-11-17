@@ -2362,6 +2362,17 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
   expect(within(dialog).queryByText(/高度：12 公尺示意/)).toBeNull();
   const beforeFilter = scene.create.mock.calls.length;
 
+  // Offer the exact, audited way rather than only a generic OSM copyright
+  // link. A field visitor can inspect the original outline without confusing
+  // it with a validated entrance, room, or campus route.
+  const sourceLink = within(dialog).getByRole('link', {
+    name: '查看此棟建築的 OpenStreetMap 原始輪廓',
+  });
+  expect(sourceLink.getAttribute('href')).toBe('https://www.openstreetmap.org/way/255784049');
+  expect(sourceLink.getAttribute('href')).toBe(buildings[0].sourceUrl);
+  expect(sourceLink.getAttribute('target')).toBe('_blank');
+  expect(sourceLink.getAttribute('rel')).toBe('noopener noreferrer');
+
   // A same-school map filter does not unmount the spatial dialog or refetch
   // Overpass. The previous library way is no longer part of this view.
   view.rerender(<CampusSpatialExplorer school="pu" locations={[zhugu]} selected={zhugu} onSelect={onSelect} />);
@@ -2370,6 +2381,11 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
   expect(within(dialog).getByText(/0 棟公開建築輪廓/)).toBeTruthy();
   expect(within(dialog).getByText(/此地點沒有可用的已核對 OSM 建築外框.*不代表已驗證入口/)).toBeTruthy();
   expect(within(dialog).queryByText(/高度：100 公尺/)).toBeNull();
+  // A source from a filtered-out POI must never appear under a different
+  // building's details, even while the old network snapshot remains cached.
+  expect(within(dialog).queryByRole('link', {
+    name: '查看此棟建築的 OpenStreetMap 原始輪廓',
+  })).toBeNull();
   expect(within(dialog).getByRole('heading', { name: zhugu.name })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(1);
