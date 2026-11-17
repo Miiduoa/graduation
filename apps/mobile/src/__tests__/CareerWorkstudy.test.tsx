@@ -1,4 +1,5 @@
 import React from 'react';
+import { Linking } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').getCurrentTheme() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
@@ -127,10 +128,10 @@ test('work-study filters can narrow by unit, slot and credit with empty-state fe
   expect(view.getByText('第二份工讀')).toBeTruthy();
   expect(view.queryByText('測試用工讀')).toBeNull();
   fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '週三');
-  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+  expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '');
   fireEvent.press(view.getByRole('button', { name: '學分：可抵學分' }));
-  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+  expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy();
 });
 test('guest action asks host to log in and never sends a command', async () => {
   const { view, service, onLogin } = setup('student', null);
@@ -321,7 +322,7 @@ test('slow reads coalesce subscription and manual triggers into one latest snaps
     changed();
     changed();
   });
-  fireEvent.press(view.getByRole('button', { name: '重新整理工讀資料' }));
+  fireEvent.press(view.getByRole('button', { name: '重新整理職涯機會' }));
   expect(service.load).toHaveBeenCalledTimes(1);
   await act(async () => {
     finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
@@ -363,7 +364,7 @@ test('account remount and unmount abort pending reads and discard late failures'
       rejectUnmount = reject;
     });
   });
-  fireEvent.press(view.getByRole('button', { name: '重新整理工讀資料' }));
+  fireEvent.press(view.getByRole('button', { name: '重新整理職涯機會' }));
   view.unmount();
   expect(unmountSignal?.aborted).toBe(true);
   await act(async () => {
@@ -463,3 +464,59 @@ test('hides student work-study chrome for teachers without applications and keep
   staff.data.viewerRole = 'teacher';
   await waitFor(() => expect(staff.view.getByText('新增機會')).toBeTruthy());
 });
+
+test('shows every published opportunity type and filters without exposing unpublished records', async () => {
+  const { view, data, changed } = setup();
+  data.opportunities = [
+    opportunity,
+    { ...opportunity, id: 'internship', type: 'internship', title: '測試實習' },
+    { ...opportunity, id: 'fair', type: 'fair', title: '測試校徵' },
+    { ...opportunity, id: 'hidden', type: 'internship', title: '未上架機會', published: false },
+  ];
+  await waitFor(() => expect(view.getByText('測試實習')).toBeTruthy());
+  expect(view.getAllByText('類型：工讀')).toHaveLength(2);
+  expect(view.getAllByText('類型：實習')).toHaveLength(2);
+  expect(view.getAllByText('類型：校徵')).toHaveLength(2);
+  expect(view.queryByText('未上架機會')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '類型：實習' }));
+  expect(view.queryByText('測試用工讀')).toBeNull();
+  expect(view.queryByText('測試校徵')).toBeNull();
+  expect(view.getByText('測試實習')).toBeTruthy();
+  data.opportunities = data.opportunities.filter((o) => o.type !== 'internship');
+  await act(async () => {
+    changed();
+  });
+  await waitFor(() => expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy());
+});
+
+test.each([
+  ['internship', true],
+  ['fair', true],
+  ['internship', false],
+  ['fair', false],
+] as const)(
+  '%s directs students to the school announcement (source: %s)',
+  async (type, hasSource) => {
+    const { view, data, service } = setup();
+    data.opportunities = [
+      { ...opportunity, type, sourceUrl: hasSource ? opportunity.sourceUrl : '' },
+    ];
+    await view.findByText('此類機會請依校方公告方式報名');
+    expect(view.queryByRole('button', { name: `應徵${opportunity.title}` })).toBeNull();
+    expect(view.queryByText('工讀權益')).toBeNull();
+    expect(view.queryByLabelText('聯絡方式')).toBeNull();
+    expect(view.queryByRole('button', { name: '送出申請' })).toBeNull();
+    if (hasSource) {
+      const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+      try {
+        fireEvent.press(view.getByRole('link', { name: '校方原始公告 ↗' }));
+        expect(openURL).toHaveBeenCalledWith(opportunity.sourceUrl);
+      } finally {
+        openURL.mockRestore();
+      }
+    } else {
+      expect(view.queryByRole('link', { name: '校方原始公告 ↗' })).toBeNull();
+    }
+    expect(service.execute).not.toHaveBeenCalled();
+  },
+);

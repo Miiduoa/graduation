@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { getApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { HttpsError } = require('firebase-functions/v2/https');
 
 const local = /^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$/.exec(process.env.FIRESTORE_EMULATOR_HOST || '');
 if (!local || Number(local[1]) < 1 || Number(local[1]) > 65535) {
@@ -16,6 +17,8 @@ const projectId = 'demo-campus-agent-write-transactions';
 process.env.FIRESTORE_EMULATOR_HOST = host;
 process.env.GCLOUD_PROJECT = projectId;
 process.env.FIREBASE_CONFIG = JSON.stringify({ projectId });
+// Only the isolated demo project below may accept the synthetic order fixtures.
+process.env.ONLINE_ORDERING_ENABLED = 'true';
 // 載入正式 callable，所有資料庫操作均限於上面指定的本機 demo project。
 const service = require('./index');
 const db = getFirestore();
@@ -25,6 +28,7 @@ const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
+const { libraryLoanVersion } = require('./agent/libraryLoanSource');
 const read = async (path) => (await db.doc(path).get()).data();
 const scope = (uid = 'alice') => ({ uid, schoolId: 'pu' });
 const request = (uid, data) => ({ auth: { uid }, data: { schoolId: 'pu', ...data } });
@@ -224,7 +228,7 @@ test('an Agent return with a whitespace-only saved book title confirms its recei
   assert.equal((await bookRef.get()).data().availableCopies, 0);
   assert.equal((await bookRef.get()).data().available, 0);
 
-  const input = { loanId: loan.loanId };
+  const input = { loanId: loan.loanId, expectedLoanVersion: libraryLoanVersion(borrowed) };
   // 還書測例只開歸還權限；其餘維持預設關閉（與 main 請假權限 seed 模式一致）。
   await db.doc('users/alice/settings/assistantPermissions').set({ returnBook: true });
   const action = await proposal(
@@ -267,6 +271,334 @@ test('an Agent return with a whitespace-only saved book title confirms its recei
   assert.equal(savedRun.steps[0].tool, 'returnBook');
   assert.deepEqual(savedRun.steps[0].input, input);
   assert.deepEqual(savedRun.steps[0].output, receipt);
+});
+
+async function libraryProposal(toolName, loanId) {
+  const source = await read(`schools/pu/libraryLoans/${loanId}`);
+  const input = { loanId, expectedLoanVersion: libraryLoanVersion(source) };
+  await db.doc('users/alice/settings/assistantPermissions').set({ [toolName]: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+async function actorGuardProposal(toolName) {
+  if (toolName === 'renewBook') {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    return libraryProposal(toolName, loan.loanId);
+  }
+  const input = seatInput();
+  await db.doc('users/alice/settings/assistantPermissions').set({ [toolName]: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+async function serviceRecordSnapshot() {
+  const collections = [
+    'schools/pu/libraryLoans', 'users/alice/schools/pu/libraryLoans',
+    'schools/pu/libraryBooks',
+    'schools/pu/seatReservations', 'users/alice/schools/pu/seatReservations',
+    'schools/pu/serviceWriteGuards', 'users/alice/schools/pu/serviceWriteGuards',
+  ];
+  return collectionRecordSnapshot(collections);
+}
+
+async function collectionRecordSnapshot(collections) {
+  const snapshots = await Promise.all(collections.map((path) => db.collection(path).get()));
+  return snapshots.flatMap((snapshot) => snapshot.docs.map((doc) => ({
+    path: doc.ref.path, data: doc.data(), updateTime: doc.updateTime,
+  }))).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Intercept only the local emulator SDK in this test. The proposal claim commits
+ * through the actual Firestore transaction before we change the account, and the
+ * real callable cannot start its service transaction until the change completes.
+ */
+async function runAfterCommittedClaim(action, change) {
+  const originalRunTransaction = db.runTransaction;
+  const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
+  let changedAfterClaim = false;
+  let failedAccountReads = 0;
+  db.runTransaction = async function (callback, ...options) {
+    const result = await originalRunTransaction.call(this, async (tx) => {
+      if (!changedAfterClaim || !change.failAccountRead) return callback(tx);
+      const originalGet = tx.get;
+      const originalGetAll = tx.getAll;
+      tx.get = function (reference, ...args) {
+        if (reference.path === 'users/alice') {
+          failedAccountReads += 1;
+          return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
+        }
+        return originalGet.call(this, reference, ...args);
+      };
+      tx.getAll = function (...references) {
+        if (references.some((reference) => reference?.path === 'users/alice')) {
+          failedAccountReads += 1;
+          return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
+        }
+        return originalGetAll.call(this, ...references);
+      };
+      try {
+        return await callback(tx);
+      } finally {
+        tx.get = originalGet;
+        tx.getAll = originalGetAll;
+      }
+    }, ...options);
+    if (!changedAfterClaim) {
+      const claim = (await runRef.get()).data()?.actionClaims?.['0'];
+      if (claim?.status === 'started') {
+        changedAfterClaim = true;
+        await change.apply(db.doc('users/alice'));
+      }
+    }
+    return result;
+  };
+  try {
+    return await executeAgentWrite.run(action);
+  } finally {
+    db.runTransaction = originalRunTransaction;
+    assert.equal(changedAfterClaim, true, 'the source change must occur after a committed claim');
+    if (change.failAccountRead) assert.ok(failedAccountReads > 0, 'the service transaction must attempt the account read');
+  }
+}
+
+const blockedAccountChanges = [
+  ...['disabled', 'suspended', 'inactive', 'deleted'].map((status) => ({
+    label: status, apply: (account) => account.update({ status }), code: 'failed-precondition',
+  })),
+  { label: 'deletion marker', apply: (account) => account.update({ accountDeletionInProgress: true }), code: 'failed-precondition' },
+  {
+    label: 'account read failure', apply: async () => {}, failAccountRead: true, code: 'unavailable',
+  },
+];
+
+for (const toolName of ['renewBook', 'reserveSeat']) {
+  for (const change of blockedAccountChanges) {
+    test(`an Agent ${toolName} stops after a committed claim when the account becomes ${change.label}`, async () => {
+      const action = await actorGuardProposal(toolName);
+      const before = await serviceRecordSnapshot();
+
+      await assert.rejects(runAfterCommittedClaim(action, change), { code: change.code });
+
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'loan, mirror, inventory, reservation and service guard documents must remain unchanged');
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'unverified');
+      assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+      assert.equal(run.steps.some((step) => step.output?.success === true), false);
+    });
+  }
+
+  for (const change of [
+    { label: 'active profile', apply: (account) => account.update({ status: 'active' }) },
+    { label: 'missing root profile with valid membership', apply: (account) => account.delete() },
+  ]) {
+    test(`an Agent ${toolName} preserves ${change.label} compatibility after the claim`, async () => {
+      const action = await actorGuardProposal(toolName);
+      const receipt = await runAfterCommittedClaim(action, change);
+
+      assert.equal(receipt.success, true);
+      assert.equal(receipt.toolName, toolName);
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'completed');
+      assert.equal((await db.doc('users/alice').get()).exists, change.label === 'active profile');
+      if (toolName === 'renewBook') {
+        const loan = await read(`schools/pu/libraryLoans/${action.data.input.loanId}`);
+        assert.equal(loan.renewCount, 1);
+        assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${action.data.input.loanId}`), loan);
+      } else {
+        const canonical = await db.collection('schools/pu/seatReservations').get();
+        const mirror = await db.collection('users/alice/schools/pu/seatReservations').get();
+        assert.equal(canonical.size, 1);
+        assert.equal(mirror.size, 1);
+        assert.equal(canonical.docs[0].data().seatId, action.data.input.seatId);
+        assert.deepEqual(mirror.docs[0].data(), canonical.docs[0].data());
+      }
+    });
+  }
+}
+
+const orderSourceCollections = [
+  'schools/pu/cafeterias', 'schools/pu/cafeterias/cafe/operators',
+  'schools/pu/menus', 'schools/pu/cafeteriaMenus',
+  'paymentIntents', 'transactions', 'wallets',
+  'users/alice/schools/pu/wallet', 'users/alice/schools/pu/transactions',
+];
+const orderCollections = [
+  'schools/pu/orders', 'users/alice/schools/pu/orders', '_orderRequests',
+  'schools/pu/queueCounters', ...orderSourceCollections,
+];
+
+async function orderProposal() {
+  await seed([
+    ['schools/pu/cafeterias/cafe', {
+      name: 'Emulator-only cafeteria', merchantId: 'emulator-merchant',
+      schoolId: 'pu', currency: 'TWD', orderingEnabled: true, pilotStatus: 'live',
+    }],
+    ['schools/pu/cafeterias/cafe/operators/emulator-operator', { status: 'active' }],
+    ['schools/pu/menus/rice', {
+      name: 'Emulator-only meal', cafeteriaId: 'cafe', schoolId: 'pu',
+      price: 100, currency: 'TWD', available: true, orderingEnabled: true,
+    }],
+    ['users/alice/schools/pu/wallet/balance', { available: 1500, pending: 0, currency: 'TWD' }],
+    ['wallets/alice', { available: 1500, pending: 0, currency: 'TWD' }],
+    ['users/alice/settings/assistantPermissions', { createOrder: true }],
+  ]);
+  const input = {
+    requestId: randomUUID(), cafeteriaId: 'cafe',
+    items: [{ menuItemId: 'rice', quantity: 1 }],
+    expectedTotal: 105, paymentMethod: 'onsite',
+  };
+  const action = await proposal(
+    { actionProposals: [{ toolName: 'createOrder', input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = 'createOrder';
+  action.data.input = input;
+  return action;
+}
+
+async function assertFailedOrderClaim(action, receipt, code) {
+  assert.equal(receipt.success, false);
+  assert.equal(receipt.toolName, 'createOrder');
+  assert.equal(receipt.errorCode, code);
+  assert.equal(receipt.orderId, undefined);
+  assert.equal(receipt.queueNumber, undefined);
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'failed');
+  assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+  assert.equal(run.steps.length, 1);
+  assert.deepEqual(run.steps[0].output, receipt);
+  assert.equal(run.steps.some((step) => step.output?.success === true), false);
+}
+
+for (const change of blockedAccountChanges) {
+  test(`an Agent createOrder fails without service writes when the account becomes ${change.label} after its claim`, async () => {
+    const action = await orderProposal();
+    const before = await collectionRecordSnapshot(orderCollections);
+
+    const receipt = await runAfterCommittedClaim(action, change);
+
+    await assertFailedOrderClaim(action, receipt, change.code);
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), before,
+      'orders, mirrors, idempotency keys, queue counters, payment data and menu sources must not change');
+  });
+}
+
+for (const change of [
+  { label: 'active profile', apply: (account) => account.update({ status: 'active' }) },
+  { label: 'legacy profile without status', apply: (account) => account.set({ schoolId: 'pu' }) },
+  { label: 'missing root profile with valid membership', apply: (account) => account.delete() },
+]) {
+  test(`an Agent createOrder preserves ${change.label} compatibility after its claim`, async () => {
+    const action = await orderProposal();
+    const sourcesBefore = await collectionRecordSnapshot(orderSourceCollections);
+
+    const receipt = await runAfterCommittedClaim(action, change);
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.toolName, 'createOrder');
+    assert.equal(receipt.total, 105);
+    assert.equal(receipt.queueNumber, 1);
+    assert.equal(receipt.queueStatus, 'assigned');
+    const canonical = await read(`schools/pu/orders/${receipt.orderId}`);
+    assert.equal(canonical.userId, 'alice');
+    assert.equal(canonical.requestId, action.data.input.requestId);
+    assert.equal(canonical.paymentStatus, 'pending');
+    assert.equal(canonical.paymentMethod, 'onsite');
+    assert.deepEqual(await read(`users/alice/schools/pu/orders/${receipt.orderId}`), canonical);
+    assert.equal((await db.collection('schools/pu/orders').get()).size, 1);
+    assert.equal((await db.collection('_orderRequests').get()).size, 1);
+    const counters = await db.collection('schools/pu/queueCounters').get();
+    assert.equal(counters.size, 1);
+    assert.equal(counters.docs[0].data().nextSerial, 1);
+    const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+    assert.equal(run.actionClaims['0'].status, 'completed');
+    assert.deepEqual(run.steps[0].output, receipt);
+    assert.deepEqual(await collectionRecordSnapshot(orderSourceCollections), sourcesBefore,
+      'placing the synthetic onsite order must not debit wallets, create payment records or alter menus');
+  });
+}
+
+test('a disabled account cannot replay an existing successful order to repair its mirror or allocate a pending number', async () => {
+  const action = await orderProposal();
+  const created = await service.createOrder.run(request('alice', action.data.input));
+  assert.equal(created.success, true);
+  const canonicalRef = db.doc(`schools/pu/orders/${created.orderId}`);
+  const mirrorRef = db.doc(`users/alice/schools/pu/orders/${created.orderId}`);
+  // Model an already committed order awaiting queue recovery. The original
+  // request key and immutable receipt digest stay intact; the mirror is stale.
+  await canonicalRef.update({ queueNumber: null, queueStatus: 'pending_confirmation' });
+  await mirrorRef.update({ queueNumber: null, queueStatus: 'pending_confirmation', fixtureMarker: 'keep-stale-mirror' });
+  const before = await collectionRecordSnapshot(orderCollections);
+
+  const receipt = await runAfterCommittedClaim(action, blockedAccountChanges[0]);
+
+  await assertFailedOrderClaim(action, receipt, 'failed-precondition');
+  assert.deepEqual(await collectionRecordSnapshot(orderCollections), before,
+    'a rejected replay must not rewrite even an existing mirror or consume a queue number');
+});
+
+for (const toolName of ['renewBook', 'returnBook']) {
+  test(`an Agent ${toolName} rejects a changed canonical book after preview without rewriting service data`, async () => {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    const action = await libraryProposal(toolName, loan.loanId);
+    const loanRef = db.doc(`schools/pu/libraryLoans/${loan.loanId}`);
+    await loanRef.update({ bookId: 'B2', bookTitle: 'Changed book after preview' });
+    const watched = [
+      loanRef,
+      db.doc(`users/alice/schools/pu/libraryLoans/${loan.loanId}`),
+      db.doc('schools/pu/libraryBooks/B1'),
+      db.doc('schools/pu/libraryBooks/B2'),
+      db.doc('users/alice/schools/pu/serviceWriteGuards/library'),
+    ];
+    const before = await db.getAll(...watched);
+
+    await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+
+    const after = await db.getAll(...watched);
+    after.forEach((snapshot, index) => {
+      assert.deepEqual(snapshot.data(), before[index].data());
+      assert.equal(snapshot.updateTime.isEqual(before[index].updateTime), true,
+        `a stale confirmation must not rewrite ${snapshot.ref.path}`);
+    });
+    const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+    assert.equal(run.actionClaims['0'].status, 'unverified');
+    assert.equal(run.steps.some((step) => step.output?.success === true), false);
+  });
+}
+
+test('a normal renewal makes an older Agent renewal confirmation stale', async () => {
+  const loan = await borrow.execute(scope(), { bookId: 'B1' });
+  const action = await libraryProposal('renewBook', loan.loanId);
+  await service.renewBook.run(request('alice', { loanId: loan.loanId }));
+  const watched = [
+    db.doc(`schools/pu/libraryLoans/${loan.loanId}`),
+    db.doc(`users/alice/schools/pu/libraryLoans/${loan.loanId}`),
+    db.doc('schools/pu/libraryBooks/B1'),
+  ];
+  const before = await db.getAll(...watched);
+  assert.equal(before[0].data().renewCount, 1);
+
+  await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+
+  const after = await db.getAll(...watched);
+  after.forEach((snapshot, index) => {
+    assert.deepEqual(snapshot.data(), before[index].data());
+    assert.equal(snapshot.updateTime.isEqual(before[index].updateTime), true);
+  });
+  assert.equal(after[0].data().renewCount, 1);
 });
 
 test('one Agent proposal can be claimed once and never accepts a client group override', async () => {

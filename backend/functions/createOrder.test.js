@@ -21,6 +21,41 @@ describe('canonical priced idempotent orders', () => {
     [...store.docs.keys()].filter(
       (path) => path.includes('/orders/') || path.startsWith('_orderRequests/'),
     );
+  const observeTransactions = ({ beforeTransaction, accountReadError } = {}) => {
+    const reads = [];
+    const writes = [];
+    const runTransaction = store.db.runTransaction.bind(store.db);
+    store.db.runTransaction = (callback) => {
+      beforeTransaction?.();
+      return runTransaction((transaction) => {
+        const read = async (method, references) => {
+          reads.push(...references.map((reference) => reference.path));
+          if (accountReadError && references.some((reference) => reference.path === 'users/alice')) {
+            throw accountReadError;
+          }
+          return transaction[method](...references);
+        };
+        return callback({
+          ...transaction,
+          get: (reference) => read('get', [reference]),
+          getAll: (...references) => read('getAll', references),
+          ...Object.fromEntries(['set', 'create', 'update'].map((method) => [
+            method,
+            (reference, data) => {
+              writes.push({ method, path: reference.path });
+              return transaction[method](reference, data);
+            },
+          ])),
+        });
+      });
+    };
+    return { reads, writes };
+  };
+  const unavailableError = {
+    code: 'failed-precondition',
+    message: '帳號正在刪除或已停用。',
+    details: { reason: 'account-deletion' },
+  };
   beforeEach(() => {
     store = transactionStore([
       ['schools/pu/members/alice', { status: 'active' }],
@@ -43,6 +78,135 @@ describe('canonical priced idempotent orders', () => {
     ]);
     createOrder = createOrderHandler({ db: store.db });
   });
+  afterEach(() => jest.restoreAllMocks());
+  test.each([
+    { status: 'disabled' },
+    { status: 'suspended' },
+    { status: 'inactive' },
+    { status: 'deleted' },
+    { status: 'active', accountDeletionInProgress: true },
+    { accountDeletionInProgress: true },
+  ])('rejects an account that becomes unavailable before the transaction without any writes %j', async (account) => {
+    store.docs.set('users/alice', { status: 'active' });
+    const transaction = observeTransactions({
+      beforeTransaction: () => store.docs.set('users/alice', account),
+    });
+    const assignNumber = jest.spyOn(require('./ordering/queueNumber'), 'assignNumberForOrder');
+
+    await expect(createOrder(request())).rejects.toMatchObject(unavailableError);
+
+    expect(transaction.reads).toContain('users/alice');
+    expect(transaction.writes).toEqual([]);
+    expect(paths()).toEqual([]);
+    expect(assignNumber).not.toHaveBeenCalled();
+  });
+  test.each([
+    ['active', { status: 'active' }],
+    ['legacy', { displayName: 'Alice' }],
+    ['missing', undefined],
+  ])('preserves creation and successful replay for a %s account profile', async (_label, account) => {
+    if (account) store.docs.set('users/alice', account);
+    const transaction = observeTransactions();
+
+    const first = await createOrder(request());
+    const replay = await createOrder(request());
+
+    expect(first).toMatchObject({ success: true, reused: false, queueNumber: 1 });
+    expect(replay).toEqual({ ...first, reused: true });
+    expect(transaction.reads.filter((path) => path === 'users/alice')).toHaveLength(2);
+    expect(paths()).toHaveLength(3);
+  });
+  test.each([
+    ['disabled', { status: 'disabled' }, 'assigned'],
+    ['deleting', { accountDeletionInProgress: true }, 'assigned'],
+    ['disabled', { status: 'disabled' }, 'pending'],
+    ['deleting', { accountDeletionInProgress: true }, 'pending'],
+  ])('rejects a %s account replay (%j, queue %s) without repairing its mirror or claiming no order exists', async (_label, account, queueStatus) => {
+    const queue = require('./ordering/queueNumber');
+    if (queueStatus === 'pending') {
+      jest.spyOn(queue, 'assignNumberForOrder').mockRejectedValueOnce(new Error('counter down'));
+    }
+    const first = await createOrder(request());
+    jest.restoreAllMocks();
+    store.docs.delete(`users/alice/schools/pu/orders/${first.orderId}`);
+    const before = new Map(store.docs);
+    before.set('users/alice', account);
+    const transaction = observeTransactions({
+      beforeTransaction: () => store.docs.set('users/alice', account),
+    });
+    const assignNumber = jest.spyOn(queue, 'assignNumberForOrder');
+
+    const replay = createOrder(request());
+    await expect(replay).rejects.toMatchObject(unavailableError);
+    await expect(replay).rejects.toHaveProperty('details', { reason: 'account-deletion' });
+
+    expect(transaction.writes).toEqual([]);
+    expect(store.docs).toEqual(before);
+    expect(store.docs.has(`schools/pu/orders/${first.orderId}`)).toBe(true);
+    expect(assignNumber).not.toHaveBeenCalled();
+  });
+  test.each([{ status: 'disabled' }, { accountDeletionInProgress: true }])(
+    'checks account state before persisting a merchant rejection %j',
+    async (account) => {
+      store.docs.get('schools/pu/cafeterias/cafe').orderingEnabled = false;
+      const transaction = observeTransactions({
+        beforeTransaction: () => store.docs.set('users/alice', account),
+      });
+
+      await expect(createOrder(request())).rejects.toMatchObject(unavailableError);
+
+      expect(transaction.writes).toEqual([]);
+      expect(paths()).toEqual([]);
+    },
+  );
+  test('checks account state before replaying a rejected key and preserves that outcome after reactivation', async () => {
+    store.docs.get('schools/pu/menus/rice').available = false;
+    await expect(createOrder(request())).rejects.toMatchObject({
+      details: { orderOutcome: 'not_created' },
+    });
+    const originalKey = store.docs.get(paths()[0]);
+    store.docs.get('schools/pu/menus/rice').available = true;
+    let account = { status: 'disabled' };
+    const transaction = observeTransactions({
+      beforeTransaction: () => store.docs.set('users/alice', account),
+    });
+
+    await expect(createOrder(request())).rejects.toMatchObject(unavailableError);
+    expect(transaction.writes).toEqual([]);
+    expect(store.docs.get(paths()[0])).toEqual(originalKey);
+    account = { status: 'active' };
+    await expect(createOrder(request())).rejects.toMatchObject({
+      details: { orderOutcome: 'not_created' },
+    });
+    expect(transaction.writes).toEqual([]);
+    expect(paths()).toHaveLength(1);
+    expect((await createOrder(request({ requestId: 'reviewed-after-reactivation' }))).success).toBe(true);
+  });
+  test.each(['new', 'successful replay', 'rejected replay'])(
+    'propagates an account read failure on %s without any partial writes or false order outcome',
+    async (scenario) => {
+      if (scenario === 'successful replay') {
+        const first = await createOrder(request());
+        store.docs.delete(`users/alice/schools/pu/orders/${first.orderId}`);
+      } else if (scenario === 'rejected replay') {
+        store.docs.get('schools/pu/menus/rice').available = false;
+        await expect(createOrder(request())).rejects.toMatchObject({
+          details: { orderOutcome: 'not_created' },
+        });
+      }
+      const before = new Map(store.docs);
+      const readError = new Error('account source unavailable');
+      const transaction = observeTransactions({ accountReadError: readError });
+      const assignNumber = jest.spyOn(require('./ordering/queueNumber'), 'assignNumberForOrder');
+
+      await expect(createOrder(request())).rejects.toBe(readError);
+
+      expect(transaction.reads).toContain('users/alice');
+      expect(transaction.writes).toEqual([]);
+      expect(store.docs).toEqual(before);
+      expect(assignNumber).not.toHaveBeenCalled();
+    },
+  );
   test('ignores forged client prices, names and merchant identities and stores matching server receipts', async () => {
     const result = await createOrder(
       request({

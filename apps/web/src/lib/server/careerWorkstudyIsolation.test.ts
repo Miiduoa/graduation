@@ -6,7 +6,6 @@ it('keeps rules and deployed Functions isolated from hosted entries', () => {
   const root = resolve(process.cwd(), '../..');
   for (const file of [
     'backend/functions/index.js',
-    'apps/web/src/app/career/data/route.ts',
     'apps/mobile/App.tsx',
     'apps/mobile/src/screens/RoleAwareTodayScreen.tsx',
     'packages/shared/src/index.ts',
@@ -17,6 +16,11 @@ it('keeps rules and deployed Functions isolated from hosted entries', () => {
       /careerInternship|CareerInternship|careerWorkstudy|CareerWorkstudy|careerSourceFeed|firestore\.rules\.fragment/,
     );
   }
+  // The public route may read source settings, but must not expose workspaces or handlers.
+  const route = readFileSync(resolve(root, 'apps/web/src/app/career/data/route.ts'), 'utf8');
+  expect(route).not.toMatch(
+    /careerInternship|CareerInternship|careerWorkstudy|CareerWorkstudy|firestore\.rules\.fragment/,
+  );
   const rules = readFileSync(resolve(root, 'backend/firestore/firestore.rules'), 'utf8');
   expect(rules).not.toContain('internshipRecords');
   expect(rules).not.toContain('internshipRules');
