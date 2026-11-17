@@ -126,6 +126,51 @@ it('pauses in-flight 3D module startup when the tab backgrounds before import se
   }
 });
 
+
+it('defers WebGL after Safari pagehide before visibilitychange and resumes once on pageshow', async () => {
+  // During bfcache navigation Safari may leave document.hidden === false.
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+      fireEvent(window, new Event('pagehide'));
+      await Promise.resolve();
+    });
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(document.hidden).toBe(false);
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(true);
+    expect(within(dialog).getByRole('status').textContent).toContain('返回導覽後才會啟動立體畫面');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    timerSpy.mockRestore();
+  }
+});
+
+it('suspends a ready WebGL scene on pagehide even without a hidden document', async () => {
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  fireEvent(window, new Event('pagehide'));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(scene.dispose).not.toHaveBeenCalled();
+  fireEvent(window, new Event('pageshow'));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
+  scene.setActive.mockClear();
+  fireEvent(window, new Event('pageshow'));
+  expect(scene.setActive).not.toHaveBeenCalled();
+});
+
 it('does not start hidden-tab WebGL after the spatial dialog is closed', async () => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
   try {
