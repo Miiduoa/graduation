@@ -33,6 +33,12 @@ type Props = {
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
+// The API bounds decoded upstream Overpass to 500 KB. A very large or
+// ambiguous downstream Content-Length must not make mobile JSON parsing
+// allocate unbounded memory if an intermediary changes the response.
+// This is a header preflight; an absent header is still guarded by the
+// existing request deadline and the validated snapshot contract.
+const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
 
 // A modal-local Retry-After can be bypassed by closing and reopening the map.
@@ -667,8 +673,16 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // complete 200 JSON document. A CDN/proxy must not turn a transformed
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
+        const contentLength = response.headers?.get('content-length') ?? null;
+        // RFC Content-Length is a decimal byte count, not a fraction, hex
+        // number or comma-separated value. Do not trust a 200 JSON body whose
+        // advertised size is invalid or implausibly large for this API.
+        const invalidContentLength = contentLength !== null &&
+          (!/^\d+$/.test(contentLength) ||
+            !Number.isSafeInteger(Number(contentLength)) ||
+            Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null) {
+            contentRange !== null || invalidContentLength) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -696,7 +710,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null;
+            contentRange !== null || invalidContentLength;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -705,7 +719,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           // ordinary 500 keeps its existing manual-retry behavior.
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
-            status === 503 || status === 504 || contentRange !== null;
+            status === 503 || status === 504 || contentRange !== null || invalidContentLength;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
