@@ -388,12 +388,13 @@ it('cancels a pending focus frame on unmount and ignores a late callback from th
 
 function visibleTabFixture(top = 376.84375) {
   const fixture = focusScrollFixture(top);
+  const documentScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   const panel = screen.getByRole('region', { name: '修改行程提議' });
   for (const target of panel.querySelectorAll('button, input, textarea')) {
     if (target !== fixture.button)
       vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, 200, 100, 44));
   }
-  return { ...fixture, panel, field: screen.getByLabelText('修改條件'),
+  return { ...fixture, documentScroll, panel, field: screen.getByLabelText('修改條件'),
     entry: screen.getByRole('button', { name: '修改時間或條件' }),
     back: screen.getByRole('button', { name: '收起修改' }), focus: vi.spyOn(fixture.button, 'focus') };
 }
@@ -409,14 +410,56 @@ it.each([false, true])('focuses the visible adjacent control without native scro
   expect(scroll).not.toHaveBeenCalled();
 });
 
+it.each([false, true])('stops pending document motion at the current offset before visible Tab focus (shift=%s)', shiftKey => {
+  const { button, field, back, bounds, scroll, documentScroll, focus, flush } = visibleTabFixture(406.84375);
+  const from = shiftKey ? back : field;
+  act(() => from.focus());
+  const position = { x: 31.25, y: 1920.5 };
+  vi.stubGlobal('scrollX', position.x);
+  vi.stubGlobal('scrollY', position.y);
+  let moving = true;
+  // jsdom has no native smooth scrolling. Model the pending browser frame;
+  // real Chromium coverage verifies that an instant scroll cancels this motion.
+  const motionFrame = window.requestAnimationFrame(() => {
+    if (!moving) return;
+    vi.stubGlobal('scrollY', position.y - 62);
+    bounds.mockReturnValue(new DOMRect(29, 468.84375, 88, 44));
+  });
+  documentScroll.mockImplementation((value: unknown) => {
+    const options = value as ScrollToOptions;
+    if (options?.behavior !== 'instant') return;
+    moving = false;
+    window.cancelAnimationFrame(motionFrame);
+    vi.stubGlobal('scrollX', options.left ?? window.scrollX);
+    vi.stubGlobal('scrollY', options.top ?? window.scrollY);
+  });
+  const motionAtFocus: boolean[] = [];
+  focus.mockImplementation(options => {
+    motionAtFocus.push(moving);
+    HTMLElement.prototype.focus.call(button, options);
+  });
+
+  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(false);
+  expect(motionAtFocus).toEqual([false]);
+  expect(document.activeElement).toBe(button);
+  expect({ x: window.scrollX, y: window.scrollY }).toEqual(position);
+  expect(documentScroll).toHaveBeenCalledExactlyOnceWith({ left: position.x, top: position.y, behavior: 'instant' });
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  flush();
+  expect({ x: window.scrollX, y: window.scrollY }).toEqual(position);
+  expect(scroll).not.toHaveBeenCalled();
+  expect(documentScroll).toHaveBeenCalledOnce(); // No later restore or correction.
+});
+
 it.each([false, true])('lets native Tab (shift=%s) leave the panel without wrapping focus', shiftKey => {
-  const { entry, back, scroll, focus, flush } = visibleTabFixture();
+  const { entry, back, scroll, documentScroll, focus, flush } = visibleTabFixture();
   const from = shiftKey ? entry : back;
   const outside = screen.getByRole('button', { name: '表單外的控制項' });
   act(() => from.focus());
   expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(true);
   expect(document.activeElement).toBe(from);
   expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
   // jsdom does not perform the browser's default Tab action.
   act(() => outside.focus());
   flush();
@@ -437,27 +480,29 @@ it.each(['disabled', 'negative tabindex', 'hidden'])('skips a %s control in the 
 });
 
 it('does not skip an occluded next control to reach a later visible one, and keeps native reveal', () => {
-  const { button, field, back, scroll, focus, flush } = visibleTabFixture(526.94);
+  const { button, field, back, scroll, documentScroll, focus, flush } = visibleTabFixture(526.94);
   const backFocus = vi.spyOn(back, 'focus');
   expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
   expect(backFocus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
   act(() => button.focus()); // Native Tab may still need scrolling to reveal this control.
   flush();
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'end', inline: 'nearest', behavior: 'instant' });
 });
 
 it('leaves positive tabindex ordering to the browser', () => {
-  const { field, entry, focus } = visibleTabFixture();
+  const { field, entry, documentScroll, focus } = visibleTabFixture();
   entry.tabIndex = 1;
   expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
 });
 
 it('leaves a panel with a nonstandard Tab stop to the browser', () => {
-  const { panel, field, focus } = visibleTabFixture();
+  const { panel, field, documentScroll, focus } = visibleTabFixture();
   const link = document.createElement('a');
   link.href = '#details';
   link.textContent = '額外連結';
@@ -466,31 +511,35 @@ it('leaves a panel with a nonstandard Tab stop to the browser', () => {
   expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
 });
 
 it('preserves native scrolling inside an inline or clipping ancestor', () => {
-  const { panel, field, focus } = visibleTabFixture();
+  const { panel, field, documentScroll, focus } = visibleTabFixture();
   panel.parentElement!.style.overflowY = 'auto';
   expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
 });
 
 it('respects a descendant handler that already cancelled Tab', () => {
-  const { field, focus } = visibleTabFixture();
+  const { field, documentScroll, focus } = visibleTabFixture();
   field.addEventListener('keydown', event => event.preventDefault(), { once: true });
   expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false);
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
 });
 
 it('does not intercept modified Tab shortcuts or ordinary typing', () => {
-  const { field, focus } = visibleTabFixture();
+  const { field, documentScroll, focus } = visibleTabFixture();
   for (const modifiers of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }])
     expect(fireEvent.keyDown(field, { key: 'Tab', ...modifiers })).toBe(true);
   expect(fireEvent.keyDown(field, { key: 'a' })).toBe(true);
   expect(document.activeElement).toBe(field);
   expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
 });
 
 function draftBridge() {

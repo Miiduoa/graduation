@@ -795,6 +795,150 @@ async def protected_good_case(page, name):
             'readability': readability, 'focusedPreview': focused_action, 'visibleForwardTab': visible_forward_tab}
 
 
+async def begin_controlled_native_smooth_scroll(button, dock_element):
+    # Only setup uses standard scroll APIs. Once motion starts, this observer
+    # reads geometry and the real keydown; it never repairs focus or scrolling.
+    return await button.evaluate('''(node, dock) => new Promise(resolveReady => {
+      const geometry = ''' + GEOMETRY_AGAINST_COMPOSER + ''';
+      const initial=geometry(node,dock), scrolling=document.scrollingElement;
+      const maximumY=Math.max(0,(scrolling?.scrollHeight ?? 0)-innerHeight);
+      const requestedStart={x:initial.scroll.x,y:Math.max(0,Math.min(maximumY,Math.round(
+        initial.scroll.y+initial.target.bottom-(Math.min(initial.dock.top,innerHeight)-24))))};
+      window.scrollTo({left:requestedStart.x,top:requestedStart.y,behavior:'instant'});
+      const start=geometry(node,dock);
+      const destination={x:start.scroll.x,y:Math.min(maximumY,Math.floor(start.scroll.y+start.target.top-24))};
+      const evidence={mode:'controlled native smooth scroll, followed by a trusted forward Tab',
+        requestedStart,start,destination,timeoutMs:1000,maxFrames:120,minimumProgress:2,minimumRemaining:8,
+        ready:false,readySample:null,keydown:null,timeline:[],finished:false,finishReason:null};
+      const active=()=>({tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null});
+      const sample=phase=>({phase,time:performance.now(),active:active(),focused:document.activeElement===node,
+        geometry:geometry(node,dock)});
+      const readable=value=>value.target.width>0 && value.target.height>0 && value.target.top>=12 &&
+        value.target.bottom+12<=Math.min(value.dock.top,value.viewport.height) &&
+        value.target.left>=0 && value.target.right<=value.viewport.width;
+      let frame=0,timer=0,frames=0,readyResolved=false,resolveDone,keydownEvent=null;
+      const done=new Promise(resolve=>{resolveDone=resolve;});
+      const stop=reason=>{
+        if(evidence.finished)return;
+        evidence.finished=true;evidence.finishReason=reason;
+        clearTimeout(timer);cancelAnimationFrame(frame);
+        document.removeEventListener('keydown',onKeydown,true);
+        if(!readyResolved){readyResolved=true;resolveReady({ready:false,reason,start,destination});}
+        resolveDone();
+      };
+      const onKeydown=event=>{
+        if(event.key!=='Tab' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)return;
+        document.removeEventListener('keydown',onKeydown,true);
+        keydownEvent=event;
+        const captured=sample('keydown capture'), current=captured.geometry;
+        evidence.keydown={key:event.key,shiftKey:event.shiftKey,isTrusted:event.isTrusted,
+          defaultPreventedAtCapture:event.defaultPrevented,defaultPreventedAfterDispatch:null,
+          target:{tag:event.target?.tagName ?? null,id:event.target?.id ?? null},
+          ...captured,readable:readable(current),
+          progressSinceStart:current.scroll.y-start.scroll.y,
+          remainingToDestination:destination.y-current.scroll.y};
+        evidence.timeline.push(captured);
+      };
+      const tick=()=>{
+        if(evidence.finished)return;
+        frames+=1;
+        if(keydownEvent)evidence.keydown.defaultPreventedAfterDispatch=keydownEvent.defaultPrevented;
+        const value=sample(evidence.keydown?'post-Tab animation frame':'native smooth animation frame');
+        evidence.timeline.push(value);
+        if(!readyResolved){
+          const progress=value.geometry.scroll.y-start.scroll.y;
+          const remaining=destination.y-value.geometry.scroll.y;
+          if(progress>=evidence.minimumProgress && remaining>=evidence.minimumRemaining && readable(value.geometry)){
+            evidence.ready=true;evidence.readySample=value;readyResolved=true;
+            resolveReady({ready:true,start,destination,atFirstMovement:value});
+          }else if(remaining<=1){stop('native destination reached before a pending-scroll sample');return;}
+        }
+        if(frames>=evidence.maxFrames){stop('frame limit');return;}
+        frame=requestAnimationFrame(tick);
+      };
+      node.__qaNativeSmoothScroll={evidence,done,stop};
+      if(!readable(start) || destination.y-start.scroll.y<120){
+        stop('insufficient visible native scroll range');return;
+      }
+      document.addEventListener('keydown',onKeydown,true);
+      evidence.timeline.push(sample('before controlled native smooth scroll'));
+      evidence.nativeScrollRequest={left:destination.x,top:destination.y,behavior:'smooth'};
+      window.scrollTo(evidence.nativeScrollRequest);
+      timer=setTimeout(()=>stop('sampling deadline'),evidence.timeoutMs);
+      frame=requestAnimationFrame(tick);
+    })''', dock_element)
+
+
+async def controlled_native_smooth_tab_case(page):
+    name = 'controlled-native-smooth-scroll-320'
+    await start_plan(page)
+    await open_revision(page, keyboard=True)
+    await select_protection(page, ORIGINAL, [0], keyboard=True)
+    field = page.get_by_role('textbox', name='修改條件', exact=True)
+    await expect(field).to_be_focused()
+    button = page.get_by_role('button', name='重新預覽', exact=True)
+    await expect(button).to_be_enabled()
+    # Let pending focus handlers finish before the explicit controlled setup.
+    await page.evaluate('''() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    })''')
+    ledger = await snapshot(page)
+    dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+    dock_element = await dock.element_handle()
+    await observe_next_forward_tab(button, dock_element)
+    evidence = {'mode': 'controlled browser-native smooth scroll; no fixture API faults or post-Tab geometry repair'}
+    try:
+        ready = await begin_controlled_native_smooth_scroll(button, dock_element)
+        evidence['setup'] = ready
+        assert ready['ready'], f'Pending native smooth-scroll precondition was not reached: {ready}'
+        # No intervening locator action or screenshot may finish the animation.
+        await page.keyboard.press('Tab')
+        evidence['nativeSmoothScroll'] = await button.evaluate('''async node => {
+          const probe=node.__qaNativeSmoothScroll;
+          await probe.done;
+          return probe.evidence;
+        }''')
+        focus = await focused_action_readability(
+            page, button, name + '-tab-focus', ready['atFirstMovement']['geometry'], require_no_scroll=True)
+        evidence['focusedPreview'] = focus
+        native = evidence['nativeSmoothScroll']
+        keydown = native['keydown']
+        assert keydown is not None, f'Missing controlled real Tab capture: {native}'
+        assert (keydown['isTrusted'] and keydown['key'] == 'Tab' and not keydown['shiftKey']
+                and keydown['target']['tag'] == 'TEXTAREA' and keydown['readable']
+                and keydown['defaultPreventedAtCapture'] is False
+                and keydown['defaultPreventedAfterDispatch'] is True), native
+        assert (keydown['progressSinceStart'] >= native['minimumProgress']
+                and keydown['remainingToDestination'] >= native['minimumRemaining']), (
+                    f'Real Tab missed the pending native smooth-scroll interval: {native}')
+        assert keydown['geometry']['scroll'] == focus['beforeTab']['scroll'], (native, focus)
+        post_tab = [value for value in native['timeline'] if value['phase'] == 'post-Tab animation frame']
+        assert len(post_tab) >= 4 and post_tab[-1]['time'] - keydown['time'] >= 500, (
+            f'Insufficient read-only observation after real Tab: {native}')
+        original_scroll = keydown['geometry']['scroll']
+        assert all(abs(value['geometry']['scroll'][axis] - original_scroll[axis]) <= 1
+                   for value in post_tab for axis in ['x', 'y']), (
+                       f'Pending native smooth scroll continued after visible Tab: {native}')
+        assert all(value['focused'] and value['geometry']['target']['top'] >= 0
+                   and value['geometry']['target']['bottom'] <= min(
+                       value['geometry']['dock']['top'], value['geometry']['viewport']['height'])
+                   for value in post_tab), f'Focused preview became obscured after real Tab: {native}'
+        assert focus['scrollRequests'] == [], f'Visible Tab required a corrective scrollIntoView: {focus}'
+        assert await snapshot(page) == ledger, 'Controlled focus case caused an API request or write'
+        await no_writes(page)
+        await no_overflow(page)
+        return evidence
+    finally:
+        native = await button.evaluate('''node => {
+          const probe=node.__qaNativeSmoothScroll;
+          probe?.stop('case ended');
+          return probe?.evidence ?? null;
+        }''')
+        if native is not None:
+            evidence['nativeSmoothScroll'] = native
+        (OUT / f'{name}-evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
 async def protected_all_case(page):
     await start_plan(page)
     await open_revision(page, keyboard=True)
@@ -1338,6 +1482,7 @@ async def main():
                 cases.extend([
                     ('protected-single-1440', 1440, lambda p: protected_good_case(p, 'single-1440')),
                     ('protected-single-320', 320, lambda p: protected_good_case(p, 'single-320')),
+                    ('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case),
                     ('protected-multiple-reordered', 1440, lambda p: protected_good_case(p, 'multiple-reordered')),
                     ('protected-all-320', 320, protected_all_case),
                     ('protected-partial-exact-duplicates', 1440, protected_partial_duplicate_case),
@@ -1363,7 +1508,7 @@ async def main():
                     ('draft-pending-confirm', 1440, lambda p: draft_pending_case(p, 'confirm')),
                 ])
                 for name, width, run in cases:
-                    motion = 'no-preference' if name == 'protected-single-320' else 'reduce'
+                    motion = 'no-preference' if name in ['protected-single-320', 'controlled-native-smooth-scroll-320'] else 'reduce'
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
                                                         reduced_motion=motion, locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')
                     page = await context.new_page()

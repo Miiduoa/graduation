@@ -125,6 +125,9 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) return;
     }
     event.preventDefault();
+    // preventScroll blocks a new focus scroll, but not one already in flight.
+    // Stop document motion at its current offset before transferring focus.
+    window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: 'instant' });
     next.focus({ preventScroll: true });
   }
 
