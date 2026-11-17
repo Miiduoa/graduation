@@ -31,11 +31,24 @@ function classify(row) {
 }
 
 function inventory(ndjson) {
+  if (typeof ndjson !== 'string' || Buffer.byteLength(ndjson, 'utf8') > MAX_BYTES) {
+    throw new Error('Inventory input must be UTF-8 text within 32 MiB');
+  }
   const counts = { total: 0, canonicalVisible: 0, hidden: 0, reviewRequired: 0 };
+  const paths = new Set();
   for (const line of ndjson.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const row = JSON.parse(line);
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      // Node's JSON.parse error includes excerpts from invalid source text.
+      // Never echo student data or the raw export line in CLI errors.
+      throw new Error('Invalid NDJSON record');
+    }
     const type = classify(row);
+    if (paths.has(row.path)) throw new Error('Duplicate group post record');
+    paths.add(row.path);
     counts.total += 1;
     counts[type] += 1;
   }
@@ -46,7 +59,9 @@ if (require.main === module) {
   try {
     if (process.argv.length !== 3) throw new Error('Usage: node scripts/audit-group-post-visibility.cjs export.ndjson');
     const file = process.argv[2];
-    if (fs.statSync(file).size > MAX_BYTES) throw new Error('Inventory input exceeds 32 MiB; split into smaller files');
+    const source = fs.statSync(file);
+    if (!source.isFile()) throw new Error('Inventory input must be a regular file');
+    if (source.size > MAX_BYTES) throw new Error('Inventory input exceeds 32 MiB; split into smaller files');
     const rows = fs.readFileSync(file, 'utf8');
     const result = inventory(rows);
     process.stdout.write(JSON.stringify(result) + '\n');

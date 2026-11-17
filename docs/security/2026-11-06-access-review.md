@@ -867,3 +867,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 新增 Firebase 模擬器合成回歸：未分類歷史貼文直接 GET、跨帳號與跨校投票拒絕，原作者補旗標公開與硬刪拒絕，文字更正保留，管理員手動明示發布後恢復讀取／投票，封存後重放及群組撤權後重放拒絕。既有正常公開貼文 fixture 補齊四欄位。
 - **本輪驗證限制：** GitHub 新 head 的 Firebase Emulator、CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 尚須各自核實，靜態語法檢查不構成隔離驗收。歷史貼文缺旗標時，作者刪除與一般成員投票會暫停，必須先完成合法唯讀盤點、人工判讀、索引及 Web/Mobile/Rules 相容性與回復程序。PR Draft、最新主線分歧與指定 nuni-merge-gate App 5504170 對精確 head APPROVED 均阻擋合併與部署。
 - 未操作正式資料、金鑰、Storage token、migration、E 校園連線或受限制的 npm/pnpm audit；GCS/Supabase URL 撤銷、真 Storage CAS、歷史附件可信引用、minimatch 雙套鎖檔仍待驗收。
+
+
+### 2026-11-17｜群組貼文唯讀盤點工具的資料保密與重複紀錄防護（PR #577）
+
+- **發現：** 原 `scripts/audit-group-post-visibility.cjs` 直接把 `JSON.parse` 的錯誤訊息輸出至 stderr；Node.js 錯誤有時包含壞掉的原始 NDJSON 片段，可能將學生貼文內容寫入工作紀錄或 CI 日誌。若匯出檔案中相同 `groups/G/posts/P` 路徑重複出現，舊工具會重複計數，可能讓後續相容性／正規化盤點失真。原 32 MiB 大小限制只存在 CLI，直接呼叫匯出函式尚未檢查。
+- **最小修補：** 解析失敗僅回報固定的 `Invalid NDJSON record`，不回傳敏感原文；對重複路徑直接中止、拒絕產出有誤計數；程式入口及直接呼叫 `inventory` 均限制 32 MiB，CLI 限定一般檔案。不輸出 UID、貼文路徑或正文，仍僅計算 `canonicalVisible/hidden/reviewRequired`，不連線 Firebase、不修改資料。
+- **可重跑證據：** 使用 Node v22.16.0，在純合成臨時 NDJSON 與 subprocess CLI 上執行 `node --test scripts/audit-group-post-visibility.test.cjs`，**6/6 通過、0 失敗、0 略過**。新增重複路徑拒絕、含敏感字串的壞 JSON 不出現在 stdout/stderr、直接 API 32 MiB 上限；既有 3 項分類案例仍通過。這不等於 Firebase Emulator、真實歷史資料或正式發布驗收。
+- **尚待與不變限制：** P0 父貼文／留言 Firestore Rules 的最新精確 head 仍需實際 Emulator 與 CI、索引 READY、合法歷史資料盤點與人工判讀；目前 PR 與 main 分歧且有合併衝突。指定 nuni-merge-gate App 5504170 完整精確 head APPROVED 前不得合併或部署。已發 GCS／Supabase URL 撤銷、真 GCS CAS、minimatch 兩圖及其他風險仍待，沒有處理正式資料、金鑰、token、migration、E 校園或重新執行被拒絕的 npm/pnpm audit。
