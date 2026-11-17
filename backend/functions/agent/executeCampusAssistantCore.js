@@ -69,6 +69,7 @@ const {
   loadAssistantWritePermissions,
 } = require('../lib/assistantWritePermissions');
 const { getIntentWritePlan } = require('./intentWritePlan');
+const { parseLibraryLoanRequest, chooseLibraryLoan } = require('./libraryLoanSelection');
 
 const db = getFirestore();
 
@@ -113,53 +114,23 @@ function resolvePermissionScope(intent, hasAuth) {
   return resolveAgentPermissionScope(intent, hasAuth);
 }
 
-function extractLoanIdFromMessage(text) {
-  const s = String(text ?? '');
-  const labeled = s.match(/(?:借閱|loan|loanId|紀錄|編號|單號)[：:\s]*([A-Za-z0-9_-]{8,})/i);
-  if (labeled) return labeled[1].trim();
-  const loose = s.match(/\b([A-Za-z0-9_-]{18,32})\b/);
-  return loose ? loose[1] : null;
-}
-
-function dueTime(row) {
-  const d = toJsDate(row?.dueAt ?? row?.dueDate);
-  return d ? d.getTime() : Number.POSITIVE_INFINITY;
-}
-
-function chooseLibraryLoan(loans, message) {
-  if (!Array.isArray(loans) || loans.length === 0) return null;
-  const text = String(message ?? '').toLowerCase();
-  const explicitLoanId = extractLoanIdFromMessage(text);
-  if (explicitLoanId) {
-    const exact = loans.find((loan) => String(loan.id) === explicitLoanId || String(loan.loanId) === explicitLoanId);
-    if (exact) return exact;
-  }
-  const titleMatch = text.match(/[《「『"]([^》」』"]{2,80})[》」』"]/)?.[1];
-  if (titleMatch) {
-    const matched = loans.find((loan) =>
-      String(loan.bookTitle || loan.title || '').toLowerCase().includes(titleMatch.toLowerCase()),
-    );
-    if (matched) return matched;
-  }
-  const active = loans.filter((loan) => !['returned', 'cancelled'].includes(String(loan.status || '').toLowerCase()));
-  const pool = active.length > 0 ? active : loans;
-  return [...pool].sort((a, b) => dueTime(a) - dueTime(b))[0] || null;
-}
-
 async function resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage }) {
-  const loanId = extractLoanIdFromMessage(lastUserMessage);
-  if (loanId) return { input: { loanId }, loan: { id: loanId } };
+  const target = parseLibraryLoanRequest(lastUserMessage);
+  if (target.kind === 'clarify') return { selectionIssue: 'clarify' };
+  if (target.kind === 'id') return { input: { loanId: target.loanId }, loan: { id: target.loanId } };
 
   const result = await runTool(
     'getLibraryLoans',
     { uid, schoolId, timeZone, prefetched: {} },
-    { onlyOverdue: /逾期|過期/.test(String(lastUserMessage || '')) },
+    { onlyOverdue: target.onlyOverdue },
   ).catch((error) => {
     if (isAuthorizationFailure(error)) throw error;
     return null;
   });
   if (result?.ok !== true || !Array.isArray(result.loans)) return { unavailable: true };
-  const loan = chooseLibraryLoan(result.loans, lastUserMessage);
+  const selection = chooseLibraryLoan(result.loans, target);
+  if (selection?.selectionIssue) return selection;
+  const loan = selection?.loan;
   if (!loan?.id) return null;
   return { input: { loanId: String(loan.id) }, loan };
 }
@@ -855,6 +826,16 @@ async function executeCampusAssistantCore({
     if (resolvedLoan?.unavailable) {
       response.content = '目前無法完整讀取平台借閱紀錄，暫時無法確認要處理哪一本書。請稍後重試，或到圖書館頁核對借閱紀錄；這不代表沒有未歸還的書。';
       response.suggestions = ['查看借閱', '我有哪些書還沒還？', '功能說明'];
+      return await finalizeResponse();
+    }
+    if (resolvedLoan?.selectionIssue) {
+      const issue = resolvedLoan.selectionIssue;
+      response.content = issue === 'not-found'
+        ? '本次讀取的 nuni 借閱紀錄中，沒有符合指定書名或借閱編號的未歸還書籍。請核對完整書名，或從圖書館頁選擇正確書目並提供借閱紀錄編號。'
+        : issue === 'ambiguous'
+          ? '本次讀取的 nuni 借閱紀錄中，有多筆符合指定書名，還不能確定要處理哪一本。請提供完整書名；若書名相同，請從圖書館頁選擇正確書目並提供借閱紀錄編號。'
+          : '請一次提供一個完整書名，例如：續借《資料結構》，或明確提供借閱紀錄編號，例如：借閱編號：紀錄ID。我確認目標後才會建立續借或還書確認。';
+      response.suggestions = ['我有哪些書還沒還？', '查看借閱', '功能說明'];
       return await finalizeResponse();
     }
     if (!resolvedLoan) {
