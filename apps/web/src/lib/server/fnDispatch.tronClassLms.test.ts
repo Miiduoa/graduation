@@ -110,6 +110,63 @@ it('loads general and filtered courseware activities without downloading locked 
   expect(JSON.stringify(body)).not.toMatch(/secret|cookies|upload-key-restricted/);
 });
 
+it('does not expose hidden, unpublished or cross-course rows from school feeds', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({
+    ok: true,
+    value: {
+      homework_activities: [
+        { ...LMS_FIXTURE_HOMEWORK_OPEN, hidden: true },
+        { ...LMS_FIXTURE_HOMEWORK_DONE, course_id: 99999 },
+        { ...LMS_FIXTURE_HOMEWORK_OPEN, id: 20003, published: false },
+        { ...LMS_FIXTURE_HOMEWORK_OPEN, id: 20004, title: '可見作業' },
+      ],
+      total: 4,
+    },
+  });
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+    ok: true,
+    value: query === 'type=courseware_activity' ? [
+      { ...LMS_FIXTURE_MATERIAL, id: 30001, is_hidden: true },
+      { ...LMS_FIXTURE_MATERIAL, id: 31001, hidden: true },
+      { id: 42004, type: 'announcement', title: '被另一來源隱藏的公告', hidden: true },
+    ] : [
+      LMS_FIXTURE_MATERIAL,
+      { ...LMS_FIXTURE_MATERIAL, id: 31002, course_id: 99999 },
+      { ...LMS_FIXTURE_MATERIAL, id: 31003, published: false },
+      { ...LMS_FIXTURE_MATERIAL, id: 31004, uploads: [
+        { name: 'hidden.pdf', key: 'hidden-key', allow_download: true, hidden: true },
+        { name: 'public.pdf', key: 'public-key', allow_download: true },
+      ] },
+      { id: 42001, type: 'announcement', title: '外課公告', course_id: 99999 },
+      { id: 42002, type: 'announcement', title: '草稿公告', published: false },
+      { id: 42004, type: 'announcement', title: '被另一來源隱藏的公告' },
+    ],
+  }));
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValueOnce({
+    ok: true,
+    value: [
+      LMS_FIXTURE_ANNOUNCEMENT,
+      { ...LMS_FIXTURE_ANNOUNCEMENT, id: 40002, course_id: 99999, title: '外課公告' },
+      { ...LMS_FIXTURE_ANNOUNCEMENT, id: 40003, is_hidden: true, title: '隱藏公告' },
+    ],
+  });
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.homework.map((row: { id: number }) => row.id)).toEqual([20004]);
+  expect(body.result.materials.map((row: { id: number }) => row.id)).toEqual([31004]);
+  expect(body.result.materials[0].files).toEqual([
+    expect.objectContaining({ name: 'public.pdf', allowDownload: true }),
+  ]);
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(JSON.stringify(body)).not.toMatch(/hidden-key|hidden\.pdf|外課公告|草稿公告|隱藏公告|被另一來源隱藏的公告/);
+});
+
 it('pages homework until total and does not treat a later 500 as an empty course', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchHomeworkPage)
