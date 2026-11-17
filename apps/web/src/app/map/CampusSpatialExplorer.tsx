@@ -36,9 +36,49 @@ const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 // The API bounds decoded upstream Overpass to 500 KB. A very large or
 // ambiguous downstream Content-Length must not make mobile JSON parsing
 // allocate unbounded memory if an intermediary changes the response.
-// This is a header preflight; an absent header is still guarded by the
-// existing request deadline and the validated snapshot contract.
+// Keep the same cap for decoded response bytes. Content-Length alone is
+// advisory: a proxy may omit it or advertise a shorter body than it sends.
 const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
+
+// Response.json() buffers the entire document before our snapshot validator
+// runs. Bound the *actual decoded bytes* so untrusted downstream responses
+// cannot exhaust mobile memory even without a reliable Content-Length.
+// Fallback is only for non-streaming WebViews / synthetic fetch stubs.
+async function readBoundedFootprintJson(response: Response): Promise<unknown> {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    return response.json() as Promise<unknown>;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_DECLARED_FOOTPRINT_BYTES) {
+        // Reader cancellation is best effort and must not block failure
+        // handling if an unusual WebView rejects or throws synchronously.
+        try {
+          void Promise.resolve(reader.cancel()).catch(() => {});
+        } catch {
+          // The decoded-body limit still fails closed.
+        }
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+}
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
 
 // A modal-local Retry-After can be bypassed by closing and reopening the map.
@@ -731,7 +771,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const cooldownSeconds = response.status === 200 ? footprintCooldownSeconds(response) : null;
         let payload: unknown;
         try {
-          payload = await response.json() as unknown;
+          payload = await readBoundedFootprintJson(response);
         } catch {
           pauseForInvalidPayload(cooldownSeconds);
           throw new Error('Invalid building outline response body');
