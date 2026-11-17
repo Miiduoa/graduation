@@ -1014,6 +1014,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     </> : '此地點沒有可用的已核對 OSM 建築外框；只顯示原有地點標記，不代表已驗證入口。'}
                   </p>
                 )}
+                {sourceFootprint && (
+                  <p className={styles.note}>
+                    <a href={sourceFootprint.sourceUrl} target="_blank" rel="noopener noreferrer">
+                      查看此棟建築的 OpenStreetMap 原始輪廓
+                    </a>
+                    {' '}（OSM 圖徵來源，非現地測繪；不代表已驗證入口）
+                  </p>
+                )}
                 {sourceFootprint?.osmVersion && sourceFootprint.osmEditedAt && (
                   <p className={styles.note}>
                     OSM way 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
