@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { getApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { HttpsError } = require('firebase-functions/v2/https');
 
 const local = /^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$/.exec(process.env.FIRESTORE_EMULATOR_HOST || '');
 if (!local || Number(local[1]) < 1 || Number(local[1]) > 65535) {
@@ -25,6 +26,7 @@ const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
+const { resolveReserveSeatInput } = require('./lib/campusWriteIntentResolve');
 const read = async (path) => (await db.doc(path).get()).data();
 const scope = (uid = 'alice') => ({ uid, schoolId: 'pu' });
 const request = (uid, data) => ({ auth: { uid }, data: { schoolId: 'pu', ...data } });
@@ -209,6 +211,200 @@ async function proposal(overrides = {}, { seedLeavePermission = true } = {}) {
     context: { schoolId: 'pu', groupId: 'untrusted-foreign-group' },
   } };
 }
+
+// These fixtures exercise nuni's Firebase collections only. They neither call
+// nor claim to reserve a seat in an official library booking system.
+const exactSeatInput = { seatId: 'lib-3F-A15', date: '2026-11-18', startTime: '14:00', endTime: '16:30' };
+const exactSeatMessage = '2026-11-18 圖書館三樓 A15，14:00–16:30 預約座位';
+async function seatProposal(message = exactSeatMessage, expected = exactSeatInput) {
+  const input = resolveReserveSeatInput(message, 'Asia/Taipei');
+  assert.deepEqual(input, expected, 'the proposed interval must preserve the explicit request');
+  await seed([
+    [`schools/pu/librarySeats/${input.seatId}`, { status: 'available' }],
+    ['users/alice/settings/assistantPermissions', { reserveSeat: true }],
+  ]);
+  const action = await proposal({ actionProposals: [{ toolName: 'reserveSeat', input }] },
+    { seedLeavePermission: false });
+  action.data.toolName = 'reserveSeat';
+  action.data.input = input;
+  return action;
+}
+
+async function seatServiceSnapshot() {
+  const paths = [
+    'schools/pu/seatReservations', 'schools/pu/librarySeats', 'schools/pu/serviceWriteGuards',
+    ...['alice', 'bob'].flatMap(uid => [
+      `users/${uid}/schools/pu/seatReservations`, `users/${uid}/schools/pu/serviceWriteGuards`,
+    ]),
+  ];
+  const rows = await Promise.all(paths.map(async path => {
+    const snapshot = await db.collection(path).get();
+    return snapshot.docs.map(doc => ({ path: doc.ref.path, data: doc.data(), updateTime: doc.updateTime }));
+  }));
+  return rows.flat().sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function assertSeatReceipt(action, receipt) {
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.toolName, 'reserveSeat');
+  for (const field of ['seatId', 'date', 'startTime', 'endTime']) {
+    assert.equal(receipt[field], action.data.input[field], `receipt must retain ${field}`);
+  }
+  const canonical = await read(`schools/pu/seatReservations/${receipt.reservationId}`);
+  assert.deepEqual(canonical, await read(`users/alice/schools/pu/seatReservations/${receipt.reservationId}`));
+  assert.equal(canonical.userId, 'alice');
+  assert.equal(canonical.schoolId, 'pu');
+  assert.equal(canonical.status, 'active');
+  assert.ok(canonical.createdAt instanceof Timestamp);
+  for (const field of ['seatId', 'date', 'startTime', 'endTime']) {
+    assert.equal(canonical[field], action.data.input[field], `canonical record must retain ${field}`);
+  }
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'completed');
+  assert.deepEqual(run.steps[0].input, action.data.input);
+  assert.deepEqual(run.steps[0].output, receipt);
+}
+
+// The test hook runs only AFTER the real claim transaction has committed. Read
+// failures and commit aborts wrap the real SDK, never a production bypass flag.
+async function afterSeatClaim(action, change, { failSeatRead = false, abortCommit = false } = {}) {
+  const original = db.runTransaction;
+  const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
+  let changed = false;
+  let failedReads = 0;
+  let aborted = false;
+  db.runTransaction = async function(callback, ...options) {
+    const result = await original.call(this, async tx => {
+      const originalGet = tx.get;
+      if (changed && failSeatRead) {
+        tx.get = function(reference, ...args) {
+          if (reference.path === `schools/pu/librarySeats/${action.data.input.seatId}`) {
+            failedReads += 1;
+            return Promise.reject(new HttpsError('unavailable', 'synthetic seat source unavailable'));
+          }
+          return originalGet.call(this, reference, ...args);
+        };
+      }
+      try {
+        const value = await callback(tx);
+        if (changed && abortCommit && !aborted) {
+          aborted = true;
+          throw new HttpsError('unavailable', 'synthetic abort before seat transaction commit');
+        }
+        return value;
+      } finally { tx.get = originalGet; }
+    }, ...options);
+    if (!changed && (await runRef.get()).data()?.actionClaims?.['0']?.status === 'started') {
+      changed = true;
+      await change();
+    }
+    return result;
+  };
+  try { return await executeAgentWrite.run(action); }
+  finally {
+    db.runTransaction = original;
+    assert.equal(changed, true, 'the fault must occur after the real claim commits');
+    if (failSeatRead) assert.ok(failedReads > 0, 'the service transaction must read the source');
+    if (abortCommit) assert.equal(aborted, true, 'the actual service callback must reach pre-commit');
+  }
+}
+
+test('resolved Agent seat proposal preserves 14:00–16:30 through receipt and canonical mirror', async () => {
+  const action = await seatProposal();
+  const receipt = await executeAgentWrite.run(action);
+  await assertSeatReceipt(action, receipt);
+  const beforeReplay = await seatServiceSnapshot();
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.deepEqual(await seatServiceSnapshot(), beforeReplay);
+  assert.equal((await db.collection('schools/pu/seatReservations').get()).size, 1);
+});
+
+test('resolved 30-minute Agent seat proposal claims once under duplicate confirmation', async () => {
+  const action = await seatProposal('2026-11-18 圖書館三樓 A15，14:00 開始預約 30 分鐘',
+    { ...exactSeatInput, endTime: '14:30' });
+  const results = await Promise.allSettled([executeAgentWrite.run(action), executeAgentWrite.run(action)]);
+  assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(results.find(row => row.status === 'rejected').reason.code, 'already-exists');
+  await assertSeatReceipt(action, results.find(row => row.status === 'fulfilled').value);
+  assert.equal((await db.collection('schools/pu/seatReservations').get()).size, 1);
+});
+
+test('missing seat selection or interval cannot generate an arbitrary Agent seat proposal', async () => {
+  const before = await seatServiceSnapshot();
+  for (const message of [
+    '2026-11-18 14:00–16:30 圖書館三樓隨便一席',
+    '2026-11-18 14:00–16:30 預約座位',
+    '2026-11-18 14:00 圖書館三樓 A15 預約座位',
+  ]) assert.equal(resolveReserveSeatInput(message, 'Asia/Taipei'), null, message);
+  assert.deepEqual(await seatServiceSnapshot(), before);
+  assert.equal((await db.collection('users/alice/agentRuns').get()).size, 0);
+});
+
+for (const fault of [
+  { name: 'source removed', code: 'not-found', apply: action => db.doc(`schools/pu/librarySeats/${action.data.input.seatId}`).delete() },
+  { name: 'source closed', code: 'failed-precondition', apply: action => db.doc(`schools/pu/librarySeats/${action.data.input.seatId}`).update({ status: 'disabled' }) },
+  { name: 'school membership withdrawn', code: 'permission-denied', apply: () => db.doc('schools/pu/members/alice').update({ status: 'inactive' }) },
+  { name: 'source read unavailable', code: 'unavailable', apply: async () => {}, failSeatRead: true },
+  { name: 'transaction commit aborted', code: 'unavailable', apply: async () => {}, abortCommit: true },
+  { name: 'another user reserved the interval', code: 'already-exists', apply: action => seat.execute(scope('bob'), action.data.input) },
+]) {
+  test(`Agent seat ${fault.name} after claim leaves no partial reservation, mirror or guard`, async () => {
+    const action = await seatProposal();
+    let beforeService;
+    await assert.rejects(afterSeatClaim(action, async () => {
+      await fault.apply(action);
+      beforeService = await seatServiceSnapshot();
+    }, fault), { code: fault.code });
+    assert.deepEqual(await seatServiceSnapshot(), beforeService);
+    assert.equal((await db.collection('users/alice/schools/pu/seatReservations').get()).size, 0);
+    const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+    assert.equal(run.actionClaims['0'].status, 'unverified');
+    assert.equal(run.steps[0].output.success, false);
+    if (fault.name === 'school membership withdrawn') {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+    }
+    await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+    assert.deepEqual(await seatServiceSnapshot(), beforeService);
+  });
+}
+
+test('seat proposal tampering cannot claim another interval, seat, date, school or account', async () => {
+  const action = await seatProposal();
+  const before = await seatServiceSnapshot();
+  for (const input of [
+    { ...action.data.input, endTime: '18:00' },
+    { ...action.data.input, seatId: 'S2' },
+    { ...action.data.input, date: '2026-11-19' },
+  ]) await assert.rejects(executeAgentWrite.run({ ...action, data: { ...action.data, input } }), { code: 'permission-denied' });
+  await assert.rejects(executeAgentWrite.run({ ...action, auth: { uid: 'bob' } }), { code: 'permission-denied' });
+  await assert.rejects(executeAgentWrite.run({ ...action, data: { ...action.data, context: { schoolId: 'foreign' } } }), { code: 'permission-denied' });
+  assert.deepEqual(await seatServiceSnapshot(), before);
+  assert.equal((await read(`users/alice/agentRuns/${action.data.agentRunId}`)).actionClaims, undefined);
+  await assertSeatReceipt(action, await executeAgentWrite.run(action));
+});
+
+test('a mismatched seat time receipt remains unverified after the real commit and cannot repeat it', async () => {
+  const action = await seatProposal();
+  const execute = seat.execute;
+  let receipt;
+  seat.execute = async (...args) => ({ ...await execute(...args), endTime: '18:00' });
+  try { receipt = await executeAgentWrite.run(action); }
+  finally { seat.execute = execute; }
+  assert.equal(receipt.success, false);
+  assert.equal(receipt.errorCode, 'unverified_receipt');
+  const reservations = await db.collection('schools/pu/seatReservations').get();
+  assert.equal(reservations.size, 1);
+  const canonical = reservations.docs[0];
+  assert.equal(canonical.data().startTime, '14:00');
+  assert.equal(canonical.data().endTime, '16:30');
+  assert.deepEqual(await read(`users/alice/schools/pu/seatReservations/${canonical.id}`), canonical.data());
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'unverified');
+  assert.deepEqual(run.steps[0].output, receipt);
+  const beforeReplay = await seatServiceSnapshot();
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.deepEqual(await seatServiceSnapshot(), beforeReplay);
+});
 
 test('an Agent return with a whitespace-only saved book title confirms its receipt and cannot replenish twice', async () => {
   const blankTitle = ' \t\n ';
