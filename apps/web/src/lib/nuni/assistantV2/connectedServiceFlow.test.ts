@@ -313,9 +313,17 @@ describe('connected readers in conversational fallback and public-post boundarie
     '查公開貼文，第一篇加入行事曆',
     '查公開貼文，把第一篇變成行程',
     '查公開貼文，照第一篇日期時間幫我排',
+    '查公開交流，幫我安排明天讀第一篇論文',
+    '查公開交流，幫我安排今天16:00到15:00讀第一篇論文',
+    '查公開交流，幫我安排今天15:00到16:00讀第一篇貼文',
+    '查公開交流，照第一篇論文的日期安排今天15:00到16:00讀書',
+    '查公開交流，根據第一篇論文的日期時間新增讀書行程',
+    '查公開交流，把第一篇論文的日期時間變成讀書行程',
+    '查公開交流，幫我安排今天15:00到16:00讀第一篇論文，照第一篇日期時間幫我排',
+    '查公開交流，照第一篇論文的日期幫我排，幫我新增行程今天15:00到16:00讀第二篇論文',
   ])('refuses post-derived proposals with complete model action fields: %s', async question => {
     const f = fixture();
-    expect(publicPostActionRequested(question)).toBe(true);
+    expect(publicPostActionRequested(question, now)).toBe(true);
     const tools = createTools(f.adapter, binding, secret, now, true, false, question);
     const args = { title: '貼文活動', date: '2026-11-04', allDay: false, startTime: '15:00', endTime: '16:00' };
     await expect(tools.call('propose_personal_event', args)).rejects.toMatchObject({ code: 'PUBLIC_POST_ACTION_SOURCE_UNVERIFIED' });
@@ -333,12 +341,55 @@ describe('connected readers in conversational fallback and public-post boundarie
   it('does not mistake an independent first research paper for a referenced public post', async () => {
     const question = '幫我安排今天15:00到16:00讀第一篇論文';
     const f = fixture();
-    expect(publicPostActionRequested(question)).toBe(false);
+    expect(publicPostActionRequested(question, now)).toBe(false);
     const tools = createTools(f.adapter, binding, secret, now, true, false, question);
     const args = { title: '讀第一篇論文', date: '2026-11-04', allDay: false, startTime: '15:00', endTime: '16:00' };
     await expect(tools.call('propose_personal_event', args)).resolves.toMatchObject({ value: { proposed: true } });
     expect(tools.cards).toHaveLength(1);
     expect(f.writes).toHaveLength(0);
+  });
+
+  it('keeps a separately specified paper appointment independent of a public feed in the same tool flow', async () => {
+    const question = '查公開交流，幫我安排今天15:00到16:00讀第一篇論文';
+    const f = fixture();
+    expect(publicPostActionRequested(question, now)).toBe(false);
+    const tools = createTools(f.adapter, binding, secret, now, true, false, question);
+    await expect(tools.call('get_public_social', {})).resolves.toMatchObject({
+      value: { source: 'platform-public-social', items: [{ id: post.id }] },
+    });
+    const event = { title: '讀第一篇論文', date: '2026-11-04', allDay: false, startTime: '15:00', endTime: '16:00' };
+    await expect(tools.call('propose_personal_event', event)).resolves.toMatchObject({ value: { proposed: true } });
+    expect(tools.cards).toHaveLength(1);
+    expect(tools.cards[0].args).toEqual(event);
+    expect(f.writes).toHaveLength(0);
+    const card = tools.cards[0];
+    const receipt = await confirm(binding, { token: card.token, args: card.args }, secret, now, f.adapter, true, () => now);
+    expect(parseAssistantCalendarReceipt(receipt, { schoolId: binding.schoolId, mutationId: card.mutationId,
+      event, storage: 'synced' })).toMatchObject({ status: 'verified' });
+    expect(f.writes).toHaveLength(1);
+    expect(f.orderCalls).toHaveLength(0);
+  });
+
+  it('runs public feed plus an explicit paper event through the existing personal-event route', async () => {
+    const question = '查公開交流，幫我新增行程今天15:00到16:00讀第一篇論文';
+    const f = fixture();
+    const event = { title: '讀第一篇論文', date: '2026-11-04', allDay: false, startTime: '15:00', endTime: '16:00' };
+    const model = vi.fn<RunInput['model']>().mockImplementation(async () => model.mock.calls.length === 1
+      ? toolReply('propose_personal_event', event) : finalReply('已準備行程，請核對確認卡。'));
+    const reply = await run(input(question, f, { model }));
+    expect(f.publicSocial).toHaveBeenCalledExactlyOnceWith({ limit: 5 });
+    expect(reply).toMatchObject({ dataRead: true });
+    expect(reply.answer).toContain('貼文摘錄：');
+    expect(reply.answer).not.toContain('公開貼文尚無可核對的行程或訂單資料');
+    expect(reply.cards).toHaveLength(1);
+    expect(reply.cards[0]).toMatchObject({ tool: 'propose_personal_event', args: event });
+    expect(f.writes).toHaveLength(0);
+    const card = reply.cards[0];
+    const receipt = await confirm(binding, { token: card.token, args: card.args }, secret, now, f.adapter, true, () => now);
+    expect(parseAssistantCalendarReceipt(receipt, { schoolId: binding.schoolId, mutationId: card.mutationId,
+      event, storage: 'synced' })).toMatchObject({ status: 'verified' });
+    expect(f.writes).toHaveLength(1);
+    expect(f.orderCalls).toHaveLength(0);
   });
 
   it('retains original read provenance during a read-only retry without reactivating a completed study question', async () => {

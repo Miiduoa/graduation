@@ -855,7 +855,7 @@ export function createTools(
   const cards: Card[] = [];
   const publicCourseResults: AssistantPublicCourseResult[] = [];
   const sourceEventRequested = publicEventCalendarSourceIntent(executionQuestion, now);
-  const sourcePostActionRequested = publicPostSourceReferenced(executionQuestion);
+  const sourcePostActionRequested = publicPostSourceReferenced(executionQuestion, now);
   let publicEventReadAttempted = false;
   let publicEventRead: PublicCampusRead | undefined;
   let publicEventReadGeneration = 0;

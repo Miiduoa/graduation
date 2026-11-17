@@ -439,7 +439,7 @@ export async function run(input: RunInput) {
     // not consume the request. Keep remaining clauses visible, never claim the
     // model completed them merely because one public read succeeded.
     const unresolved = connectedServiceClauses(input.question).filter(clause => !connectedServiceRead(clause));
-    if (publicPostActionRequested(input.question)) {
+    if (publicPostActionRequested(input.question, now)) {
       lines.push('公開貼文尚無可核對的行程或訂單資料；請直接提供要安排的事項、日期與時間，再建立確認卡。');
       stopReason ||= 'PUBLIC_POST_ACTION_SOURCE_UNVERIFIED';
     }

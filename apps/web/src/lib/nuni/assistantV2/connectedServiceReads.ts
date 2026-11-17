@@ -1,3 +1,4 @@
+import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import { canonical, type Obj } from './contracts';
 import { parsePublicSocialArguments, parsePublicSocialRead } from './publicSocial';
 import { parseSchoolInfoArguments, parseSchoolInfoRead } from './schoolInfo';
@@ -68,12 +69,20 @@ export function connectedServiceReadKey(read: Pick<ConnectedServiceRead, 'tool' 
 
 /** A public post has no verified calendar/order contract. Explicit independent
  * plans remain possible; references to post content cannot supply action data. */
-export function publicPostSourceReferenced(question: string): boolean {
+export function publicPostSourceReferenced(question: string, now = Date.now()): boolean {
   const text = question.normalize('NFKC');
   if (!/公開(?:交流|動態|貼文|看板)|跨校公開交流|社群|貼文/.test(text)) return false;
-  return /第[一二三四五六七八九十0-9]+篇|(?:這|那|該|同一)篇|(?:把|將|依照|依據|根據|按照|照著|照|為|替|從|依|用).{0,40}(?:貼文|文章|動態)|(?:貼文|文章|動態)(?:裡|內|中|上)?(?:說|提到|寫|的)/.test(text);
+  const clauses = connectedServiceClauses(text);
+  // An independently specified paper appointment supplies its own valid date,
+  // times and exact title. Its ordinal is not a reference to a public post;
+  // any source reference in another clause must still block proposals.
+  const sourceText = clauses.length ? clauses.filter(clause => {
+    const intent = parseAssistantCalendarIntent(clause, now);
+    return intent?.kind !== 'draft' || !/^(?:讀|閱讀)第[一二三四五六七八九十0-9]+篇論文$/.test(intent.event.title);
+  }).join('，') : text;
+  return /第[一二三四五六七八九十0-9]+篇|(?:這|那|該|同一)篇|(?:把|將|依照|依據|根據|按照|照著|照|為|替|從|依|用).{0,40}(?:貼文|文章|動態)|(?:貼文|文章|動態)(?:裡|內|中|上)?(?:說|提到|寫|的)/.test(sourceText);
 }
 
-export function publicPostActionRequested(question: string): boolean {
-  return publicPostSourceReferenced(question) && /安排|規劃|幫我排|排.{0,8}(?:行程|事件)|(?:變|轉|改)成.{0,8}(?:行程|事件)|新增|建立|加.{0,8}行事曆|點餐|下單|報名/.test(question.normalize('NFKC'));
+export function publicPostActionRequested(question: string, now = Date.now()): boolean {
+  return publicPostSourceReferenced(question, now) && /安排|規劃|幫我排|排.{0,8}(?:行程|事件)|(?:變|轉|改)成.{0,8}(?:行程|事件)|新增|建立|加.{0,8}行事曆|點餐|下單|報名/.test(question.normalize('NFKC'));
 }
