@@ -578,6 +578,8 @@ it('adds source-checked Providence building shapes without changing navigation o
 // attach an audited building outline to that different map location.
 it.each([
   { reason: 'same ID at a moved coordinate', override: { lat: 24.237 } },
+  // Both axes are within the old 0.0005° limit, but the combined drift is 52.7 m.
+  { reason: 'same ID moved 53m diagonally', override: { lat: 24.226632, lng: 120.581727 } },
   { reason: 'same ID under a different name', override: { name: '另一棟圖書館' } },
 ])('does not misattribute a valid OSM building to $reason', async ({ override }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
