@@ -283,21 +283,24 @@ export function watchDormParcels(
   let cached: ParcelRows | undefined;
   let projection: ParcelRows | undefined;
   let stale = false;
+  let lastProjectionKey: string | undefined;
   // Remember aliases even after a legacy parcel is removed from the subscription.
   const legacyIds = new Set<string>();
   let stopPoll: (() => void) | undefined;
   const publishProjection = () => {
     const deadlines = new Map((cached ?? []).map((row) => [row.id, parcelReturnAt(row.data)]));
-    rows(
-      (projection ?? []).map((row) => {
-        const returnAt = deadlines.get(row.id);
-        // The current endpoint omits deadlines. Preserve only the matching legacy
-        // deadline; endpoint membership/status and explicit deadline values still win.
-        return returnAt != null && !PARCEL_RETURN_FIELDS.some((field) => field in row.data)
-          ? { ...row, data: { ...row.data, returnAt } }
-          : row;
-      }),
-    );
+    const next = (projection ?? []).map((row) => {
+      const returnAt = deadlines.get(row.id);
+      // The current endpoint omits deadlines. Preserve only the matching legacy
+      // deadline; endpoint membership/status and explicit deadline values still win.
+      return returnAt != null && !PARCEL_RETURN_FIELDS.some((field) => field in row.data)
+        ? { ...row, data: { ...row.data, returnAt } }
+        : row;
+    });
+    const key = JSON.stringify(next);
+    if (key === lastProjectionKey) return;
+    lastProjectionKey = key;
+    rows(next);
   };
   const publishFallback = () => {
     if (projection) {
@@ -310,6 +313,7 @@ export function watchDormParcels(
   };
   const fallback = () => {
     stale = true;
+    lastProjectionKey = undefined;
     publishFallback();
   };
   const stopLegacy = legacy(
