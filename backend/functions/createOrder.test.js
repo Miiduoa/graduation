@@ -113,7 +113,8 @@ describe('canonical priced idempotent orders', () => {
 
     expect(first).toMatchObject({ success: true, reused: false, queueNumber: 1 });
     expect(replay).toEqual({ ...first, reused: true });
-    expect(transaction.reads.filter((path) => path === 'users/alice')).toHaveLength(2);
+    // Creation and its queue transaction each recheck the actor; an assigned replay reads once.
+    expect(transaction.reads.filter((path) => path === 'users/alice')).toHaveLength(3);
     expect(paths()).toHaveLength(3);
   });
   test.each([
@@ -205,6 +206,46 @@ describe('canonical priced idempotent orders', () => {
       expect(transaction.writes).toEqual([]);
       expect(store.docs).toEqual(before);
       expect(assignNumber).not.toHaveBeenCalled();
+    },
+  );
+  test.each(['disabled', 'suspended', 'inactive', 'deleted', 'deleting', 'unreadable'])(
+    'keeps a committed order pending without a queue write when the buyer becomes %s before numbering',
+    async (state) => {
+      store.docs.set('users/alice', { status: 'active' });
+      const transact = store.db.runTransaction.bind(store.db);
+      let orderCommitted = false;
+      let accountReadAttempted = false;
+      let afterCreation;
+      store.db.runTransaction = async (callback) => {
+        const result = await transact((transaction) => callback({
+          ...transaction,
+          get: async (reference) => {
+            if (orderCommitted && reference.path === 'users/alice') {
+              accountReadAttempted = true;
+              if (state === 'unreadable') throw new Error('account source unavailable after order commit');
+            }
+            return transaction.get(reference);
+          },
+        }));
+        if (!orderCommitted) {
+          expect(paths()).toHaveLength(3);
+          orderCommitted = true;
+          if (state !== 'unreadable') store.docs.set('users/alice',
+            state === 'deleting' ? { accountDeletionInProgress: true } : { status: state });
+          afterCreation = new Map(store.docs);
+        }
+        return result;
+      };
+
+      const result = await createOrder(request());
+
+      expect(result).toMatchObject({ success: true, reused: false, queueNumber: null,
+        queueStatus: 'pending_confirmation', paymentStatus: 'pending' });
+      expect(result).not.toHaveProperty('orderOutcome');
+      expect(accountReadAttempted).toBe(true);
+      expect(store.docs).toEqual(afterCreation);
+      expect([...store.docs.keys()].filter((path) => path.includes('/queueCounters/'))).toEqual([]);
+      expect(store.docs.get(`schools/pu/orders/${result.orderId}`)).toMatchObject({ status: 'pending', queueNumber: null });
     },
   );
   test('ignores forged client prices, names and merchant identities and stores matching server receipts', async () => {
