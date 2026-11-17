@@ -875,3 +875,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **最小修補：** 解析失敗僅回報固定的 `Invalid NDJSON record`，不回傳敏感原文；對重複路徑直接中止、拒絕產出有誤計數；程式入口及直接呼叫 `inventory` 均限制 32 MiB，CLI 限定一般檔案。不輸出 UID、貼文路徑或正文，仍僅計算 `canonicalVisible/hidden/reviewRequired`，不連線 Firebase、不修改資料。
 - **可重跑證據：** 使用 Node v22.16.0，在純合成臨時 NDJSON 與 subprocess CLI 上執行 `node --test scripts/audit-group-post-visibility.test.cjs`，**6/6 通過、0 失敗、0 略過**。新增重複路徑拒絕、含敏感字串的壞 JSON 不出現在 stdout/stderr、直接 API 32 MiB 上限；既有 3 項分類案例仍通過。這不等於 Firebase Emulator、真實歷史資料或正式發布驗收。
 - **尚待與不變限制：** P0 父貼文／留言 Firestore Rules 的最新精確 head 仍需實際 Emulator 與 CI、索引 READY、合法歷史資料盤點與人工判讀；目前 PR 與 main 分歧且有合併衝突。指定 nuni-merge-gate App 5504170 完整精確 head APPROVED 前不得合併或部署。已發 GCS／Supabase URL 撤銷、真 GCS CAS、minimatch 兩圖及其他風險仍待，沒有處理正式資料、金鑰、token、migration、E 校園或重新執行被拒絕的 npm/pnpm audit。
+
+
+## 2026-11-17：歷史貼文盤點工具：拒絕符號連結及限制真實讀取大小（隔離驗證）
+
+- 以前一提交 fe9a0663b38321f84c382b9a706c37f16ec77621 為精確分支基準，核對當時 main 為 e71bccf0ab8ea10fccb7b092271d2810a9e06bf8。PR #577 仍 Draft/dirty，與主線 diverged 48 ahead／33 behind；沒有自行合併或執行正式部署。
+- 發現唯讀 scripts/audit-group-post-visibility.cjs 的 CLI 曾採 stat(path) 後再用同一路徑 readFileSync(path)，兩步之間路徑若遭替換，可讀到非原始驗證檔；stat 同時會追蹤符號連結。另需避免文件在 stat 後持續成長使原先 32 MiB 上限失效。
+- 最小修補改用 O_NOFOLLOW | O_NONBLOCK | O_RDONLY 開啟單一 FD，再以 fstatSync 驗證一般檔案與初始大小；透過 readSync 有界分塊最多讀 32 MiB + 1 byte（超過立即拒絕），最後關閉同一 FD。執行平台缺少安全開檔旗標則 fail-closed；OS 文件系統錯誤改為固定文字，避免輸入路徑或個資外洩。32 MiB 合成盤點規則與 reviewRequired 人工審查不變。
+- 以本次實際生成並核對 Git blob SHA 的兩個檔案，在 Node.js v22.16.0 隔離容器執行 node --test scripts/audit-group-post-visibility.test.cjs，**10/10 通過、0 失敗、0 略過**。包含正常輸入、重複紀錄、無效 JSON 不吐個資、CLI 符號連結、失效／含秘密路徑、目錄與超 32 MiB 檔案；原始碼 blob f9e68662e7ea5e5e601c13799629be394b8d9af7、測試 blob 95536dff7ce30ef1e27d43182c816019977caf71，均與本機已跑版本逐位元組相符。
+- **驗證限制：** 這是盤點 CLI 的隔離 Node 回歸，不等於 Firebase Emulator、Supabase Storage、GCS CAS 或 Web/Mobile/Rules 成功。既有精確 fe9a0663 沒有 PR-triggered Actions、CodeQL 或 combined checks；本次新 head 須另查。指定 nuni-merge-gate App 5504170 仍待對新 head 核可。P0 未發布貼文及子留言的 Firestore 修補、歷史資料盤點與發布相容性、已簽發 GCS/Supabase URL 撤權、真實 GCS staging、minimatch 雙鎖檔相容等未關閉。
+- 全程只用本機合成檔案，未接 E 校園、未操作正式資料／憑證／token／migration、未啟動任何 npm/pnpm audit，也沒有繞過主線合併閘門。

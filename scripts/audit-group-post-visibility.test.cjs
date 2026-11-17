@@ -68,3 +68,79 @@ test('bounded input rejects oversized direct inventory even without CLI', () => 
   assert.throws(() => inventory(' '.repeat(32 * 1024 * 1024 + 1)), /within 32 MiB/);
   assert.throws(() => inventory(null), /must be UTF-8 text/);
 });
+
+test('CLI inventories a regular synthetic file through a single descriptor', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'inventory-regular-'));
+  const file = path.join(root, 'synthetic.ndjson');
+  try {
+    fs.writeFileSync(file, JSON.stringify(record('good', {
+      published: true, status: 'published', deleted: false, deletedAt: null,
+    })));
+    const run = spawnSync(process.execPath,
+      [path.join(__dirname, 'audit-group-post-visibility.cjs'), file],
+      { encoding: 'utf8', timeout: 3000 });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), {
+      total: 1, canonicalVisible: 1, hidden: 0, reviewRequired: 0,
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI rejects symlinks and never echoes private paths or source content', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'inventory-symlink-'));
+  const secret = 'PRIVATE-STUDENT-SOURCE-SECRET';
+  const file = path.join(root, secret + '.ndjson');
+  const link = path.join(root, 'export.ndjson');
+  try {
+    fs.writeFileSync(file, JSON.stringify(record('private', { title: secret })));
+    fs.symlinkSync(file, link);
+    const run = spawnSync(process.execPath,
+      [path.join(__dirname, 'audit-group-post-visibility.cjs'), link],
+      { encoding: 'utf8', timeout: 3000 });
+    assert.equal(run.status, 1);
+    assert.equal(run.stdout, '');
+    assert.match(run.stderr, /cannot be opened safely/);
+    assert.equal(run.stderr.includes(secret), false);
+    const missing = spawnSync(process.execPath,
+      [path.join(__dirname, 'audit-group-post-visibility.cjs'), file + '-missing'],
+      { encoding: 'utf8', timeout: 3000 });
+    assert.equal(missing.status, 1);
+    assert.equal(missing.stderr.includes(secret), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI refuses directory input without disclosing its contents', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'inventory-directory-'));
+  try {
+    const run = spawnSync(process.execPath,
+      [path.join(__dirname, 'audit-group-post-visibility.cjs'), root],
+      { encoding: 'utf8', timeout: 3000 });
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /regular file/);
+    assert.equal(run.stdout, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('CLI rejects an oversized export without reading its contents', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'inventory-oversize-'));
+  const file = path.join(root, 'synthetic.ndjson');
+  try {
+    fs.writeFileSync(file, '');
+    fs.truncateSync(file, 32 * 1024 * 1024 + 1);
+    const run = spawnSync(process.execPath,
+      [path.join(__dirname, 'audit-group-post-visibility.cjs'), file],
+      { encoding: 'utf8', timeout: 3000 });
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /exceeds 32 MiB/);
+    assert.equal(run.stdout, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
