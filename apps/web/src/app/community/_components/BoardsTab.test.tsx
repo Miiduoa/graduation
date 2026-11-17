@@ -147,6 +147,31 @@ it('keeps a Chinese IME candidate Escape from discarding the board search', asyn
   expect(mocks.list).toHaveBeenCalledTimes(reads);
 });
 
+it('lets touch users clear a matching board search without Escape or another data read', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic' },
+    { id: 'arts', name: '人文討論', type: 'topic' },
+  ]);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('link', { name: /科學討論/ });
+  const search = screen.getByRole('searchbox', { name: '搜尋看板' });
+  fireEvent.change(search, { target: { value: '科學' } });
+  expect(screen.getByRole('link', { name: /科學討論/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /人文討論/ })).toBeNull();
+  const reads = mocks.list.mock.calls.length;
+  const clear = screen.getByRole('button', { name: '清除看板搜尋' });
+  expect((clear as HTMLButtonElement).type).toBe('button');
+  expect((clear as HTMLButtonElement).style.minHeight).toBe('44px');
+  expect((clear as HTMLButtonElement).style.minWidth).toBe('44px');
+  clear.focus();
+  fireEvent.click(clear);
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('link', { name: /人文討論/ })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '清除看板搜尋' })).toBeNull();
+  expect(mocks.list).toHaveBeenCalledTimes(reads);
+});
+
 it('does not send ordinary members into a board creation flow they cannot use', async () => {
   mocks.list.mockResolvedValue([]);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
