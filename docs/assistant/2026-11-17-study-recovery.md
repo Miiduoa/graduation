@@ -33,3 +33,29 @@
 前一批 #670／#678／#680／#681 與 #631 的獨立審查、Functions／Firestore emulator 及合併驗證紀錄仍保存在本機 integration 分支。該份完整整合報告尚未推送，不能當作可分享的 GitHub 證據。本批的實際測試結果與獨立審查將記錄於此文件及 Draft PR。
 
 App `5504170` 的必要核准、正式帳號及實機驗收仍屬獨立門檻；本批不合併、不部署，也不修改 gate。
+
+## 本批驗證
+
+開發提交 `1f88a2e5` 合入 main `0fdee84e7cd2eca2fa49efd9477b24dd516e1c7c` 後，測試程式版本為 `1d5c17917c910f40a9c2214bd0dca770ba159e8b`。main 合併沒有衝突。
+
+| 範圍 | 實際結果 |
+| --- | --- |
+| 原版回歸 | 首頁找不到復原按鈕：1 failed、41 skipped。原 handler 不接受 recovery：22 failed；其中原提案的 missing 成功情境後來撤除，最終明確拒絕 missing。 |
+| 新復原測試 | Handler 33、實際 adapter 3、UI 新增 29；真 adapter 包含 principal，規劃 8 次、確認 10 次 API，沒有提高既有 12 次上限。 |
+| main + 本功能 Web Agent／Today／career 聚合 | 126 files、2,715 passed。此為指定範圍，非完整 Web suite。 |
+| main + 本功能 Mobile Agent／career | 6 suites、89 passed。 |
+| 服務流程 | 56 passed；workflow／career contract 6 passed。 |
+| Chromium 合成瀏覽器 | 11 passed，原 6 情境保留，新 5 情境涵蓋手機／桌面、唯一確認、取消重試、重新載入、回應遺失及帳號切換。0 page errors／外部請求／request failures。 |
+| 型別與 lint | Web 型別檢查通過；變更的 fixture lint、Python syntax、bundle、diff-check 通過。 |
+
+另外在本機整合分支，以 `0037b76c9032c24b7d22d07e2175af1523cf47fd` 實際結合 #670／#678／#680／#681 與上述 main、#631、新功能，無新增衝突：完整 Functions **152 suites／2,749 passed**、Firestore Agent emulator **106 passed**、Web 指定聚合 **127 files／2,726 passed**、Mobile 指定聚合 **9 suites／124 passed**。Web／Mobile／shared typecheck 均通過；Functions／Web／Mobile／shared lint 各有既有警告 4／212／585／2，均 0 errors。emulator 已停止。
+
+獨立 reviewer 自行讀碼並執行 focused suites 及額外反例，沒有本功能的阻擋 finding。開發中處理了實際 adapter 重讀超額風險、舊 generic-study policy 降低新 gap 檢查的風險，以及長標題造成確認 token 超出瀏覽器 2048 字元上限的風險。現在原安排限定 coursework-gap，guard 只簽完整原紀錄的 hash；最大合法 ID／中文標題及第二代復原有持久回歸。
+
+額外對未修改的 `scripts/qa/today-agent/build.mjs` 單獨 lint，仍遇其既有 `console/no-undef`；未把這項失敗改稱通過。適用套件 lint 與修改的 fixture lint 如上。正式帳號、正式寫入、真人操作與實機驗收沒有執行；本批遠端完整 CI 必須以 Draft PR 的最終 SHA 為準。
+
+## #672 額外整合限制
+
+#672 不是本功能執行的必要依賴。額外本機合併實際遇到 `TodayAgentPanel.tsx` 衝突：若直接保留 #672 的 taskPicker 區塊，會漏傳 recovery callback，合併測試曾有 2 failed／46 passed。解析時兩個追蹤呈現入口都必須呼叫本批 `arrangement(row)`。
+
+獨立 reviewer 另發現 #631＋#672 的 **P1 相依阻擋**：#672 將 career 加入 `ASSISTANT_SERVICES`，而 #631 的 `capabilityDescriptions` 沒有對應項目，導致 TypeScript TS1360／TS7053，執行時也可能讀取 `undefined.modes`。本機隔離整合提交 `9463ed5ca1ff4be24631f47f6dbcd2a8c02707fe`（parents：本批 `1d5c17917c910f40a9c2214bd0dca770ba159e8b` 與 #672 `f3d1f28f4f973becabba0275dafb95da972733f2`）已修正 callback 合併遺失，並補最小 career handoff 描述與回歸，沒有新增代理權限。修正後 4 suites／182 tests、shared capability 17 tests、Web／shared typecheck、修改的 UI lint 及 diff checks 通過。未修改或推送 #672；其正式合併前仍須移植這些相容修正，不能當作正式分支 blocker 已解。完整本機整合 commits、logs、screenshots 目前未推送；此文件是可分享的結果摘要，不是正式服務驗收。
