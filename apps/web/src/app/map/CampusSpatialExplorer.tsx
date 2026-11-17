@@ -669,6 +669,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const contentRange = response.headers?.get('content-range') ?? null;
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null) {
+          // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
+          // can still stream a large body; release it without awaiting an
+          // uncooperative proxy, rather than waste mobile bandwidth/memory.
+          // The status and Retry-After headers remain usable after cancellation.
+          if (response.body) void response.body.cancel().catch(() => {});
           // Match the API's fail-closed response policy: an upstream/proxy can
           // request a cooldown on 408, gateway failures, or partial content,
           // not only 429/503. Do not hammer a source that rejected a full map.
