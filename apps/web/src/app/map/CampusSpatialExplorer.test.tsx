@@ -715,14 +715,12 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
-// Browser transport failures need not be TypeError: some WebViews or
-// intermediate fetch layers reject with DOMException or a generic Error.
-// None has an HTTP response/Retry-After, and none may invite a rapid retry.
-// An HTTP 500 response remains immediately retryable in its separate test.
+// Offline fetch rejections are usually TypeError, but mobile WebViews may
+// use DOMException NetworkError. Both need local backoff; a generic application
+// error and an HTTP 500 are intentionally not treated as origin rate limits.
 it.each([
   { kind: 'TypeError', reason: () => new TypeError('Failed to fetch') },
   { kind: 'DOMException NetworkError', reason: () => new DOMException('Network disconnected', 'NetworkError') },
-  { kind: 'generic transport Error', reason: () => new Error('Proxy connection dropped') },
 ])('backs off a rejected OSM request with no response ($kind)', async ({ reason }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockRejectedValue(reason());
