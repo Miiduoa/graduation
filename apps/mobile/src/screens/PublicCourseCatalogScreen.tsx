@@ -44,6 +44,11 @@ function publicCourseCardKey(course: PublicCatalogCourse, index: number): string
 
 type ClipboardFeedback = { csv: string; cardId: string; status: 'copied' | 'manual' };
 
+// Draft read/check/write spans multiple awaits. A per-card busy ref does not
+// protect another row (or a remounted list) from observing the same empty draft
+// and overwriting it. Lock the exact owner/school draft until the write settles.
+const activeCatalogDraftReviews = new Set<string>();
+
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   initialQuery?: string;
@@ -75,10 +80,15 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       setNotice('請先確認目前帳號與所選校園，再帶入課表核對。');
       return;
     }
+    const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+    if (activeCatalogDraftReviews.has(key)) {
+      setNotice('另一門課正在建立匯入草稿，請稍後再試。');
+      return;
+    }
     const current = () => mounted.current && scopeRef.current?.owner === scope.owner && scopeRef.current?.schoolId === scope.schoolId;
     busy.current = true;
+    activeCatalogDraftReviews.add(key);
     try {
-      const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
       const existing = await readImportReviewDraft(key);
       const aiDraft = await hasPersonalImportDraft(scope);
       if (!current()) return;
@@ -104,6 +114,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
     } catch {
       if (current()) setNotice('無法安全讀寫匯入草稿，請稍後重試。');
     } finally {
+      activeCatalogDraftReviews.delete(key);
       busy.current = false;
     }
   }
