@@ -109,3 +109,29 @@ it('advances automatic playback after the media helper returns null', async () =
   act(() => vi.advanceTimersByTime(7000));
   expect(next).toHaveBeenCalledTimes(1);
 });
+
+
+it('does not change stories on arrow keys used by focused controls, but keeps dialog shortcuts', () => {
+  const { viewer } = renderVideo();
+  const dialog = screen.getByRole('dialog', { name: '限時動態' });
+  const controls = [
+    screen.getByRole('button', { name: '關閉限時動態' }),
+    screen.getByRole('button', { name: '連續播放' }),
+    screen.getByRole('button', { name: /下一則/ }),
+    screen.getByRole('button', { name: '私下回覆' }),
+  ];
+
+  for (const control of controls) {
+    control.focus();
+    fireEvent.keyDown(control, { key: 'ArrowRight' });
+    fireEvent.keyDown(control, { key: 'ArrowLeft' });
+  }
+  expect(viewer.next).not.toHaveBeenCalled();
+  expect(viewer.previous).not.toHaveBeenCalled();
+
+  dialog.focus();
+  fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+  fireEvent.keyDown(dialog, { key: 'ArrowLeft' });
+  expect(viewer.next).toHaveBeenCalledOnce();
+  expect(viewer.previous).toHaveBeenCalledOnce();
+});
