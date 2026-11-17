@@ -1031,11 +1031,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {school === 'pu' && place.id === 'pu-zhugu' && (
                   <div className={styles.officialFloors}>
                     <strong>主顧樓 · 校方公開樓層資訊</strong>
-                    <p>4 樓：資訊管理學系、資訊傳播工程學系。5 樓：資訊工程學系。6 樓：資訊學院。</p>
+                    <p>4 樓：資訊管理學系、人工智慧應用學系。5 樓：資訊工程學系。6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。</p>
                     <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
                       查看官方建築資料
                     </a>
-                    <small>此處是樓層資訊，不代表教室入口或室內行走路線已驗證。</small>
+                    <small>依校方校史資料室公開的主顧樓樓層單位資訊整理；單位可能調整，請以校方最新公告為準。這不是教室座標，不代表建築入口或室內動線已查證。</small>
                   </div>
                 )}
                 {isProvidencePendingVerification(school, place) && (
