@@ -62,10 +62,12 @@ function BoardsContent(props: {
   const [subscriptionNotices, setSubscriptionNotices] = useState<Map<string, string>>(() => new Map());
   // Keep a few independent outcomes so a slower board write cannot hide a newer one's result.
   const subscriptionNotice = [...subscriptionNotices.values()].join(' ');
-  // A ref closes the gap between a click and React's next render/disabled update.
-  const pendingSubscriptionLock = useRef<Set<string>>(new Set());
-  // Invalidate subscription snapshots begun before or during a local write.
-  const subscriptionWriteRevision = useRef(0);
+  // Stable async coordinator, not render state: it synchronously guards double clicks
+  // and records writes so older server snapshots cannot replace the student's action.
+  const [subscriptionWriteGuard] = useState(() => ({
+    pending: new Set<string>(),
+    revision: 0,
+  }));
   // Lifecycle-only signal: do not cancel a Firestore write or report it as cancelled.
   const [subscriptionLifetime] = useState(() => new AbortController());
   useEffect(() => () => subscriptionLifetime.abort(), [subscriptionLifetime]);
@@ -96,7 +98,7 @@ function BoardsContent(props: {
       setSubscribed(new Set());
       return;
     }
-    const readRevision = subscriptionWriteRevision.current;
+    const readRevision = subscriptionWriteGuard.revision;
     const [rows, subs] = await Promise.all([
       listBoards(schoolId, 120),
       user?.uid ? listSubscribedBoardIds(user.uid, schoolId) : Promise.resolve([] as string[]),
@@ -104,7 +106,7 @@ function BoardsContent(props: {
     setBoards(rows);
     // A list refresh may have read subscriptions before a concurrent subscribe/unsubscribe.
     // Keep the optimistic (or rolled-back) local result until a later fresh refresh.
-    if (readRevision === subscriptionWriteRevision.current && pendingSubscriptionLock.current.size === 0) {
+    if (readRevision === subscriptionWriteGuard.revision && subscriptionWriteGuard.pending.size === 0) {
       setSubscribed(new Set(subs));
     }
   }, [schoolId, user]);
@@ -265,13 +267,13 @@ function BoardsContent(props: {
   };
 
   function handleSubscriptionClick(board: CampusBoard) {
-    // Keep this ref-based lease in an event handler, never during render.
-    if (pendingSubscriptionLock.current.has(board.id)) return;
-    pendingSubscriptionLock.current.add(board.id);
-    subscriptionWriteRevision.current += 1;
+    // Synchronous event-time lease: no duplicate writes in a single React batch.
+    if (subscriptionWriteGuard.pending.has(board.id)) return;
+    subscriptionWriteGuard.pending.add(board.id);
+    subscriptionWriteGuard.revision += 1;
     void onToggleSub(board).finally(() => {
-      pendingSubscriptionLock.current.delete(board.id);
-      subscriptionWriteRevision.current += 1;
+      subscriptionWriteGuard.pending.delete(board.id);
+      subscriptionWriteGuard.revision += 1;
     });
   }
 
