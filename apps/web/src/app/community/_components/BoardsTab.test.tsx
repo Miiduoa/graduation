@@ -266,6 +266,38 @@ it('prevents two subscription writes from rapid clicks before React commits the 
   expect(button.getAttribute('aria-pressed')).toBe('true');
 });
 
+it.each([
+  ['while the write is still pending', false],
+  ['after the write succeeds', true],
+] as const)('keeps a subscribed board selected after a stale list refresh %s', async (_timing, settleWriteFirst) => {
+  // A student who manages boards can subscribe while a newly created board triggers a list reload.
+  // The subscription read is stale because it began before that write became visible.
+  allow();
+  const science = { id: 'science', name: '科學討論', type: 'topic' };
+  const staleRead = deferred<typeof science[]>();
+  const write = deferred<void>();
+  mocks.list.mockResolvedValueOnce([science]).mockReturnValueOnce(staleRead.promise);
+  mocks.subscribe.mockReturnValue(write.promise);
+
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const subscribe = await screen.findByRole('button', { name: '訂閱科學討論' });
+  fireEvent.click(subscribe);
+  expect(subscribe.getAttribute('aria-pressed')).toBe('true');
+
+  const dialog = await openCreate();
+  fireEvent.click(within(dialog).getByRole('button', { name: '建立' }));
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+
+  if (settleWriteFirst) await act(async () => write.resolve(undefined));
+  // Stale subscription list still says "not subscribed" although the local write is newer.
+  await act(async () => staleRead.resolve([science]));
+  expect(subscribe.getAttribute('aria-pressed')).toBe('true');
+  if (!settleWriteFirst) await act(async () => write.resolve(undefined));
+
+  expect(subscribe.getAttribute('aria-pressed')).toBe('true');
+  expect(mocks.subscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science');
+});
+
 it('reports a failed subscribe, restores the previous state and allows retry', async () => {
   mocks.list.mockResolvedValue([{ id: 'science', name: '科學討論', type: 'topic' }]);
   const pending = deferred<void>();
