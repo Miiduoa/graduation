@@ -151,3 +151,79 @@ it('uses last known choices during an outage, bounds stale use, and coalesces re
   expect(recovered.sourceSettingsStale).toBe(false);
   expect(recovered.announcements).toEqual([]);
 });
+
+it.each(['cold', 'expiring'])(
+  'returns 503 after a hung settings read with %s cache',
+  async (cache) => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(async () => new Response('<div class="d-txt"></div>'));
+    vi.stubGlobal('fetch', fetcher);
+    const { GET } = await import('./route');
+    const request = () => GET(new Request('https://nuni.tw/career/data?school=pu'));
+    if (cache === 'expiring') {
+      expect((await request()).status).toBe(200);
+      vi.advanceTimersByTime(297000);
+    }
+    fetcher.mockClear();
+    state.getSettings.mockClear().mockReturnValue(new Promise(() => {}));
+    const response = request();
+    await vi.advanceTimersByTimeAsync(5000);
+    const failed = await response;
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+    expect(await failed.json()).toEqual({ error: '暫時無法讀取職涯資料來源設定，請稍後再試。' });
+    expect((await request()).status).toBe(503);
+    expect(state.getSettings).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+
+it('times out coalesced reads, preserves recent choices, and ignores late results after recovery', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('<div class="d-txt"></div>')),
+  );
+  state.getSettings.mockResolvedValue({
+    data: () => ({ office: false, departments: false, taiwanjobs: false }),
+  });
+  const { GET } = await import('./route');
+  const request = (school = 'pu') =>
+    GET(new Request(`https://nuni.tw/career/data?school=${school}`));
+  await request();
+  vi.advanceTimersByTime(30000);
+  let resolveLate!: (value: { data: () => undefined }) => void;
+  state.getSettings.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveLate = resolve;
+    }),
+  );
+  const responses = Promise.all([request(), request('tw-pu'), request()]);
+  await vi.advanceTimersByTimeAsync(5000);
+  for (const response of await responses) {
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(await response.json()).toMatchObject({
+      sourceSettingsStale: true,
+      announcements: [],
+      jobs: [],
+      announcementsUnavailable: false,
+      jobsUnavailable: false,
+    });
+  }
+  await request();
+  expect(state.getSettings).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(30000);
+  const recovered = await request();
+  expect(recovered.status).toBe(200);
+  expect((await recovered.json()).sourceSettingsStale).toBe(false);
+  expect(state.getSettings).toHaveBeenCalledTimes(3);
+  // The timed-out read would enable all sources if its late result were cached.
+  resolveLate({ data: () => undefined });
+  await vi.advanceTimersByTimeAsync(0);
+  const afterLateRead = await (await request()).json();
+  expect(afterLateRead.announcementsUnavailable).toBe(false);
+  expect(afterLateRead.jobsUnavailable).toBe(false);
+  expect(state.getSettings).toHaveBeenCalledTimes(3);
+  expect(vi.getTimerCount()).toBe(0);
+});

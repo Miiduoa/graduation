@@ -36,12 +36,20 @@ export function createCareerSourceFeed({
   const settings = async () => {
     if (cached && now() - cached.at < 30000) return cached.sources;
     if (!pending && now() >= retryAt) {
-      pending = loadSources()
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // Bound the shared wait; late reads must not refresh or overwrite the cache.
+      pending = Promise.race([
+        Promise.resolve().then(loadSources),
+        new Promise<CareerSources>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('career source settings timeout')), 5000);
+        }),
+      ])
         .then((sources) => {
           cached = { sources, at: now() };
           return sources;
         })
         .finally(() => {
+          clearTimeout(timer);
           retryAt = now() + 30000;
           pending = undefined;
         });
