@@ -673,6 +673,39 @@ it.each([
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+
+// The public endpoint bounds its decoded upstream OSM payload. A downstream
+// proxy could still advertise a huge or malformed 200 response. Reject before
+// json() to protect mobile memory; keep verified POIs and walking directions.
+it.each([
+  { contentLength: '2000001', reason: 'oversized declared body' },
+  { contentLength: '9'.repeat(40), reason: 'overflowing decimal length' },
+  { contentLength: '1e8', reason: 'nondecimal length' },
+])('rejects a $reason on a 200 OSM response without parsing it', async ({ contentLength }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const json = vi.fn();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200,
+    headers: { get: (name: string) => name === 'content-length' ? contentLength : null },
+    body: { cancel },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+  fireEvent.click(retry);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('keeps the spatial map usable when Providence building geometry is unavailable', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
