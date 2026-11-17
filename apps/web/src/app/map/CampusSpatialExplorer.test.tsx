@@ -715,12 +715,17 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
-// Offline, DNS and low-level proxy failures reject fetch with TypeError and
-// carry no Retry-After header. They must not allow a rapid source retry loop;
-// ordinary HTTP 500 responses remain immediately retryable in a separate test.
-it('backs off a failed OSM network request while keeping campus POIs and directions', async () => {
+// Browser transport failures need not be TypeError: some WebViews or
+// intermediate fetch layers reject with DOMException or a generic Error.
+// None has an HTTP response/Retry-After, and none may invite a rapid retry.
+// An HTTP 500 response remains immediately retryable in its separate test.
+it.each([
+  { kind: 'TypeError', reason: () => new TypeError('Failed to fetch') },
+  { kind: 'DOMException NetworkError', reason: () => new DOMException('Network disconnected', 'NetworkError') },
+  { kind: 'generic transport Error', reason: () => new Error('Proxy connection dropped') },
+])('backs off a rejected OSM request with no response ($kind)', async ({ reason }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-  const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+  const fetchMock = vi.fn().mockRejectedValue(reason());
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
