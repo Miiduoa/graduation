@@ -1042,6 +1042,10 @@ describe('new lesson self-check quality boundary', () => {
 
 describe('new local self-check answer disclosure boundary', () => {
   it.each([
+    { label: 'short Chinese answer key', question: '哪個欄位？\n答：主鍵', answer: '主鍵' },
+    { label: 'short Chinese answer key with equals', question: '哪個欄位？ 答 = 主鍵', answer: '主鍵' },
+    { label: 'bold short Chinese answer label', question: '哪個欄位？ **答**：主鍵', answer: '主鍵' },
+    { label: 'short Chinese Markdown answer column', question: '選哪個？\n| 題目 | 答 |\n| --- | --- |\n| A | 主鍵 |', answer: '主鍵' },
     { label: 'CR-only Markdown answer column', question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQL |', answer: 'SQL' },
     { label: 'answer key inline disclosure', question: 'Which language? Answer key: SQL', answer: 'SQL' },
     { label: 'emphasized answer key label', question: 'Which language? **Answer Key**：SQL', answer: 'SQL' },
@@ -1185,6 +1189,9 @@ describe('new local self-check answer disclosure boundary', () => {
   });
 
   it.each([
+    { question: '「試答：SQL」在這份教材表示什麼？', answer: 'SQL' },
+    { question: '「問答：SQL」格式中的主題是什麼？', answer: 'SQL' },
+    { question: '答：SQLServer 跟 SQL 有什麼區別？', answer: 'SQL' },
     { question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQLServer |', answer: 'SQL' },
     { question: 'Which language? Answer key: SQLServer instead of SQL?', answer: 'SQL' },
     { question: 'Which language?\n| Prompt | Ans. |\n| --- | --- |\n| DB | SQLServer |', answer: 'SQL' },
