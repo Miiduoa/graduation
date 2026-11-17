@@ -2839,7 +2839,7 @@ it.each([
       if (actionLabel === '複製閱讀進度 JSON')
         expect(parseCourseStudyProgress(fallback.value, scope).passages['0:0'].note)
           .toBe('手機還沒備份的逐字私人筆記');
-      expect(screen.getByRole('region', { name: regionLabel })).toContain(fallback);
+      expect(screen.getByRole('region', { name: regionLabel }).contains(fallback)).toBe(true);
 
       // A delayed acknowledgement cannot undo the rescue or claim a success.
       await act(async () => { resolveLate(); });
