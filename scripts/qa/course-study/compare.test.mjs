@@ -227,3 +227,55 @@ test('keeps case IDs aligned to measured deltas and per-case verification/offlin
   assert.equal('winner' in report, false);
   assert.equal(JSON.stringify(report).includes('human test operator'), false);
 });
+
+test('paired mean deltas exclude unpaired measurements rather than comparing separate averages', () => {
+  const paired = fixture();
+  paired.trials[0].results[1] = {
+    ...result('Ahaboard'), coldStartMs: 1000, warmStartMs: 250,
+    steps: 7, peakMemoryMiB: 250, costTwd: 2,
+  };
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = 'pair-2';
+  second.results[0].coldStartMs = null;
+  second.results[0].peakMemoryMiB = null;
+  second.results[0].costTwd = null;
+  second.results[1].coldStartMs = 1e308;
+  second.results[1].warmStartMs = null;
+  second.results[1].steps = 6;
+  paired.trials.push(second);
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.pairedMeasuredCounts, {
+    coldStartMs: 1, warmStartMs: 1, steps: 2, peakMemoryMiB: 1, costTwd: 1,
+  });
+  assert.deepEqual(report.pairedAverageDeltas, {
+    coldStartMs: 500, warmStartMs: 250, steps: -2.5, peakMemoryMiB: -50, costTwd: -2,
+  });
+  assert.deepEqual(report.pairedColdStartDeltasMs, [500, null]);
+  assert.equal(report.summary.Ahaboard.measuredCounts.coldStartMs, 2);
+  assert.equal(report.summary.nuni.measuredCounts.coldStartMs, 1);
+  assert.equal('winner' in report, false);
+});
+
+test('signed paired means stay finite for opposite extreme measurements', () => {
+  const paired = fixture();
+  paired.trials[0].results[1] = result('Ahaboard');
+  paired.trials[0].results[0].coldStartMs = 1e308;
+  paired.trials[0].results[1].coldStartMs = 0;
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = 'pair-2';
+  second.results[0].coldStartMs = 0;
+  second.results[1].coldStartMs = 1e308;
+  paired.trials.push(second);
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.pairedColdStartDeltasMs, [1e308, -1e308]);
+  assert.equal(report.pairedMeasuredCounts.coldStartMs, 2);
+  assert.equal(report.pairedAverageDeltas.coldStartMs, 0);
+  assert.equal(JSON.stringify(report).includes('"coldStartMs":null'), false);
+});
+
+test('all missing paired measurements remain null despite one-sided data', () => {
+  const report = auditStudyComparisons(fixture());
+  assert.equal(report.pairedMeasuredCounts.warmStartMs, 0);
+  assert.equal(report.pairedAverageDeltas.warmStartMs, null);
+  assert.equal(report.summary.nuni.averageWarmStartMs, 500);
+});

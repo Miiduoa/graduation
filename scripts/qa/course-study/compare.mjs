@@ -23,13 +23,16 @@ function bool(value, where) {
   if (typeof value !== 'boolean') fail(where, 'boolean required');
   return value;
 }
-// An ordinary sum can overflow even when every observed value is finite
-// (for example, two large valid latency readings). Keep the mean finite.
+// Ordinary sums overflow for large measurements; even an incremental
+// (next - average) can overflow when paired deltas have opposite signs.
+// A weighted update keeps both intermediate terms within finite range.
 function mean(list) {
   if (!list.length) return null;
   let average = list[0];
-  for (let index = 1; index < list.length; index += 1)
-    average += (list[index] - average) / (index + 1);
+  for (let index = 1; index < list.length; index += 1) {
+    const count = index + 1;
+    average = average * (index / count) + list[index] / count;
+  }
   return average;
 }
 // Never emit Infinity in a report: JSON.stringify would silently turn it
@@ -175,10 +178,27 @@ export function auditStudyComparisons(raw) {
       costNotMeasured: values.filter((v) => v.costTwd === null).length,
     };
   }
+  // Product-wide averages can use disjoint sets of measurements, so their
+  // difference is not a same-case result. Publish paired coverage separately.
+  const pairedMetrics = {
+    coldStartMs: pairedColdStartDeltasMs,
+    warmStartMs: pairedWarmStartDeltasMs,
+    steps: pairedStepsDeltas,
+    peakMemoryMiB: pairedPeakMemoryDeltasMiB,
+    costTwd: pairedCostDeltasTwd,
+  };
+  const pairedMeasuredCounts = {};
+  const pairedAverageDeltas = {};
+  for (const [metric, deltas] of Object.entries(pairedMetrics)) {
+    const measured = deltas.filter((delta) => delta !== null);
+    pairedMeasuredCounts[metric] = measured.length;
+    pairedAverageDeltas[metric] = mean(measured);
+  }
   return { trialCount: input.trials.length, summary, caseIds,
     pairedVerifiedOutcomes, pairedOfflineOutcomes, pairedColdStartDeltasMs,
     pairedWarmStartDeltasMs, pairedStepsDeltas, pairedPeakMemoryDeltasMiB,
-    pairedCostDeltasTwd, pairedOfflineCounts, pairedVerifiedCounts,
+    pairedCostDeltasTwd, pairedMeasuredCounts, pairedAverageDeltas,
+    pairedOfflineCounts, pairedVerifiedCounts,
     sourceOfTruth: 'manually recorded observations, not automatic grading or proof of superiority' };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
