@@ -18,7 +18,7 @@ const state = vi.hoisted(() => ({
   selectedSchoolId: 'pu' as string | null,
   schoolRole: null as string | null,
   schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
-  session: null as null | { context: string; platformAccountId: string },
+  session: null as null | { context: string; platformAccountId: string; isPlatformOperator?: boolean },
   sessionLoading: false,
   sessionError: '',
   pendingLogout: false,
@@ -212,8 +212,9 @@ it('uses the Nuni account for home and links directly to pending work', async ()
     ],
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
   const taskLinks = await screen.findAllByRole('link', { name: /週五提案/ });
+  expect(screen.queryByRole('heading', { name: '我的工作' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '申請店家進駐' })).toBeNull();
   expect(
     taskLinks.some(
       (link) => link.getAttribute('href') === '/classroom/course/design#assignment-draft',
@@ -635,7 +636,7 @@ it('publishes teaching navigation before work finishes and keeps the previous wo
     });
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '先到的授課' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /先到的授課/ })).toBeTruthy();
   expect(screen.getByText(/課程還在讀取/)).toBeTruthy();
   await act(async () => finish(data('完成來源')));
   expect(screen.getAllByText('完成來源 作業').length).toBeGreaterThan(0);
@@ -864,7 +865,9 @@ it.each(['teacher', 'student'])(
     expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
     if (mode === 'teacher') {
       expect(screen.getByTestId('teacher-today')).toBeTruthy();
-      expect(document.getElementById('teaching-courses')).toBeTruthy();
+      expect(within(screen.getByTestId('teacher-today')).getByRole('link', { name: /保留授課/ })).toBeTruthy();
+      expect(screen.getAllByRole('link', { name: /保留授課/ })).toHaveLength(1);
+      expect(document.getElementById('teaching-courses')).toBeNull();
     } else expect(screen.getAllByText('保留修課 作業').length).toBeGreaterThan(0);
   },
 );

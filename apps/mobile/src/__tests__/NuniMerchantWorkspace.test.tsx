@@ -407,6 +407,7 @@ test('a suspended active location cannot restore itself or edit activated settin
   fireEvent.press(await view.findByRole('button', { name: '管理門市：第一門市' }));
   await view.findByText('門市目前由場域管理者停權，請聯絡管理者確認。');
   expect(view.queryByRole('button', { name: '恢復接單' })).toBeNull();
+  expect(view.queryByRole('button', { name: '處理訂單與收銀' })).toBeNull();
   expect(view.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
   expect(writes()).toHaveLength(0);
 });

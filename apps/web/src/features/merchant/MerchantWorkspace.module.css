@@ -8,6 +8,35 @@
   align-items: center;
   gap: 12px;
 }
+.nextTask {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  background: var(--surface);
+}
+.nextTask h3 {
+  margin: 4px 0 8px;
+  font-size: 21px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.nextTask p {
+  margin: 0;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.nextTask .eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+}
+.nextTask a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 8px;
+}
 .intro {
   border-left: 3px solid var(--brand);
   padding: 4px 0 4px 22px;

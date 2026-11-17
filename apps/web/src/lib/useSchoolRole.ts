@@ -1,36 +1,50 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured } from '@/lib/firebase';
 
 export type SchoolRole = 'student' | 'teacher' | 'admin' | 'editor' | 'vendor' | string;
 
-const cache = new Map<string, SchoolRole | null>();
-
-/** 自己在這所學校的身分（讀自己的 members 文件）。還沒讀到或讀不到是 null。 */
-export function useSchoolRole(uid: string | null | undefined, schoolId: string | null | undefined): SchoolRole | null {
-  const key = uid && schoolId ? `${schoolId}:${uid}` : '';
-  const [role, setRole] = useState<{ key: string; value: SchoolRole | null }>({ key: '', value: null });
+/** Display only the current account's active, server-confirmed school membership. */
+export function useSchoolRole(
+  uid: string | null | undefined,
+  schoolId: string | null | undefined,
+): SchoolRole | null {
+  const key = uid && schoolId ? JSON.stringify([schoolId, uid]) : '';
+  const [role, setRole] = useState<{ key: string; value: SchoolRole | null }>({
+    key: '',
+    value: null,
+  });
+  // Record every scope transition, including A -> B -> A before B responds.
+  // A previous role must not reappear before the new subscription confirms it.
+  if (role.key !== key) setRole({ key, value: null });
 
   useEffect(() => {
     if (!key || !uid || !schoolId || !isFirebaseConfigured()) return;
-    if (cache.has(key)) {
-      void Promise.resolve().then(() => setRole({ key, value: cache.get(key) ?? null }));
-      return;
-    }
     let alive = true;
-    getDoc(doc(getDb(), 'schools', schoolId, 'members', uid))
-      .then((snap) => {
-        const value = snap.exists() ? ((snap.data() as { role?: string }).role ?? null) : null;
-        cache.set(key, value);
-        if (alive) setRole({ key, value });
-      })
-      .catch(() => {
+    const unsubscribe = onSnapshot(
+      doc(getDb(), 'schools', schoolId, 'members', uid),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        if (!alive) return;
+        const member = snapshot.exists() ? snapshot.data() : null;
+        const value =
+          !snapshot.metadata.fromCache &&
+          !snapshot.metadata.hasPendingWrites &&
+          member?.status === 'active' &&
+          typeof member.role === 'string'
+            ? member.role
+            : null;
+        setRole({ key, value });
+      },
+      () => {
         if (alive) setRole({ key, value: null });
-      });
+      },
+    );
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, [key, uid, schoolId]);
 

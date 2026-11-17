@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
 import { HomeStack } from '../screens/HomeStack';
 import { LearnStack } from '../screens/LearnStack';
@@ -1041,11 +1042,80 @@ test.each([
     expect(view.queryByText('待接單')).toBeNull();
     expect(view.queryByText(/此身分的工作台尚未開放/)).toBeNull();
   } else {
-    expect(view.getByText(/此身分的工作台尚未開放/)).toBeTruthy();
-    expect(view.getByText('查看校方公告')).toBeTruthy();
+    expect(view.queryByText(/此身分的工作台尚未開放/)).toBeNull();
+    expect(view.getByText('從這裡開始')).toBeTruthy();
+    expect(view.getByText('接著處理')).toBeTruthy();
+    expect(view.getByText('日常與帳號')).toBeTruthy();
     expect(view.queryByText('StudentTodayScreen')).toBeNull();
   }
 });
+
+// A nested navigator uses the same tab/screen navigation contract as AppTabNavigator.
+// Its sibling stacks catch the silent cross-tab failure that a single-stack mount misses.
+const JourneyStack = createNativeStackNavigator<
+  Record<'Today' | '學習' | '校園' | '訊息' | '我的', undefined>,
+  undefined
+>();
+function RoleJourneyNavigation() {
+  return (
+    <JourneyStack.Navigator id={undefined} screenOptions={{ headerShown: false }}>
+      <JourneyStack.Screen name="Today" component={HomeStack} />
+      <JourneyStack.Screen name="學習" component={LearnStack} />
+      <JourneyStack.Screen name="校園" component={MapStack} />
+      <JourneyStack.Screen name="訊息" component={MessagesStack} />
+      <JourneyStack.Screen name="我的" component={MeStack} />
+    </JourneyStack.Navigator>
+  );
+}
+
+test.each(['ta', 'department_head', 'admin'])(
+  '%s teaching task reaches the existing authorized course screen instead of looping to its landing',
+  async (role) => {
+    mockAuth.profile = { ...mockAuth.profile, role, roleGroup: role };
+    const { view, navigation } = await mount(RoleJourneyNavigation);
+    fireEvent.press(view.getByText('查看教學待辦'));
+    await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('TeachingHub'));
+    expect(view.getByText('TeacherTodayScreen')).toBeTruthy();
+    expect(ensureLmsV2DemoSignIn).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['student', 'staff', 'alumni', 'guest'])(
+  '%s cannot become a teacher by opening the teaching deep link',
+  async (role) => {
+    mockAuth.profile = { ...mockAuth.profile, role, roleGroup: role };
+    const { view, navigation } = await mount(LearnStack);
+    act(() => navigation.navigate('TeachingHub'));
+    expect(view.queryByText('TeacherTodayScreen')).toBeNull();
+    expect(ensureLmsV2DemoSignIn).not.toHaveBeenCalled();
+  },
+);
+
+test('club officer can resume personal coursework from the work landing', async () => {
+  mockAuth.profile = { ...mockAuth.profile, role: 'club_officer', roleGroup: 'club_officer' };
+  const { view, navigation } = await mount(RoleJourneyNavigation);
+  fireEvent.press(view.getByText('處理我的課務'));
+  await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('LearnHome'));
+  expect(view.getByText('LearnAiFirstScreen')).toBeTruthy();
+});
+
+test('staff can return to their account through the collapsed daily section', async () => {
+  mockAuth.profile = { ...mockAuth.profile, role: 'staff', roleGroup: 'staff' };
+  const { view, navigation } = await mount(RoleJourneyNavigation);
+  expect(view.queryByText('我的帳號與設定')).toBeNull();
+  fireEvent.press(view.getByText('日常與帳號'));
+  fireEvent.press(view.getByText('我的帳號與設定'));
+  await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('MeHome'));
+});
+
+test('department work does not expose platform or school admin permissions', async () => {
+  mockAuth.profile = { ...mockAuth.profile, role: 'department_head', roleGroup: 'department_head' };
+  const { view } = await mount(HomeStack);
+  expect(view.queryByText('管理公告與活動')).toBeNull();
+  expect(view.queryByText('AdminDashboardScreen')).toBeNull();
+  expect(view.getByText('查看教學待辦')).toBeTruthy();
+});
+
 test('role comes from the current authenticated profile, never a UID prefix or a prior account', async () => {
   mockAuth.user.uid = 'demo_admin_sys';
   mockAuth.profile.uid = 'demo_admin_sys';

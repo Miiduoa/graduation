@@ -37,3 +37,37 @@ test('discover uses the callable portal despite the old flag and hides office ac
   expect(await view.findByText('課外組／平台維運（依本校授權）')).toBeTruthy();
   expect(callClubPortal).toHaveBeenCalledWith('student', 'pu', { action: 'directory' });
 });
+
+test('找社團只用外層搜尋欄篩選名稱與類別，清除及切換分段後可還原名單', async () => {
+  (callClubPortal as jest.Mock).mockResolvedValue({
+    success: true,
+    office: false,
+    clubs: [
+      { id: 'photo', name: '攝影社', category: '學藝', meetingTime: '', recruiting: false },
+      { id: 'dance', name: '熱舞社', category: '康樂', meetingTime: '', recruiting: true },
+    ],
+  });
+  const view = render(<ClubDirectory uid="student" schoolId="pu" clubs={[]} onOpen={jest.fn()} />);
+  fireEvent.press(view.getByText('找社團'));
+  await view.findByText('查看社團：攝影社');
+  expect(view.getAllByLabelText('搜尋學校社團')).toHaveLength(1);
+  fireEvent.changeText(view.getByLabelText('搜尋學校社團'), '攝影');
+  expect(view.queryByText('查看社團：熱舞社')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋學校社團'), '康樂');
+  expect(view.getByText('查看社團：熱舞社')).toBeTruthy();
+  expect(view.queryByText('查看社團：攝影社')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋學校社團'), '不存在');
+  expect(view.getByText('找不到符合「不存在」的社團，請試試其他關鍵字。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋學校社團'), '');
+  expect(view.getByText('查看社團：攝影社')).toBeTruthy();
+  expect(view.getByText('查看社團：熱舞社')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋學校社團'), '攝影');
+  fireEvent.press(view.getByText('查看社團：攝影社'));
+  await view.findByText('回找社團');
+  fireEvent.press(view.getByText('回找社團'));
+  await view.findByText('查看社團：攝影社');
+  expect(view.queryByText('查看社團：熱舞社')).toBeNull();
+  fireEvent.press(view.getByText('我的社團'));
+  fireEvent.press(view.getByText('找社團'));
+  await view.findByText('查看社團：熱舞社');
+});

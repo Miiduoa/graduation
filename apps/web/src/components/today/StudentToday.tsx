@@ -36,6 +36,7 @@ export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigne
 
 type Props = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   agent?: ReactNode;
   personalization?: ReactNode;
   scopeKey?: string;
@@ -61,6 +62,7 @@ type Props = {
 
 type BoundProps = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   agent?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
@@ -152,6 +154,7 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
+      {props.workspaces}
       {!props.skeleton && props.unsigned && action.type !== 'class' && (
         <TodayWelcome
           importHref={props.importHref}
@@ -455,6 +458,7 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      workspaces={props.workspaces}
       agent={props.agent}
       personalization={!scope.loading && props.now ? (
         <CampusPersonalizationSection

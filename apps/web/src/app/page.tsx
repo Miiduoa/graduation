@@ -9,6 +9,8 @@ import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/To
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
+import { AccountWorkspaces } from '@/components/AccountWorkspaces';
+import type { IdentityPart, TeachingIdentity } from '@/lib/accountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { TodayAgent } from '@/features/nuni/TodayAgent';
 import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
@@ -250,14 +252,14 @@ export default function HomePage() {
 
   const assistant = (
     <TodayAssistantDisclosure
-      key={assistantScope}
+      key={`assistant:${assistantScope}`}
       ref={voiceEntry}
       onOpenChange={handleAssistantToggle}
     />
   );
   const agent = context && accountId && !sessionLoading && !blocked && !nuni.error ? (
     <TodayAgent
-      key={assistantScope}
+      key={`agent:${assistantScope}`}
       compact
       context={context}
       accountId={accountId}
@@ -266,6 +268,32 @@ export default function HomePage() {
       loading={!rows.nuni || rows.nuni.loading}
       error={rows.nuni?.error || rows.nuni?.data?.tasksError || ''}
       onRetry={() => void readSource('nuni', generation.current)}
+    />
+  ) : null;
+  const teachingIdentity: IdentityPart<TeachingIdentity[]> = teaching.length || (!busy && !failed) ? {
+    status: 'ok',
+    items: teaching.map((course) => ({
+      id: course.id,
+      name: course.name,
+      role: course.role === 'co-teacher' ? '協同教師' : course.role === 'moderator' ? '教學協作' : '負責老師',
+      href: courseHref(course),
+    })),
+  } : { status: 'pending' };
+  const workspaces = signedIn && context && accountId && !sessionLoading && !nuni.error ? (
+    <AccountIdentity
+      context={context}
+      accountId={accountId}
+      variant="home"
+      isPlatformOperator={nuni.session?.isPlatformOperator === true}
+      includeTeaching={!teacherOnly}
+      teaching={teachingIdentity}
+    />
+  ) : signedIn && !sessionLoading && !teacherOnly && teaching.length ? (
+    <AccountWorkspaces
+      data={{ teaching: teachingIdentity, stores: { status: 'ok', items: [] }, applications: { status: 'ok', items: [] } }}
+      isPlatformOperator={false}
+      loading={false}
+      onRetry={() => void refresh()}
     />
   ) : null;
   return (
@@ -295,6 +323,7 @@ export default function HomePage() {
         ) : teacherOnly ? (
           <TeacherTodayPage
             assistant={assistant}
+            workspaces={workspaces}
             now={now}
             unsigned={!signedIn}
             teachingCourses={teaching}
@@ -304,6 +333,7 @@ export default function HomePage() {
           <StudentTodayPage
             assistant={assistant}
             agent={agent}
+            workspaces={workspaces}
             now={now}
             updatedAt={updatedAt}
             signedIn={signedIn}
@@ -390,43 +420,9 @@ export default function HomePage() {
             ))}
           </section>
         ) : null}
-        {data && teaching.length > 0 ? (
-          <section
-            id="teaching-courses"
-            className={styles.section}
-            aria-labelledby="teaching-title"
-          >
-            <div className={styles.sectionHeading}>
-              <h2 id="teaching-title">
-                授課與協作 <span>{teaching.length}</span>
-              </h2>
-            </div>
-            <div className={styles.courses}>
-              {teaching.map((course) => (
-                <Link key={course.id} href={courseHref(course)} className={styles.course}>
-                  <span>
-                    {course.role === 'owner-teacher'
-                      ? '課程建立者'
-                      : course.role === 'co-teacher'
-                        ? '協同教師'
-                        : '授課成員'}
-                  </span>
-                  <h3>{course.name}</h3>
-                </Link>
-              ))}
-            </div>
-          </section>
-        ) : null}
         <div className={styles.personalTools}>
           <StudentCardEntry />
         </div>
-        {signedIn && context && accountId ? (
-          <AccountIdentity
-            key={`identity:${accountId}:${context}`}
-            context={context}
-            accountId={accountId}
-          />
-        ) : null}
         <details className={styles.siteInformation}>
           <summary>關於 nuni</summary>
           <SiteFooter />
