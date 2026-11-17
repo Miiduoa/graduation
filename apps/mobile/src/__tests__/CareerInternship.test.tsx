@@ -457,3 +457,236 @@ it('keeps conflict feedback on the card when reload removes the document control
   await waitFor(() => expect(view.queryByText('確認申請')).toBeNull());
   expect(within(view.getByTestId(`internship-${record.id}`)).getByText(message)).toBeTruthy();
 });
+
+it('preserves document and hours drafts through polling and failed reads, with current revision on submit', async () => {
+  jest.useFakeTimers();
+  try {
+    const { view, props, record, snapshot } = setup();
+    await act(async () => {});
+    fireEvent.changeText(view.getByLabelText('申請文件連結'), 'https://example.test/draft');
+    fireEvent.changeText(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-17');
+    fireEvent.changeText(view.getByLabelText('實習時數'), '8');
+    fireEvent.changeText(view.getByLabelText('工作內容與佐證說明'), '未送出的時數草稿');
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d) => ({ ...d, url: 'https://example.test/server' })),
+        },
+      ],
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(10000);
+    });
+    expect(view.getByLabelText('申請文件連結').props.value).toBe('https://example.test/draft');
+    expect(view.getByLabelText('計畫書文件連結').props.value).toBe('https://example.test/server');
+    expect(view.getByLabelText('實習時數').props.value).toBe('8');
+    expect(view.getByLabelText('工作內容與佐證說明').props.value).toBe('未送出的時數草稿');
+    expect(view.getByText(/這筆實習紀錄已更新，尚未送出的草稿已保留/)).toBeTruthy();
+    props.service.load.mockRejectedValueOnce(
+      Object.assign(new Error('讀取失敗'), { code: 'unavailable' }),
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(10000);
+    });
+    expect(view.getByText('讀取失敗')).toBeTruthy();
+    expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+    expect(view.getByLabelText('申請文件連結').props.value).toBe('https://example.test/draft');
+    await act(async () => {
+      fireEvent.press(view.getByText('登錄已繳交申請'));
+    });
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'document',
+        revision: 2,
+        url: 'https://example.test/draft',
+      }),
+    );
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('preserves reply drafts when a polled record changes review sections', async () => {
+  jest.useFakeTimers();
+  try {
+    const { view, props, record, snapshot } = setup('student', 'teacher');
+    record.documents[0].submitted = true;
+    await act(async () => {});
+    expect(view.getByText('待我確認')).toBeTruthy();
+    fireEvent.changeText(view.getByLabelText('申請退回原因'), '未送出的回覆');
+    // A submitted, verified document leaves the pending review group.
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [{ ...record, revision: 2, confirmed: true }],
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(10000);
+    });
+    expect(view.getByText('其他實習紀錄')).toBeTruthy();
+    expect(view.getByText(/尚未送出的草稿已保留/)).toBeTruthy();
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [{ ...record, revision: 3 }],
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(10000);
+    });
+    expect(view.getByLabelText('申請退回原因').props.value).toBe('未送出的回覆');
+    await act(async () => {
+      fireEvent.press(view.getByText('退回申請'));
+    });
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'verifyDocument',
+        revision: 3,
+        message: '未送出的回覆',
+      }),
+    );
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('shows an initial load error with retry instead of loading or an empty result', async () => {
+  const { view, props } = setup();
+  props.service.load.mockRejectedValueOnce(new Error('暫時無法讀取'));
+  // The first read is already in flight; request a fresh scope to exercise an initial failure.
+  view.rerender(<CareerInternship {...props} schoolId="other" />);
+  await waitFor(() => expect(view.getByText('暫時無法讀取')).toBeTruthy());
+  expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+  expect(view.queryByText('目前沒有實習紀錄。')).toBeNull();
+  fireEvent.press(view.getByText('重試讀取實習進度'));
+  await waitFor(() => expect(view.getByText(/測試用機構/)).toBeTruthy());
+  expect(view.queryByText('暫時無法讀取')).toBeNull();
+});
+
+it('keeps the saved document URL when refresh fails and resubmits the saved value', async () => {
+  const { view, props, record } = setup();
+  const oldUrl = 'https://example.test/old';
+  const savedUrl = 'https://example.test/saved';
+  record.documents[0].url = oldUrl;
+  await waitFor(() => expect(view.getByLabelText('申請文件連結').props.value).toBe(oldUrl));
+  props.service.load.mockRejectedValue(
+    Object.assign(new Error('儲存後讀取失敗'), { code: 'functions/unavailable' }),
+  );
+  fireEvent.changeText(view.getByLabelText('申請文件連結'), savedUrl);
+  await act(async () => {
+    fireEvent.press(view.getByText('登錄已繳交申請'));
+  });
+  await waitFor(() => expect(view.getByText('儲存後讀取失敗')).toBeTruthy());
+  expect(props.service.execute).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('申請文件連結').props.value).toBe(savedUrl);
+  await act(async () => {
+    fireEvent.press(view.getByText('登錄已繳交申請'));
+  });
+  expect(props.service.execute).toHaveBeenCalledTimes(2);
+  expect(props.service.execute).toHaveBeenLastCalledWith(
+    expect.objectContaining({ action: 'document', index: 0, url: savedUrl, submitted: true }),
+  );
+  expect(view.getByLabelText('申請文件連結').props.value).toBe(savedUrl);
+});
+
+it.each([
+  ['student', 'permission-denied'],
+  ['staff', 'functions/permission-denied'],
+  ['student', 'unauthenticated'],
+  ['student', 'firestore/not-found'],
+  ['student', 'auth/user-token-expired'],
+  ['student', 'auth/network-request-failed'],
+  ['student', 'unknown'],
+] as const)(
+  'clears private snapshots and %s drafts after a %s poll failure',
+  async (audience, code) => {
+    jest.useFakeTimers();
+    try {
+      const { view, props, record, snapshot } = setup(
+        audience,
+        audience === 'staff' ? 'staff' : 'student',
+      );
+      record.studentName = '王小明';
+      record.studentId = 'S123';
+      record.documents[0].submitted = true;
+      record.documents[0].url = 'https://example.test/saved';
+      await act(async () => {});
+      expect(view.getByText(/測試用機構/)).toBeTruthy();
+      if (audience === 'student') {
+        fireEvent.changeText(view.getByLabelText('實習機構'), '未送出的機構');
+        fireEvent.changeText(
+          view.getByLabelText('申請文件連結'),
+          'https://example.test/private-draft',
+        );
+        fireEvent.changeText(view.getByLabelText('實習時數'), '8');
+        fireEvent.press(view.getByText('選擇測試系規則'));
+        fireEvent.press(view.getByText(/測試指導老師｜teacher@school.edu.tw/));
+      } else {
+        expect(view.getByText(/王小明.*S123/)).toBeTruthy();
+        fireEvent.changeText(view.getByLabelText('申請退回原因'), '未送出的回覆');
+        fireEvent.press(view.getByText('新增系所規則'));
+        fireEvent.changeText(view.getByLabelText('系所'), '未送出的系所');
+      }
+      props.service.load.mockRejectedValueOnce(Object.assign(new Error('讀取權限失效'), { code }));
+      await act(async () => {
+        jest.advanceTimersByTime(10000);
+      });
+      expect(view.getByText('讀取權限失效')).toBeTruthy();
+      expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+      expect(view.queryByText(/測試用機構/)).toBeNull();
+      expect(view.queryByText(/王小明.*S123/)).toBeNull();
+      expect(view.queryByTestId(`internship-${record.id}`)).toBeNull();
+      expect(view.queryByLabelText('系所')).toBeNull();
+      props.service.load.mockResolvedValueOnce({ ...snapshot, advisors: [] });
+      await act(async () => {
+        fireEvent.press(view.getByText('重試讀取實習進度'));
+      });
+      expect(view.queryByText('讀取權限失效')).toBeNull();
+      if (audience === 'student') {
+        expect(view.getByLabelText('實習機構').props.value).toBe('');
+        expect(view.getByLabelText('申請文件連結').props.value).toBe('https://example.test/saved');
+        expect(view.getByLabelText('實習時數').props.value).toBe('');
+        expect(view.getByText('選擇測試系規則')).toBeTruthy();
+        expect(view.getByText(/已選擇指導老師：.*尚未選擇/)).toBeTruthy();
+        expect(view.queryByText(/測試指導老師｜teacher@school.edu.tw/)).toBeNull();
+      } else {
+        expect(view.getByLabelText('申請退回原因').props.value).toBe('');
+        expect(view.queryByLabelText('系所')).toBeNull();
+      }
+      view.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
+  },
+);
+
+it.each([
+  { code: 'functions/unavailable' },
+  { code: 'firestore/deadline-exceeded' },
+  { code: 'internal' },
+  { code: 'network-request-failed' },
+  { code: 'timeout' },
+  new TypeError('Failed to fetch'),
+  Object.assign(new Error('讀取逾時'), { name: 'TimeoutError' }),
+])('keeps the snapshot and drafts after a transient poll failure: %s', async (error) => {
+  jest.useFakeTimers();
+  try {
+    const { view, props } = setup();
+    await act(async () => {});
+    fireEvent.changeText(view.getByLabelText('申請文件連結'), 'https://example.test/draft');
+    props.service.load.mockRejectedValueOnce(error);
+    await act(async () => {
+      jest.advanceTimersByTime(10000);
+    });
+    expect(view.getByText(/測試用機構/)).toBeTruthy();
+    expect(view.getByLabelText('申請文件連結').props.value).toBe('https://example.test/draft');
+    expect(view.getByRole('alert')).toBeTruthy();
+    expect(view.getByText('重試讀取實習進度')).toBeTruthy();
+    expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
