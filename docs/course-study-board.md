@@ -1,3 +1,9 @@
+## 2026-11-17：CR-only 講解題目不得提前揭露參考答案
+
+- 裝置端模型產生的新自我檢查題若使用舊式 Mac 單獨 CR 換行，之前的題目答案檢查只依 LF／CRLF 辨識換行，可能略過 CR-only 的 Markdown 表格「Answer」欄、獨立「答案」標題、列表及 fenced code block，令參考回答在學生試答前顯示。
+- 現在只對新生成題目的臨時答案檢查副本統一 CRLF／CR 為 LF；原始提問、教材逐字引用、顯示文字、私人筆記及 v1/v2 閱讀／v1 練習 checkpoint 完全不改。新增 5 組應拒收與 3 組應保留的模擬 Worker 回歸情境；允許使用者重試，不新增套件、付費 API 或外部教材傳輸。
+- 需以新精確 SHA 的 GitHub CI／CodeQL、GitHub App 5504170 正式 APPROVED、Maestro／iOS／Android 真機與 Ahaboard 同教材同題同機測試分別核實。程式防洩漏測試不等於生成語意正確性或手機實測。PR #534 維持 Draft，不合併、不部署。
+
 ## 2026-11-17：TXT／JSON 進度下載遇異常 Blob 網址時不跳出課程
 
 - 修復讀書白板共用的「下載本次筆記／本輪練習／閱讀進度／逐題 checkpoint」匯出入口：部分異常行動 WebView 的 `URL.createObjectURL()` 可能**未拋錯**卻回傳空值、非字串或非 `blob:` 網址。舊程式直接指定 `a.href` 再觸發點擊，可能誤導向目前頁面或不預期的網址，且誤報下載已送出。現在先驗證只接受非空 Blob URL，無效時不點擊連結，保留學生的私人筆記、原教材和完整可選取的 TXT／JSON 備份。

@@ -1014,6 +1014,11 @@ describe('new lesson self-check quality boundary', () => {
 
 describe('new local self-check answer disclosure boundary', () => {
   it.each([
+    { label: 'CR-only Markdown answer column', question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQL |', answer: 'SQL' },
+    { label: 'CR-only Chinese answer heading', question: '哪個欄位？\r## 答案\r主鍵', answer: '主鍵' },
+    { label: 'CR-only unpunctuated English answer list', question: 'Which language?\rAnswer\r> - SQL', answer: 'SQL' },
+    { label: 'CR-only fenced answer', question: 'Which language? Answer:\r~~~txt\rSQL\r~~~', answer: 'SQL' },
+    { label: 'mixed LF and CR answer heading', question: 'Which language?\n### Answer\rSQL', answer: 'SQL' },
     { label: 'English answer followed by teaching words', question: 'Which language? Answer: SQL is a database language.', answer: 'SQL' },
     { label: 'Latin answer followed by tabs', question: 'What is used? Answer: SQL\tcan query tables.', answer: 'SQL' },
     { label: 'Markdown link visibly spells out answer', question: 'Which query language? Answer: [SQL](https://example.test/reference)', answer: 'SQL' },
@@ -1137,6 +1142,9 @@ describe('new local self-check answer disclosure boundary', () => {
   });
 
   it.each([
+    { question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQLServer |', answer: 'SQL' },
+    { question: 'Which language?\rAnswer\rSQLServer', answer: 'SQL' },
+    { question: '哪個數值？\r## 答案\r12', answer: '1' },
     { question: 'Answer: SQLServer is different from SQL?', answer: 'SQL' },
     { question: 'Answer: ~~SQLServer~~ is a different product?', answer: 'SQL' },
     { question: '答案：~~12~~ 是否太大？', answer: '1' },

@@ -221,6 +221,11 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   // answer key. Only rewrite exact standalone Markdown answer headings in
   // this comparison copy; never mutate the learner-facing question or source.
   const question = comparableGeneratedAnswerDisplay(explanation.question, true).toLowerCase()
+    // Model responses can use classic Mac CR-only line breaks. Normalize only
+    // this temporary answer-disclosure comparison so headings, lists and
+    // Markdown answer tables cannot reveal a key before the student tries.
+    // Do not alter the generated question, displayed source or saved backups.
+    .replace(/\r\n?/gu, '\n')
     .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
     // A model can also place an unpunctuated key on its own line, inside a
     // blockquote/list, or as "**答案** 主鍵". These still display the answer
