@@ -132,11 +132,14 @@ it('defers WebGL after Safari pagehide before visibilitychange and resumes once 
   const timerSpy = vi.spyOn(window, 'setTimeout');
   try {
     render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-      fireEvent(window, new Event('pagehide'));
-      await Promise.resolve();
-    });
+    // Let React commit the dialog and register its pagehide listener first.
+    // Putting both events in one async act batches the mount until *after*
+    // pagehide, testing an impossible listener ordering rather than Safari.
+    // Do not yield between the committed click and pagehide: the scene's
+    // dynamic import still has to be in flight when the page is suspended.
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    fireEvent(window, new Event('pagehide'));
+    await act(async () => { await Promise.resolve(); });
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
     expect(document.hidden).toBe(false);
     expect(scene.create).not.toHaveBeenCalled();
