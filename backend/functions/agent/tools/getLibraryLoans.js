@@ -1,12 +1,13 @@
 'use strict';
 
 const { z } = require('zod');
-const { getFirestore } = require('firebase-admin/firestore');
+const { FieldPath, getFirestore } = require('firebase-admin/firestore');
 const { projectLibraryLoan } = require('../libraryLoanSource');
 
-// Bound the complete source snapshot, including returned/legacy records. The
-// extra row proves whether the list is exhaustive before it can drive actions.
-const MAX_LOAN_RECORDS = 500;
+// Page size for a complete source snapshot, including returned/legacy records.
+// Paginate instead of failing closed so long-lived accounts still see unpaid loans.
+const LOAN_PAGE_SIZE = 500;
+const MAX_LOAN_PAGES = 20;
 
 const inputSchema = z.object({
   onlyOverdue: z.boolean().optional(),
@@ -27,6 +28,25 @@ function isActiveLoan(row) {
   return true;
 }
 
+async function loadLoanDocs(uid, schoolId) {
+  const col = loanPath(uid, schoolId);
+  const docs = [];
+  let cursor = null;
+  let complete = true;
+  for (let page = 0; page < MAX_LOAN_PAGES; page++) {
+    let query = col.orderBy(FieldPath.documentId());
+    if (cursor) query = query.startAfter(cursor);
+    const snap = await query.limit(LOAN_PAGE_SIZE).get();
+    docs.push(...snap.docs);
+    if (snap.docs.length < LOAN_PAGE_SIZE) {
+      return { docs, complete };
+    }
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+  complete = false;
+  return { docs, complete };
+}
+
 /**
  * 讀取使用者目前未歸還的圖書借閱（與 App users/{uid}/schools/{schoolId}/libraryLoans 一致）。
  */
@@ -38,14 +58,11 @@ async function execute(ctx, rawInput) {
     return { ok: false, error: 'missing_uid_or_school', loans: [] };
   }
 
-  const snap = await loanPath(uid, schoolId).limit(MAX_LOAN_RECORDS + 1).get();
-  if (snap.docs.length > MAX_LOAN_RECORDS) {
-    return { ok: false, error: 'library_loans_limit_exceeded', loans: [] };
-  }
+  const { docs, complete } = await loadLoanDocs(uid, schoolId);
   const now = Date.now();
   const loans = [];
 
-  for (const doc of snap.docs) {
+  for (const doc of docs) {
     const row = { id: doc.id, ...doc.data() };
     if (!isActiveLoan(row)) continue;
     const loan = projectLibraryLoan(doc.id, row);
@@ -56,7 +73,9 @@ async function execute(ctx, rawInput) {
     loans.push(loan);
   }
 
-  return { ok: true, count: loans.length, loans };
+  const result = { ok: true, count: loans.length, loans };
+  if (!complete) result.complete = false;
+  return result;
 }
 
 module.exports = {
