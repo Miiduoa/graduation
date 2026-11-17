@@ -73,6 +73,23 @@ export function isDormPostalParcel(row: Record<string, unknown>): boolean {
     text(row.location) + ' ' + text(row.courier || row.carrier),
   );
 }
+const PARCEL_RETURN_FIELDS = [
+  'returnAt',
+  'returnBy',
+  'returnDate',
+  'pickupDeadline',
+  'holdUntil',
+  'retainUntil',
+  'pickupBy',
+] as const;
+function parcelReturnAt(row: Record<string, unknown>): number | null {
+  // Explicit return/pickup deadline aliases only; returnedAt records an event.
+  return (
+    PARCEL_RETURN_FIELDS.map((field) => dormCloudTime(row[field])).find(
+      (at) => at !== null && Number.isFinite(at) && Number.isFinite(new Date(at).getTime()),
+    ) ?? null
+  );
+}
 export function projectDormParcel(id: string, row: Record<string, unknown>): DormCloudParcel {
   const location = text(row.location);
   const courier = text(row.courier || row.carrier);
@@ -83,11 +100,7 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
       (courier !== 'unknown' ? courier : '') ||
       '包裹',
     arrivedAt: dormCloudTime(row.arrivedAt || row.createdAt),
-    // Explicit return/pickup deadline aliases only; returnedAt records an event.
-    returnAt:
-      ['returnAt', 'returnBy', 'returnDate', 'pickupDeadline', 'holdUntil', 'retainUntil', 'pickupBy']
-        .map((field) => dormCloudTime(row[field]))
-        .find((at) => at !== null && Number.isFinite(at) && Number.isFinite(new Date(at).getTime())) ?? null,
+    returnAt: parcelReturnAt(row),
     location: location || '請向服務台確認',
     status: ['picked', 'picked_up'].includes(String(row.status))
       ? 'collected'
@@ -273,6 +286,19 @@ export function watchDormParcels(
   // Remember aliases even after a legacy parcel is removed from the subscription.
   const legacyIds = new Set<string>();
   let stopPoll: (() => void) | undefined;
+  const publishProjection = () => {
+    const deadlines = new Map((cached ?? []).map((row) => [row.id, parcelReturnAt(row.data)]));
+    rows(
+      (projection ?? []).map((row) => {
+        const returnAt = deadlines.get(row.id);
+        // The current endpoint omits deadlines. Preserve only the matching legacy
+        // deadline; endpoint membership/status and explicit deadline values still win.
+        return returnAt != null && !PARCEL_RETURN_FIELDS.some((field) => field in row.data)
+          ? { ...row, data: { ...row.data, returnAt } }
+          : row;
+      }),
+    );
+  };
   const publishFallback = () => {
     if (projection) {
       const privateRows = projection.filter((row) => !legacyIds.has(row.id));
@@ -295,6 +321,7 @@ export function watchDormParcels(
         return { ...row, id };
       });
       if (stale || !projection) publishFallback();
+      else publishProjection();
     },
     () => {
       if (stale || !projection) error();
@@ -311,7 +338,7 @@ export function watchDormParcels(
         (value) => {
           projection = value;
           stale = false;
-          rows(value);
+          publishProjection();
         },
         fallback,
       );

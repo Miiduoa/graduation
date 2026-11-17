@@ -2,11 +2,13 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import DormitoryPage from './page';
+import { subscribeDormCloud } from './cloud';
 import {
   emptyDormCloud,
   projectDormParcel,
   projectDormRepair,
   watchDormCloud,
+  watchDormParcels,
   type DormCloudState,
 } from '@campus/shared/src/dormitoryCloud';
 
@@ -305,4 +307,38 @@ it('polls the backend parcel projection and ignores late results after unsubscri
   await Promise.resolve();
   expect(rows).not.toHaveBeenCalled();
   expect(error).not.toHaveBeenCalled();
+});
+
+
+it.each([false, true])('API 成功後保留實際期限，legacy 較晚到達：%s', async (apiFirst) => {
+  type Rows = Array<{ id: string; data: Record<string, unknown> }>;
+  let snapshot!: (rows: Rows) => void;
+  let finish!: (value: { rows: Rows }) => void;
+  vi.mocked(subscribeDormCloud).mockImplementationOnce((_school, _uid, update) => watchDormCloud({
+    watch: (name, _field, rows, error) => {
+      if (name !== 'packages') { rows([]); return () => {}; }
+      return watchDormParcels(
+        (next) => { snapshot = next; return () => {}; },
+        (change) => { change(true); return () => {}; },
+        () => new Promise((resolve) => { finish = resolve; }), rows, error,
+      );
+    },
+    identity: () => () => {},
+  }, update));
+  render(<DormitoryPage />);
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  const legacy = [{ id: 'legacy', data: {
+    publicId: 'dw_public', description: '有登錄期限的包裹',
+    arrivedAt: Date.now() - 2 * 86400000, pickupDeadline: '2026-11-25T02:00:00Z',
+  } }];
+  if (!apiFirst) act(() => snapshot(legacy));
+  await act(async () => finish({ rows: [{ id: 'dw_public', data: {
+    description: '有登錄期限的包裹', arrivedAt: Date.now() - 2 * 86400000, status: 'arrived',
+  } }] }));
+  if (apiFirst) act(() => snapshot(legacy));
+  expect(screen.getAllByText('有登錄期限的包裹')).toHaveLength(1);
+  expect(screen.getByText('登錄退件／領取期限：2026/11/25 10:00:00（台灣時間）')).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日/)).toBeNull();
+  act(() => snapshot([{ ...legacy[0], data: { ...legacy[0].data, pickupDeadline: '2026-11-26T02:00:00Z' } }]));
+  expect(screen.getByText('登錄退件／領取期限：2026/11/26 10:00:00（台灣時間）')).toBeTruthy();
 });

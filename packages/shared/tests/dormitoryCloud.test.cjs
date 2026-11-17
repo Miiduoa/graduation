@@ -11,7 +11,7 @@ require.extensions['.ts'] = (module, filename) => {
   }).outputText;
   module._compile(source, filename);
 };
-const { dormParcelReturnNotice, projectDormParcel, DORM_PACKAGES_EMPTY } = require('../src/dormitoryCloud.ts');
+const { dormParcelReturnNotice, projectDormParcel, DORM_PACKAGES_EMPTY, watchDormParcels } = require('../src/dormitoryCloud.ts');
 require.extensions['.ts'] = original;
 const arrivedAt = Date.parse('2026-11-12T10:00:00+08:00');
 const parcel = projectDormParcel('estimate', { status: 'arrived', arrivedAt });
@@ -95,6 +95,75 @@ test('已領取與已退件包裹不顯示待退件提醒，不論是否有登�
       const completed = projectDormParcel('completed', { status, arrivedAt, returnAt });
       assert.equal(completed.status, status === 'returned' ? 'returned' : 'collected');
       assert.equal(dormParcelReturnNotice(completed, arrivedAt + 4 * 86400000), '');
+    }
+  }
+});
+
+test('API 成功省略期限時，依公開識別碼保留 legacy 期限，兩種到達順序皆可更新與清除', async () => {
+  for (const apiFirst of [false, true]) {
+    let snapshot;
+    let finish;
+    const changes = [];
+    const stop = watchDormParcels(
+      (rows) => { snapshot = rows; return () => {}; },
+      (change) => { change(true); return () => {}; },
+      () => new Promise((resolve) => { finish = resolve; }),
+      (rows) => changes.push(rows),
+      () => assert.fail('不應讀取失敗'),
+    );
+    try {
+      const legacy = (deadline) => [{ id: 'legacy-document', data: {
+        publicId: 'dw_public', pickupDeadline: deadline, description: '舊名稱',
+        status: 'arrived', staffNote: '不可帶入 API 投影',
+      } }];
+      const api = [{ id: 'dw_public', data: {
+        description: '目前名稱', arrivedAt, status: 'picked_up',
+      } }, { id: 'dw_private', data: { description: '私有包裹', arrivedAt } }];
+      if (!apiFirst) snapshot(legacy('2026-11-25T02:00:00Z'));
+      finish({ rows: api });
+      await Promise.resolve();
+      if (apiFirst) snapshot(legacy('2026-11-25T02:00:00Z'));
+      assert.deepEqual(changes.at(-1), [{ ...api[0], data: {
+        ...api[0].data, returnAt: Date.parse('2026-11-25T02:00:00Z'),
+      } }, api[1]]);
+      assert.equal(dormParcelReturnNotice(projectDormParcel('dw_public', changes.at(-1)[0].data)), '');
+      snapshot(legacy('2026-11-26T02:00:00Z'));
+      assert.equal(projectDormParcel('dw_public', changes.at(-1)[0].data).returnAt, Date.parse('2026-11-26T02:00:00Z'));
+      snapshot(legacy(null));
+      assert.deepEqual(changes.at(-1), api);
+      snapshot([]);
+      assert.deepEqual(changes.at(-1), api);
+    } finally {
+      stop();
+    }
+  }
+});
+
+test('API 的期限、清除、包裹清單優先，不將其他包裹期限混入或復活已移除包裹', async () => {
+  for (const apiFields of [{ returnAt: '2026-11-27T02:00:00Z' }, { pickupDeadline: null }, {}]) {
+    const api = [{ id: 'dw_public', data: apiFields }, { id: 'dw_unmatched', data: {} }];
+    let result;
+    const stop = watchDormParcels(
+      (rows) => {
+        rows([
+          { id: 'raw-id', data: { publicId: 'dw_public', returnAt: '2026-11-25T02:00:00Z' } },
+          { id: 'removed', data: { returnAt: '2026-11-26T02:00:00Z' } },
+        ]);
+        return () => {};
+      },
+      (change) => { change(true); return () => {}; },
+      async () => ({ rows: api }),
+      (rows) => { result = rows; },
+      () => assert.fail('不應讀取失敗'),
+    );
+    try {
+      await Promise.resolve();
+      assert.deepEqual(result.map((row) => row.id), ['dw_public', 'dw_unmatched']);
+      assert.deepEqual(result[1], api[1]);
+      if (Object.keys(apiFields).length) assert.deepEqual(result[0], api[0]);
+      else assert.equal(result[0].data.returnAt, Date.parse('2026-11-25T02:00:00Z'));
+    } finally {
+      stop();
     }
   }
 });
