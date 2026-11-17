@@ -74,12 +74,15 @@ function storeFootprintCooldown(until: number | null) {
 function footprintCooldownSeconds(response: Response): number | null {
   const raw = response.headers?.get('retry-after')?.trim();
   if (!raw) return null;
-  // RFC 9110 delay-seconds is 1*DIGIT: leading zeroes and long positive
-  // values are valid. Cap their effect at 24h, but bound header size before
-  // parsing so malformed or excessively long headers cannot lock controls.
-  if (/^\d{1,64}$/.test(raw)) {
-    const seconds = Number(raw);
-    return seconds > 0 ? Math.min(86_400, seconds) : null;
+  // RFC 9110 delay-seconds is 1*DIGIT, with no 64-digit upper bound.
+  // Cap a valid positive value *before* numeric conversion so an unusually
+  // long gateway header cannot accidentally shorten an OSM rate-limit pause.
+  // Leading zeroes do not change the requested delay.
+  if (/^\d+$/.test(raw)) {
+    const digits = raw.replace(/^0+/, '') || '0';
+    if (digits === '0') return null;
+    return digits.length > 5 || (digits.length === 5 && digits > '86400')
+      ? 86_400 : Number(digits);
   }
   const until = Date.parse(raw);
   if (!Number.isFinite(until) || new Date(until).toUTCString() !== raw) return null;
