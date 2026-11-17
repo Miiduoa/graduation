@@ -673,16 +673,24 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           // request a cooldown on 408, gateway failures, or partial content,
           // not only 429/503. Do not hammer a source that rejected a full map.
           const status = response.status;
-          const rateLimitedOrIncomplete = status === 206 || status === 408 ||
+          // 201/202/203/204/205/206 and other non-200 success statuses do
+          // not satisfy our complete JSON snapshot contract. In particular
+          // 204/205 have no body: repeated retries would only load the origin.
+          // A stray 304 without a conditional request is also not a snapshot.
+          const invalidSuccessStatus = typeof status === 'number' && status >= 200 &&
+            status < 300 && status !== 200;
+          const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
             contentRange !== null;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
-          // Back off 60s alongside 429 and 502/503/504. Explicit valid
-          // Retry-After still wins; an ordinary 500 keeps its existing retry.
-          const fallbackBackoff = status === 206 || status === 408 || status === 429 ||
-            status === 502 || status === 503 || status === 504 || contentRange !== null;
+          // Back off 60s for non-200 2xx, unexpected 304, 408, 429 and
+          // gateway failures. Explicit valid Retry-After still wins; an
+          // ordinary 500 keeps its existing manual-retry behavior.
+          const fallbackBackoff = invalidSuccessStatus || status === 304 ||
+            status === 408 || status === 429 || status === 502 ||
+            status === 503 || status === 504 || contentRange !== null;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
