@@ -242,6 +242,26 @@ test('a pending catalog response times out and allows retry with the same keywor
   } finally { globalThis.fetch = original; jest.useRealTimers(); }
 });
 
+test.each([
+  { reason: 'HTTP 503', overrides: { ok: false } },
+  { reason: 'oversized Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? String(512 * 1024 + 1) : null } } },
+  { reason: 'off-campus response URL', overrides: { url: 'https://other.test/api/public-course-catalog?schoolId=nthu&q=AES' } },
+])('mobile rejects $reason before reading its body and cancels the pending fetch', async ({ overrides }) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const body = jest.fn(nthuJson().text);
+  const fetchSource = jest.fn().mockResolvedValue({ ...nthuJson(), ...overrides, text: body });
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('暫時無法讀取清大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+    expect(body).not.toHaveBeenCalled();
+    expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(view.queryByText('分析化學專題')).toBeNull();
+    view.unmount();
+  } finally { globalThis.fetch = original; }
+});
+
 test('NCNU guest catalog opens directly and supports code search, empty results and the official guest link', async () => {
   setBrowsingSchoolId('ncnu');
   const original = globalThis.fetch;
