@@ -5,9 +5,25 @@ import { ClubProfile } from '../screens/ClubProfile';
 import { ClubDirectory } from '../screens/ClubDirectory';
 import { loadClubProfile } from '../services/clubProfile';
 jest.mock('../screens/ClubPortal', () => ({
-  ClubPortal: ({ uid, schoolId, groupId }: { uid: string; schoolId: string; groupId: string }) => {
+  ClubPortal: ({
+    uid,
+    schoolId,
+    groupId,
+    onBack,
+  }: {
+    uid: string;
+    schoolId: string;
+    groupId: string;
+    onBack?: () => void;
+  }) => {
     const { Text } = require('react-native');
-    return <Text>{`管理入口：${uid}/${schoolId}/${groupId}`}</Text>;
+    const { Button } = require('../ui/components');
+    return (
+      <>
+        <Text>{`管理入口：${uid}/${schoolId}/${groupId}`}</Text>
+        <Button text="回社團介紹" onPress={onBack} />
+      </>
+    );
   },
 }));
 jest.mock('../services/clubProfile', () => ({ loadClubProfile: jest.fn() }));

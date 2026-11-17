@@ -43,16 +43,15 @@ export function ClubProfile({
   const textStyle = { color: theme.colors.text, lineHeight: 22 };
   if (manage && profile && clubSummaryEnabled() && ['owner', 'admin'].includes(profile.role)) {
     return (
-      <>
-        <Button
-          text="回社團介紹"
-          onPress={() => {
-            setManage(false);
-            setRevision((value) => value + 1);
-          }}
-        />
-        <ClubPortal uid={uid} schoolId={schoolId} groupId={groupId} />
-      </>
+      <ClubPortal
+        uid={uid}
+        schoolId={schoolId}
+        groupId={groupId}
+        onBack={() => {
+          setManage(false);
+          setRevision((value) => value + 1);
+        }}
+      />
     );
   }
   return (

@@ -26,12 +26,14 @@ export function ClubPortal({
   schoolId,
   groupId,
   onChanged,
+  onBack,
   searchQuery,
 }: {
   uid: string;
   schoolId: string;
   groupId?: string;
   onChanged?: () => void;
+  onBack?: () => void;
   searchQuery?: string;
 }) {
   const [view, setView] = useState<ClubPortalView | null>(null),
@@ -273,6 +275,7 @@ export function ClubPortal({
   };
   return (
     <Card title="社團服務" subtitle="生活 › 社團">
+      {onBack ? <Button text="回社團介紹" disabled={busy} onPress={onBack} /> : null}
       {view?.memberCursor ? (
         <Button text="載入更多社員" disabled={busy} onPress={() => void loadMore('member')} />
       ) : null}
