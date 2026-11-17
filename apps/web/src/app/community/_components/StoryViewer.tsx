@@ -28,6 +28,7 @@ export function StoryViewer({
   const beforePanel = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
   const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const [auto, setAuto] = useState(false);
+  const [readingFocused, setReadingFocused] = useState(false);
   const [panelFor, setPanelFor] = useState<string | null>(null);
   const [hidden, setHidden] = useState(() => document.hidden);
   const [loadedId, setLoadedId] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function StoryViewer({
     auto &&
     !panelOpen &&
     !hidden &&
+    !readingFocused &&
     !video &&
     (!photo || loadedId === story.id || failedId === story.id);
   const onNext = useRef(viewer.next);
@@ -200,7 +202,14 @@ export function StoryViewer({
           className={styles.canvas}
           role="region"
           aria-label="限時動態內容，左右方向鍵切換"
+          aria-description="閱讀區取得鍵盤焦點時會暫停自動播放，移開焦點後接續剩餘時間。"
           tabIndex={0}
+          onFocus={(e) => {
+            if (e.target === e.currentTarget) setReadingFocused(true);
+          }}
+          onBlur={(e) => {
+            if (e.target === e.currentTarget) setReadingFocused(false);
+          }}
           onPointerDown={(e) => {
             // Leave native play/seek controls alone; swipes across the picture can still change author.
             if (
