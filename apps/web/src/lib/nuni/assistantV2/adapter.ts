@@ -22,6 +22,7 @@ import { parsePublicEventTarget } from './publicEvent';
 import { readLostFound } from './lostFoundAdapter';
 import { parseCampusMapArguments } from './campusMap';
 import { readCampusMap } from './campusMapAdapter';
+import { readPublicSocial } from './publicSocialAdapter';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
   if (!Array.isArray(v[key])) throw new V2Error(502, 'INVALID_RESPONSE');
@@ -285,6 +286,17 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
       });
       signal.throwIfAborted();
       operationSignal()?.throwIfAborted();
+      return result;
+    },
+    publicSocial: async (args) => {
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      const expectedAccount = verifiedPrincipal.platformAccountId;
+      const result = await readPublicSocial(schoolId, args, (path, input, query) => request(path, input, query));
+      signal.throwIfAborted();
+      operationSignal()?.throwIfAborted();
+      if (verifiedPrincipal?.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
       return result;
     },
     ledger: async () =>

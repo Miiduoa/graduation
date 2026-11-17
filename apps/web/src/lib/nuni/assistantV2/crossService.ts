@@ -15,6 +15,8 @@ import { findSchoolById } from '@campus/shared/src/schools';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS } from './publicCourses';
 import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind } from './publicCampus';
 import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
+import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
+import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult, type CampusMapRead } from './campusMap';
 import type { AssistantCampusEventTarget } from '../../assistantCampusEvent';
 import { publicCampusEventTargets } from './publicCampusSelection';
@@ -119,6 +121,10 @@ function failureMessage(error: unknown): string {
 }
 
 function readSummary(operation: CrossServiceOperation, value: unknown, now: number, schoolId: string): string {
+  if (operation.tool === 'get_public_social')
+    return formatPublicSocialRead(parsePublicSocialResult(value, schoolId, operation.args));
+  if (operation.tool === 'get_school_info')
+    return formatSchoolInfoRead(parseSchoolInfoResult(value, schoolId, operation.args));
   if (operation.tool === 'get_lost_found')
     return formatLostFoundRead(parseLostFoundResult(value, schoolId, operation.args));
   const campusKind = publicCampusToolKind(operation.tool);
@@ -282,7 +288,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -325,10 +331,13 @@ export async function runCrossService(input: {
         } else {
           const result = unwrap(value);
           step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
-          const sourceSummary = publicCampusToolKind(operation.tool) || operation.tool === 'get_lost_found';
+          const sourceSummary = publicCampusToolKind(operation.tool) ||
+            ['get_lost_found', 'get_public_social', 'get_school_info'].includes(operation.tool || '');
           step.summary = result.unavailable && !sourceSummary
             ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
           if (operation.tool === 'get_lost_found') step.href = parseLostFoundResult(value, binding.schoolId, operation.args).href;
+          else if (operation.tool === 'get_public_social') step.href = parsePublicSocialResult(value, binding.schoolId, operation.args).href;
+          else if (operation.tool === 'get_school_info') step.href = parseSchoolInfoResult(value, binding.schoolId, operation.args).href;
           else if (sourceSummary) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
           if (partial(result) && !sourceSummary) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
         }

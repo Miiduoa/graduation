@@ -11,6 +11,7 @@ const RETRY_TTL_MS = 15 * 60 * 1000;
 const READ_TOOLS = new Set([
   'get_schedule', 'get_calendar', 'get_due_work', 'get_imported_academics', 'get_dining',
   'list_food_orders', 'get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map',
+  'get_public_social', 'get_school_info',
 ]);
 const READ_KINDS = new Set(['free-time', 'materials', 'clubs', 'transit', 'public-course', 'map-location']);
 const invalid = (): never => { throw new V2Error(409, 'TASK_RETRY_INVALID'); };
@@ -152,7 +153,7 @@ export async function retryTaskReads(input: {
   const proof = retryProof(input);
   // Empty question prevents a completed study/reorder clause from influencing
   // any tools used in this read-only continuation.
-  const tools = createTools(input.adapter, input.binding, input.secret, input.now, false);
+  const tools = createTools(input.adapter, input.binding, input.secret, input.now, false, false, '', false, proof.question);
   const result = await runCrossService({ request: proof.subset, tools, binding: input.binding,
     now: input.now, signal: input.signal, availableAfter: input.now, eventMapSelections: proof.eventMapSelections });
   input.signal.throwIfAborted();

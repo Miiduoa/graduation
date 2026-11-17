@@ -100,7 +100,11 @@ const capabilityDescriptions = {
     summary: '可查所選校園的站點與到站資料；保留來源失敗、即時或表定狀態。',
     tools: ['get_transit'],
   },
-  'school-info': handoff('可開啟學校資訊；詳細聯絡方式需到原頁核對。'),
+  'school-info': {
+    modes: ['read'],
+    summary: '可查所選學校的官方校名、地址、總機與網站，附教育部公開資料快照日期及來源；系所聯絡方式與即時服務狀態需另行核對。',
+    tools: ['get_school_info'],
+  },
   'student-card': handoff('可開啟本人的學生證頁；本助理不會變更校籍、出示憑證或感應門禁。'),
   cafeteria: {
     modes: ['read'],
@@ -128,7 +132,11 @@ const capabilityDescriptions = {
     summary: '可依關鍵字查所選校園的平台失物招領，或查本人發布的刊登摘要；保留分頁與來源不可用狀態，不讀聯絡方式、不發布或聯絡他人，也不混用學校帳號的舊刊登。',
     tools: ['get_lost_found'],
   },
-  'public-social': handoff('可開啟跨校公開交流；本助理尚未讀取貼文或代發內容。'),
+  'public-social': {
+    modes: ['read'],
+    summary: '可查所選校園的平台公開交流動態，顯示來源看板與摘要並保留分頁；不讀私人對話、不代發文，也不依貼文內容自動執行操作。',
+    tools: ['get_public_social'],
+  },
   community: handoff('可開啟校園社群；本助理尚未讀取貼文或代發內容。'),
   messages: handoff('可開啟私人訊息；本助理尚未讀取或傳送私人對話。'),
   notifications: handoff('可開啟通知中心；正式服務尚未接入本助理的通知查詢。'),

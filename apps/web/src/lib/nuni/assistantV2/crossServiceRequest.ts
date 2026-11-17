@@ -9,6 +9,7 @@ import { publicCourseArguments } from './publicCourses';
 import { parsePublicCampusRead } from './publicCampus';
 import { parseLostFoundRead } from './lostFound';
 import { parseCampusMapClause, parseCampusMapCommand } from './campusMapRequest';
+import { connectedServiceRead } from './connectedServiceReads';
 
 export type CrossServiceOperation = {
   id: string;
@@ -137,6 +138,11 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
       continue;
     }
     const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
+    const connected = connectedServiceRead(clause);
+    if (connected) {
+      add({ kind: 'read', ...connected });
+      continue;
+    }
     const map = parseCampusMapClause(clause);
     if (map?.kind === 'place') {
       add({ kind: 'read', label: '查校園地點', serviceId: 'map', tool: 'get_campus_map',
@@ -251,9 +257,9 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
   const singleSourceRead = requested.length === 1 && requested[0].kind === 'read' &&
-    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map'].includes(requested[0].tool || '');
+    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info'].includes(requested[0].tool || '');
   if ((!singleSourceRead && requested.length < 2) || requested.length > 12 || (!singleSourceRead &&
-      new Set(requested.map(op => op.kind === 'public-course' || op.tool === 'get_campus_map' ? op.kind + ':' + JSON.stringify(op.args)
+      new Set(requested.map(op => op.kind === 'public-course' || op.tool === 'get_campus_map' || op.tool === 'get_school_info' ? op.kind + ':' + op.tool + ':' + JSON.stringify(op.args)
         : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2)) return null;
   const operations: CrossServiceOperation[] = [];
   let serial = requested.length;

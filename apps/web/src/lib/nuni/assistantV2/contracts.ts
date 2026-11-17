@@ -222,6 +222,8 @@ export type Adapter = {
   publicEvent?(target: import('./publicEvent').PublicEventTarget): Promise<unknown>;
   /** Platform-authenticated list summaries only; never contact details or publication. */
   lostFound?(args: import('./lostFound').LostFoundArguments): Promise<unknown>;
+  /** Platform public feed for this fixed school; never private school conversations. */
+  publicSocial?(args: import('./publicSocial').PublicSocialArguments): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,

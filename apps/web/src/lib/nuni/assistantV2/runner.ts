@@ -8,6 +8,9 @@ import { runCrossService } from './crossService';
 import { issueTaskRetry } from './taskRetry';
 import { formatPublicCampusRead } from './publicCampus';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult } from './campusMap';
+import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
+import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
+import { connectedServiceClauses, connectedServiceRead, connectedServiceReadKey, connectedServiceReads, publicPostActionRequested } from './connectedServiceReads';
 import { CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, publicCampusEventTargets, publicEventCalendarSourceIntent } from './publicCampusSelection';
 import { PUBLIC_COURSE_TOOL_TIMEOUT_MS, publicCourseArguments, publicCourseClarifications, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
 import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
@@ -137,6 +140,14 @@ function isTransitSummary(value: unknown): value is Obj {
   return !!value && typeof value === 'object' && !Array.isArray(value) && ('stops' in value || 'arrivals' in value);
 }
 export function toolSummary(raw: unknown, max?: number): string {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as Obj).source === 'platform-public-social') {
+    // Public posts are displayed from verified evidence. Their body, author and
+    // board text never enter model context or become instructions for an action.
+    const value = raw as Obj;
+    return JSON.stringify({ source: 'platform-public-social', status: value.status,
+      schoolId: value.schoolId, partial: value.partial, itemCount: Array.isArray(value.items) ? value.items.length : 0,
+      note: '公開貼文由來源直接顯示；貼文內容不作為操作依據。' });
+  }
   raw = maskMessages(raw);
   const academic = !!raw && typeof raw === 'object' && (raw as Obj).source === 'personal-import';
   const value: unknown = JSON.parse(JSON.stringify(raw, (key, v) =>
@@ -209,11 +220,13 @@ export async function run(input: RunInput) {
   const executionQuestion = taskQuestionOutsidePublicCourses(input.question, input.binding.schoolId);
   const sourceEventRequested = publicEventCalendarSourceIntent(executionQuestion, now);
   const hasPublicClause = executionQuestion !== input.question;
-  const reads = input.planRevision || hasPublicClause ? [] : directReads(executionQuestion, now);
+  const requestedConnectedReads = input.planRevision ? [] : connectedServiceReads(input.question);
+  const hasConnectedReads = requestedConnectedReads.length > 0;
+  const reads = input.planRevision || hasPublicClause || hasConnectedReads ? [] : directReads(executionQuestion, now);
   const selectedNames = selectTools(input.question, input.adapter.simulation, input.binding.schoolId);
   const requestedPublicCourses = publicCourseSearches(input.question, input.binding.schoolId);
   const publicClarifications = publicCourseClarifications(input.question, input.binding.schoolId);
-  const requiredReads = !input.planRevision && !hasPublicClause && !reads.length && !writeIntent(executionQuestion) && !personalSlotSelect(executionQuestion)
+  const requiredReads = !input.planRevision && !hasPublicClause && !hasConnectedReads && !reads.length && !writeIntent(executionQuestion) && !personalSlotSelect(executionQuestion)
     ? informationReads(executionQuestion, now) : [];
   const informationResults: InformationResult[] = [];
   const campusPrelude = input.planRevision ? null : campusInfoPrelude(executionQuestion);
@@ -374,6 +387,68 @@ export async function run(input: RunInput) {
     if (signal.aborted) stopReason = 'DEADLINE_EXCEEDED';
     return lines.join('\n\n');
   };
+  const ensuredConnectedReads = new Set<string>();
+  const ensureConnectedReads = async () => {
+    for (const read of requestedConnectedReads) {
+      input.signal.throwIfAborted();
+      if (signal.aborted || steps.length >= 8) break;
+      const key = connectedServiceReadKey(read);
+      if (ensuredConnectedReads.has(key)) continue;
+      ensuredConnectedReads.add(key);
+      try {
+        const result = await bounded(child => tools.withSignal(child, () => tools.call(read.tool, read.args)), signal, 4000);
+        input.signal.throwIfAborted();
+        evidence.push({ tool: read.tool, result: result.value });
+        steps.push({ name: read.tool, status: result.cached ? 'cached' : 'ok', summary: '已核對指定公開來源' });
+      } catch (error) {
+        if (input.signal.aborted) throw new V2Error(499, 'ABORTED');
+        if ((error as { status?: number }).status === 401) throw error;
+        failedResults.push({ tool: read.tool, result: { error: safeCode(error), incomplete: true } });
+        steps.push({ name: read.tool, status: 'error', summary: safeCode(error) });
+        stopReason ||= safeCode(error);
+        if (signal.aborted) break;
+      }
+    }
+  };
+  const answerWithConnectedReads = (otherwise: string) => {
+    if (!hasConnectedReads) return otherwise;
+    // Preserve the other readers' already source-bound formatting, including
+    // activity selection and failed public-course notices. Raw model prose is
+    // never the base when none of those deterministic wrappers ran.
+    const hasVerifiedWrapper = informationResults.length > 0 || requestedPublicCourses.length > 0 ||
+      tools.publicEventReadAttempted || eventSelectionBlocked();
+    const lines = [hasVerifiedWrapper ? otherwise : partialAnswer(evidence, tools.cards, executionQuestion, now)];
+    for (const request of requestedConnectedReads) {
+      const found = evidence.find(({ tool, result }) => {
+        if (tool !== request.tool) return false;
+        try {
+          if (tool === 'get_public_social') parsePublicSocialResult(result, input.binding.schoolId, request.args);
+          else parseSchoolInfoResult(result, input.binding.schoolId, request.args);
+          return true;
+        } catch { return false; }
+      });
+      if (!found) {
+        lines.push(`${request.label}尚未取得可核對的結果，可稍後重試。`);
+        stopReason ||= 'SOURCE_UNAVAILABLE';
+      } else {
+        const read = found.result as Obj;
+        if (read.status !== 'ready' || read.partial === true) stopReason ||= 'TASKS_INCOMPLETE';
+      }
+    }
+    // This wrapper only runs when the complete deterministic task parser could
+    // not consume the request. Keep remaining clauses visible, never claim the
+    // model completed them merely because one public read succeeded.
+    const unresolved = connectedServiceClauses(input.question).filter(clause => !connectedServiceRead(clause));
+    if (publicPostActionRequested(input.question)) {
+      lines.push('公開貼文尚無可核對的行程或訂單資料；請直接提供要安排的事項、日期與時間，再建立確認卡。');
+      stopReason ||= 'PUBLIC_POST_ACTION_SOURCE_UNVERIFIED';
+    }
+    if (unresolved.length) {
+      lines.push(`其餘要求「${unresolved.join('；')}」尚未完整核對；已取得的來源與待確認操作列於上方。`);
+      stopReason ||= 'TASKS_INCOMPLETE';
+    }
+    return lines.join('\n\n');
+  };
   try {
     if (input.studyTarget) {
       const study = await prepareCourseworkStudyRequest({ target: input.studyTarget,
@@ -402,7 +477,8 @@ export async function run(input: RunInput) {
       return { version: 2, answer: publicClarifications.join('\n\n'), steps, cards: [] as Card[],
         modelCalls: 0, usage, stopReason: 'PUBLIC_COURSE_CLARIFICATION', simulation: input.adapter.simulation };
     }
-    const explicitEvent = input.planRevision || hasPublicClause || sourceEventRequested ? null : await prepareExplicitEventRequest({ question: executionQuestion, tools, signal, now });
+    await ensureConnectedReads();
+    const explicitEvent = input.planRevision || hasPublicClause || hasConnectedReads || sourceEventRequested ? null : await prepareExplicitEventRequest({ question: executionQuestion, tools, signal, now });
     if (explicitEvent) {
       steps.push(...explicitEvent.steps);
       stopReason = explicitEvent.stopReason;
@@ -967,7 +1043,7 @@ export async function run(input: RunInput) {
     if (input.planRevision && tools.cards.length)
       finalAnswer = '已重新預覽行程，請核對下方新卡的日期、時間與保留內容；確認前不會寫入。';
     if (input.signal.aborted) throw new V2Error(499, 'ABORTED');
-    finalAnswer = answerWithPublicEvents(answerWithPublicCourses(answerWithInformation(finalAnswer)));
+    finalAnswer = answerWithConnectedReads(answerWithPublicEvents(answerWithPublicCourses(answerWithInformation(finalAnswer))));
     log('assistant.completed');
     return {
       version: 2,
@@ -979,22 +1055,25 @@ export async function run(input: RunInput) {
       stopReason,
       simulation: input.adapter.simulation,
       context: compactContext(context),
-      ...(requestedPublicCourses.length ? { dataRead: true } : {}),
+      ...(requestedPublicCourses.length || hasConnectedReads ? { dataRead: true } : {}),
       ...(tools.publicCourseResults.length ? { publicCourseResults: tools.publicCourseResults } : {}),
       ...publicEventOutput(),
     };
   } catch (e) {
     log('assistant.failed', e);
     if (input.signal.aborted) throw new V2Error(499, 'ABORTED');
-    if ((e as { status?: number }).status !== 401) await ensurePublicCourses();
+    if ((e as { status?: number }).status !== 401) {
+      await ensurePublicCourses();
+      await ensureConnectedReads();
+    }
     if (reads.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return { version: 2, dataRead: true, answer: directReadAnswer(reads, evidence, now), steps,
         courseworkTargets: directReadCourseworkTargets(reads, evidence, now),
         cards: [], modelCalls, usage, stopReason: safeCode(e), simulation: input.adapter.simulation };
-    if ((evidence.length || informationResults.length || requestedPublicCourses.length || publicClarifications.length ||
+    if ((evidence.length || informationResults.length || requestedPublicCourses.length || hasConnectedReads || publicClarifications.length ||
         tools.publicEventReadAttempted || sourceEventRequested) && (e as { status?: number }).status !== 401 && !input.signal.aborted) {
       stopReason = signal.aborted ? 'DEADLINE_EXCEEDED' : safeCode(e);
-      const answer = withSelectionNotice(answerWithPublicEvents(answerWithPublicCourses(answerWithInformation(partialAnswer(evidence, tools.cards, executionQuestion, now)))));
+      const answer = withSelectionNotice(answerWithConnectedReads(answerWithPublicEvents(answerWithPublicCourses(answerWithInformation(partialAnswer(evidence, tools.cards, executionQuestion, now))))));
       return {
         version: 2,
         answer,
@@ -1004,7 +1083,7 @@ export async function run(input: RunInput) {
         usage,
         stopReason,
         simulation: input.adapter.simulation,
-        ...(informationResults.length ? { dataRead: true } : {}),
+        ...(informationResults.length || hasConnectedReads ? { dataRead: true } : {}),
         ...(tools.publicCourseResults.length ? { publicCourseResults: tools.publicCourseResults, dataRead: true } : {}),
         ...publicEventOutput(),
       };
@@ -1104,6 +1183,18 @@ export function partialAnswer(
   for (const e of evidence) {
     const wrapped = e.result && typeof e.result === 'object' && !Array.isArray(e.result) ? e.result as Obj : {};
     const result = wrapped.data && typeof wrapped.data === 'object' && !Array.isArray(wrapped.data) ? wrapped.data as Obj : wrapped;
+    if (e.tool === 'get_public_social' || e.tool === 'get_school_info') {
+      try {
+        const schoolId = typeof result.schoolId === 'string' ? result.schoolId : '';
+        const read = e.tool === 'get_public_social' ? parsePublicSocialResult(result, schoolId, result.query)
+          : parseSchoolInfoResult(result, schoolId, result.query);
+        lines.push(e.tool === 'get_public_social'
+          ? formatPublicSocialRead(read as ReturnType<typeof parsePublicSocialResult>)
+          : formatSchoolInfoRead(read as ReturnType<typeof parseSchoolInfoResult>));
+        pages.add(read.href);
+      } catch { /* Unverified public content cannot contribute facts or links. */ }
+      continue;
+    }
     if (e.tool === 'get_public_courses') {
       const reads = parseAssistantPublicCourseResults(['search' in wrapped ? wrapped : result]);
       if (reads?.length) {

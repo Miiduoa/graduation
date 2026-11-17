@@ -28,6 +28,8 @@ export async function loadClubProfile(uid: string, schoolId: string, groupId: st
   return {
     name: typeof data.name === 'string' ? data.name : '未命名社團',
     description: typeof data.description === 'string' ? data.description : '',
+    meetingTime:
+      typeof data.clubProfile?.meetingTime === 'string' ? data.clubProfile.meetingTime.trim() : '',
     role: typeof member.role === 'string' ? member.role : 'member',
     memberCount:
       Number.isInteger(data.memberCount) && data.memberCount >= 0

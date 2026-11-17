@@ -11,6 +11,9 @@ import { CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, publicEventCalendarSourceInten
 import { lostFoundListInput, parseLostFoundRead, parseLostFoundResult } from './lostFound';
 import { parseCampusMapArguments, parseCampusMapResult } from './campusMap';
 import { parseCampusMapCommand } from './campusMapRequest';
+import { parsePublicSocialArguments, parsePublicSocialResult } from './publicSocial';
+import { parseSchoolInfoArguments, parseSchoolInfoResult, readSchoolInfo } from './schoolInfo';
+import { connectedServiceReads, publicPostSourceReferenced } from './connectedServiceReads';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import {
@@ -56,6 +59,8 @@ const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  get_public_social: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_school_info: [{ field: { enum: ['overview', 'address', 'phone', 'website'] } }, []],
   get_campus_announcements: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_campus_events: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
   get_campus_map: [{ query: { type: 'string', minLength: 1, maxLength: 120 },
@@ -465,6 +470,7 @@ export const toolNames = Object.keys(definitions);
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
 function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
+  const connected = connectedServiceReads(question);
   const campusMap = parseCampusMapCommand(question);
   if (campusMap) return campusMap.kind === 'next-class'
     ? [['課表／行程', 'get_schedule'], ['校園位置', 'get_campus_map']] : [['校園位置', 'get_campus_map']];
@@ -482,6 +488,7 @@ function requestedToolDomains(question: string, simulation: boolean, schoolId = 
   const add = (requested: boolean, label: string, tool: string) => {
     if (requested) domains.push([label, tool]);
   };
+  for (const read of connected) add(true, read.label, read.tool);
   add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
   add(informationKinds(question).includes('orders'), '訂單進度', 'list_food_orders');
   add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
@@ -528,6 +535,7 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
     : '';
 }
 export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
+  const connected = connectedServiceReads(question);
   const campusMap = parseCampusMapCommand(question);
   if (campusMap) return campusMap.kind === 'next-class'
     ? ['get_schedule', 'get_campus_map'] : ['get_campus_map'];
@@ -544,6 +552,11 @@ export function selectTools(question: string, simulation: boolean, schoolId = ''
   }
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  if (connected.length) {
+    out.delete('get_today_context');
+    out.delete('propose_open_page');
+    add(...connected.map(read => read.tool));
+  }
   const information = informationKinds(question);
   // A shortcut card cannot satisfy a request for facts already available to readers.
   if (information.length || personalSlotSelect(question)) out.delete('propose_open_page');
@@ -627,7 +640,8 @@ export function selectTools(question: string, simulation: boolean, schoolId = ''
       'find_free_time',
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
-    ];
+      ...connected.map(read => read.tool),
+    ].slice(0, 8);
   if (names.length <= 8) return names;
   const primary = requestedToolDomains(question, simulation, schoolId)
     .map(([, tool]) => tool).filter((tool) => names.includes(tool));
@@ -655,6 +669,8 @@ export function validateTool(name: string, raw: unknown): Obj {
   if (required.some((k) => a[k] === undefined)) return fail();
   if (name === 'get_public_courses') return publicCourseArguments(parsePublicCourseArguments(a));
   if (name === 'get_campus_map') return { ...parseCampusMapArguments(a) };
+  if (name === 'get_public_social') return { ...parsePublicSocialArguments(a) };
+  if (name === 'get_school_info') return { ...parseSchoolInfoArguments(a) };
   if (name === 'propose_food_order') return { ...cartArgs(a) };
   for (const [key, value] of Object.entries(a)) {
     const spec = props[key] as Obj;
@@ -821,6 +837,9 @@ export function createTools(
   reorder = false,
   question = '',
   exactEventArguments = false,
+  // Signed read-only retries retain the original query for provenance without
+  // reactivating its completed write intent or time normalization.
+  readRequestQuestion = question,
 ) {
   const executionQuestion = taskQuestionOutsidePublicCourses(question, binding.schoolId);
   const cache = new Map<string, Promise<unknown>>();
@@ -836,6 +855,7 @@ export function createTools(
   const cards: Card[] = [];
   const publicCourseResults: AssistantPublicCourseResult[] = [];
   const sourceEventRequested = publicEventCalendarSourceIntent(executionQuestion, now);
+  const sourcePostActionRequested = publicPostSourceReferenced(executionQuestion);
   let publicEventReadAttempted = false;
   let publicEventRead: PublicCampusRead | undefined;
   let publicEventReadGeneration = 0;
@@ -991,6 +1011,15 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_public_social':
+      case 'get_school_info': {
+        const requested = connectedServiceReads(readRequestQuestion);
+        if (!requested.some(read => read.tool === name && canonical(read.args) === canonical(a)))
+          return fail('PUBLIC_READ_QUERY_MISMATCH');
+        if (name === 'get_school_info') return parseSchoolInfoResult(readSchoolInfo(binding.schoolId, a, now), binding.schoolId, a);
+        if (!adapter.publicSocial) return fail('PUBLIC_SOCIAL_UNAVAILABLE', 503);
+        return parsePublicSocialResult(await adapter.publicSocial(a), binding.schoolId, a);
+      }
       case 'get_campus_map': {
         const args = parseCampusMapArguments(a);
         if (!adapter.campusMap) return fail('CAMPUS_MAP_UNAVAILABLE', 503);
@@ -1012,7 +1041,7 @@ export function createTools(
       }
       case 'get_public_courses': {
         const search = parsePublicCourseArguments(a);
-        const requested = publicCourseSearches(question, binding.schoolId);
+        const requested = publicCourseSearches(readRequestQuestion, binding.schoolId);
         if (!requested.some(item => canonical(publicCourseArguments(item)) === canonical(a)))
           return fail('PUBLIC_COURSE_QUERY_MISMATCH');
         if (!adapter.publicCourses) return fail('PUBLIC_COURSES_UNAVAILABLE', 503);
@@ -1494,11 +1523,11 @@ export function createTools(
       };
       return {
         ...(name === 'get_public_courses' ? {
-          requestedQueries: publicCourseSearches(question, binding.schoolId).map(publicCourseArguments),
+          requestedQueries: publicCourseSearches(readRequestQuestion, binding.schoolId).map(publicCourseArguments),
         } : {}),
         nextStep:
           next[name] || `依 ${name} schema 補正參數後重試；日期 YYYY-MM-DD、時間 HH:mm，不猜 id`,
-        availableIds: (name === 'get_public_courses' ? [] : ['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
+        availableIds: (['get_public_courses', 'get_public_social', 'get_school_info'].includes(name) ? [] : ['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
           ? tenantIds
           : name === 'get_dining'
             ? [...diningIds]
@@ -1520,6 +1549,8 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown, requestQuestion = executionQuestion) {
+      if (sourcePostActionRequested && proposalPermission(name))
+        return fail('PUBLIC_POST_ACTION_SOURCE_UNVERIFIED', 409);
       let eventReadGeneration: number | undefined;
       // Mark the attempt before argument validation or I/O. A failed lookup
       // must not authorize a guessed event, nor revive a previous choice list.
@@ -1591,7 +1622,7 @@ export function createTools(
         cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
       // Public content readers do not reinterpret unsupported school, date or
       // endpoint fields as an unfiltered query for the bound campus.
-      if (name === 'get_campus_announcements' || name === 'get_campus_events' || name === 'get_lost_found' || name === 'get_campus_map') validateTool(name, cleaned);
+      if (['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info'].includes(name)) validateTool(name, cleaned);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);
