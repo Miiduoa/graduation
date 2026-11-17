@@ -1,3 +1,5 @@
+import { clubProfileFeed } from '@campus/shared/src/clubProfile';
+import { callClubPortal } from './clubPortal';
 import {
   collection,
   doc,
@@ -25,7 +27,12 @@ export async function loadClubProfile(uid: string, schoolId: string, groupId: st
     query(collection(getDb(), 'groups', groupId, 'posts'), orderBy('createdAt', 'desc'), limit(20)),
   );
   if (getAuthInstance().currentUser !== user) throw new Error('帳號已變更');
+  const feed = await callClubPortal(uid, schoolId, { action: 'read', groupId })
+    .then(clubProfileFeed)
+    .catch(() => null);
+  if (getAuthInstance().currentUser !== user) throw new Error('帳號已變更');
   return {
+    feed,
     name: typeof data.name === 'string' ? data.name : '未命名社團',
     description: typeof data.description === 'string' ? data.description : '',
     meetingTime:
