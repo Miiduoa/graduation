@@ -1043,6 +1043,10 @@ describe('new lesson self-check quality boundary', () => {
 describe('new local self-check answer disclosure boundary', () => {
   it.each([
     { label: 'short Chinese answer key', question: '哪個欄位？\n答：主鍵', answer: '主鍵' },
+    { label: 'short 答 Markdown heading', question: '哪個欄位？\n## 答\n主鍵', answer: '主鍵' },
+    { label: 'bold 答 Markdown heading with CR-only lines', question: '哪個欄位？\r### **答**\r主鍵', answer: '主鍵' },
+    { label: 'standalone 答 line', question: '哪個欄位？\n答\n主鍵', answer: '主鍵' },
+    { label: 'blockquote 答 key line', question: '哪個欄位？\n> 答\n> 主鍵', answer: '主鍵' },
     { label: 'short Chinese answer key with equals', question: '哪個欄位？ 答 = 主鍵', answer: '主鍵' },
     { label: 'bold short Chinese answer label', question: '哪個欄位？ **答**：主鍵', answer: '主鍵' },
     { label: 'short Chinese Markdown answer column', question: '選哪個？\n| 題目 | 答 |\n| --- | --- |\n| A | 主鍵 |', answer: '主鍵' },
@@ -1192,6 +1196,8 @@ describe('new local self-check answer disclosure boundary', () => {
     { question: '「試答：SQL」在這份教材表示什麼？', answer: 'SQL' },
     { question: '「問答：SQL」格式中的主題是什麼？', answer: 'SQL' },
     { question: '答：SQLServer 跟 SQL 有什麼區別？', answer: 'SQL' },
+    { question: '哪個欄位？\n## 答\n外鍵', answer: '主鍵' },
+    { question: '哪個欄位？\n## 問答\n主鍵', answer: '主鍵' },
     { question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQLServer |', answer: 'SQL' },
     { question: 'Which language? Answer key: SQLServer instead of SQL?', answer: 'SQL' },
     { question: 'Which language?\n| Prompt | Ans. |\n| --- | --- |\n| DB | SQLServer |', answer: 'SQL' },

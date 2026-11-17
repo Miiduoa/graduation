@@ -232,7 +232,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // Normalize only a matching Markdown wrapper before an explicit separator.
     // Leave displayed questions and saved v1/v2 explanations unchanged.
     .replace(/(\*\*|__|\*|_|`)(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|答|answer\s+key|ans\.?|answer|solution|(?:correct|expected|reference)\s+answer)\1(?=[ \t]*(?:[:：=＝]|(?:就)?[是為]))/giu, '$2')
-    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer\s+key|ans\.?|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
+    // The concise traditional-Chinese heading "答" may also hide the key\n    // on the next line; match only a standalone label, not "試答／問答".\n    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|答|answer\s+key|ans\.?|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
     // Do not mistake the "Answer" prefix of an already normalized "Answer Key："
     // heading for a bare "Answer" label; that would move the colon before Key.
     // A model can also place an unpunctuated key on its own line, inside a
@@ -240,7 +240,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // before the student can respond. Match only standalone answer-key labels,
     // then use the same exact-answer boundary check below; a normal mention of
     // "答案" in question prose must remain valid.
-    .replace(/(^|\r?\n)[ \t]*(?:>[ \t]*){0,2}(?:(?:[-+*•]|\d{1,2}[.)、])[ \t]+)?(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer\s+key|ans\.?|answer(?![ \t]+key\b)|solution)(?:\*\*|__)?(?=[ \t]*\r?\n|[ \t]+\S)/giu, '$1$2：');
+    .replace(/(^|\r?\n)[ \t]*(?:>[ \t]*){0,2}(?:(?:[-+*•]|\d{1,2}[.)、])[ \t]+)?(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|答|answer\s+key|ans\.?|answer(?![ \t]+key\b)|solution)(?:\*\*|__)?(?=[ \t]*\r?\n|[ \t]+\S)/giu, '$1$2：');
   const answer = comparableGeneratedAnswerDisplay(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
   // New Markdown tables may display an explicit answer key as "| 答案 | 主鍵 |".
