@@ -255,6 +255,7 @@ test('cloud parcels show arrival and identity, keep postal items separate, and p
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
   expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
   expect(screen.getByText('預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）')).toBeTruthy();
+  expect(screen.queryByText(/登錄退件／領取期限/)).toBeNull();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('不混入的掛號')).toBeNull();
   expect(screen.getByText('我自己記的')).toBeTruthy();
@@ -266,6 +267,46 @@ test('cloud parcels show arrival and identity, keep postal items separate, and p
   expect(screen.getByText(/備忘標記：已完成 ·/)).toBeTruthy();
   expect(screen.queryByText(/PRIVATE-REF|已送出|單號|你抽中了|通行證|已扣款/)).toBeNull();
   expect(screen.getByText('緊急請直接打服務台')).toBeTruthy();
+});
+
+test.each([
+  ['2026-11-20T02:00:00Z', '2026/11/20 10:00:00'],
+  ['2026-11-15T02:00:00Z', '2026/11/15 10:00:00'],
+])('有登錄期限 %s 時，包裹卡片顯示台灣日期，不使用三天推算', async (pickupDeadline, date) => {
+  const { emptyDormCloud, projectDormParcel } = require('@campus/shared/src/dormitoryCloud');
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    change({
+      ...emptyDormCloud(), packagesState: 'ready', repairsState: 'ready',
+      packages: [projectDormParcel('official', {
+        description: '有登錄期限的包裹', arrivedAt: Date.now() - 2 * 86400000, pickupDeadline,
+      })],
+    });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getByText(`登錄退件／領取期限：${date}（台灣時間）`)).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日|已退件/)).toBeNull();
+});
+
+test.each(['picked_up', 'returned'])('包裹狀態 %s 不顯示待退件提示', async (status) => {
+  const { emptyDormCloud, projectDormParcel } = require('@campus/shared/src/dormitoryCloud');
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    change({
+      ...emptyDormCloud(), packagesState: 'ready', repairsState: 'ready',
+      packages: [projectDormParcel('completed', {
+        description: '已處理的包裹', arrivedAt: Date.now() - 4 * 86400000,
+        returnAt: '2026-11-15T02:00:00Z', status,
+      })],
+    });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getAllByText(status === 'returned' ? '已退件' : '已領取').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/登錄退件／領取期限|預估|依到件日加三天推算|已到件多日/)).toBeNull();
 });
 
 test('a resident can view and update an existing local repair reference', async () => {

@@ -82,6 +82,7 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
   expect(screen.getByText('家人寄的衣服')).toBeTruthy();
   expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
   expect(screen.getByText('預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）')).toBeTruthy();
+  expect(screen.queryByText(/登錄退件／領取期限/)).toBeNull();
   expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
   expect(screen.queryByText('私密掛號信')).toBeNull();
   expect(screen.getByRole('heading', { name: '我自己記的' })).toBeTruthy();
@@ -93,6 +94,40 @@ it('renders cloud arrivals, separates registered mail, and presents a human-read
   expect(document.body.textContent).not.toMatch(/已送出|單號|你抽中了|通行證|已扣款/);
   fireEvent.click(screen.getByRole('button', { name: '關閉領取碼' }));
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it.each([
+  ['2026-11-20T02:00:00Z', '2026/11/20 10:00:00'],
+  ['2026-11-15T02:00:00Z', '2026/11/15 10:00:00'],
+])('有登錄期限 %s 時，包裹卡片顯示台灣日期，不使用三天推算', (pickupDeadline, date) => {
+  render(<DormitoryPage />);
+  act(() => mock.listeners[0]({
+    ...state(),
+    packages: [projectDormParcel('official', {
+      description: '有登錄期限的包裹',
+      arrivedAt: Date.now() - 2 * 86400000,
+      pickupDeadline,
+    })],
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  expect(screen.getByText(`登錄退件／領取期限：${date}（台灣時間）`)).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日|已退件/)).toBeNull();
+});
+
+it.each(['picked_up', 'returned'])('包裹狀態 %s 不顯示待退件提示', (status) => {
+  render(<DormitoryPage />);
+  act(() => mock.listeners[0]({
+    ...state(),
+    packages: [projectDormParcel('completed', {
+      description: '已處理的包裹',
+      arrivedAt: Date.now() - 4 * 86400000,
+      returnAt: '2026-11-15T02:00:00Z',
+      status,
+    })],
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '包裹領取' }));
+  expect(within(screen.getByRole('region', { name: '校方登錄包裹' })).getByText(status === 'returned' ? '已退件' : '已領取')).toBeTruthy();
+  expect(screen.queryByText(/登錄退件／領取期限|預估|依到件日加三天推算|已到件多日/)).toBeNull();
 });
 
 it('updates repair status timestamps live, keeps private staff references out and clears school/account subscriptions', () => {

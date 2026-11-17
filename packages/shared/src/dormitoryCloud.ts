@@ -6,6 +6,7 @@ export type DormCloudParcel = {
   id: string;
   title: string;
   arrivedAt: number | null;
+  returnAt: number | null;
   location: string;
   status: 'waiting' | 'collected' | 'returned';
   postal: boolean;
@@ -82,6 +83,11 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
       (courier !== 'unknown' ? courier : '') ||
       '包裹',
     arrivedAt: dormCloudTime(row.arrivedAt || row.createdAt),
+    // Explicit return/pickup deadline aliases only; returnedAt records an event.
+    returnAt:
+      ['returnAt', 'returnBy', 'returnDate', 'pickupDeadline', 'holdUntil', 'retainUntil', 'pickupBy']
+        .map((field) => dormCloudTime(row[field]))
+        .find((at) => at !== null && Number.isFinite(at) && Number.isFinite(new Date(at).getTime())) ?? null,
     location: location || '請向服務台確認',
     status: ['picked', 'picked_up'].includes(String(row.status))
       ? 'collected'
@@ -133,9 +139,15 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
 export function dormCloudDate(value: number | null): string {
   return value === null ? '時間待確認' : new Date(value).toLocaleString('zh-TW', { hour12: false });
 }
-/** Arrival + three days is only an implied reminder, never an official school deadline. */
+/** Prefer a logged deadline; arrival + three days is only an estimated reminder. */
 export function dormParcelReturnNotice(parcel: DormCloudParcel, now = Date.now()): string {
-  if (parcel.status !== 'waiting' || parcel.arrivedAt === null) return '';
+  if (parcel.status !== 'waiting') return '';
+  if (parcel.returnAt != null)
+    return `登錄退件／領取期限：${new Date(parcel.returnAt).toLocaleString('zh-TW', {
+      timeZone: 'Asia/Taipei',
+      hour12: false,
+    })}（台灣時間）`;
+  if (parcel.arrivedAt === null) return '';
   const day = (time: number) => Math.floor((time + 8 * 3600000) / 86400000);
   const remainingDays = day(parcel.arrivedAt + 3 * 86400000) - day(now);
   if (remainingDays === 1) return '預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）';
