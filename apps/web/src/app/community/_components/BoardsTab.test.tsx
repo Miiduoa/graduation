@@ -172,6 +172,59 @@ it('lets touch users clear a matching board search without Escape or another dat
   expect(mocks.list).toHaveBeenCalledTimes(reads);
 });
 
+it('shows only subscribed boards without re-reading Firestore and restores the full list', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic' },
+    { id: 'arts', name: '人文討論', type: 'topic' },
+  ]);
+  mocks.subscriptions.mockResolvedValue(['science']);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('link', { name: /科學討論/ });
+  const reads = mocks.list.mock.calls.length;
+  const subscriptionReads = mocks.subscriptions.mock.calls.length;
+  const only = screen.getByRole('button', { name: '只看已訂閱看板' });
+  expect(only.getAttribute('aria-pressed')).toBe('false');
+  expect((only as HTMLButtonElement).style.minHeight).toBe('44px');
+
+  fireEvent.click(only);
+  expect(only.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('link', { name: /科學討論/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /人文討論/ })).toBeNull();
+  expect(screen.getByText('僅篩選目前載入的看板。')).toBeTruthy();
+
+  const search = screen.getByRole('searchbox', { name: '搜尋看板' });
+  fireEvent.change(search, { target: { value: '人文' } });
+  expect(screen.getByText('已訂閱的看板中找不到符合「人文」的結果。')).toBeTruthy();
+  fireEvent.change(search, { target: { value: '' } });
+  fireEvent.click(only);
+  expect(screen.getByRole('link', { name: /人文討論/ })).toBeTruthy();
+  expect(only.getAttribute('aria-pressed')).toBe('false');
+  expect(mocks.list).toHaveBeenCalledTimes(reads);
+  expect(mocks.subscriptions).toHaveBeenCalledTimes(subscriptionReads);
+});
+
+it('keeps focus usable when unsubscribing the last board from the subscribed-only view', async () => {
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic' },
+    { id: 'arts', name: '人文討論', type: 'topic' },
+  ]);
+  mocks.subscriptions.mockResolvedValue(['science']);
+  render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const toggle = await screen.findByRole('button', { name: '只看已訂閱看板' });
+  fireEvent.click(toggle);
+  const unsubscribe = screen.getByRole('button', { name: '取消訂閱科學討論' });
+  unsubscribe.focus();
+  fireEvent.click(unsubscribe);
+  expect(document.activeElement).toBe(toggle);
+  expect(screen.queryByRole('link', { name: /科學討論/ })).toBeNull();
+  expect(screen.getByText('目前載入的看板中沒有已訂閱項目。')).toBeTruthy();
+  await waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledExactlyOnceWith('student', 'pu', 'science'));
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(toggle);
+  expect(screen.getByRole('link', { name: /科學討論/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /人文討論/ })).toBeTruthy();
+});
+
 it('does not send ordinary members into a board creation flow they cannot use', async () => {
   mocks.list.mockResolvedValue([]);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
