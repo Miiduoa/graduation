@@ -69,6 +69,7 @@ const {
   loadAssistantWritePermissions,
 } = require('../lib/assistantWritePermissions');
 const { getIntentWritePlan } = require('./intentWritePlan');
+const { parseWashingReservationTarget, selectWashingReservation } = require('./washingReservationSelection');
 const { parseLibraryLoanRequest, chooseLibraryLoan } = require('./libraryLoanSelection');
 const { projectLibraryLoan, libraryLoanVersion } = require('./libraryLoanSource');
 
@@ -350,6 +351,66 @@ async function executeCampusAssistantCore({
       const deniedEarly = await ensureWriteToolAllowed(writePlan.toolName);
       if (deniedEarly) return deniedEarly;
     }
+  }
+
+  if (intent === 'wash_cancel' || intent === 'wash_status') {
+    if (!uid) {
+      response.content = '請先登入目前學校的帳號，才能查核或取消本人的洗衣預約。';
+      return finalizeResponse();
+    }
+    const target = parseWashingReservationTarget(lastUserMessage);
+    if (target.kind === 'clarify') {
+      response.content = '請明確指定一筆洗衣預約，例如「取消 A2 洗衣機預約」；也可以先說「查我的洗衣預約」。這次沒有取消或新增預約。';
+      return finalizeResponse();
+    }
+    let source;
+    try {
+      source = await runTool('getMyWashingReservations', { uid, schoolId, timeZone },
+        target.reservationId ? { reservationId: target.reservationId } : {});
+    } catch (error) {
+      if (isAuthorizationFailure(error)) throw error;
+      if (error?.code === 'not-found') source = { ok: true, complete: true, reservations: [] };
+    }
+    if (source?.ok !== true || !Array.isArray(source.reservations) || source.complete !== true) {
+      response.content = '目前無法完整查核你的洗衣預約，這次沒有取消或新增預約。請稍後重新查詢，或提供要查核的預約編號。';
+      return finalizeResponse();
+    }
+    const rows = source.reservations;
+    const describe = (row) => `${row.dormitory}｜機台 ${row.machineId}｜開始 ${row.startTime}｜預約編號 ${row.reservationId}`;
+    const statusLabel = (status) => ({ reserved: '已預約', active: '使用中', inUse: '使用中', cancelled: '已取消', completed: '已完成', noshow: '未到場' })[status] || '狀態無法判定，尚未驗證取消';
+    response.citations = [{ type: 'system', id: 'my-washing-reservations', label: '目前學校的本人洗衣預約紀錄' }];
+    response.debug.sourcesUsed = rows.length;
+    if (intent === 'wash_status' && !target.reservationId && !target.machineId && !target.date && !target.time) {
+      response.content = rows.length
+        ? '目前有效的洗衣預約：\n' + rows.map((row) => `${describe(row)}｜${statusLabel(row.status)}`).join('\n') + '\n若要取消，請指定機台或預約編號；仍需另外確認。'
+        : '目前學校沒有查到本人有效的洗衣預約。若要核對先前取消是否完成，請提供那筆預約編號。';
+      return finalizeResponse();
+    }
+    const selected = selectWashingReservation(rows, target);
+    if (!selected.reservation) {
+      response.content = selected.issue === 'ambiguous'
+        ? '有多筆相符的洗衣預約，請指定其中一筆的日期、機台或預約編號：\n' + rows.map(describe).join('\n')
+        : '沒有找到符合指定條件的本人洗衣預約。請核對日期、機台或預約編號；這次沒有改選其他預約，也沒有寫入。';
+      return finalizeResponse();
+    }
+    const row = selected.reservation;
+    if (intent === 'wash_status' || !['reserved', 'active'].includes(row.status)) {
+      response.content = `${describe(row)}\n目前紀錄：${statusLabel(row.status)}。這次僅查核，沒有新增或重複取消。`;
+      return finalizeResponse();
+    }
+    const reviewed = { reservationId: row.reservationId, machineId: row.machineId, dormitory: row.dormitory,
+      startTime: row.startTime, reservedUntil: row.reservedUntil };
+    const reservationVersion = row.reservationVersion;
+    response.content = `已查核本人預約：\n${describe(row)}\n${row.reservedUntil ? `保留至 ${row.reservedUntil}\n` : ''}請檢視下方草稿並確認，確認後才會取消這筆預約；目前尚未取消。`;
+    response.actions = [assistantAction({
+      label: '取消洗衣預約', action: 'queue_action',
+      params: { toolName: 'cancelWashingReservation', input: { ...reviewed, expectedReservationVersion: reservationVersion }, agentRunId: requestId },
+      requiresConfirmation: true, sensitivity: 'high',
+      evidenceRefs: [{ type: 'system', id: 'my-washing-reservations', label: '本人洗衣預約' }],
+    })];
+    response.citations.push({ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' });
+    response.suggestions = [`查洗衣預約 編號 ${row.reservationId}`, '查我的洗衣預約'];
+    return finalizeResponse();
   }
 
   const contactAnswer = getSchoolContactAnswer(schoolId, lastUserMessage);

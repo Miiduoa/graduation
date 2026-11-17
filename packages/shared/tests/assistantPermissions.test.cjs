@@ -34,6 +34,13 @@ describe('assistantWritePermissions', () => {
     assert.equal(defaults.createPersonalTodoReminder, false);
   });
 
+  test('washing cancellation needs its own explicit grant', () => {
+    assert.equal(createDefaultAssistantWritePermissions().cancelWashingReservation, false);
+    assert.equal(isAssistantWriteToolAllowed(normalizeAssistantWritePermissions({ reserveWashingMachine: true }), 'cancelWashingReservation'), false);
+    assert.equal(isAssistantWriteToolAllowed(normalizeAssistantWritePermissions({ cancelWashingReservation: true }), 'cancelWashingReservation'), true);
+    assert.equal(isAssistantWriteToolAllowed(normalizeAssistantWritePermissions({ cancelWashingReservation: 'true' }), 'cancelWashingReservation'), false);
+  });
+
   test('missing or invalid payload fails closed', () => {
     assert.equal(isAssistantWriteToolAllowed(null, 'createOrder'), false);
     assert.equal(isAssistantWriteToolAllowed(undefined, 'createOrder'), false);
