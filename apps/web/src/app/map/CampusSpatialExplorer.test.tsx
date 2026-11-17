@@ -894,12 +894,13 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
-// Offline fetch rejections are usually TypeError, but mobile WebViews may
-// use DOMException NetworkError. Both need local backoff; a generic application
-// error and an HTTP 500 are intentionally not treated as origin rate limits.
+// Offline fetch rejections are usually TypeError. Some WebViews instead
+// surface DOMException or an ordinary Error named NetworkError; all represent
+// the same failed request and require origin backoff, not rapid manual retries.
 it.each([
   { kind: 'TypeError', reason: () => new TypeError('Failed to fetch') },
   { kind: 'DOMException NetworkError', reason: () => new DOMException('Network disconnected', 'NetworkError') },
+  { kind: 'Error named NetworkError', reason: () => Object.assign(new Error('WebView network offline'), { name: 'NetworkError' }) },
 ])('backs off a rejected OSM request with no response ($kind)', async ({ reason }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockRejectedValue(reason());
@@ -915,6 +916,20 @@ it.each([
   expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+});
+
+it('does not rate-limit a generic application failure disguised as a rejected OSM fetch', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockRejectedValue(new Error('Application error'));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy());
+  expect(retry.hasAttribute('disabled')).toBe(false);
+  expect(window.sessionStorage.getItem('nuni:pu:osm-footprint-cooldown-until')).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 // Closing and reopening a dialog must not bypass an origin-protecting wait.
