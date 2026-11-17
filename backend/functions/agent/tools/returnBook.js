@@ -4,8 +4,12 @@ const { z } = require('zod');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { assertServiceScope, readServiceActor, userServiceGuard } = require('./serviceWriteGuard');
+const { assertLibraryLoanVersion } = require('../libraryLoanSource');
 
-const inputSchema = z.object({ loanId: z.string().min(1).max(128).refine((id) => !id.includes('/')) });
+const inputSchema = z.object({
+  loanId: z.string().min(1).max(128).refine((id) => !id.includes('/')),
+  expectedLoanVersion: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+});
 
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
@@ -20,6 +24,7 @@ async function execute(ctx, rawInput) {
     if (!loanDoc.exists) throw new HttpsError('not-found', '找不到此借閱紀錄。');
     const loan = loanDoc.data();
     if (loan.userId !== uid) throw new HttpsError('permission-denied', '這不是您的借閱紀錄。');
+    assertLibraryLoanVersion(ctx, input, loan);
     if (!['borrowed', 'active'].includes(loan.status)) {
       throw new HttpsError('failed-precondition', '此書已歸還或狀態異常。');
     }

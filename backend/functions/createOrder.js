@@ -2,6 +2,7 @@ const nodeCrypto = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
 const { assertOnlineOrderingEnabled } = require('./lib/onlineOrdering');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 function identifier(value, name, max = 160) {
   if (
@@ -178,12 +179,18 @@ function createOrderHandler({ db }) {
       .doc(orderId);
     const keyRef = db.collection('_orderRequests').doc(orderId);
     const result = await db.runTransaction(async (transaction) => {
-      const [keyDoc, memberDoc, orderDoc, mirrorDoc] = await transaction.getAll(
+      const [keyDoc, memberDoc, orderDoc, mirrorDoc, accountDoc] = await transaction.getAll(
         keyRef,
         schoolRef.collection('members').doc(uid),
         orderRef,
         userOrderRef,
+        db.collection('users').doc(uid),
       );
+      if (isAccountUnavailable(accountDoc.exists ? accountDoc.data() : {})) {
+        throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+          reason: 'account-deletion',
+        });
+      }
       if (!memberDoc.exists || memberDoc.data().status !== 'active')
         throw new HttpsError('permission-denied', 'Active school membership required');
       if (keyDoc.exists) {
