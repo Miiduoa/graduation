@@ -1,4 +1,5 @@
 'use client';
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { clubEnabled } from './clubService';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -34,6 +35,8 @@ export function ClubProfile({
       generation.current++;
     };
   }, [uid, schoolId, groupId, revision]);
+  const meetingTime = normalizeClubProfileText(group?.meetingTime);
+  const description = normalizeClubProfileText(group?.description);
   return (
     <section className={styles.group} aria-label="社團頁">
       <Link href={`/clubs?schoolId=${encodeURIComponent(schoolId)}`}>回我的社團</Link>
@@ -47,11 +50,11 @@ export function ClubProfile({
           <p>
             類別未提供 ·{' '}
             {group.memberCount === null ? '社員數未提供' : `${group.memberCount} 位社員`} ·{' '}
-            {group.meetingTime?.trim() || '社課時間未提供'}
+            {meetingTime || '社課時間未提供'}
           </p>
           {clubEnabled() &&
             ['owner', 'admin'].includes(group.role) &&
-            !group.meetingTime?.trim() && (
+            !meetingTime && (
               <Link
                 className="btn"
                 href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
@@ -91,11 +94,11 @@ export function ClubProfile({
           <section>
             <h2>介紹</h2>
             <p style={{ whiteSpace: 'pre-wrap' }}>
-              {group.description?.trim() || '社團尚未提供介紹。'}
+              {description || '社團尚未提供介紹。'}
             </p>
             {clubEnabled() &&
               ['owner', 'admin'].includes(group.role) &&
-              !group.description?.trim() && (
+              !description && (
                 <Link
                   className="btn"
                   href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}

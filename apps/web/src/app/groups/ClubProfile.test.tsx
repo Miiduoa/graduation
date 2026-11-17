@@ -1,3 +1,4 @@
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { clubEnabled } from './clubService';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
@@ -34,6 +35,24 @@ beforeEach(() => {
   vi.mocked(clubEnabled).mockReturnValue(false);
   vi.mocked(loadClubProfile).mockResolvedValue(profile);
 });
+
+test.each([
+  [undefined, ''],
+  [null, ''],
+  ['', ''],
+  [' \t\n　', ''],
+  [' 未提供 ', ''],
+  [' 社課時間未提供 ', ''],
+  [' 社團尚未提供介紹 ', ''],
+  [' 社團尚未提供介紹。 ', ''],
+  [' 週三 18:00 ', '週三 18:00'],
+  [' 社團介紹\n每週見面 ', '社團介紹\n每週見面'],
+  ['社課時間未提供，請洽幹部', '社課時間未提供，請洽幹部'],
+  ['社團尚未提供介紹，但歡迎來聊聊', '社團尚未提供介紹，但歡迎來聊聊'],
+])('共用社團文字正規化只將空白與完整 placeholder 視為缺值：%s', (value, expected) => {
+  expect(normalizeClubProfileText(value)).toBe(expected);
+});
+
 test('依規格呈現唯讀社團、真實公告與活動尚未串接的界線', async () => {
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   await screen.findByRole('heading', { name: '攝影社' });
@@ -108,28 +127,37 @@ test.each(['owner', 'admin', 'member'])(
   },
 );
 
-test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位空白時顯示：%s', async (enabled) => {
+test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位缺資料時顯示：%s', async (enabled) => {
   vi.mocked(clubEnabled).mockReturnValue(enabled);
   const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   for (const role of ['owner', 'admin', 'member']) {
-    for (const [meetingTime, description] of [
-      ['  ', '  '],
-      ['週三 18:00', '  '],
-      ['  ', '新版介紹'],
-      ['週三 18:00', '新版介紹'],
-    ]) {
+    for (const [meetingTime, description, missingTime, missingIntro] of [
+      ['  ', '  ', true, true],
+      ['週三 18:00', '  ', false, true],
+      ['  ', '新版介紹', true, false],
+      ['週三 18:00', '新版介紹', false, false],
+      ['社課時間未提供', '社團尚未提供介紹', true, true],
+      [' \t社課時間未提供\n', ' 社團尚未提供介紹。 ', true, true],
+      ['未提供', '未提供', true, true],
+      ['社課時間未提供', '新版介紹', true, false],
+      ['週三 18:00', '社團尚未提供介紹。', false, true],
+      ['社課時間未提供，請洽幹部', '社團尚未提供介紹，但歡迎來聊聊', false, false],
+    ] as const) {
       vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role, meetingTime, description });
       fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
       await screen.findByText('攝影社');
-      for (const [name, value] of [
-        ['填寫社課時間', meetingTime],
-        ['填寫社團介紹', description],
-      ]) {
+      for (const [name, missing] of [
+        ['填寫社課時間', missingTime],
+        ['填寫社團介紹', missingIntro],
+      ] as const) {
         const entry = screen.queryByRole('link', { name });
-        const show = enabled && role !== 'member' && !value.trim();
+        const show = enabled && role !== 'member' && missing;
         expect(entry !== null).toBe(show);
       }
-      expect(screen.queryByText(/社課時間未提供/) !== null).toBe(!meetingTime.trim());
+      expect(screen.queryByText(/社課時間未提供$/) !== null).toBe(missingTime);
+      expect(screen.queryByText('社團尚未提供介紹。') !== null).toBe(missingIntro);
+      if (!missingTime) expect(screen.getByText(new RegExp(meetingTime.trim()))).toBeTruthy();
+      if (!missingIntro) expect(screen.getByText(description.trim())).toBeTruthy();
     }
   }
   view.unmount();

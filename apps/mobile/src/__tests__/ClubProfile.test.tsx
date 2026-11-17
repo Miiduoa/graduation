@@ -141,30 +141,39 @@ test.each(['owner', 'admin', 'member'])(
   },
 );
 
-test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位空白時顯示：%s', async (enabled) => {
+test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位缺資料時顯示：%s', async (enabled) => {
   jest.mocked(clubSummaryEnabled).mockReturnValue(enabled);
   const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   for (const role of ['owner', 'admin', 'member']) {
-    for (const [meetingTime, description] of [
-      ['  ', '  '],
-      ['週三 18:00', '  '],
-      ['  ', '新版介紹'],
-      ['週三 18:00', '新版介紹'],
-    ]) {
+    for (const [meetingTime, description, missingTime, missingIntro] of [
+      ['  ', '  ', true, true],
+      ['週三 18:00', '  ', false, true],
+      ['  ', '新版介紹', true, false],
+      ['週三 18:00', '新版介紹', false, false],
+      ['社課時間未提供', '社團尚未提供介紹', true, true],
+      [' \t社課時間未提供\n', ' 社團尚未提供介紹。 ', true, true],
+      ['未提供', '未提供', true, true],
+      ['社課時間未提供', '新版介紹', true, false],
+      ['週三 18:00', '社團尚未提供介紹。', false, true],
+      ['社課時間未提供，請洽幹部', '社團尚未提供介紹，但歡迎來聊聊', false, false],
+    ] as const) {
       jest
         .mocked(loadClubProfile)
         .mockResolvedValue({ ...profile, role, meetingTime, description });
       fireEvent.press(screen.getByText('重新讀取社團資料'));
       await screen.findByText('攝影社');
-      for (const [name, value] of [
-        ['填寫社課時間', meetingTime],
-        ['填寫社團介紹', description],
-      ]) {
+      for (const [name, missing] of [
+        ['填寫社課時間', missingTime],
+        ['填寫社團介紹', missingIntro],
+      ] as const) {
         const entry = screen.queryByText(name);
-        const show = enabled && role !== 'member' && !value.trim();
+        const show = enabled && role !== 'member' && missing;
         expect(entry !== null).toBe(show);
       }
-      expect(screen.queryByText(/社課時間未提供/) !== null).toBe(!meetingTime.trim());
+      expect(screen.queryByText(/社課時間未提供$/) !== null).toBe(missingTime);
+      expect(screen.queryByText('社團尚未提供介紹。') !== null).toBe(missingIntro);
+      if (!missingTime) expect(screen.getByText(new RegExp(meetingTime.trim()))).toBeTruthy();
+      if (!missingIntro) expect(screen.getByText(description.trim())).toBeTruthy();
     }
   }
   view.unmount();

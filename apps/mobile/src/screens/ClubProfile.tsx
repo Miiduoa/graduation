@@ -1,3 +1,4 @@
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { ClubPortal } from './ClubPortal';
 import { clubSummaryEnabled } from '../services/clubSummary';
 import React, { useEffect, useRef, useState } from 'react';
@@ -37,6 +38,8 @@ export function ClubProfile({
       generation.current++;
     };
   }, [uid, schoolId, groupId, revision]);
+  const meetingTime = normalizeClubProfileText(profile?.meetingTime);
+  const description = normalizeClubProfileText(profile?.description);
   const textStyle = { color: theme.colors.text, lineHeight: 22 };
   if (manage && profile && clubSummaryEnabled() && ['owner', 'admin'].includes(profile.role)) {
     return (
@@ -66,11 +69,11 @@ export function ClubProfile({
           <Text style={textStyle}>
             類別未提供 ·{' '}
             {profile.memberCount === null ? '社員數未提供' : `${profile.memberCount} 位社員`} ·{' '}
-            {profile.meetingTime?.trim() || '社課時間未提供'}
+            {meetingTime || '社課時間未提供'}
           </Text>
           {clubSummaryEnabled() &&
           ['owner', 'admin'].includes(profile.role) &&
-          !profile.meetingTime?.trim() ? (
+          !meetingTime ? (
             <Button text="填寫社課時間" onPress={() => setManage(true)} />
           ) : null}
           <Button text="已加入" disabled />
@@ -97,10 +100,10 @@ export function ClubProfile({
             顯示最近 20 則討論中的最新 3 則公告；更多公告請查看下方討論。
           </Text>
           <Text style={textStyle}>介紹</Text>
-          <Text style={textStyle}>{profile.description?.trim() || '社團尚未提供介紹。'}</Text>
+          <Text style={textStyle}>{description || '社團尚未提供介紹。'}</Text>
           {clubSummaryEnabled() &&
           ['owner', 'admin'].includes(profile.role) &&
-          !profile.description?.trim() ? (
+          !description ? (
             <Button text="填寫社團介紹" onPress={() => setManage(true)} />
           ) : null}
           <Text style={textStyle}>僅供現有社員閱讀。IG、LINE 官方連結尚未提供。</Text>
