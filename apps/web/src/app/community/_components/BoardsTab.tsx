@@ -287,6 +287,21 @@ function BoardsContent(props: {
           }}
           style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
+        {q && filtered.length > 0 && !loading && !error && (
+          <button
+            type="button"
+            className="btn"
+            aria-label="清除看板搜尋"
+            onClick={() => {
+              setFilter('');
+              // Keep touch and switch-control users in the search context after the button disappears.
+              searchInputRef.current?.focus();
+            }}
+            style={{ minHeight: 44, minWidth: 44, flexShrink: 0, padding: '8px 12px' }}
+          >
+            清除
+          </button>
+        )}
         {access.status === 'allowed' && (
           <button
             type="button"
