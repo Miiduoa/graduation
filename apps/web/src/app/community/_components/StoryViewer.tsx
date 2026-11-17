@@ -198,6 +198,9 @@ export function StoryViewer({
         </header>
         <div
           className={styles.canvas}
+          role="region"
+          aria-label="限時動態內容，左右方向鍵切換"
+          tabIndex={0}
           onPointerDown={(e) => {
             // Leave native play/seek controls alone; swipes across the picture can still change author.
             if (

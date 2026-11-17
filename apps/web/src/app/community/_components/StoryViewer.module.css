@@ -131,6 +131,10 @@
   overflow: auto;
   touch-action: pan-y pinch-zoom;
 }
+.canvas:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: -4px;
+}
 .photo {
   width: 100%;
   min-height: 0;
