@@ -50,6 +50,10 @@ export function auditStudyComparisons(raw) {
   const observations = { nuni: [], Ahaboard: [] };
   const pairedColdStartDeltasMs = [];
   const pairedWarmStartDeltasMs = [];
+  // Pairwise verification is stricter than simple task completion: it requires
+  // the human reviewer to mark both correctness and exact-source support.
+  // Failures and unverified answers remain in the denominator.
+  const pairedVerifiedCounts = { both: 0, nuniOnly: 0, ahaboardOnly: 0, neither: 0 };
   input.trials.forEach((item, index) => {
     const key = `trials[${index}]`;
     const trial = object(item, key);
@@ -107,6 +111,12 @@ export function auditStudyComparisons(raw) {
     pairedWarmStartDeltasMs.push(
       pair.nuni.warmStartMs !== null && pair.Ahaboard.warmStartMs !== null
         ? pair.nuni.warmStartMs - pair.Ahaboard.warmStartMs : null);
+    const nuniVerified = pair.nuni.completed && pair.nuni.correct && pair.nuni.sourceVerified;
+    const ahaboardVerified = pair.Ahaboard.completed && pair.Ahaboard.correct && pair.Ahaboard.sourceVerified;
+    if (nuniVerified && ahaboardVerified) pairedVerifiedCounts.both += 1;
+    else if (nuniVerified) pairedVerifiedCounts.nuniOnly += 1;
+    else if (ahaboardVerified) pairedVerifiedCounts.ahaboardOnly += 1;
+    else pairedVerifiedCounts.neither += 1;
   });
   const summary = {};
   for (const [product, values] of Object.entries(observations)) {
@@ -139,7 +149,7 @@ export function auditStudyComparisons(raw) {
     };
   }
   return { trialCount: input.trials.length, summary, pairedColdStartDeltasMs,
-    pairedWarmStartDeltasMs,
+    pairedWarmStartDeltasMs, pairedVerifiedCounts,
     sourceOfTruth: 'manually recorded observations, not automatic grading or proof of superiority' };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

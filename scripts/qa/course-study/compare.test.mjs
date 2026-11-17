@@ -131,3 +131,28 @@ test('rejects overflowing measured costs instead of serializing Infinity as unkn
   large.trials[0].results[1].costTwd = null;
   assert.throws(() => auditStudyComparisons(large), /measured total exceeds finite numeric range/);
 });
+
+
+test('counts paired human-verified outcomes including failed and unsupported attempts', () => {
+  const paired = fixture(); // nuni verified, Ahaboard failed
+  const add = (caseId, nuni, ahaboard) => {
+    const item = structuredClone(paired.trials[0]);
+    item.caseId = caseId;
+    item.results = [nuni, ahaboard];
+    paired.trials.push(item);
+  };
+  add('pair-2', result('nuni'), result('Ahaboard')); // both verified
+  add('pair-3', result('nuni', false), result('Ahaboard')); // Ahaboard alone
+  add('pair-4', result('nuni', false), result('Ahaboard', false)); // neither
+  const unsupported = result('nuni');
+  unsupported.sourceVerified = false; // completed and correct, but not grounded
+  add('pair-5', unsupported, result('Ahaboard', false)); // still neither
+  const report = auditStudyComparisons(paired);
+  assert.equal(report.trialCount, 5);
+  assert.deepEqual(report.pairedVerifiedCounts, {
+    both: 1, nuniOnly: 1, ahaboardOnly: 1, neither: 2,
+  });
+  assert.equal(report.summary.nuni.completed, 3);
+  assert.equal(report.summary.nuni.correctAndSourceVerified, 2);
+  assert.equal('winner' in report, false);
+});

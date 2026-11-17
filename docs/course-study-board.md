@@ -1598,3 +1598,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 標準 Clipboard.writeText() 應回傳 Promise<void>，完成時取得 undefined。行動 WebView／橋接實作可能回傳已 fulfilled 的 null、true、0 或字串，即使尚未真正將筆記寫入剪貼簿。前版僅拒絕 false，現在對非 undefined 的成功值一律不宣稱完成，並保留當次本機 TXT／完整閱讀進度 JSON 的唯讀可選取備援；標準 Promise<void> 成功行為不變。
 - 擴充原有模擬剪貼簿回歸：非標準 fulfilled 值亦需保留原筆記和教材、可還原 JSON、重試不誤報完成且不啟動裝置端模型。不新增套件、付費服務、私人教材傳輸，也不改 v1/v2 閱讀進度或 v1 練習 checkpoint。
 - 以上只是原始 Web 程式及 DOM 模擬驗證，非 iOS Safari／Android Chrome／Maestro 真機貼上結果。CI／CodeQL、指定 GitHub App 5504170 APPROVED、WebGPU 中文教學、Ahaboard 同教材同題同裝置實測仍需依新 head 分別核查；保持 PR Draft，不合併、不部署。
+
+### 2026-11-18：同題競品核對補足成對「正確且有原文證據」結果
+
+- 在 `scripts/qa/course-study/compare.mjs` 新增 `pairedVerifiedCounts`，將每組同教材、同題目、同裝置的人工觀察分成「兩方均通過」、「只有 nuni 通過」、「只有 Ahaboard 通過」、「兩方均未通過」。通過條件必須同時具備該次任務完成、人工判定答案正確、人工核對來源引句；沒有來源核對的答案、失敗或未完成案例皆不會被當成通過。
+- 四類計數總和必須等於 `trialCount`；失敗與缺少來源證據的案例仍納入全部分母，避免各自平均值掩蓋同題差異。新增 Node 正反回歸，保留既有成本未知、冷暖啟、記憶體、離線與步數稽核。這是本地報告邏輯，**未新增真人競品測量、未自動評分、未宣稱優於 Ahaboard**。
+- 精確新 head 需重新查 GitHub CI／CodeQL、指定 App 5504170 APPROVED、Maestro 與 iOS／Android 真機；既有 `picomatch` 高風險 Security Gates 失敗不得掩蓋或放行。維持 Draft，不合併、不部署；不新增套件／付費 API／私人教材傳輸，不修改閱讀或練習 checkpoint 格式。
