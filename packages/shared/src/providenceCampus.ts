@@ -190,8 +190,10 @@ function samePlaceCoordinates(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boo
 }
 
 function samePlaceIdentity(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  // Only provenance is withheld when the marker drifts; the marker itself stays.
-  return a.id === b.id && a.name === b.name && samePlaceCoordinates(a, b);
+  // Only provenance is withheld when a marker's identity, category or location
+  // differs; the marker itself stays visible.
+  return a.id === b.id && a.name === b.name && a.category === b.category &&
+    samePlaceCoordinates(a, b);
 }
 
 function allBundledProvidencePlaces(): readonly ProvidencePlace[] {
@@ -209,7 +211,8 @@ export function isBusStopLocation(location: CampusMapPlaceLike): boolean {
 function samePlace(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
   // Server-bundled stop deduplication uses the same metre-based tolerance as
   // provenance matching; two 53m-diagonal stops must not be collapsed.
-  return a.name === b.name && samePlaceCoordinates(a, b);
+  return a.category === '公車站' && b.category === '公車站' &&
+    a.name === b.name && samePlaceCoordinates(a, b);
 }
 
 /**
