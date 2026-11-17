@@ -164,10 +164,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     if (!host) return;
     let active = true;
     let visible = true;
+    let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
-    setStatus(document.hidden ? 'deferred' : 'loading');
+    // Safari can fire pagehide before visibilitychange when entering bfcache.
+    // Treat that window as suspended even if document.hidden stays false.
+    const isBackgrounded = () => pageSuspended || document.hidden;
+    setStatus(isBackgrounded() ? 'deferred' : 'loading');
 
-    const updateVisibility = () => scene?.setActive(visible && !document.hidden);
+    const updateVisibility = () => scene?.setActive(visible && !isBackgrounded());
     const fail = () => {
       if (!active) return;
       active = false;
@@ -184,7 +188,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // the tab is visible again. Resuming must not duplicate the context.
     const syncPendingStartup = () => {
       if (!active || !started || scene) return;
-      if (document.hidden) {
+      if (isBackgrounded()) {
         if (timeout !== null) window.clearTimeout(timeout);
         timeout = null;
         setStatus('deferred');
@@ -195,13 +199,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       pendingCreate?.();
     };
     const startWhenVisible = () => {
-      if (!active || started || document.hidden) return;
+      if (!active || started || isBackgrounded()) return;
       started = true;
       syncPendingStartup();
       void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
         if (!active) return;
         const finishStart = () => {
-          if (!active || document.hidden || scene) return;
+          if (!active || isBackgrounded() || scene) return;
           pendingCreate = null;
           scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
           if (!active) {
@@ -228,7 +232,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       startWhenVisible();
       syncPendingStartup();
     };
+    const onPageHide = () => {
+      pageSuspended = true;
+      updateVisibility();
+      syncPendingStartup();
+    };
     const onPageShow = () => {
+      pageSuspended = false;
+      updateVisibility();
       startWhenVisible();
       syncPendingStartup();
     };
@@ -240,6 +251,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       });
     intersection?.observe(host);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     startWhenVisible();
     return () => {
@@ -247,6 +259,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       if (timeout !== null) window.clearTimeout(timeout);
       intersection?.disconnect();
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       pendingCreate = null;
       scene?.dispose();
