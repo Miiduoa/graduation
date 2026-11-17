@@ -300,6 +300,9 @@ jobs:
       - name: Test web server lifecycle
         run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/career-release-gate.test.mjs
 
+      - name: Validate paired course-study comparison evidence
+        run: node --test scripts/qa/course-study/compare.test.mjs
+
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food
 
