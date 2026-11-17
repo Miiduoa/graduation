@@ -1,5 +1,4 @@
 /** Approval-isolated. Deliberately absent from fnDispatch, API routes and deployed functions. */
-import { createHash } from 'node:crypto';
 import { Timestamp } from 'firebase-admin/firestore';
 import type {
   Firestore,
@@ -206,6 +205,7 @@ export function createCareerWorkstudyHandlers({
             events: events.sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
             opportunities: opp.sort((a, b) => a.deadline.localeCompare(b.deadline)),
             applications: apps.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+            viewerRole: member?.data()?.role,
             canReview,
             canOperate,
             audit,
@@ -234,17 +234,17 @@ export function createCareerWorkstudyHandlers({
       }
       if (command.action === 'apply') {
         const opportunityId = id(command.opportunityId);
-        const ref = applications.doc(
-          createHash('sha256')
-            .update(JSON.stringify([uid, opportunityId]))
-            .digest('hex'),
-        );
-        const [opp, existing] = await Promise.all([
+        const ref = applications.doc();
+        const [opp, history] = await Promise.all([
           tx.get(opportunities.doc(opportunityId)),
-          tx.get(ref),
+          tx.get(applications.where('uid', '==', uid).limit(501)),
         ]);
-        // Identical retry returns the original receipt, even after a deadline or revision change.
-        if (existing.exists) return { id: ref.id };
+        if (history.size > 500) fail('resource-exhausted', '申請紀錄超過單次範圍，請洽承辦。');
+        const existing = history.docs.find(
+          (doc) => doc.data().opportunityId === opportunityId && doc.data().state !== 'withdrawn',
+        );
+        // A transaction retry observes the existing active receipt; withdrawn history stays intact.
+        if (existing) return { id: existing.id };
         if (
           !opp.exists ||
           !opp.data()?.published ||
@@ -276,7 +276,7 @@ export function createCareerWorkstudyHandlers({
             confirmedAt: at,
           },
         };
-        tx.create(ref, application);
+        tx.set(ref, application);
         log('apply', ref.id);
         return { id: ref.id };
       }
@@ -301,6 +301,19 @@ export function createCareerWorkstudyHandlers({
           revision: app.revision + 1,
         });
         log(`review_${command.state}`, ref.id);
+        return { id: ref.id };
+      }
+      if (command.action === 'withdraw') {
+        const ref = applications.doc(id(command.applicationId));
+        const snap = await tx.get(ref);
+        if (!snap.exists) fail('not-found', '找不到這筆申請。');
+        const app = data<CareerApplication>(snap);
+        if (app.uid !== uid) fail('permission-denied', '只能撤回自己的工讀申請。');
+        if (command.revision !== app.revision) fail('aborted', '申請已更新，請重新整理。');
+        if (!['submitted', 'read'].includes(app.state))
+          fail('failed-precondition', '這筆申請目前不可撤回。');
+        tx.update(ref, { state: 'withdrawn', revision: app.revision + 1, updatedAt: at });
+        log('withdraw', ref.id);
         return { id: ref.id };
       }
       if (command.action === 'sources') {
