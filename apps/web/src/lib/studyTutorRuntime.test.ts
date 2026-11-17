@@ -828,19 +828,47 @@ describe('study cancellation and failure isolation', () => {
     await expect(pending).resolves.toEqual(lesson());
   });
 
-  it('does not dispatch after progress delivery aborts the session or throws', async () => {
+  it('does not dispatch after progress delivery explicitly aborts the session', async () => {
     const controller = new AbortController();
     await expect(runStudyTutor({
       passage: passage(), mode: 'exam', signal: controller.signal, onProgress: () => controller.abort(),
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(lastWorker().postMessage).not.toHaveBeenCalled();
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
-    await expect(runStudyTutor({
+  });
+
+  it('preserves a valid local lesson when progress rendering throws at startup or later phases', async () => {
+    const onProgress = vi.fn(() => { throw new Error('private render failure'); });
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
       passage: passage(), mode: 'exam', signal: new AbortController().signal,
-      onProgress: () => { throw new Error('private render failure'); },
-    })).rejects.toThrow('工作已停止');
-    expect(lastWorker().postMessage).not.toHaveBeenCalled();
-    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+      onProgress, onTiming,
+    });
+    const worker = lastWorker();
+    expect(worker.postMessage).toHaveBeenCalledOnce();
+    worker.emit({ type: 'progress', phase: 'loading', message: 'received 20 MB' });
+    worker.emit({ type: 'progress', phase: 'generating' });
+    worker.emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(pending).resolves.toEqual(lesson());
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'success' }));
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
+  it('keeps real worker failures authoritative when the progress callback also throws', async () => {
+    const onProgress = vi.fn(() => { throw new Error('private render failure'); });
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal, onProgress,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'error', code: 'memory' });
+    await expect(pending).rejects.toThrow('裝置記憶體不足');
+    expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
   it('times out the actual loading worker', async () => {

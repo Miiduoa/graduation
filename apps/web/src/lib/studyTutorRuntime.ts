@@ -454,7 +454,9 @@ export async function runStudyTutor({
         try {
           onProgress?.(message);
         } catch {
-          finish(new Error('白板無法更新講解進度，工作已停止。請重試。'));
+          // Progress rendering is optional: a failed UI callback must not
+          // discard an otherwise valid on-device lesson or GPU session.
+          // Abort, worker errors and timeout still settle the request normally.
         }
       };
       let timer = setTimeout(

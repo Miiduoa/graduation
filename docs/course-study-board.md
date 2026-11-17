@@ -1548,3 +1548,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 根據 `32cb4568321dc08396132b089f25e6f885c468ab` 的 Web Tests job `133917350846` 實際日誌，`studyTutorRuntime.test.ts` 的 `Markdown answer key heading` 單一案例失敗（16,402 項通過、1 項失敗）。`### Answer Key` 先轉成 `answer key：`，後續「無標點獨立答案行」規則又把前綴 `answer` 錯改成 `answer： key：`，讓模型直接印出 SQL 的答案鍵通過驗證。
 - 本輪在**新產生的複習題比對副本**防止對 `Answer Key` 的 `Answer` 前綴二次重寫，保留真正獨立 `Answer`、`Ans.`、中文標籤的既有規則。新增三個應拒收的 Markdown／純文字 `Answer Key` 標題與兩個不同答案的反例；保留原始教材、題目顯示及 v1/v2 閱讀和 v1 練習 JSON checkpoint，無新套件或私人教材外傳。
 - 本地獨立 JavaScript 正規表示式邊界檢查只證明字串改寫符合預期；完整 Vitest、CI、CodeQL 與 App 5504170 APPROVED 必須以新精確 SHA 重查。iOS／Android／Maestro、WebGPU 中文教學及 Ahaboard 同教材同題同機對照仍待真實驗收，PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-17：裝置端 AI 進度顯示異常不再丟棄已生成的教學
+
+- `runStudyTutor` 的 `onProgress` 只用於呈現下載／生成進度；先前若進度 UI 回呼本身拋錯，會立即終止 Worker 並丟棄可能仍可成功的教材講解。現在將進度 UI 失敗隔離，讓裝置端任務繼續依其真正結果完成或失敗。使用者主動取消仍會在派送前或執行期間立即停止；Worker 本身錯誤、無效結果及兩段逾時仍正常失敗，避免以進度畫面取代正確的執行狀態。
+- 更新一個原有取消測試並新增兩組模擬 Worker 回歸，驗證啟動／載入／生成階段的 UI 回呼拋錯不妨礙合法結果、可接續下一輪，且記憶體不足仍回報真正錯誤。這不代表真實 WebGPU 模型成功率提高或已完成 iOS／Android 真機測試。
+- 不新增依賴／付費服務，不上傳私人教材，不變更既有閱讀進度、筆記或練習 checkpoint。完整 CI、CodeQL、App 5504170 審查與 Ahaboard 同題同機比較須按新精確 SHA 驗收；PR 保持 Draft，不合併、不部署。
