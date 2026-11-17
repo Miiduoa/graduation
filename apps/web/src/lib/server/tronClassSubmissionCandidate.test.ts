@@ -251,6 +251,31 @@ describe('fixed candidate HTTP boundary', () => {
     await expect(s.fetch(url, { method: 'POST', redirect: 'manual', body: JSON.stringify({ ...JSON.parse(body), uploads: [40] }) })).rejects.toBeInstanceOf(NuniError);
     expect(s.request).not.toHaveBeenCalled();
   });
+  it('sends only the immutable upload IDs supplied by the controlled final candidate', async () => {
+    const s = transport();
+    const ids = [40, 41];
+    const fetch = createTronClassCandidateFetch(s.request, ids);
+    ids[0] = 999;
+    const payload = JSON.stringify({ ...JSON.parse(body), comment: '', uploads: [40, 41] });
+    await expect(fetch(url, { method: 'POST', redirect: 'manual', body: payload })).resolves.toMatchObject({ status: 200 });
+    expect(s.req.write).toHaveBeenCalledWith(payload);
+  });
+  it('rejects additional, missing or substituted upload IDs before opening the connection', async () => {
+    const s = transport();
+    const fetch = createTronClassCandidateFetch(s.request, [40, 41]);
+    for (const uploads of [[40], [40, 42], [40, 41, 42], [41, 40]]) {
+      const payload = JSON.stringify({ ...JSON.parse(body), uploads });
+      await expect(fetch(url, { method: 'POST', redirect: 'manual', body: payload })).rejects.toMatchObject({ code: 'TRONCLASS_PROTOCOL_INVALID_INPUT' });
+    }
+    expect(s.request).not.toHaveBeenCalled();
+  });
+  it('rejects an invalid transport upload manifest', () => {
+    const s = transport();
+    for (const uploads of [[40, 40], [0], [1, 2, 3, 4, 5], Array(1)]) {
+      expect(() => createTronClassCandidateFetch(s.request, uploads)).toThrow('TRONCLASS_PROTOCOL_INVALID_INPUT');
+    }
+    expect(s.request).not.toHaveBeenCalled();
+  });
   it('destroys an oversized response at the network boundary', async () => {
     const s = transport(200, 'x'.repeat(1024 * 1024 + 1));
     await expect(s.fetch(url, { method: 'POST', redirect: 'manual', body })).rejects.toMatchObject({ code: 'TRONCLASS_CANDIDATE_UNCONFIRMED' });

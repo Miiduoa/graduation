@@ -126,6 +126,19 @@ module `539963` 判斷「已提交」時，同時檢查教師代標、草稿與�
 
 ## 離線分析器的後續實作與缺口
 
+### 2026-11-17 重新查核與附件傳輸補充
+
+以匿名 HTTPS GET 重新取得首頁、公開課程頁及 `72914`、`56834`、`66297`、`88788`、`55200`、`56029` 六份公開資源；均回 HTTP 200，版本仍為 `1.78.118597-hotfix-v1-78-eefefe8e`，六份 SHA-256 與上表相同。沒有登入、取得私人回應或執行校方寫入。
+
+- `72914` module `995651`／uploadClass 直接使用 top-level `id`、`name`、`upload_url`、`status`、`type`、`storage_type`、`transcoder`；沒有 `data.upload` wrapper 的證據。`size` 若回傳必須一致，缺少 size 不能證明 binary 內容。
+- `72914` module `748693` 列出 MEDIA、QINIU、S3、CHINAMCLOUD，沒有 LOCAL。最小候選只採 MEDIA multipart 及 S3／WRPC raw PUT＋callback；其他模式仍未支援。
+- `56834` module `611733` 的 callback 條件是 S3＋WRPC。官方 client 只等待 callback HTTP promise 成功，沒有讀取 `uploaded`、`success` 等 JSON 欄位，不能猜測這些欄位或把 callback 當正式作業收據。
+- 公開設定沒有提供可驗證的 storage host／path 範圍。候選要求 server-only policy 依獨立受控設定核對精確目的地；metadata 回傳的 URL 本身不是授權。
+- MEDIA multipart 需保留同一次序列化產生的 bytes 與 boundary Content-Type。新候選先完成這個編碼，避免將 FormData 直接交給會字串化的底層傳輸，或讓 relay 遺失 boundary。
+- Final candidate 以捕捉到的新 acknowledgment ID 對照本人完整歷史、精確本文與完整附件。`created_at` 保留為來源紀錄時間；HTTP 接受與版本讀回確認分開。若整個 final 回應遺失而缺少 acknowledgment，維持未知、不重送，不能自行找同內容版本替代。
+
+這些新增定位支持受控 pipeline 與離線整合測試，仍不是已驗證的 production response schema、儲存目的地或真人收件證據。
+
 首次公開查核時，`scripts/tronclass/analyze-har.mjs` 尚未辨識上述真實路徑；2026-11-16 的後續開發已將報告更新為 `formatVersion: 2`，加入官方 `submission_list`、`/api/course/activities/.../submissions`、metadata、可精確關聯的同來源 binary PUT 及 callback。原猜測端點保留為 `legacy_*`，不再建立正式操作證據。
 
 目前分析器已區分 POST 新版本與 PUT 既有草稿轉正式，核對事前本人歷史、comment／數字 uploads、created_by、唯一最新版及草稿／退回／教師代標旗標。created_at 仍只表示來源紀錄時間；同來源 URL 的離線一致性也不構成線上 PUT 授權。跨來源儲存服務、QINIU 及外部資源尚未支援，**空 entries 或缺少 chain 不代表 HAR 中沒有這些動作**。去值化、輸入上限、未知狀態與 `contractVerified: false` 均保留，仍不能取代真人收件驗收。

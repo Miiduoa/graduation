@@ -1,6 +1,6 @@
 # TronClass 獨立綁定與作業整合
 
-更新日期：2026-11-16。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
+更新日期：2026-11-17。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
 
 ## 功能狀態
 
@@ -24,6 +24,7 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 依已確認的作業規則編輯與預覽 | 已實作；保留零附件額度，送出前先核對全部文字、檔案與總量，規則未知時只標示本頁整理上限 |
 | 上傳 → 最終送出 → 讀回收據 | 服務及 UI 已實作，以注入測試來源驗證 |
 | 官方送出協定與受控文字候選實作 | 已實作 request builder、acknowledgment parser 及預設停用的單次 POST；尚未接入公開路由或正式 provider |
+| 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回與唯讀查證；注入來源整合測試通過，受控模組尚未接正式路由 |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
 | 重交、撤回、小組繳交、代替其他人繳交 | 未實作；小組歷史也回傳 `group-unsupported`，引導至原作業查看 |
 | 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊作業、討論發文／回覆、問卷與同儕互評 writer 改為明確拒絕，避免假成功 |
@@ -140,6 +141,41 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 權限管理與 Agent 一般請求每 owner 每程序每分鐘 30 次；昂貴的 ask／prepare 每分鐘 6 次。下載沿用既有大小、時間與並行上限。這些限制不是跨程序全域配額。
 
 ## 送出與失敗恢復
+
+### 2026-11-17：受控附件與版本確認
+
+新增 `tronClassAttachmentCandidate.ts`、`tronClassFinalSubmissionCandidate.ts`、`tronClassSubmissionReadback.ts` 三個協定模組，並以 `tronClassControlledSubmission.ts` 與 `tronClassControlledJournal.ts` 完成服務及 Firestore 交易接線。執行候選與工廠預設停用，`contractVerified` 固定為 `false`，不會由環境變數自行成為正式 provider。既有公開 route／Agent 寫入限制不變。
+
+**附件傳輸。** 先以 server-only 授權讀取器確認本人作業與限制，再要求原子且持久化的檔案 claim，才建立 metadata。S3／WRPC 分支以原始 bytes PUT，成功後呼叫官方 callback；MEDIA 分支以包含 `file` 的 multipart PUT。multipart 先產生完整 bytes 及相同 boundary 的 Content-Type，避免既有底層把 FormData 轉成字串或遺失 boundary。QINIU、CHINAMCLOUD、未知模式與尚未驗證的 S3 分支拒絕。
+
+Metadata 的 `upload_url` 只能提供待查核的目的地，不能自行授權網路請求。呼叫方必須注入受控、獨立設定的精確 URL／upload ID／傳輸模式 policy；沒有預設可信 storage host，不以「與學校同來源」放行任意 API 路徑。Storage PUT 不帶校方 Cookie、CSRF、平台 Authorization、Origin 或 Referer；不跟 redirect、不重試。MEDIA 目的地若仍要求校方 Cookie，此候選目前不支援，必須先確認精確目的地接受無憑證 PUT 才能由 policy 放行。每個階段有時間／回應大小上限與綁定、開關、期限檢查。參數與 bytes 會先複製，避免等待期間變動。
+
+Binary／callback 的 HTTP 成功僅回傳 `state: transferred`、`confirmation: awaiting-confirmation` 與檔案識別資料；不回傳私有 URL、cookie、教師資料或收據。該結果也不保證遠端 bytes 已經下載核對。候選要求呼叫端用 owner／operation／file 的穩定槽持久化 claim；換 bytes、revision 或程序不能自動重建同一檔案。
+
+**最後送出。** Final candidate 只接受本次選取的 file IDs，由 server-only journal 取得已完成傳輸的 handle，重新核對 owner、校方學生、作業、revision、operation、檔名、大小與 SHA-256 欄位。完整附件集合符合最新限制才可繼續；缺少任一附件時，不送出部分版本。它要求跨 owner／程序的校方學生與作業原子 claim，保存本次本文、附件 manifest、完整空 baseline 與內容摘要後才 POST。
+
+Claim 完成後會再次讀取校方授權與歷史。若使用者已在另一個校方分頁繳交、老師變更限制／期限、或綁定身分改變，就停止正式 POST。這個最小候選只處理個人、normal、一般繳交期間、完整空歷史、零次數的首次送出；沒有推論小組、重交、補交或草稿更新權限。最後的校方競態仍須由伺服器自身權限檢查拒絕。
+
+**讀回確認。** Final HTTP 200／201 先解析本人新版本 acknowledgment，將 ID 保存後，再讀取該學生的官方 `submission_list`。只有以下條件全部成立才回傳 `verified-new-version`：
+
+- 完整事前版本仍保留，清單只多出這次 acknowledgment 的一個 ID，且該 ID 是唯一最新版。
+- 同一學生、課程與作業；明確不是草稿、退回或教師標記。
+- 原始 canonical HTML 本文逐字相同；附件數字 ID、檔名、大小完整相符，沒有額外資源或簡報。
+- 查核前後綁定仍相同；晚到的舊身分資料不能成為確認結果。
+
+`sourceRecordedAt` 只表示校方 `created_at`，缺少或無法解析時保留 null。`confirmedAt` 是本系統完成讀回核對的時間；兩者都不冒稱正式 `submittedAt`。這個結果目前沒有轉成既有公開 `TronClassSubmissionReceipt`，不能直接用校方建立時間填入該舊收據介面。
+
+**查證與防重送。** 有保存 acknowledgment 而讀回失敗時，可用新 candidate instance 的 `reconcile(ownerKey, operationId)` 查原版本。關閉寫入後仍可查證，同一校方本人重新綁定後也可恢復；此方法不呼叫 POST。Claim 的本文與 manifest 會重新比對摘要，避免查證過程換內容。若正式 POST 的整個回應遺失，沒有可信 acknowledgment ID，仍維持 `awaiting-confirmation`；不能靠看到同內容就認定是本次操作，也不會再送一次。
+
+**持久化接線。** `createTronClassControlledSubmission()` 已直接使用 Firestore transaction journal，將附件結果保存後才交給 final。Operation 與舊服務使用相同 owner／operation hash，採明示 version 2 與 candidate 標記；遇到舊 version 1 會拒絕覆寫。校方學生／作業鎖與舊服務共用相同 hash，跨 nuni owner 也只能取得一次。本輪遇到任何既有鎖均拒絕，包含舊 `not-sent`；不自行清除或轉換舊鎖。
+
+每個交易先讀取 `_tronClassBindings` 的關帳／解除／換綁 barrier，核對當下本人、revision 與期限，再讀寫 operation 及鎖。附件有固定 file slot、完整 manifest 與總量限制；保存 acknowledgment 前會重新核對原 attempt 和鎖，不把 acknowledged 標成已完成讀回。所有未確認記錄與鎖使用 `purgeAt: null`，避免 TTL 讓原操作再次送出。新增的私有資料仍由既有 ownerKey 清理流程覆蓋；平台帳號的外部關帳 hook 仍是下方既有待辦。
+
+**驗證與剩餘接線。** `tronClassControlledFlow.test.ts` 直接使用實際工廠與 journal，配合支援原子提交、rollback、先讀後寫的交易測試資料庫，完成文字與兩個 PDF／ZIP MIME 附件的 8 條整合流程：正常順序、三階段失敗、第二檔失敗、少檔後唯讀恢復、跨 instance 防重送及關帳競態。每次操作都可重建工廠，仍讀回資料庫中的原 claim／manifest／acknowledgment。沒有手造已上傳 token，也沒有真人作業送交。
+
+Node **22.23.5** 的整合回歸：37 個測試檔通過、1 個環境相關檔略過；**1,260 項通過、3 項略過、0 失敗**。修改範圍的 12 個 TypeScript 模組／測試連同 imports 依原 Web strict 設定通過型別檢查。完整 Web TypeScript 在本地兩次以 exit 137 結束、沒有診斷輸出，不能列為本地通過，另依 GitHub CI 查核。測試資料庫不是 Firestore emulator；正式 Firestore 與校方 session／CSRF、可信 storage policy、來源權限 reader、正式 adapter／收據介面及本人與教師端收件仍須驗收。
+
+### 既有站內服務的送出狀態
 
 1. 讀取本人課程與作業，確認來源已提供明確規則。
 2. 使用者檢視預覽，勾選確認，送出前重新讀取條件。

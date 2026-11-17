@@ -36,15 +36,17 @@ function checkedTarget(raw: string): URL {
   return url;
 }
 
-function checkedBody(body: RequestInit['body']): string {
+function checkedBody(body: RequestInit['body'], allowedUploadIds: readonly number[] = []): string {
   if (typeof body !== 'string' || Buffer.byteLength(body, 'utf8') > MAX_REQUEST_BYTES) return invalid();
   let data: Record<string, unknown>;
   try { data = JSON.parse(body); } catch { return invalid(); }
   const keys = ['comment', 'uploads', 'slides', 'is_draft', 'mode', 'other_resources', 'uploads_in_rich_text'];
   if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length !== keys.length ||
-    Object.keys(data).some(key => !keys.includes(key)) || typeof data.comment !== 'string' || !data.comment.trim() ||
+    Object.keys(data).some(key => !keys.includes(key)) || typeof data.comment !== 'string' || (!data.comment.trim() && allowedUploadIds.length === 0) ||
     data.is_draft !== false || data.mode !== 'normal' ||
-    !['uploads', 'slides', 'other_resources', 'uploads_in_rich_text'].every(key => Array.isArray(data[key]) && data[key].length === 0)) return invalid();
+    !Array.isArray(data.uploads) || data.uploads.length !== allowedUploadIds.length ||
+    !Array.from(data.uploads).every((value, index) => id(value) && value === allowedUploadIds[index]) ||
+    !['slides', 'other_resources', 'uploads_in_rich_text'].every(key => Array.isArray(data[key]) && data[key].length === 0)) return invalid();
   return body;
 }
 
@@ -66,14 +68,17 @@ function checkedLength(headers: Headers): number | null {
 }
 
 /** Fixed POST endpoint, bounded buffering, no redirects or retries. */
-export function createTronClassCandidateFetch(request: RequestFn = https.request): FetchLike {
+export function createTronClassCandidateFetch(request: RequestFn = https.request, allowedUploadIds: readonly number[] = []): FetchLike {
+  if (!Array.isArray(allowedUploadIds) || allowedUploadIds.length > 4 || !Array.from(allowedUploadIds).every(id) ||
+    new Set(allowedUploadIds).size !== allowedUploadIds.length) invalid();
+  const uploads = Object.freeze([...allowedUploadIds]);
   return (raw, init = {}) => new Promise((resolve, reject) => {
     let target: URL;
     let body: string;
     try {
       target = checkedTarget(raw);
       if (init.method !== 'POST' || init.redirect !== 'manual') invalid();
-      body = checkedBody(init.body);
+      body = checkedBody(init.body, uploads);
     } catch (error) { reject(error); return; }
     if (init.signal?.aborted) { reject(new NuniError(504, 'TRONCLASS_CANDIDATE_TIMEOUT')); return; }
     let req: ClientRequest | undefined;
@@ -132,7 +137,7 @@ export function createTronClassCandidateFetch(request: RequestFn = https.request
   });
 }
 
-function headersFor(binding: TronClassSubmissionBinding): Headers {
+export function tronClassCandidateHeaders(binding: TronClassSubmissionBinding): Headers {
   const pairs = Object.entries(binding.cookies);
   if (!pairs.length || pairs.length > 64) return invalid();
   const cookie = pairs.map(([key, value]) => {
@@ -154,7 +159,9 @@ function headersFor(binding: TronClassSubmissionBinding): Headers {
   return headers;
 }
 
-function checkedAuthorization(value: TronClassCandidateAuthorization, scope: TronClassHomeworkScope, now: number) {
+export function assertTronClassCandidateAuthorization(
+  value: TronClassCandidateAuthorization, scope: TronClassHomeworkScope, now: number, requiresText = true,
+) {
   if (!Number.isFinite(now)) fail(503, 'TRONCLASS_CANDIDATE_UNCONFIRMED');
   const binding = value?.binding;
   const assignment = value?.assignment;
@@ -162,7 +169,7 @@ function checkedAuthorization(value: TronClassCandidateAuthorization, scope: Tro
     !Number.isFinite(Date.parse(binding.expiresAt)) || Date.parse(binding.expiresAt) <= now) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
   if (!assignment || assignment.courseId !== scope.courseId || assignment.homeworkId !== scope.homeworkId ||
     assignment.studentId !== binding.userId || assignment.permissionKnown !== true || assignment.individual !== true ||
-    assignment.canSubmit !== true || assignment.isClosed !== false || assignment.allowsText !== true ||
+    assignment.canSubmit !== true || assignment.isClosed !== false || (requiresText && assignment.allowsText !== true) ||
     (assignment.remainingAttempts !== null && (!Number.isSafeInteger(assignment.remainingAttempts) || assignment.remainingAttempts <= 0)) ||
     value.mode !== 'normal' || value.historyComplete !== true || !Array.isArray(value.priorSubmissionIds) ||
     value.priorSubmissionIds.length !== 0 || value.userSubmitCount !== 0 ||
@@ -174,7 +181,7 @@ function checkedAuthorization(value: TronClassCandidateAuthorization, scope: Tro
   }
 }
 
-async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
+export async function readTronClassCandidateJson(response: Response, signal: AbortSignal): Promise<unknown> {
   const type = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
   const encoding = response.headers.get('content-encoding');
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -248,19 +255,19 @@ export function createTronClassTextSubmissionCandidate(dependencies: {
         checkCancelled();
         const authorization = await dependencies.authorize(ownerKey, scope);
         checkCancelled();
-        checkedAuthorization(authorization, scope, now());
+        assertTronClassCandidateAuthorization(authorization, scope, now());
         // Capture the checked identity and source rules before the next await.
         const binding = { ...authorization.binding, cookies: { ...authorization.binding.cookies } };
         const checked = { ...authorization, binding,
           assignment: { ...authorization.assignment, allowedContentTypes: [...authorization.assignment.allowedContentTypes] },
           priorSubmissionIds: [...authorization.priorSubmissionIds] };
-        const headers = headersFor(binding);
+        const headers = tronClassCandidateHeaders(binding);
         await dependencies.assertCurrent(ownerKey, binding.revision);
         checkCancelled();
         if (!enabled()) fail(503, 'TRONCLASS_CANDIDATE_DISABLED');
         // Reaching the deadline during an awaited identity check must not send
         // an ordinary-window request using an earlier eligibility decision.
-        checkedAuthorization(checked, scope, now());
+        assertTronClassCandidateAuthorization(checked, scope, now());
         // Concurrent calls on this candidate cannot both dispatch after await.
         if (attempted) fail(409, 'TRONCLASS_CANDIDATE_ALREADY_DISPATCHED');
         attempted = true;
@@ -273,7 +280,7 @@ export function createTronClassTextSubmissionCandidate(dependencies: {
           if (response.status === 401 || response.status === 403) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
           return unconfirmed();
         }
-        const raw = await readJson(response, controller.signal);
+        const raw = await readTronClassCandidateJson(response, controller.signal);
         checkCancelled();
         await dependencies.assertCurrent(ownerKey, binding.revision);
         checkCancelled();
