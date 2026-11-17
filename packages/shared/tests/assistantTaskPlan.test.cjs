@@ -189,7 +189,7 @@ describe('assistant connected service capabilities', () => {
 
   test('does not label source links, unconnected private services or school writers as data or execution', () => {
     for (const id of ['library', 'notifications', 'messages', 'community',
-      'school-lms', 'dormitory', 'leave', 'grades', 'app-orders', 'admin']) {
+      'school-lms', 'dormitory', 'leave', 'grades', 'app-orders', 'admin', 'career']) {
       const capability = getAssistantServiceCapability(id);
       assert.deepEqual(capability.modes, ['handoff'], id);
       assert.deepEqual(capability.tools, ['list_campus_services', 'propose_open_page'], id);

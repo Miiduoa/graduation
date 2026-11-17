@@ -105,6 +105,7 @@ const capabilityDescriptions = {
     summary: '可查所選學校的官方校名、地址、總機與網站，附教育部公開資料快照日期及來源；系所聯絡方式與即時服務狀態需另行核對。',
     tools: ['get_school_info'],
   },
+  career: handoff('可開啟職涯服務頁；本助理尚未代查工讀申請或實習學分進度，申請與承辦操作仍由原頁確認。'),
   'student-card': handoff('可開啟本人的學生證頁；本助理不會變更校籍、出示憑證或感應門禁。'),
   cafeteria: {
     modes: ['read'],
