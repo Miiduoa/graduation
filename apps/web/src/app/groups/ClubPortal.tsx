@@ -1,4 +1,5 @@
 'use client';
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { clubRosterCsv } from '@campus/shared/src/clubExport';
 import { ClubCheckIn } from './ClubCheckIn';
 import Link from 'next/link';
@@ -12,16 +13,12 @@ import { clubRoleLabel } from './clubService';
 const MEETING_TIME_PLACEHOLDER = '社課時間未提供';
 const roleOfficeLabel = (role: string) =>
   role === 'owner' ? '社長' : role === 'admin' ? '幹部' : clubRoleLabel(role);
-function displayMeetingTime(value?: string) {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text && text !== MEETING_TIME_PLACEHOLDER ? text : '';
-}
 function clubSummary(club?: ClubPortalView['club']) {
   if (!club) return '';
   const items = [
     club.category,
     `${club.memberCount ?? '未提供'} 位社員`,
-    displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
+    normalizeClubProfileText(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
   ];
   if (club.recruiting) items.push('招新中');
   return items.filter(Boolean).join(' · ');
@@ -327,7 +324,7 @@ export function ClubPortal({
                 <p>
                   {[
                     c.category,
-                    displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
+                    normalizeClubProfileText(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
                     c.recruiting ? '招新中' : '',
                     office ? c.approval : '',
                   ]
@@ -365,7 +362,7 @@ export function ClubPortal({
           <header>
             <h1 style={{ fontSize: 28 }}>{club.name}</h1>
             <p>{clubSummary(club)}</p>
-            {officer && !displayMeetingTime(club.meetingTime) && (
+            {officer && !normalizeClubProfileText(club.meetingTime) && (
               <button className="btn" onClick={() => setManage(true)}>
                 填寫社課時間
               </button>
@@ -543,9 +540,9 @@ export function ClubPortal({
           <section>
             <h2>介紹</h2>
             <p style={{ whiteSpace: 'pre-wrap' }}>
-              {club.description?.trim() || '社團尚未提供介紹。'}
+              {normalizeClubProfileText(club.description) || '社團尚未提供介紹。'}
             </p>
-            {officer && !club.description?.trim() && (
+            {officer && !normalizeClubProfileText(club.description) && (
               <button className="btn" onClick={() => setManage(true)}>
                 填寫社團介紹
               </button>
@@ -611,7 +608,9 @@ export function ClubPortal({
                     <input
                       name={key}
                       defaultValue={
-                        key === 'meetingTime' ? displayMeetingTime(club.meetingTime) : club[key]
+                        key === 'meetingTime' || key === 'description'
+                          ? normalizeClubProfileText(club[key])
+                          : club[key]
                       }
                       placeholder={key === 'meetingTime' ? MEETING_TIME_PLACEHOLDER : undefined}
                       maxLength={key === 'description' ? 2000 : 500}

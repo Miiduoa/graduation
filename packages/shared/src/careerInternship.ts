@@ -98,6 +98,33 @@ export function createInternshipService(schoolId: string, transport: InternshipT
   };
 }
 export type InternshipService = ReturnType<typeof createInternshipService>;
+/** Retain private data only for recognized transient read failures. */
+export function isTransientInternshipReadError(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string')
+    return [
+      'network',
+      'network-error',
+      'network-request-failed',
+      'unavailable',
+      'deadline-exceeded',
+      'internal',
+      'timeout',
+    ].includes(
+      code
+        .toLowerCase()
+        .replace(/_/g, '-')
+        .replace(/^(functions|firestore)\//, ''),
+    );
+  return (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' ||
+      (error instanceof TypeError &&
+        /^(Failed to fetch|fetch failed|Network request failed|Load failed|NetworkError when attempting to fetch resource\.?)$/i.test(
+          error.message,
+        )))
+  );
+}
 export function internshipProgress(record: InternshipRecord) {
   const required = record.rule.credits * record.rule.hoursPerCredit;
   const logged = record.hours.reduce((sum, h) => sum + h.hours, 0);
@@ -164,7 +191,12 @@ export function createInternshipCallableTransport({
     if (signal?.aborted) abort();
     let rejectAbort = () => {};
     const cancelled = new Promise<never>((_resolve, reject) => {
-      rejectAbort = () => reject(new Error('職涯操作已取消或等候逾時，請重新整理後重試。'));
+      rejectAbort = () =>
+        reject(
+          Object.assign(new Error('職涯操作已取消或等候逾時，請重新整理後重試。'), {
+            code: 'deadline-exceeded',
+          }),
+        );
       controller.signal.addEventListener('abort', rejectAbort, { once: true });
       if (controller.signal.aborted) rejectAbort();
     });
@@ -180,12 +212,34 @@ export function createInternshipCallableTransport({
             headers: { 'Content-Type': 'application/json', ...headers },
             body: JSON.stringify({ data: { ...command, schoolId } }),
           });
-          const body = (await response.json()) as {
+          const body = (await response.json().catch((error: unknown) => {
+            if (response.ok) throw error;
+            // Error responses may have HTML or empty bodies; keep HTTP status classification.
+            return {};
+          })) as {
             result?: InternshipReply;
-            error?: { message?: string };
+            error?: { message?: string; status?: string };
           };
           if (!response.ok || body.error || !body.result)
-            throw new Error(body.error?.message || '實習服務暫時無法使用，請稍後重試。');
+            throw Object.assign(
+              new Error(body.error?.message || '實習服務暫時無法使用，請稍後重試。'),
+              {
+                code:
+                  body.error?.status ||
+                  (
+                    {
+                      401: 'unauthenticated',
+                      403: 'permission-denied',
+                      404: 'not-found',
+                      408: 'deadline-exceeded',
+                      500: 'internal',
+                      502: 'unavailable',
+                      503: 'unavailable',
+                      504: 'deadline-exceeded',
+                    } as Record<number, string>
+                  )[response.status],
+              },
+            );
           return body.result;
         })(),
       ]);
