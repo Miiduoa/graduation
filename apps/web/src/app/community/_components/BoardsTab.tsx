@@ -264,6 +264,17 @@ function BoardsContent(props: {
     }
   };
 
+  function handleSubscriptionClick(board: CampusBoard) {
+    // Keep this ref-based lease in an event handler, never during render.
+    if (pendingSubscriptionLock.current.has(board.id)) return;
+    pendingSubscriptionLock.current.add(board.id);
+    subscriptionWriteRevision.current += 1;
+    void onToggleSub(board).finally(() => {
+      pendingSubscriptionLock.current.delete(board.id);
+      subscriptionWriteRevision.current += 1;
+    });
+  }
+
   return (
     <div>
       <div
@@ -500,17 +511,7 @@ function BoardsContent(props: {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => {
-                          // Synchronous event-time lock: two clicks in one React batch must not double-write.
-                          if (pendingSubscriptionLock.current.has(b.id)) return;
-                          pendingSubscriptionLock.current.add(b.id);
-                          subscriptionWriteRevision.current += 1;
-                          void onToggleSub(b).finally(() => {
-                            pendingSubscriptionLock.current.delete(b.id);
-                            // A refresh started during the write must not apply an older server snapshot.
-                            subscriptionWriteRevision.current += 1;
-                          });
-                        }}
+                        onClick={() => handleSubscriptionClick(b)}
                         disabled={subscriptionPending}
                         aria-pressed={isSub}
                         aria-busy={subscriptionPending}
