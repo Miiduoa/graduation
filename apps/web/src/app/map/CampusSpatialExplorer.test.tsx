@@ -1552,6 +1552,61 @@ it('retries Providence building data after a temporary outage without closing th
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('retains a newly stale outline throughout its first 24-hour refresh and an offline failure', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  const fetchedAt = new Date(clock - day + 60_000).toISOString();
+  let rejectRefresh!: (reason: Error) => void;
+  const pendingRefresh = new Promise<unknown>((_resolve, reject) => { rejectRefresh = reject; });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+    })
+    .mockReturnValueOnce(pendingRefresh);
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    const previousSceneCount = scene.create.mock.calls.length;
+
+    // The map was fresh when fetched, but becomes stale while the modal
+    // stays mounted. The first automatic revalidation is not a new map load:
+    // do not blank still-retainable geometry or reconstruct WebGL.
+    clock += 2 * 60_000;
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    expect(scene.create).toHaveBeenCalledTimes(previousSceneCount);
+
+    await act(async () => { rejectRefresh(new TypeError('Failed to fetch')); });
+    expect(within(dialog).getByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(`資料讀取：${fetchedAt.slice(0, 10)}（暫用舊快照）`)).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(scene.create).toHaveBeenCalledTimes(previousSceneCount);
+  } finally {
+    clockSpy.mockRestore();
+  }
+});
+
 it('evicts an expired snapshot on tab resume, then installs only fresh source geometry', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
