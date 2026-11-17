@@ -31,6 +31,7 @@ export function auditStudyComparisons(raw) {
   const ids = new Set();
   const observations = { nuni: [], Ahaboard: [] };
   const pairedColdStartDeltasMs = [];
+  const pairedWarmStartDeltasMs = [];
   input.trials.forEach((item, index) => {
     const key = `trials[${index}]`;
     const trial = object(item, key);
@@ -65,6 +66,8 @@ export function auditStudyComparisons(raw) {
       const sourceVerified = bool(run.sourceVerified, `${where}.sourceVerified`);
       if (!completed && (correct || sourceVerified))
         fail(where, 'failed attempt cannot count as correct/source-verified');
+      if (!completed && run.offlineCompleted === true)
+        fail(where, 'failed attempt cannot count as offline-completed');
       if (!completed) text(run.failureReason, `${where}.failureReason`);
       const steps = number(run.steps, `${where}.steps`, true);
       if (steps !== null && !Number.isSafeInteger(steps)) fail(where, 'steps must be integer');
@@ -83,6 +86,9 @@ export function auditStudyComparisons(raw) {
     pairedColdStartDeltasMs.push(
       pair.nuni.coldStartMs !== null && pair.Ahaboard.coldStartMs !== null
         ? pair.nuni.coldStartMs - pair.Ahaboard.coldStartMs : null);
+    pairedWarmStartDeltasMs.push(
+      pair.nuni.warmStartMs !== null && pair.Ahaboard.warmStartMs !== null
+        ? pair.nuni.warmStartMs - pair.Ahaboard.warmStartMs : null);
   });
   const summary = {};
   for (const [product, values] of Object.entries(observations)) {
@@ -94,6 +100,15 @@ export function auditStudyComparisons(raw) {
       correctAndSourceVerified: values.filter((v) => v.correct && v.sourceVerified).length,
       offlineCompleted: values.filter((v) => v.offlineCompleted === true).length,
       offlineNotMeasured: values.filter((v) => v.offlineCompleted === null).length,
+      // Averages exclude unknown measurements; publish denominators so coverage is visible.
+      measuredCounts: {
+        steps: measured('steps').length,
+        coldStartMs: measured('coldStartMs').length,
+        warmStartMs: measured('warmStartMs').length,
+        peakMemoryMiB: measured('peakMemoryMiB').length,
+        offlineCompleted: measured('offlineCompleted').length,
+        costTwd: measured('costTwd').length,
+      },
       averageSteps: mean(measured('steps')),
       averageColdStartMs: mean(measured('coldStartMs')),
       averageWarmStartMs: mean(measured('warmStartMs')),
@@ -106,6 +121,7 @@ export function auditStudyComparisons(raw) {
     };
   }
   return { trialCount: input.trials.length, summary, pairedColdStartDeltasMs,
+    pairedWarmStartDeltasMs,
     sourceOfTruth: 'manually recorded observations, not automatic grading or proof of superiority' };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
