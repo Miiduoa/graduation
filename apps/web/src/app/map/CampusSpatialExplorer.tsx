@@ -733,10 +733,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       .catch((error: unknown) => {
         requestPending = false;
         if (!active || timedOut) return;
-        // A rejected fetch (offline/DNS/proxy failure) has no HTTP status or
-        // Retry-After. Rate-limit manual retries without changing explicit
-        // server cooldowns or the existing retryable HTTP 500 behavior.
-        if (!receivedResponse && error instanceof TypeError) {
+        // Fetch can reject without an HTTP response as TypeError (offline),
+        // DOMException (some browser/network layers), or a proxy error.
+        // Bound deliberate retries for *all* unsettled transport failures.
+        // Intentional background/unmount aborts and the 15s timeout are
+        // already quarantined by active/timedOut above; real HTTP responses
+        // keep their existing Retry-After and HTTP 500 behavior.
+        if (!receivedResponse) {
           setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
         }
         // Preserve only a still-retainable dated snapshot on refresh failure.
