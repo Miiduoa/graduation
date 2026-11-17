@@ -1,6 +1,6 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { useSchoolRole } from './useSchoolRole';
+import { useSchoolRole, useSchoolRoleState } from './useSchoolRole';
 
 const state = vi.hoisted(() => ({
   configured: true,
@@ -105,4 +105,68 @@ it('does not revive a previous role on A to B to A before either new subscriptio
   expect(result.current).toBeNull();
   act(() => state.listeners[2].next(snapshot({ role: 'student', status: 'active' })));
   expect(result.current).toBe('student');
+});
+
+it('distinguishes server-confirmed non-membership from an unconfirmed cached membership', () => {
+  const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' }, true)));
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  act(() => state.listeners[0].next(snapshot(null)));
+  expect(result.current).toMatchObject({ status: 'ready', role: null });
+  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
+  expect(result.current).toMatchObject({ status: 'ready', role: 'admin' });
+  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'inactive' })));
+  expect(result.current).toMatchObject({ status: 'ready', role: null });
+});
+
+it('retries a failed listener without accepting late callbacks or retries from its previous attempt', () => {
+  const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+  act(() => state.listeners[0].error());
+  expect(result.current).toMatchObject({ status: 'error', role: null });
+  const previousRetry = result.current.retry;
+  act(() => result.current.retry());
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  expect(state.listeners[0].unsubscribe).toHaveBeenCalledOnce();
+  expect(state.listeners[1].path).toEqual(['schools', 'school-a', 'members', 'account-a']);
+  act(() => {
+    state.listeners[0].next(snapshot({ role: 'admin', status: 'active' }));
+    state.listeners[0].error();
+    previousRetry();
+  });
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  expect(state.listeners).toHaveLength(2);
+  act(() => state.listeners[1].next(snapshot({ role: 'editor', status: 'active' })));
+  expect(result.current).toMatchObject({ status: 'ready', role: 'editor' });
+});
+
+it('recovers from a subscription setup failure through an explicit retry', async () => {
+  state.configured = false;
+  const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+  await waitFor(() => expect(result.current).toMatchObject({ status: 'error', role: null }));
+  expect(state.listeners).toHaveLength(0);
+  state.configured = true;
+  act(() => result.current.retry());
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
+  expect(result.current).toMatchObject({ status: 'ready', role: 'admin' });
+});
+
+it('ignores a retry from an older account scope even after returning to the same account', () => {
+  const { result, rerender } = renderHook(({ uid }) => useSchoolRoleState(uid, 'school-a'), {
+    initialProps: { uid: 'account-a' },
+  });
+  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
+  const previousRetry = result.current.retry;
+  rerender({ uid: 'account-b' });
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  rerender({ uid: 'account-a' });
+  expect(result.current).toMatchObject({ status: 'loading', role: null });
+  act(() => previousRetry());
+  expect(state.listeners).toHaveLength(3);
+  act(() => state.listeners[2].next(snapshot({ role: 'student', status: 'active' })));
+  expect(result.current).toMatchObject({ status: 'ready', role: 'student' });
+  act(() => previousRetry());
+  expect(result.current).toMatchObject({ status: 'ready', role: 'student' });
+  expect(state.listeners).toHaveLength(3);
 });
