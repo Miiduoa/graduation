@@ -73,6 +73,8 @@ jobs:
             src/lib/assistantCourseworkFollowupContract.test.ts \
             src/lib/nuni/assistantV2/courseworkFollowup.test.ts \
             src/lib/nuni/assistantV2/courseworkFollowupHandler.test.ts \
+            src/lib/nuni/assistantV2/courseworkRecoveryHandler.test.ts \
+            src/lib/nuni/assistantV2/courseworkRecoveryAdapter.test.ts \
             src/lib/nuni/assistantV2/planningHandler.test.ts \
             src/lib/nuni/assistantV2/courseworkStudyHandler.test.ts \
             src/lib/nuni/assistantV2/calendarExecution.test.ts \
