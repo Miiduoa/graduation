@@ -1482,3 +1482,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 在教材明確使用 HTML 內聯 `opacity:0`、`opacity:0%` 或等價的零值隱藏整個容器時，先套用同一屬性的宣告順序與 `!important` 優先權，再決定是否從該容器額外重建表格。原本只辨識 `display:none`、`visibility:hidden` 與 `content-visibility:hidden`，可能讓畫面上完全透明的教師備註成為額外的學生表格。
 - 新增隱藏／可見正反測試，確認零透明度不會被其他屬性的 `visibility:visible` 覆蓋，後續真正可見教材仍可抽取，也不推論 `calc()`、CSS 變數、動畫或外部樣式。這只處理衍生表格展示，不是原始教材的存取權限控制；不修改原始教材、備份格式，不新增套件或私有資料外傳。
 - 本次屬來源掃描器與單元測試修補，須按新精確 SHA 核對 CI／CodeQL 與 App 5504170；Maestro／iOS／Android 真機及 Ahaboard 同教材同題同裝置驗收未完成前 PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-17：手機備份 Blob URL 回收失敗不能中斷新教材或新備份
+
+- 部分內嵌 WebView／相容層可能在已接受 TXT／JSON 下載後，對 URL.revokeObjectURL 拋錯；原流程會把已觸發的第二次下載誤判為失敗。若下載連結本身失敗，回收 Blob URL 再拋錯甚至會中斷完整手動備份顯示。現在將 Blob URL 釋放視為 best-effort，回收例外不再阻擋新的下載狀態、手動 JSON 備援、確認換教材或卸載白板；仍保留原本按需清除 URL 的意圖，不宣稱瀏覽器一定釋放記憶體。
+- 新增 3 組模擬瀏覽器 DOM 回歸：舊 URL 回收失敗後第二份筆記仍可選取；下載點擊與回收都失敗仍可取得可解析、含原筆記的閱讀進度 JSON；確認換教材時回收失敗也不會留下舊筆記。沒有新增套件、付費 API、外傳私人教材、改動 v1/v2 進度或 v1 練習 checkpoint。
+- 這只驗證程式與模擬 WebView 的錯誤恢復，不代表 iOS Safari／Android Chrome、Maestro 真機、WebGPU 中文教學或 Ahaboard 同教材同題同裝置比較已通過。最新 SHA 的 GitHub CI／CodeQL 與指定 App 5504170 APPROVED 仍須獨立查核；PR 維持 Draft、不合併、不部署。

@@ -209,6 +209,18 @@ async function readStudyTextFile(file: File, encoding: StudyTextEncoding, signal
   }
 }
 
+// Releasing an old Blob URL is best-effort cleanup, not part of exporting
+// or replacing the student's work. Some embedded browsers throw here even
+// after accepting a download; do not turn that into lost backup access.
+function revokeStudyDownloadUrl(url: string | null): void {
+  if (!url) return;
+  try {
+    URL.revokeObjectURL(url);
+  } catch {
+    // The browser owns the URL after this point; keep the current study state.
+  }
+}
+
 function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onClose }: Props) {
   const [initial] = useState(() => initialMaterial(material));
   const previousAuthorizedMaterial = useRef({ material, selectionSerial });
@@ -372,7 +384,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     return () => {
       read.current?.abort();
       read.current = null;
-      if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+      revokeStudyDownloadUrl(downloadUrl.current);
       downloadUrl.current = null;
     };
   }, []);
@@ -479,7 +491,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
 
   function clearDownload() {
     invalidateCopyFeedback();
-    if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+    revokeStudyDownloadUrl(downloadUrl.current);
     downloadUrl.current = null;
   }
 
@@ -564,12 +576,12 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       link.hidden = true;
       document.body.append(link);
       link.click();
-      if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+      revokeStudyDownloadUrl(downloadUrl.current);
       downloadUrl.current = url;
       setDownloadBackup(preparedFallback);
       setDownloadStatus(`已交給瀏覽器下載${label}；若沒有出現檔案，可改用下方手動備份。`);
     } catch {
-      if (url) URL.revokeObjectURL(url);
+      revokeStudyDownloadUrl(url);
       const hasNewExport = previousManualCopy !== null && preparedFallback !== null
         && (preparedFallback.kind !== previousManualKind || preparedFallback.text !== previousManualCopy);
       if (previousManualCopy !== null) {

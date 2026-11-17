@@ -2730,3 +2730,86 @@ it('cancelled Blob.arrayBuffer does not start a fallback FileReader after a late
     vi.stubGlobal('FileReader', nativeReader);
   }
 });
+
+
+// WebViews may accept a new export but throw when retiring the previous
+// Blob URL. URL cleanup must never make the newer notes appear lost.
+it('retains the latest TXT export and manual rescue if the prior Blob URL cannot be revoked', () => {
+  const create = vi.fn().mockReturnValueOnce('blob:first-notes').mockReturnValueOnce('blob:second-notes');
+  const revoke = vi.fn(() => { throw new Error('WebView rejected URL cleanup'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    const note = screen.getByLabelText(noteLabel) as HTMLTextAreaElement;
+    const download = screen.getByRole('button', { name: '下載本次筆記' });
+    fireEvent.change(note, { target: { value: '第一版草稿' } });
+    fireEvent.click(download);
+    fireEvent.change(note, { target: { value: '第二版已修正筆記' } });
+    fireEvent.click(download);
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(revoke).toHaveBeenCalledWith('blob:first-notes');
+    expect(screen.getByText(/已交給瀏覽器下載本次筆記/)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' }));
+    const backup = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    expect(backup.value).toContain('第二版已修正筆記');
+    expect(backup.value).not.toContain('第一版草稿');
+    expect(() => view.unmount()).not.toThrow();
+    expect(revoke).toHaveBeenCalledWith('blob:second-notes');
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('keeps a selectable JSON checkpoint when both anchor click and Blob URL cleanup throw', () => {
+  const create = vi.fn().mockReturnValue('blob:blocked-json');
+  const revoke = vi.fn(() => { throw new Error('revoke failed'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('download blocked'); });
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '一定要留下來的作答' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+    expect(click).toHaveBeenCalledOnce();
+    expect(revoke).toHaveBeenCalledWith('blob:blocked-json');
+    expect(document.querySelector('a[download]')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('目前無法下載');
+    const backup = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(parseCourseStudyProgress(backup.value, scope).passages['0:0'].note).toBe('一定要留下來的作答');
+    expect(screen.getByLabelText(noteLabel)).toHaveProperty('value', '一定要留下來的作答');
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('still replaces the explicitly confirmed source when old download URL cleanup throws', () => {
+  const create = vi.fn().mockReturnValue('blob:prior-notes');
+  const revoke = vi.fn(() => { throw new Error('revocation unavailable'); });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '原教材筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '下載本次筆記' }));
+    fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: '新學習內容：課堂第二章' } });
+    fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+    expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+    expect(revoke).toHaveBeenCalledWith('blob:prior-notes');
+    expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+    expect(screen.getByText('新學習內容：課堂第二章')).toBeTruthy();
+    expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('');
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
