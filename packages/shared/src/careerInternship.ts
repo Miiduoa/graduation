@@ -212,7 +212,11 @@ export function createInternshipCallableTransport({
             headers: { 'Content-Type': 'application/json', ...headers },
             body: JSON.stringify({ data: { ...command, schoolId } }),
           });
-          const body = (await response.json()) as {
+          const body = (await response.json().catch((error: unknown) => {
+            if (response.ok) throw error;
+            // Error responses may have HTML or empty bodies; keep HTTP status classification.
+            return {};
+          })) as {
             result?: InternshipReply;
             error?: { message?: string; status?: string };
           };

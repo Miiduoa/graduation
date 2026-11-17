@@ -6,6 +6,7 @@ import {
   internshipProgress,
   createInternshipCallableTransport,
   createInternshipService,
+  isTransientInternshipReadError,
 } from '@campus/shared/src/careerInternship';
 import { internshipPersonalEvent } from '@campus/shared/src/careerInternshipCalendar';
 import { createCareerInternshipPorts } from './careerInternshipPorts';
@@ -147,6 +148,34 @@ it('forwards read cancellation and bounds even an uncooperative fetch or auth pr
   } finally {
     vi.useRealTimers();
   }
+});
+
+it.each(
+  [
+    { status: 502, code: 'unavailable', transient: true },
+    { status: 503, code: 'unavailable', transient: true },
+    { status: 504, code: 'deadline-exceeded', transient: true },
+    { status: 408, code: 'deadline-exceeded', transient: true },
+    { status: 500, code: 'internal', transient: true },
+    { status: 401, code: 'unauthenticated', transient: false },
+    { status: 403, code: 'permission-denied', transient: false },
+    { status: 404, code: 'not-found', transient: false },
+  ].flatMap((entry) => [
+    { ...entry, label: 'HTML', body: '<html><body>Service unavailable</body></html>' },
+    { ...entry, label: 'empty', body: '' },
+  ]),
+)('classifies HTTP $status with a $label body', async ({ status, code, transient, body }) => {
+  const transport = createInternshipCallableTransport({
+    endpoint: '/internship',
+    authHeaders: async () => ({}),
+    fetcher: async () => new Response(body, { status }),
+  });
+  const error = await transport('pu', { action: 'list', audience: 'student' }).catch(
+    (error: unknown) => error,
+  );
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({ message: '實習服務暫時無法使用，請稍後重試。', code });
+  expect(isTransientInternshipReadError(error)).toBe(transient);
 });
 
 it.each([
