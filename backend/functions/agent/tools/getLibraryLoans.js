@@ -4,6 +4,10 @@ const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
 const { toJsDate } = require('../../lib/assistantFormat');
 
+// Bound the complete source snapshot, including returned/legacy records. The
+// extra row proves whether the list is exhaustive before it can drive actions.
+const MAX_LOAN_RECORDS = 500;
+
 const inputSchema = z.object({
   onlyOverdue: z.boolean().optional(),
 });
@@ -50,7 +54,10 @@ async function execute(ctx, rawInput) {
     return { ok: false, error: 'missing_uid_or_school', loans: [] };
   }
 
-  const snap = await loanPath(uid, schoolId).limit(50).get();
+  const snap = await loanPath(uid, schoolId).limit(MAX_LOAN_RECORDS + 1).get();
+  if (snap.docs.length > MAX_LOAN_RECORDS) {
+    return { ok: false, error: 'library_loans_limit_exceeded', loans: [] };
+  }
   const now = Date.now();
   const loans = [];
 

@@ -156,8 +156,9 @@ async function resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessag
     { onlyOverdue: /逾期|過期/.test(String(lastUserMessage || '')) },
   ).catch((error) => {
     if (isAuthorizationFailure(error)) throw error;
-    return { loans: [] };
+    return null;
   });
+  if (result?.ok !== true || !Array.isArray(result.loans)) return { unavailable: true };
   const loan = chooseLibraryLoan(result.loans, lastUserMessage);
   if (!loan?.id) return null;
   return { input: { loanId: String(loan.id) }, loan };
@@ -851,6 +852,11 @@ async function executeCampusAssistantCore({
     }
 
     const resolvedLoan = await resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage });
+    if (resolvedLoan?.unavailable) {
+      response.content = '目前無法完整讀取平台借閱紀錄，暫時無法確認要處理哪一本書。請稍後重試，或到圖書館頁核對借閱紀錄；這不代表沒有未歸還的書。';
+      response.suggestions = ['查看借閱', '我有哪些書還沒還？', '功能說明'];
+      return await finalizeResponse();
+    }
     if (!resolvedLoan) {
       response.content = [
         intent === 'renew_book'
