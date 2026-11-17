@@ -193,7 +193,8 @@ function hasDisclosedGeneratedAnswerColumn(question: string, answer: string): bo
   };
   const expected = normalized(answer);
   if (!expected) return false;
-  const headerPattern = /^(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution|correctanswer|expectedanswer|referenceanswer)$/u;
+  // Also recognize a model's "Answer Key" and "Ans." table headings.
+  const headerPattern = /^(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|ans\.?|answerkey|solution|solutionkey|correctanswer|expectedanswer|referenceanswer)$/u;
   const lines = question.split(/\r?\n/u);
   for (let index = 0; index < lines.length - 2; index += 1) {
     const headers = parseRow(lines[index]);
@@ -230,14 +231,14 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
     // "**答案**：主鍵" already reveals the key before the learner responds.
     // Normalize only a matching Markdown wrapper before an explicit separator.
     // Leave displayed questions and saved v1/v2 explanations unchanged.
-    .replace(/(\*\*|__|\*|_|`)(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution|(?:correct|expected|reference)\s+answer)\1(?=[ \t]*(?:[:：=＝]|(?:就)?[是為]))/giu, '$2')
-    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
+    .replace(/(\*\*|__|\*|_|`)(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer\s+key|ans\.?|answer|solution|(?:correct|expected|reference)\s+answer)\1(?=[ \t]*(?:[:：=＝]|(?:就)?[是為]))/giu, '$2')
+    .replace(/(^|\r?\n)[ \t]*#{1,6}[ \t]+(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer\s+key|ans\.?|answer|solution)(?:\*\*|__)?[ \t]*#*[ \t]*(?=\r?\n)/giu, '$1$2：')
     // A model can also place an unpunctuated key on its own line, inside a
     // blockquote/list, or as "**答案** 主鍵". These still display the answer
     // before the student can respond. Match only standalone answer-key labels,
     // then use the same exact-answer boundary check below; a normal mention of
     // "答案" in question prose must remain valid.
-    .replace(/(^|\r?\n)[ \t]*(?:>[ \t]*){0,2}(?:(?:[-+*•]|\d{1,2}[.)、])[ \t]+)?(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer|solution)(?:\*\*|__)?(?=[ \t]*\r?\n|[ \t]+\S)/giu, '$1$2：');
+    .replace(/(^|\r?\n)[ \t]*(?:>[ \t]*){0,2}(?:(?:[-+*•]|\d{1,2}[.)、])[ \t]+)?(?:\*\*|__)?(正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案|answer\s+key|ans\.?|answer|solution)(?:\*\*|__)?(?=[ \t]*\r?\n|[ \t]+\S)/giu, '$1$2：');
   const answer = comparableGeneratedAnswerDisplay(explanation.answer)
     .replace(/[.!?。！？；;：:，、]+$/gu, '').trim().toLowerCase().replace(/\s+/gu, '');
   // New Markdown tables may display an explicit answer key as "| 答案 | 主鍵 |".
@@ -245,7 +246,7 @@ function hasUnrevealedGeneratedReview(explanation: TutorExplanation): boolean {
   // Compare only NEW generated results; never alter the student's source text.
   // Generated answer keys also use 是／為, 就是, equals signs, or English labels.
   // This is only a conservative disclosure check, not a semantic answer judge.
-  const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|\|(?=[ \t]*\S)|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer|ans\.?|solution)\s*(?:[:：=＝]|\|(?=[ \t]*\S)|\bis\b\s*[:：=＝]?)/giu;
+  const labels = /(?:正確答案|標準答案|參考答案|參考回答|參考解答|正確選項|正解|解答|答案)\s*(?:[:：=＝]|\|(?=[ \t]*\S)|(?:就)?[是為]\s*[:：=＝]?)|\b(?:(?:correct|expected|reference)\s+answer|answer\s+key|answer|ans\.?|solution)\s*(?:[:：=＝]|\|(?=[ \t]*\S)|\bis\b\s*[:：=＝]?)/giu;
   let label: RegExpExecArray | null;
   while ((label = labels.exec(question)) !== null) {
     // Generated Markdown may wrap a disclosed key in inline code or emphasis.

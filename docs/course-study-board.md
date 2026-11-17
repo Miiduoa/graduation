@@ -1535,3 +1535,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 原文表格此前已能識別 CR-only 及混合換行，但供裝置端講解、逐題複習和來源段落導航共用的 `splitStudySection` 仍只以 LF 尋找自然分段。當 1,600 字元窗內有 CR-only 換行時可能在句子中央截斷；現在也納入 CR 作為原始分段候選，不重寫或丟棄教材原文。
 - 新增三組純函式回歸：CR-only 自然斷行、CR／CRLF／LF 混用取最後一個原始換行，以及 CRLF 跨字數上限不被拆成兩段。核對段落串接逐字還原、每段不超過字數限制與下一段起點。原有 PDF 頁碼、引句、筆記與 v1/v2 閱讀、v1 練習 checkpoint 格式保持不變，沒有新增套件、遠端模型或私人教材傳輸。
 - 這是可由 Vitest 確認的段落切分修補，不是 iOS／Android 真機、WebGPU 中文教學正確率或 Ahaboard 同教材同題同機對照證據。完整 CI/CodeQL、指定 App 5504170 APPROVED、Maestro/真機仍須以新精確 SHA 另驗；PR 保持 Draft、不合併、不部署。
+
+### 2026-11-17：阻止 Answer Key 與 Ans. 簡寫提前揭答
+
+- 裝置端模型可能把複習題的參考回答標為 `Answer key: SQL`、`**Answer Key**：SQL`，或放入 Markdown 表格的 `Answer Key`／`Ans.` 欄位。舊的答案洩漏檢查不辨識這些常見英文答案鍵標記，學生可能在作答前直接看到參考答案。這次只擴充**新生成複習題的暫存比對**，涵蓋同一行、獨立答案標題與表格欄位；不修改教材原文、顯示的題目或已備份資料。
+- 新增 6 組必須拒收、3 組必須保留的模擬 Worker 回歸，包含 CR-only、Markdown 強調語法以及 SQLServer／SQL 等部分相符但答案不同的情境。既有答案比較仍要求實際值相符，不推論語義正確，也不將單元測試視為真實模型品質。
+- 無新增套件、付費模型、外傳私人教材或更動 v1/v2 閱讀進度與 v1 練習 checkpoint 格式。CI／CodeQL／App 5504170 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同教材同題同機比較須依本次新 SHA 另外驗收；PR 保持 Draft，不合併、不部署。

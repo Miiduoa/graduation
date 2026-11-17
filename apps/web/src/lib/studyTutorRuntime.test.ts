@@ -1015,6 +1015,12 @@ describe('new lesson self-check quality boundary', () => {
 describe('new local self-check answer disclosure boundary', () => {
   it.each([
     { label: 'CR-only Markdown answer column', question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQL |', answer: 'SQL' },
+    { label: 'answer key inline disclosure', question: 'Which language? Answer key: SQL', answer: 'SQL' },
+    { label: 'emphasized answer key label', question: 'Which language? **Answer Key**：SQL', answer: 'SQL' },
+    { label: 'answer-key Markdown column', question: 'Which language?\n| Prompt | Answer Key |\n| --- | --- |\n| DB | SQL |', answer: 'SQL' },
+    { label: 'Ans. abbreviated column with CR-only lines', question: 'Which language?\r| Prompt | Ans. |\r| --- | --- |\r| DB | SQL |', answer: 'SQL' },
+    { label: 'standalone abbreviated answer label', question: 'Which language?\nAns.\nSQL', answer: 'SQL' },
+    { label: 'Markdown answer key heading', question: 'Which language?\n### Answer Key\nSQL', answer: 'SQL' },
     { label: 'CR-only Chinese answer heading', question: '哪個欄位？\r## 答案\r主鍵', answer: '主鍵' },
     { label: 'CR-only unpunctuated English answer list', question: 'Which language?\rAnswer\r> - SQL', answer: 'SQL' },
     { label: 'CR-only fenced answer', question: 'Which language? Answer:\r~~~txt\rSQL\r~~~', answer: 'SQL' },
@@ -1149,6 +1155,9 @@ describe('new local self-check answer disclosure boundary', () => {
 
   it.each([
     { question: 'Which language?\r| Prompt | Answer |\r| --- | --- |\r| DB | SQLServer |', answer: 'SQL' },
+    { question: 'Which language? Answer key: SQLServer instead of SQL?', answer: 'SQL' },
+    { question: 'Which language?\n| Prompt | Ans. |\n| --- | --- |\n| DB | SQLServer |', answer: 'SQL' },
+    { question: 'Which language?\n| Prompt | Answer Key |\n| --- | --- |\n| DB | NoSQL |', answer: 'SQL' },
     { question: 'Which language?\rAnswer\rSQLServer', answer: 'SQL' },
     { question: '哪個數值？\r## 答案\r12', answer: '1' },
     { question: 'Answer: SQLServer is different from SQL?', answer: 'SQL' },
