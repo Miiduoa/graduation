@@ -139,6 +139,16 @@ function safePromptEvidenceText(value: unknown, maxLength: number, optional = fa
   return true;
 }
 
+// Array#every skips empty slots. Caller-supplied snapshots may be sparse even
+// when their counts claim complete coverage. Inherited numeric entries do not
+// prove that a row exists in the actual student source either.
+function allOwnArrayItems<T>(items: readonly T[], isValid: (item: T) => boolean): boolean {
+  for (let index = 0; index < items.length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(items, index) || !isValid(items[index])) return false;
+  }
+  return true;
+}
+
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
@@ -195,7 +205,7 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
   // A JSON-restored snapshot can bypass that reader; two distinct titles with
   // the same original assignment ID are not two separate student tasks.
   const seenAssignmentSources = new Set<string>();
-  const assignmentsValid = assignments.items.every((item) => {
+  const assignmentsValid = allOwnArrayItems(assignments.items, (item) => {
     if (!item || !safePromptEvidenceText(item.title, 140) ||
         !safePromptEvidenceText(item.groupName, 100, true) ||
         !(item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48))) return false;
@@ -208,7 +218,7 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
     }
     return true;
   });
-  return assignmentsValid && announcements.items.every((item) => !!item &&
+  return assignmentsValid && allOwnArrayItems(announcements.items, (item) => !!item &&
     safePromptEvidenceText(item.title, 140) &&
     (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
@@ -278,7 +288,7 @@ export function formatOnDeviceSchoolPrompt(
     // A restored contradiction must not authorize unrelated private summaries.
     (timetable.source === 'saved-device-copy' ||
       (timetable.updatedAt === null && timetable.courses.length === 0)) &&
-    timetable.courses.every((course) => !!course &&
+    allOwnArrayItems(timetable.courses, (course) => !!course &&
       // The offline copy may bypass the regular title parser. Newline or
       // line-separator controls in a course name can masquerade as model instructions.
       safePromptEvidenceText(course.name, 48) &&

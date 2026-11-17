@@ -692,6 +692,66 @@ test('restored assignment snapshot cannot double count the same original student
   expect(rejected).toContain('資料庫概論'); // Independent authorized offline timetable remains.
 });
 
+test('sparse caller-supplied evidence cannot claim complete task, announcement or timetable rows', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const sense: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 2,
+      items: [
+        { title: '私人待辦 A', groupName: '資料庫', dueAt: null },
+        { title: '私人待辦 B', groupName: '資料庫', dueAt: null },
+      ],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: {
+      status: 'available', items: [
+        { title: '校園公告 A', publishedAt: null },
+        { title: '校園公告 B', publishedAt: null },
+      ],
+    },
+  };
+  const format = (context: OnDeviceSchoolContext, campus: CampusSenseSnapshot) =>
+    formatOnDeviceSchoolPrompt(context, campus, 'alice');
+  const normal = format(local, sense);
+  expect(normal).toContain('私人待辦 A');
+  expect(normal).toContain('校園公告 A');
+  expect(normal).toContain('資料庫概論');
+
+  // Array#every ignores holes. A caller-provided source claiming two complete
+  // rows must not silently serialize its missing second row as null.
+  const sparseAssignments = new Array<CampusSenseSnapshot['assignments']['items'][number]>(2);
+  sparseAssignments[0] = sense.assignments.items[0];
+  const badAssignments = format(local, {
+    ...sense, assignments: { ...sense.assignments, items: sparseAssignments },
+  });
+  expect(badAssignments).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badAssignments).not.toContain('私人待辦 A');
+  expect(badAssignments).toContain('資料庫概論');
+
+  const sparseAnnouncements = new Array<CampusSenseSnapshot['announcements']['items'][number]>(2);
+  sparseAnnouncements[0] = sense.announcements.items[0];
+  const badAnnouncements = format(local, {
+    ...sense, announcements: { ...sense.announcements, items: sparseAnnouncements },
+  });
+  expect(badAnnouncements).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badAnnouncements).not.toContain('校園公告 A');
+  expect(badAnnouncements).toContain('資料庫概論');
+
+  // Invalid device evidence also prevents a synced campus summary from
+  // piggybacking on a timetable whose provenance cannot be verified.
+  const sparseCourses = new Array<OnDeviceSchoolContext['timetable']['courses'][number]>(2);
+  sparseCourses[0] = local.timetable.courses[0];
+  const badTimetable = format({
+    ...local, timetable: { ...local.timetable, courses: sparseCourses },
+  }, sense);
+  expect(badTimetable).toContain('目前沒有可確認的本機個人課表');
+  expect(badTimetable).not.toContain('資料庫概論');
+  expect(badTimetable).not.toContain('私人待辦 A');
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
