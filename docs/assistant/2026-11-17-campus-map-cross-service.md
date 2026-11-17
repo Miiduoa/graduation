@@ -65,6 +65,8 @@
 
 本輪已整合 main `e71bccf0ab8ea10fccb7b092271d2810a9e06bf8`，包含課務來源頁數核對與公開查課回應大小／UTF-8 防護。單一 worker 的完整 Agent 驗證為 **100 檔、1,966 項全數通過**，未變更 timeout 或略過失敗案例；新增活動身分重試有 17 項案例。最後補強活動選取回呼的型別與來源驗證後，受影響的 **4 檔、75 項**再次通過。另有整合 main 的公開查課 **77 項**與共享能力契約 **17 項**通過。本輪 28 個 TS／TSX／CJS 變更檔 ESLint 與 `git diff --check` 通過。
 
+首次發布 `96d9f8c3d62ce07219ca2c4b1c9388873cc67636` 已通過本機完整 Next.js Turbopack production build、全站 TypeScript 與最終瀏覽器 bundle 掃描。其 Node 22 CI 揭露 `scripts/nuni-assistant/v2.test.mjs` 的預覽第 4 案例仍假設查教室只有課表 reader；fixture 未提供地圖資料，故正確回報來源缺口卻被舊預期判定失敗。後續僅更新這份整合測試與說明，明確驗證缺地圖來源時保留課表且 map blocked，並新增有已驗證來源時完整成功、零模型／寫入的案例。修正後本機該檔 **4／4** 通過；完整 Fastify 整合採最新 head 的 Node 22／frozen lockfile CI 結果，本機未安裝其額外依賴。
+
 正式建置結果與發布版本以 PR 最新 head 的驗證紀錄為準。本機使用 Node 24.22.1 與既有依賴快取；專案要求的 Node 22.23.5／pnpm 10.28.2 與完整 lockfile 依賴矩陣仍以 GitHub Actions 驗證。單元測試與模擬 DOM 不代表正式帳號或原生手機實機驗收。
 
 舊 head `c6cc7c9a76e549e7fb3f94ea39e7b64ca1ffa086` 的 [Maestro run](https://github.com/Miiduoa/graduation/actions/runs/43894561694) 已失敗，不再是 pending。下載 `maestro-results-ios`（artifact `14241796293`）核對：訪客 onboarding 通過，`Guest campus map access` 在 `scrollUntilVisible` 找不到 `public-Map`；截圖階層仍停在已選清大的登入首頁，後續完整 suite 未執行。這不是本輪 Web 地圖 Agent 已在 iOS 通過的證據。
