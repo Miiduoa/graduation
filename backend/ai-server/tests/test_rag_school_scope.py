@@ -1,6 +1,8 @@
 """Public RAG tests use disposable records and deterministic offline embeddings."""
 
+import hashlib
 import json
+from copy import deepcopy
 import tempfile
 import unittest
 from importlib.util import find_spec
@@ -12,6 +14,22 @@ from rag.public_documents import public_document
 
 def announcement(school, title="午餐時段"):
     return {"title": title, "visibility": "public", "schoolId": school}
+
+
+def snapshot(collection, documents):
+    return {
+        "format": "nuni-rag-firestore-snapshot-v1",
+        "collection": collection,
+        "scope": "all_schools",
+        "complete": True,
+        "documents": documents,
+    }
+
+
+def write_snapshot(folder, collection, payload):
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    (Path(folder) / f"{collection}.json").write_bytes(raw)
+    return {collection: hashlib.sha256(raw).hexdigest()}
 
 
 class PublicRecordTests(unittest.TestCase):
@@ -119,13 +137,15 @@ class RetrievalTests(unittest.TestCase):
             sync, "sync_all", return_value={name: -1 for name in sync.PUBLIC_FIELDS}
         ))
         with tempfile.TemporaryDirectory() as folder:
+            trusted = {}
             for name in sync.PUBLIC_FIELDS:
-                (Path(folder) / f"{name}.json").write_text("[]", encoding="utf-8")
-            (Path(folder) / "announcements.json").write_text(
-                '[{"title": "午餐時段", "body": "舊公告", "schoolId": "nchu"}]',
-                encoding="utf-8",
+                rows = [{"id": "old-1", "data": {
+                    "title": "午餐時段", "body": "舊公告", "schoolId": "nchu",
+                }}] if name == "announcements" else []
+                trusted.update(write_snapshot(folder, name, snapshot(name, rows)))
+            result = sync.migrate_legacy_firestore_index(
+                dump_dir=folder, trusted_snapshot_sha256=trusted,
             )
-            result = sync.migrate_legacy_firestore_index(dump_dir=folder)
         self.assertGreater(result["legacy"], 0)
         self.assertEqual(result["remaining"], 0)
         self.assertTrue(result["rebuilt"])
@@ -143,7 +163,7 @@ class RetrievalTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_RAG and find_spec("firebase_admin"), "requires Firestore and local RAG dependencies")
 class SyncTests(unittest.TestCase):
-    def test_firestore_and_json_apply_the_same_policy(self):
+    def test_firestore_and_valid_snapshot_apply_the_same_public_projection(self):
         from rag import sync_firestore as sync
 
         rows = [
@@ -160,9 +180,14 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(sync.sync_collection("users", db), 0)
             db.collection.assert_not_called()
             self.assertEqual(sync.sync_collection("announcements", db), 2)
-            (Path(folder) / "announcements.json").write_text(json.dumps(rows))
+            # Live reads filter unscoped records; snapshots reject them entirely.
+            # Preserve the original source IDs when comparing the valid projection.
+            scoped = [{"id": str(i), "data": row} for i, row in enumerate(rows) if row["schoolId"]]
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", scoped))
             (Path(folder) / "users.json").write_text(json.dumps(rows))
-            self.assertEqual(sync.sync_from_json_dump(folder, collections={"announcements"}), {"announcements": 2})
+            self.assertEqual(sync.sync_from_json_dump(
+                folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+            ), {"announcements": 2})
             self.assertEqual(index.call_args_list[0], index.call_args_list[1])
             self.assertEqual({item["metadata"]["schoolId"] for item in index.call_args.args[0]}, {"nchu"})
 
@@ -217,7 +242,7 @@ class MigrationSafetyTests(unittest.TestCase):
         def current_legacy(_name="campus"):
             return leftover.copy()
 
-        def fallback(dump_dir=None, collections=None):
+        def fallback(dump_dir=None, collections=None, *, trusted_snapshot_sha256=None):
             leftover.clear()
             return {name: 1 for name in (collections or ["announcements"])}
 
@@ -274,7 +299,7 @@ class MigrationSafetyTests(unittest.TestCase):
         leftover = ["old-event"]
         requested = {}
 
-        def fallback(dump_dir=None, collections=None):
+        def fallback(dump_dir=None, collections=None, *, trusted_snapshot_sha256=None):
             requested["collections"] = set(collections or [])
             leftover.clear()
             return {name: 1 for name in collections or []}
@@ -321,3 +346,266 @@ class MigrationSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             result = sync.sync_from_json_dump(folder, collections={"announcements"})
         self.assertEqual(result, {"announcements": -1})
+
+
+    def _fake_snapshot_index(self):
+        """Disposable store; exercising real replacement code cannot reach Chroma."""
+        sync = self._stub_rag_imports()
+        self.snapshot_store = {
+            "old-pu": public_document("announcements", announcement("pu", "PU old"), "pu-old"),
+            "old-nchu": public_document("announcements", announcement("nchu", "NCHU old"), "nchu-old"),
+            "old-legacy": {"text": "legacy", "source": "firestore:announcements", "metadata": {}},
+            "old-event": public_document("events", announcement("nchu", "Event old"), "event-old"),
+            "app-help": {"text": "App help", "source": "app:navigation", "metadata": {}},
+        }
+        self.snapshot_before = deepcopy(self.snapshot_store)
+        self.snapshot_calls = []
+
+        def source_ids(source, collection_name="campus"):
+            self.snapshot_calls.append(("read", source))
+            return [key for key, row in self.snapshot_store.items() if row["source"] == source]
+
+        def write(documents, collection_name="campus"):
+            self.snapshot_calls.append(("write", len(documents)))
+            ids = []
+            for row in documents:
+                key = f'{row["source"]}/{row["metadata"]["schoolId"]}/{row["metadata"]["firestore_id"]}'
+                self.snapshot_store[key] = deepcopy(row)
+                ids.append(key)
+            return len(documents), ids
+
+        def delete(ids, collection_name="campus"):
+            self.snapshot_calls.append(("delete", list(ids)))
+            for key in ids:
+                self.snapshot_store.pop(key, None)
+
+        def legacy(collection_name="campus"):
+            return [key for key, row in self.snapshot_store.items()
+                    if row["source"].startswith("firestore:") and not row["metadata"].get("schoolId")]
+
+        self.enterContext(patch.object(sync, "source_document_ids", side_effect=source_ids))
+        self.enterContext(patch.object(sync, "index_written_ids", side_effect=write))
+        self.enterContext(patch.object(sync, "delete_ids", side_effect=delete))
+        self.enterContext(patch.object(sync, "legacy_unscoped_firestore_ids", side_effect=legacy))
+        return sync
+
+    def _assert_snapshot_preserved(self):
+        self.assertEqual(self.snapshot_store, self.snapshot_before)
+        self.assertEqual(self.snapshot_calls, [])
+
+    def test_empty_and_partial_development_dumps_never_change_existing_index(self):
+        sync = self._fake_snapshot_index()
+        dumps = [[], [announcement("pu", "Partial replacement")], announcement("pu", "Single record")]
+        with tempfile.TemporaryDirectory() as folder:
+            for payload in dumps:
+                for approved in (False, True):
+                    with self.subTest(payload=payload, digest_supplied=approved):
+                        trusted = write_snapshot(folder, "announcements", payload)
+                        result = sync.sync_from_json_dump(
+                            folder, collections={"announcements"},
+                            trusted_snapshot_sha256=trusted if approved else None,
+                        )
+                        self.assertEqual(result, {"announcements": -1})
+                        self._assert_snapshot_preserved()
+
+    def test_snapshot_declaration_cannot_grant_itself_trust(self):
+        sync = self._fake_snapshot_index()
+        with tempfile.TemporaryDirectory() as folder:
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", []))
+            for approval in (None, {}, {"announcements": "0" * 64}, {"announcements": True}):
+                with self.subTest(approval=approval):
+                    result = sync.sync_from_json_dump(
+                        folder, collections={"announcements"}, trusted_snapshot_sha256=approval,
+                    )
+                    self.assertEqual(result, {"announcements": -1})
+                    self._assert_snapshot_preserved()
+            # A file changed after independent approval must not use the old digest.
+            write_snapshot(folder, "announcements", snapshot("announcements", [
+                {"id": "changed", "data": announcement("pu", "Changed after approval")},
+            ]))
+            self.assertEqual(sync.sync_from_json_dump(
+                folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+            ), {"announcements": -1})
+            self._assert_snapshot_preserved()
+
+    def test_invalid_snapshot_contract_preserves_all_old_rows(self):
+        sync = self._fake_snapshot_index()
+        valid = snapshot("announcements", [{"id": "new", "data": announcement("pu")}])
+        invalid = [
+            {**valid, "format": "unsupported-v2"},
+            {**valid, "collection": "events"},
+            {**valid, "scope": "pu"},
+            {**valid, "scope": "unknown"},
+            {**valid, "scope": ["pu", "nchu"]},
+            {**valid, "complete": False},
+            {**valid, "complete": 1},
+            {key: value for key, value in valid.items() if key != "scope"},
+            {**valid, "partial": True},
+            {**valid, "documents": {}},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            for payload in invalid:
+                with self.subTest(payload=payload):
+                    trusted = write_snapshot(folder, "announcements", payload)
+                    self.assertEqual(sync.sync_from_json_dump(
+                        folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+                    ), {"announcements": -1})
+                    self._assert_snapshot_preserved()
+
+    def test_every_snapshot_row_is_validated_before_any_write(self):
+        sync = self._fake_snapshot_index()
+        good = {"id": "valid-first", "data": announcement("pu", "Must not be written")}
+        invalid = [
+            None,
+            {"id": "missing-data"},
+            {"id": "new", "data": []},
+            {"id": "valid-first", "data": announcement("nchu")},
+            *[{"id": bad_id, "data": announcement("nchu")} for bad_id in (None, 3, "", " ", " padded ", "a/b")],
+            *[{"id": "new", "data": announcement(school)} for school in (None, "", "all", "unknown", "unavailable-campus", "pu/path", {})],
+            {"id": "new", "data": {**announcement("pu"), "visibility": "unlisted"}},
+            {"id": "new", "data": {**announcement("pu"), "visibility": True}},
+            {"id": "new", "data": {"schoolId": "pu", "body": {"private": "secret"}}},
+            {"id": "new", "data": {"schoolId": "pu", "title": True}},
+            {"id": "new", "data": {"schoolId": "unknown", "visibility": "private"}},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            for bad in invalid:
+                with self.subTest(bad=bad):
+                    trusted = write_snapshot(folder, "announcements", snapshot("announcements", [good, bad]))
+                    self.assertEqual(sync.sync_from_json_dump(
+                        folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+                    ), {"announcements": -1})
+                    self._assert_snapshot_preserved()
+
+    def test_broken_json_duplicate_keys_and_nonfinite_values_preserve_index(self):
+        sync = self._fake_snapshot_index()
+        valid = json.dumps(snapshot("announcements", [
+            {"id": "new", "data": announcement("pu")},
+        ])).encode()
+        invalid = [
+            valid[:-1], b"\xff", b"null", b"[" * 10000 + b"0" + b"]" * 10000,
+            valid.replace(b'"complete": true', b'"complete": false, "complete": true'),
+            valid.replace(b'"schoolId": "pu"', b'"schoolId": "unknown", "schoolId": "pu"'),
+            *[valid.replace(b'"schoolId": "pu"', b'"schoolId": "pu", "body": ' + value)
+              for value in (b"NaN", b"Infinity", b"-Infinity", b"1e309")],
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            for raw in invalid:
+                with self.subTest(raw=raw):
+                    (Path(folder) / "announcements.json").write_bytes(raw)
+                    self.assertEqual(sync.sync_from_json_dump(
+                        folder, collections={"announcements"},
+                        trusted_snapshot_sha256={"announcements": hashlib.sha256(raw).hexdigest()},
+                    ), {"announcements": -1})
+                    self._assert_snapshot_preserved()
+
+    def test_all_requested_files_are_preflighted_before_any_source_changes(self):
+        sync = self._fake_snapshot_index()
+        wanted = {"announcements", "events"}
+        with tempfile.TemporaryDirectory() as folder:
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", []))
+            for fault in ("missing approval", "missing file", "partial scope", "unknown collection"):
+                with self.subTest(fault=fault):
+                    approvals = dict(trusted)
+                    requested = set(wanted)
+                    if fault == "missing file":
+                        approvals["events"] = "0" * 64
+                    elif fault == "partial scope":
+                        approvals.update(write_snapshot(folder, "events", {
+                            **snapshot("events", []), "scope": "pu",
+                        }))
+                    elif fault == "unknown collection":
+                        requested = {"announcements", "users"}
+                        approvals["users"] = "0" * 64
+                    self.assertEqual(sync.sync_from_json_dump(
+                        folder, collections=requested, trusted_snapshot_sha256=approvals,
+                    ), {name: -1 for name in requested})
+                    self._assert_snapshot_preserved()
+            missing_dir = Path(folder) / "absent"
+            self.assertEqual(sync.sync_from_json_dump(
+                missing_dir, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+            ), {"announcements": -1})
+            self._assert_snapshot_preserved()
+
+    def test_trusted_full_snapshot_preserves_public_projection_ids_and_other_sources(self):
+        sync = self._fake_snapshot_index()
+        rows = [
+            {"id": "pu-source-id", "data": {
+                **announcement("tw-pu", "PU current"), "uid": "private uid", "body": {"secret": "private body"},
+            }},
+            {"id": "nchu-source-id", "data": {"schoolId": "tw-nchu", "title": "NCHU current"}},
+            {"id": "private-source", "data": {**announcement("pu", "Private"), "visibility": "private"}},
+            {"id": "school-source", "data": {**announcement("nchu", "School only"), "visibility": "school"}},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", rows))
+            self.assertEqual(sync.sync_from_json_dump(
+                folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+            ), {"announcements": 2})
+        expected = {key: value for key, value in self.snapshot_before.items()
+                    if value["source"] != "firestore:announcements"}
+        expected.update({
+            "firestore:announcements/pu/pu-source-id": {
+                "text": "[announcements]\ntitle: PU current", "source": "firestore:announcements",
+                "metadata": {"schoolId": "pu", "visibility": "public", "firestore_id": "pu-source-id"},
+            },
+            "firestore:announcements/nchu/nchu-source-id": {
+                "text": "[announcements]\ntitle: NCHU current", "source": "firestore:announcements",
+                "metadata": {"schoolId": "nchu", "visibility": "public", "firestore_id": "nchu-source-id"},
+            },
+        })
+        self.assertEqual(self.snapshot_store, expected)
+        self.assertEqual([call[0] for call in self.snapshot_calls], ["read", "write", "delete"])
+
+    def test_trusted_empty_snapshot_can_clear_only_its_declared_source(self):
+        sync = self._fake_snapshot_index()
+        with tempfile.TemporaryDirectory() as folder:
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", []))
+            self.assertEqual(sync.sync_from_json_dump(
+                folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+            ), {"announcements": 0})
+        self.assertEqual(self.snapshot_store, {
+            key: value for key, value in self.snapshot_before.items()
+            if value["source"] != "firestore:announcements"
+        })
+        self.assertEqual([call[0] for call in self.snapshot_calls], ["read", "delete"])
+
+    def test_trusted_snapshot_upsert_failure_does_not_delete_old_rows(self):
+        sync = self._fake_snapshot_index()
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+            sync, "index_written_ids", side_effect=RuntimeError("synthetic upsert failure"),
+        ):
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", [
+                {"id": "new", "data": announcement("pu")},
+            ]))
+            self.assertEqual(sync.sync_from_json_dump(
+                folder, collections={"announcements"}, trusted_snapshot_sha256=trusted,
+            ), {"announcements": -1})
+        self.assertEqual(self.snapshot_store, self.snapshot_before)
+        self.assertEqual(self.snapshot_calls, [("read", "firestore:announcements")])
+
+    def test_migration_default_preserves_index_and_explicit_trust_rebuilds_failed_source(self):
+        sync = self._fake_snapshot_index()
+        live = {name: (-1 if name == "announcements" else 0) for name in sync.PUBLIC_FIELDS}
+        with tempfile.TemporaryDirectory() as folder, patch.object(sync, "sync_all", return_value=live):
+            trusted = write_snapshot(folder, "announcements", snapshot("announcements", [
+                {"id": "pu-new", "data": announcement("pu")},
+                {"id": "nchu-new", "data": announcement("nchu")},
+            ]))
+            result = sync.migrate_legacy_firestore_index(db=Mock(), dump_dir=folder)
+            self.assertEqual(result["json"], {"announcements": -1})
+            self.assertEqual(result["remaining"], 1)
+            self.assertFalse(result["rebuilt"])
+            self.assertTrue(result["retryable"])
+            self._assert_snapshot_preserved()
+            result = sync.migrate_legacy_firestore_index(
+                db=Mock(), dump_dir=folder, trusted_snapshot_sha256=trusted,
+            )
+        self.assertEqual(result["json"], {"announcements": 2})
+        self.assertEqual(result["remaining"], 0)
+        self.assertTrue(result["rebuilt"])
+        self.assertFalse(result["retryable"])
+        self.assertEqual(self.snapshot_store["old-event"], self.snapshot_before["old-event"])
+        self.assertEqual(self.snapshot_store["app-help"], self.snapshot_before["app-help"])
+        self.assertEqual({row["metadata"]["schoolId"] for row in self.snapshot_store.values()
+                          if row["source"] == "firestore:announcements"}, {"pu", "nchu"})
