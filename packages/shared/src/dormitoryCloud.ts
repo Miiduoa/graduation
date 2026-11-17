@@ -67,6 +67,11 @@ export function dormCloudTime(value: unknown): number | null {
   }
   return null;
 }
+export function isDormPostalParcel(row: Record<string, unknown>): boolean {
+  return /郵局|掛號|收發室|中華郵政|post\s*office|registered\s*mail|chunghwa/i.test(
+    text(row.location) + ' ' + text(row.courier || row.carrier),
+  );
+}
 export function projectDormParcel(id: string, row: Record<string, unknown>): DormCloudParcel {
   const location = text(row.location);
   const courier = text(row.courier || row.carrier);
@@ -83,9 +88,7 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
       : row.status === 'returned'
         ? 'returned'
         : 'waiting',
-    postal: /郵局|掛號|收發室|中華郵政|post\s*office|registered\s*mail|chunghwa/i.test(
-      location + ' ' + courier,
-    ),
+    postal: isDormPostalParcel(row),
   };
 }
 export function projectDormRepair(id: string, row: Record<string, unknown>): DormCloudRepair {

@@ -1,4 +1,4 @@
-import { projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
+import { isDormPostalParcel, projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import {
@@ -422,7 +422,9 @@ export function DormWorkflow({
               ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
               : '公告已發布，推播尚未送出。'
             : data.action === 'registerPackage'
-              ? '已登錄，學生開啟 nuni 宿舍頁即可看到。'
+              ? isDormPostalParcel(data)
+                ? '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'
+                : '已登錄，學生開啟 nuni 宿舍頁即可看到。'
               : '紀錄已更新。',
       );
       await refresh();

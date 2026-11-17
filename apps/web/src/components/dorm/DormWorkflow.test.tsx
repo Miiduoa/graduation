@@ -370,7 +370,13 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
   polling.mockRestore();
 });
 
-it('selects a masked resident using the opaque handle for package registration', async () => {
+it.each([
+  ['宿舍管理室', '已登錄，學生開啟 nuni 宿舍頁即可看到。'],
+  ['校內郵局', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['掛號領取處', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['第一宿舍收發室', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['Post Office', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+])('registers the selected masked resident and reports parcel visibility at %s', async (location, notice) => {
   api.config.packages = true;
   api.rows.residents = [
     {
@@ -386,13 +392,14 @@ it('selects a masked resident using the opaque handle for package registration',
     target: { value: '456' },
   });
   fireEvent.click(await screen.findByText('***456 合成同學 A 101'));
+  fireEvent.change(screen.getByLabelText('領取地點'), { target: { value: location } });
   fireEvent.click(screen.getByText('登錄包裹'));
   await waitFor(() =>
     expect(api.call).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_synthetic_resident' }),
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_synthetic_resident', location }),
     ),
   );
-  expect(await screen.findByText('已登錄，學生開啟 nuni 宿舍頁即可看到。')).toBeTruthy();
+  expect(await screen.findByText(notice)).toBeTruthy();
 });
 
 it('resolves ticket photos through the authorized backend only on request', async () => {

@@ -346,7 +346,13 @@ test('mobile resolves repair photos through the authorized backend', async () =>
   expect((await view.findAllByLabelText('報修照片 1')).length).toBeGreaterThan(0);
 });
 
-test('mobile sends the selected opaque resident handle with masked display', async () => {
+test.each([
+  ['宿舍管理室', '已登錄，學生開啟 nuni 宿舍頁即可看到。'],
+  ['校內郵局', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['掛號領取處', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['第一宿舍收發室', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['Post Office', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+])('registers the selected masked resident and reports parcel visibility at %s', async (location, notice) => {
   mockCall.mockImplementation(async (data) =>
     data.action === 'config'
       ? { enabled: true, packages: true }
@@ -368,13 +374,14 @@ test('mobile sends the selected opaque resident handle with masked display', asy
   const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
   fireEvent.changeText(await view.findByLabelText('學號末三碼或姓名（本棟住宿生）'), '456');
   fireEvent.press(await view.findByText('***456 合成同學 A 101'));
+  fireEvent.changeText(view.getByLabelText('領取地點'), location);
   fireEvent.press(view.getByText('登錄包裹'));
   await waitFor(() =>
     expect(mockCall).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_resident' }),
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_resident', location }),
     ),
   );
-  expect(await view.findByText('已登錄，學生開啟 nuni 宿舍頁即可看到。')).toBeTruthy();
+  expect(await view.findByText(notice)).toBeTruthy();
 });
 
 it('完整學號查詢與零筆核銷提示', async () => {
