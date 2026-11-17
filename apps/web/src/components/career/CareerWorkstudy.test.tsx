@@ -525,9 +525,15 @@ function pendingExecution(service: WorkstudyService) {
   let resolve!: () => void;
   let reject!: (error: Error) => void;
   vi.mocked(service.execute).mockImplementationOnce(
-    () =>
+    (command) =>
       new Promise((done, fail) => {
-        resolve = () => done({ id: application.id });
+        resolve = () =>
+          done({
+            id:
+              command.action === 'save'
+                ? command.opportunity.id || 'created-opening'
+                : application.id,
+          });
         reject = fail;
       }),
   );
@@ -571,6 +577,19 @@ test.each(['title', 'slots', 'deadline', 'unchanged', 'rejected', 'rejected-unch
       expect(view.getByRole('button', { name: '儲存機會' })).toBeTruthy();
     }
     if (rejected) expect(view.getByText('儲存失敗，請重試。')).toBeTruthy();
+    if (edited || rejected) {
+      fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+      expect(service.execute).toHaveBeenLastCalledWith({
+        action: 'save',
+        opportunity: {
+          ...opportunity,
+          title: edited && change !== 'slots' && change !== 'deadline' ? newer : '送出的標題',
+          revision: rejected ? opportunity.revision : opportunity.revision + 1,
+          ...(change === 'slots' ? { slots: [{ day: 4, start: '13:00', end: '15:00' }] } : {}),
+          ...(change === 'deadline' ? { deadline: '2099-02-01T04:00:00.000Z' } : {}),
+        },
+      });
+    }
   },
 );
 
@@ -684,5 +703,94 @@ test.each(['apply', 'withdraw', 'sources'] as const)(
     await act(async () => pending.resolve());
     expect((view.getByLabelText('標題') as HTMLInputElement).value).toBe('保留中的機會草稿');
     if (action === 'apply') expect(view.queryByLabelText('聯絡方式')).toBeNull();
+  },
+);
+
+test.each([false, true])(
+  'new published draft keeps its saved id even if refresh fails: %s',
+  async (refreshFails) => {
+    const { view, service, data } = setup('staff');
+    fireEvent.click(await view.findByRole('button', { name: '新增機會' }));
+    for (const [label, value] of [
+      ['標題', '新增測試工讀'],
+      ['單位', opportunity.unit],
+      ['時薪或待遇', opportunity.pay],
+      ['校方公告網址', opportunity.sourceUrl],
+      ['權益公告標題', opportunity.rightsTitle],
+      ['權益公告網址', opportunity.rightsUrl],
+      ['權益公告內容', opportunity.rightsText],
+    ]) {
+      fireEvent.change(view.getByRole('textbox', { name: label, exact: true }), {
+        target: { value },
+      });
+    }
+    fireEvent.change(view.getByLabelText(/每週時段/), { target: { value: '1 08:30 10:00' } });
+    fireEvent.change(view.getByLabelText(/截止時間（/), { target: { value: '2099-12-01 17:00' } });
+    fireEvent.click(view.getByRole('checkbox', { name: '上架' }));
+    const pending = pendingExecution(service);
+    fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+    const first = vi.mocked(service.execute).mock.calls[0][0];
+    if (first.action !== 'save') throw new Error('Expected a save command');
+    expect(first.opportunity).toEqual(
+      expect.objectContaining({ id: '', revision: 0, published: true }),
+    );
+    data.opportunities = [{ ...first.opportunity, id: 'created-opening', revision: 1 }];
+    fireEvent.change(view.getByLabelText('標題'), { target: { value: '新增後繼續編輯的標題' } });
+    if (refreshFails)
+      vi.mocked(service.load).mockRejectedValueOnce(new Error('讀取失敗，請重試。'));
+    await act(async () => pending.resolve());
+    expect((view.getByLabelText('標題') as HTMLInputElement).value).toBe('新增後繼續編輯的標題');
+    vi.mocked(service.execute).mockImplementationOnce(async (command) => {
+      if (command.action !== 'save') throw new Error('Expected a save command');
+      const existing = data.opportunities.find((o) => o.id === command.opportunity.id);
+      expect(existing?.revision).toBe(command.opportunity.revision);
+      data.opportunities = [{ ...command.opportunity, revision: command.opportunity.revision + 1 }];
+      return { id: command.opportunity.id };
+    });
+    fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+    await waitFor(() => expect(view.queryByLabelText('標題')).toBeNull());
+    expect(service.execute).toHaveBeenLastCalledWith({
+      action: 'save',
+      opportunity: {
+        ...first.opportunity,
+        id: 'created-opening',
+        revision: 1,
+        title: '新增後繼續編輯的標題',
+      },
+    });
+    expect(data.opportunities).toHaveLength(1);
+    expect(data.opportunities[0].revision).toBe(2);
+  },
+);
+
+test.each(['same', 'other', 'new'])(
+  'save response does not change a switched draft: %s',
+  async (target) => {
+    const { view, service, data } = setup('staff');
+    data.opportunities.push({
+      ...opportunity,
+      id: 'other-opening',
+      title: '另一筆測試工讀',
+      revision: 7,
+    });
+    fireEvent.click(await view.findByRole('button', { name: '編輯測試用工讀' }));
+    const pending = pendingExecution(service);
+    fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+    const label =
+      target === 'same' ? '編輯測試用工讀' : target === 'other' ? '編輯另一筆測試工讀' : '新增機會';
+    fireEvent.click(view.getByRole('button', { name: label }));
+    await act(async () => pending.resolve());
+    expect((view.getByLabelText('標題') as HTMLInputElement).value).toBe(
+      target === 'same' ? opportunity.title : target === 'other' ? '另一筆測試工讀' : '',
+    );
+    fireEvent.change(view.getByLabelText(/截止時間（/), { target: { value: '2099-12-01 17:00' } });
+    fireEvent.click(view.getByRole('button', { name: '儲存機會' }));
+    expect(service.execute).toHaveBeenLastCalledWith({
+      action: 'save',
+      opportunity: expect.objectContaining({
+        id: target === 'same' ? opportunity.id : target === 'other' ? 'other-opening' : '',
+        revision: target === 'same' ? opportunity.revision : target === 'other' ? 7 : 0,
+      }),
+    });
   },
 );
