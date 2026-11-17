@@ -932,7 +932,9 @@ it.each([
   { status: 429, kind: 'delay-seconds', header: '600', minutes: 10 },
   { status: 503, kind: 'HTTP-date', header: null, minutes: 10 },
   { status: 429, kind: 'zero-padded delay-seconds', header: '00000600', minutes: 10 },
+  { status: 429, kind: 'more than 64 leading zeroes', header: '0'.repeat(80) + '600', minutes: 10 },
   { status: 503, kind: 'long delay-seconds capped to 24h', header: '1000000', minutes: 1440 },
+  { status: 429, kind: 'more than 64 positive digits capped to 24h', header: '9'.repeat(80), minutes: 1440 },
 ])('does not repeatedly retry a rate-limited OSM source ($status, $kind)', async ({ status, kind, header, minutes }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   // RFC 9110 permits leading zeroes and arbitrarily long digit strings.
