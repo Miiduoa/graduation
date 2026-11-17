@@ -1033,7 +1033,13 @@ it('defers an OSM request opened in a hidden mobile tab until one foreground res
   // A spurious pageshow while still hidden must not touch public Overpass.
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).not.toHaveBeenCalled();
-  expect(within(dialog).getByText(/目前位於背景分頁/)).toBeTruthy();
+  // WebGL and OSM each explain their independent background wait; an
+  // unscoped text query would be ambiguous despite correct visible UI.
+  expect(deferred.isConnected).toBe(true);
+  expect(deferred.getAttribute('role')).toBe('status');
+  expect(deferred.textContent).toContain('目前位於背景分頁');
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(scene.create).not.toHaveBeenCalled();
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   fireEvent(document, new Event('visibilitychange'));
   fireEvent(window, new Event('pageshow'));
