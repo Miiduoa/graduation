@@ -202,6 +202,8 @@ function Workspace({
   const [draft, setDraft] = useState<CareerOpportunity | null>(null);
   const [slotsText, setSlotsText] = useState('');
   const [deadline, setDeadline] = useState('');
+  const opportunityDraft = useRef({ draft, slotsText, deadline });
+  opportunityDraft.current = { draft, slotsText, deadline };
   const [message, setMessage] = useState<Record<string, { value: string; revision: number }>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -301,6 +303,12 @@ function Workspace({
   }, [service, loadCourses]);
   async function execute(command: Exclude<CareerCommand, { action: 'list' }>) {
     if (inFlight.current) return;
+    const submittedDraft = JSON.stringify(opportunityDraft.current);
+    const submittedMessage =
+      command.action === 'review'
+        ? (command.message ??
+          snapshot?.applications.find((a) => a.id === command.applicationId)?.message)
+        : undefined;
     inFlight.current = true;
     setBusy(true);
     setError('');
@@ -313,14 +321,24 @@ function Workspace({
       if (!alive.current) return;
       if (command.action === 'review') {
         setMessage((previous) => {
+          const current = previous[command.applicationId];
+          if (current?.value !== submittedMessage || current?.revision !== command.revision)
+            return previous;
           const next = { ...previous };
           delete next[command.applicationId];
           return next;
         });
       }
-      setSelected(null);
-      setConfirmed(false);
-      setDraft(null);
+      if (command.action === 'apply') {
+        setSelected((current) => (current?.id === command.opportunityId ? null : current));
+        setConfirmed(false);
+      }
+      if (
+        command.action === 'save' &&
+        JSON.stringify(opportunityDraft.current) === submittedDraft
+      ) {
+        setDraft(null);
+      }
       setNotice(
         command.action === 'apply'
           ? '已送出申請，可在「我的申請」查看進度。'
