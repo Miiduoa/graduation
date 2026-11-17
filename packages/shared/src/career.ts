@@ -9,7 +9,11 @@ export type CareerFeed = {
   announcementsUnavailable: boolean;
   jobsUnavailable: boolean;
   supported: boolean;
+  sourceSettingsStale?: boolean;
 };
+export const CAREER_FEED_UNAVAILABLE =
+  '暫時無法讀取整份公開職涯資訊，請重新整理或前往校方職涯網站。';
+export const CAREER_SOURCES_STALE = '來源設定暫時讀不到，目前依最近一次成功讀取的設定顯示資料。';
 export const CAREER_EMPTY = '職產處還沒在這裡上架工讀或實習。';
 export const CAREER_JOBS_UNAVAILABLE = '暫時讀不到台灣就業通的職缺。';
 export const CAREER_LINKS = [

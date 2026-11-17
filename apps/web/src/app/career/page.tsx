@@ -5,7 +5,8 @@ import {
   CAREER_LINKS,
   careerCalendarUrl,
   careerSoon,
-  emptyCareerFeed,
+  CAREER_FEED_UNAVAILABLE,
+  CAREER_SOURCES_STALE,
   fetchCareerFeed,
   type CareerFeed,
 } from '@campus/shared/src/career';
@@ -16,6 +17,7 @@ import styles from './career.module.css';
 import { CareerHost } from '@/components/career/CareerHost';
 function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
   const [feed, setFeed] = useState<CareerFeed | null>(null);
+  const [feedFailed, setFeedFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   useEffect(() => {
@@ -25,7 +27,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
         if (!controller.signal.aborted) setFeed(data);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setFeed(emptyCareerFeed());
+        if (!controller.signal.aborted) setFeedFailed(true);
       });
     return () => controller.abort();
   }, [schoolId, retry]);
@@ -34,7 +36,9 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
       <section className={styles.panel}>
         <h2>接下來</h2>
         <p>職產處、系所與校園徵才的明確日期，最多顯示 5 筆。日期來自標題，詳細時段請回原文確認。</p>
-        {!feed ? (
+        {feedFailed ? (
+          <p role="alert">{CAREER_FEED_UNAVAILABLE}</p>
+        ) : !feed ? (
           <p role="status">正在讀取公開職涯資訊…</p>
         ) : !feed.timeline.length ? (
           <p>目前沒有可確認日期的近期截止日或活動。</p>
@@ -61,12 +65,14 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
         <p className={styles.muted}>
           點選日期列可「加入行事曆」，將開啟 Google 日曆確認；不會自動建立或發送提醒。
         </p>
+        {feed?.sourceSettingsStale && <p role="status">{CAREER_SOURCES_STALE}</p>}
         {feed?.announcementsUnavailable && (
           <p role="status">部分校方公告暫時讀不到，仍可前往官方網站。</p>
         )}
         <button
           onClick={() => {
             setFeed(null);
+            setFeedFailed(false);
             setRetry((v) => v + 1);
           }}
         >
@@ -100,7 +106,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
             ))}
           </ul>
         ) : (
-          <p>目前沒有可顯示的公告。</p>
+          feed && <p>目前沒有可顯示的公告。</p>
         )}
         {official && (
           <p>
