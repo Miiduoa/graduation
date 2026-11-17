@@ -591,13 +591,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     let receivedResponse = false;
     // A freshness deadline may retain a dated snapshot; the seven-day hard
     // source expiry never may.
-    // A once-fresh snapshot also becomes retainable stale geometry when the
-    // local 24-hour soft deadline passes. Its first automatic revalidation
-    // must not hide verified outlines while the seven-day retention holds.
-    const preserveStale = (staleSnapshotRef.current || footprintStale) &&
-      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
-    // Retention may expire during a pending response; never restore that
-    // geometry after the seven-day hard deadline has passed.
+    // Both originally stale snapshots and once-fresh snapshots crossing
+    // the 24-hour soft deadline can stay visible during revalidation.
+    // Their hard retention may end while mobile timers are suspended.
+    const preserveStale = staleSnapshotRef.current;
+    // Never restore expired geometry after a failed or aborted refresh,
+    // even if the browser has not delivered its seven-day deadline timer.
     const canRetainStale = () => preserveStale && footprintExpiresAtRef.current !== null &&
       Date.now() < footprintExpiresAtRef.current;
     // A manual refresh or an already-triggered request supersedes deferral.
