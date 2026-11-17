@@ -730,7 +730,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintRefreshFailed(false);
         setFootprintStatus('ready');
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         requestPending = false;
         if (!active || timedOut) return;
         // Fetch can reject without an HTTP response as TypeError (offline),
