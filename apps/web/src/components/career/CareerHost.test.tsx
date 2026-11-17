@@ -5,7 +5,7 @@ import type { CareerWorkstudyProps } from './CareerWorkstudy';
 import type { InternshipCalendarItem } from '@campus/shared/src/careerInternship';
 import { savePersonalImportBatch } from '@/lib/personalImports';
 const state = vi.hoisted(() => ({
-  user: { uid: 'alice' },
+  user: { uid: 'alice' } as { uid: string } | null,
   events: null as CareerWorkstudyProps['onCareerEvents'] | null,
   calendar: null as null | ((item: InternshipCalendarItem) => Promise<unknown>),
 }));
@@ -120,4 +120,13 @@ it('navigates in the same tab to school event list and both event sources', asyn
     });
     expect(location.href).toBe('/events/event%20%2F1?schoolId=pu&source=' + source);
   }
+});
+
+it('shows an honest sign-in state for guests before querying opportunities', () => {
+  state.user = null;
+  const view = render(<CareerHost schoolId="pu" />);
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
+  expect(view.queryByText(/職產處還沒/)).toBeNull();
+  expect(view.queryByText(/實習工作區/)).toBeNull();
+  state.user = { uid: 'alice' };
 });
