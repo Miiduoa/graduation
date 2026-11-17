@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getDocFromServer, getDocsFromServer } from 'firebase/firestore';
-import { joinByCode, leaveMemberGroup, loadMyGroups } from './groupService';
+import { joinByCode, leaveMemberGroup, loadMyGroups, readMemberGroup } from './groupService';
 
 const runtime = vi.hoisted(() => ({
   user: null as null | { uid: string; getIdToken: () => Promise<string> },
@@ -244,4 +244,22 @@ it('does not send a leave request for the actual group owner', async () => {
   });
   await expect(leaveMemberGroup('alice', 'pu', 'firestore-1', () => true)).rejects.toThrow();
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  [' 週三 18:00 ', '週三 18:00'],
+  ['  ', ''],
+  [undefined, ''],
+  [123, ''],
+])('沿用群組讀取取得管理頁儲存的介紹與社課時間：%j', async (meetingTime, expected) => {
+  seedGroup({
+    type: 'club',
+    description: '新版介紹',
+    clubProfile: { meetingTime },
+  });
+  expect(await readMemberGroup('alice', 'pu', 'firestore-1')).toMatchObject({
+    description: '新版介紹',
+    meetingTime: expected,
+  });
+  expect(getDocFromServer).toHaveBeenCalledTimes(2);
 });
