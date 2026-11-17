@@ -89,6 +89,33 @@ function documentVersion(snapshot: SchoolDataSnapshot): string | undefined {
 
 type CourseRow = { id: number; name: string };
 
+// School feeds can include drafts, hidden items or stale rows from another
+// course. An explicit denial always wins over a positive visibility flag.
+function sourceRowVisible(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = record(value);
+  for (const field of ['is_hidden', 'hidden'] as const) {
+    const flag = row[field];
+    if (flag !== undefined && flag !== false && flag !== 0) return false;
+  }
+  return row.published === undefined || row.published === true || row.published === 1;
+}
+
+function belongsToCourse(row: Record<string, unknown>, course: CourseRow | null): boolean {
+  return course === null || row.course_id === undefined || positiveId(row.course_id) === course.id;
+}
+
+// A hidden entry in either activities feed must not be revived by a visible
+// duplicate from the other feed with the same activity ID.
+function visibleSourceRows(rows: unknown[], allRows: unknown[] = rows): unknown[] {
+  const denied = new Set<number>();
+  for (const raw of allRows) {
+    const id = positiveId(record(raw).id);
+    if (id && !sourceRowVisible(raw)) denied.add(id);
+  }
+  return rows.filter((raw) => sourceRowVisible(raw) && !denied.has(positiveId(record(raw).id) ?? 0));
+}
+
 function publicCourses(input: unknown): CourseRow[] {
   if (!Array.isArray(input) || input.length > 1000) {
     throw new HttpsError('unavailable', 'WOW Class 課程資料不完整，請稍後重試。');
@@ -109,8 +136,8 @@ function publicCourses(input: unknown): CourseRow[] {
 }
 
 function uploadsOf(activity: Record<string, unknown>): Record<string, unknown>[] {
-  if (Array.isArray(activity.uploads)) return activity.uploads.filter((item) => item && typeof item === 'object') as Record<string, unknown>[];
-  if (Array.isArray(activity.attachments)) return activity.attachments.filter((item) => item && typeof item === 'object') as Record<string, unknown>[];
+  if (Array.isArray(activity.uploads)) return activity.uploads.filter((item) => sourceRowVisible(item)) as Record<string, unknown>[];
+  if (Array.isArray(activity.attachments)) return activity.attachments.filter((item) => sourceRowVisible(item)) as Record<string, unknown>[];
   return [];
 }
 
@@ -121,7 +148,7 @@ function parseHomework(
   const row = record(raw);
   const id = positiveId(row.id);
   const title = shortText(row.title || row.name);
-  if (!id || !title) return null;
+  if (!id || !title || !belongsToCourse(row, course) || !sourceRowVisible(row)) return null;
   const data = record(row.data);
   const deadline = isoTime(row.deadline) || isoTime(row.end_time);
   return {
@@ -145,7 +172,7 @@ function parseAnnouncement(
   const row = record(raw);
   const numericId = positiveId(row.id);
   const title = shortText(row.title || row.name);
-  if (!numericId || !title) return null;
+  if (!numericId || !title || !belongsToCourse(row, course) || !sourceRowVisible(row)) return null;
   const content = homeworkDescriptionText(row.content ?? record(row.data).description ?? row.description);
   const publishedAt = isoTime(row.created_at) || isoTime(row.publish_time) || isoTime(record(row.data).publish_time);
   const href = course
@@ -168,7 +195,7 @@ function parseMaterial(raw: unknown, course: CourseRow): LmsMaterialItem | null 
   const id = positiveId(row.id);
   const title = shortText(row.title || row.name);
   const type = shortText(row.type, 40) || 'material';
-  if (!id || !title || !isMaterialActivityType(type)) return null;
+  if (!id || !title || !isMaterialActivityType(type) || !belongsToCourse(row, course) || !sourceRowVisible(row)) return null;
   const files: LmsMaterialFile[] = [];
   for (const upload of uploadsOf(row).slice(0, 30)) {
     const name = shortText(upload.name || upload.filename, 200);
@@ -232,6 +259,7 @@ async function readPagedHomework(
 ): Promise<{ items: LmsHomeworkItem[]; error: LmsCourseError | null }> {
   const seen = new Set<number>();
   const items: LmsHomeworkItem[] = [];
+  let accumulated = 0;
   let total: number | null = null;
   for (let page = 1; page <= HOMEWORK_MAX_PAGES; page += 1) {
     const result = await source.fetchHomeworkPage(cookies, course.id, page, HOMEWORK_PAGE_SIZE);
@@ -249,11 +277,13 @@ async function readPagedHomework(
       parsed.push(item);
     }
     items.push(...parsed);
+    // The school's total includes hidden and out-of-course rows as well.
+    accumulated += rows.length;
     const advance = homeworkPageAdvance({
       page,
       pageSize: HOMEWORK_PAGE_SIZE,
       pageLength: rows.length,
-      accumulated: items.length,
+      accumulated,
       total,
     });
     if (advance === 'complete') return { items, error: null };
@@ -314,13 +344,16 @@ async function loadCourseContents(
   const seenMaterials = new Set<number>();
   // A courseware item may appear in both feeds; keep its first occurrence so
   // the UI never duplicates the same assignment material.
-  const generalActivities = activitiesResult.ok ? activitiesResult.value : [];
-  // The filtered source contributes courseware only. It is not an independent
-  // announcement feed, even if an adapter unexpectedly includes other types.
-  const materialActivities = [
-    ...generalActivities,
+  const allActivities = [
+    ...(activitiesResult.ok ? activitiesResult.value : []),
     ...(coursewareResult.ok ? coursewareResult.value : []),
   ];
+  const generalActivities = visibleSourceRows(
+    activitiesResult.ok ? activitiesResult.value : [], allActivities,
+  );
+  // Only materials come from the filtered feed. A hidden duplicate in either
+  // feed suppresses the activity across both feeds.
+  const materialActivities = visibleSourceRows(allActivities);
   for (const raw of materialActivities) {
     const material = parseMaterial(raw, course);
     if (material && !seenMaterials.has(material.id)) {
