@@ -290,7 +290,9 @@ it('makes a pending subscription a single action and announces its current state
   const pending = deferred<void>();
   mocks.subscribe.mockReturnValue(pending.promise);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  const button = await screen.findByRole('button', { name: /訂閱/ });
+  // The subscribed-only filter is also labeled with 訂閱. Select the action for this board,
+  // not the filter, so the pending-write and aria-state assertions exercise Firestore writes.
+  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
   fireEvent.click(button);
   expect((button as HTMLButtonElement).disabled).toBe(true);
   expect(button.getAttribute('aria-busy')).toBe('true');
@@ -377,7 +379,7 @@ it('reports a failed subscribe, restores the previous state and allows retry', a
   const pending = deferred<void>();
   mocks.subscribe.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(undefined);
   render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  const button = await screen.findByRole('button', { name: /訂閱/ });
+  const button = await screen.findByRole('button', { name: '訂閱科學討論' });
   fireEvent.click(button);
   await act(async () => pending.reject(new Error('offline')));
   expect((button as HTMLButtonElement).disabled).toBe(false);
@@ -420,9 +422,9 @@ it('does not show a stale failure after changing schools while a subscribe is pe
   const pending = deferred<void>();
   mocks.subscribe.mockReturnValue(pending.promise);
   const view = render(<BoardsTab schoolId="pu" schoolSearch="?schoolId=pu" />);
-  fireEvent.click(await screen.findByRole('button', { name: /訂閱/ }));
+  fireEvent.click(await screen.findByRole('button', { name: '訂閱科學討論' }));
   view.rerender(<BoardsTab schoolId="nthu" schoolSearch="?schoolId=nthu" />);
-  const other = await screen.findByRole('button', { name: /訂閱/ });
+  const other = await screen.findByRole('button', { name: '訂閱人文討論' });
   await act(async () => pending.reject(new Error('old school offline')));
   expect(other.getAttribute('aria-pressed')).toBe('false');
   expect(window.alert).not.toHaveBeenCalled();
