@@ -64,6 +64,8 @@ function BoardsContent(props: {
   const subscriptionNotice = [...subscriptionNotices.values()].join(' ');
   // A ref closes the gap between a click and React's next render/disabled update.
   const pendingSubscriptionLock = useRef<Set<string>>(new Set());
+  // Invalidate subscription snapshots begun before or during a local write.
+  const subscriptionWriteRevision = useRef(0);
   // Lifecycle-only signal: do not cancel a Firestore write or report it as cancelled.
   const [subscriptionLifetime] = useState(() => new AbortController());
   useEffect(() => () => subscriptionLifetime.abort(), [subscriptionLifetime]);
@@ -94,12 +96,17 @@ function BoardsContent(props: {
       setSubscribed(new Set());
       return;
     }
+    const readRevision = subscriptionWriteRevision.current;
     const [rows, subs] = await Promise.all([
       listBoards(schoolId, 120),
       user?.uid ? listSubscribedBoardIds(user.uid, schoolId) : Promise.resolve([] as string[]),
     ]);
     setBoards(rows);
-    setSubscribed(new Set(subs));
+    // A list refresh may have read subscriptions before a concurrent subscribe/unsubscribe.
+    // Keep the optimistic (or rolled-back) local result until a later fresh refresh.
+    if (readRevision === subscriptionWriteRevision.current && pendingSubscriptionLock.current.size === 0) {
+      setSubscribed(new Set(subs));
+    }
   }, [schoolId, user]);
 
   const { loading, error, refresh } = useCommunityLoad(
@@ -497,8 +504,11 @@ function BoardsContent(props: {
                           // Synchronous event-time lock: two clicks in one React batch must not double-write.
                           if (pendingSubscriptionLock.current.has(b.id)) return;
                           pendingSubscriptionLock.current.add(b.id);
+                          subscriptionWriteRevision.current += 1;
                           void onToggleSub(b).finally(() => {
                             pendingSubscriptionLock.current.delete(b.id);
+                            // A refresh started during the write must not apply an older server snapshot.
+                            subscriptionWriteRevision.current += 1;
                           });
                         }}
                         disabled={subscriptionPending}
