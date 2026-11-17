@@ -9,7 +9,34 @@ There is currently no production snapshot exporter in this repository. Startup
 calls `migrate_legacy_firestore_index()` without trusted digests: when live sync
 fails, local dumps cannot append, overwrite or delete indexed facts. Existing
 scoped rows stay available, and legacy unscoped rows remain invisible to
-school-filtered retrieval. Migration remains retryable while those rows remain.
+school-filtered retrieval. Migration reports `retryable: true` while those rows remain, but this is a
+status flag, not a scheduled retry. `server.lifespan` invokes migration once when
+RAG starts; there is no Firestore retry loop in this repository. An index with no
+legacy rows returns early from migration and is not refreshed by that helper.
+
+The availability tradeoff is explicit: during an outage, existing scoped facts
+can become stale and previously unscoped facts stay unavailable. This patch does
+not turn an unverified development dump into an offline recovery source. It also
+does not delete the last known scoped index merely to make migration look done.
+
+## Recovery when no trusted exporter exists
+
+After restoring authorized live-source access, an operator can explicitly call
+`migrate_legacy_firestore_index(db=authorized_db)` again for outstanding legacy
+rows (or allow the normal RAG startup attempt on a planned restart). To refresh
+already-scoped sources when no legacy rows remain, use the existing
+`sync_all(db=authorized_db)` API; migration's early return is not a refresh job.
+Both operations use the existing full paginated live reads. These are operational
+instructions, not operations performed by this PR; real source/index access
+requires the usual authorization and a backup/recovery procedure.
+
+If live access cannot be restored, keep the index unchanged until an independently
+reviewed complete export exists. The explicit snapshot API below accepts such an
+artifact; there is no built-in exporter, conversion utility or CLI shortcut that
+can certify a legacy dump. Review `firestore`/`json` per-collection results and
+`remaining`, `rebuilt`, `retryable` after migration; `-1` is failure, and a preserved
+index or `retryable: true` is not proof of refreshed facts. Do not approve a digest
+merely to clear that status.
 
 ## Explicit complete snapshots
 
@@ -98,4 +125,5 @@ At main `d4bc4cbf418eee804842b8834e19c6a28202ce89`, an in-memory fake seeded wit
 
 This demonstrates an isolated failure mode, not an observation of lost production
 data. `tests/test_rag_school_scope.py` covers these cases plus trusted complete
-and empty replacements, malformed inputs, projection, scope and migration retry.
+and empty replacements, malformed inputs, projection, scope and an actual mocked
+live-sync retry after an outage (without granting JSON trust).

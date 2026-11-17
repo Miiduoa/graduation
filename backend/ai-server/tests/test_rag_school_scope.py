@@ -609,3 +609,40 @@ class MigrationSafetyTests(unittest.TestCase):
         self.assertEqual(self.snapshot_store["app-help"], self.snapshot_before["app-help"])
         self.assertEqual({row["metadata"]["schoolId"] for row in self.snapshot_store.values()
                           if row["source"] == "firestore:announcements"}, {"pu", "nchu"})
+
+
+    def test_live_recovery_retries_migration_without_approving_a_dump(self):
+        sync = self._fake_snapshot_index()
+        db = Mock()
+        db.collection.return_value.limit.return_value.stream.side_effect = ConnectionError("offline fixture")
+        with tempfile.TemporaryDirectory() as folder:
+            # No trusted producer: even an existing dump must not change the store.
+            (Path(folder) / "announcements.json").write_text("[]", encoding="utf-8")
+            failed = sync.migrate_legacy_firestore_index(db=db, dump_dir=folder)
+            self.assertEqual(failed["remaining"], 1)
+            self.assertFalse(failed["rebuilt"])
+            self.assertTrue(failed["retryable"])
+            self.assertEqual(failed["json"], {name: -1 for name in sync.PUBLIC_FIELDS})
+            self._assert_snapshot_preserved()
+
+            def recovered_collection(name):
+                rows = [
+                    Mock(id="pu-live", to_dict=Mock(return_value=announcement("pu", "PU recovered"))),
+                    Mock(id="nchu-live", to_dict=Mock(return_value=announcement("nchu", "NCHU recovered"))),
+                ] if name == "announcements" else []
+                query = Mock()
+                query.limit.return_value.stream.return_value = rows
+                return query
+
+            db.collection.side_effect = recovered_collection
+            # This second call models an explicit operator retry, not a timer.
+            recovered = sync.migrate_legacy_firestore_index(db=db, dump_dir=folder)
+        self.assertNotIn("json", recovered)
+        self.assertEqual(recovered["firestore"]["announcements"], 2)
+        self.assertEqual(recovered["remaining"], 0)
+        self.assertTrue(recovered["rebuilt"])
+        self.assertFalse(recovered["retryable"])
+        self.assertEqual(self.snapshot_store["app-help"], self.snapshot_before["app-help"])
+        self.assertEqual({row["metadata"]["schoolId"] for row in self.snapshot_store.values()
+                          if row["source"] == "firestore:announcements"}, {"pu", "nchu"})
+        self.assertNotIn("old-legacy", self.snapshot_store)
