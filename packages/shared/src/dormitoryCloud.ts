@@ -35,7 +35,7 @@ export type DormCloudState = {
   repairsState: 'loading' | 'ready' | 'error' | 'guest';
   identity: { studentId: string; name: string } | null;
 };
-export const DORM_PACKAGES_EMPTY = '這所學校的宿舍還沒用 nuni 登錄包裹。';
+export const DORM_PACKAGES_EMPTY = '目前沒有登錄給你的包裹。';
 export function emptyDormCloud(guest = false): DormCloudState {
   return {
     packages: [],
@@ -135,7 +135,7 @@ export function dormParcelReturnNotice(parcel: DormCloudParcel, now = Date.now()
   if (parcel.status !== 'waiting' || parcel.arrivedAt === null) return '';
   const day = (time: number) => Math.floor((time + 8 * 3600000) / 86400000);
   const remainingDays = day(parcel.arrivedAt + 3 * 86400000) - day(now);
-  if (remainingDays === 1) return '明天起退件';
+  if (remainingDays === 1) return '預估明天起可能退件（依到件日推算，以宿舍公告為準）';
   if (remainingDays <= 0) return '已到件多日，請確認領取期限';
   return '';
 }

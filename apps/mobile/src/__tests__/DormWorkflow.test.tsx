@@ -126,15 +126,15 @@ test('changing parcel search clears the previously selected resident', async () 
     (node) =>
       typeof node.type === 'function' &&
       node.type.name === 'Btn' &&
-      node.props.label === '登錄並通知學生',
+      node.props.label === '登錄包裹',
   )[0].props.onPress;
   fireEvent.changeText(search, '456');
   // A queued press from the previous render must also reject the old student.
   act(() => staleSubmit());
   expect(
-    view.getByRole('button', { name: '登錄並通知學生' }).props.accessibilityState.disabled,
+    view.getByRole('button', { name: '登錄包裹' }).props.accessibilityState.disabled,
   ).toBe(true);
-  fireEvent.press(view.getByText('登錄並通知學生'));
+  fireEvent.press(view.getByText('登錄包裹'));
   expect(mockCall.mock.calls.some(([d]) => d.action === 'registerPackage')).toBe(false);
 });
 
@@ -368,12 +368,13 @@ test('mobile sends the selected opaque resident handle with masked display', asy
   const view = render(<DormWorkflow schoolId="pu" uid="staff" initialStaff />);
   fireEvent.changeText(await view.findByLabelText('學號末三碼或姓名（本棟住宿生）'), '456');
   fireEvent.press(await view.findByText('***456 合成同學 A 101'));
-  fireEvent.press(view.getByText('登錄並通知學生'));
+  fireEvent.press(view.getByText('登錄包裹'));
   await waitFor(() =>
     expect(mockCall).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'registerPackage', studentId: 'dw_resident' }),
     ),
   );
+  expect(await view.findByText('已登錄，學生開啟 nuni 宿舍頁即可看到。')).toBeTruthy();
 });
 
 it('完整學號查詢與零筆核銷提示', async () => {
@@ -397,13 +398,13 @@ it('完整學號查詢與零筆核銷提示', async () => {
   );
   fireEvent.press(view.getByText('以完整學號查詢'));
   fireEvent.press(await view.findByText('***456 查詢同學 A 101'));
-  fireEvent.press(view.getByText('登錄並通知學生'));
+  fireEvent.press(view.getByText('登錄包裹'));
   await waitFor(() =>
     expect(mockCall).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'registerPackage', studentId: 'dw_found' }),
     ),
   );
-  await view.findByText('紀錄已更新。');
+  await view.findByText('已登錄，學生開啟 nuni 宿舍頁即可看到。');
   fireEvent.changeText(view.getByLabelText('核對學生領取碼上的學號'), 'wrong');
   fireEvent.press(view.getByText('已核對姓名與學號・全部核銷'));
   expect(await view.findByText('未核銷任何包裹，跳過 1 件。')).toBeTruthy();
@@ -436,3 +437,44 @@ test.each([0, 1])(
     ).toBeTruthy();
   },
 );
+
+test.each([false, true])('設定查詢失敗可重試並重新開啟服務（submitOnly=%s）', async (submitOnly) => {
+  mockCall.mockRejectedValueOnce(new Error('offline'));
+  const view = render(<DormWorkflow schoolId="pu" uid="student" submitOnly={submitOnly} draft={{ title: '燈壞了', description: '不亮', category: 'electric', location: '浴室' }} />);
+  await view.findByText('宿舍服務暫時無法使用，請稍後再試。');
+  fireEvent.press(view.getByText('重試'));
+  expect(await view.findByText('送給宿舍輔導員')).toBeTruthy();
+  expect(mockCall.mock.calls.filter(([data]) => data.action === 'config')).toHaveLength(2);
+});
+
+test('工單區分載入、失敗、重試與空白結果', async () => {
+  let rejectRows!: (reason: Error) => void;
+  mockCall.mockImplementation(async (data) => data.action === 'config'
+    ? { enabled: true, repairs: false, packages: false }
+    : new Promise((_, reject) => { rejectRows = reject; }));
+  const view = render(<DormWorkflow schoolId="pu" uid="student" />);
+  expect(await view.findByText('正在讀取工單…')).toBeTruthy();
+  expect(view.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+  await act(async () => rejectRows(new Error('offline')));
+  expect(await view.findByText('工單讀取失敗，請重試。')).toBeTruthy();
+  expect(view.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+  mockCall.mockResolvedValue({ repairs: [], leaves: [] });
+  fireEvent.press(view.getByText('重試'));
+  expect(await view.findByText('目前沒有送給輔導員的工單。')).toBeTruthy();
+  expect(view.queryByText('工單讀取失敗，請重試。')).toBeNull();
+  expect(view.queryByText('讀取失敗，請重試。')).toBeNull();
+});
+
+test('外宿卡說明使用校方名冊且不送出本機棟別與房間', async () => {
+  const view = render(<DormWorkflow schoolId="pu" uid="student" building="本機棟別" room="999" />);
+  expect(await view.findByText('棟別與寢室依校方住宿名冊帶入')).toBeTruthy();
+  expect(view.queryByText('外宿棟別')).toBeNull();
+  expect(view.queryByText('外宿房間')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('外宿日期 YYYY-MM-DD'), '2099-01-01');
+  fireEvent.changeText(view.getByLabelText('外宿原因'), '返家');
+  fireEvent.press(view.getByText('送給輔導員核可'));
+  await waitFor(() => expect(mockCall).toHaveBeenCalledWith(expect.objectContaining({ action: 'requestLeave', date: '2099-01-01', reason: '返家' })));
+  const payload = mockCall.mock.calls.find(([data]) => data.action === 'requestLeave')![0];
+  expect(payload).not.toHaveProperty('building');
+  expect(payload).not.toHaveProperty('room');
+});
