@@ -1541,3 +1541,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 裝置端模型可能把複習題的參考回答標為 `Answer key: SQL`、`**Answer Key**：SQL`，或放入 Markdown 表格的 `Answer Key`／`Ans.` 欄位。舊的答案洩漏檢查不辨識這些常見英文答案鍵標記，學生可能在作答前直接看到參考答案。這次只擴充**新生成複習題的暫存比對**，涵蓋同一行、獨立答案標題與表格欄位；不修改教材原文、顯示的題目或已備份資料。
 - 新增 6 組必須拒收、3 組必須保留的模擬 Worker 回歸，包含 CR-only、Markdown 強調語法以及 SQLServer／SQL 等部分相符但答案不同的情境。既有答案比較仍要求實際值相符，不推論語義正確，也不將單元測試視為真實模型品質。
 - 無新增套件、付費模型、外傳私人教材或更動 v1/v2 閱讀進度與 v1 練習 checkpoint 格式。CI／CodeQL／App 5504170 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同教材同題同機比較須依本次新 SHA 另外驗收；PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-17：修正 Answer Key 標題二次正規化造成的漏檢
+
+- 根據 `32cb4568321dc08396132b089f25e6f885c468ab` 的 Web Tests job `133917350846` 實際日誌，`studyTutorRuntime.test.ts` 的 `Markdown answer key heading` 單一案例失敗（16,402 項通過、1 項失敗）。`### Answer Key` 先轉成 `answer key：`，後續「無標點獨立答案行」規則又把前綴 `answer` 錯改成 `answer： key：`，讓模型直接印出 SQL 的答案鍵通過驗證。
+- 本輪在**新產生的複習題比對副本**防止對 `Answer Key` 的 `Answer` 前綴二次重寫，保留真正獨立 `Answer`、`Ans.`、中文標籤的既有規則。新增三個應拒收的 Markdown／純文字 `Answer Key` 標題與兩個不同答案的反例；保留原始教材、題目顯示及 v1/v2 閱讀和 v1 練習 JSON checkpoint，無新套件或私人教材外傳。
+- 本地獨立 JavaScript 正規表示式邊界檢查只證明字串改寫符合預期；完整 Vitest、CI、CodeQL 與 App 5504170 APPROVED 必須以新精確 SHA 重查。iOS／Android／Maestro、WebGPU 中文教學及 Ahaboard 同教材同題同機對照仍待真實驗收，PR 保持 Draft，不合併、不部署。
