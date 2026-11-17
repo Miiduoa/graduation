@@ -2333,6 +2333,25 @@ it('rejects an expired OSM API snapshot while keeping the known place and walkin
 });
 
 
+it('uses current official Providence Hall floor unit names without inventing classroom coordinates', async () => {
+  const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  // Official floor labels must remain usable when live Overpass data fails:
+  // they are not inferred from 3D building heights or fabricated floor plans.
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: false, status: 503, headers: { get: () => null }, body: null,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[zhugu]} selected={zhugu} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(within(dialog).getByRole('heading', { name: '主顧樓' })).toBeTruthy();
+  const floors = within(dialog).getByText(/4 樓：資訊管理學系、人工智慧應用學系/);
+  expect(floors.textContent).toContain('5 樓：資訊工程學系');
+  expect(floors.textContent).toContain('6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）');
+  expect(within(dialog).queryByText(/資訊傳播工程學系/)).toBeNull();
+  expect(within(dialog).getByText(/依校方校史資料室公開的主顧樓樓層單位資訊/).textContent)
+    .toContain('這不是教室座標');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('withdraws filtered-out Providence volumes and counts only buildings in the current map', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
