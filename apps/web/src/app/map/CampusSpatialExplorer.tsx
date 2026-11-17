@@ -57,8 +57,7 @@ async function readBoundedFootprintJson(response: Response): Promise<unknown> {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      total += value.byteLength;
-      if (total > MAX_DECLARED_FOOTPRINT_BYTES) {
+      if (value.byteLength > MAX_DECLARED_FOOTPRINT_BYTES - total) {
         // Reader cancellation is best effort and must not block failure
         // handling if an unusual WebView rejects or throws synchronously.
         try {
