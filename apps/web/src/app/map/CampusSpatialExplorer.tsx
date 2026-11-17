@@ -1031,7 +1031,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     此日期不代表現場查證，節點座標可能另有更新。
                   </p>
                 )}
-                {school === 'pu' && place.id === 'pu-zhugu' && (
+                {school === 'pu' && place.id === 'pu-zhugu' && source !== null && (
                   <div className={styles.officialFloors}>
                     <strong>主顧樓 · 校方公開樓層資訊</strong>
                     <p>4 樓：資訊管理學系、人工智慧應用學系。</p>
@@ -1044,6 +1044,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     </a>
                     <small>依校方校史資料室公開的主顧樓樓層單位資訊整理；單位可能調整，請以校方最新公告為準。這不是教室座標，不代表建築入口或室內動線已查證。</small>
                   </div>
+                )}
+                {school === 'pu' && place.id === 'pu-zhugu' && source === null && (
+                  <p className={styles.pending} role="status">
+                    這筆主顧樓地點尚未與校園已核對資料對上，暫不顯示校方樓層單位，避免把單位誤掛到其他位置。
+                  </p>
                 )}
                 {isProvidencePendingVerification(school, place) && (
                   <p className={styles.pending} role="status">此地點僅有單一資料來源，位置待再次確認。</p>
