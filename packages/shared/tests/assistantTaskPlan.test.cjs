@@ -198,6 +198,10 @@ describe('assistant connected service capabilities', () => {
     assert.deepEqual(getAssistantServiceCapability('map').modes, ['read']);
     assert.deepEqual(getAssistantServiceCapability('map').tools, ['get_campus_map']);
     assert.deepEqual(getAssistantServiceCapability('food').modes, ['read', 'prepare']);
+    assert.deepEqual(getAssistantServiceCapability('merchant').modes, ['read']);
+    assert.deepEqual(getAssistantServiceCapability('merchant').tools, ['get_merchant_overview']);
+    assert.ok(getAssistantServiceCapability('classroom').tools.includes('get_teaching_overview'));
+    assert.deepEqual(getAssistantServiceCapability('teacher').modes, ['handoff']);
     assert.deepEqual(getAssistantServiceCapability('calendar').modes, ['read', 'prepare']);
     assert.deepEqual(getAssistantServiceCapability('school-courses').modes, ['read', 'handoff']);
     assert.deepEqual(getAssistantServiceCapability('school-courses').tools,

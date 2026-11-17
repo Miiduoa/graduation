@@ -248,6 +248,26 @@ it.each([
   expect(window.location.pathname + window.location.search).toBe('/?campus=pu');
 });
 
+it('uses the existing teacher homepage preference only for examples, without adding role authority to requests', async () => {
+  const ask = vi.fn().mockReturnValue(reply('授課概況已整理。'));
+  mockNuniAsk(ask);
+  render(<AssistantEnabledProvider enabled><TodayCampusEntry preferredWorkContext="teacher" /></AssistantEnabledProvider>);
+  expect((await screen.findByLabelText('目前處理的工作') as HTMLSelectElement).value).toBe('teacher');
+  expect(screen.queryByRole('button', { name: '下一堂課在哪裡？' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查我的授課概況' }));
+  expect(ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('授課概況已整理。');
+  expect(ask.mock.calls[0][0]).toMatchObject({ question: '查我的授課概況', schoolId: 'pu', consent: true });
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('role');
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('preferredWorkContext');
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('isTeacher');
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+    '/api/nuni/assistant/capability', '/api/nuni/assistant/ask',
+  ]);
+});
+
 function saveDeviceTimetable(owner = 'platform:session-a') {
   localStorage.setItem(`campus-one-personal-timetable:${owner}:pu`, JSON.stringify({
     schoolId: 'pu', updatedAt: '2026-11-10T10:00:00.000Z', shareWithFriends: false,

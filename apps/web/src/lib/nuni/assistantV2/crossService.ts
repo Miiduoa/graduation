@@ -6,7 +6,7 @@ import {
 } from '@campus/shared/src/assistantTaskPlan';
 import { assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { formatImportedAcademicSummary, type ImportedAcademicSummary } from '@campus/shared/src/importedAcademicSummary';
-import { bounded, clip, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
+import { bounded, clip, isSessionInvalidation, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
 import { directReadAnswer, directReadCourseworkTargets, type DirectRead } from './directRead';
 import { informationAnswer } from './information';
 import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
@@ -17,6 +17,8 @@ import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind }
 import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
 import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
 import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
+import { isRoleWorkspaceTool, parseRoleWorkspaceResult, formatRoleWorkspaceResult,
+  roleWorkspaceTaskStatus, ROLE_WORKSPACE_TIMEOUT_MS } from './roleWorkspaceReads';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult, type CampusMapRead } from './campusMap';
 import type { AssistantCampusEventTarget } from '../../assistantCampusEvent';
 import { publicCampusEventTargets } from './publicCampusSelection';
@@ -28,6 +30,7 @@ import type { CrossServiceOperation, CrossServiceRequest } from './crossServiceR
 type Tools = ReturnType<typeof createTools>;
 /** Server-held identities selected from a verified event reader, keyed by map step. */
 export type EventMapSelections = Readonly<Record<string, PublicEventTarget>>;
+export type MerchantSelections = Readonly<Record<string, import('./roleWorkspaceReads').MerchantTarget>>;
 const record = (value: unknown): Obj => value && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
 const rows = (value: unknown): Obj[] => Array.isArray(value) ? value.map(record) : [];
 const unwrap = (value: unknown): Obj => {
@@ -109,6 +112,8 @@ function nextClassMapSource(value: unknown, read: DirectRead, schoolId: string, 
 
 function failureMessage(error: unknown): string {
   switch ((error as { code?: string })?.code) {
+    case 'PUBLIC_POST_ACTION_SOURCE_UNVERIFIED': return '公開貼文尚無可核對的行程或訂單資料；請直接提供要安排的事項、日期與時間。';
+    case 'CAMPUS_EVENT_SELECTION_REQUIRED': return '公開活動需從清單明確選取並重新核對來源，這一步尚未建立行程。';
     case 'API_BUDGET_EXCEEDED': case 'TASK_BUDGET_EXCEEDED': return '這次查詢額度已用完，已保留其他完成的結果；這一步尚未完成。';
     case 'ASSISTANT_PERMISSION_DENIED': return '這項助理操作的權限尚未開啟，請到設定的助理權限確認。';
     case 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE': return '目前無法確認助理權限，這項操作尚未執行。';
@@ -121,6 +126,8 @@ function failureMessage(error: unknown): string {
 }
 
 function readSummary(operation: CrossServiceOperation, value: unknown, now: number, schoolId: string): string {
+  if (isRoleWorkspaceTool(operation.tool || ''))
+    return formatRoleWorkspaceResult(operation.tool as import('./roleWorkspaceReads').RoleWorkspaceTool, value, schoolId, operation.args);
   if (operation.tool === 'get_public_social')
     return formatPublicSocialRead(parsePublicSocialResult(value, schoolId, operation.args));
   if (operation.tool === 'get_school_info')
@@ -192,7 +199,7 @@ function readPlanCourseworkTargets(
 ): AssistantCourseworkTarget[] {
   // A prepared plan keeps its original confirmation/revision path. A new source
   // button must not quietly replace an existing calendar or food proposal.
-  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'reorder')) return [];
+  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'event' || operation.kind === 'reorder')) return [];
   const work = request.operations.filter(operation => operation.kind === 'read' && operation.tool === 'get_due_work' &&
     (operation.directRead?.kind === 'due-work' || operation.informationRead?.kind === 'work'));
   // The existing pronoun follow-up can select a sole candidate automatically.
@@ -240,6 +247,9 @@ export async function runCrossService(input: {
   availableAfter?: number;
   /** Only verified retry proofs may populate these exact event identities. */
   eventMapSelections?: EventMapSelections;
+  /** Issued from a previous verified merchant read, never selected by model text. */
+  merchantSelections?: MerchantSelections;
+  onMerchantSelection?: (stepId: string, target: import('./roleWorkspaceReads').MerchantTarget) => void;
   /** Captures a selected identity before its map lookup can fail. Never client data. */
   onEventMapSelection?: (stepId: string, target: PublicEventTarget) => void;
 }) {
@@ -272,12 +282,12 @@ export async function runCrossService(input: {
     if (++calls > 16) throw new V2Error(429, 'TASK_BUDGET_EXCEEDED');
     try {
       const result = await bounded(child => tools.withSignal(child, () => tools.call(name, args, question)), signal,
-        name === 'get_public_courses' ? PUBLIC_COURSE_TOOL_TIMEOUT_MS : 4000);
+        name === 'get_public_courses' ? PUBLIC_COURSE_TOOL_TIMEOUT_MS : isRoleWorkspaceTool(name) ? ROLE_WORKSPACE_TIMEOUT_MS : 4000);
       signal.throwIfAborted();
       steps.push({ name, status: result.cached ? 'cached' : 'ok', summary: '已核對此步驟的資料' });
       return result.value;
     } catch (error) {
-      if ((error as { status?: number })?.status === 401 || signal.aborted) throw error;
+      if (isSessionInvalidation(error) || signal.aborted) throw error;
       const code = (error as { code?: string })?.code;
       steps.push({ name, status: 'error', summary: typeof code === 'string' && /^[A-Z_]{1,80}$/.test(code) ? code : 'SOURCE_UNAVAILABLE' });
       throw error;
@@ -288,7 +298,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'merchant', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -322,7 +332,15 @@ export async function runCrossService(input: {
       } else if (operation.kind === 'read') {
         const value = await call(operation.tool!, operation.args);
         results.set(operation.id, value);
-        if (operation.tool === 'get_campus_map') {
+        if (isRoleWorkspaceTool(operation.tool!)) {
+          const target = input.merchantSelections?.[operation.id];
+          const read = parseRoleWorkspaceResult(operation.tool, value, binding.schoolId, operation.args, target);
+          step.status = roleWorkspaceTaskStatus(read);
+          step.summary = formatRoleWorkspaceResult(operation.tool, read, binding.schoolId, operation.args, target);
+          step.href = read.href;
+          if ('selected' in read && read.selected) input.onMerchantSelection?.(operation.id,
+            { tenantId: read.selected.tenantId, locationId: read.selected.locationId });
+        } else if (operation.tool === 'get_campus_map') {
           const read = parseCampusMapResult(value, binding.schoolId, parseCampusMapArguments(operation.args));
           step.status = mapStepStatus(read);
           step.summary = formatCampusMapRead(read);
@@ -434,7 +452,7 @@ export async function runCrossService(input: {
             incomplete ||= partial(value);
             titles.push(...rows(value.materials).map(row => label(row.title)));
           } catch (error) {
-            if ((error as { status?: number })?.status === 401 || signal.aborted) throw error;
+            if (isSessionInvalidation(error) || signal.aborted) throw error;
             incomplete = true;
           }
         }
@@ -476,6 +494,21 @@ export async function runCrossService(input: {
           step.summary = '已找到站點：' + (rows(value.stops).map(row => label(row.name)).join('、') || '請開啟公車頁選擇') + '。尚未取得指定站牌的到站資訊。';
         }
         step.href = assistantServiceHref('bus', binding.schoolId) || undefined;
+      } else if (operation.kind === 'event') {
+        if (operation.eventIssue) {
+          step.summary = operation.eventIssue;
+          continue;
+        }
+        // The complete clause supplies its own title and time. It does not infer
+        // a work action from teacher, store or public-source text.
+        await call('propose_personal_event', operation.args, operation.question);
+        const cards = tools.cards.slice(beforeCards);
+        if (cards.length) step.cardIds = cards.map(card => card.mutationId);
+        step.status = cards.length ? 'ready' : 'blocked';
+        const actual = cards[0]?.args ?? operation.args;
+        step.summary = cards.length
+          ? `已核對 ${actual.date} ${actual.startTime}–${actual.endTime}「${label(actual.title)}」，請確認下方個人行程；目前尚未儲存。`
+          : '已整理指定時段，目前尚未開放新增個人行程，尚未儲存。';
       } else if (operation.kind === 'reorder') {
         await call('reorder_last_food_order', operation.args, operation.question);
         const cards = tools.cards.slice(beforeCards);
@@ -485,7 +518,7 @@ export async function runCrossService(input: {
           : '沒有取得可確認的備餐內容，尚未下單。';
       }
     } catch (error) {
-      if ((error as { status?: number })?.status === 401 || signal.aborted) throw error;
+      if (isSessionInvalidation(error) || signal.aborted) throw error;
       const cards = tools.cards.slice(beforeCards);
       const priorSummary = ['completed', 'partial'].includes(step.status) ? step.summary : '';
       step.status = cards.length || priorSummary ? 'partial' : 'blocked';

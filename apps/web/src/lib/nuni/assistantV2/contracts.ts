@@ -12,6 +12,10 @@ export class V2Error extends Error {
     super(code);
   }
 }
+export function isSessionInvalidation(error: unknown): boolean {
+  const value = error as { status?: number; code?: string } | null;
+  return value?.status === 401 || value?.code === 'SESSION_CHANGED';
+}
 export const fail = (code = 'INVALID_INPUT', status = 422): never => {
   throw new V2Error(status, code);
 };
@@ -224,6 +228,11 @@ export type Adapter = {
   lostFound?(args: import('./lostFound').LostFoundArguments): Promise<unknown>;
   /** Platform public feed for this fixed school; never private school conversations. */
   publicSocial?(args: import('./publicSocial').PublicSocialArguments): Promise<unknown>;
+  /** Fresh reviewed owner-teacher membership; never the student's own submission view. */
+  teachingOverview?(args: import('./teacherWorkspace').TeachingArguments): Promise<unknown>;
+  /** Merchant-authorized locations in this fixed school; never customer order history. */
+  merchantOverview?(args: import('./merchantWorkspace').MerchantArguments,
+    expectedTarget?: { tenantId: string; locationId: string }): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,

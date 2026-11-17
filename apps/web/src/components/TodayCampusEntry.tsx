@@ -20,6 +20,7 @@ import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import styles from './TodayCampusEntry.module.css';
+import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -30,7 +31,9 @@ const SchoolConversation = lazy(async () => ({
 
 type Account = { kind: 'nuni'; context: string; accountId: string } | { kind: 'school'; uid: string; localOwner: string };
 
-function TodayConversation({ account, schoolId, cloudEnabled }: { account: Account; schoolId: string; cloudEnabled: boolean }) {
+function TodayConversation({ account, schoolId, cloudEnabled, preferredWorkContext }: {
+  account: Account; schoolId: string; cloudEnabled: boolean; preferredWorkContext?: AssistantWorkContext;
+}) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
   const canAsk = account.kind === 'school' ? areFunctionsConfigured() : !cloudEnabled || nuniFreeform;
@@ -74,6 +77,7 @@ function TodayConversation({ account, schoolId, cloudEnabled }: { account: Accou
         <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
           {account.kind === 'nuni' ? (
             <NuniConversation
+              preferredWorkContext={preferredWorkContext}
               context={account.context}
               accountId={account.accountId}
               schoolId={schoolId}
@@ -98,7 +102,7 @@ function TodayConversation({ account, schoolId, cloudEnabled }: { account: Accou
   );
 }
 
-export function TodayCampusEntry() {
+export function TodayCampusEntry({ preferredWorkContext }: { preferredWorkContext?: AssistantWorkContext } = {}) {
   useLayoutEffect(() => {
     // A client-side visit keeps the previous document's microphone policy.
     // Load Today's headers before the first draft, only for a blocked soft navigation.
@@ -155,6 +159,7 @@ export function TodayCampusEntry() {
   }
   return (
     <TodayConversation
+      preferredWorkContext={preferredWorkContext}
       key={JSON.stringify([
         uid,
         session?.context,
@@ -176,9 +181,11 @@ export type TodayVoiceHandle = { openVoice(): void };
 export function TodayAssistantDisclosure({
   ref,
   onOpenChange,
+  preferredWorkContext,
 }: {
   ref: Ref<TodayVoiceHandle>;
   onOpenChange: (open: boolean) => void;
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const disclosure = useRef<HTMLDetailsElement>(null);
 
@@ -230,7 +237,7 @@ export function TodayAssistantDisclosure({
         <span className={styles.triggerHint}>打字或語音詢問</span>
       </summary>
       <div className={styles.body}>
-        <TodayCampusEntry />
+        <TodayCampusEntry preferredWorkContext={preferredWorkContext} />
       </div>
     </details>
   );

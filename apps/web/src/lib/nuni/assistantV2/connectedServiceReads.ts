@@ -2,16 +2,19 @@ import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalend
 import { canonical, type Obj } from './contracts';
 import { parsePublicSocialArguments, parsePublicSocialRead } from './publicSocial';
 import { parseSchoolInfoArguments, parseSchoolInfoRead } from './schoolInfo';
+import { roleWorkspaceRead } from './roleWorkspaceReads';
 
 export type ConnectedServiceRead = {
-  tool: 'get_public_social' | 'get_school_info';
+  tool: 'get_public_social' | 'get_school_info' | 'get_teaching_overview' | 'get_merchant_overview';
   args: Obj;
-  serviceId: 'public-social' | 'school-info';
+  serviceId: 'public-social' | 'school-info' | 'classroom' | 'merchant';
   label: string;
 };
 
 export function connectedServiceRead(question: string): ConnectedServiceRead | null {
   const clause = question.trim().replace(/^先(?=查|看|幫我)/, '');
+  const workspace = roleWorkspaceRead(clause);
+  if (workspace) return workspace;
   const social = parsePublicSocialRead(clause);
   if (social) return { tool: social.tool, args: { ...parsePublicSocialArguments(social.args) },
     serviceId: 'public-social', label: '查公開交流動態' };

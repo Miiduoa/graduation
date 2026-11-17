@@ -1,4 +1,5 @@
 import type { AssistantServiceId } from '@campus/shared/src/assistantServices';
+import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
 import { publicCourseAssistantSource, type PublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { addDays, date, taipeiDate, type Obj } from './contracts';
@@ -9,13 +10,13 @@ import { publicCourseArguments } from './publicCourses';
 import { parsePublicCampusRead } from './publicCampus';
 import { parseLostFoundRead } from './lostFound';
 import { parseCampusMapClause, parseCampusMapCommand } from './campusMapRequest';
-import { connectedServiceRead } from './connectedServiceReads';
+import { connectedServiceRead, publicPostActionRequested } from './connectedServiceReads';
 
 export type CrossServiceOperation = {
   id: string;
   label: string;
   serviceId: AssistantServiceId;
-  kind: 'read' | 'study' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course' | 'map-location';
+  kind: 'read' | 'study' | 'event' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course' | 'map-location';
   tool?: string;
   args: Obj;
   dependsOn: string[];
@@ -24,6 +25,7 @@ export type CrossServiceOperation = {
   question?: string;
   publicCourseIntent?: PublicCourseAssistantIntent;
   mapSource?: { kind: 'event'; index: number };
+  eventIssue?: string;
 };
 export type CrossServiceRequest = { operations: CrossServiceOperation[] };
 
@@ -224,6 +226,16 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
         args: { ...options, ...studyWindow(clause), date: days[index] || inheritedDay }, question: clause });
       continue;
     }
+    const appointment = parseAssistantCalendarIntent(clause, now);
+    if (appointment) {
+      // Source-derived post requests keep the existing explicit source warning,
+      // including invalid dates; a new compound appointment cannot relax it.
+      if (publicPostActionRequested(text, now)) return null;
+      add({ kind: 'event', label: '準備指定個人行程', serviceId: 'calendar',
+        args: appointment.kind === 'draft' ? { ...appointment.event } : {}, question: clause,
+        ...(appointment.kind === 'invalid' ? { eventIssue: appointment.message } : {}) });
+      continue;
+    }
     const short = clause.replace(genericPrefix, '').replace(/(?:一下|有哪些|有什麼|在哪裡|資訊|資料|嗎|呢)$/g, '').trim();
     if (/^(?:午餐|晚餐|早餐|校園餐廳|餐廳|吃什麼|哪裡吃飯)$/.test(short)) {
       add({ kind: 'read', label: '查校園餐廳', serviceId: 'cafeteria', tool: 'get_dining', args: {} }); continue;
@@ -257,7 +269,7 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     add({ kind: 'handoff', label: '', serviceId: services[0], args: {} });
   }
   const singleSourceRead = requested.length === 1 && requested[0].kind === 'read' &&
-    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info'].includes(requested[0].tool || '');
+    ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(requested[0].tool || '');
   if ((!singleSourceRead && requested.length < 2) || requested.length > 12 || (!singleSourceRead &&
       new Set(requested.map(op => op.kind === 'public-course' || op.tool === 'get_campus_map' || op.tool === 'get_school_info' ? op.kind + ':' + op.tool + ':' + JSON.stringify(op.args)
         : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2)) return null;

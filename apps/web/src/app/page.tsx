@@ -253,6 +253,7 @@ export default function HomePage() {
   const assistant = (
     <TodayAssistantDisclosure
       key={`assistant:${assistantScope}`}
+      preferredWorkContext={teacherOnly ? 'teacher' : undefined}
       ref={voiceEntry}
       onOpenChange={handleAssistantToggle}
     />

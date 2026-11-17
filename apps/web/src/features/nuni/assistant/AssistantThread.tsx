@@ -20,7 +20,9 @@ import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
+import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
+import { assistantWorkContextFromQuestion, getAssistantRoleWorkflow, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import { AssistantRoleTasks } from './AssistantRoleTasks';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
@@ -72,6 +74,7 @@ export function AssistantThread({
   renderPlanRevision,
   renderPlanComparison,
   allowBatchConfirmation,
+  preferredWorkContext,
 }: {
   inline?: boolean;
   schoolId: string;
@@ -103,6 +106,8 @@ export function AssistantThread({
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
   allowBatchConfirmation?: (turn: V2Turn) => boolean;
+  /** Display preference from an already-loaded workspace, never authorization. */
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -114,6 +119,10 @@ export function AssistantThread({
   const revisionFocus = useRef(false);
   const [showJump, setShowJump] = useState(false);
   const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
+  const [chosenWorkContext, setWorkContext] = useState<AssistantWorkContext | null>(null);
+  const [initialWorkContext] = useState(() => assistantWorkContextFromQuestion(question));
+  const workContext = chosenWorkContext ?? preferredWorkContext ?? initialWorkContext;
+  const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -223,7 +232,7 @@ export function AssistantThread({
       }}>
       {!inline && (
         <>
-          <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>依目前工作查資料、接續安排事情。查詢會核對帳號可用的課程與門市；新增行程會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -231,6 +240,8 @@ export function AssistantThread({
           </nav>
         </>
       )}
+      <AssistantRoleTasks context={workContext} onContext={setWorkContext} schoolId={schoolId}
+        compact={inline || turns.length > 0} />
       {!ready ? (
         <p className={styles.notice} role="status">
           雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
@@ -247,9 +258,9 @@ export function AssistantThread({
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
             <h2>今天想問什麼？</h2>
-            <p>可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。</p>
+            <p>選一個問題後，可以在下方修改再送出。安排個人行程時，會先提供確認卡。</p>
             <div className={styles.chips}>
-              {SUGGESTIONS.map((phrase) => (
+              {workflow.suggestions.map((phrase) => (
                 <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                   {phrase}
                 </button>
@@ -386,7 +397,7 @@ export function AssistantThread({
         ) : null}
         {turns.length > 0 && !inline ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
-            {SUGGESTIONS.map((phrase) => (
+            {workflow.suggestions.map((phrase) => (
               <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
@@ -416,7 +427,7 @@ export function AssistantThread({
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
+            placeholder={inline && turns.length ? '接著問…' : workflow.placeholder}
             onChange={(e) => {
               setDraft(editComposerDraft(draft));
               onQuestion(e.target.value);
@@ -463,7 +474,7 @@ export function AssistantThread({
         </p>
         {inline && ready && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (
+            {(workContext === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？'] : workflow.suggestions.slice(0, 2)).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
