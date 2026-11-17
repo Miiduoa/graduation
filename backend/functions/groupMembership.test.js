@@ -445,6 +445,82 @@ describe('transferGroupOwnership', () => {
       }),
     ).rejects.toMatchObject({ code: 'already-exists' });
   });
+
+  // Snapshot every document, including membership mirrors, the group count and
+  // immutable audit/operation receipts. Rejections must not partially hand off ownership.
+  const completeState = () => JSON.stringify(
+    [...store.docs.entries()].sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+  test.each(
+    ['alice', 'bob'].flatMap((uid) => ['disabled', 'suspended', 'inactive'].map((status) => [uid, status])),
+  )('the transaction rejects unavailable account %s with status %s without changing any document', async (uid, status) => {
+    store.docs.set(`users/${uid}`, { role: 'student', status });
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each(['alice', 'bob'])('a missing %s account cannot participate in a new ownership transfer', async (uid) => {
+    store.docs.delete(`users/${uid}`);
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each(['disabled', 'suspended', 'inactive', 'missing'])('a successful receipt cannot bypass an original actor whose account is now %s', async (status) => {
+    await transfer();
+    if (status === 'missing') store.docs.delete('users/alice');
+    else store.docs.set('users/alice', { role: 'student', status });
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each([{ role: 'student' }, { role: 'student', status: 'active' }, { role: 'teacher' }, {}])('existing profiles %j still transfer and recover the same immutable receipt', async (profile) => {
+    for (const uid of ['alice', 'bob']) {
+      store.docs.set(`users/${uid}`, { ...profile });
+    }
+    const first = await transfer();
+    expect(first).toMatchObject({ success: true, reused: false, fromUid: 'alice', toUid: 'bob' });
+    expect(store.docs.get('groups/one/members/alice').role).toBe('member');
+    expect(store.docs.get('groups/one/members/bob').role).toBe('owner');
+    const beforeReplay = completeState();
+    expect(await transfer()).toEqual({ ...first, reused: true });
+    expect(completeState()).toBe(beforeReplay);
+  });
+
+  test.each(['disabled', 'missing'])('an eligible original actor can recover history after the target account becomes %s', async (status) => {
+    const first = await transfer();
+    if (status === 'missing') store.docs.delete('users/bob');
+    else store.docs.set('users/bob', { role: 'student', status });
+    const before = completeState();
+    expect(await transfer()).toEqual({ ...first, reused: true });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each(['users/alice', 'users/bob'])('failure to read canonical account %s propagates before any write', async (accountPath) => {
+    const failure = new Error('account source unavailable');
+    const writes = jest.fn();
+    const database = {
+      ...store.db,
+      runTransaction: (callback) => store.db.runTransaction((transaction) => callback({
+        ...transaction,
+        getAll: async (...references) => {
+          if (references.some((reference) => reference.path === accountPath)) throw failure;
+          return transaction.getAll(...references);
+        },
+        set: (...args) => { writes('set'); return transaction.set(...args); },
+        create: (...args) => { writes('create'); return transaction.create(...args); },
+        update: (...args) => { writes('update'); return transaction.update(...args); },
+      })),
+    };
+    handlers = createGroupMembershipHandlers({ db: database });
+    const before = completeState();
+    await expect(transfer()).rejects.toBe(failure);
+    expect(writes).not.toHaveBeenCalled();
+    expect(completeState()).toBe(before);
+  });
 });
 
 describe('transferGroupOwnership registration', () => {
