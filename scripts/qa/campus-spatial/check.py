@@ -772,6 +772,19 @@ async def sourced_building_volumes(page, _requests, _resources):
     assert before != after, "A source-checked building did not alter the real WebGL pixels"
     assert len(requests_seen) == 1, requests_seen
     await expect(dialog_for(page).get_by_text(f"資料讀取：{fixture['fetchedAt'][:10]}", exact=False)).to_be_visible()
+    source_link = dialog_for(page).get_by_role(
+        "link", name="查看此棟建築的 OpenStreetMap 原始輪廓", exact=True
+    )
+    await expect(source_link).to_have_attribute("href", fixture["buildings"][0]["sourceUrl"])
+    await expect(source_link).to_have_attribute("target", "_blank")
+    await expect(source_link).to_have_attribute("rel", "noopener noreferrer")
+    touch_target = await source_link.evaluate("""el => ({
+      width: el.getBoundingClientRect().width,
+      height: el.getBoundingClientRect().height,
+    })""")
+    assert touch_target["width"] >= 43.5 and touch_target["height"] >= 43.5, (
+        f"OSM source link touch target must be at least 44 CSS px: {touch_target}"
+    )
     await assert_layout(page)
     await page.screenshot(path=str(OUT / "sourced-building-volume.png"))
     return {
