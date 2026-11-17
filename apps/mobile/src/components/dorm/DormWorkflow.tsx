@@ -280,7 +280,7 @@ export function DormWorkflow({
       setRowsError(false);
       setNotice((old) => old === '讀取失敗，請重試。' ? '' : old);
       const token = generation.current;
-      const rowToken = rowGeneration.current;
+      const rowToken = ++rowGeneration.current;
       try {
         const [result, mine] = await Promise.all([
           call<Partial<DormWorkflowRows>>({
@@ -292,11 +292,12 @@ export function DormWorkflow({
         if (token === generation.current && rowToken === rowGeneration.current) {
           setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
           setRowsLoaded(true);
+          setRowsError(false);
           setOwnLeaves((mine ?? result).leaves ?? []);
         }
       } catch (error) {
-        if (token === generation.current && rowToken === rowGeneration.current)
-          setRowsError(true);
+        if (token !== generation.current || rowToken !== rowGeneration.current) return;
+        setRowsError(true);
         throw error;
       }
     },

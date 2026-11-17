@@ -581,3 +581,66 @@ it.each([false, true])('非輔導員開啟工作台有說明（enabled=%s）', a
   expect(await screen.findByText('此頁供宿舍輔導員使用；你的帳號目前沒有輔導員工作台；需要服務請到宿舍頁。')).toBeTruthy();
   expect(screen.queryByText('開啟輔導員工作台')).toBeNull();
 });
+
+it.each([
+  ['manual', true, true],
+  ['manual', false, true],
+  ['manual', true, false],
+  ['timer', true, true],
+  ['timer', false, true],
+  ['timer', true, false],
+] as const)(
+  'only the latest row read updates the UI (%s, olderFails=%s, latestFirst=%s)',
+  async (source, olderFails, latestFirst) => {
+    const polling = vi.spyOn(globalThis, 'setInterval');
+    const pending: { resolve: (value: unknown) => void; reject: (reason: Error) => void }[] = [];
+    const repair = (title: string) => ({
+      repairs: [{ id: title, title, dormitory: 'A', room: '101', dormStatus: 'sent', history: [] }],
+      leaves: [],
+    });
+    try {
+      render(<DormWorkflow schoolId="pu" uid="student" />);
+      await screen.findByText('目前沒有送給輔導員的工單。');
+      api.call.mockImplementation(() => new Promise((resolve, reject) => {
+        pending.push({ resolve, reject });
+      }));
+      fireEvent.click(screen.getByText('重新整理'));
+      await waitFor(() => expect(pending).toHaveLength(1));
+      if (source === 'timer') {
+        await act(async () => {
+          for (const [tick, ms] of polling.mock.calls) {
+            if (ms === 60000 && typeof tick === 'function') tick();
+          }
+        });
+      } else {
+        fireEvent.click(screen.getByText('重新整理'));
+      }
+      await waitFor(() => expect(pending).toHaveLength(2));
+      const settleOlder = () => olderFails
+        ? pending[0].reject(new Error('older request failed'))
+        : pending[0].resolve(repair('舊工單'));
+      const settleLatest = () => olderFails
+        ? pending[1].resolve(repair('新工單'))
+        : pending[1].reject(new Error('latest request failed'));
+      await act(async () => { (latestFirst ? settleLatest : settleOlder)(); });
+      if (!latestFirst) {
+        expect(screen.getByText('正在讀取工單…')).toBeTruthy();
+        expect(screen.queryByText('工單讀取失敗，請重試。')).toBeNull();
+        expect(screen.queryByText('讀取失敗，請重試。')).toBeNull();
+      }
+      await act(async () => { (latestFirst ? settleOlder : settleLatest)(); });
+      expect(screen.queryByText('舊工單 · A 101')).toBeNull();
+      expect(screen.queryByText('正在讀取工單…')).toBeNull();
+      if (olderFails) {
+        expect(screen.getByText('新工單 · A 101')).toBeTruthy();
+        expect(screen.queryByText('工單讀取失敗，請重試。')).toBeNull();
+        expect(screen.queryByText('讀取失敗，請重試。')).toBeNull();
+      } else {
+        expect(screen.getByText('工單讀取失敗，請重試。')).toBeTruthy();
+        expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+      }
+    } finally {
+      polling.mockRestore();
+    }
+  },
+);
