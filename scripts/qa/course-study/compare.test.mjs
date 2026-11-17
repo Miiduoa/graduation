@@ -156,3 +156,43 @@ test('counts paired human-verified outcomes including failed and unsupported att
   assert.equal(report.summary.nuni.correctAndSourceVerified, 2);
   assert.equal('winner' in report, false);
 });
+
+test('compares steps, memory and actual costs only in the same measured pair', () => {
+  const paired = fixture();
+  paired.trials[0].results[1] = {
+    ...result('Ahaboard'), steps: 7, peakMemoryMiB: 250,
+    costTwd: 2, offlineCompleted: false,
+  };
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = 'pair-2';
+  second.results[0].steps = null;
+  second.results[0].peakMemoryMiB = null;
+  second.results[0].costTwd = null;
+  second.results[1].offlineCompleted = null;
+  paired.trials.push(second);
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.pairedStepsDeltas, [-3, null]);
+  assert.deepEqual(report.pairedPeakMemoryDeltasMiB, [-50, null]);
+  assert.deepEqual(report.pairedCostDeltasTwd, [-2, null]);
+  assert.deepEqual(report.pairedOfflineCounts, {
+    both: 0, nuniOnly: 1, ahaboardOnly: 0, neither: 0, unmeasured: 1,
+  });
+  assert.equal(report.summary.nuni.totalCostTwd, null);
+  assert.equal('winner' in report, false);
+});
+
+test('separates measured offline failure from a missing offline measurement', () => {
+  const paired = fixture();
+  paired.trials[0].results[0].offlineCompleted = false;
+  paired.trials[0].results[1].offlineCompleted = false;
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = 'pair-2';
+  second.results[0].offlineCompleted = null;
+  second.results[1].offlineCompleted = true;
+  paired.trials.push(second);
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.pairedOfflineCounts, {
+    both: 0, nuniOnly: 0, ahaboardOnly: 0, neither: 1, unmeasured: 1,
+  });
+  assert.equal(report.summary.Ahaboard.offlineCompleted, 1);
+});

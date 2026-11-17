@@ -50,6 +50,13 @@ export function auditStudyComparisons(raw) {
   const observations = { nuni: [], Ahaboard: [] };
   const pairedColdStartDeltasMs = [];
   const pairedWarmStartDeltasMs = [];
+  // Differences are meaningful only within the same licensed source, question
+  // and device case. Unknown measurements stay null, not zero.
+  const pairedStepsDeltas = [];
+  const pairedPeakMemoryDeltasMiB = [];
+  const pairedCostDeltasTwd = [];
+  // An unknown offline result is NOT the same as a measured "did not work offline".
+  const pairedOfflineCounts = { both: 0, nuniOnly: 0, ahaboardOnly: 0, neither: 0, unmeasured: 0 };
   // Pairwise verification is stricter than simple task completion: it requires
   // the human reviewer to mark both correctness and exact-source support.
   // Failures and unverified answers remain in the denominator.
@@ -111,6 +118,19 @@ export function auditStudyComparisons(raw) {
     pairedWarmStartDeltasMs.push(
       pair.nuni.warmStartMs !== null && pair.Ahaboard.warmStartMs !== null
         ? pair.nuni.warmStartMs - pair.Ahaboard.warmStartMs : null);
+    const pairedDifference = (field) =>
+      pair.nuni[field] !== null && pair.Ahaboard[field] !== null
+        ? pair.nuni[field] - pair.Ahaboard[field] : null;
+    pairedStepsDeltas.push(pairedDifference('steps'));
+    pairedPeakMemoryDeltasMiB.push(pairedDifference('peakMemoryMiB'));
+    pairedCostDeltasTwd.push(pairedDifference('costTwd'));
+    const nuniOffline = pair.nuni.offlineCompleted;
+    const ahaboardOffline = pair.Ahaboard.offlineCompleted;
+    if (nuniOffline === null || ahaboardOffline === null) pairedOfflineCounts.unmeasured += 1;
+    else if (nuniOffline && ahaboardOffline) pairedOfflineCounts.both += 1;
+    else if (nuniOffline) pairedOfflineCounts.nuniOnly += 1;
+    else if (ahaboardOffline) pairedOfflineCounts.ahaboardOnly += 1;
+    else pairedOfflineCounts.neither += 1;
     const nuniVerified = pair.nuni.completed && pair.nuni.correct && pair.nuni.sourceVerified;
     const ahaboardVerified = pair.Ahaboard.completed && pair.Ahaboard.correct && pair.Ahaboard.sourceVerified;
     if (nuniVerified && ahaboardVerified) pairedVerifiedCounts.both += 1;
@@ -149,7 +169,8 @@ export function auditStudyComparisons(raw) {
     };
   }
   return { trialCount: input.trials.length, summary, pairedColdStartDeltasMs,
-    pairedWarmStartDeltasMs, pairedVerifiedCounts,
+    pairedWarmStartDeltasMs, pairedStepsDeltas, pairedPeakMemoryDeltasMiB,
+    pairedCostDeltasTwd, pairedOfflineCounts, pairedVerifiedCounts,
     sourceOfTruth: 'manually recorded observations, not automatic grading or proof of superiority' };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

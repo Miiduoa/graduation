@@ -1,3 +1,9 @@
+## 2026-11-18：競品同案例步數／記憶體／實際費用／離線結果成對判讀
+
+- 先前比較工具只列冷啟與暖啟的同案例差值。現在新增 `pairedStepsDeltas`、`pairedPeakMemoryDeltasMiB`、`pairedCostDeltasTwd`（nuni 減 Ahaboard）；**任一方未量測就保留 null**，不拿其他題目的結果湊平均或當成免費／零步數。
+- 離線紀錄新增 `pairedOfflineCounts` 的 both／nuniOnly／ahaboardOnly／neither／unmeasured。雙方明確回報未能離線完成才是 neither；任一方沒有實測即列 unmeasured。新增 Node 回歸測試，維持所有失敗任務納入分母與原有人工核對三條件。
+- 這是本機比較報告的計算修補，**不是**實際執行 Ahaboard 或手機效能量測；數據仍須有授權教材、同題、同裝置／網路／版本、人工正確性與原文核對。沒有新增套件、付費 API、教材上傳或更動白板 checkpoint。新 head 的 CI／CodeQL／指定 GitHub App 5504170、iOS／Android／Maestro 與競品實測未完成前維持 Draft，不合併、不部署。
+
 ## 2026-11-18：短版「答」獨立標題不再提前洩漏逐題答案
 
 - 修正新生成的裝置端複習題使用「## 答」或單獨一行「答」作為參考答案標籤、下一行顯示「主鍵」時，舊驗證器只會攔截「答案」等較長標籤，學生可能尚未作答就看到參考答案。現在只在新生成結果的**臨時檢查副本**辨識獨立「答」標題／段落及區塊引用，並要求後面實際顯示的值與生成參考答案相同才拒收。
