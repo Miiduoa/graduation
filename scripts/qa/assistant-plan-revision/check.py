@@ -804,12 +804,27 @@ async def begin_controlled_native_smooth_scroll(button, dock_element):
       const maximumY=Math.max(0,(scrolling?.scrollHeight ?? 0)-innerHeight);
       const requestedStart={x:initial.scroll.x,y:Math.max(0,Math.min(maximumY,Math.round(
         initial.scroll.y+initial.target.bottom-(Math.min(initial.dock.top,innerHeight)-24))))};
+      const originalScrollTo=window.scrollTo, windowScrollToRequests=[];
+      // Delegate unchanged arguments and receiver. Read only offsets/time here;
+      // additional geometry reads could disturb the event-to-compositor timing.
+      const scrollSample=()=>({time:performance.now(),x:window.scrollX,y:window.scrollY});
+      const observedScrollTo=function(...args){
+        const value=args[0];
+        const options=value && typeof value==='object'
+          ? {left:value.left,top:value.top,behavior:value.behavior} : args;
+        const request={options,before:scrollSample()};
+        windowScrollToRequests.push(request);
+        try{return originalScrollTo.apply(this,args);}
+        finally{request.after=scrollSample();}
+      };
+      window.scrollTo=observedScrollTo;
       window.scrollTo({left:requestedStart.x,top:requestedStart.y,behavior:'instant'});
       const start=geometry(node,dock);
       const destination={x:start.scroll.x,y:Math.min(maximumY,Math.floor(start.scroll.y+start.target.top-24))};
       const evidence={mode:'controlled native smooth scroll, followed by a trusted forward Tab',
         requestedStart,start,destination,timeoutMs:1000,maxFrames:120,minimumProgress:2,minimumRemaining:8,
-        ready:false,readySample:null,keydown:null,timeline:[],finished:false,finishReason:null};
+        ready:false,readySample:null,keydown:null,timeline:[],finished:false,finishReason:null,
+        windowScrollToRequests,windowScrollToObserver:'Delegates original scrollTo with unchanged arguments and receiver; records only offsets/time'};
       const active=()=>({tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null});
       const sample=phase=>({phase,time:performance.now(),active:active(),focused:document.activeElement===node,
         geometry:geometry(node,dock)});
@@ -823,6 +838,7 @@ async def begin_controlled_native_smooth_scroll(button, dock_element):
         evidence.finished=true;evidence.finishReason=reason;
         clearTimeout(timer);cancelAnimationFrame(frame);
         document.removeEventListener('keydown',onKeydown,true);
+        if(window.scrollTo===observedScrollTo)window.scrollTo=originalScrollTo;
         if(!readyResolved){readyResolved=true;resolveReady({ready:false,reason,start,destination});}
         resolveDone();
       };
