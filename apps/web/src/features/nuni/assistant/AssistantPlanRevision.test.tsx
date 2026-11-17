@@ -295,7 +295,8 @@ it('clears old protection choices on a new proposal and ignores its predecessor\
 
 
 // Explicit jsdom geometry uses the measured 720px viewport and computed margins:
-// 150px dock + 72px bottom clearance + 12px focus gap. Browser QA checks movement.
+// 150px dock + 72px bottom clearance + 12px focus gap + 1px alignment buffer.
+// Browser QA checks actual native rounding and movement.
 function focusScrollFixture(top = 526.94) {
   let frameId = 0;
   const frames = new Map<number, FrameRequestCallback>();
@@ -314,15 +315,9 @@ function focusScrollFixture(top = 526.94) {
   const scroll = vi.fn();
   Object.defineProperty(button, 'scrollIntoView', { configurable: true, value: scroll });
   const bounds = vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, top, 88, 44));
-  const computedStyle = window.getComputedStyle.bind(window);
-  vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
-    const style = computedStyle(element, pseudo);
-    if (element === button) {
-      style.scrollMarginBlockStart = '12px';
-      style.scrollMarginBlockEnd = '234px';
-    }
-    return style;
-  });
+  button.style.setProperty('--assistant-focus-rounding-buffer', '1px');
+  button.style.scrollMarginBlockStart = '13px';
+  button.style.scrollMarginBlockEnd = '235px';
   const flush = () => act(() => {
     const callbacks = [...frames.values()];
     frames.clear();
@@ -408,6 +403,31 @@ it.each([false, true])('focuses the visible adjacent control without native scro
   expect(document.activeElement).toBe(button);
   flush();
   expect(scroll).not.toHaveBeenCalled();
+});
+
+it.each([
+  { edge: 'top', top: 12.859375 },
+  { edge: 'bottom', top: 441.140625 },
+])('accepts a rounded $edge alignment that still preserves the full 12px clearance', ({ top }) => {
+  const { button, field, scroll, focus, flush } = visibleTabFixture(top);
+  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false);
+  expect(document.activeElement).toBe(button);
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  flush();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it.each([
+  { edge: 'top', top: 11.859375, block: 'start' },
+  { edge: 'bottom', top: 442.140625, block: 'end' },
+])('still reveals a $edge gap below 12px instead of treating rounding as visibility tolerance', ({ top, block }) => {
+  const { button, field, scroll, documentScroll, focus, flush } = visibleTabFixture(top);
+  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
+  expect(focus).not.toHaveBeenCalled();
+  expect(documentScroll).not.toHaveBeenCalled();
+  act(() => button.focus()); // Emulate the native Tab target after the guard deferred.
+  flush();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block, inline: 'nearest', behavior: 'instant' });
 });
 
 it.each([false, true])('requests same-position instant cancellation before visible Tab focus (shift=%s)', shiftKey => {

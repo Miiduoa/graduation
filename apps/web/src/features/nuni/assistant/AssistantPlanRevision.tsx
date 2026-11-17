@@ -37,8 +37,11 @@ function eventTime(event: PlanRevisionEvent): string {
 
 function focusGeometry(target: HTMLElement) {
   const style = window.getComputedStyle(target);
-  const topMargin = Number.parseFloat(style.scrollMarginBlockStart) || 0;
-  const bottomMargin = Number.parseFloat(style.scrollMarginBlockEnd) || 0;
+  // Native alignment reserves one extra CSS pixel for scroll-offset rounding.
+  // Visibility still requires the original clearance, not that alignment buffer.
+  const roundingBuffer = Math.max(0, Number.parseFloat(style.getPropertyValue('--assistant-focus-rounding-buffer')) || 0);
+  const topMargin = Math.max(0, (Number.parseFloat(style.scrollMarginBlockStart) || 0) - roundingBuffer);
+  const bottomMargin = Math.max(0, (Number.parseFloat(style.scrollMarginBlockEnd) || 0) - roundingBuffer);
   const viewport = window.visualViewport;
   const top = viewport?.offsetTop ?? 0;
   const left = viewport?.offsetLeft ?? 0;
