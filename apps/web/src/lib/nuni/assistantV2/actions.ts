@@ -5,6 +5,7 @@ import { courseworkRecoveryGuard, courseworkRecoveryId, verifyCourseworkRecovery
   type CourseworkRecoveryGuard } from './courseworkRecovery';
 import { parsePublicEventGuard, type PublicEventGuard } from './publicEvent';
 import { verifyPublicEventGuard } from './campusEventGuard';
+import { foodPickupGuard, verifyFoodPickupGuard } from './foodPickup';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
@@ -27,6 +28,7 @@ import {
   type Card,
   type CourseworkStudyGuard,
   type EventArgs,
+  type FoodPickupGuard,
   type Ledger,
   type Obj,
 } from './contracts';
@@ -139,12 +141,20 @@ export function signCard(
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
   studyGuard?: CourseworkStudyGuard,
-  publicEventGuard?: PublicEventGuard,
+  sourceGuard?: PublicEventGuard | FoodPickupGuard,
   recoveryGuard?: CourseworkRecoveryGuard,
+  pickupGuard?: FoodPickupGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
+  const publicEventGuard = sourceGuard && 'target' in sourceGuard ? sourceGuard : undefined;
+  if (sourceGuard && !('target' in sourceGuard)) {
+    if (pickupGuard) return fail('CONFIRMATION_INVALID', 409);
+    pickupGuard = sourceGuard;
+  }
   if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail();
   if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || previousEvent)) return fail();
+  if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     tool === 'propose_food_order'
       ? foodCardArgs(raw)
@@ -165,6 +175,7 @@ export function signCard(
     ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
     ...(publicEventGuard ? { publicEventGuard: parsePublicEventGuard(publicEventGuard) } : {}),
     ...(recoveryGuard ? { recoveryGuard: courseworkRecoveryGuard(recoveryGuard) } : {}),
+    ...(pickupGuard ? { pickupGuard: foodPickupGuard(pickupGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -182,6 +193,7 @@ export function signCard(
     token: body + '.' + mac(secret, body),
     mutationId,
     schoolId: binding.schoolId,
+    ...(pickupGuard ? { sourceBound: 'food-pickup' as const } : {}),
     destination:
       tool === 'propose_food_order'
         ? String(args.reason)
@@ -254,6 +266,9 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   if (recoveryGuard && (p.tool !== 'propose_personal_event' || !studyGuard || publicEventGuard ||
       p.previousEventHash !== undefined ||
       p.mutationId !== courseworkRecoveryId(binding, recoveryGuard.mutationId))) return fail('CONFIRMATION_INVALID', 409);
+  const pickupGuard = p.pickupGuard === undefined ? undefined : foodPickupGuard(p.pickupGuard);
+  if (pickupGuard && (p.tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -274,6 +289,7 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
       ...(studyGuard ? { studyGuard } : {}),
       ...(publicEventGuard ? { publicEventGuard } : {}),
       ...(recoveryGuard ? { recoveryGuard } : {}),
+      ...(pickupGuard ? { pickupGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -291,7 +307,7 @@ type VerifiedCard = AuthenticatedCard['card'];
  */
 export function authenticateCourseworkFollowup(binding: Binding, raw: unknown, secret: string, now: number) {
   const { card } = authenticatedCard(binding, raw, secret, now);
-  if (card.tool !== 'propose_personal_event') return fail('INVALID_INPUT', 422);
+  if (card.tool !== 'propose_personal_event' || card.pickupGuard) return fail('INVALID_INPUT', 422);
   return { mutationId: card.mutationId, iat: card.iat, event: eventArgs(card.args),
     studyGuard: card.studyGuard ? { ...card.studyGuard } : null };
 }
@@ -618,10 +634,13 @@ export async function confirm(
       await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
     if (p.publicEventGuard)
       await verifyPublicEventGuard(adapter, binding, p.publicEventGuard, event, currentTime());
+    if (p.pickupGuard)
+      await verifyFoodPickupGuard(adapter, binding, p.pickupGuard, event, currentTime());
     await requireAssistantPermission(adapter, 'createPersonalEvent');
     const writeTime = currentTime();
     verifyCard(binding, raw, secret, writeTime);
     const [start] = eventInterval(event);
+    if (p.pickupGuard && start <= writeTime) return fail('FOOD_PICKUP_PASSED', 409);
     if (p.studyGuard?.policy === 'coursework-gap' && start <= writeTime)
       return fail('STUDY_SLOT_CHANGED', 409);
     if (p.publicEventGuard && start <= writeTime)

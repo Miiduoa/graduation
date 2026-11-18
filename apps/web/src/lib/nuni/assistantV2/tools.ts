@@ -18,6 +18,7 @@ import { isRoleWorkspaceTool, parseRoleWorkspaceResult } from './roleWorkspaceRe
 import { parseTeachingArguments } from './teacherWorkspace';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
+import { assistantRoleToolAllowed, getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -863,7 +864,15 @@ export function createTools(
   readRequestQuestion = question,
   // Only a verified read-retry signature can supply this target. Never model or HTTP input.
   merchantRetryTarget?: { tenantId: string; locationId: string },
+  taskProfile?: AssistantRoleProfileId,
 ) {
+  // Preserve the profile argument used on main and the signed retry provenance
+  // used by this branch. Profile IDs are fixed application values, never roles.
+  const positionalProfile = getAssistantRoleProfile(readRequestQuestion);
+  if (!taskProfile && positionalProfile) {
+    taskProfile = positionalProfile.id;
+    readRequestQuestion = question;
+  }
   const executionQuestion = taskQuestionOutsidePublicCourses(question, binding.schoolId);
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
@@ -1390,6 +1399,10 @@ export function createTools(
         return propose(a, undefined, requestQuestion);
       case 'propose_open_page': {
         if (a.entityId) {
+          // A page proposal must not indirectly read student courses or buyer
+          // orders while the active task context excludes those sources.
+          if (taskProfile && taskProfile !== 'student' && ['classroom', 'orders'].includes(String(a.page)))
+            return fail('TASK_CONTEXT_MISMATCH', 409);
           const entity = String(a.entityId);
           const observedOrders = a.page === 'orders'
             ? [...orders].filter((key) => key.endsWith(':' + entity))
@@ -1453,6 +1466,8 @@ export function createTools(
     return fail('UNKNOWN_TOOL');
   }
   function context() {
+    if (taskProfile && !assistantRoleToolAllowed(taskProfile, 'get_today_context'))
+      return fail('TASK_CONTEXT_MISMATCH', 409);
     return (contextCache ||= buildContext());
   }
   async function buildContext() {
@@ -1590,6 +1605,10 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown, requestQuestion = executionQuestion) {
+      // Context selection can narrow tool use, never authorize a new resource.
+      // Check before argument repair, pre-reads, permissions or cache access.
+      if (taskProfile && !assistantRoleToolAllowed(taskProfile, name))
+        return fail('TASK_CONTEXT_MISMATCH', 409);
       if (sourcePostActionRequested && proposalPermission(name))
         return fail('PUBLIC_POST_ACTION_SOURCE_UNVERIFIED', 409);
       let eventReadGeneration: number | undefined;

@@ -1,6 +1,9 @@
 import { withOperationSignal } from './operation';
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
+import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
+import { getAssistantRoleProfile } from '@campus/shared/src/assistantRoleProfiles';
+import { assistantRoleTaskGuide } from '@campus/shared/src/assistantRoleTasks';
 import { createPlanProtection, validatePlanProtection, type PlanProtection } from '@/lib/assistantPlanProtection';
 import {
   boundedJson,
@@ -12,6 +15,7 @@ import {
 } from '../server';
 import { beginProposal, cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
+import { directReads } from './directRead';
 import { directPlanRevision, selectPlanRevision, shiftPlanRevision } from './directPlanRevision';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
@@ -25,7 +29,8 @@ import { parsePublicEventTarget } from './publicEvent';
 import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventRequest';
 import { parseCampusEventDiscovery, prepareCampusEventDiscovery } from './campusEventDiscovery';
 import { parseCampusMapReadTask, readCampusMapRequest } from './campusMapReadRequest';
-const ACTIONS = ['capability', 'ask', 'plan', 'event-preview', 'map-read', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
+import { FOOD_PICKUP_MESSAGES, prepareSelectedFoodPickupRequest, selectedFoodPickupTarget } from './foodPickupRequest';
+const ACTIONS = ['capability', 'ask', 'plan', 'pickup-plan', 'event-preview', 'map-read', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 const followupHits = new Map<string, number[]>();
@@ -146,13 +151,15 @@ export async function handleV2(request: NextRequest, action: string) {
     const raw = object(
       await boundedJson(request, 16384),
       action === 'ask'
-        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget']
+        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget', 'taskProfile']
         : action === 'plan'
           ? ['schoolId', 'conversationId', 'routeToken', 'task', 'recovery']
           : action === 'event-preview'
             ? ['schoolId', 'conversationId', 'routeToken', 'event', 'discovery']
           : action === 'map-read'
             ? ['schoolId', 'conversationId', 'task']
+          : action === 'pickup-plan'
+            ? ['schoolId', 'conversationId', 'routeToken', 'target']
           : action === 'followup'
             ? ['schoolId', 'conversationId', 'issuedContext', 'token', 'args']
             : action === 'retry'
@@ -161,11 +168,23 @@ export async function handleV2(request: NextRequest, action: string) {
               ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
               : ['schoolId', 'conversationId', 'token', 'args'],
     );
+    const profile = action === 'ask' ? getAssistantRoleProfile(raw.taskProfile ?? 'student') : null;
+    if (action === 'ask' && (!profile || (raw.taskProfile !== undefined && raw.taskProfile === null)))
+      throw new V2Error(422, 'INVALID_INPUT');
+    const direct = action === 'ask' && typeof raw.question === 'string' ? directReads(raw.question, Date.now()) : [];
+    const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
+    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
+      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question) : null;
     const studyTarget = action === 'plan'
       ? courseworkStudyTarget(raw.task)
       : action === 'ask' && raw.studyTarget !== undefined
         ? courseworkStudyTarget(raw.studyTarget) : undefined;
     const recovery = action === 'plan' && raw.recovery !== undefined ? courseworkRecoveryProof(raw.recovery) : undefined;
+    const pickupTarget = action === 'pickup-plan' ? selectedFoodPickupTarget(raw.target) : undefined;
+    // This whole-question parser also returns bounded, local guidance for an
+    // unsupported pickup request. Both paths are intercepted before the model.
+    const pickupRequest = action === 'ask' && profile?.id === 'student' && raw.planProtection === undefined &&
+      typeof raw.question === 'string' && parseAssistantFoodPickupIntent(raw.question) !== null;
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
@@ -180,7 +199,7 @@ export async function handleV2(request: NextRequest, action: string) {
     if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
         !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const preparing = action === 'ask' || action === 'plan' || action === 'event-preview';
+    const preparing = action === 'ask' || action === 'plan' || action === 'event-preview' || action === 'pickup-plan';
     const routePurpose = action === 'event-preview' ? 'event-preview' : 'chat';
     const target = action === 'reconcile' || action === 'followup' || action === 'retry' || action === 'map-read' ? undefined : preparing || action === 'revise'
       ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret, routePurpose)
@@ -248,7 +267,7 @@ export async function handleV2(request: NextRequest, action: string) {
       // They can never issue a replacement for a client-selected old binding.
       if (raw.routeToken === undefined) {
         if (action === 'ask') {
-          if (raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
+          if (raw.consent !== true && !studyTarget && !pickupRequest && !roleGuide) throw new V2Error(422, 'CONSENT_REQUIRED');
           text(raw.question, 1000);
           history(raw.history);
         }
@@ -292,14 +311,14 @@ export async function handleV2(request: NextRequest, action: string) {
         ),
       );
     if (action === 'revise' && !writes) throw new V2Error(403, 'ASSISTANT_WRITE_UNAVAILABLE');
-    if (action === 'ask' && raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
+    if (action === 'ask' && raw.consent !== true && !studyTarget && !pickupRequest && !roleGuide) throw new V2Error(422, 'CONSENT_REQUIRED');
     const question = action === 'ask' ? text(raw.question, 1000) : '',
       memory = action === 'ask' ? history(raw.history) : [];
     const key = hash(principal.platformAccountId),
       sessionKey = hash(session.sessionHandle);
     const now = Date.now();
     // Structured previews have their own allowance; chat quota belongs to chat.
-    const allowance = action === 'plan' || action === 'event-preview' ? planHits : hits;
+    const allowance = action === 'plan' || action === 'event-preview' || action === 'pickup-plan' || pickupRequest ? planHits : hits;
     for (const [k, times] of allowance) {
       if (!times.some((t) => t > now - 3600000)) allowance.delete(k);
     }
@@ -310,9 +329,11 @@ export async function handleV2(request: NextRequest, action: string) {
     allowance.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
-      if (action === 'event-preview') {
+      if (action === 'event-preview' || action === 'pickup-plan') {
         const options = { adapter: source.adapter, binding, secret, writes, now, signal };
-        const result = eventDiscovery
+        const result = action === 'pickup-plan'
+          ? await prepareSelectedFoodPickupRequest({ target: pickupTarget!, adapter: source.adapter, binding, secret, writes, now, signal })
+          : eventDiscovery
           ? await prepareCampusEventDiscovery({ ...options, discovery: eventDiscovery })
           : { ...await prepareCampusEventRequest({ ...options, target: selectedEvent! }), campusEventPreview: true };
         signal.throwIfAborted();
@@ -354,8 +375,9 @@ export async function handleV2(request: NextRequest, action: string) {
       }
       const result = await run({
         question,
+        ...(profile ? { taskProfile: profile.id } : {}),
         ...(studyTarget ? { studyTarget } : {}),
-        history: studyTarget ? [] : memory,
+        history: studyTarget || pickupRequest ? [] : memory,
         binding,
         adapter: source.adapter,
         secret,
@@ -364,6 +386,8 @@ export async function handleV2(request: NextRequest, action: string) {
         planRevision: protection !== undefined,
         log,
         model: async (input) => {
+          // Model-free task exceptions never authorize a later model fallback.
+          if (raw.consent !== true) throw new V2Error(422, 'CONSENT_REQUIRED');
           const amount =
             Buffer.byteLength(JSON.stringify({ messages: input.messages, tools: input.tools })) +
             input.max_completion_tokens +
@@ -445,6 +469,7 @@ export async function handleV2(request: NextRequest, action: string) {
           : code === 'EVENT_START_PASSED'
           ? { message: '這個時段已經開始，請重新安排時間。' }
           : CAMPUS_EVENT_MESSAGES[code] ? { message: CAMPUS_EVENT_MESSAGES[code] }
+          : FOOD_PICKUP_MESSAGES[code] ? { message: FOOD_PICKUP_MESSAGES[code] }
           : COURSEWORK_STUDY_MESSAGES[code] ? { message: COURSEWORK_STUDY_MESSAGES[code] }
           : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
       },
