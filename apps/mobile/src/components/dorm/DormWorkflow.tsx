@@ -5,6 +5,7 @@ import {
   DORM_TICKET_LABELS,
   DORM_LEAVE_LABELS,
   dormTicketOverdue,
+  formatDormWorkflowTime,
   dormRequestKey,
   parseDormResidentsCsv,
   dormWorkflowSummary,
@@ -480,7 +481,7 @@ export function DormWorkflow({
       {r.history.map((h, i) => (
         <Label key={i}>
           {DORM_TICKET_LABELS[h.status]} ·{' '}
-          {new Date(h.at).toLocaleString('zh-TW', { hour12: false })}
+          {formatDormWorkflowTime(h.at)}
         </Label>
       ))}
       {r.schoolReference && <Label>學校單號 {r.schoolReference}（輔導員填）</Label>}
@@ -543,7 +544,7 @@ export function DormWorkflow({
       <Label>{r.reason}</Label>
       {r.history.map((h, i) => (
         <Label key={i}>
-          {DORM_LEAVE_LABELS[h.status]} · {new Date(h.at).toLocaleString('zh-TW')}
+          {DORM_LEAVE_LABELS[h.status]} · {formatDormWorkflowTime(h.at)}
         </Label>
       ))}
       {staff && r.status === 'pending' && (

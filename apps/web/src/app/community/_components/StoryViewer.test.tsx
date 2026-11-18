@@ -109,3 +109,163 @@ it('advances automatic playback after the media helper returns null', async () =
   act(() => vi.advanceTimersByTime(7000));
   expect(next).toHaveBeenCalledTimes(1);
 });
+
+
+it('does not change stories on arrow keys used by focused controls, but keeps dialog shortcuts', () => {
+  const { viewer } = renderVideo();
+  const dialog = screen.getByRole('dialog', { name: '限時動態' });
+  const controls = [
+    screen.getByRole('button', { name: '關閉限時動態' }),
+    screen.getByRole('button', { name: '連續播放' }),
+    screen.getByRole('button', { name: /下一則/ }),
+    screen.getByRole('button', { name: '私下回覆' }),
+  ];
+
+  for (const control of controls) {
+    control.focus();
+    fireEvent.keyDown(control, { key: 'ArrowRight' });
+    fireEvent.keyDown(control, { key: 'ArrowLeft' });
+  }
+  expect(viewer.next).not.toHaveBeenCalled();
+  expect(viewer.previous).not.toHaveBeenCalled();
+
+  dialog.focus();
+  fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+  fireEvent.keyDown(dialog, { key: 'ArrowLeft' });
+  expect(viewer.next).toHaveBeenCalledOnce();
+  expect(viewer.previous).toHaveBeenCalledOnce();
+});
+
+
+it('gives keyboard readers a focusable story surface for deliberate arrow navigation', () => {
+  const { viewer, video } = renderVideo();
+  const canvas = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
+
+  expect(canvas).toHaveProperty('tabIndex', 0);
+  canvas.focus();
+  expect(document.activeElement).toBe(canvas);
+  fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+  fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+  expect(viewer.next).toHaveBeenCalledOnce();
+  expect(viewer.previous).toHaveBeenCalledOnce();
+
+  video.focus();
+  fireEvent.keyDown(video, { key: 'ArrowRight' });
+  expect(viewer.next).toHaveBeenCalledOnce();
+});
+
+
+it('pauses timed text stories while a keyboard reader focuses the story content, then resumes the remaining time', () => {
+  vi.useFakeTimers();
+  const viewer = {
+    group: {
+      authorUid: 'one',
+      latestAt: 0,
+      stories: [{
+        id: 'text-reading',
+        schoolId: 'pu',
+        authorUid: 'one',
+        kind: 'text' as const,
+        text: '學生會活動時間與地點',
+      }],
+    },
+    viewerUid: 'reader',
+    isOwner: false,
+    index: 0,
+    hasPrevious: false,
+    hasNext: true,
+    next: vi.fn(),
+    previous: vi.fn(),
+    close: vi.fn(),
+    switchAuthor: vi.fn(),
+  };
+  render(<StoryViewer author="同學" viewer={viewer} />);
+  fireEvent.click(screen.getByRole('button', { name: '自動播放' }));
+  act(() => vi.advanceTimersByTime(3_000));
+
+  const readingRegion = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
+  act(() => readingRegion.focus());
+  expect(document.activeElement).toBe(readingRegion);
+  act(() => vi.advanceTimersByTime(10_000));
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  act(() => screen.getByRole('button', { name: '暫停' }).focus());
+  act(() => vi.advanceTimersByTime(3_999));
+  expect(viewer.next).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(1));
+  expect(viewer.next).toHaveBeenCalledOnce();
+});
+
+it('lets students focus and read media captions without switching stories by arrow keys or caption taps', () => {
+  const { viewer } = renderVideo();
+  const canvas = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
+  const caption = screen.getByRole('region', { name: '限時動態說明文字' });
+  expect(caption).toHaveProperty('tabIndex', 0);
+
+  act(() => caption.focus());
+  expect(document.activeElement).toBe(caption);
+  fireEvent.keyDown(caption, { key: 'ArrowRight' });
+  fireEvent.keyDown(caption, { key: 'ArrowLeft' });
+  expect(viewer.next).not.toHaveBeenCalled();
+  expect(viewer.previous).not.toHaveBeenCalled();
+
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100 } as DOMRect);
+  const tap = { pointerId: 1, isPrimary: true, button: 0, clientX: 95, clientY: 80 };
+  fireEvent.pointerDown(caption, tap);
+  fireEvent.pointerUp(caption, tap);
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  fireEvent.pointerDown(canvas, tap);
+  fireEvent.pointerUp(canvas, tap);
+  expect(viewer.next).toHaveBeenCalledOnce();
+
+  act(() => canvas.focus());
+  fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+  expect(viewer.next).toHaveBeenCalledTimes(2);
+});
+
+it('pauses image-story auto-advance while the caption is focused and resumes the remaining time', async () => {
+  vi.useFakeTimers();
+  const viewer = {
+    group: {
+      authorUid: 'one',
+      latestAt: 0,
+      stories: [{
+        id: 'photo-caption',
+        schoolId: 'pu',
+        authorUid: 'one',
+        kind: 'image' as const,
+        mediaUrl: '/photo-caption.png',
+        text: '較長的社團活動說明，可用方向鍵閱讀',
+      }],
+    },
+    viewerUid: 'reader',
+    isOwner: false,
+    index: 0,
+    hasPrevious: false,
+    hasNext: true,
+    next: vi.fn(),
+    previous: vi.fn(),
+    close: vi.fn(),
+    switchAuthor: vi.fn(),
+  };
+  render(<StoryViewer author="同學" viewer={viewer} />);
+  // Next/Image resolves image decoding asynchronously before invoking the supplied onLoad.
+  // Flush that promise before advancing fake timers, just as a decoded image is ready in the browser.
+  await act(async () => {
+    fireEvent.load(screen.getByRole('img', { name: '限時動態照片' }));
+  });
+  fireEvent.click(screen.getByRole('button', { name: '自動播放' }));
+  act(() => vi.advanceTimersByTime(3_000));
+
+  const caption = screen.getByRole('region', { name: '限時動態說明文字' });
+  act(() => caption.focus());
+  act(() => vi.advanceTimersByTime(10_000));
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  act(() => screen.getByRole('button', { name: '暫停' }).focus());
+  act(() => vi.advanceTimersByTime(3_999));
+  expect(viewer.next).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(1));
+  expect(viewer.next).toHaveBeenCalledOnce();
+});

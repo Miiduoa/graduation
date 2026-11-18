@@ -41,6 +41,141 @@ function setStatus(status) {
   store.docs.set(canonical, { ...base, status });
   store.docs.set(mirror, { ...base, status });
 }
+function observeTransactions({ beforeTransaction, failReadPath, readError } = {}) {
+  const run = store.db.runTransaction;
+  const reads = [];
+  const writes = [];
+  store.db.runTransaction = (callback) => {
+    beforeTransaction?.();
+    return run((transaction) => callback({
+      ...transaction,
+      getAll: async (...refs) => {
+        reads.push(...refs.map((ref) => ref.path));
+        if (refs.some((ref) => ref.path === failReadPath)) throw readError;
+        return transaction.getAll(...refs);
+      },
+      ...Object.fromEntries(['update', 'set'].map((method) => [
+        method,
+        (ref, data) => {
+          writes.push({ method, path: ref.path });
+          return transaction[method](ref, data);
+        },
+      ])),
+    }));
+  };
+  return { reads, writes };
+}
+const actors = [
+  ['customer', 'alice', 'cancelOrder'],
+  ['operator', 'operator', 'updateOrderStatus'],
+  ['admin', 'admin', 'updateOrderStatus'],
+];
+const unavailableAccounts = [
+  { status: 'disabled' },
+  { status: 'suspended' },
+  { status: 'inactive' },
+  { status: 'deleted' },
+  { status: 'active', accountDeletionInProgress: true },
+  { accountDeletionInProgress: true },
+];
+test.each(actors.flatMap(([label, uid, method]) =>
+  unavailableAccounts.map((account) => [label, uid, method, account]),
+))('rejects an unavailable %s actor (%s/%s, %j) inside the transaction before writes', async (_label, uid, method, account) => {
+  store.docs.set(`users/${uid}`, { status: 'active' });
+  const transaction = observeTransactions({
+    beforeTransaction: () => store.docs.set(`users/${uid}`, account),
+  });
+
+  await expect(handlers[method](request('cancelled', uid))).rejects.toMatchObject({
+    code: 'failed-precondition',
+    details: { reason: 'account-deletion' },
+  });
+
+  expect(transaction.reads).toContain(`users/${uid}`);
+  expect(transaction.writes).toEqual([]);
+  expect(store.docs.get(canonical)).toEqual(base);
+  expect(store.docs.get(mirror)).toEqual(base);
+  expect(push).not.toHaveBeenCalled();
+});
+test.each(actors)('checks %s account availability before repairing a cancelled replay', async (_label, uid, method) => {
+  setStatus('cancelled');
+  const original = store.docs.get(canonical);
+  store.docs.delete(mirror);
+  const transaction = observeTransactions({
+    beforeTransaction: () => store.docs.set(`users/${uid}`, { status: 'disabled' }),
+  });
+
+  await expect(handlers[method](request('cancelled', uid))).rejects.toMatchObject({
+    code: 'failed-precondition',
+    details: { reason: 'account-deletion' },
+  });
+
+  expect(transaction.writes).toEqual([]);
+  expect(store.docs.get(canonical)).toEqual(original);
+  expect(store.docs.has(mirror)).toBe(false);
+  expect(push).not.toHaveBeenCalled();
+});
+test.each(actors.flatMap(([label, uid, method]) => [
+  ['active', { status: 'active' }],
+  ['legacy', { displayName: 'Account' }],
+  ['missing', undefined],
+].map(([profile, account]) => [label, uid, method, profile, account])))('preserves %s permissions (%s/%s) with a %s root profile', async (_label, uid, method, _profile, account) => {
+  if (account) store.docs.set(`users/${uid}`, account);
+  const transaction = observeTransactions();
+
+  expect(await handlers[method](request('cancelled', uid))).toMatchObject({
+    success: true,
+    reused: false,
+    status: 'cancelled',
+  });
+
+  expect(transaction.reads).toContain(`users/${uid}`);
+  expect(store.docs.get(canonical).status).toBe('cancelled');
+  expect(store.docs.get(mirror)).toEqual(store.docs.get(canonical));
+  expect(push).toHaveBeenCalledTimes(method === 'cancelOrder' ? 0 : 1);
+});
+test.each([
+  ...actors.map(([label, uid, method]) => [label, uid, method, `users/${uid}`]),
+  ['customer canonical', 'alice', 'cancelOrder', canonical],
+  ['customer membership', 'alice', 'cancelOrder', 'schools/pu/members/alice'],
+  ['operator permission', 'operator', 'updateOrderStatus', 'schools/pu/cafeterias/cafe/operators/operator'],
+])('propagates a %s source read failure without service writes', async (_label, uid, method, failReadPath) => {
+  const error = new Error('source unavailable');
+  const transaction = observeTransactions({ failReadPath, readError: error });
+
+  await expect(handlers[method](request('cancelled', uid))).rejects.toBe(error);
+
+  expect(transaction.writes).toEqual([]);
+  expect(store.docs.get(canonical)).toEqual(base);
+  expect(store.docs.get(mirror)).toEqual(base);
+  expect(push).not.toHaveBeenCalled();
+});
+test.each(actors)('rechecks the %s account when the transaction callback is retried', async (_label, uid, method) => {
+  const run = store.db.runTransaction;
+  store.docs.set(`users/${uid}`, { status: 'active' });
+  store.db.runTransaction = async (callback) => {
+    store.failNextCommit();
+    await expect(run(callback)).rejects.toThrow('commit unavailable');
+    store.docs.set(`users/${uid}`, { status: 'disabled' });
+    return run(callback);
+  };
+
+  await expect(handlers[method](request('cancelled', uid))).rejects.toMatchObject({
+    code: 'failed-precondition',
+    details: { reason: 'account-deletion' },
+  });
+
+  expect(store.docs.get(canonical)).toEqual(base);
+  expect(store.docs.get(mirror)).toEqual(base);
+  expect(push).not.toHaveBeenCalled();
+});
+test('checks the merchant actor account without blocking service for an unavailable order owner', async () => {
+  store.docs.set('users/alice', { status: 'disabled' });
+  store.docs.set('users/operator', { status: 'active' });
+
+  expect(await handlers.updateOrderStatus(request('confirmed'))).toMatchObject({ success: true });
+  expect(store.docs.get(mirror)).toEqual(store.docs.get(canonical));
+});
 const next = {
   pending: 'confirmed',
   confirmed: 'preparing',

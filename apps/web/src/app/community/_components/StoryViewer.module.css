@@ -131,6 +131,10 @@
   overflow: auto;
   touch-action: pan-y pinch-zoom;
 }
+.canvas:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: -4px;
+}
 .photo {
   width: 100%;
   min-height: 0;
@@ -161,6 +165,10 @@
   padding: 10px 16px;
   background: #161b19;
   line-height: 1.5;
+}
+.caption:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: -4px;
 }
 .unavailable {
   padding: 16px;

@@ -325,6 +325,42 @@ function resolveRepairInput(lastUserMessage) {
   };
 }
 
+/** Return exact document IDs, or null for an unsupported explicit selector. */
+function washingMachineIdsFromText(raw) {
+  // Dates such as 11月18號 describe the requested time, not a machine number.
+  raw = raw.replace(/(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}[日號]?/g, ' ');
+  // Ordinals and display numbers are not document IDs. Ask for the ID instead of guessing.
+  if (/(?:第\s*[0-9０-９零一二三四五六七八九十兩]+\s*[台部個]|[0-9０-９零一二三四五六七八九十兩]+\s*號)/.test(raw)) return null;
+  const ids = new Set();
+  for (const match of raw.matchAll(/(?:洗衣機|機台(?:編號)?|機號|編號)\s*[:：#]?\s*[「『《"]([^」』》"]+)[」』》"]/g)) {
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(match[1])) return null;
+    ids.add(match[1]);
+  }
+  for (const match of raw.matchAll(/(?:機台(?:編號)?|機號|編號)\s*[:：#]?\s*([^\s:：#])/g)) {
+    if (!/[A-Za-z0-9Ａ-Ｚａ-ｚ０-９_「『《"]/.test(match[1])) return null;
+  }
+  for (const match of raw.matchAll(/[A-Za-zＡ-Ｚａ-ｚ0-9０-９_./-]+/g)) {
+    const token = match[0];
+    const before = raw.slice(0, match.index);
+    const after = raw.slice(match.index + token.length);
+    if (/^\s*[棟樓層]/.test(after)) continue;
+    const labeled = /(?:洗衣機|機台(?:編號)?|機器|機號|編號)\s*[:：#]?\s*$/.test(before) ||
+      /^\s*(?:號)?(?:洗衣機|機台)/.test(after);
+    const inList = /(?:或|和|及|跟|與|、|,|，|\+)\s*$/.test(before) ||
+      /^\s*(?:或|和|及|跟|與|、|,|，|\+)/.test(after);
+    const isTimeOrDate = /^(?:[0-9]{4}[./-])?[0-9]{1,2}[./-][0-9]{1,2}$/.test(token) ||
+      (/^[0-9]+$/.test(token) && (/^\s*(?:[:：][0-9]{2}|[點時分年月日])/.test(after) || /[0-9]{1,2}\s*[:：]\s*$/.test(before)));
+    if ((/[A-Za-zＡ-Ｚａ-ｚ]/.test(token) && /[0-9０-９_-]/.test(token)) || ((labeled || inList) && !isTimeOrDate)) {
+      // Keep case and the complete token: A2 is not A20, a2, or a path ending in A2.
+      if (token.includes('/') || token.length > 128 || token === '.' || token === '..') return null;
+      ids.add(token);
+    }
+  }
+  if (/號\s*(?:洗衣機|機台)/.test(raw)) return null;
+  if (ids.size === 0 && /指定|編號|機號|機台\s*[:：]|洗衣機\s*[「『《"]/.test(raw)) return null;
+  return [...ids];
+}
+
 /**
  * @param {string} lastUserMessage
  * @param {string} schoolId
@@ -334,23 +370,27 @@ async function resolveWashReserveInput(lastUserMessage, schoolId) {
   const raw = String(lastUserMessage ?? '');
   if (!/洗衣機|洗衣/.test(raw) || !/預約|幫我|訂/.test(raw)) return null;
 
+  const machineIds = washingMachineIdsFromText(raw);
+  if (!machineIds || machineIds.length > 1) return null;
   const db = getFirestore();
-  const snap = await db
-    .collection('schools')
-    .doc(schoolId)
-    .collection('washingMachines')
-    .where('status', '==', 'available')
-    .limit(5)
-    .get()
-    .catch(() => null);
-
-  let machineId = null;
-  if (snap && !snap.empty) {
-    machineId = snap.docs[0].id;
+  const machines = db.collection('schools').doc(schoolId).collection('washingMachines');
+  let machineId;
+  let machineDormitory = null;
+  if (machineIds.length === 1) {
+    const machine = await machines.doc(machineIds[0]).get().catch(() => null);
+    if (!machine || !machine.exists || machine.data()?.status !== 'available') return null;
+    machineId = machine.id;
+    const dormitory = machine.data()?.dormitory;
+    if (typeof dormitory === 'string' && dormitory.trim()) machineDormitory = dormitory;
   } else {
-    const anySnap = await db.collection('schools').doc(schoolId).collection('washingMachines').limit(1).get();
-    if (anySnap.empty) return null;
-    machineId = anySnap.docs[0].id;
+    const snap = await machines.where('status', '==', 'available').limit(5).get().catch(() => null);
+    if (snap && !snap.empty) {
+      machineId = snap.docs[0].id;
+    } else {
+      const anySnap = await machines.limit(1).get().catch(() => null);
+      if (!anySnap || anySnap.empty) return null;
+      machineId = anySnap.docs[0].id;
+    }
   }
 
   const timeZone = 'Asia/Taipei';
@@ -369,8 +409,9 @@ async function resolveWashReserveInput(lastUserMessage, schoolId) {
   }
   if (!startIso) return null;
 
-  const dormM = raw.match(/([ABCDE一二三四五六七八九十]+棟)/);
-  const dormitory = dormM ? dormM[1] : '宿舍';
+  const dormM = raw.match(/([A-Za-zＡ-Ｚａ-ｚ一二三四五六七八九十]+棟)/);
+  if (machineDormitory && dormM && machineDormitory.trim().replace(/棟$/, '') !== dormM[1].replace(/棟$/, '')) return null;
+  const dormitory = machineDormitory || (dormM ? dormM[1] : '宿舍');
 
   return { dormitory, machineId, startTime: startIso };
 }

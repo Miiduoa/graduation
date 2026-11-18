@@ -17,6 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate synthetic benchmark audit cases (not field results)
         run: python3 -m unittest discover -s scripts/qa/campus-spatial -p 'test_compare_trials.py' -v
