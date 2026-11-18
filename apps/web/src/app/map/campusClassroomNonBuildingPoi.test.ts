@@ -408,7 +408,7 @@ describe('malformed imported transit stop markers cannot become classroom destin
     } as unknown as CampusMapPlaceLike;
     for (const schoolId of ['pu', 'another-school']) {
       expect(resolveCampusClassroom({
-        schoolId, query: 'PH303', locations: [imported, hall],
+        schoolId, query: schoolId === 'pu' ? 'PH303' : '主顧樓 PH303', locations: [imported, hall],
       }).matches, schoolId).toEqual([hall]);
     }
   });
@@ -429,7 +429,7 @@ describe('malformed imported transit stop markers cannot become classroom destin
         ...hall, transitStopIds,
       } as unknown as CampusMapPlaceLike;
       expect(resolveCampusClassroom({
-        schoolId: 'another-school', query: 'PH303', locations: [building],
+        schoolId: 'another-school', query: '主顧樓 PH303', locations: [building],
       }).matches).toEqual([building]);
     }
   });
