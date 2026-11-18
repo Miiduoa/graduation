@@ -380,3 +380,30 @@ test('verifies local course/question bytes without exposing private content or p
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('streams large binary PDF fixtures and detects a changed last byte', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nuni-study-large-'));
+  try {
+    const source = Buffer.alloc(5 * 1024 * 1024);
+    source.write('%PDF-1.7\\n', 0, 'utf8');
+    source[source.length - 1] = 255;
+    const question = Buffer.from('試題原文：如何解釋主鍵？', 'utf8');
+    writeFileSync(join(directory, 'lecture.pdf'), source);
+    writeFileSync(join(directory, 'question.txt'), question);
+    const input = fixture();
+    input.trials[0].sourceFile = 'lecture.pdf';
+    input.trials[0].questionFile = 'question.txt';
+    input.trials[0].sourceSha256 = createHash('sha256').update(source).digest('hex');
+    input.trials[0].questionSha256 = createHash('sha256').update(question).digest('hex');
+    const manifest = join(directory, 'observations.json');
+    writeFileSync(manifest, JSON.stringify(input));
+    const report = verifyLocalStudyFixtures(input, manifest);
+    assert.equal(report.fixtureIntegrityVerified, true);
+    assert.equal(JSON.stringify(report).includes('lecture.pdf'), false);
+    source[source.length - 1] = 254;
+    writeFileSync(join(directory, 'lecture.pdf'), source);
+    assert.throws(() => verifyLocalStudyFixtures(input, manifest), /SHA-256 mismatch/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

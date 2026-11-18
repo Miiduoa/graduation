@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Audits paired, human-verified study tasks. Never uploads study material or grades AI. */
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, openSync, readSync, fstatSync, closeSync, constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -241,6 +241,38 @@ function fixturePath(root, name, where) {
   }
   return actual;
 }
+// Stream large PDFs in bounded memory instead of loading each whole fixture.
+// Recheck the opened descriptor (not just a pre-open path) so a file replaced
+// by a FIFO or another non-regular object cannot block the synchronous reader.
+function hashLocalFixture(file, where) {
+  let descriptor;
+  try {
+    descriptor = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK |
+      (constants.O_NOFOLLOW ?? 0));
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!before.isFile()) fail(where, 'regular fixture file required');
+    const digest = createHash('sha256');
+    const chunk = Buffer.allocUnsafe(64 * 1024);
+    let remaining = before.size;
+    while (remaining > 0n) {
+      const length = Number(remaining < BigInt(chunk.length) ? remaining : BigInt(chunk.length));
+      const count = readSync(descriptor, chunk, 0, length, null);
+      if (count === 0) fail(where, 'fixture file changed while hashing');
+      digest.update(chunk.subarray(0, count));
+      remaining -= BigInt(count);
+    }
+    const after = fstatSync(descriptor, { bigint: true });
+    if (before.size !== after.size || before.mtimeNs !== after.mtimeNs ||
+        before.ctimeNs !== after.ctimeNs)
+      fail(where, 'fixture file changed while hashing');
+    return digest.digest('hex');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(`${where}: `)) throw error;
+    fail(where, 'fixture file unreadable');
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
 export function verifyLocalStudyFixtures(raw, manifestPath) {
   const report = auditStudyComparisons(raw);
   const root = realpathSync(dirname(resolve(manifestPath)));
@@ -250,10 +282,7 @@ export function verifyLocalStudyFixtures(raw, manifestPath) {
     ]) {
       const where = `trials[${index}].${fileKey}`;
       const file = fixturePath(root, trial[fileKey], where);
-      let bytes;
-      try { bytes = readFileSync(file); }
-      catch { fail(where, 'fixture file unreadable'); }
-      const actual = createHash('sha256').update(bytes).digest('hex');
+      const actual = hashLocalFixture(file, where);
       if (actual !== trial[digestKey].toLowerCase())
         fail(where, 'local fixture SHA-256 mismatch');
     }
