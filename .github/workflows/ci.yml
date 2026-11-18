@@ -194,8 +194,8 @@ jobs:
       - name: Test platform public Agent admission contracts
         run: node scripts/test-platform-public-agent.mjs
 
-      - name: Test offline TronClass contract report privacy
-        run: node --test scripts/tronclass/analyze-har.test.mjs
+      - name: Test TronClass contract privacy and optional retention profile
+        run: node --test scripts/tronclass/analyze-har.test.mjs scripts/tronclass/prepare-ttl-profile.test.cjs
 
   test-mobile:
     name: Mobile Tests
@@ -301,7 +301,7 @@ jobs:
         run: node scripts/build-functions-shared.cjs
 
       - name: Test web server lifecycle
-        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs
+        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/career-release-gate.test.mjs
 
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food

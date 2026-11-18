@@ -165,11 +165,18 @@ export async function nuniBffRequest(
 ): Promise<unknown> {
   if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) || !NUNI_HANDLE.test(handle))
     throw new NuniError(400, 'INVALID_REQUEST');
+  const tronClass = path === 'tronclass';
+  if (
+    tronClass &&
+    (!input || !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile'].includes(String(input.action)))
+  )
+    throw new NuniError(400, 'INVALID_REQUEST');
   if (signal?.aborted) throw new NuniError(0, 'REQUEST_CANCELLED');
   return withWakeRetry(
     async (attemptSignal) => {
       try {
-        const response = await fetch(`https://nuni.tw/api/nuni/${path}`, {
+        const endpoint = tronClass ? 'https://nuni.tw/api/tronclass' : `https://nuni.tw/api/nuni/${path}`;
+        const response = await fetch(endpoint, {
           method: input ? 'POST' : 'GET',
           redirect: 'error',
           cache: 'no-store',
@@ -188,10 +195,14 @@ export async function nuniBffRequest(
       }
     },
     {
-      timeoutMs: Math.max(12000, WAKE_REQUEST_TIMEOUT_MS),
+      timeoutMs: tronClass
+        ? (['connect', 'disconnect'].includes(String(input?.action)) ? 90000 : 60000)
+        : Math.max(12000, WAKE_REQUEST_TIMEOUT_MS),
       externalSignal: signal,
-      // A permission save may have committed before a timeout. Read back before another edit.
-      retry: path !== 'assistant-permissions' || !input,
+      // A mutation may have committed before a timeout; only reads can wake-retry.
+      retry: tronClass
+        ? ['status', 'sync', 'prepare', 'reconcile'].includes(String(input?.action))
+        : path !== 'assistant-permissions' || !input,
     },
   );
 }
@@ -202,28 +213,50 @@ export async function nuniBffFilePut(
   body: Uint8Array,
   contentType: string,
   signal?: AbortSignal,
+  query?: Record<string, string>,
 ): Promise<unknown> {
   if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) || !NUNI_HANDLE.test(handle))
     throw new NuniError(400, 'INVALID_REQUEST');
   if (signal?.aborted) throw new NuniError(0, 'REQUEST_CANCELLED');
-  try {
-    const response = await fetch(`https://nuni.tw/api/nuni/${path}`, {
-      method: 'PUT',
-      redirect: 'error',
-      cache: 'no-store',
-      signal,
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Platform ${handle}`,
-        'Content-Type': contentType,
-      },
-      body: body as unknown as BodyInit,
-    });
-    return await parseNuniBffJson(response);
-  } catch (error) {
-    if (error instanceof NuniError) throw error;
-    throw new NuniError(0, signal?.aborted ? 'REQUEST_CANCELLED' : 'NETWORK_ERROR');
-  }
+  const tronClass = path === 'tronclass';
+  if (tronClass ? !validTronClassUploadQuery(query) : query !== undefined)
+    throw new NuniError(400, 'INVALID_REQUEST');
+  return withWakeRetry(
+    async (attemptSignal) => {
+      try {
+        const endpoint = tronClass
+          ? `https://nuni.tw/api/tronclass?${new URLSearchParams(query).toString()}`
+          : `https://nuni.tw/api/nuni/${path}`;
+        const response = await fetch(endpoint, {
+          method: 'PUT',
+          redirect: 'error',
+          cache: 'no-store',
+          signal: attemptSignal,
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Platform ${handle}`,
+            'Content-Type': contentType,
+          },
+          body: body as unknown as BodyInit,
+        });
+        return await parseNuniBffJson(response);
+      } catch (error) {
+        if (error instanceof NuniError) throw error;
+        throw new NuniError(0, signal?.aborted ? 'REQUEST_CANCELLED' : 'NETWORK_ERROR');
+      }
+    },
+    { timeoutMs: 60000, externalSignal: signal, retry: false },
+  );
+}
+
+/** The upload scope is data, never a caller-selected host or path. */
+export function validTronClassUploadQuery(query: Record<string, string> | undefined): boolean {
+  if (!query || Object.keys(query).sort().join(',') !== 'courseId,fileId,homeworkId,name,operationId,revision') return false;
+  return ['courseId', 'homeworkId'].every(key => /^[1-9]\d{0,15}$/.test(query[key]) && Number.isSafeInteger(Number(query[key]))) &&
+    /^[a-f0-9]{32}$/.test(query.revision) &&
+    ['operationId', 'fileId'].every(key => /^[A-Za-z0-9_-]{16,80}$/.test(query[key])) &&
+    typeof query.name === 'string' && query.name.length > 0 && query.name.length <= 200 && !/[\\/]/.test(query.name) &&
+    !Array.from(query.name).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 }
 
 export function parseNuniLoginTransaction(value: unknown) {

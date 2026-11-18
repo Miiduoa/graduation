@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { ClubPortal as ClubProfile } from './ClubPortal';
 import { callClubPortal } from './clubPortalService';
 import { leaveMemberGroup } from './groupService';
@@ -443,27 +443,62 @@ test.each(['none', 'past', 'mixed'])('活動篩選後提供空態與已載入的
   expect(callClubPortal).toHaveBeenCalledTimes(1);
 });
 
-test.each(['owner', 'admin', 'member', 'visitor'])(
+describe.each(['owner', 'admin', 'member', 'visitor'])(
   '缺漏資料只向本社幹部提供既有編輯入口：%s',
-  async (role) => {
+  (role) => {
+    test.each([
+      ['社課時間未提供', '  '],
+      ['  ', ''],
+      [' 未提供 ', ' 未提供 '],
+      [' 社團尚未提供介紹 ', ' 社團尚未提供介紹 '],
+      [' 社團尚未提供介紹。 ', ' 社團尚未提供介紹。 '],
+    ])('缺漏值：%s / %s', async (meetingTime, description) => {
+      vi.mocked(callClubPortal).mockResolvedValue({
+        ...profile,
+        role,
+        status: 'active',
+        office: role === 'visitor',
+        club: { ...profile.club!, meetingTime, description },
+      });
+      render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+      await screen.findByText('社團尚未提供介紹。');
+      expect(screen.getByText(/社課時間未提供/)).toBeTruthy();
+      if (role === 'owner' || role === 'admin') {
+        fireEvent.click(screen.getByRole('button', { name: '填寫社課時間' }));
+        expect(screen.getByText('編輯社團介紹')).toBeTruthy();
+        expect((screen.getByLabelText('社課時間') as HTMLInputElement).value).toBe('');
+        expect((screen.getByLabelText('介紹') as HTMLInputElement).value).toBe('');
+        fireEvent.click(screen.getByRole('button', { name: '管理' }));
+        fireEvent.click(screen.getByRole('button', { name: '填寫社團介紹' }));
+        expect(screen.getByText('編輯社團介紹')).toBeTruthy();
+      } else {
+        expect(screen.queryByText('填寫社課時間')).toBeNull();
+        expect(screen.queryByText('填寫社團介紹')).toBeNull();
+      }
+      expect(callClubPortal).toHaveBeenCalledTimes(1);
+    });
+  },
+);
+
+test.each(['未提供', '社課時間未提供', '社團尚未提供介紹', '社團尚未提供介紹。'])(
+  '包含佔位片語的完整句子仍保留內容：%s',
+  async (phrase) => {
+    const content = `原資料註記「${phrase}」，本學期每週三舉行社課。`;
     vi.mocked(callClubPortal).mockResolvedValue({
       ...profile,
-      role,
+      role: 'admin',
       status: 'active',
-      office: role === 'visitor',
-      club: { ...profile.club!, meetingTime: '社課時間未提供', description: '  ' },
+      club: { ...profile.club!, meetingTime: ` ${content} `, description: ` ${content} ` },
     });
     render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
-    await screen.findByText('社團尚未提供介紹。');
-    if (role === 'owner' || role === 'admin') {
-      fireEvent.click(screen.getByRole('button', { name: '填寫社課時間' }));
-      expect(screen.getByText('編輯社團介紹')).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: '管理' }));
-      fireEvent.click(screen.getByRole('button', { name: '填寫社團介紹' }));
-      expect(screen.getByText('編輯社團介紹')).toBeTruthy();
-    } else {
-      expect(screen.queryByText('填寫社課時間')).toBeNull();
-      expect(screen.queryByText('填寫社團介紹')).toBeNull();
+    await screen.findByText(content);
+    expect(screen.getAllByText(content, { exact: false })).toHaveLength(2);
+    expect(screen.queryByText('填寫社課時間')).toBeNull();
+    expect(screen.queryByText('填寫社團介紹')).toBeNull();
+    expect(screen.queryByText('社團尚未提供介紹。')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '管理' }));
+    for (const label of ['社課時間', '介紹']) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe(content);
     }
     expect(callClubPortal).toHaveBeenCalledTimes(1);
   },

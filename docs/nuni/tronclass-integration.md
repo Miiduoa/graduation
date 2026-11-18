@@ -1,10 +1,10 @@
 # TronClass 獨立綁定與作業整合
 
-更新日期：2026-11-17。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
+更新日期：2026-11-18。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
 
 ## 功能狀態
 
-Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。目前只支援靜宜大學 `https://tronclass.pu.edu.tw`。
+Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。原生 Mobile 入口為 `TronClassWorkspace`，學習首頁與 nuni 課程工作區均有入口；深連結路徑為 `/tronclass`。目前只支援靜宜大學 `https://tronclass.pu.edu.tw`。
 
 | 能力 | 本分支狀態 |
 | --- | --- |
@@ -20,14 +20,16 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 既有 Assistant 直接查詢 TronClass | 已實作，回傳本人課程、作業狀態、公告與教材；私有結果不加入雲端模型歷史 |
 | Agent 代理下載與準備作業 | 已實作，需使用者分別授權；在聊天內下載附件、選定作業並開啟預覽 |
 | 隨時調整／撤銷 Agent 權限 | 已實作，綁定 revision 與權限版本雙重檢查；換綁後重新授權 |
-| 作業文字、附件選擇、預覽、複製內容 | 已實作，草稿及檔案只留在目前頁面記憶體 |
+| 作業文字、附件選擇、預覽、複製內容 | 已實作；Web 草稿及檔案只留在目前頁面記憶體，Mobile 文字留在記憶體、附件使用有清理機制的受控 cache 副本 |
 | 依已確認的作業規則編輯與預覽 | 已實作；保留零附件額度，送出前先核對全部文字、檔案與總量，規則未知時只標示本頁整理上限 |
 | 上傳 → 最終送出 → 讀回收據 | 服務及 UI 已實作，以注入測試來源驗證 |
 | 官方送出協定與受控文字候選實作 | 已實作 request builder、acknowledgment parser 及預設停用的單次 POST；尚未接入公開路由或正式 provider |
-| 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回與唯讀查證；注入來源整合測試通過，受控模組尚未接正式路由 |
+| 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回；公開 API 已接上 v2 唯讀查證及新的確認結果，寫入候選仍未啟用 |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
 | 重交、撤回、小組繳交、代替其他人繳交 | 未實作；小組歷史也回傳 `group-unsupported`，引導至原作業查看 |
-| 原生 Mobile 的新綁定／作業畫面 | 本次未實作；舊作業、討論發文／回覆、問卷與同儕互評 writer 改為明確拒絕，避免假成功 |
+| 原生 Mobile 的新綁定／作業畫面 | 已實作獨立綁定、選課讀取、作業詳情、文字／選檔／預覽／再次確認、條件式送出與唯讀查證，使用相同 BFF；正式 writer 的停用條件相同 |
+| 原生 Mobile 教材下載 | 使用固定、已驗證本人權限的 material-download BFF；限定大小、檔名與完整 bytes，透過原生分享介面儲存，使用後清理暫存 |
+| 資料到期與關帳清理 | 已實作 Spark 可用的有上限背景清理與平台關帳 outbox worker；均需明確部署設定。TTL 另有可選設定，不默默啟用計費 |
 
 TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的收件、附件與教師批改，不是 TronClass 的正式繳交證據。
 
@@ -142,9 +144,25 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 ## 送出與失敗恢復
 
+### 2026-11-18：公開查證、原生 Mobile 與實際資料庫驗證
+
+`getDefaultTronClassSubmissionService()` 的 `reconcile` 已按持久化版本分流。v1 沿用既有正式收據與時間檢查；v2 只讀取受控 journal 保存的原 attempt 與 acknowledgment，再使用目前綁定重新讀取本人校方歷史。未知版本一律拒絕，不能以 v1 parser 處理 v2 記錄。這條路徑沒有上傳或 POST 依賴，也不會釋放作業鎖、重寫原 revision 或把紀錄改成可重送。
+
+新增 `tronClassRawSubmissionHistory.ts` 在讀取前後核對當下綁定、課程完整清單、作業活動與個人繳交模式，並驗證歷史的完整性、重複 ID 與本人範圍。401／403／隱藏／404／410 不能退回舊內容；每頁有 deadline guard，逾時的晚回覆不會繼續發起下一頁或活動讀取。原始 HTML 與附件 ID 只用於伺服器內部精確比對，不回傳給公開介面。
+
+有可信 acknowledgment 且精確讀回成功時，公開回應新增獨立的 `status: confirmed`、`receipt: null`、`confirmation.kind: acknowledged-readback`。確認包含本次 operation、校方版本 ID、課程／作業與 `confirmedAt`；可空的 `sourceRecordedAt` 仍只是校方建立紀錄時間。它沒有虛構 `submittedAt`，也不改變舊收據格式。Web 與 Mobile 都核對 operation 及作業範圍後才清除本地 pending；錯誤範圍、暫時讀取失敗、沒有 acknowledgment 或仍在 preparing 的 v2 操作保留待查證。準備中的另一個 actor 仍可能取得 final claim，因此唯讀查證不能聲稱「確定不會送出」。
+
+原生 Mobile 使用平台 session context；只有沒有平台 session 且 Firebase 登入仍有效時，才使用目前 Firebase token。平台 session handle 留在既有 controller，校方 Cookie 不傳到手機。換 nuni 帳號、換校方 studentKey、解除連接或晚回的舊要求都不能沿用權限或確認。選課會發起帶 courseId 的讀取，取得該課完整作業、公告與教材，並丟棄較早選課的晚回覆。
+
+Mobile 文字草稿留在目前畫面記憶體；附件使用 DocumentPicker 的 cache copy 支援 iCloud／Android 文件來源，再移至本畫面的隨機暫存目錄。預覽固定當時 bytes 與 SHA-256，確認後上傳相同內容。移除、丟棄、換人、解除連接、確認成功與離頁會清理副本；不刪使用者原檔。只能恢復同一已驗證學生的本頁草稿，重連後重新讀取權限與預覽。AsyncStorage 僅保存 owner／作業範圍對應的不透明操作 ID，不保存密碼、草稿文字、附件 URI、上傳狀態或校方 Cookie。教材下載使用固定 BFF、大小與 header 檢查，在原生分享完成後清除暫存。JavaScript export／單元測試不等同於 iOS／Android 真人選檔與校方繳交驗收。
+
+Firestore journal 已用真正的 Java 21／Firestore Emulator 1.22.0／Admin SDK 測試，不再只依賴模擬交易：兩個獨立 client 的檔案／final claim 競爭、跨 owner 同學生共用鎖、同學生重連只讀、換學生拒絕、實際關帳 hook 與晚回 transfer／acknowledgment 都在驗證範圍內。後述 Spark retention 也有真 emulator 的 query／transaction 競態測試。這些使用合成校方資料，沒有真人作業 POST。
+
+另外整合 PR #586 的既有課務 reader 修正：補讀 courseware、隱藏／未發布／跨課資料過濾，以及不完整結果的 60 秒重試。交叉審查再修正損壞 error cache 阻斷手動 refresh 的問題，並加入 projection version；舊快取已遺失隱藏旗標，必須整體重新讀取，不能在升級後繼續回傳舊投影。
+
 ### 2026-11-17：受控附件與版本確認
 
-新增 `tronClassAttachmentCandidate.ts`、`tronClassFinalSubmissionCandidate.ts`、`tronClassSubmissionReadback.ts` 三個協定模組，並以 `tronClassControlledSubmission.ts` 與 `tronClassControlledJournal.ts` 完成服務及 Firestore 交易接線。執行候選與工廠預設停用，`contractVerified` 固定為 `false`，不會由環境變數自行成為正式 provider。既有公開 route／Agent 寫入限制不變。
+下段保留 11/17 的設計與當日測試紀錄；11/18 的公開唯讀查證及真實資料庫驗證更新見上節。新增 `tronClassAttachmentCandidate.ts`、`tronClassFinalSubmissionCandidate.ts`、`tronClassSubmissionReadback.ts` 三個協定模組，並以 `tronClassControlledSubmission.ts` 與 `tronClassControlledJournal.ts` 完成服務及 Firestore 交易接線。執行候選與工廠預設停用，`contractVerified` 固定為 `false`，不會由環境變數自行成為正式 provider。公開 route／Agent 寫入限制不變。
 
 **附件傳輸。** 先以 server-only 授權讀取器確認本人作業與限制，再要求原子且持久化的檔案 claim，才建立 metadata。S3／WRPC 分支以原始 bytes PUT，成功後呼叫官方 callback；MEDIA 分支以包含 `file` 的 multipart PUT。multipart 先產生完整 bytes 及相同 boundary 的 Content-Type，避免既有底層把 FormData 轉成字串或遺失 boundary。QINIU、CHINAMCLOUD、未知模式與尚未驗證的 S3 分支拒絕。
 
@@ -169,7 +187,7 @@ Claim 完成後會再次讀取校方授權與歷史。若使用者已在另一�
 
 **持久化接線。** `createTronClassControlledSubmission()` 已直接使用 Firestore transaction journal，將附件結果保存後才交給 final。Operation 與舊服務使用相同 owner／operation hash，採明示 version 2 與 candidate 標記；遇到舊 version 1 會拒絕覆寫。校方學生／作業鎖與舊服務共用相同 hash，跨 nuni owner 也只能取得一次。本輪遇到任何既有鎖均拒絕，包含舊 `not-sent`；不自行清除或轉換舊鎖。
 
-每個交易先讀取 `_tronClassBindings` 的關帳／解除／換綁 barrier，核對當下本人、revision 與期限，再讀寫 operation 及鎖。附件有固定 file slot、完整 manifest 與總量限制；保存 acknowledgment 前會重新核對原 attempt 和鎖，不把 acknowledged 標成已完成讀回。所有未確認記錄與鎖使用 `purgeAt: null`，避免 TTL 讓原操作再次送出。新增的私有資料仍由既有 ownerKey 清理流程覆蓋；平台帳號的外部關帳 hook 仍是下方既有待辦。
+每個交易先讀取 `_tronClassBindings` 的關帳／解除／換綁 barrier，核對當下本人、revision 與期限，再讀寫 operation 及鎖。附件有固定 file slot、完整 manifest 與總量限制；保存 acknowledgment 前會重新核對原 attempt 和鎖，不把 acknowledged 標成已完成讀回。所有 v2 記錄與鎖使用 `purgeAt: null`，避免 TTL 讓原操作再次送出。新增的私有資料仍由 ownerKey 清理流程覆蓋；11/18 已加入平台關帳 outbox worker，部署條件見下節。
 
 **驗證與剩餘接線。** `tronClassControlledFlow.test.ts` 直接使用實際工廠與 journal，配合支援原子提交、rollback、先讀後寫的交易測試資料庫，完成文字與兩個 PDF／ZIP MIME 附件的 8 條整合流程：正常順序、三階段失敗、第二檔失敗、少檔後唯讀恢復、跨 instance 防重送及關帳競態。每次操作都可重建工廠，仍讀回資料庫中的原 claim／manifest／acknowledgment。沒有手造已上傳 token，也沒有真人作業送交。
 
@@ -259,24 +277,50 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 所有 ledger 變更的 transaction 也會讀取關閉標記，防止清理完成後被尚未結束的請求重新建立。已確認收據的 ledger 日後到期清除，仍會保留作業鎖；重放同一 operation ID 也不能重新送交。
 
-**平台帳號（Google／nuni）關帳仍有一個外部整合待辦：**實際關帳工作位於本 repo 之外的 nuni API，目前沒有可呼叫 Firestore 清理的 hook。可信的 closure job 必須以驗證過的 platform account ID 呼叫同一清理函式，不能暴露讓客戶端任意傳 owner 的端點。不能將本次 Firebase 清理宣稱為平台帳號也已自動清理。
+**平台帳號（Google／nuni）關帳接線：**本分支新增 PostgreSQL 的帳號狀態／刪除 trigger，與真實 `platform_accounts` 關帳交易一同寫入 durable outbox。背景 worker 以 lease token 領取並呼叫同一 `closeTronClassOwner()`，成功才刪除事件及其 platform ID；失敗固定錯誤碼、退避重試，程序中斷後可重新領取。worker 只讀明確關帳事件，不掃不存在的帳號猜測關帳，也沒有讓客戶端任意傳 owner 的 HTTP 端點。專用資料庫設定、最小權限、候選 migration 與啟用順序見 [平台關帳部署說明](../../deploy/nuni-api/tronclass-account-closure/README.md)。本輪未套用正式 PostgreSQL migration，因此不能宣稱 production 平台關帳已啟用自動清理。
 
-程式已寫入下列 `purgeAt`，但本次**未建立或部署 Firestore TTL policy**，因此尚不能保證背景自動清除時間：
+**到期清理：**`TRONCLASS_RETENTION_ENABLED=true` 會在 Node.js Web 程序啟用背景 worker，每 15 分鐘加 0–60 秒 jitter 執行一次；每輪三個固定集合合計最多掃描 50 筆。同一程序不重疊，跨程序由 Firestore transaction 重讀目前期限及狀態後決定是否刪除。換綁、配額續期或 draft 轉成 unknown 時不會被舊查詢結果刪除。游標與輪換順序避免不應刪除的紀錄堵住其他已到期資料。這個方式保留 Spark 部署相容性，不依賴付費 TTL；仍受實際服務運作與 Firestore 配額影響，不承諾到期瞬間刪除。
+
+程式依以下期限清理，伺服器授權仍即時核對到期時間，不等待背景刪除：
 
 | 文件 | purgeAt |
 | --- | --- |
 | 已連接校方 session | 12 小時有效期到期 |
 | 登入嘗試配額 | 15 分鐘視窗到期 |
-| 尚未最終送出的 draft operation | 24 小時 |
-| 已確認成功的 receipt operation | 30 天 |
-| unknown / submitting operation | null，不自動到期 |
+| v1 尚未最終送出的 draft operation | 24 小時 |
+| v1 已確認成功的 receipt operation | 30 天 |
+| unknown / submitting 與所有 v2 operation | null，不自動到期；關帳時清理 |
 | closed / disconnected 綁定標記、所有作業鎖 | 不設定 TTL |
 
-正式啟用前，需要對 `_tronClassBindings`、`_tronClassLoginAttempts`、`_tronClassSubmissionOperations` 的 `purgeAt` 設定 TTL policy，保留上述永久標記，並接好平台關帳 hook。
+Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟用 TTL；[可選 TTL profile](../../deploy/tronclass/README.md) 產生器會保留所有既有索引，另加入三個 `purgeAt` policy，並明確停用作業鎖的 TTL。readiness gate 會核對 exact field 的 `ACTIVE` 狀態、零額外 offset 及鎖 policy 已停用，不能只因一般索引 READY 就通過。本輪未修改 production 計費或套用 TTL policy。正式啟用時需部署 retention worker 設定及平台關帳 migration／worker；若使用可選 TTL，還需先確認該專案已符合計費前提。
 
 ## 驗證方式與範圍
 
 使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、Agent grants／意圖／工具／下載、client、TronClassWorkspace 與既有 Assistant／NuniApp 回歸；另外驗證 Mobile 五個舊 writer 沒有任何網路送出。HAR 測試使用 `node --test scripts/tronclass/analyze-har.test.mjs`，已加入既有 CI。
+
+### 2026-11-18 本機整合驗證
+
+這輪先合入 `main` 的 `d4bc4cbf`，再完成上述接線。完整 Web 測試執行於開發收尾期間；其後變更另跑最新 TronClass／instrumentation 範圍，兩者有重疊，不能相加。正式 GitHub 結果以 PR 最新提交上的 Actions 為準。
+
+| 範圍 | 實際結果 |
+| --- | --- |
+| 完整 Web Vitest | 770 個檔案通過、16 個略過；16,641 項通過、141 項略過、0 失敗 |
+| 最後 TronClass 與 instrumentation 回歸 | 48 個檔案通過、4 個略過；1,504 項通過、33 項略過、0 失敗 |
+| 真 Firestore Emulator | controlled journal 8 項與 retention 6 項，合計 14 / 14 通過 |
+| 真 PostgreSQL 17.12 | 關帳 outbox、角色權限、lease、rollback 與實際 SQL 逾時，16 / 16 通過 |
+| 最新原生 Mobile／transport／session 測試 | 9 suites、149 / 149 通過 |
+| Mobile 受影響導覽回歸 | 4 suites、140 / 140 通過；與上列分開列示，不加總 |
+| 完整 Web 與 Mobile TypeScript | Node 22.23.5，均 exit 0 |
+| 完整 monorepo ESLint | `pnpm lint` exit 0；既有 warnings 保留，沒有降低規則 |
+| 原生 iOS／Android Metro JS export | development 設定下兩平台均 exit 0；不等同原生商店 build 或真人裝置驗收 |
+| 正式環境 iOS／Android JS export | 兩平台均在 Expo 設定階段因缺少 `EXPO_PUBLIC_FIREBASE_API_KEY` 停止，尚未進入 Metro；未加入假設定或略過 release gate |
+| UI design gate | `--base origin/main` 通過 |
+
+普通 Vitest 未啟動 PostgreSQL／Firestore Emulator 時會略過相應檔案；上表真資料庫結果來自另外實際啟動的隔離 runtime，不把 skipped 計作通過。學校登入回應與作業內容均為合成資料，沒有將其他學生的真實課務資料轉為 fixture，也沒有真人作業送交。
+
+這輪新提交仍須面對 11/17 更新的 `picomatch` advisory `GHSA-fc5q-39xc-vjpf`；當時沒有可用已發布修正版，實際 `workspace-prod`／`workspace-all` audit 都被既有 high gate 阻擋。未修改例外名單、改版本號假裝修補，或放寬安全 gate。先前提交的 CI 綠燈不能代替本輪提交的結果。
+
+### 先前開發回合
 
 前輪（2026-11-16，`ca87994d`）的驗證結果保留如下。這是指定範圍的回歸結果，不代表整個 monorepo 的所有測試均已執行；重跑的子集合不重複累加。最新詳情／草稿恢復的結果另列於下方。
 

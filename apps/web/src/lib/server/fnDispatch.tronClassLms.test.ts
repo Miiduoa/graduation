@@ -6,6 +6,7 @@ import { resetUidRateLimitForTests } from './uidRateLimit';
 import { getCloudFunctionUrl } from '../cloudFunctions';
 import { LMS_CACHE_COLLECTION, LMS_SNAPSHOT_TTL_MS } from '@campus/shared/src/puLmsReadonly';
 import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadonlySnapshot } from '../tronClassLmsTypes';
 import {
   LMS_FIXTURE_ANNOUNCEMENT,
   LMS_FIXTURE_COURSE,
@@ -89,7 +90,7 @@ it('loads homework without per-course activities on a cold list', async () => {
   expect(JSON.stringify(body)).not.toMatch(/secret|cookies/);
 });
 
-it('loads one activities request when opening a course and does not download locked files', async () => {
+it('loads general and filtered courseware activities without downloading locked files', async () => {
   const { request, source } = setup();
   await request();
   vi.mocked(source.fetchHomeworkPage).mockClear();
@@ -97,8 +98,9 @@ it('loads one activities request when opening a course and does not download loc
   const body = await (await request({ courseId: 10001 })).json();
   expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
   expect(source.fetchCourses).not.toHaveBeenCalled();
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, '');
+  expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'lms-secret' }, 10001, 'type=courseware_activity');
   expect(source.fetchCourseAnnouncements).toHaveBeenCalledTimes(1);
   expect(body.result.materials[0].files).toEqual([
     expect.objectContaining({ name: 'notes.pdf', allowDownload: true, downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/upload-key-notes/blob' }),
@@ -106,6 +108,63 @@ it('loads one activities request when opening a course and does not download loc
   ]);
   expect(body.result.announcements[0]).toMatchObject({ title: '停課通知', source: 'course' });
   expect(JSON.stringify(body)).not.toMatch(/secret|cookies|upload-key-restricted/);
+});
+
+it('does not expose hidden, unpublished or cross-course rows from school feeds', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({
+    ok: true,
+    value: {
+      homework_activities: [
+        { ...LMS_FIXTURE_HOMEWORK_OPEN, hidden: true },
+        { ...LMS_FIXTURE_HOMEWORK_DONE, course_id: 99999 },
+        { ...LMS_FIXTURE_HOMEWORK_OPEN, id: 20003, published: false },
+        { ...LMS_FIXTURE_HOMEWORK_OPEN, id: 20004, title: '可見作業' },
+      ],
+      total: 4,
+    },
+  });
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+    ok: true,
+    value: query === 'type=courseware_activity' ? [
+      { ...LMS_FIXTURE_MATERIAL, id: 30001, is_hidden: true },
+      { ...LMS_FIXTURE_MATERIAL, id: 31001, hidden: true },
+      { id: 42004, type: 'announcement', title: '被另一來源隱藏的公告', hidden: true },
+    ] : [
+      LMS_FIXTURE_MATERIAL,
+      { ...LMS_FIXTURE_MATERIAL, id: 31002, course_id: 99999 },
+      { ...LMS_FIXTURE_MATERIAL, id: 31003, published: false },
+      { ...LMS_FIXTURE_MATERIAL, id: 31004, uploads: [
+        { name: 'hidden.pdf', key: 'hidden-key', allow_download: true, hidden: true },
+        { name: 'public.pdf', key: 'public-key', allow_download: true },
+      ] },
+      { id: 42001, type: 'announcement', title: '外課公告', course_id: 99999 },
+      { id: 42002, type: 'announcement', title: '草稿公告', published: false },
+      { id: 42004, type: 'announcement', title: '被另一來源隱藏的公告' },
+    ],
+  }));
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValueOnce({
+    ok: true,
+    value: [
+      LMS_FIXTURE_ANNOUNCEMENT,
+      { ...LMS_FIXTURE_ANNOUNCEMENT, id: 40002, course_id: 99999, title: '外課公告' },
+      { ...LMS_FIXTURE_ANNOUNCEMENT, id: 40003, is_hidden: true, title: '隱藏公告' },
+    ],
+  });
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.homework.map((row: { id: number }) => row.id)).toEqual([20004]);
+  expect(body.result.materials.map((row: { id: number }) => row.id)).toEqual([31004]);
+  expect(body.result.materials[0].files).toEqual([
+    expect.objectContaining({ name: 'public.pdf', allowDownload: true }),
+  ]);
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(JSON.stringify(body)).not.toMatch(/hidden-key|hidden\.pdf|外課公告|草稿公告|隱藏公告|被另一來源隱藏的公告/);
 });
 
 it('pages homework until total and does not treat a later 500 as an empty course', async () => {
@@ -125,6 +184,69 @@ it('pages homework until total and does not treat a later 500 as an empty course
   ]);
 });
 
+it('retries incomplete homework after a short TTL, including legacy cache entries', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+
+  const first = await (await request()).json();
+  expect(first.result.homework).toEqual([]);
+  expect(first.result.courseErrors).toEqual([
+    expect.objectContaining({ area: 'homework', status: 503 }),
+  ]);
+  const cached = store.docs.get(CACHE)! as { snapshot: LmsReadonlySnapshot; expiresAt: Date };
+  const shortTtl = Date.parse(cached.snapshot.cache.expiresAt) - Date.parse(cached.snapshot.fetchedAt);
+  expect(shortTtl).toBeGreaterThan(58_000);
+  expect(shortTtl).toBeLessThanOrEqual(60_000);
+
+  const immediate = await (await request()).json();
+  expect(immediate.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+
+  // An older release stored incomplete homework for ten minutes. Its expiry
+  // alone must not prevent retrying the now-recovered school source.
+  cached.snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  cached.snapshot.cache.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  cached.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS);
+  const recovered = await (await request()).json();
+  expect(recovered.result.cache.hit).toBe(false);
+  expect(recovered.result.homework).toHaveLength(2);
+  expect(recovered.result.courseErrors).toEqual([]);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+  const renewed = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  expect(Date.parse(renewed.cache.expiresAt) - Date.parse(renewed.fetchedAt))
+    .toBeGreaterThan(580_000);
+});
+
+it('retries an incomplete upcoming-course list without discarding current homework', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchCourses)
+    .mockResolvedValueOnce([LMS_FIXTURE_COURSE])
+    .mockRejectedValueOnce(new Error('upcoming course source unavailable'));
+
+  const first = await (await request()).json();
+  expect(first.result.homework).toHaveLength(2);
+  expect(first.result.upcomingCoursesError).toEqual({ status: null });
+  const stored = store.docs.get(CACHE)! as { snapshot: LmsReadonlySnapshot; expiresAt: Date };
+  expect(Date.parse(stored.snapshot.cache.expiresAt) - Date.parse(stored.snapshot.fetchedAt))
+    .toBeLessThanOrEqual(60_000);
+
+  const immediate = await (await request()).json();
+  expect(immediate.result.cache.hit).toBe(true);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+
+  // Simulate an old partial cache with its ten-minute expiry still intact.
+  stored.snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  stored.snapshot.cache.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  stored.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS);
+  const recovered = await (await request()).json();
+  expect(recovered.result.cache.hit).toBe(false);
+  expect(recovered.result.homework).toHaveLength(2);
+  expect(recovered.result.upcomingCoursesError).toBeNull();
+  expect(source.fetchCourses).toHaveBeenCalledTimes(4);
+  expect(Date.parse((store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot).cache.expiresAt) -
+    Date.parse((store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot).fetchedAt)).toBeGreaterThan(580_000);
+});
+
 it('keeps the page up when one course feature returns 500', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchCourseAnnouncements).mockResolvedValueOnce({ ok: false, status: 500 });
@@ -136,6 +258,162 @@ it('keeps the page up when one course feature returns 500', async () => {
     expect.objectContaining({ area: 'announcements', status: 500 }),
   ]);
   expect(body.result.announcements).toEqual([]);
+});
+
+it('includes courseware-only materials and deduplicates items shared by both feeds', async () => {
+  const { request, source } = setup();
+  const additional = {
+    id: 30999, title: '補充講義', type: 'courseware_activity',
+    uploads: [{ name: 'extra.pdf', key: 'extra-pdf', allow_download: true }],
+  };
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+    ok: true,
+    value: query === 'type=courseware_activity'
+      ? [LMS_FIXTURE_MATERIAL, additional] : [LMS_FIXTURE_MATERIAL],
+  }));
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(2);
+  expect(body.result.materials.filter((item: { id: number }) => item.id === LMS_FIXTURE_MATERIAL.id))
+    .toHaveLength(1);
+  expect(body.result.materials).toContainEqual(expect.objectContaining({
+    id: 30999, title: '補充講義',
+    files: [expect.objectContaining({
+      name: 'extra.pdf', downloadHref: 'https://tronclass.pu.edu.tw/api/uploads/extra-pdf/blob',
+    })],
+  }));
+  expect(body.result.courseErrors).toEqual([]);
+  expect(source.fetchActivities).toHaveBeenCalledWith(
+    { session: 'lms-secret' }, 10001, 'type=courseware_activity',
+  );
+});
+
+it('does not treat filtered courseware entries as another announcement feed', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => ({
+    ok: true,
+    value: query === 'type=courseware_activity'
+      ? [LMS_FIXTURE_MATERIAL, {
+        id: 40099, title: '不應出現在公告列表', type: 'announcement',
+        content: '篩選教材端點不是公告來源',
+      }]
+      : [LMS_FIXTURE_MATERIAL],
+  }));
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.courseErrors).toEqual([]);
+});
+
+it('reports incomplete announcements when only the filtered courseware feed succeeds', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: true, value: [LMS_FIXTURE_MATERIAL] }
+      : { ok: false, status: 503 });
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 404 });
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.announcements).toEqual([]);
+  expect(body.result.courseErrors).toEqual([
+    expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 }),
+    expect.objectContaining({ courseId: 10001, area: 'announcements', status: 404 }),
+  ]);
+});
+
+it('marks announcements incomplete when the general feed fails despite dedicated notices succeeding', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: true, value: [LMS_FIXTURE_MATERIAL] }
+      : { ok: false, status: 503 });
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.courseErrors).toEqual([
+    expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 }),
+    expect.objectContaining({ courseId: 10001, area: 'announcements', status: 503 }),
+  ]);
+});
+
+it('retries incomplete course content after one minute even when an old cache has a longer TTL', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: true, value: [LMS_FIXTURE_MATERIAL] }
+      : { ok: false, status: 503 });
+
+  const first = await (await request({ courseId: 10001 })).json();
+  expect(first.result.materials).toHaveLength(1);
+  expect(first.result.courseErrors).toEqual([
+    expect.objectContaining({ area: 'materials', status: 503 }),
+    expect.objectContaining({ area: 'announcements', status: 503 }),
+  ]);
+
+  type CachedExtra = { fetchedAt: string; expiresAt: string; errors: unknown[] };
+  const extras = store.docs.get(CACHE)!.extras as Record<string, CachedExtra>;
+  const partial = extras['10001'];
+  expect(partial.errors).toHaveLength(2);
+  const partialTtl = Date.parse(partial.expiresAt) - Date.parse(partial.fetchedAt);
+  expect(partialTtl).toBeGreaterThan(58_000);
+  expect(partialTtl).toBeLessThanOrEqual(60_000);
+  expect(Date.parse(first.result.cache.expiresAt) - Date.parse(partial.fetchedAt))
+    .toBeGreaterThan(60_000);
+
+  vi.mocked(source.fetchActivities).mockClear().mockResolvedValue({
+    ok: true, value: [LMS_FIXTURE_MATERIAL],
+  });
+  const cached = await (await request({ courseId: 10001 })).json();
+  expect(cached.result.cache.hit).toBe(true);
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+
+  // Simulate a legacy partial document that kept the full TTL. Even if its
+  // stored expiresAt is in the future, its 60-second retry window has elapsed.
+  partial.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+  partial.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  const recovered = await (await request({ courseId: 10001 })).json();
+  expect(recovered.result.cache.hit).toBe(false);
+  expect(recovered.result.courseErrors).toEqual([]);
+  expect(recovered.result.materials).toHaveLength(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+  const fresh = (store.docs.get(CACHE)!.extras as Record<string, CachedExtra>)['10001'];
+  expect(fresh.errors).toEqual([]);
+  expect(Date.parse(fresh.expiresAt) - Date.parse(fresh.fetchedAt)).toBeGreaterThan(580_000);
+});
+
+it('does not cache partial materials when the filtered courseware feed rejects the session', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: false, status: 401 }
+      : { ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  const response = await request({ courseId: 10001 });
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+});
+
+it.each([404, 503])('keeps general materials after filtered courseware returns HTTP %s', async (status) => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
+    query === 'type=courseware_activity'
+      ? { ok: false, status }
+      : { ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.materials).toHaveLength(1);
+  // A missing optional endpoint is not an error; a live upstream 503 is.
+  expect(body.result.courseErrors).toEqual(status === 404
+    ? []
+    : [expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 })]);
 });
 
 it.each(['homework', 'activities', 'announcements'] as const)(
@@ -280,7 +558,7 @@ it('uses activity announcements on 404 without marking the course as empty succe
     expect.objectContaining({ title: '討論區公告', source: 'activity' }),
   ]);
   expect(body.result.materials).toHaveLength(1);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('keeps activity-only notices when the dedicated course announcement feed succeeds', async () => {
@@ -299,7 +577,7 @@ it('keeps activity-only notices when the dedicated course announcement feed succ
   ]);
   expect(body.result.materials).toHaveLength(1);
   expect(body.result.courseErrors).toEqual([]);
-  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('deduplicates matching activity and course notices without hiding changed content', async () => {
@@ -450,58 +728,134 @@ it('refetches a legacy cache missing sessionId', async () => {
   expect(store.docs.get(CACHE)?.sessionId).toBeDefined();
 });
 
-it('keeps a still-fresh legacy cache missing sessionVersion without rewriting it', async () => {
+it('refetches a versionless legacy cache instead of presenting it as a session-bound hit', async () => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
-  const cached = store.docs.get(CACHE)!;
-  delete cached.sessionVersion;
+  delete store.docs.get(CACHE)!.sessionVersion;
   vi.mocked(source.fetchHomeworkPage).mockClear();
   vi.mocked(source.fetchCourses).mockClear();
 
   const body = await (await request()).json();
-  expect(body.result.cache.hit).toBe(true);
-  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
-  expect(source.fetchCourses).not.toHaveBeenCalled();
-  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
 });
 
-it('does not rewrite a fresh legacy cache when a missing course is requested', async () => {
+it.each([undefined, 0, 1, 3, '2'])('refetches old or unknown projections so previously cached hidden items cannot survive an upgrade: %j', async version => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  if (version === undefined) delete cached.projectionVersion;
+  else cached.projectionVersion = version;
+  // The old projection retained no hidden flag. Only a fresh school request can
+  // establish that this formerly visible assignment and material are hidden.
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValue({ ok: true, value: {
+    homework_activities: [{ ...LMS_FIXTURE_HOMEWORK_OPEN, hidden: true }], total: 1,
+  } });
+  vi.mocked(source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...LMS_FIXTURE_MATERIAL, hidden: true }] });
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: true, value: [] });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.homework).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(body.result.announcements).toEqual([]);
+  expect(store.docs.get(CACHE)?.projectionVersion).toBe(2);
+});
+
+it.each([false, true])('corrupt course-error cache is a miss and cannot block manual refresh=%s', async refresh => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
-  const cached = store.docs.get(CACHE)!;
-  delete cached.sessionVersion;
+  (store.docs.get(CACHE)!.snapshot as Record<string, unknown>).courseErrors = [null];
+  const response = await request({ refresh });
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+});
+
+it('prunes a corrupt per-course error entry and recovers through a fresh owned course read', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, { errors: unknown[] }>;
+  extras['10001'].errors = [null];
+  vi.mocked(source.fetchActivities).mockClear();
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.courseErrors).toEqual([]);
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+});
+
+it('refetches versionless course cache even when the requested course is unknown', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
   vi.mocked(source.fetchHomeworkPage).mockClear();
   vi.mocked(source.fetchCourses).mockClear();
   vi.mocked(source.fetchActivities).mockClear();
 
   const body = await (await request({ courseId: 19999 })).json();
-  expect(body.result.cache.hit).toBe(true);
-  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
-  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
   expect(source.fetchActivities).not.toHaveBeenCalled();
-  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
 });
 
-it('does not rewrite a still-fresh legacy cache when extras have expired', async () => {
+it('discards versionless cached materials rather than mixing them with a new session', async () => {
   const { request, source, store } = setup();
   expect((await request({ courseId: 10001 })).status).toBe(200);
-  const cached = store.docs.get(CACHE)!;
-  delete cached.sessionVersion;
-  const extras = cached.extras as Record<string, { expiresAt?: string }>;
-  if (extras) {
-    for (const key of Object.keys(extras)) {
-      extras[key] = { ...extras[key], expiresAt: '2000-01-01T00:00:00.000Z' };
-    }
-  }
+  delete store.docs.get(CACHE)!.sessionVersion;
   vi.mocked(source.fetchHomeworkPage).mockClear();
-  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchActivities).mockClear().mockResolvedValue({ ok: true, value: [] });
+  vi.mocked(source.fetchCourseAnnouncements).mockClear().mockResolvedValue({ ok: true, value: [] });
 
-  const body = await (await request()).json();
-  expect(body.result.cache.hit).toBe(true);
-  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
-  expect(source.fetchCourses).not.toHaveBeenCalled();
-  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
-  expect(store.docs.get(CACHE)?.extras).toEqual(cached.extras);
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.materials).toEqual([]);
+  expect(body.result.announcements).toEqual([]);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
+it('does not expose legacy homework when the same LMS document rotates credentials', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  await store.db.doc(LMS).set({ cookies: { session: 'rotated-fixture' }, userId: 11 }, { merge: true });
+  vi.mocked(source.fetchCourses).mockClear().mockResolvedValue([{ id: 10002, name: '新連線課程' }]);
+  vi.mocked(source.fetchHomeworkPage).mockClear().mockResolvedValue({
+    ok: true, value: { homework_activities: [], total: 0 },
+  });
+  vi.mocked(source.fetchActivities).mockClear();
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.courses).toEqual([{ id: 10002, name: '新連線課程' }]);
+  expect(body.result.homework).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(source.fetchCourses).toHaveBeenCalledWith(
+    { session: 'rotated-fixture' }, { userId: 11, status: 'ongoing' },
+  );
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
+it('does not fall back to versionless homework when a safe refetch fails', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  const stale = structuredClone(store.docs.get(CACHE));
+  vi.mocked(source.fetchCourses).mockRejectedValueOnce(new Error('upstream unavailable'));
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('UNAVAILABLE');
+  expect(store.docs.get(CACHE)).toEqual(stale);
 });
 
 it.each([
@@ -569,7 +923,7 @@ it('rejects an in-flight course read when its linked session changes before comp
     release = () => resolve({ ok: true, value: [LMS_FIXTURE_MATERIAL] });
   }));
   const pending = request({ courseId: 10001 });
-  await vi.waitFor(() => expect(source.fetchActivities).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(source.fetchActivities).toHaveBeenCalledTimes(2));
 
   const nextId = 'd'.repeat(32);
   Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: nextId });

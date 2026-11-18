@@ -1,4 +1,5 @@
 import { isSchoolLmsReadonlyEnabled } from './schoolLmsReadonly';
+import { isTronClassSourceVisible as sourceRowVisible } from './tronClassSourceVisibility';
 import { LMS_CONNECTING_CODE } from '../schoolLoginTimeouts';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
@@ -89,6 +90,21 @@ function documentVersion(snapshot: SchoolDataSnapshot): string | undefined {
 
 type CourseRow = { id: number; name: string };
 
+function belongsToCourse(row: Record<string, unknown>, course: CourseRow | null): boolean {
+  return course === null || row.course_id === undefined || positiveId(row.course_id) === course.id;
+}
+
+// A hidden entry in either activities feed must not be revived by a visible
+// duplicate from the other feed with the same activity ID.
+function visibleSourceRows(rows: unknown[], allRows: unknown[] = rows): unknown[] {
+  const denied = new Set<number>();
+  for (const raw of allRows) {
+    const id = positiveId(record(raw).id);
+    if (id && !sourceRowVisible(raw)) denied.add(id);
+  }
+  return rows.filter((raw) => sourceRowVisible(raw) && !denied.has(positiveId(record(raw).id) ?? 0));
+}
+
 function publicCourses(input: unknown): CourseRow[] {
   if (!Array.isArray(input) || input.length > 1000) {
     throw new HttpsError('unavailable', 'WOW Class 課程資料不完整，請稍後重試。');
@@ -109,8 +125,8 @@ function publicCourses(input: unknown): CourseRow[] {
 }
 
 function uploadsOf(activity: Record<string, unknown>): Record<string, unknown>[] {
-  if (Array.isArray(activity.uploads)) return activity.uploads.filter((item) => item && typeof item === 'object') as Record<string, unknown>[];
-  if (Array.isArray(activity.attachments)) return activity.attachments.filter((item) => item && typeof item === 'object') as Record<string, unknown>[];
+  if (Array.isArray(activity.uploads)) return activity.uploads.filter((item) => sourceRowVisible(item)) as Record<string, unknown>[];
+  if (Array.isArray(activity.attachments)) return activity.attachments.filter((item) => sourceRowVisible(item)) as Record<string, unknown>[];
   return [];
 }
 
@@ -121,7 +137,7 @@ function parseHomework(
   const row = record(raw);
   const id = positiveId(row.id);
   const title = shortText(row.title || row.name);
-  if (!id || !title) return null;
+  if (!id || !title || !belongsToCourse(row, course) || !sourceRowVisible(row)) return null;
   const data = record(row.data);
   const deadline = isoTime(row.deadline) || isoTime(row.end_time);
   return {
@@ -145,7 +161,7 @@ function parseAnnouncement(
   const row = record(raw);
   const numericId = positiveId(row.id);
   const title = shortText(row.title || row.name);
-  if (!numericId || !title) return null;
+  if (!numericId || !title || !belongsToCourse(row, course) || !sourceRowVisible(row)) return null;
   const content = homeworkDescriptionText(row.content ?? record(row.data).description ?? row.description);
   const publishedAt = isoTime(row.created_at) || isoTime(row.publish_time) || isoTime(record(row.data).publish_time);
   const href = course
@@ -168,7 +184,7 @@ function parseMaterial(raw: unknown, course: CourseRow): LmsMaterialItem | null 
   const id = positiveId(row.id);
   const title = shortText(row.title || row.name);
   const type = shortText(row.type, 40) || 'material';
-  if (!id || !title || !isMaterialActivityType(type)) return null;
+  if (!id || !title || !isMaterialActivityType(type) || !belongsToCourse(row, course) || !sourceRowVisible(row)) return null;
   const files: LmsMaterialFile[] = [];
   for (const upload of uploadsOf(row).slice(0, 30)) {
     const name = shortText(upload.name || upload.filename, 200);
@@ -232,6 +248,7 @@ async function readPagedHomework(
 ): Promise<{ items: LmsHomeworkItem[]; error: LmsCourseError | null }> {
   const seen = new Set<number>();
   const items: LmsHomeworkItem[] = [];
+  let accumulated = 0;
   let total: number | null = null;
   for (let page = 1; page <= HOMEWORK_MAX_PAGES; page += 1) {
     const result = await source.fetchHomeworkPage(cookies, course.id, page, HOMEWORK_PAGE_SIZE);
@@ -249,11 +266,13 @@ async function readPagedHomework(
       parsed.push(item);
     }
     items.push(...parsed);
+    // The school's total includes hidden and out-of-course rows as well.
+    accumulated += rows.length;
     const advance = homeworkPageAdvance({
       page,
       pageSize: HOMEWORK_PAGE_SIZE,
       pageLength: rows.length,
-      accumulated: items.length,
+      accumulated,
       total,
     });
     if (advance === 'complete') return { items, error: null };
@@ -275,33 +294,88 @@ type CachedCourseContents = CourseContents & {
   expiresAt: string;
 };
 
+// Partial source failures must not stay cached for the full 10-minute window.
+// A short backoff avoids repeatedly hitting an unavailable school endpoint.
+const PARTIAL_COURSE_RETRY_MS = 60_000;
+// Earlier projections omitted source visibility flags, so their contents
+// cannot be revalidated in place after applying the current visibility policy.
+const LMS_CACHE_PROJECTION_VERSION = 2;
+
+function validCourseErrors(value: unknown): value is LmsCourseError[] {
+  return Array.isArray(value) && value.every(error => {
+    const row = record(error);
+    return typeof row.courseId === 'number' && positiveId(row.courseId) === row.courseId &&
+      typeof row.courseName === 'string' && row.courseName.length > 0 && row.courseName.length <= 300 &&
+      ['homework', 'materials', 'announcements'].includes(String(row.area)) &&
+      (row.status === null || (typeof row.status === 'number' && Number.isInteger(row.status) && row.status >= 100 && row.status <= 599));
+  });
+}
+
+function baseSnapshotRetryMs(
+  courseErrors: LmsCourseError[],
+  upcomingCoursesError: LmsReadonlySnapshot['upcomingCoursesError'],
+): number {
+  // Missing homework pages or an unreadable upcoming course list must not
+  // hide newly recovered assignments for the full ten-minute cache window.
+  return courseErrors.some((item) => item.area === 'homework') || upcomingCoursesError != null
+    ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS;
+}
+
 async function loadCourseContents(
   source: LmsReadonlySource,
   cookies: Record<string, string>,
   course: CourseRow,
 ): Promise<CourseContents> {
   const errors: LmsCourseError[] = [];
-  const [activitiesResult, announcementResult] = await Promise.all([
+  const [activitiesResult, coursewareResult, announcementResult] = await Promise.all([
     source.fetchActivities(cookies, course.id, ''),
+    // TronClass can keep courseware in a separately filtered activity feed.
+    // Read both rather than mistaking the unfiltered feed for a complete list.
+    source.fetchActivities(cookies, course.id, 'type=courseware_activity'),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
+  // A denied supplementary feed is still a denied session: never return or cache
+  // earlier results from the general activities endpoint after a school 401.
   if (!activitiesResult.ok) requireAuthorizedSchoolRead(activitiesResult.status);
+  if (!coursewareResult.ok) requireAuthorizedSchoolRead(coursewareResult.status);
   if (!announcementResult.ok) requireAuthorizedSchoolRead(announcementResult.status);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
-  if (activitiesResult.ok) {
-    for (const raw of activitiesResult.value) {
-      const material = parseMaterial(raw, course);
-      if (material) materials.push(material);
-      if (isAnnouncementActivityType(record(raw).type)) {
-        const item = parseAnnouncement(raw, 'activity', course);
-        if (item) activityAnnouncements.push(item);
-      }
+  const seenMaterials = new Set<number>();
+  // A courseware item may appear in both feeds; keep its first occurrence so
+  // the UI never duplicates the same assignment material.
+  const allActivities = [
+    ...(activitiesResult.ok ? activitiesResult.value : []),
+    ...(coursewareResult.ok ? coursewareResult.value : []),
+  ];
+  const generalActivities = visibleSourceRows(
+    activitiesResult.ok ? activitiesResult.value : [], allActivities,
+  );
+  // Only materials come from the filtered feed. A hidden duplicate in either
+  // feed suppresses the activity across both feeds.
+  const materialActivities = visibleSourceRows(allActivities);
+  for (const raw of materialActivities) {
+    const material = parseMaterial(raw, course);
+    if (material && !seenMaterials.has(material.id)) {
+      seenMaterials.add(material.id);
+      materials.push(material);
     }
-  } else {
+  }
+  for (const raw of generalActivities) {
+    if (isAnnouncementActivityType(record(raw).type)) {
+      const item = parseAnnouncement(raw, 'activity', course);
+      if (item) activityAnnouncements.push(item);
+    }
+  }
+  if (!activitiesResult.ok) {
     errors.push({ courseId: course.id, courseName: course.name, area: 'materials', status: activitiesResult.status });
+  }
+  // A missing optional filtered endpoint (404) is tolerated. Other failures
+  // remain visible as incomplete sync even if general courseware was readable.
+  if (!coursewareResult.ok && coursewareResult.status !== 404) {
+    errors.push({ courseId: course.id, courseName: course.name, area: 'materials', status: coursewareResult.status });
   }
 
   let announcements: LmsAnnouncementItem[] = [];
@@ -320,6 +394,14 @@ async function loadCourseContents(
       if (seen.has(signature)) continue;
       seen.add(signature);
       announcements.push(item);
+    }
+    // The dedicated feed alone cannot prove completeness: the general
+    // activities feed may contain additional course notices. Keep the
+    // available notices but surface the failed source as incomplete.
+    if (!activitiesResult.ok) {
+      errors.push({
+        courseId: course.id, courseName: course.name, area: 'announcements', status: activitiesResult.status,
+      });
     }
   } else if (activitiesResult.ok) {
     announcements = activityAnnouncements;
@@ -349,15 +431,23 @@ function readCachedExtras(value: unknown, nowMs: number): {
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const courseId = positiveId(key);
     const row = record(item);
-    if (!courseId || !cacheStillFresh(row.expiresAt, nowMs) ||
-      typeof row.fetchedAt !== 'string' || typeof row.expiresAt !== 'string' ||
-      !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !Array.isArray(row.errors)) {
+    const fetchedAtMs = typeof row.fetchedAt === 'string' ? Date.parse(row.fetchedAt) : Number.NaN;
+    const expiresAtMs = typeof row.expiresAt === 'string' ? Date.parse(row.expiresAt) : Number.NaN;
+    // Clamp older cached partial results too, so a previously stored 503 does
+    // not hide newly recovered school content for the full snapshot TTL.
+    const retryMs = Array.isArray(row.errors) && row.errors.length > 0
+      ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS;
+    const effectiveExpiresAtMs = Math.min(expiresAtMs, fetchedAtMs + retryMs);
+    if (!courseId || !Number.isFinite(fetchedAtMs) || !Number.isFinite(effectiveExpiresAtMs) ||
+      effectiveExpiresAtMs <= nowMs ||
+      !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !validCourseErrors(row.errors) ||
+      row.errors.some(error => error.courseId !== courseId)) {
       pruned = true;
       continue;
     }
     extras[String(courseId)] = {
-      fetchedAt: row.fetchedAt,
-      expiresAt: row.expiresAt,
+      fetchedAt: row.fetchedAt as string,
+      expiresAt: new Date(effectiveExpiresAtMs).toISOString(),
       announcements: row.announcements as LmsAnnouncementItem[],
       materials: row.materials as LmsMaterialItem[],
       errors: row.errors as LmsCourseError[],
@@ -378,7 +468,13 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     typeof cache.expiresAt !== 'string' || !cacheStillFresh(cache.expiresAt, nowMs) ||
     !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
-    !Array.isArray(row.courseErrors)) return null;
+    !validCourseErrors(row.courseErrors)) return null;
+  // Legacy partial snapshots can still have an outer ten-minute TTL. Clamp
+  // them by fetchedAt as well, without trusting the stored expiry alone.
+  if (Date.parse(row.fetchedAt as string) + baseSnapshotRetryMs(
+    row.courseErrors as LmsCourseError[],
+    row.upcomingCoursesError as LmsReadonlySnapshot['upcomingCoursesError'],
+  ) <= nowMs) return null;
   return row as LmsReadonlySnapshot;
 }
 
@@ -512,7 +608,7 @@ export function createTronClassLmsHandler({
       // A relink can leave the original portal document intact.
       await verifyLinkedSession();
       const cacheData = cached.data();
-      const saveCache = async (snapshot: LmsReadonlySnapshot, stampSessionVersion = true) => {
+      const saveCache = async (snapshot: LmsReadonlySnapshot) => {
         if (!sessionVersion || !db.runTransaction) return;
         try {
           await db.runTransaction(async (tx) => {
@@ -521,12 +617,8 @@ export function createTronClassLmsHandler({
             // A concurrent refresh, relink or cleanup has already replaced our input.
             if (cached.exists !== current.exists || (current.exists &&
               (!current.updateTime || documentVersion(current) !== documentVersion(cached)))) return;
-            const currentData = current.data();
-            const keepLegacyShape = !stampSessionVersion && current.exists &&
-              currentData != null && !('sessionVersion' in currentData);
             tx.set(cacheRef, {
-              ownerUid: uid, sessionId: linkedId,
-              ...(keepLegacyShape ? {} : { sessionVersion }),
+              ownerUid: uid, sessionId: linkedId, sessionVersion, projectionVersion: LMS_CACHE_PROJECTION_VERSION,
               fetchedAt: snapshot.fetchedAt,
               expiresAt: new Date(snapshot.cache.expiresAt),
               snapshot,
@@ -539,10 +631,10 @@ export function createTronClassLmsHandler({
         }
       };
 
-      const legacyCompatibleCache = cacheData != null && !('sessionVersion' in cacheData);
       if (cached.exists && sessionVersion && cacheData &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
-        (cacheData.sessionVersion === sessionVersion || legacyCompatibleCache) &&
+        cacheData.projectionVersion === LMS_CACHE_PROJECTION_VERSION &&
+        cacheData.sessionVersion === sessionVersion &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
         const pruned = readCachedExtras(cacheData.extras, now());
         extras = refresh ? {} : pruned.extras;
@@ -551,10 +643,8 @@ export function createTronClassLmsHandler({
       }
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
-        // Legacy caches without sessionVersion are left untouched; stale extras
-        // are only omitted from this response.
-        if (shouldPruneExtras && !legacyCompatibleCache) {
-          await saveCache(cachedHomework, true);
+        if (shouldPruneExtras) {
+          await saveCache(cachedHomework);
           await verifyLinkedSession();
         }
         return {
@@ -597,8 +687,12 @@ export function createTronClassLmsHandler({
 
         await verifyLinkedSession();
 
-        const fetchedAt = new Date(now()).toISOString();
-        const expiresAt = new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+        const courseErrors = homeworkResults.flatMap((item) => item.error ? [item.error] : []);
+        const fetchedAtMs = now();
+        const fetchedAt = new Date(fetchedAtMs).toISOString();
+        const expiresAt = new Date(fetchedAtMs + baseSnapshotRetryMs(
+          courseErrors, upcomingCoursesError,
+        )).toISOString();
         snapshot = {
           success: true,
           ownerUid: uid,
@@ -611,7 +705,7 @@ export function createTronClassLmsHandler({
           homework: homeworkResults.flatMap((item) => item.items),
           announcements: [],
           materials: [],
-          courseErrors: homeworkResults.flatMap((item) => item.error ? [item.error] : []),
+          courseErrors,
           siteAnnouncementError: null,
           upcomingCoursesError,
         };
@@ -623,11 +717,12 @@ export function createTronClassLmsHandler({
         if (course && (refresh || !extras[String(courseId)])) {
           const contents = await loadCourseContents(source, cookies, course);
           fetchedFromSchool = true;
-          const fetchedAt = new Date(now()).toISOString();
+          const fetchedAtMs = now();
           extras[String(courseId)] = {
             ...contents,
-            fetchedAt,
-            expiresAt: new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString(),
+            fetchedAt: new Date(fetchedAtMs).toISOString(),
+            expiresAt: new Date(fetchedAtMs + (contents.errors.length > 0
+              ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS)).toISOString(),
           };
         }
       }
@@ -635,10 +730,10 @@ export function createTronClassLmsHandler({
       const homework = homeworkOnlySnapshot(snapshot);
       const merged = mergeExtras(homework, extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
-      // Do not rewrite a still-fresh legacy cache just to stamp sessionVersion
-      // when this request fetched no new school data and needs no prune.
-      if (fetchedFromSchool || refresh || (shouldPruneExtras && !legacyCompatibleCache)) {
-        await saveCache(homework, !legacyCompatibleCache || !cachedHomework);
+      // Versionless legacy documents never qualify as a hit; only fresh data
+      // fetched for the verified session may replace them.
+      if (fetchedFromSchool || refresh || shouldPruneExtras) {
+        await saveCache(homework);
       }
       // Do not return the old session's data if the user relinked during the write.
       await verifyLinkedSession();

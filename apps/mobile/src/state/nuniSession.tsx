@@ -22,7 +22,7 @@ import { NuniDraftScopeProvider, NuniDraftScopeStore } from './nuniDrafts';
 
 const KEY = 'campus-one.nuni.native-session.v1';
 type Auth = NativeNuniState &
-  Pick<NuniSessionController, 'refresh' | 'signIn' | 'logout' | 'request' | 'upload' | 'bffRequest' | 'isSessionCurrent'>;
+  Pick<NuniSessionController, 'refresh' | 'signIn' | 'logout' | 'request' | 'upload' | 'bffRequest' | 'tronClassDownload' | 'isSessionCurrent'>;
 const Context = createContext<Auth | null>(null);
 
 function createController(drafts: NuniDraftScopeStore) {
@@ -100,6 +100,7 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
         request: controller.request,
         upload: controller.upload,
         bffRequest: controller.bffRequest,
+        tronClassDownload: controller.tronClassDownload,
       }}
     >
       <NuniDraftScopeProvider store={drafts.current}>{children}</NuniDraftScopeProvider>

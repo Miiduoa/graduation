@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { isTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import {
   tronClassErrorMessage,
   TronClassRequestError,
@@ -8,6 +9,7 @@ import {
 } from '@/lib/tronClassIntegrationClient';
 import type {
   TronClassHomeworkItem,
+  TronClassAcknowledgedReadbackConfirmation,
   TronClassPreparation,
   TronClassSubmissionReceipt,
   TronClassSubmissionResult,
@@ -19,7 +21,7 @@ import { sameTronClassDraftScope, type TronClassLocalDraft } from './tronClassLo
 import styles from './tronclass.module.css';
 
 type Attachment = { id: string; file: File; status: 'ready' | 'uploading' | 'uploaded' | 'failed' };
-type Phase = 'editing' | 'preview' | 'uploading' | 'submitting' | 'unknown' | 'submitted';
+type Phase = 'editing' | 'preview' | 'uploading' | 'submitting' | 'unknown' | 'submitted' | 'confirmed';
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 4;
@@ -100,6 +102,7 @@ export function TronClassAssignment({
   const [phase, setPhase] = useState<Phase>('editing');
   const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState<TronClassSubmissionReceipt | null>(null);
+  const [readbackConfirmation, setReadbackConfirmation] = useState<TronClassAcknowledgedReadbackConfirmation | null>(null);
   const [restored, setRestored] = useState(false);
   const [checking, setChecking] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
@@ -118,6 +121,7 @@ export function TronClassAssignment({
   }, [onConnectionChanged, onBusy, onSubmitted, onDraftChange]);
   const storageKey = pendingKey(owner, homework.courseId, homework.id);
   const working = phase === 'uploading' || phase === 'submitting' || checking;
+  const completed = phase === 'submitted' || phase === 'confirmed';
   const limits = preparationLimits(preparation);
   const canAddAttachments = limits.allowsAttachments && limits.maxFiles > 0 &&
     limits.maxFileBytes > 0 && limits.maxTotalBytes > 0;
@@ -127,11 +131,11 @@ export function TronClassAssignment({
     // A recovered draft stays hidden until a fresh prepare confirms its scope.
     // This callback only retains local text/File handles, never upload status.
     if (prepareOnly || draftToRestore.current) return;
-    callbacks.current.onDraftChange?.(phase === 'submitted' || (!content && !files.length) ? null : {
+    callbacks.current.onDraftChange?.(completed || (!content && !files.length) ? null : {
       courseId: homework.courseId, homeworkId: homework.id, content,
       files: files.map(({ file }) => file),
     });
-  }, [content, files, phase, homework.courseId, homework.id, prepareOnly]);
+  }, [content, files, completed, homework.courseId, homework.id, prepareOnly]);
 
   useEffect(() => {
     alive.current = true;
@@ -283,6 +287,28 @@ export function TronClassAssignment({
   }
 
   function acceptResult(value: TronClassSubmissionResult, operationId: string) {
+    if (value.status === 'confirmed') {
+      if (!isTronClassAcknowledgedReadbackResult(value, {
+        operationId, courseId: homework.courseId, homeworkId: homework.id,
+      })) {
+        setPhase('unknown');
+        return;
+      }
+      draftToRestore.current = null;
+      setAwaitingDraftRecovery(false);
+      callbacks.current.onDraftChange?.(null);
+      setReceipt(null);
+      setReadbackConfirmation(value.confirmation);
+      setPhase('confirmed');
+      setError('');
+      try {
+        sessionStorage.removeItem(storageKey);
+      } catch {
+        /* The acknowledged version has still been independently matched. */
+      }
+      callbacks.current.onSubmitted();
+      return;
+    }
     const result = value.receipt;
     const verified =
       value.operationId === operationId &&
@@ -297,6 +323,7 @@ export function TronClassAssignment({
       draftToRestore.current = null;
       setAwaitingDraftRecovery(false);
       callbacks.current.onDraftChange?.(null);
+      setReadbackConfirmation(null);
       setReceipt(result);
       setPhase('submitted');
       setError('');
@@ -547,14 +574,14 @@ export function TronClassAssignment({
           </button>
         </div>
       )}
-      {!preparing && !prepareError && preparation?.details && phase !== 'submitted' && (
+      {!preparing && !prepareError && preparation?.details && !completed && (
         <TronClassAssignmentDetails
           details={preparation.details}
           onRetry={retryPreparation}
           retryDisabled={working}
         />
       )}
-      {!preparing && !working && !prepareError && preparation?.history && phase !== 'submitted' && phase !== 'unknown' && (
+      {!preparing && !working && !prepareError && preparation?.history && !completed && phase !== 'unknown' && (
         <TronClassSubmissionHistory
           history={preparation.history}
           sourceHref={homework.href}
@@ -562,7 +589,7 @@ export function TronClassAssignment({
           retryDisabled={working}
         />
       )}
-      {blocked && phase !== 'unknown' && phase !== 'submitted' && (
+      {blocked && phase !== 'unknown' && !completed && (
         <div className={styles.notice}>
           <p>{preparation?.blockedReason || (limits.confirmed
             ? '目前無法確認這份作業是否接受直接繳交。'
@@ -570,7 +597,7 @@ export function TronClassAssignment({
           <p>可以先整理內容與附件，再開啟原作業完成繳交。</p>
         </div>
       )}
-      {previous && phase !== 'submitted' && (
+      {previous && !completed && (
         <details className={styles.previous}>
           <summary>TronClass 的上次繳交紀錄 · {tronClassTime(previous.submittedAt)}</summary>
           <Receipt receipt={previous} />
@@ -581,7 +608,17 @@ export function TronClassAssignment({
           {error}
         </p>
       )}
-      {phase === 'submitted' && receipt ? (
+      {phase === 'confirmed' && readbackConfirmation ? (
+        <div className={styles.receipt} role="status">
+          <h3>已確認校方版本</h3>
+          <p>已核對這次送出的校方版本。</p>
+          <p className={styles.muted}>確認時間：{tronClassTime(readbackConfirmation.confirmedAt)}</p>
+          <p className={styles.muted}>來源紀錄時間：{readbackConfirmation.sourceRecordedAt
+            ? tronClassTime(readbackConfirmation.sourceRecordedAt) : '尚無可確認的時間'}</p>
+          <p className={styles.muted}>校方版本：{readbackConfirmation.submissionId}</p>
+          <p className={styles.muted}>確認時間是 nuni 完成核對的時間，來源紀錄時間由 TronClass 提供。</p>
+        </div>
+      ) : phase === 'submitted' && receipt ? (
         <div className={styles.receipt} role="status">
           <h3>TronClass 已確認收到</h3>
           <Receipt receipt={receipt} />

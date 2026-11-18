@@ -129,6 +129,7 @@ export default function LearnAiFirstScreen() {
         subtitle="先看自己的課表，再處理這堂課要做的事。"
       />
       <AISection title="課務分區">
+        <AIRow title="TronClass 課程與作業" subtitle="獨立連接校方帳號，查看課務、準備與核對作業" onPress={() => safeNavigate(navigation, 'TronClassWorkspace')} />
         {STUDENT_ACADEMIC_SECTIONS.map((section) => (
           <AIRow
             key={section.id}

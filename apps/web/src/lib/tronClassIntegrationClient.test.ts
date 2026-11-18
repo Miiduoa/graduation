@@ -5,6 +5,7 @@ import {
   safeTronClassHref,
   TronClassRequestError,
 } from './tronClassIntegrationClient';
+import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -23,6 +24,75 @@ describe('TronClass client response boundary', () => {
     isInProgress: true, isClosed: false,
     attempts: { unlimited: false, limit: 2, used: 2, remaining: 0 },
     resubmissionOpen: false, retractAllowed: false };
+  const readback: TronClassAcknowledgedReadbackResult = {
+    status: 'confirmed', operationId: 'operation_123456789', receipt: null,
+    confirmation: { kind: 'acknowledged-readback', source: 'tronclass', schoolId: 'pu',
+      operationId: 'operation_123456789', submissionId: 7, courseId: 1, homeworkId: 2,
+      confirmedAt: '2026-11-18T08:00:00.700Z', sourceRecordedAt: '2026-11-17T08:00:00.000Z' },
+  };
+
+  it('accepts an operation-matched version confirmation independently of the legacy submitted-at receipt', () => {
+    for (const action of ['submit', 'reconcile']) {
+      const result = parseTronClassResult(action, readback,
+        { operationId: readback.operationId, courseId: 1, homeworkId: 2 });
+      expect(result).toEqual(readback);
+      expect(result).not.toBe(readback);
+      expect(result).toHaveProperty('receipt', null);
+      expect(result).not.toHaveProperty('confirmation.submittedAt');
+    }
+    expect(() => parseTronClassResult('prepare', { ...preparation, receipt: readback.confirmation },
+      { courseId: 1, homeworkId: 2 })).toThrowError('尚未收到可確認的回覆');
+  });
+
+  it.each([
+    { ...readback, operationId: 'another_operation_1234' },
+    { ...readback, confirmation: { ...readback.confirmation, operationId: 'another_operation_1234' } },
+    { ...readback, receipt: { status: 'submitted' } },
+    { ...readback, status: ['confirmed'] },
+    { ...readback, canSubmit: true },
+    { ...readback, confirmation: { ...readback.confirmation, submittedAt: readback.confirmation.confirmedAt } },
+  ])('rejects mixed or mismatched version confirmation responses: %j', value => {
+    for (const action of ['submit', 'reconcile']) {
+      expect(() => parseTronClassResult(action, value,
+        { operationId: readback.operationId, courseId: 1, homeworkId: 2 })).toThrowError('尚未收到可確認的回覆');
+    }
+  });
+
+  it.each([{ courseId: 999 }, { homeworkId: 999 }])('checks new submission confirmations against the requested scope: %j', change => {
+    expect(() => parseTronClassResult('submit', { ...readback,
+      confirmation: { ...readback.confirmation, ...change } },
+    { operationId: readback.operationId, courseId: 1, homeworkId: 2 })).toThrowError('尚未收到可確認的回覆');
+  });
+
+  it('preserves the v1 timestamp requirement and rejects confirmations inside old statuses', () => {
+    const receipt = { id: '7', source: 'tronclass', status: 'submitted', courseId: 1, homeworkId: 2,
+      submittedAt: '2026-11-18T08:00:00.000Z', content: '作業', attachments: [] };
+    const submitted = { status: 'submitted', operationId: readback.operationId, receipt };
+    const input = { operationId: readback.operationId, courseId: 1, homeworkId: 2 };
+    expect(parseTronClassResult('submit', submitted, input)).toEqual(submitted);
+    expect(parseTronClassResult('reconcile', { status: 'unknown', operationId: readback.operationId, receipt: null }, input))
+      .toMatchObject({ status: 'unknown', receipt: null });
+    for (const submittedAt of [undefined, null, 'bad-time']) {
+      expect(() => parseTronClassResult('reconcile', { ...submitted, receipt: { ...receipt, submittedAt } }, input))
+        .toThrowError('尚未收到可確認的回覆');
+    }
+    for (const status of ['unknown', 'submitted', ['unknown'], ['submitted']]) {
+      expect(() => parseTronClassResult('reconcile', { ...readback, status }, input))
+        .toThrowError('尚未收到可確認的回覆');
+    }
+  });
+
+  it('returns the strict readback variant through the existing authenticated reconcile request', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify(readback), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const client = createTronClassClient({ kind: 'platform', context: 'context' });
+    expect(await client.reconcile(readback.operationId, 'a'.repeat(32))).toEqual(readback);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/tronclass');
+    expect(JSON.parse(String(init.body))).toEqual({ action: 'reconcile', operationId: readback.operationId, revision: 'a'.repeat(32) });
+    expect(new Headers(init.headers).get('X-Campus-Session')).toBe('context');
+    expect(init.cache).toBe('no-store');
+  });
 
   it('accepts school settings as observations without changing submission authority or an old response', () => {
     const value = { ...preparation, details };

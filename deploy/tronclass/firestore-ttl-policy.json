@@ -1,0 +1,34 @@
+{
+  "fieldOverrides": [
+    {
+      "collectionGroup": "_tronClassBindings",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" }
+      ]
+    },
+    {
+      "collectionGroup": "_tronClassLoginAttempts",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" }
+      ]
+    },
+    {
+      "collectionGroup": "_tronClassSubmissionOperations",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" }
+      ]
+    },
+    {
+      "collectionGroup": "_tronClassSubmissionLocks",
+      "fieldPath": "purgeAt",
+      "ttl": false,
+      "indexes": []
+    }
+  ]
+}

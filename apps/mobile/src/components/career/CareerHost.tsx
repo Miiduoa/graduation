@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CAREER_EMPTY } from '@campus/shared/src/career';
 import { useAuth } from '../../state/auth';
 import { getAuthInstance as getAuth } from '../../firebase';
 import { Linking, Text } from 'react-native';
@@ -26,7 +25,7 @@ export function CareerHost({ schoolId }: { schoolId: string }) {
     />
   ) : (
     <>
-      <Text>{CAREER_EMPTY}</Text>
+      <Text>登入後查看本校工讀、實習與校徵</Text>
       <Text
         onPress={() => {
           void Linking.openURL(`https://nuni.tw${loginUrl}`);
@@ -137,7 +136,9 @@ function createPorts(
     try {
       return await fetch(input, init);
     } catch {
-      throw new Error('職涯服務暫時無法使用，請重新整理。');
+      throw Object.assign(new Error('職涯服務暫時無法使用，請重新整理。'), {
+        code: 'network-request-failed',
+      });
     }
   };
   const workstudy = createWorkstudyService(

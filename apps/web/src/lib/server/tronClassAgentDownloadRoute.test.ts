@@ -31,7 +31,7 @@ it('returns the actual bounded attachment after rechecking actor, binding and bo
   expect(response.status).toBe(200);
   expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
   expect(response.headers.get('content-disposition')).toContain(`filename*=UTF-8''${encodeURIComponent('教材.pdf')}`);
-  expect(response.headers.get('cache-control')).toBe('no-store, private');
+  expect(response.headers.get('cache-control')).toBe('no-store, private, no-transform');
   expect(f.authenticate).toHaveBeenCalledTimes(2);
   expect(f.grants.require.mock.calls).toEqual([[actor.ownerKey, 'readCourseData'], [actor.ownerKey, 'downloadMaterials']]);
   expect(f.grants.assertCurrent).toHaveBeenCalledWith(actor.ownerKey, grant, 'readCourseData');

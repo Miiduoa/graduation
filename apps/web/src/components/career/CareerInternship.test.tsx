@@ -455,3 +455,409 @@ it('keeps conflict feedback on the card when reload removes the document control
   await waitFor(() => expect(view.queryByText('確認申請')).toBeNull());
   expect(within(view.getByTestId(`internship-${record.id}`)).getByText(message)).toBeTruthy();
 });
+
+it('preserves document and hours drafts through polling and failed reads, with current revision on submit', async () => {
+  vi.useFakeTimers();
+  try {
+    const { view, props, record, snapshot } = setup();
+    await act(async () => {});
+    change(view.getByLabelText('申請文件連結'), 'https://example.test/draft');
+    change(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-17');
+    change(view.getByLabelText('實習時數'), '8');
+    change(view.getByLabelText('工作內容與佐證說明'), '未送出的時數草稿');
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d) => ({ ...d, url: 'https://example.test/server' })),
+        },
+      ],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/draft',
+    );
+    expect((view.getByLabelText('計畫書文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/server',
+    );
+    expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe('8');
+    expect((view.getByLabelText('工作內容與佐證說明') as HTMLInputElement).value).toBe(
+      '未送出的時數草稿',
+    );
+    expect(view.getByText(/這筆實習紀錄已更新，尚未送出的草稿已保留/)).toBeTruthy();
+    props.service.load.mockRejectedValueOnce(
+      Object.assign(new Error('讀取失敗'), { code: 'unavailable' }),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(view.getByText('讀取失敗')).toBeTruthy();
+    expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/draft',
+    );
+    await act(async () => {
+      fireEvent.click(view.getByText('登錄已繳交申請'));
+    });
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'document',
+        revision: 2,
+        url: 'https://example.test/draft',
+      }),
+    );
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('preserves reply drafts when a polled record changes review sections', async () => {
+  vi.useFakeTimers();
+  try {
+    const { view, props, record, snapshot } = setup('student', 'teacher');
+    record.documents[0].submitted = true;
+    await act(async () => {});
+    expect(view.getByText('待我確認')).toBeTruthy();
+    change(view.getByLabelText('申請退回原因'), '未送出的回覆');
+    // A submitted, verified document leaves the pending review group.
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [{ ...record, revision: 2, confirmed: true }],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(view.getByText('其他實習紀錄')).toBeTruthy();
+    expect(view.getByText(/尚未送出的草稿已保留/)).toBeTruthy();
+    props.service.load.mockResolvedValueOnce({
+      ...snapshot,
+      records: [{ ...record, revision: 3 }],
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect((view.getByLabelText('申請退回原因') as HTMLInputElement).value).toBe('未送出的回覆');
+    await act(async () => {
+      fireEvent.click(view.getByText('退回申請'));
+    });
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'verifyDocument',
+        revision: 3,
+        message: '未送出的回覆',
+      }),
+    );
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('shows an initial load error with retry instead of loading or an empty result', async () => {
+  const { view, props } = setup();
+  props.service.load.mockRejectedValueOnce(new Error('暫時無法讀取'));
+  // The first read is already in flight; request a fresh scope to exercise an initial failure.
+  view.rerender(<CareerInternship {...props} schoolId="other" />);
+  await waitFor(() => expect(view.getByText('暫時無法讀取')).toBeTruthy());
+  expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+  expect(view.queryByText('目前沒有實習紀錄。')).toBeNull();
+  fireEvent.click(view.getByText('重試讀取實習進度'));
+  await waitFor(() => expect(view.getByText(/測試用機構/)).toBeTruthy());
+  expect(view.queryByText('暫時無法讀取')).toBeNull();
+});
+
+it('keeps the saved document URL when refresh fails and resubmits the saved value', async () => {
+  const { view, props, record } = setup();
+  const oldUrl = 'https://example.test/old';
+  const savedUrl = 'https://example.test/saved';
+  record.documents[0].url = oldUrl;
+  await waitFor(() =>
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(oldUrl),
+  );
+  props.service.load.mockRejectedValue(
+    Object.assign(new Error('儲存後讀取失敗'), { code: 'functions/unavailable' }),
+  );
+  change(view.getByLabelText('申請文件連結'), savedUrl);
+  await act(async () => {
+    fireEvent.click(view.getByText('登錄已繳交申請'));
+  });
+  await waitFor(() => expect(view.getByText('儲存後讀取失敗')).toBeTruthy());
+  expect(props.service.execute).toHaveBeenCalledTimes(1);
+  expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(savedUrl);
+  await act(async () => {
+    fireEvent.click(view.getByText('登錄已繳交申請'));
+  });
+  expect(props.service.execute).toHaveBeenCalledTimes(2);
+  expect(props.service.execute).toHaveBeenLastCalledWith(
+    expect.objectContaining({ action: 'document', index: 0, url: savedUrl, submitted: true }),
+  );
+  expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(savedUrl);
+});
+
+it.each([
+  ['student', 'permission-denied'],
+  ['staff', 'functions/permission-denied'],
+  ['student', 'unauthenticated'],
+  ['student', 'firestore/not-found'],
+  ['student', 'auth/user-token-expired'],
+  ['student', 'auth/network-request-failed'],
+  ['student', 'unknown'],
+] as const)(
+  'clears private snapshots and %s drafts after a %s poll failure',
+  async (audience, code) => {
+    vi.useFakeTimers();
+    try {
+      const { view, props, record, snapshot } = setup(
+        audience,
+        audience === 'staff' ? 'staff' : 'student',
+      );
+      record.studentName = '王小明';
+      record.studentId = 'S123';
+      record.documents[0].submitted = true;
+      record.documents[0].url = 'https://example.test/saved';
+      await act(async () => {});
+      expect(view.getByText(/測試用機構/)).toBeTruthy();
+      if (audience === 'student') {
+        change(view.getByLabelText('實習機構'), '未送出的機構');
+        change(view.getByLabelText('申請文件連結'), 'https://example.test/private-draft');
+        change(view.getByLabelText('實習時數'), '8');
+        fireEvent.click(view.getByText('選擇測試系規則'));
+        fireEvent.click(view.getByText(/測試指導老師｜teacher@school.edu.tw/));
+      } else {
+        expect(view.getByText(/王小明.*S123/)).toBeTruthy();
+        change(view.getByLabelText('申請退回原因'), '未送出的回覆');
+        fireEvent.click(view.getByText('新增系所規則'));
+        change(view.getByLabelText('系所'), '未送出的系所');
+      }
+      props.service.load.mockRejectedValueOnce(Object.assign(new Error('讀取權限失效'), { code }));
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+      expect(view.getByText('讀取權限失效')).toBeTruthy();
+      expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+      expect(view.queryByText(/測試用機構/)).toBeNull();
+      expect(view.queryByText(/王小明.*S123/)).toBeNull();
+      expect(view.queryByTestId(`internship-${record.id}`)).toBeNull();
+      expect(view.queryByLabelText('系所')).toBeNull();
+      props.service.load.mockResolvedValueOnce({ ...snapshot, advisors: [] });
+      await act(async () => {
+        fireEvent.click(view.getByText('重試讀取實習進度'));
+      });
+      expect(view.queryByText('讀取權限失效')).toBeNull();
+      if (audience === 'student') {
+        expect((view.getByLabelText('實習機構') as HTMLInputElement).value).toBe('');
+        expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+          'https://example.test/saved',
+        );
+        expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe('');
+        expect(view.getByText('選擇測試系規則')).toBeTruthy();
+        expect(view.getByText(/已選擇指導老師：.*尚未選擇/)).toBeTruthy();
+        expect(view.queryByText(/測試指導老師｜teacher@school.edu.tw/)).toBeNull();
+      } else {
+        expect((view.getByLabelText('申請退回原因') as HTMLInputElement).value).toBe('');
+        expect(view.queryByLabelText('系所')).toBeNull();
+      }
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each([
+  { code: 'functions/unavailable' },
+  { code: 'firestore/deadline-exceeded' },
+  { code: 'internal' },
+  { code: 'network-request-failed' },
+  { code: 'timeout' },
+  new TypeError('Failed to fetch'),
+  Object.assign(new Error('讀取逾時'), { name: 'TimeoutError' }),
+])('keeps the snapshot and drafts after a transient poll failure: %s', async (error) => {
+  vi.useFakeTimers();
+  try {
+    const { view, props } = setup();
+    await act(async () => {});
+    change(view.getByLabelText('申請文件連結'), 'https://example.test/draft');
+    props.service.load.mockRejectedValueOnce(error);
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(view.getByText(/測試用機構/)).toBeTruthy();
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      'https://example.test/draft',
+    );
+    expect(view.getByRole('alert')).toBeTruthy();
+    expect(view.getByText('重試讀取實習進度')).toBeTruthy();
+    expect(view.queryByText('正在讀取實習進度…')).toBeNull();
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Hold the write open so edits and refreshes can happen before it completes.
+function pendingSave() {
+  let resolve!: (reply: InternshipReply) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<InternshipReply>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+it.each(['newer', 'unchanged', 'rejected'] as const)(
+  'preserves only unsaved URL input after an in-flight save: %s',
+  async (scenario) => {
+    const { view, props, record, snapshot } = setup();
+    await waitFor(() =>
+      expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(''),
+    );
+    const pending = pendingSave();
+    props.service.execute.mockReturnValueOnce(pending.promise);
+    const submitted = 'https://example.test/submitted';
+    const newer = 'https://example.test/newer';
+    const server = 'https://example.test/saved';
+    change(view.getByLabelText('申請文件連結'), submitted);
+    fireEvent.click(view.getByText('登錄已繳交申請'));
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'document', url: submitted, revision: 1 }),
+    );
+    if (scenario === 'newer') change(view.getByLabelText('申請文件連結'), newer);
+    props.service.load.mockResolvedValue({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d, i) =>
+            i === 0 ? { ...d, url: server, submitted: true } : d,
+          ),
+        },
+      ],
+    });
+    await act(async () => {
+      if (scenario === 'rejected') pending.reject(new Error('儲存失敗'));
+      else pending.resolve({ id: record.id });
+    });
+    if (scenario === 'rejected') {
+      expect(view.getByText('儲存失敗')).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(view.getByText('重新整理實習進度'));
+      });
+    }
+    expect(props.service.load).toHaveBeenCalledTimes(2);
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      scenario === 'newer' ? newer : scenario === 'unchanged' ? server : submitted,
+    );
+    expect(!!view.queryByText(/尚未送出的草稿已保留/)).toBe(scenario !== 'unchanged');
+  },
+);
+
+it.each(['newer', 'unchanged', 'rejected'] as const)(
+  'preserves only unsaved rejection input after an in-flight save: %s',
+  async (scenario) => {
+    const { view, props, record, snapshot } = setup('student', 'teacher');
+    record.documents[0].submitted = true;
+    await waitFor(() => expect(view.getByLabelText('申請退回原因')).toBeTruthy());
+    const pending = pendingSave();
+    props.service.execute.mockReturnValueOnce(pending.promise);
+    change(view.getByLabelText('申請退回原因'), '請補上佐證');
+    fireEvent.click(view.getByText('退回申請'));
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'verifyDocument', verified: false, message: '請補上佐證' }),
+    );
+    if (scenario === 'newer') change(view.getByLabelText('申請退回原因'), '請補上日期與佐證');
+    props.service.load.mockResolvedValue({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d, i) =>
+            i === 0 ? { ...d, message: '請補上佐證（已儲存）' } : d,
+          ),
+        },
+      ],
+    });
+    await act(async () => {
+      if (scenario === 'rejected') pending.reject(new Error('儲存失敗'));
+      else pending.resolve({ id: record.id });
+    });
+    if (scenario === 'rejected') {
+      expect(view.getByText('儲存失敗')).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(view.getByText('重新整理實習進度'));
+      });
+    }
+    expect((view.getByLabelText('申請退回原因') as HTMLInputElement).value).toBe(
+      scenario === 'newer'
+        ? '請補上日期與佐證'
+        : scenario === 'unchanged'
+          ? '請補上佐證（已儲存）'
+          : '請補上佐證',
+    );
+    expect(!!view.queryByText(/尚未送出的草稿已保留/)).toBe(scenario !== 'unchanged');
+  },
+);
+
+it.each(['unchanged', 'date', 'hours', 'note', 'rejected'] as const)(
+  'resets hours only when the entire submitted draft is still current: %s',
+  async (scenario) => {
+    const { view, props, record, snapshot } = setup();
+    await waitFor(() => expect(view.getByLabelText('實習時數')).toBeTruthy());
+    const pending = pendingSave();
+    props.service.execute.mockReturnValueOnce(pending.promise);
+    change(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-17');
+    change(view.getByLabelText('實習時數'), '7.5');
+    change(view.getByLabelText('工作內容與佐證說明'), '送出的說明');
+    fireEvent.click(view.getByText('儲存實習時數'));
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'hours',
+        revision: 1,
+        entry: expect.objectContaining({ date: '2026-11-17', hours: 7.5, note: '送出的說明' }),
+      }),
+    );
+    if (scenario === 'date') change(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-18');
+    // A different string must remain a draft even if it is the same numeric hours.
+    if (scenario === 'hours') change(view.getByLabelText('實習時數'), '07.5');
+    if (scenario === 'note') change(view.getByLabelText('工作內容與佐證說明'), '較新的說明');
+    props.service.load.mockResolvedValue({ ...snapshot, records: [{ ...record, revision: 2 }] });
+    await act(async () => {
+      if (scenario === 'rejected') pending.reject(new Error('儲存失敗'));
+      else pending.resolve({ id: record.id });
+    });
+    if (scenario === 'rejected') {
+      expect(view.getByText('儲存失敗')).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(view.getByText('重新整理實習進度'));
+      });
+    }
+    expect((view.getByLabelText('實習日期（西元年-月-日）') as HTMLInputElement).value).toBe(
+      scenario === 'unchanged' ? '' : scenario === 'date' ? '2026-11-18' : '2026-11-17',
+    );
+    expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe(
+      scenario === 'unchanged' ? '' : scenario === 'hours' ? '07.5' : '7.5',
+    );
+    expect((view.getByLabelText('工作內容與佐證說明') as HTMLInputElement).value).toBe(
+      scenario === 'unchanged' ? '' : scenario === 'note' ? '較新的說明' : '送出的說明',
+    );
+    expect(!!view.queryByText(/尚未送出的草稿已保留/)).toBe(scenario !== 'unchanged');
+    if (scenario !== 'unchanged') {
+      await act(async () => {
+        fireEvent.click(view.getByText('儲存實習時數'));
+      });
+      expect(props.service.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ action: 'hours', revision: 2 }),
+      );
+      expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe('');
+      expect(view.queryByText(/尚未送出的草稿已保留/)).toBeNull();
+    }
+  },
+);

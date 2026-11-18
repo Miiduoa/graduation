@@ -99,6 +99,35 @@ it('reconciliation uses only the recorded operation, never a new payload', async
   expect(submissions.submit).not.toHaveBeenCalled();
 });
 
+it('returns an acknowledged version confirmation without inventing a legacy submitted-at receipt', async () => {
+  const { request, submissions } = setup();
+  const confirmed = { status: 'confirmed', operationId, receipt: null, confirmation: {
+    kind: 'acknowledged-readback', source: 'tronclass', schoolId: 'pu', operationId,
+    submissionId: 301, courseId: 101, homeworkId: 201,
+    confirmedAt: '2026-11-18T05:00:00.000Z', sourceRecordedAt: null,
+  } };
+  submissions.reconcile.mockResolvedValue(confirmed);
+  const response = await request({ action: 'reconcile', operationId, revision });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(confirmed);
+  expect(response.headers.get('cache-control')).toBe('no-store, private');
+  expect(response.headers.get('vary')).toContain('Authorization');
+  expect(submissions.submit).not.toHaveBeenCalled();
+  expect(submissions.upload).not.toHaveBeenCalled();
+});
+
+it('discards even a confirmed school version when the authenticated nuni owner changes during reconciliation', async () => {
+  const { request, submissions, authenticate } = setup();
+  submissions.reconcile.mockResolvedValue({ status: 'confirmed', operationId, receipt: null,
+    confirmation: { submissionId: 301, privateTestMarker: 'must-not-escape' } });
+  authenticate.mockResolvedValueOnce({ ownerKey, provider: 'platform' })
+    .mockResolvedValueOnce({ ownerKey: 'platform:pa_other', provider: 'platform' });
+  const response = await request({ action: 'reconcile', operationId, revision });
+  expect(response.status).toBe(409);
+  expect(await response.text()).not.toContain('must-not-escape');
+  expect(submissions.submit).not.toHaveBeenCalled();
+});
+
 it('discards a school result if the nuni session was revoked while reading', async () => {
   const { request, authenticate, read } = setup();
   read.mockResolvedValue({ homework: [{ title: 'private-homework' }] });

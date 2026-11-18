@@ -47,6 +47,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   CourseAppeals: '學習',
   CourseModules: '學習',
   CourseCatalog: '學習',
+  TronClassWorkspace: '學習',
   CourseSchedule: '學習',
   PersonalImport: '學習',
   PersonalTimetable: '學習',

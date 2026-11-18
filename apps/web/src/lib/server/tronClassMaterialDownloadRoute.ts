@@ -132,6 +132,9 @@ export async function handleTronClassMaterialDownload(
     if (request.signal.aborted) throw new NuniError(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
     const headers = new Headers({
       ...PRIVATE_HEADERS,
+      // Native clients verify the exact bounded byte count before saving. Keep
+      // proxy/framework compression from changing this authenticated payload.
+      'Cache-Control': 'no-store, private, no-transform',
       'Content-Type': result.contentType,
       'Content-Disposition': disposition(result.name),
       'Content-Length': String(result.bytes.byteLength),

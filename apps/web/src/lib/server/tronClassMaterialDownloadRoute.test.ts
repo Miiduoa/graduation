@@ -32,7 +32,7 @@ it('returns a private attachment with a UTF-8 filename after actor and binding r
   expect(response.headers.get('content-type')).toBe('application/pdf');
   expect(response.headers.get('content-disposition')).toContain(`filename*=UTF-8''${encodeURIComponent('第一週講義.pdf')}`);
   expect(response.headers.get('content-disposition')).toMatch(/^attachment;/);
-  expect(response.headers.get('cache-control')).toBe('no-store, private');
+  expect(response.headers.get('cache-control')).toBe('no-store, private, no-transform');
   expect(response.headers.get('content-length')).toBe(String(binary.length));
   expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   expect(response.headers.get('content-security-policy')).toBe('sandbox');

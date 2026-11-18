@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   INTERNSHIP_STEPS,
   internshipProgress,
+  isTransientInternshipReadError,
   internshipCalendarItem,
   internshipDeadlineState,
   type InternshipAudience,
@@ -185,7 +186,22 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         }
       } catch (e) {
         if (live && !current.signal.aborted) {
-          setSnapshot(null);
+          if (!isTransientInternshipReadError(e)) {
+            // Unmount record forms to discard document, hours and review drafts.
+            setSnapshot(null);
+            setOrganization('');
+            setTeacher('');
+            setTeacherUid('');
+            setAdvisorKeyword('');
+            setAdvisors([]);
+            setAdvisorSearched(false);
+            advisorSearchStarted.current = false;
+            setSelectedRuleId('');
+            setFieldErrors({});
+            setRuleDraft(null);
+            setError('');
+            setNotice('');
+          }
           setLoadError(e instanceof Error ? e.message : '暫時讀不到實習進度，請重試。');
         }
       } finally {
@@ -205,7 +221,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
     };
   }, [service, uid, audience, retry]);
   async function run(action: () => Promise<unknown>, success = '已儲存，正在更新進度。') {
-    if (writing.current) return;
+    if (writing.current) return false;
     writing.current = true;
     setBusy(true);
     setErrorTarget(pendingTarget.current);
@@ -217,6 +233,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         setNotice(success);
         setRetry((v) => v + 1);
       }
+      return true;
     } catch (e) {
       if (active.current) {
         setError(e instanceof Error ? e.message : '操作未完成，請重試。');
@@ -229,6 +246,7 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         )
           setRetry((v) => v + 1);
       }
+      return false;
     } finally {
       writing.current = false;
       if (active.current) setBusy(false);
@@ -289,7 +307,30 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
     });
   }
   const execute = (command: Exclude<InternshipCommand, { action: 'list' }>) =>
-    run(() => service.execute(command));
+    run(async () => {
+      await service.execute(command);
+      // Keep saved document values if the following refresh fails.
+      if (active.current && command.action === 'document') {
+        setSnapshot(
+          (previous) =>
+            previous && {
+              ...previous,
+              records: previous.records.map((record) =>
+                record.id === command.id
+                  ? {
+                      ...record,
+                      documents: record.documents.map((document, index) =>
+                        index === command.index
+                          ? { ...document, url: command.url, submitted: command.submitted }
+                          : document,
+                      ),
+                    }
+                  : record,
+              ),
+            },
+        );
+      }
+    });
   function addRecordCalendar(record: InternshipRecord, index: number) {
     void run(
       () => onAddCalendar(internshipCalendarItem(record, index)),
@@ -339,9 +380,13 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
         </Body>
         {loadError && <AlertText>{loadError}</AlertText>}
         {notice && errorTarget.startsWith('page:') && <Body>{notice}</Body>}
-        <Button label="重新整理實習進度" disabled={busy} onPress={() => setRetry((v) => v + 1)} />
+        <Button
+          label={loadError ? '重試讀取實習進度' : '重新整理實習進度'}
+          disabled={busy}
+          onPress={() => setRetry((v) => v + 1)}
+        />
         {!snapshot ? (
-          <Body>正在讀取實習進度…</Body>
+          !loadError && <Body>正在讀取實習進度…</Body>
         ) : (
           <>
             {!snapshot.rules.length && <Body>系所尚未設定實習學分規則，請洽系辦確認。</Body>}
@@ -559,26 +604,27 @@ function Content({ schoolId, uid, audience, service, onLogin, onAddCalendar }: P
                 },
               ]
                 .filter((section) => section.rows.length)
-                .map((section) => (
-                  <Box key={section.title}>
-                    {(section.title !== '我的實習' ||
-                      audience !== 'student' ||
-                      snapshot.viewerRole === 'teacher' ||
-                      snapshot.records.some((r) => r.uid !== uid)) && (
-                      <Heading>{section.title}</Heading>
-                    )}
-                    {section.rows.map((record) => (
+                .flatMap((section) =>
+                  section.rows.map((record, index) => (
+                    <React.Fragment key={record.id}>
+                      {index === 0 &&
+                        (section.title !== '我的實習' ||
+                          audience !== 'student' ||
+                          snapshot.viewerRole === 'teacher' ||
+                          snapshot.records.some((r) => r.uid !== uid)) && (
+                          <Heading>{section.title}</Heading>
+                        )}
                       <RecordCard
-                        key={`${record.id}:${record.revision}`}
+                        key={record.id}
                         record={record}
                         uid={uid}
                         busy={busy}
                         execute={execute}
                         addCalendar={addRecordCalendar}
                       />
-                    ))}
-                  </Box>
-                ))}
+                    </React.Fragment>
+                  )),
+                )}
             {audience === 'ops' && (
               <>
                 <Body>營運檢視不顯示學生名冊。以下為最近 100 筆校務操作中的實習紀錄。</Body>
@@ -621,7 +667,7 @@ function RecordCard({
   record: InternshipRecord;
   uid: string;
   busy: boolean;
-  execute: (c: Exclude<InternshipCommand, { action: 'list' }>) => Promise<void>;
+  execute: (c: Exclude<InternshipCommand, { action: 'list' }>) => Promise<boolean>;
   addCalendar: (record: InternshipRecord, i: number) => void;
 }) {
   const feedback = React.useContext(OperationFeedback);
@@ -634,9 +680,30 @@ function RecordCard({
   );
   if (p.verified < p.required) missing.push(`已確認時數 ${p.verified}／需要 ${p.required} 小時`);
   const owner = uid === r.uid;
-  const [entry, setEntry] = useState({ id: newId(), date: '', hours: '', note: '' });
-  const [urls, setUrls] = useState(r.documents.map((d) => d.url));
-  const [messages, setMessages] = useState(r.documents.map((d) => d.message));
+  const [entry, setEntry] = useState({
+    id: newId(),
+    date: '',
+    hours: '',
+    note: '',
+    revision: null as number | null,
+  });
+  // Only edited fields override refreshed server values.
+  type Draft = { value: string; revision: number };
+  const [urlDrafts, setUrlDrafts] = useState<Record<number, Draft>>({});
+  const [messageDrafts, setMessageDrafts] = useState<Record<number, Draft>>({});
+  const draftChanged =
+    (entry.revision !== null && entry.revision !== r.revision) ||
+    [...Object.values(urlDrafts), ...Object.values(messageDrafts)].some(
+      (d) => d.revision !== r.revision,
+    );
+  const urls = r.documents.map((d, i) => urlDrafts[i]?.value ?? d.url);
+  const messages = r.documents.map((d, i) => messageDrafts[i]?.value ?? d.message);
+  const clearDraft = (drafts: Record<number, Draft>, index: number, submitted: string) => {
+    if (drafts[index]?.value !== submitted) return drafts;
+    const next = { ...drafts };
+    delete next[index];
+    return next;
+  };
   const base = { id: r.id, revision: r.revision };
   const recordTarget = feedback.target.startsWith(`${r.id}:`)
     ? feedback.target.slice(r.id.length + 1)
@@ -664,6 +731,9 @@ function RecordCard({
   return (
     <OperationScope.Provider value={r.id}>
       <Card testID={`internship-${r.id}`}>
+        {draftChanged && (
+          <Body>這筆實習紀錄已更新，尚未送出的草稿已保留；送出前請先確認最新內容。</Body>
+        )}
         {!owner && (
           <Body>
             學生：{r.studentName || '姓名待確認'} · 學號：{r.studentId || '學號未提供'}
@@ -724,7 +794,12 @@ function RecordCard({
                       <Field
                         label={`${d.title}文件連結`}
                         value={urls[i]}
-                        onChange={(v) => setUrls(urls.map((x, n) => (n === i ? v : x)))}
+                        onChange={(v) => {
+                          setUrlDrafts({
+                            ...urlDrafts,
+                            [i]: { value: v, revision: urlDrafts[i]?.revision ?? r.revision },
+                          });
+                        }}
                       />
                       <Button
                         label={`登錄已繳交${d.title}`}
@@ -737,6 +812,8 @@ function RecordCard({
                             index: i,
                             url: urls[i],
                             submitted: true,
+                          }).then((saved) => {
+                            if (saved) setUrlDrafts((drafts) => clearDraft(drafts, i, urls[i]));
                           })
                         }
                       />
@@ -764,7 +841,12 @@ function RecordCard({
                       <Field
                         label={`${d.title}退回原因`}
                         value={messages[i]}
-                        onChange={(v) => setMessages(messages.map((x, n) => (n === i ? v : x)))}
+                        onChange={(v) => {
+                          setMessageDrafts({
+                            ...messageDrafts,
+                            [i]: { value: v, revision: messageDrafts[i]?.revision ?? r.revision },
+                          });
+                        }}
                       />
                       <Button
                         label={`確認${d.title}`}
@@ -791,6 +873,9 @@ function RecordCard({
                             index: i,
                             verified: false,
                             message: messages[i],
+                          }).then((saved) => {
+                            if (saved)
+                              setMessageDrafts((drafts) => clearDraft(drafts, i, messages[i]));
                           })
                         }
                       />
@@ -819,7 +904,13 @@ function RecordCard({
                     <Button
                       label={`更正${h.date}時數`}
                       actionId={`editHours:${h.id}`}
-                      onPress={() => setEntry({ ...h, hours: String(h.hours) })}
+                      onPress={() => {
+                        setEntry((current) => ({
+                          ...h,
+                          hours: String(h.hours),
+                          revision: current.revision ?? r.revision,
+                        }));
+                      }}
                     />
                   </Box>
                 )
@@ -848,7 +939,13 @@ function RecordCard({
                 label={['實習日期（西元年-月-日）', '實習時數', '工作內容與佐證說明'][i]}
                 type={k === 'date' ? 'date' : undefined}
                 value={entry[k]}
-                onChange={(v) => setEntry({ ...entry, [k]: v })}
+                onChange={(v) => {
+                  setEntry((current) => ({
+                    ...current,
+                    [k]: v,
+                    revision: current.revision ?? r.revision,
+                  }));
+                }}
               />
             ))}
             <Button
@@ -859,7 +956,24 @@ function RecordCard({
                 void execute({
                   ...base,
                   action: 'hours',
-                  entry: { ...entry, hours: Number(entry.hours) },
+                  entry: {
+                    id: entry.id,
+                    date: entry.date,
+                    hours: Number(entry.hours),
+                    note: entry.note,
+                  },
+                }).then((saved) => {
+                  if (saved) {
+                    const blank = { id: newId(), date: '', hours: '', note: '', revision: null };
+                    setEntry((current) =>
+                      current.id === entry.id &&
+                      current.date === entry.date &&
+                      current.hours === entry.hours &&
+                      current.note === entry.note
+                        ? blank
+                        : current,
+                    );
+                  }
                 })
               }
             />

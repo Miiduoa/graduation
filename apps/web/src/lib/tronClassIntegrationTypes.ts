@@ -1,4 +1,10 @@
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+
+export type {
+  TronClassAcknowledgedReadbackConfirmation,
+  TronClassAcknowledgedReadbackResult,
+} from '@campus/shared/src/tronClassSubmissionConfirmation';
 
 export type TronClassConnection = {
   schoolId: 'pu';
@@ -134,7 +140,8 @@ export type TronClassSubmissionResult = {
   status: 'submitted' | 'unknown';
   operationId: string;
   receipt: TronClassSubmissionReceipt | null;
-};
+  confirmation?: never;
+} | TronClassAcknowledgedReadbackResult;
 
 export type TronClassUploadedFile = {
   fileId: string;

@@ -1,4 +1,5 @@
 import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { decodeTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import { isTronClassAssignmentDetails } from './tronClassAssignmentDetails';
 import type {
   TronClassConnection,
@@ -283,8 +284,19 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
     )
       return invalidResponse();
   } else if (action === 'submit' || action === 'reconcile') {
+    if (value.status === 'confirmed') {
+      if (!isOperationId(input.operationId) ||
+        (action === 'submit' && (!isId(input.courseId) || !isId(input.homeworkId)))) return invalidResponse();
+      const result = decodeTronClassAcknowledgedReadbackResult(value, {
+        operationId: input.operationId,
+        ...(action === 'submit' ? { courseId: input.courseId as number, homeworkId: input.homeworkId as number } : {}),
+      });
+      if (!result) return invalidResponse();
+      return result;
+    }
     if (
-      !['submitted', 'unknown'].includes(String(value.status)) ||
+      (value.status !== 'submitted' && value.status !== 'unknown') ||
+      Object.prototype.hasOwnProperty.call(value, 'confirmation') ||
       !isOperationId(value.operationId) ||
       value.operationId !== input.operationId ||
       (value.status === 'submitted' ? !isReceipt(value.receipt) : value.receipt !== null)

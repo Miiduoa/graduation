@@ -530,14 +530,13 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
 
 /** Request-local construction; credentials and sessions never enter a client bundle. */
 export async function getDefaultTronClassSubmissionService() {
-  const [{ getFirebaseAdmin }, { createTronClassBindingService }, { createTronClassSubmissionSource }] = await Promise.all([
-    import('./firebaseAdmin'), import('./tronClassBinding'), import('./tronClassSubmissionSource'),
+  const [{ getFirebaseAdmin }, { createTronClassBindingService }, { createTronClassSubmissionSource }, { createTronClassOperationReconciler }] = await Promise.all([
+    import('./firebaseAdmin'), import('./tronClassBinding'), import('./tronClassSubmissionSource'), import('./tronClassOperationReconcile'),
   ]);
   const runtime = await getFirebaseAdmin();
   if (!runtime?.db) unavailable();
-  return createTronClassSubmissionService({
-    db: runtime.db as unknown as TronClassSubmissionFirestore,
-    bindings: createTronClassBindingService(),
-    source: createTronClassSubmissionSource(),
-  });
+  const db = runtime.db as unknown as TronClassSubmissionFirestore;
+  const bindings = createTronClassBindingService();
+  const service = createTronClassSubmissionService({ db, bindings, source: createTronClassSubmissionSource() });
+  return { ...service, reconcile: createTronClassOperationReconciler({ db, bindings, legacyReconcile: service.reconcile }) };
 }
