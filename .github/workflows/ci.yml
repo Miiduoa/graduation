@@ -486,7 +486,8 @@ jobs:
 
   build-web:
     name: Build Web
-    runs-on: ubuntu-latest
+    # Match the OS supported by the pinned Chromium tooling used by browser checks.
+    runs-on: ubuntu-24.04
     needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
