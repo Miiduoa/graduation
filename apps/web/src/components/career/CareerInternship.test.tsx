@@ -699,3 +699,165 @@ it.each([
     vi.useRealTimers();
   }
 });
+
+// Hold the write open so edits and refreshes can happen before it completes.
+function pendingSave() {
+  let resolve!: (reply: InternshipReply) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<InternshipReply>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+it.each(['newer', 'unchanged', 'rejected'] as const)(
+  'preserves only unsaved URL input after an in-flight save: %s',
+  async (scenario) => {
+    const { view, props, record, snapshot } = setup();
+    await waitFor(() =>
+      expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(''),
+    );
+    const pending = pendingSave();
+    props.service.execute.mockReturnValueOnce(pending.promise);
+    const submitted = 'https://example.test/submitted';
+    const newer = 'https://example.test/newer';
+    const server = 'https://example.test/saved';
+    change(view.getByLabelText('申請文件連結'), submitted);
+    fireEvent.click(view.getByText('登錄已繳交申請'));
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'document', url: submitted, revision: 1 }),
+    );
+    if (scenario === 'newer') change(view.getByLabelText('申請文件連結'), newer);
+    props.service.load.mockResolvedValue({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d, i) =>
+            i === 0 ? { ...d, url: server, submitted: true } : d,
+          ),
+        },
+      ],
+    });
+    await act(async () => {
+      if (scenario === 'rejected') pending.reject(new Error('儲存失敗'));
+      else pending.resolve({ id: record.id });
+    });
+    if (scenario === 'rejected') {
+      expect(view.getByText('儲存失敗')).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(view.getByText('重新整理實習進度'));
+      });
+    }
+    expect(props.service.load).toHaveBeenCalledTimes(2);
+    expect((view.getByLabelText('申請文件連結') as HTMLInputElement).value).toBe(
+      scenario === 'newer' ? newer : scenario === 'unchanged' ? server : submitted,
+    );
+    expect(!!view.queryByText(/尚未送出的草稿已保留/)).toBe(scenario !== 'unchanged');
+  },
+);
+
+it.each(['newer', 'unchanged', 'rejected'] as const)(
+  'preserves only unsaved rejection input after an in-flight save: %s',
+  async (scenario) => {
+    const { view, props, record, snapshot } = setup('student', 'teacher');
+    record.documents[0].submitted = true;
+    await waitFor(() => expect(view.getByLabelText('申請退回原因')).toBeTruthy());
+    const pending = pendingSave();
+    props.service.execute.mockReturnValueOnce(pending.promise);
+    change(view.getByLabelText('申請退回原因'), '請補上佐證');
+    fireEvent.click(view.getByText('退回申請'));
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'verifyDocument', verified: false, message: '請補上佐證' }),
+    );
+    if (scenario === 'newer') change(view.getByLabelText('申請退回原因'), '請補上日期與佐證');
+    props.service.load.mockResolvedValue({
+      ...snapshot,
+      records: [
+        {
+          ...record,
+          revision: 2,
+          documents: record.documents.map((d, i) =>
+            i === 0 ? { ...d, message: '請補上佐證（已儲存）' } : d,
+          ),
+        },
+      ],
+    });
+    await act(async () => {
+      if (scenario === 'rejected') pending.reject(new Error('儲存失敗'));
+      else pending.resolve({ id: record.id });
+    });
+    if (scenario === 'rejected') {
+      expect(view.getByText('儲存失敗')).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(view.getByText('重新整理實習進度'));
+      });
+    }
+    expect((view.getByLabelText('申請退回原因') as HTMLInputElement).value).toBe(
+      scenario === 'newer'
+        ? '請補上日期與佐證'
+        : scenario === 'unchanged'
+          ? '請補上佐證（已儲存）'
+          : '請補上佐證',
+    );
+    expect(!!view.queryByText(/尚未送出的草稿已保留/)).toBe(scenario !== 'unchanged');
+  },
+);
+
+it.each(['unchanged', 'date', 'hours', 'note', 'rejected'] as const)(
+  'resets hours only when the entire submitted draft is still current: %s',
+  async (scenario) => {
+    const { view, props, record, snapshot } = setup();
+    await waitFor(() => expect(view.getByLabelText('實習時數')).toBeTruthy());
+    const pending = pendingSave();
+    props.service.execute.mockReturnValueOnce(pending.promise);
+    change(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-17');
+    change(view.getByLabelText('實習時數'), '7.5');
+    change(view.getByLabelText('工作內容與佐證說明'), '送出的說明');
+    fireEvent.click(view.getByText('儲存實習時數'));
+    expect(props.service.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'hours',
+        revision: 1,
+        entry: expect.objectContaining({ date: '2026-11-17', hours: 7.5, note: '送出的說明' }),
+      }),
+    );
+    if (scenario === 'date') change(view.getByLabelText('實習日期（西元年-月-日）'), '2026-11-18');
+    // A different string must remain a draft even if it is the same numeric hours.
+    if (scenario === 'hours') change(view.getByLabelText('實習時數'), '07.5');
+    if (scenario === 'note') change(view.getByLabelText('工作內容與佐證說明'), '較新的說明');
+    props.service.load.mockResolvedValue({ ...snapshot, records: [{ ...record, revision: 2 }] });
+    await act(async () => {
+      if (scenario === 'rejected') pending.reject(new Error('儲存失敗'));
+      else pending.resolve({ id: record.id });
+    });
+    if (scenario === 'rejected') {
+      expect(view.getByText('儲存失敗')).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(view.getByText('重新整理實習進度'));
+      });
+    }
+    expect((view.getByLabelText('實習日期（西元年-月-日）') as HTMLInputElement).value).toBe(
+      scenario === 'unchanged' ? '' : scenario === 'date' ? '2026-11-18' : '2026-11-17',
+    );
+    expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe(
+      scenario === 'unchanged' ? '' : scenario === 'hours' ? '07.5' : '7.5',
+    );
+    expect((view.getByLabelText('工作內容與佐證說明') as HTMLInputElement).value).toBe(
+      scenario === 'unchanged' ? '' : scenario === 'note' ? '較新的說明' : '送出的說明',
+    );
+    expect(!!view.queryByText(/尚未送出的草稿已保留/)).toBe(scenario !== 'unchanged');
+    if (scenario !== 'unchanged') {
+      await act(async () => {
+        fireEvent.click(view.getByText('儲存實習時數'));
+      });
+      expect(props.service.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ action: 'hours', revision: 2 }),
+      );
+      expect((view.getByLabelText('實習時數') as HTMLInputElement).value).toBe('');
+      expect(view.queryByText(/尚未送出的草稿已保留/)).toBeNull();
+    }
+  },
+);
