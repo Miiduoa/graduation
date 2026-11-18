@@ -315,16 +315,31 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   const now = Date.now();
-  // A way's edit timestamp cannot be newer than the Overpass replication
-  // snapshot that contains it. Preserve checked geometry, but drop any
-  // contradictory revision label rather than advertising false provenance.
-  // Legacy replies without osm3s are bounded by their HTTP fetch time.
-  const buildings = stripOsmRevisionsAfter(
-    parseProvidenceOsmFootprints(payload),
-    osmBaseAt ? Date.parse(osmBaseAt) : now,
-  );
+  let osmBaseAt: string | null;
+  let buildings: ProvidenceFootprint[];
+  try {
+    osmBaseAt = verifyOverpassReplicationTime(payload, now);
+    // A way's edit timestamp cannot be newer than the Overpass replication
+    // snapshot that contains it. Preserve checked geometry, but drop any
+    // contradictory revision label rather than advertising false provenance.
+    // Legacy replies without osm3s are bounded by their HTTP fetch time.
+    buildings = stripOsmRevisionsAfter(
+      parseProvidenceOsmFootprints(payload),
+      osmBaseAt ? Date.parse(osmBaseAt) : now,
+    );
+  } catch (error) {
+    // Even syntactically valid JSON can carry invalid replication metadata or
+    // unusable geometry. Never cache that snapshot; also do not ignore an
+    // explicit upstream Retry-After and retry a known-bad source after 10m.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
   if (!buildings.length) {
     // A valid JSON object can still contain no verified outlines during an
     // upstream partial/outage response. Never cache it as a fresh map. If the
