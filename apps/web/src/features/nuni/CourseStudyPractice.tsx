@@ -39,6 +39,55 @@ function outcomeLabel(response: StudyPracticeResponse | undefined): string {
   return '未完成';
 }
 
+/**
+ * A retry replaces the active round, including responses on cards that the
+ * pending subset will not contain. Require an explicit second action before
+ * discarding any draft, revealed answer state or self-rating.
+ *
+ * Kept inside the finished summary so leaving the summary also cancels a
+ * pending confirmation without changing the persisted checkpoint shape.
+ */
+function PracticeRestartControls({ pending, onAction }: {
+  pending: number;
+  onAction: (action: StudyPracticeAction) => void;
+}) {
+  const [scope, setScope] = useState<'pending' | 'all' | null>(null);
+  const pendingButton = useRef<HTMLButtonElement>(null);
+  const allButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  const warningId = useId();
+
+  useEffect(() => {
+    if (scope) confirmButton.current?.focus();
+  }, [scope]);
+
+  function cancel() {
+    const returnTo = scope === 'pending' ? pendingButton.current : allButton.current;
+    setScope(null);
+    returnTo?.focus();
+  }
+
+  return <>
+    <button ref={pendingButton} type="button" className={`${styles.button} ${styles.primary}`}
+      disabled={pending === 0} onClick={() => setScope('pending')}>重練待加強題（{pending} 題）</button>
+    <button ref={allButton} type="button" className={styles.button}
+      onClick={() => setScope('all')}>重練本輪全部</button>
+    {scope && <div className={styles.note} role="group" aria-label="確認重練">
+      <p id={warningId} role="status">
+        {scope === 'pending' ? '重練待加強題只會選取尚未理解的題目，' : '重練本輪全部題目，'}
+        但都會取代目前整輪的草稿、已揭答狀態與自評，包括未被選入待加強題的紀錄。要保留內容，請先儲存練習進度或下載本輪紀錄。
+      </p>
+      <button ref={confirmButton} type="button" className={`${styles.button} ${styles.primary}`}
+        aria-describedby={warningId} onClick={() => {
+          const selected = scope;
+          setScope(null);
+          onAction({ type: 'restart', scope: selected });
+        }}>確認重練{scope === 'pending' ? '待加強題' : '本輪全部'}</button>
+      <button type="button" className={styles.button} onClick={cancel}>取消，保留本輪</button>
+    </div>}
+  </>;
+}
+
 export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onDownload, onCopy, onSave, onCopyCheckpoint }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
   const evidenceMark = useRef<HTMLElement>(null);
@@ -124,10 +173,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
               const index = round.cards.findIndex((item) => round.responses[item.id]?.outcome == null);
               if (index >= 0) onAction({ type: 'go', index });
             }}>接續未自評題（{summary.unreviewed} 題）</button>}
-          <button type="button" className={`${styles.button} ${styles.primary}`} disabled={summary.pending === 0}
-            onClick={() => onAction({ type: 'restart', scope: 'pending' })}>重練待加強題（{summary.pending} 題）</button>
-          <button type="button" className={styles.button}
-            onClick={() => onAction({ type: 'restart', scope: 'all' })}>重練本輪全部</button>
+          <PracticeRestartControls pending={summary.pending} onAction={onAction} />
         </div>
         <p className={styles.note}>
           {summary.pending > 0 ? '待加強題包含還要加強、略過與未完成的題目。' : '所有題目都已由你標記理解，仍可重練本輪全部。'}

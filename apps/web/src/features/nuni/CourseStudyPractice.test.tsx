@@ -565,3 +565,52 @@ it('lets keyboard and screen-reader students focus an exact practice quote and n
   fireEvent.click(shownAnswer);
   expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('aria-controls')).toBe(false);
 });
+
+it('requires explicit confirmation before replacing the whole round, and cancel preserves drafts and focus', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  writeAnswer('先保留的第一題草稿');
+  skip();
+  skip();
+  skip();
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+
+  const request = screen.getByRole('button', { name: '重練本輪全部' });
+  fireEvent.click(request);
+  expect(screen.getByRole('group', { name: '確認重練' }).textContent).toContain('整輪的草稿');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '確認重練本輪全部' }));
+  expect(handlers.onAction).not.toHaveBeenCalledWith({ type: 'restart', scope: 'all' });
+  fireEvent.click(screen.getByRole('button', { name: '取消，保留本輪' }));
+  expect(screen.queryByRole('group', { name: '確認重練' })).toBeNull();
+  expect(document.activeElement).toBe(request);
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+
+  // Cancelled confirmations must not silently remove the first answer.
+  selectQuestion(1);
+  expect(answerInput().value).toBe('先保留的第一題草稿');
+  skip();
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重練本輪全部' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認重練本輪全部' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'restart', scope: 'all' });
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(answerInput().value).toBe('');
+});
+
+it('warns that a pending-only retry also replaces ratings outside the selected subset', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  decide('understood');
+  skip();
+  skip();
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重練待加強題（2 題）' }));
+  const confirmation = screen.getByRole('group', { name: '確認重練' });
+  expect(confirmation.textContent).toContain('包括未被選入待加強題的紀錄');
+  expect(handlers.onAction).not.toHaveBeenCalledWith({ type: 'restart', scope: 'pending' });
+  fireEvent.click(screen.getByRole('button', { name: '確認重練待加強題' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'restart', scope: 'pending' });
+  expect(screen.getByRole('status').textContent).toBe('第 1 題／共 2 題');
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
+});
