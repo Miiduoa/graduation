@@ -57,62 +57,7 @@ function isRoomSuffix(value: string): boolean {
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
   // this still identifies a building POI, never a surveyed floor or indoor route.
   const adjoiningRoom = '\\d{1,5}[a-z]?(?:\\s*(?:教室|室))?';
-  return new RegExp(`^${floor}(?:[\\s,，:：·/\\-]+${room}|${adjoiningRoom})?import {
-  PROVIDENCE_BUS_STOPS,
-  PROVIDENCE_CAMPUS_PLACES,
-  providencePlaceSourceUrl,
-  type CampusMapPlaceLike,
-} from './providenceCampus';
-
-export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
-
-/** Keep the supplied room wording; normalization for matching happens separately. */
-export function normalizeCampusClassroomQuery(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  const text = value
-    .replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return Array.from(text).slice(0, MAX_CAMPUS_CLASSROOM_QUERY_LENGTH).join('').trim();
-}
-
-function validSchoolId(value: string | null | undefined): string | null {
-  const id = value?.trim();
-  if (!id || ['all', 'personal', 'unavailable-campus'].includes(id)) return null;
-  return /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/.test(id) ? id : null;
-}
-
-/** A room is a search request, never an invented destination or an inferred floor. */
-export function buildCampusClassroomMapHref({
-  schoolId,
-  location,
-}: {
-  schoolId: string | null | undefined;
-  location: unknown;
-}): string | null {
-  const school = validSchoolId(schoolId);
-  const query = normalizeCampusClassroomQuery(location);
-  if (!school || !query) return null;
-  return `/map?${new URLSearchParams({ schoolId: school, query })}`;
-}
-
-export type CampusClassroomResolution<T extends CampusMapPlaceLike> = {
-  query: string;
-  status: 'empty' | 'unmatched' | 'matched' | 'ambiguous';
-  matches: readonly T[];
-};
-
-function comparisonText(value: unknown): string {
-  return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
-}
-
-/** This only recognizes a suffix as room wording; it does not decode its building or floor. */
-function isRoomSuffix(value: string): boolean {
-  const suffix = value.replace(/^[\s:：,，·#/–—-]+/, '').trim();
-  const room = '(?:(?:room|教室|室)\\s*)?[a-z]{0,8}\\s*-?\\s*\\d{1,5}[a-z]?(?:\\s*(?:教室|室))?';
-  if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
-  const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
-, 'u').test(suffix);
+  return new RegExp(`^${floor}(?:[\\s,，:：·/\\-]+${room}|${adjoiningRoom})?$`, 'u').test(suffix);
 }
 
 /** Classrooms belong to buildings, not a stop, car park, road or gateway
