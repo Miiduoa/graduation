@@ -171,14 +171,19 @@ function hasOwnEvidenceFields(value: unknown, required: readonly string[], optio
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
-  if (!value || !isRealTimestamp(value.checkedAt)) return false;
+  if (!hasOwnEvidenceFields(value, ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements']) ||
+      !isRealTimestamp(value.checkedAt)) return false;
   const schedule = value.schedule;
   const assignments = value?.assignments;
   const announcements = value?.announcements;
   const status = (candidate: unknown) => candidate === 'available' || candidate === 'unavailable';
   const count = (candidate: unknown) => candidate === null ||
     (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0);
-  if (!schedule || !assignments || !announcements ||
+  // Restored envelopes may themselves be accessor-backed even when each row
+  // is a plain object. Validate the descriptors before reading totals or lists.
+  if (!hasOwnEvidenceFields(schedule, ['status', 'count']) ||
+      !hasOwnEvidenceFields(assignments, ['status', 'count', 'items'], ['coverage']) ||
+      !hasOwnEvidenceFields(announcements, ['status', 'items']) ||
       !status(schedule.status) || !status(assignments.status) || !status(announcements.status) ||
       !count(schedule.count) || !count(assignments.count) ||
       (schedule.status === 'available' && schedule.count === null) ||
@@ -198,7 +203,7 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
   // Coverage is produced by the paginated authorized reader. A damaged restored
   // flag must not turn a partial task list into evidence that all tasks were read.
   const coverage = assignments.coverage;
-  if (coverage !== undefined && (!coverage || typeof coverage !== 'object' ||
+  if (coverage !== undefined && (!hasOwnEvidenceFields(coverage, ['complete', 'reason', 'pages']) ||
       assignments.status !== 'available' ||
       typeof coverage.complete !== 'boolean' ||
       !['complete', 'legacy-partial', 'read-budget'].includes(coverage.reason) ||
@@ -263,7 +268,10 @@ export function formatOnDeviceSchoolPrompt(
   senseSnapshot: CampusSenseSnapshot | null | undefined,
   expectedOwnerUid: string,
 ): string {
-  const context = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : null;
+  // Reject caller-supplied scope/timetable getters before they are consulted.
+  // Legitimate cached JSON and the live collector always use own data fields.
+  const context = hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
+    ? snapshot : null;
   // A missing or malformed campus ID cannot authorize the same account's
   // cached timetable or synchronized assignments from an unknown school.
   const schoolId = checkedSchoolLabel(context?.schoolId, 100);
@@ -298,7 +306,8 @@ export function formatOnDeviceSchoolPrompt(
   // Validate the complete small on-device excerpt before handing any private
   // evidence (including synchronized campus summaries) to the local model.
   const timetable = context?.timetable;
-  const validTimetable = !!timetable &&
+  const validTimetable = hasOwnEvidenceFields(timetable, ['source', 'updatedAt', 'courses'],
+    ['nextClasses', 'currentClasses', 'classGaps']) &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
     // The saved timetable must predate the context that collected it. Comparing
     // to the current clock alone would accept a source written after checkedAt.
@@ -342,7 +351,9 @@ const sampleCourses = owned && timetable
     : '目前沒有可確認的本機個人課表，因此無法回答正式課程安排。';
   // A matching campus alone is not permission to disclose another student's data.
   // Recheck ownership and freshness at prompt construction, after async model loading.
-  const candidateSense = owned
+  // Scope checks must not invoke a restored root getter before row validation.
+  const candidateSense = owned && hasOwnEvidenceFields(senseSnapshot,
+    ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements'])
     ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId })
     : null;
   const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
