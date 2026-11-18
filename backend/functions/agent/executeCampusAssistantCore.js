@@ -61,6 +61,7 @@ const {
 } = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
 const { relevantItems } = require('../lib/assistantRelevance');
+const { resolveAssignmentPlanningTarget } = require('../lib/assignmentPlanningTarget');
 const { runTool } = require('./tools/registry');
 const {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
@@ -952,8 +953,8 @@ async function executeCampusAssistantCore({
     const washInput = await resolveWashReserveInput(lastUserMessage, schoolId);
     if (!washInput) {
       response.content =
-        '我可以幫你預約洗衣機，但目前找不到可預約的機台或無法解析時間。請確認學校是否已建立 washingMachines 資料。';
-      response.suggestions = ['今晚八點洗衣', '今日公告', '查課表'];
+        '目前無法確認要預約的機台或時間。請提供此校園的單一機台編號與時間；指定機台不存在、無法使用或不明確時，請確認後再試。';
+      response.suggestions = ['提供機台編號與時間', '今日公告', '查課表'];
       return await finalizeResponse();
     }
     response.content = [
@@ -1026,7 +1027,15 @@ async function executeCampusAssistantCore({
       ? prefetched.assignments
       : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     response.debug.sourcesUsed = pendingAssignments.length;
-    const target = pendingAssignments[0];
+    const selection = resolveAssignmentPlanningTarget(lastUserMessage, pendingAssignments);
+    const target = selection.target;
+
+    if (selection.reason === 'clarify') {
+      response.content =
+        '我還不能唯一確認你要拆解哪一份作業。請提供完整作業名稱；若有同名作業，請一併指定課程，例如：拆解「課程名稱」的「作業名稱」。';
+      response.suggestions = ['查看作業', '今日摘要'];
+      return await finalizeResponse();
+    }
 
     if (!target) {
       response.content =
