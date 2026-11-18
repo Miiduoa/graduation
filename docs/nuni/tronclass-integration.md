@@ -2,6 +2,30 @@
 
 更新日期：2026-11-18。此文件描述本分支的實作與驗證範圍；已完成指定真人帳號的校方唯讀抽樣，尚未完成 nuni 綁定、正式繳交及 Web 部署驗收。
 
+## 2026-11-18：原生課程接線、草稿生命週期與受控驗收入口
+
+提交前已整合同期 `b19dc420`（含 main `a5d70b68`），保留其個人補交／重繳／校方草稿狀態、較完整的 Session 草稿修正，以及真正 Next／Auth／Firestore 隔離驗證環境。新版 [個人繳交狀態](tronclass-submission-windows-2026-11-18.md) 與 [綁定驗證環境](tronclass-runtime-verification-2026-11-18.md) 也納入本輪回歸；沒有用本輪近似實作覆蓋同期工作。
+
+接續 `a77a2410` 的整合查核發現，Mobile client 雖然會發送新 `courses` action，Platform 與 Firebase 的真實傳輸層尚未將它列入允許清單，請求會在抵達 BFF 前失敗。兩條傳輸路徑現已加入此唯讀操作，沿用固定 BFF、目前身分、取消及一次喚醒重試；上傳與正式繳交仍不重試。新增兩項真實 transport 回歸先重現原錯誤，修補後相關 **5 suites／196 tests 通過**，完整 Mobile TypeScript 與修改檔案 ESLint 通過。
+
+站內 `prepare` 原先沒有將 HTTP 取消訊號傳入課程、作業詳情及本人歷史的完整讀取鏈。現在 public adapter 建立共用 **50 秒總期限**，涵蓋綁定、唯讀準備、歷史及後續即時授權；legacy 唯讀準備沿用同一個 context。每個來源請求使用同一 AbortSignal 與最多 **8 秒、且不超過剩餘總預算**的期限，分頁及每次 await 前後重新檢查。請求已取消或時間耗盡時，來源即使忽略取消並稍後回覆，也不能啟動下一頁、本人歷史、授權或回傳舊 preparation。
+
+取消會回固定 `TRONCLASS_READ_TIMEOUT`；詳情／歷史的降級處理不能把取消改成部分成功。計時器與事件監聽在完成後清除，來源平行查詢也會停止後續工作。這個唯讀請求的取消不操作 final claim 或提交鎖，既有 `cancel-preparation` 與 unknown／reconcile 語意維持各自的用途。
+
+合併同期版本前，以真正 public adapter、legacy reader 與來源 normalizer 搭配合成 provider 驗證，**7 檔／358 項通過、0 失敗、0 略過**；包含 course／page／detail／history 刻意忽略 signal 的晚回、晚到錯誤、永不完成的 binding、下一頁停止、剩餘預算與即時授權取消。合併後個人 availability reader 也接入同一取消鏈，保留其額外 15 秒上限；新增取消與總期限耗盡後晚回的回歸，避免 optional fallback 把整段取消改成成功。合併處含 default factory、公開服務、legacy 與 acceptance 的 **5 檔／197 項通過**。這些是程式回歸，不是校方登入或送交驗收；production `contractVerified: false` 保留。
+
+**背景確認登入不再丟掉同一身分的頁內草稿。** 真正 `NuniSessionProvider` 的 `pageshow` refresh 會暫時卸載授權工作區；文字與 File 現移到依 nuni owner／session context 隔離的記憶體容器。確認期間仍隱藏課程及草稿，重新取得校方 status、相同 student key 與新的 prepare 後才恢復編輯，不保留舊寫入授權。換 owner／context、登出或換校方學生會丟棄草稿。這沒有增加 localStorage、雲端或跨頁持久化。
+
+新增可實際執行的 [本機受控驗收入口](../../scripts/tronclass/ACCEPTANCE.md)：`preflight` 產生最長五分鐘、HMAC 簽署且綁定精確文字 digest 的計畫；`dispatch` 需要同一 operation、內容與明確確認，沿用持久化 final claim；`reconcile` 只查原 operation。只處理 PU 一般期間、首次個人純文字作業，拒絕附件及既有作業版本。私有輸入、固定 server runtime、一次執行標記與未知結果保留原鎖已實作；兩份不同文字的同 operation 計畫競爭時，輸家保留內容衝突，不能借用另一份結果。核心 **33／33**、真正 esbuild runtime CLI **6／6** 合成回歸通過；後者已加入 CI，沒有執行真人 preflight 或校方繳交。
+
+前一版 `a77a2410` 的實際 Next／Docker Chromium 驗收在返回清單後恢復草稿時失敗，見 [原始 CI](https://github.com/Miiduoa/graduation/actions/runs/44274879965)。背景 session refresh 的草稿缺陷已獨立重現，但不據此認定它就是該瀏覽器失敗的原因。瀏覽器腳本現會在失敗頁關閉前保存 actions、DOM、文字、console 與最後畫面，原斷言和期限不變；本版真實瀏覽器結果以新 commit 的 CI 為準。
+
+獨立固定快照 [#710 iOS 驗證](https://github.com/Miiduoa/graduation/actions/runs/44276403344) 已完成 Release 建置與兩條訪客 smoke，兩份 JUnit 各 1 項、0 失敗；測試涵蓋登入與校園地圖的明確不可用／重試狀態，並非校方登入或寫入。其 tree `57f102625d7a6ef4610526215ece72901737e15f` 只涵蓋 `a77a2410` 的固定 merge 快照，不能替代本輪 Mobile 修改的原生驗證。
+
+本輪使用 Node **22.23.5**。合併 `b19dc420` 前，TronClass Web 回歸 **66 檔／2,238 項通過，4 檔／38 項環境相關測試略過**。合併後擴及新增 Login／Admin 隔離案例的 Web 範圍為 **2,464 項通過、38 項略過、1 項 5 秒逾時**；該 final candidate 檔以原斷言和原期限獨立重跑 **34／34 通過**，不將第一次全範圍結果寫成全綠。Mobile TronClass **14 檔／278 項通過**，CLI privacy／TTL／acceptance／隔離 launcher 合計 **42／42**；子集合不重複相加。
+
+完整 Web TypeScript 增量檢查、完整 Mobile TypeScript、修改檔案 ESLint、Python 語法與 diff 檢查通過；合併前最早一次非增量 Web typecheck 曾遭 SIGKILL，沒有據此宣稱那次檢查通過。本輪精確新 SHA 的遠端完整專案、Chromium 與原生結果另以 GitHub Actions 為準。
+
 ## 2026-11-18：獨立課程清單、多份頁內草稿與校方媒體下載
 
 本輪接續 `1a1eb8db`，合併 main `dcb1b9af`，修正三個會中斷工作區操作的問題：

@@ -123,7 +123,7 @@ describe('assignment detail GET failure and identity boundaries', () => {
   it('uses only the verified binding cookie and activity id with the existing fixed GET source', async () => {
     const reads = source({ ok: true, value: activity });
     expect(await readTronClassAssignmentDetails(reads, binding, scope)).toMatchObject({ details: { status: 'available' } });
-    expect(reads.fetchHomeworkActivity).toHaveBeenCalledExactlyOnceWith(binding.cookies, 202);
+    expect(reads.fetchHomeworkActivity).toHaveBeenCalledExactlyOnceWith(binding.cookies, 202, undefined);
   });
 
   it.each([401, 403, 404, 410])('preserves definitive source denial %s instead of treating it as a transient failure', async status => {

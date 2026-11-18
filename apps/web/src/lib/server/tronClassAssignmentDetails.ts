@@ -5,6 +5,7 @@ import type { TronClassAssignmentDetails } from '../tronClassIntegrationTypes';
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import type { TronClassHomeworkScope, TronClassSubmissionBinding } from './tronClassSubmissionSource';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
+import { readTronClassPreparationSource, type TronClassPreparationRead } from './tronClassPreparationRead';
 
 type DetailRead = {
   details: TronClassAssignmentDetails;
@@ -78,12 +79,16 @@ export function normalizeTronClassAssignmentDetails(
 /** Caller must first confirm the binding's course and homework-list ownership. */
 export async function readTronClassAssignmentDetails(
   source: LmsReadonlySource, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope,
+  context?: TronClassPreparationRead,
 ): Promise<DetailRead> {
+  context?.check();
   if (!id(scope.courseId) || !id(scope.homeworkId) || !id(binding.userId)) return fail(502, 'TRONCLASS_ASSIGNMENT_DETAILS_INVALID');
   if (!source.fetchHomeworkActivity) return unavailable();
   let response: Awaited<ReturnType<NonNullable<LmsReadonlySource['fetchHomeworkActivity']>>>;
-  try { response = await source.fetchHomeworkActivity(binding.cookies, scope.homeworkId); }
+  try { response = await readTronClassPreparationSource(context, options =>
+    source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId, options)); }
   catch (error) {
+    context?.check();
     if (error instanceof NuniError && ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED'].includes(error.code)) throw error;
     const status = schoolHttpStatus(error);
     if (classifySchoolReadError(error) === 'session' || status === 401) return fail(401, 'TRONCLASS_RECONNECT_REQUIRED');

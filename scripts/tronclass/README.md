@@ -1,5 +1,7 @@
 # TronClass 離線契約查核
 
+需要在指定測試作業上執行既有 controlled candidate 時，請參考獨立的 [本機受控驗收入口](ACCEPTANCE.md)。該入口提供唯讀 preflight、明確確認後的一次純文字 dispatch 與原 operation reconcile；不開啟 production writer，也不是下述 HAR 的重播工具。
+
 這支工具把**本機 HAR** 裡與靜宜 TronClass 有關的已知請求整理成去值化型別、階段關聯及證據缺口，供開發者檢查正式 adapter 的必要條件。它不登入、不發網路請求、不重播任何操作，也不會把 `contractVerified` 改成 `true`。
 
 ## 已支援的官方前端路徑

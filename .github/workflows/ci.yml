@@ -195,8 +195,8 @@ jobs:
       - name: Test platform public Agent admission contracts
         run: node scripts/test-platform-public-agent.mjs
 
-      - name: Test TronClass contract privacy and optional retention profile
-        run: node --test scripts/tronclass/analyze-har.test.mjs scripts/tronclass/prepare-ttl-profile.test.cjs
+      - name: Test TronClass contract privacy, retention and controlled acceptance
+        run: node --test scripts/tronclass/analyze-har.test.mjs scripts/tronclass/prepare-ttl-profile.test.cjs scripts/tronclass/acceptance.test.mjs
 
   test-mobile:
     name: Mobile Tests

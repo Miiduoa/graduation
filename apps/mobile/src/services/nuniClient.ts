@@ -168,7 +168,7 @@ export async function nuniBffRequest(
   const tronClass = path === 'tronclass';
   if (
     tronClass &&
-    (!input || !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(String(input.action)))
+    (!input || !['status', 'connect', 'disconnect', 'courses', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(String(input.action)))
   )
     throw new NuniError(400, 'INVALID_REQUEST');
   if (signal?.aborted) throw new NuniError(0, 'REQUEST_CANCELLED');
@@ -201,7 +201,7 @@ export async function nuniBffRequest(
       externalSignal: signal,
       // A mutation may have committed before a timeout; only reads can wake-retry.
       retry: tronClass
-        ? ['status', 'sync', 'prepare', 'reconcile'].includes(String(input?.action))
+        ? ['status', 'courses', 'sync', 'prepare', 'reconcile'].includes(String(input?.action))
         : path !== 'assistant-permissions' || !input,
     },
   );

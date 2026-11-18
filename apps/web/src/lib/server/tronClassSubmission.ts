@@ -6,6 +6,7 @@ import { classifySchoolReadError, schoolHttpStatus } from '@campus/shared/src/pu
 import type { TronClassAssignmentDetails, TronClassSubmissionRules } from '../tronClassIntegrationTypes';
 import { isTronClassAssignmentDetails } from '../tronClassAssignmentDetails';
 import type { TronClassPublicSubmissionService } from './tronClassPublicSubmissionService';
+import { withTronClassPreparationRead, type TronClassPreparationRead } from './tronClassPreparationRead';
 import type {
   TronClassAssignment, TronClassHomeworkScope, TronClassSourceReceipt,
   TronClassSubmissionBinding, TronClassSubmissionSource,
@@ -196,7 +197,7 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
   bindings: TronClassSubmissionBindings;
   source: TronClassSubmissionSource;
   /** Optional injection: only the production factory supplies the live reader. */
-  readAvailability?: (ownerKey: string, scope: TronClassHomeworkScope, expectedRevision: string) => Promise<TronClassSubmissionAvailability>;
+  readAvailability?: (ownerKey: string, scope: TronClassHomeworkScope, expectedRevision: string, signal?: AbortSignal) => Promise<TronClassSubmissionAvailability>;
   now?: () => number;
   writeEnabled?: () => boolean;
 }) {
@@ -231,15 +232,21 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
     if (revision !== undefined && binding.revision !== revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
     return binding;
   }
-  async function assignmentFor(ownerKey: string, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope) {
-    const assignment = await source.getAssignment(binding, scope);
+  async function assignmentFor(ownerKey: string, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead) {
+    context?.check();
+    const assignment = await source.getAssignment(binding, scope, context);
+    context?.check();
     await bindings.assertCurrent(ownerKey, binding.revision);
+    context?.check();
     validateAssignment(assignment, binding, scope);
     return assignment;
   }
-  async function receiptsFor(ownerKey: string, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope) {
+  async function receiptsFor(ownerKey: string, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead) {
+    context?.check();
     const value = await source.listSubmissions(binding, scope);
+    context?.check();
     await bindings.assertCurrent(ownerKey, binding.revision);
+    context?.check();
     return validatedReceipts(value, binding, scope, now());
   }
   function newOperation(ownerKey: string, binding: TronClassSubmissionBinding, input: ScopedOperationInput): Operation {
@@ -313,87 +320,94 @@ export function createTronClassSubmissionService({ db, bindings, source, readAva
     return { status: 'submitted', operationId: operation.operationId, receipt };
   }
   return {
-    async prepare(ownerKey: string, input: TronClassHomeworkScope): Promise<TronClassPreparedSubmission> {
-      validateScope(input);
-      const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
-      const binding = await bindingFor(ownerKey);
-      const assignment = await assignmentFor(ownerKey, binding, scope);
-      const details = assignment.details === undefined ? undefined : structuredClone(assignment.details);
-      let blockedReason = !writeEnabled() ? '目前暫停站內作業繳交，你仍可查看作業說明。'
-        : source.contractVerified !== true ? '此學校目前尚未開放在 nuni 繳交，請使用 TronClass 作業頁。'
-          : assignmentBlock(assignment, now());
-      let receipt: TronClassSubmissionReceipt | null = null;
-      if (source.contractVerified === true) {
-        try {
-          const receipts = await receiptsFor(ownerKey, binding, scope);
-          const latest = receipts.sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt))[0];
-          if (latest) receipt = publicReceipt(latest);
-        } catch (error) {
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          // A school session can expire before the locally encrypted binding.
-          // Let the workspace reconnect instead of presenting it as a temporary
-          // receipt failure under an apparently valid connection.
-          if (error instanceof NuniError && ([401, 403].includes(error.status) ||
-            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
-          blockedReason = '繳交紀錄暫時無法確認，請重新讀取後再試。';
+    async prepare(ownerKey: string, input: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassPreparedSubmission> {
+      const prepareRead = async (read: TronClassPreparationRead): Promise<TronClassPreparedSubmission> => {
+        read.check();
+        validateScope(input);
+        const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
+        const binding = await read.wait(() => bindingFor(ownerKey));
+        const assignment = await read.wait(() => assignmentFor(ownerKey, binding, scope, read));
+        const details = assignment.details === undefined ? undefined : structuredClone(assignment.details);
+        let blockedReason = !writeEnabled() ? '目前暫停站內作業繳交，你仍可查看作業說明。'
+          : source.contractVerified !== true ? '此學校目前尚未開放在 nuni 繳交，請使用 TronClass 作業頁。'
+            : assignmentBlock(assignment, now());
+        let receipt: TronClassSubmissionReceipt | null = null;
+        if (source.contractVerified === true) {
+          try {
+            const receipts = await read.wait(() => receiptsFor(ownerKey, binding, scope, read));
+            const latest = receipts.sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt))[0];
+            if (latest) receipt = publicReceipt(latest);
+          } catch (error) {
+            read.check();
+            await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+            // A school session can expire before the locally encrypted binding.
+            // Let the workspace reconnect instead of presenting it as a temporary
+            // receipt failure under an apparently valid connection.
+            if (error instanceof NuniError && ([401, 403].includes(error.status) ||
+              ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
+            blockedReason = '繳交紀錄暫時無法確認，請重新讀取後再試。';
+          }
         }
-      }
-      let history: TronClassSubmissionHistory | undefined;
-      if (source.readSubmissionHistory) {
-        try {
-          const result = await source.readSubmissionHistory(binding, scope);
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          if (!isTronClassSubmissionHistory(result, scope)) fail(502, 'TRONCLASS_HISTORY_UNAVAILABLE');
-          history = result;
-        } catch (error) {
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          // A later source check can revoke visibility after the initial detail
-          // read. Never return that earlier snapshot after a definitive denial.
-          if (error instanceof NuniError && ([401, 403].includes(error.status) ||
-            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
-          history = { source: 'tronclass', ...scope, fetchedAt: new Date(now()).toISOString(),
-            state: 'unavailable', latestId: null, entries: [] };
+        let history: TronClassSubmissionHistory | undefined;
+        if (source.readSubmissionHistory) {
+          try {
+            const result = await read.wait(() => source.readSubmissionHistory!(binding, scope, read));
+            await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+            if (!isTronClassSubmissionHistory(result, scope)) fail(502, 'TRONCLASS_HISTORY_UNAVAILABLE');
+            history = result;
+          } catch (error) {
+            read.check();
+            await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+            // A later source check can revoke visibility after the initial detail
+            // read. Never return that earlier snapshot after a definitive denial.
+            if (error instanceof NuniError && ([401, 403].includes(error.status) ||
+              ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
+            history = { source: 'tronclass', ...scope, fetchedAt: new Date(now()).toISOString(),
+              state: 'unavailable', latestId: null, entries: [] };
+          }
         }
-      }
-      let availability: TronClassSubmissionAvailability | undefined;
-      if (readAvailability) {
-        try {
-          const result = await readAvailability(ownerKey, scope, binding.revision);
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          if (!isTronClassSubmissionAvailability(result, scope, binding.revision)) fail(502, 'TRONCLASS_AVAILABILITY_UNAVAILABLE');
-          availability = structuredClone(result);
-        } catch (error) {
-          await bindings.assertCurrent(ownerKey, binding.revision);
-          // A later school denial invalidates the earlier assignment/history too.
-          // Only an ordinary optional-read failure can become unknown here.
-          if (error instanceof NuniError && ([401, 403, 409].includes(error.status) ||
-            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'SIGN_IN_REQUIRED',
-              'TRONCLASS_HOMEWORK_NOT_FOUND', 'TRONCLASS_COURSE_ACCESS_DENIED'].includes(error.code))) throw error;
-          const status = schoolHttpStatus(error);
-          if (status === 401 || classifySchoolReadError(error) === 'session') fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-          if (status === 403) fail(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
-          if (status === 409) fail(409, 'TRONCLASS_BINDING_CHANGED');
-          availability = {
-            source: 'tronclass', ...scope, revision: binding.revision, fetchedAt: new Date(now()).toISOString(), state: 'unavailable',
-            ordinary: { state: 'unknown', kind: 'unknown', remainingAttempts: null },
-            makeUp: { state: 'unknown', updatedAt: null }, resubmit: { state: 'unknown', updatedAt: null },
-            draft: { state: 'unknown', submissionId: null, count: null },
-          };
+        let availability: TronClassSubmissionAvailability | undefined;
+        if (readAvailability) {
+          try {
+            const result = await read.wait(() => readAvailability(ownerKey, scope, binding.revision, read.signal));
+            await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+            if (!isTronClassSubmissionAvailability(result, scope, binding.revision)) fail(502, 'TRONCLASS_AVAILABILITY_UNAVAILABLE');
+            availability = structuredClone(result);
+          } catch (error) {
+            read.check();
+            await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+            // A later school denial invalidates the earlier assignment/history too.
+            // Only an ordinary optional-read failure can become unknown here.
+            if (error instanceof NuniError && ([401, 403, 409].includes(error.status) ||
+              ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'SIGN_IN_REQUIRED',
+                'TRONCLASS_HOMEWORK_NOT_FOUND', 'TRONCLASS_COURSE_ACCESS_DENIED'].includes(error.code))) throw error;
+            const status = schoolHttpStatus(error);
+            if (status === 401 || classifySchoolReadError(error) === 'session') fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
+            if (status === 403) fail(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
+            if (status === 409) fail(409, 'TRONCLASS_BINDING_CHANGED');
+            availability = {
+              source: 'tronclass', ...scope, revision: binding.revision, fetchedAt: new Date(now()).toISOString(), state: 'unavailable',
+              ordinary: { state: 'unknown', kind: 'unknown', remainingAttempts: null },
+              makeUp: { state: 'unknown', updatedAt: null }, resubmit: { state: 'unknown', updatedAt: null },
+              draft: { state: 'unknown', submissionId: null, count: null },
+            };
+          }
         }
-      }
-      await bindings.assertCurrent(ownerKey, binding.revision);
-      return { source: 'tronclass', schoolId: 'pu', courseId: scope.courseId, homeworkId: scope.homeworkId, revision: binding.revision,
-        title: assignment.title, description: assignment.description, deadline: assignment.deadline,
-        canSubmit: blockedReason === null, blockedReason, ...(details === undefined ? {} : { details }),
-        maxFiles: Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES),
-        maxFileBytes: Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES),
-        rules: assignment.permissionKnown ? {
-          status: 'confirmed', allowsText: assignment.allowsText,
-          allowsAttachments: assignment.allowsAttachments,
-          maxTotalBytes: Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES),
-        } : { status: 'unknown' },
-        allowedContentTypes: [...assignment.allowedContentTypes], receipt,
-        ...(history ? { history } : {}), ...(availability ? { availability } : {}) };
+        await read.wait(() => bindings.assertCurrent(ownerKey, binding.revision));
+        return { source: 'tronclass', schoolId: 'pu', courseId: scope.courseId, homeworkId: scope.homeworkId, revision: binding.revision,
+          title: assignment.title, description: assignment.description, deadline: assignment.deadline,
+          canSubmit: blockedReason === null, blockedReason, ...(details === undefined ? {} : { details }),
+          maxFiles: Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES),
+          maxFileBytes: Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES),
+          rules: assignment.permissionKnown ? {
+            status: 'confirmed', allowsText: assignment.allowsText,
+            allowsAttachments: assignment.allowsAttachments,
+            maxTotalBytes: Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES),
+          } : { status: 'unknown' },
+          allowedContentTypes: [...assignment.allowedContentTypes], receipt,
+          ...(history ? { history } : {}), ...(availability ? { availability } : {}) };
+      };
+      return context ? prepareRead(context) : withTronClassPreparationRead(undefined, prepareRead);
     },
     async upload(ownerKey: string, input: ScopedOperationInput & {
       fileId: string; name: string; contentType: string; bytes: Uint8Array;

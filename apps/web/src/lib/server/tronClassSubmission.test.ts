@@ -145,7 +145,7 @@ describe('TronClass submission orchestration (injected verified source only)', (
     f.source.contractVerified = false;
     const readAvailability = vi.fn(async () => structuredClone(availability));
     const result = await f.create({ readAvailability }).prepare(OWNER, SCOPE);
-    expect(readAvailability).toHaveBeenCalledExactlyOnceWith(OWNER, SCOPE, REVISION);
+    expect(readAvailability).toHaveBeenCalledExactlyOnceWith(OWNER, SCOPE, REVISION, expect.any(AbortSignal));
     expect(result).toMatchObject({ availability, canSubmit: false, receipt: null });
     expect(f.source.uploadFile).not.toHaveBeenCalled();
     expect(f.source.submit).not.toHaveBeenCalled();

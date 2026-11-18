@@ -166,8 +166,8 @@ describe('read-only student submission history', () => {
   it('checks the owned course and activity before requesting the fixed current-student history', async () => {
     const { source, adapter } = fixture();
     expect(await adapter.readSubmissionHistory!(binding, scope)).toMatchObject({ latestId: '501', state: 'available' });
-    expect(source.fetchHomeworkActivity).toHaveBeenCalledWith(binding.cookies, 202);
-    expect(source.fetchStudentSubmissionList).toHaveBeenCalledWith(binding.cookies, 202, 303);
+    expect(source.fetchHomeworkActivity).toHaveBeenCalledWith(binding.cookies, 202, undefined);
+    expect(source.fetchStudentSubmissionList).toHaveBeenCalledWith(binding.cookies, 202, 303, undefined);
     expect(adapter.contractVerified).toBe(false);
     await expect(adapter.listSubmissions(binding, scope)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
   });

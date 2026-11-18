@@ -77,7 +77,7 @@ describe('production default public submission factory', () => {
     expect(prepared.rules.status).toBe('unknown');
     expect(prepared.receipt).toBeNull();
     expect(runtime.createAvailability).toHaveBeenCalledExactlyOnceWith({ bindings: s.bindings });
-    expect(s.readAvailability).toHaveBeenCalledExactlyOnceWith(ownerKey, scope, revision);
+    expect(s.readAvailability).toHaveBeenCalledExactlyOnceWith(ownerKey, scope, revision, expect.any(AbortSignal));
     expect(prepared.availability).toEqual(s.availability);
     // A real reader is wired into the factory, but its available school window
     // cannot grant nuni's still-unverified writer or trigger any school mutation.

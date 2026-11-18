@@ -37,9 +37,9 @@ describe('production TronClass submission source is read-only until its contract
       maxFiles: 0, maxFileBytes: 0, maxTotalBytes: 0, allowedContentTypes: [],
       details: { status: 'unavailable' },
     });
-    expect(reads.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'ongoing' });
-    expect(reads.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'upcoming' });
-    expect(reads.fetchHomeworkPage).toHaveBeenCalledWith(binding.cookies, 101, 1, 50);
+    expect(reads.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'ongoing' }, undefined);
+    expect(reads.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'upcoming' }, undefined);
+    expect(reads.fetchHomeworkPage).toHaveBeenCalledWith(binding.cookies, 101, 1, 50, undefined);
   });
 
   it('also permits read-only preparation from an owned upcoming course', async () => {
@@ -139,7 +139,7 @@ describe('production TronClass submission source is read-only until its contract
       permissionKnown: false, canSubmit: false, remainingAttempts: null,
       details: { status: 'available', submissionType: 'individual', mode: 'normal',
         attempts: { unlimited: false, limit: 3, used: 1, remaining: 2 } } });
-    expect(reads.fetchHomeworkActivity).toHaveBeenCalledWith(binding.cookies, 202);
+    expect(reads.fetchHomeworkActivity).toHaveBeenCalledWith(binding.cookies, 202, undefined);
     expect(JSON.stringify(result)).not.toContain('private answer');
     expect(source.contractVerified).toBe(false);
   });

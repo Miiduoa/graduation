@@ -178,7 +178,7 @@ export async function handleTronClassIntegration(
           break;
         case 'prepare':
           only(input, ['action', 'courseId', 'homeworkId']);
-          result = await (await getSubmissions()).prepare(actor.ownerKey, { courseId: id(input.courseId), homeworkId: id(input.homeworkId) });
+          result = await (await getSubmissions()).prepare(actor.ownerKey, { courseId: id(input.courseId), homeworkId: id(input.homeworkId) }, request.signal);
           break;
         case 'submit':
           only(input, ['action', 'courseId', 'homeworkId', 'revision', 'operationId', 'content', 'attachments', 'confirmed']);

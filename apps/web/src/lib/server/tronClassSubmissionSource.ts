@@ -8,12 +8,13 @@ import {
   schoolHttpStatus,
 } from '@campus/shared/src/puLmsReadonly';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
-import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadonlySource, LmsReadOptions } from './tronClassLmsSource';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import { readTronClassSubmissionHistory } from './tronClassSubmissionHistory';
 import type { TronClassAssignmentDetails } from '../tronClassIntegrationTypes';
 import { readTronClassAssignmentDetails } from './tronClassAssignmentDetails';
+import { readTronClassPreparationSource, type TronClassPreparationRead } from './tronClassPreparationRead';
 
 export type TronClassSubmissionBinding = {
   schoolId: 'pu';
@@ -85,7 +86,7 @@ export type TronClassSourceUpload = TronClassSourceFile & TronClassHomeworkScope
  */
 export type TronClassSubmissionSource = {
   contractVerified: boolean;
-  getAssignment(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope): Promise<TronClassAssignment>;
+  getAssignment(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassAssignment>;
   uploadFile(binding: TronClassSubmissionBinding, assignment: TronClassAssignment, input: TronClassUploadInput): Promise<TronClassSourceUpload>;
   submit(binding: TronClassSubmissionBinding, assignment: TronClassAssignment, input: {
     operationId: string;
@@ -94,7 +95,7 @@ export type TronClassSubmissionSource = {
   }): Promise<void>;
   listSubmissions(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope): Promise<TronClassSourceReceipt[]>;
   /** Read-only historical display; never used to reconcile a new write. */
-  readSubmissionHistory?(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope): Promise<TronClassSubmissionHistory>;
+  readSubmissionHistory?(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassSubmissionHistory>;
 };
 
 function unavailable(): never { throw new NuniError(503, 'TRONCLASS_SUBMISSION_UNAVAILABLE'); }
@@ -108,8 +109,9 @@ function numericId(value: unknown): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-async function schoolRead<T>(run: () => Promise<T>): Promise<T> {
-  try { return await run(); } catch (error) {
+async function schoolRead<T>(run: (options?: LmsReadOptions) => Promise<T>, context?: TronClassPreparationRead): Promise<T> {
+  try { return await readTronClassPreparationSource(context, run); } catch (error) {
+    context?.check();
     const status = schoolHttpStatus(error);
     if (classifySchoolReadError(error) === 'session' || status === 401) {
       throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
@@ -131,10 +133,14 @@ async function schoolRead<T>(run: () => Promise<T>): Promise<T> {
 export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySource): TronClassSubmissionSource {
   const adapter: TronClassSubmissionSource = {
     contractVerified: false,
-    async getAssignment(binding, scope) {
+    async getAssignment(binding, scope, context) {
+      context?.check();
       const source = readonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
-      const lists = await schoolRead(() => Promise.all(['ongoing', 'upcoming'].map((status) =>
-        source.fetchCourses(binding.cookies, { userId: binding.userId, status: status as 'ongoing' | 'upcoming' }))));
+      context?.check();
+      const lists = await Promise.all(['ongoing', 'upcoming'].map((status) =>
+        schoolRead(options => source.fetchCourses(binding.cookies,
+          { userId: binding.userId, status: status as 'ongoing' | 'upcoming' }, options), context)));
+      context?.check();
       if (lists.some((list) => !Array.isArray(list) || list.length > 1000)) unavailable();
       const courses = (lists as unknown[][]).flat();
       if (!courses.some((course) => numericId(record(course).id) === scope.courseId)) {
@@ -144,7 +150,7 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
       let found: Record<string, unknown> | undefined;
       const seen = new Set<number>();
       for (let page = 1; page <= HOMEWORK_MAX_PAGES; page += 1) {
-        const response = await schoolRead(() => source.fetchHomeworkPage(binding.cookies, scope.courseId, page, HOMEWORK_PAGE_SIZE));
+        const response = await schoolRead(options => source.fetchHomeworkPage(binding.cookies, scope.courseId, page, HOMEWORK_PAGE_SIZE, options), context);
         if (!response.ok && response.status === 401) throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
         if (!response.ok && response.status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
         if (!response.ok || !Array.isArray(response.value.homework_activities)) unavailable();
@@ -171,7 +177,8 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
       if (!title) unavailable();
       const rawDeadline = found.deadline ?? found.end_time;
       const deadline = typeof rawDeadline === 'string' ? parseTaipeiInstant(rawDeadline) : null;
-      const detail = await readTronClassAssignmentDetails(source, binding, scope);
+      const detail = await readTronClassAssignmentDetails(source, binding, scope, context);
+      context?.check();
       return {
         courseId: scope.courseId, homeworkId: scope.homeworkId, studentId: binding.userId, title: detail.title ?? title,
         description: detail.description ?? homeworkDescriptionText(record(found.data).description ?? found.description),
@@ -186,11 +193,14 @@ export function createTronClassSubmissionSource(readonlySource?: LmsReadonlySour
     async uploadFile() { return unavailable(); },
     async submit() { return unavailable(); },
     async listSubmissions() { return unavailable(); },
-    async readSubmissionHistory(binding, scope) {
+    async readSubmissionHistory(binding, scope, context) {
+      context?.check();
       // Recheck ownership/visibility before the student-specific history URL.
-      await adapter.getAssignment(binding, scope);
+      await adapter.getAssignment(binding, scope, context);
+      context?.check();
       const source = readonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
-      return readTronClassSubmissionHistory(source, binding, scope);
+      context?.check();
+      return readTronClassSubmissionHistory(source, binding, scope, Date.now(), context);
     },
   };
   return adapter;

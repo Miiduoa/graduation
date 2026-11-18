@@ -162,17 +162,37 @@ async def expect_recovered_draft(page, prefix, report):
     try:
         await expect(page.get_by_label('作業內容', exact=True)).to_have_value(
             '合成介面驗收：校園課程整合與個人學習反思。')
-    except Exception:
+    except Exception as error:
         # These pages and API responses are entirely synthetic. Preserve the
         # failing state before Playwright closes the context, so a remount is
         # distinguishable from a slow or rejected assignment read.
-        report['failedDraftRecovery'] = dict(
-            scenario=prefix,
-            url=page.url,
-            visibleText=await page.locator('body').inner_text(),
-            lifecycle=await page.evaluate('window.__tronclassFixtureLifecycle || []'),
-        )
-        await page.screenshot(path=str(OUT / f'{prefix}-failed-draft.png'), full_page=True)
+        failure = dict(scenario=prefix, originalError=str(error), captureErrors=[])
+        report['failedDraftRecovery'] = failure
+        try:
+            failure['url'] = page.url
+        except Exception as capture_error:
+            failure['captureErrors'].append('url: ' + str(capture_error))
+        for key, read in [
+            ('visibleText', lambda: page.locator('body').inner_text()),
+            ('lifecycle', lambda: page.evaluate('window.__tronclassFixtureLifecycle || []')),
+            ('domFile', page.content),
+        ]:
+            try:
+                value = await asyncio.wait_for(read(), timeout=3)
+                if key == 'domFile':
+                    name = f'{prefix}-failed-draft.html'
+                    (OUT / name).write_text(value, encoding='utf-8')
+                    failure[key] = name
+                else:
+                    failure[key] = value
+            except Exception as capture_error:
+                failure['captureErrors'].append(key + ': ' + str(capture_error))
+        try:
+            name = f'{prefix}-failed-draft.png'
+            await page.screenshot(path=str(OUT / name), full_page=True, timeout=3000)
+            failure['screenshot'] = name
+        except Exception as capture_error:
+            failure['captureErrors'].append('screenshot: ' + str(capture_error))
         raise
 
 

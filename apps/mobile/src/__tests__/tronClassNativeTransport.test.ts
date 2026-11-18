@@ -45,6 +45,45 @@ it('uses POST at the fixed TronClass BFF with Platform authorization, without a 
     code: 'INVALID_REQUEST',
   });
 });
+it.each([
+  {
+    name: 'Platform',
+    authorization: `Platform ${handle}`,
+    read: (signal?: AbortSignal) => nuniBffRequest('tronclass', handle, { action: 'courses' }, signal),
+    cancellationCode: 'REQUEST_CANCELLED',
+  },
+  {
+    name: 'Firebase',
+    authorization: 'Bearer fresh-token',
+    read: (signal?: AbortSignal) => nativeTronClassFirebaseRequest('school-a', () => true, { action: 'courses' }, signal),
+    cancellationCode: 'SESSION_CHANGED',
+  },
+])('loads the independent course index through the real $name transport with bounded read retry', async ({
+  authorization, read, cancellationCode,
+}) => {
+  const index = { kind: 'course-index', revision, fetchedAt: '2026-11-18T10:00:00.000Z',
+    courses: [{ id: 10, name: '程式設計', code: 'CS101', teachers: [], semester: null,
+      status: 'active', href: 'https://tronclass.pu.edu.tw/course/10/content' }],
+    errors: [], partial: false };
+  const fetchMock = jest.fn()
+    .mockRejectedValueOnce(new TypeError('waking'))
+    .mockResolvedValue({ ok: true, text: async () => JSON.stringify(index) });
+  global.fetch = fetchMock as unknown as typeof fetch;
+
+  await expect(read()).resolves.toEqual(index);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  for (const call of fetchMock.mock.calls) {
+    expect(call).toEqual(['https://nuni.tw/api/tronclass', expect.objectContaining({
+      method: 'POST', redirect: 'error', cache: 'no-store', body: '{"action":"courses"}',
+      headers: { Accept: 'application/json', Authorization: authorization, 'Content-Type': 'application/json' },
+    })]);
+  }
+
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await expect(read(cancelled.signal)).rejects.toMatchObject({ code: cancellationCode });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
 it.each(['connect', 'disconnect', 'submit', 'cancel-preparation'])(
   'never retries a %s whose reply was lost',
   async (action) => {

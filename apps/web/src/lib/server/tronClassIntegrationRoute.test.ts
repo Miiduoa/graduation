@@ -67,6 +67,20 @@ it('passes request cancellation to the sync reader separately from caller-suppli
   expect(read.mock.calls[0][2].aborted).toBe(true);
 });
 
+it('passes prepare cancellation to the submission reader without adding a client-controlled field', async () => {
+  const { dependencies, submissions } = setup();
+  submissions.prepare.mockResolvedValue({ canSubmit: false });
+  const controller = new AbortController();
+  const request = new NextRequest('https://nuni.tw/api/tronclass', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw' },
+    body: JSON.stringify({ action: 'prepare', courseId: 101, homeworkId: 202 }), signal: controller.signal,
+  });
+  expect((await handleTronClassIntegration(request, dependencies)).status).toBe(200);
+  expect(submissions.prepare).toHaveBeenCalledExactlyOnceWith(ownerKey, { courseId: 101, homeworkId: 202 }, request.signal);
+  controller.abort();
+  expect(submissions.prepare.mock.calls[0][2].aborted).toBe(true);
+});
+
 it('loads only the authenticated course index and forwards cancellation without creating a submission service', async () => {
   const { dependencies, courses, read, getSubmissions, authenticate } = setup();
   const controller = new AbortController();

@@ -85,4 +85,4 @@ reader 使用伺服器綁定的 student ID，不接受前端學生或小組 sele
 4. 附件須完成 metadata、經獨立來源確認的 storage target、binary 與必要 callback，再確認完整附件關聯。已驗證的 media 下載 host 不能直接當成上傳允許清單。
 5. acknowledgment 遺失、逾時或綁定改變時保持結果不明並讀回查核，不能自動重送。資料庫 ledger 與合成 route 測試只能驗證本地流程，不代替校方收件。
 
-本次沒有變更 production writer 開關、candidate、protocol 或寫入授權。availability 資料不替代這些驗收條件。
+個人時段觀察不變更 production writer 開關或寫入授權。同批整合的請求 header 序列化與 acknowledgment parser 調整，僅對齊官方 client 的可選 XSRF header 及可省略 `course_id` 的回應形狀；明示錯誤歸屬仍拒絕，真正校方接受與精確讀回仍須驗收。availability 資料不替代這些條件。

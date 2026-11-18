@@ -5,9 +5,10 @@ import {
   TRONCLASS_HISTORY_MAX_ATTACHMENTS, TRONCLASS_HISTORY_MAX_CONTENT, TRONCLASS_HISTORY_MAX_ENTRIES,
   type TronClassSubmissionHistory, type TronClassSubmissionHistoryEntry,
 } from '@campus/shared/src/tronClassSubmissionHistory';
-import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadonlySource, LmsReadOptions } from './tronClassLmsSource';
 import type { TronClassHomeworkScope, TronClassSubmissionBinding } from './tronClassSubmissionSource';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
+import { readTronClassPreparationSource, type TronClassPreparationRead } from './tronClassPreparationRead';
 
 function invalid(): never { throw new NuniError(502, 'TRONCLASS_HISTORY_UNAVAILABLE'); }
 function object(value: unknown): Record<string, unknown> {
@@ -124,12 +125,14 @@ export function normalizeTronClassSubmissionHistory(
 /** Caller must first verify this binding's current course and homework access. */
 export async function readTronClassSubmissionHistory(
   source: LmsReadonlySource, binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, now = Date.now(),
+  context?: TronClassPreparationRead,
 ): Promise<TronClassSubmissionHistory> {
+  context?.check();
   if (!source.fetchHomeworkActivity || !source.fetchStudentSubmissionList ||
     !id(scope.courseId) || !id(scope.homeworkId) || !id(binding.userId)) return invalid();
-  const read = async (request: () => Promise<{ ok: true; value: unknown } | { ok: false; status: number | null }>, activityRead = false) => {
+  const read = async (request: (options?: LmsReadOptions) => Promise<{ ok: true; value: unknown } | { ok: false; status: number | null }>, activityRead = false) => {
     try {
-      const response = await request();
+      const response = await readTronClassPreparationSource(context, request);
       if (!response.ok) {
         if (response.status === 401) throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
         if (response.status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
@@ -140,6 +143,7 @@ export async function readTronClassSubmissionHistory(
       }
       return response.value;
     } catch (error) {
+      context?.check();
       if (error instanceof NuniError && ([401, 403].includes(error.status) ||
         ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'TRONCLASS_HOMEWORK_NOT_FOUND'].includes(error.code))) throw error;
       const status = schoolHttpStatus(error);
@@ -151,7 +155,7 @@ export async function readTronClassSubmissionHistory(
       return invalid();
     }
   };
-  const activity = object(await read(() => source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId), true));
+  const activity = object(await read(options => source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId, options), true));
   if (activity.id !== scope.homeworkId || activity.course_id !== scope.courseId ||
     activity.type !== 'homework') return invalid();
   if (!isTronClassSourceVisible(activity)) throw new NuniError(404, 'TRONCLASS_HOMEWORK_NOT_FOUND');
@@ -160,6 +164,6 @@ export async function readTronClassSubmissionHistory(
       state: 'group-unsupported', latestId: null, entries: [] };
   }
   if (activity.submit_by_group !== false) return invalid();
-  const value = await read(() => source.fetchStudentSubmissionList!(binding.cookies, scope.homeworkId, binding.userId));
+  const value = await read(options => source.fetchStudentSubmissionList!(binding.cookies, scope.homeworkId, binding.userId, options));
   return normalizeTronClassSubmissionHistory(value, binding, scope, now);
 }

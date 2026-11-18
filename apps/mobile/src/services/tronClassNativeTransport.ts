@@ -105,7 +105,7 @@ export async function nativeTronClassFirebaseRequest(
   const action = 'action' in input ? String(input.action) : 'upload';
   if (
     !upload &&
-    !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(action)
+    !['status', 'connect', 'disconnect', 'courses', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(action)
   )
     throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
   const endpoint = upload
@@ -155,7 +155,7 @@ export async function nativeTronClassFirebaseRequest(
     {
       timeoutMs: ['connect', 'disconnect'].includes(action) ? 90000 : 60000,
       externalSignal: signal,
-      retry: !upload && ['status', 'sync', 'prepare', 'reconcile'].includes(action),
+      retry: !upload && ['status', 'courses', 'sync', 'prepare', 'reconcile'].includes(action),
     },
   );
 }

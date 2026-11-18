@@ -18,6 +18,7 @@ import {
   type TronClassSubmissionResult, type TronClassUploadedAttachment,
 } from './tronClassSubmission';
 import type { TronClassAssignment, TronClassHomeworkScope, TronClassSubmissionBinding } from './tronClassSubmissionSource';
+import { withTronClassPreparationRead, type TronClassPreparationRead } from './tronClassPreparationRead';
 
 type OperationInput = TronClassHomeworkScope & { revision: string; operationId: string };
 export type TronClassPublicUploadInput = OperationInput & {
@@ -28,7 +29,7 @@ export type TronClassPublicSubmitInput = OperationInput & {
 };
 export type TronClassPublicSubmissionResult = TronClassSubmissionResult | TronClassAcknowledgedReadbackResult;
 export type TronClassPublicSubmissionService = {
-  prepare(ownerKey: string, scope: TronClassHomeworkScope): Promise<TronClassPreparedSubmission>;
+  prepare(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassPreparedSubmission>;
   upload(ownerKey: string, input: TronClassPublicUploadInput, signal?: AbortSignal): Promise<TronClassUploadedAttachment>;
   submit(ownerKey: string, input: TronClassPublicSubmitInput, signal?: AbortSignal): Promise<TronClassPublicSubmissionResult>;
   reconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassPublicSubmissionResult>;
@@ -38,7 +39,7 @@ export type TronClassPublicSubmissionService = {
 export type TronClassPublicSubmissionDependencies = {
   db: TronClassSubmissionFirestore;
   bindings: TronClassSubmissionBindings;
-  readonlyPrepare: TronClassPublicSubmissionService['prepare'];
+  readonlyPrepare(ownerKey: string, scope: TronClassHomeworkScope, context?: TronClassPreparationRead): Promise<TronClassPreparedSubmission>;
   legacyReconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassSubmissionResult>;
   /** Explicit server-owned tenant evidence; neither an HTTP field nor an environment toggle. */
   contractVerified?: boolean;
@@ -119,13 +120,16 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
     guardWrites();
     if (!attachmentsConfigured) unavailable();
   };
-  async function current(ownerKey: string, revision: string, studentId?: number): Promise<TronClassSubmissionBinding> {
+  async function current(ownerKey: string, revision: string, studentId?: number, read?: TronClassPreparationRead): Promise<TronClassSubmissionBinding> {
+    read?.check();
     const binding = await bindings.requireBinding(ownerKey);
+    read?.check();
     const at = now();
     if (!binding || binding.schoolId !== 'pu' || !positiveId(binding.userId) || binding.revision !== revision ||
       (studentId !== undefined && binding.userId !== studentId)) fail(409, 'TRONCLASS_BINDING_CHANGED');
     if (!Number.isFinite(at) || !instant(binding.expiresAt) || Date.parse(binding.expiresAt) <= at) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
     await bindings.assertCurrent(ownerKey, revision);
+    read?.check();
     return binding;
   }
   function controlled(ownerKey: string) {
@@ -166,63 +170,65 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
       // The journal transaction, never a client phase or absent response, decides.
       return journal.cancelPreparation(ownerKey, input);
     },
-    async prepare(ownerKey, input) {
-      ownerAndScope(ownerKey, input);
-      if (Object.keys(input).some(key => !['courseId', 'homeworkId'].includes(key))) invalid();
-      const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
-      const base = structuredClone(await readonlyPrepare(ownerKey, scope));
-      if (!base || base.source !== 'tronclass' || base.schoolId !== 'pu' || base.courseId !== scope.courseId ||
-        base.homeworkId !== scope.homeworkId || typeof base.revision !== 'string' || !REVISION.test(base.revision) ||
-        (base.availability !== undefined && !isTronClassSubmissionAvailability(base.availability, scope, base.revision))) unavailable();
-      const binding = await current(ownerKey, base.revision);
-      // Project the existing read-only DTO explicitly; do not spread provider data.
-      const preparation: TronClassPreparedSubmission = {
-        source: 'tronclass', schoolId: 'pu', ...scope, revision: base.revision,
-        title: base.title, description: base.description, deadline: base.deadline,
-        canSubmit: false, blockedReason: blockedReason(), maxFiles: base.maxFiles, maxFileBytes: base.maxFileBytes,
-        allowedContentTypes: [...base.allowedContentTypes], rules: base.rules, receipt: base.receipt,
-        ...(base.details === undefined ? {} : { details: base.details }), ...(base.history === undefined ? {} : { history: base.history }),
-        ...(base.availability === undefined ? {} : { availability: base.availability }),
-      };
-      if (preparation.blockedReason) return preparation;
-      const granted: TronClassCandidateAuthorization = structuredClone(await authorization!(ownerKey, scope));
-      await current(ownerKey, base.revision, binding.userId);
-      if (!granted?.binding || granted.binding.revision !== base.revision || granted.binding.userId !== binding.userId ||
-        granted.binding.schoolId !== binding.schoolId) fail(409, 'TRONCLASS_BINDING_CHANGED');
-      if (!granted.assignment || granted.assignment.courseId !== scope.courseId || granted.assignment.homeworkId !== scope.homeworkId ||
-        granted.assignment.studentId !== binding.userId) conflict();
-      assignmentShape(granted.assignment);
-      const allowsAttachments = attachmentsConfigured && granted.assignment.allowsAttachments;
-      let reason = blockedReason();
-      if (!reason) {
-        try {
-          assertTronClassCandidateAuthorization(granted, scope, now(), false);
-          tronClassCandidateHeaders(granted.binding);
-          if (!granted.assignment.allowsText && (!allowsAttachments || granted.assignment.maxFiles === 0 ||
-            granted.assignment.maxFileBytes === 0 || granted.assignment.maxTotalBytes === 0)) fail(409, 'TRONCLASS_SUBMISSION_BLOCKED');
-        } catch (error) {
-          if (error instanceof NuniError && error.code === 'TRONCLASS_SUBMISSION_BLOCKED') {
-            reason = '這份作業目前不符合站內繳交條件，請重新讀取或至 TronClass 查看。';
-          } else if (error instanceof NuniError && error.code === 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED') {
-            reason = '尚無法確認校方送交驗證，請重新連線或使用 TronClass 作業頁。';
-          } else throw error;
+    async prepare(ownerKey, input, signal) {
+      return withTronClassPreparationRead(signal, async read => {
+        ownerAndScope(ownerKey, input);
+        if (Object.keys(input).some(key => !['courseId', 'homeworkId'].includes(key))) invalid();
+        const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
+        const base = structuredClone(await read.wait(() => readonlyPrepare(ownerKey, scope, read)));
+        if (!base || base.source !== 'tronclass' || base.schoolId !== 'pu' || base.courseId !== scope.courseId ||
+          base.homeworkId !== scope.homeworkId || typeof base.revision !== 'string' || !REVISION.test(base.revision) ||
+          (base.availability !== undefined && !isTronClassSubmissionAvailability(base.availability, scope, base.revision))) unavailable();
+        const binding = await read.wait(() => current(ownerKey, base.revision, undefined, read));
+        // Project the existing read-only DTO explicitly; do not spread provider data.
+        const preparation: TronClassPreparedSubmission = {
+          source: 'tronclass', schoolId: 'pu', ...scope, revision: base.revision,
+          title: base.title, description: base.description, deadline: base.deadline,
+          canSubmit: false, blockedReason: blockedReason(), maxFiles: base.maxFiles, maxFileBytes: base.maxFileBytes,
+          allowedContentTypes: [...base.allowedContentTypes], rules: base.rules, receipt: base.receipt,
+          ...(base.details === undefined ? {} : { details: base.details }), ...(base.history === undefined ? {} : { history: base.history }),
+          ...(base.availability === undefined ? {} : { availability: base.availability }),
+        };
+        if (preparation.blockedReason) return preparation;
+        const granted: TronClassCandidateAuthorization = structuredClone(await read.wait(() => authorization!(ownerKey, scope, read.signal)));
+        await read.wait(() => current(ownerKey, base.revision, binding.userId, read));
+        if (!granted?.binding || granted.binding.revision !== base.revision || granted.binding.userId !== binding.userId ||
+          granted.binding.schoolId !== binding.schoolId) fail(409, 'TRONCLASS_BINDING_CHANGED');
+        if (!granted.assignment || granted.assignment.courseId !== scope.courseId || granted.assignment.homeworkId !== scope.homeworkId ||
+          granted.assignment.studentId !== binding.userId) conflict();
+        assignmentShape(granted.assignment);
+        const allowsAttachments = attachmentsConfigured && granted.assignment.allowsAttachments;
+        let reason = blockedReason();
+        if (!reason) {
+          try {
+            assertTronClassCandidateAuthorization(granted, scope, now(), false);
+            tronClassCandidateHeaders(granted.binding);
+            if (!granted.assignment.allowsText && (!allowsAttachments || granted.assignment.maxFiles === 0 ||
+              granted.assignment.maxFileBytes === 0 || granted.assignment.maxTotalBytes === 0)) fail(409, 'TRONCLASS_SUBMISSION_BLOCKED');
+          } catch (error) {
+            if (error instanceof NuniError && error.code === 'TRONCLASS_SUBMISSION_BLOCKED') {
+              reason = '這份作業目前不符合站內繳交條件，請重新讀取或至 TronClass 查看。';
+            } else if (error instanceof NuniError && error.code === 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED') {
+              reason = '尚無法確認校方送交驗證，請重新連線或使用 TronClass 作業頁。';
+            } else throw error;
+          }
         }
-      }
-      const assignment = granted.assignment;
-      await current(ownerKey, base.revision, binding.userId);
-      reason = blockedReason() ?? reason;
-      return {
-        ...preparation, title: assignment.title, description: assignment.description, deadline: assignment.deadline,
-        canSubmit: reason === null, blockedReason: reason, receipt: null,
-        maxFiles: allowsAttachments ? Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES) : 0,
-        maxFileBytes: allowsAttachments ? Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES) : 0,
-        allowedContentTypes: allowsAttachments ? [...assignment.allowedContentTypes] : [],
-        rules: assignment.permissionKnown ? { status: 'confirmed', allowsText: assignment.allowsText,
-          allowsAttachments, maxTotalBytes: allowsAttachments ? Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES) : 0 } : { status: 'unknown' },
-        // An authorizer can observe newer rules than the earlier read-only call.
-        // Missing fresh observations must not revive that earlier detail snapshot.
-        details: assignment.details === undefined ? { status: 'unavailable' } : structuredClone(assignment.details),
-      };
+        const assignment = granted.assignment;
+        await read.wait(() => current(ownerKey, base.revision, binding.userId, read));
+        reason = blockedReason() ?? reason;
+        return {
+          ...preparation, title: assignment.title, description: assignment.description, deadline: assignment.deadline,
+          canSubmit: reason === null, blockedReason: reason, receipt: null,
+          maxFiles: allowsAttachments ? Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES) : 0,
+          maxFileBytes: allowsAttachments ? Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES) : 0,
+          allowedContentTypes: allowsAttachments ? [...assignment.allowedContentTypes] : [],
+          rules: assignment.permissionKnown ? { status: 'confirmed', allowsText: assignment.allowsText,
+            allowsAttachments, maxTotalBytes: allowsAttachments ? Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES) : 0 } : { status: 'unknown' },
+          // An authorizer can observe newer rules than the earlier read-only call.
+          // Missing fresh observations must not revive that earlier detail snapshot.
+          details: assignment.details === undefined ? { status: 'unavailable' } : structuredClone(assignment.details),
+        };
+      });
     },
     async upload(ownerKey, rawInput, signal) {
       operation(ownerKey, rawInput);
