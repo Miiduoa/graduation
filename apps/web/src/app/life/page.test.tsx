@@ -26,187 +26,146 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   selectedSchool.mockReset();
   navigation.search = '';
   navigation.suspend = false;
 });
 
-const searchServices = (query: string) =>
-  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
-    target: { value: query },
-  });
-
-it('生活總覽先顯示七個常用服務與四個任務分類，其他入口可逐層展開', () => {
+it('生活只列日常服務，課務、交流與學生證有自己的分類', () => {
   render(<LifePage />);
-  expect(screen.getAllByRole('link')).toHaveLength(7);
-  for (const title of ['出門與交通', '吃飯與取餐', '住宿與日常', '安排課餘時間']) {
-    expect(screen.getByRole('heading', { name: title })).toBeTruthy();
+  for (const name of ['出門與交通', '吃飯與住宿', '校園資源']) {
+    expect(screen.getByRole('heading', { name })).toBeTruthy();
   }
-  expect(screen.queryByRole('link', { name: /學校資訊/ })).toBeNull();
-  const toggle = screen.getByRole('button', { name: /更多交通與地點服務/ });
-  expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  fireEvent.click(toggle);
-  expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  expect(screen.getByRole('link', { name: /學校資訊/ }).getAttribute('href')).toBe('/school-info');
-  fireEvent.click(toggle);
-  expect(screen.queryByRole('link', { name: /學校資訊/ })).toBeNull();
-  expect(screen.queryByRole('link', { name: /課程與作業|共同空堂/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: '跨校公開交流' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '校園交流' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '課程與作業' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '數位學生證' })).toBeNull();
+  expect(screen.getByRole('link', { name: '宿舍' }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.getByRole('link', { name: '校園活動' }).getAttribute('href')).toBe('/events');
+  expect(screen.getByRole('status').textContent).toBe('共 10 項服務');
 });
 
-it('點餐關閉時先提供餐廳菜單，展開仍可查看餐飲入口說明但沒有訂單入口', () => {
+it('點餐未開時隱藏訂單；餐廳收在同一主入口內，且不誤稱免登入點餐', () => {
   render(<LifePage />);
-  const food = screen.getByRole('region', { name: '吃飯與取餐' });
-  expect(within(food).getByRole('link', { name: /餐廳/ }).getAttribute('href')).toBe('/cafeteria');
-  expect(within(food).queryByRole('link', { name: /點餐與取餐/ })).toBeNull();
-  fireEvent.click(within(food).getByRole('button', { name: /更多餐飲服務/ }));
-  expect(
-    within(food)
-      .getByRole('link', { name: /點餐與取餐/ })
-      .getAttribute('href'),
-  ).toBe('/food');
+  const food = screen.getByRole('link', { name: '點餐與取餐' });
+  expect(food.getAttribute('href')).toBe('/food');
+  expect(within(food).getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(within(food).getByText('Google 帳號')).toBeTruthy();
   expect(document.querySelector('a[href="/orders"]')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '餐廳' })).toBeNull();
+  fireEvent.click(screen.getByLabelText('點餐與取餐的其他入口'));
+  expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe('/cafeteria');
 });
 
-it('點餐開放後主入口接到點餐，展開提供餐廳與 App 餐廳訂單且沿用同一說明', () => {
+it('點餐開啟後可由同一主入口展開餐廳訂單，搜尋也能直達', () => {
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
   render(<LifePage />);
-  const food = screen.getByRole('region', { name: '吃飯與取餐' });
-  expect(
-    within(food)
-      .getByRole('link', { name: /點餐與取餐/ })
-      .getAttribute('href'),
-  ).toBe('/food');
-  expect(within(food).queryByRole('link', { name: /App 餐廳訂單/ })).toBeNull();
-  fireEvent.click(within(food).getByRole('button', { name: /更多餐飲服務/ }));
-  expect(
-    within(food)
-      .getByRole('link', { name: /App 餐廳訂單/ })
-      .getAttribute('href'),
-  ).toBe('/orders');
-  expect(within(food).getByText('查看在 App 餐廳下的訂單、取餐號碼與店家接單進度')).toBeTruthy();
+  const secondary = screen.getByRole('link', { name: 'App 餐廳訂單' }).closest('details');
+  expect(secondary?.open).toBe(false);
+  fireEvent.click(screen.getByLabelText('點餐與取餐的其他入口'));
+  expect(secondary?.open).toBe(true);
+  expect(screen.getByRole('link', { name: 'App 餐廳訂單' }).getAttribute('href')).toBe('/orders');
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
+    target: { value: '訂單紀錄' },
+  });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: 'App 餐廳訂單' }).getAttribute('href')).toBe('/orders');
 });
 
-it('需求搜尋涵蓋收合服務，接受全形英文與前後空白', () => {
-  render(<LifePage />);
-  searchServices('借書');
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')).toBe('/library');
-  expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
-  searchServices('  ＢＵＳ  ');
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /公車/ }).getAttribute('href')).toBe('/bus');
-  searchServices('總機');
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /學校資訊/ }).getAttribute('href')).toBe('/school-info');
-});
-
-it('任務分類、免登入與關鍵字可一起篩選，清除搜尋保留分類與輸入焦點', () => {
+it('可以用需求找服務，並接受全形英文與前後空白', () => {
   render(<LifePage />);
   const search = screen.getByRole('searchbox', { name: '快速找服務' });
-  fireEvent.click(screen.getByRole('button', { name: '交通與地點' }));
-  fireEvent.click(screen.getByRole('checkbox', { name: '只看免登入服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(3);
-  searchServices('教室');
+  fireEvent.change(search, { target: { value: '借書' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /校園地圖/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '圖書館' }).getAttribute('href')).toBe('/library');
+  expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
+  fireEvent.change(search, { target: { value: '  ＢＵＳ  ' } });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '公車' }).getAttribute('href')).toBe('/bus');
+});
+
+it('分類與搜尋共同篩選，清除搜尋保留分類及輸入焦點', () => {
+  render(<LifePage />);
+  const search = screen.getByRole('searchbox', { name: '快速找服務' });
+  fireEvent.click(screen.getByRole('button', { name: '出門與交通' }));
+  expect(screen.getAllByRole('link')).toHaveLength(2);
+  fireEvent.change(search, { target: { value: '地點' } });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '校園地圖' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
   expect(document.activeElement).toBe(search);
-  expect(screen.getAllByRole('link')).toHaveLength(3);
-  expect(screen.getByRole('button', { name: '交通與地點' }).getAttribute('aria-pressed')).toBe(
+  expect(screen.getAllByRole('link')).toHaveLength(2);
+  expect(screen.getByRole('button', { name: '出門與交通' }).getAttribute('aria-pressed')).toBe(
     'true',
   );
-  expect(
-    (screen.getByRole('checkbox', { name: '只看免登入服務' }) as HTMLInputElement).checked,
-  ).toBe(true);
 });
 
-it('免登入篩選包含可直接使用的本機服務，仍排除需要 Google 的入口', () => {
-  render(<LifePage />);
-  fireEvent.click(screen.getByRole('checkbox', { name: '只看免登入服務' }));
-  expect(screen.getByRole('link', { name: /圖書館/ })).toBeTruthy();
-  expect(screen.getByRole('link', { name: /校園地圖/ })).toBeTruthy();
-  expect(screen.getByRole('link', { name: /宿舍/ })).toBeTruthy();
-  expect(screen.getByText('可直接使用，資料保存在這台裝置')).toBeTruthy();
-  expect(screen.queryByRole('link', { name: /失物招領|跨校公開交流/ })).toBeNull();
-});
-
-it('空結果可回到總覽，Escape 清除輸入但不打斷中文輸入法', () => {
+it('空結果可回完整目錄；中文輸入組字時 Escape 不清掉搜尋', () => {
   render(<LifePage />);
   const search = screen.getByRole('searchbox', { name: '快速找服務' });
-  searchServices('無此服務xyz');
+  fireEvent.change(search, { target: { value: '無此服務xyz' } });
   expect(screen.getByRole('heading', { name: '沒有找到符合的服務' })).toBeTruthy();
   expect(screen.queryAllByRole('link')).toHaveLength(0);
-  expect(screen.getByRole('status').textContent).toBe('找到 0 項服務');
-  fireEvent.click(screen.getByRole('button', { name: '回到生活總覽' }));
-  expect(screen.getAllByRole('link')).toHaveLength(7);
+  fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
+  expect(screen.getByRole('status').textContent).toBe('共 10 項服務');
   expect(document.activeElement).toBe(search);
-  searchServices('教室');
+  fireEvent.change(search, { target: { value: '借書' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getAllByRole('link')).toHaveLength(7);
+  expect(screen.getByRole('status').textContent).toBe('共 10 項服務');
 });
 
-it('搜尋不能繞過訂單開關，亦可直達宿舍工作區', () => {
+it('搜尋不繞過點餐開關，仍可找到菜單與個人宿舍備忘', () => {
   render(<LifePage />);
-  searchServices('取餐');
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /點餐與取餐/ }).getAttribute('href')).toBe('/food');
+  const search = screen.getByRole('searchbox', { name: '快速找服務' });
+  fireEvent.change(search, { target: { value: '訂單紀錄' } });
   expect(document.querySelector('a[href="/orders"]')).toBeNull();
-  searchServices('維修');
+  fireEvent.change(search, { target: { value: '菜單' } });
+  expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe('/cafeteria');
+  fireEvent.change(search, { target: { value: '維修' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /宿舍/ }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.getByRole('link', { name: '宿舍' }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.getByText('可直接使用，資料保存在這台裝置')).toBeTruthy();
 });
 
-it('失物招領與全站目錄一致使用 Google 帳號說明', () => {
+it('失物招領的帳號說明與主服務目錄一致，不再寫成只能用學校帳號', () => {
   render(<LifePage />);
-  searchServices('失物');
-  expect(screen.getByText('用 Google 帳號查看、刊登與管理失物')).toBeTruthy();
-  expect(screen.getByText('Google 帳號')).toBeTruthy();
-  expect(screen.queryByText('使用學校帳號登入後，查看或刊登遺失與拾獲物品。')).toBeNull();
-  expect(screen.getByRole('link', { name: /失物招領/ }).getAttribute('href')).toBe('/lost-found');
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
+    target: { value: '失物' },
+  });
+  const link = screen.getByRole('link', { name: '失物招領' });
+  expect(link.getAttribute('href')).toBe('/lost-found');
+  expect(within(link).getByText('Google 帳號')).toBeTruthy();
+  expect(within(link).getByText('用 Google 帳號查看、刊登與管理失物')).toBeTruthy();
 });
 
-it('好友搜尋保留清華校園與原有學校帳號需求', () => {
+it('搜尋連結保留已選校園，篩選字詞不會傳到目的地', () => {
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'nthu' },
     loading: false,
     catalogStatus: 'ready',
   });
   render(<LifePage />);
-  searchServices('好友');
-  const href = new URL(
-    screen.getByRole('link', { name: /找人/ }).getAttribute('href')!,
-    'https://campus.example',
-  );
-  expect(href.pathname).toBe('/friends');
-  expect(href.searchParams.get('schoolId')).toBe('nthu');
-  expect(href.searchParams.get('campus')).toBe('nthu');
-  expect(href.searchParams.get('school')).toBe('NTHU');
-  expect(screen.getByText('學校帳號')).toBeTruthy();
-});
-
-it('Google 公開交流可直接查找，保留校園且不錯放入免登入結果', () => {
-  selectedSchool.mockReturnValue({
-    selectedSchool: { id: 'nthu' },
-    loading: false,
-    catalogStatus: 'ready',
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
+    target: { value: '講座' },
   });
-  render(<LifePage />);
-  fireEvent.click(screen.getByRole('button', { name: '活動與交流' }));
-  searchServices('Google');
   const href = new URL(
-    screen.getByRole('link', { name: /跨校公開交流/ }).getAttribute('href')!,
+    screen.getByRole('link', { name: '校園活動' }).getAttribute('href')!,
     'https://campus.example',
   );
-  expect(href.pathname).toBe('/social');
-  expect(href.searchParams.get('campus')).toBe('nthu');
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('checkbox', { name: '只看免登入服務' }));
-  expect(screen.queryByRole('link', { name: /跨校公開交流/ })).toBeNull();
+  expect(href.pathname).toBe('/events');
+  expect([...href.searchParams.entries()]).toEqual([
+    ['schoolId', 'nthu'],
+    ['campus', 'nthu'],
+    ['school', 'NTHU'],
+  ]);
+  expect(href.searchParams.has('q')).toBe(false);
+  expect(href.searchParams.has('group')).toBe(false);
 });
 
-it('目錄尚未就緒時沿用 URL 校園，不使用過期 provider 選定，也涵蓋展開的服務', () => {
+it('目錄未就緒時沿用 URL 校園，不採用過期選校', () => {
   navigation.search = 'campus=nthu&school=PU&schoolId=pu';
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'pu', code: 'PU' },
@@ -214,10 +173,9 @@ it('目錄尚未就緒時沿用 URL 校園，不使用過期 provider 選定，�
     catalogStatus: 'loading',
   });
   render(<LifePage />);
-  for (const button of screen.getAllByRole('button', { name: /^更多/ })) fireEvent.click(button);
-  for (const name of ['校園地圖', '圖書館', '學校資訊', '失物招領', '找人']) {
+  for (const name of ['校園地圖', '圖書館', '學校資訊', '失物招領', '校園活動']) {
     const href = new URL(
-      screen.getByRole('link', { name: new RegExp(name) }).getAttribute('href')!,
+      screen.getByRole('link', { name }).getAttribute('href')!,
       'https://campus.example',
     );
     expect([...href.searchParams.entries()]).toEqual([
@@ -228,9 +186,9 @@ it('目錄尚未就緒時沿用 URL 校園，不使用過期 provider 選定，�
   }
 });
 
-it('服務連結只帶校園參數，不傳播搜尋、分類、token 或 returnUrl', () => {
+it('未就緒時只帶校園參數且保留編碼，不傳播 token 或 returnUrl', () => {
   navigation.search =
-    'school=PU%20Main&schoolId=nthu%2Fmain&campus=north%2Bgate&token=secret&returnUrl=%2Fadmin&q=借書&group=daily';
+    'school=PU%20Main&schoolId=nthu%2Fmain&campus=north%2Bgate&token=secret&returnUrl=%2Fadmin';
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'pu' },
     loading: false,
@@ -238,37 +196,27 @@ it('服務連結只帶校園參數，不傳播搜尋、分類、token 或 return
   });
   render(<LifePage />);
   const href = new URL(
-    screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')!,
+    screen.getByRole('link', { name: '圖書館' }).getAttribute('href')!,
     'https://campus.example',
   );
-  expect(href.pathname).toBe('/library');
-  expect([...href.searchParams.entries()]).toEqual([
-    ['school', 'PU Main'],
-    ['schoolId', 'nthu/main'],
-    ['campus', 'north+gate'],
-  ]);
   expect(href.search).toBe('?school=PU+Main&schoolId=nthu%2Fmain&campus=north%2Bgate');
 });
 
-it('未就緒時保留 campus=all 與未知校園，不改寫成既有選定', () => {
+it('全校與未知校園查詢不被改寫成舊學校', () => {
   navigation.search = 'campus=all';
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'pu', code: 'PU' },
     loading: true,
     catalogStatus: 'loading',
   });
-  render(<LifePage />);
-  expect(
-    new URL(
-      screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!,
-      'https://campus.example',
-    ).searchParams.get('campus'),
-  ).toBe('all');
-  cleanup();
+  const view = render(<LifePage />);
+  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe(
+    '/map?campus=all',
+  );
   navigation.search = 'campus=not-a-real-school&school=???';
-  render(<LifePage />);
+  view.rerender(<LifePage />);
   const href = new URL(
-    screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')!,
+    screen.getByRole('link', { name: '圖書館' }).getAttribute('href')!,
     'https://campus.example',
   );
   expect([...href.searchParams.entries()]).toEqual([
@@ -277,16 +225,16 @@ it('未就緒時保留 campus=all 與未知校園，不改寫成既有選定', (
   ]);
 });
 
-it('目錄就緒後以 provider 選定為準，空選定則使用全部校園', () => {
-  navigation.search = 'campus=pu&school=PU&schoolId=pu&token=x';
+it('目錄就緒後採用 provider；清除選校使用 campus=all', () => {
+  navigation.search = 'campus=nthu&school=PU&schoolId=pu&token=x';
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'nthu' },
     loading: false,
     catalogStatus: 'ready',
   });
-  render(<LifePage />);
-  const href = new URL(
-    screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!,
+  const view = render(<LifePage />);
+  let href = new URL(
+    screen.getByRole('link', { name: '學校資訊' }).getAttribute('href')!,
     'https://campus.example',
   );
   expect([...href.searchParams.entries()]).toEqual([
@@ -294,99 +242,58 @@ it('目錄就緒後以 provider 選定為準，空選定則使用全部校園', 
     ['campus', 'nthu'],
     ['school', 'NTHU'],
   ]);
-  cleanup();
   selectedSchool.mockReturnValue({ selectedSchool: null, loading: false, catalogStatus: 'ready' });
-  render(<LifePage />);
-  expect(
-    new URL(
-      screen.getByRole('link', { name: /校園地圖/ }).getAttribute('href')!,
-      'https://campus.example',
-    ).search,
-  ).toBe('?campus=all');
-});
-
-it('書籤與返回 URL 可恢復搜尋、任務分類及免登入選擇', () => {
-  navigation.search = 'campus=nthu&q=借書&group=daily&access=public';
-  render(<LifePage />);
-  expect((screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement).value).toBe(
-    '借書',
-  );
-  expect(screen.getByRole('button', { name: '日常' }).getAttribute('aria-pressed')).toBe('true');
-  expect(
-    (screen.getByRole('checkbox', { name: '只看免登入服務' }) as HTMLInputElement).checked,
-  ).toBe(true);
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: /圖書館/ }).getAttribute('href')).toContain(
-    'campus=nthu',
-  );
-});
-
-it('操作篩選以 replaceState 儲存在目前 URL，返回時重新讀取且不帶到目的地', () => {
-  window.history.replaceState({}, '', '/life?campus=nthu');
-  navigation.search = 'campus=nthu';
-  const view = render(<LifePage />);
-  const length = window.history.length;
-  fireEvent.click(screen.getByRole('button', { name: '交通與地點' }));
-  fireEvent.click(screen.getByRole('checkbox', { name: '只看免登入服務' }));
-  searchServices('公車');
-  const current = new URL(window.location.href);
-  expect(current.searchParams.get('q')).toBe('公車');
-  expect(current.searchParams.get('group')).toBe('travel');
-  expect(current.searchParams.get('access')).toBe('public');
-  expect(current.searchParams.get('campus')).toBe('nthu');
-  expect(window.history.length).toBe(length);
-  expect(screen.getByRole('link', { name: /公車/ }).getAttribute('href')).toBe('/bus?campus=nthu');
-  navigation.search = 'campus=nthu&q=借書&group=daily';
   view.rerender(<LifePage />);
-  expect((screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement).value).toBe(
-    '借書',
+  href = new URL(
+    screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')!,
+    'https://campus.example',
   );
-  expect(screen.getByRole('link', { name: /圖書館/ })).toBeTruthy();
-  expect(
-    (screen.getByRole('checkbox', { name: '只看免登入服務' }) as HTMLInputElement).checked,
-  ).toBe(false);
+  expect([...href.searchParams.entries()]).toEqual([['campus', 'all']]);
 });
 
-it('總覽展開狀態寫入目前 URL，進入服務後返回仍看得到原分類內容', () => {
-  window.history.replaceState({}, '', '/life?campus=nthu');
+it('搜尋與任務分類寫進目前網址，保留校園與錨點', () => {
+  window.history.replaceState({ keep: true }, '', '/life?campus=nthu#services');
   navigation.search = 'campus=nthu';
   render(<LifePage />);
-  fireEvent.click(screen.getByRole('button', { name: /更多日常服務/ }));
-  expect(new URL(window.location.href).searchParams.get('expanded')).toBe('daily');
-  expect(screen.getByRole('link', { name: /失物招領/ })).toBeTruthy();
-  const returnedQuery = window.location.search.slice(1);
-  cleanup();
-  navigation.search = `${returnedQuery},unknown,travel,daily`;
-  render(<LifePage />);
-  expect(screen.getByRole('button', { name: /收合日常服務/ }).getAttribute('aria-expanded')).toBe(
+  fireEvent.click(screen.getByRole('button', { name: '出門與交通' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
+    target: { value: '公車' },
+  });
+  const url = new URL(window.location.href);
+  expect(url.pathname).toBe('/life');
+  expect(url.searchParams.get('campus')).toBe('nthu');
+  expect(url.searchParams.get('q')).toBe('公車');
+  expect(url.searchParams.get('group')).toBe('travel');
+  expect(url.hash).toBe('#services');
+  expect(window.history.state).toEqual({ keep: true });
+});
+
+it('重新開啟或瀏覽器返回時從網址恢復搜尋，不殘留另一個條件', () => {
+  navigation.search = 'campus=nthu&q=公車&group=travel';
+  const view = render(<LifePage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: '出門與交通' }).getAttribute('aria-pressed')).toBe(
     'true',
   );
-  expect(
-    screen.getByRole('button', { name: /收合交通與地點服務/ }).getAttribute('aria-expanded'),
-  ).toBe('true');
-  const href = screen.getByRole('link', { name: /失物招領/ }).getAttribute('href')!;
-  expect(href).toBe('/lost-found?campus=nthu');
-  expect(screen.getByRole('link', { name: /學校資訊/ })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: /收合日常服務/ }));
-  fireEvent.click(screen.getByRole('button', { name: /收合交通與地點服務/ }));
-  expect(new URL(window.location.href).searchParams.has('expanded')).toBe(false);
-  expect(screen.getAllByRole('link')).toHaveLength(7);
+  navigation.search = 'campus=nthu&q=借書&group=resources';
+  view.rerender(<LifePage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '公車' })).toBeNull();
 });
 
-it('未知分類與 access 不會藏掉全部服務，長網址搜尋最多保留 100 字', () => {
-  navigation.search = 'group=admin&access=operator';
+it('無法改寫 history 時，搜尋仍可操作', () => {
   render(<LifePage />);
-  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getAllByRole('link')).toHaveLength(7);
-  cleanup();
-  navigation.search = `q=${'借'.repeat(120)}`;
-  render(<LifePage />);
-  expect(
-    (screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement).value,
-  ).toHaveLength(100);
+  vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
+    throw new DOMException('blocked');
+  });
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+  expect(screen.getAllByRole('link')).toHaveLength(1);
 });
 
-it('沒有校園 URL 的載入路徑不發明預設學校', () => {
+it('無校園網址的載入路徑不發明預設學校', () => {
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'pu' },
     loading: true,
@@ -397,7 +304,7 @@ it('沒有校園 URL 的載入路徑不發明預設學校', () => {
     expect(link.getAttribute('href')).toMatch(/^\/[a-z-]+$/);
 });
 
-it('Suspense 備援只有安全載入狀態，不顯示錯誤範圍的服務連結', () => {
+it('Suspense 備援沒有錯誤範圍的可互動連結', () => {
   navigation.suspend = true;
   navigation.search = 'campus=nthu';
   render(<LifePage />);
@@ -405,22 +312,25 @@ it('Suspense 備援只有安全載入狀態，不顯示錯誤範圍的服務連�
   expect(screen.queryAllByRole('link')).toHaveLength(0);
 });
 
-it('校園活動與職涯可從同一生活目錄搜尋，保留目前校園', () => {
+it('校園資源可以找到免登入職涯頁，搜尋保留學校且不轉送無關參數', () => {
   selectedSchool.mockReturnValue({
     selectedSchool: { id: 'pu' },
     loading: false,
     catalogStatus: 'ready',
   });
+  navigation.search = 'campus=pu&token=private';
   render(<LifePage />);
-  searchServices('講座');
-  expect(screen.getByRole('link', { name: /校園活動/ }).getAttribute('href')).toContain(
-    'schoolId=pu',
-  );
-  searchServices('校內工讀');
-  const href = new URL(
-    screen.getByRole('link', { name: /職涯/ }).getAttribute('href')!,
-    'https://nuni.tw',
-  );
+  fireEvent.click(screen.getByRole('button', { name: '校園資源' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), {
+    target: { value: '校內工讀' },
+  });
+  const link = screen.getByRole('link', { name: '職涯' });
+  expect(within(link).getByText('可直接瀏覽')).toBeTruthy();
+  const href = new URL(link.getAttribute('href')!, 'https://nuni.tw');
   expect(href.pathname).toBe('/career');
   expect(href.searchParams.get('schoolId')).toBe('pu');
+  expect(href.searchParams.get('campus')).toBe('pu');
+  expect(href.searchParams.has('token')).toBe(false);
+  expect(href.searchParams.has('q')).toBe(false);
+  expect(screen.getAllByRole('link')).toHaveLength(1);
 });

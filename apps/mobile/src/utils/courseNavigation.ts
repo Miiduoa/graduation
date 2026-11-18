@@ -131,9 +131,13 @@ export function navigateToTarget(
   const tab = migrateTabName(target.tab);
 
   if (target.screen) {
+    // 首次從首頁、通知或推播開啟子頁時，保留目的分頁首頁作為返回位置。
+    // 已存在的堆疊仍沿用原 route keys、參數與返回順序；不 reset 使用中的課程。
     navigation.navigate(
       tab,
-      target.params ? { screen: target.screen, params: target.params } : { screen: target.screen },
+      target.params
+        ? { screen: target.screen, params: target.params, initial: false }
+        : { screen: target.screen, initial: false },
     );
     return;
   }

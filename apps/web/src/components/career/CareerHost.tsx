@@ -1,9 +1,9 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { CAREER_EMPTY } from '@campus/shared/src/career';
 import { useAuth } from '@/components/AuthGuard';
 import { getAuth, getCloudFunctionUrl } from '@/lib/firebase';
 import { loadPersonalTimetable } from '@/lib/timetable/store';
+import { loginHref } from '@/lib/navigation';
 import {
   createCareerCallableTransport,
   createWorkstudyService,
@@ -16,7 +16,7 @@ import { buildCampusEventListHref, buildCampusEventDetailHref } from '../events/
 
 export function CareerHost({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
-  const loginUrl = `/login?returnUrl=${encodeURIComponent(`/career?schoolId=${schoolId}`)}`;
+  const loginUrl = loginHref(`/career?${new URLSearchParams({ schoolId })}`);
   return user ? (
     <Workspace
       key={`${user.uid}:${schoolId}`}
@@ -26,7 +26,7 @@ export function CareerHost({ schoolId }: { schoolId: string }) {
     />
   ) : (
     <>
-      <p>{CAREER_EMPTY}</p>
+      <p>登入後查看本校工讀、實習與校徵</p>
       <a href={loginUrl}>登入後可申請校內工讀與查看實習學分</a>
     </>
   );
@@ -130,7 +130,9 @@ function createPorts(
     try {
       return await fetch(input, init);
     } catch {
-      throw new Error('職涯服務暫時無法使用，請重新整理。');
+      throw Object.assign(new Error('職涯服務暫時無法使用，請重新整理。'), {
+        code: 'network-request-failed',
+      });
     }
   };
   const workstudy = createWorkstudyService(

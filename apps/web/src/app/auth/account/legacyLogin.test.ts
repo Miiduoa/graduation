@@ -293,6 +293,44 @@ it('keeps the first page-state value without letting duplicate or encoded keys c
   );
 });
 
+it.each([
+  ['/connect', 'topics'],
+  ['/connect', 'people'],
+  ['/connect', 'updates'],
+  ['/life', 'travel'],
+  ['/life', 'daily'],
+  ['/life', 'resources'],
+])('returns to %s with its known %s group and campus after sign-in', (page, group) => {
+  const path = `${page}?${new URLSearchParams({ campus: 'nthu', group, q: '校園' })}`;
+  expect(sanitizeReturnPath(path)).toBe(path);
+  expect(platformDestination(path)).toBe(path);
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: path }));
+  expect(new URL(href!, 'https://nuni.tw').searchParams.get('returnUrl')).toBe(path);
+});
+
+it('allows only the exchange landing page on the retained plain-page callback', () => {
+  expect(sanitizeReturnPath('/connect')).toBe('/connect');
+  expect(campusOneLoginHref('returnUrl=%2Fconnect')).toBeNull();
+  expect(sanitizeReturnPath('/connect/private')).toBe('/');
+  expect(sanitizeReturnPath('/connect-other')).toBe('/');
+  expect(platformDestination('/connect/private')).toBe('/classroom');
+});
+
+it('drops unknown or cross-section journey groups and unrelated return context', () => {
+  expect(sanitizeReturnPath('/connect?group=daily&campus=pu&token=secret&next=%2Fadmin&section=account')).toBe('/connect?campus=pu');
+  expect(sanitizeReturnPath('/life?group=topics&q=food&groupId=private')).toBe('/life?q=food');
+  expect(sanitizeReturnPath('/connect?group=people&group=topics')).toBe('/connect?group=people');
+  expect(sanitizeReturnPath('/grades?group=people')).toBe('/grades');
+});
+
+it('preserves bounded journey search text while dropping oversized or unsafe values', () => {
+  const valid = `/connect?${new URLSearchParams({ q: '校園'.repeat(50), group: 'topics' })}`;
+  expect(sanitizeReturnPath(valid)).toBe(valid);
+  expect(sanitizeReturnPath('/connect?q=' + 'x'.repeat(101) + '&group=people')).toBe('/connect?group=people');
+  expect(sanitizeReturnPath('/life?q=food%0A&group=daily')).toBe('/life?group=daily');
+  expect(sanitizeReturnPath('/connect?q=https%3A%2F%2Fexample.test%2F%3Fnext%3D%2Flogin&group=topics')).toBe('/connect?q=https%3A%2F%2Fexample.test%2F%3Fnext%3D%2Flogin&group=topics');
+});
+
 it('keeps a URL as search text without treating it as a nested destination', () => {
   const params = new URLSearchParams({ q: 'https://example.test/?next=/login', category: 'campus' });
   const path = `/search?${params}`;

@@ -1,5 +1,11 @@
-import { getMobileQuickActions, getMobileActionsForDestinations } from '../services/quickCampusActions';
-import { CAMPUS_QUICK_DESTINATIONS, suggestCampusDestinations } from '@campus/shared/src/campusIntent';
+import {
+  getMobileQuickActions,
+  getMobileActionsForDestinations,
+} from '../services/quickCampusActions';
+import {
+  CAMPUS_QUICK_DESTINATIONS,
+  suggestCampusDestinations,
+} from '@campus/shared/src/campusIntent';
 import { ROUTE_TO_TAB } from '../utils/routeRegistry';
 
 test.each([
@@ -10,6 +16,7 @@ test.each([
   ['我要看玩課雲', '/school-courses', 'CoursesHome'],
   ['我想查公車到站時間', '/bus', 'BusV2'],
   ['宿舍報修', '/dormitory', 'Dormitory'],
+  ['我想找社團', '/clubs', 'Clubs'],
   ['我找不到我的東西', '/lost-found', 'PlatformLostFound'],
   ['遺失錢包了', '/lost-found', 'PlatformLostFound'],
   ['請幫我看今天課表', '/timetable', 'PersonalTimetable'],
@@ -38,10 +45,15 @@ test('every allowed voice route lands on a registered native screen', () => {
 
 test('keeps branded school navigation separate from general course and timetable requests', () => {
   expect(getMobileQuickActions('TronClass 教材').map((action) => action.destination)).toEqual([
-    '/school-courses', '/classroom',
+    '/school-courses',
+    '/classroom',
   ]);
-  expect(getMobileQuickActions('課堂教材').map((action) => action.destination)).toEqual(['/classroom']);
-  expect(getMobileQuickActions('查課表').map((action) => action.destination)).toEqual(['/timetable']);
+  expect(getMobileQuickActions('課堂教材').map((action) => action.destination)).toEqual([
+    '/classroom',
+  ]);
+  expect(getMobileQuickActions('查課表').map((action) => action.destination)).toEqual([
+    '/timetable',
+  ]);
   expect(getMobileQuickActions('tronclassroom')).toEqual([]);
 });
 

@@ -1,7 +1,8 @@
 'use strict';
 
 const { z } = require('zod');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getFirestore } = require('firebase-admin/firestore');
+const { createOrderStatusHandlers } = require('../../orderTransitions');
 
 const inputSchema = z.object({
   orderId: z.string().min(1),
@@ -15,31 +16,15 @@ async function execute(ctx, rawInput) {
   if (!uid) throw new Error('cancelOrder requires ctx.uid');
   if (!schoolId) throw new Error('cancelOrder requires ctx.schoolId');
 
-  const db = getFirestore();
-  const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc(input.orderId);
-  const orderDoc = await orderRef.get();
-  if (!orderDoc.exists) throw new Error('找不到此訂單。');
-
-  const order = orderDoc.data();
-  if (order.userId !== uid) throw new Error('這不是您的訂單。');
-  if (['preparing', 'ready', 'completed'].includes(order.status)) {
-    throw new Error(`訂單狀態為「${order.status}」，已無法取消。`);
-  }
-
-  const updatePayload = {
-    status: 'cancelled',
-    cancelledAt: FieldValue.serverTimestamp(),
-    cancelReason: input.reason || '使用者取消',
-  };
-
-  await orderRef.update(updatePayload);
-  await db.collection('users').doc(uid).collection('schools').doc(schoolId)
-    .collection('orders').doc(input.orderId).set(
-      { ...updatePayload, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true },
-    );
-
-  return { success: true, orderId: input.orderId };
+  const result = await createOrderStatusHandlers({ db: getFirestore() }).cancelOrder({
+    auth: { uid },
+    data: {
+      schoolId,
+      orderId: input.orderId,
+      reason: input.reason?.trim() || '使用者取消',
+    },
+  });
+  return { ...result, orderId: input.orderId };
 }
 
 module.exports = {

@@ -1,8 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useSignInOptions } from '@/lib/signInOptions';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { schoolLoginHref } from '@/lib/navigation';
+import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
+import { SchoolScopePlaceholder } from './SchoolScopePlaceholder';
 import styles from '@/components/academic/academic.module.css';
 
 export const SCHOOL_FEATURE_CLOSED_COPY = '這個功能還沒接通';
@@ -22,9 +27,17 @@ export function SchoolAccountRequired({
   headingLevel?: 2 | 3;
 }) {
   const nuni = useOptionalNuniSession();
-  const options = useSignInOptions();
+  const selection = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
+  const schoolReady = !selection || (
+    !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
+  );
+  const options = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady);
+  const destination = campusServiceHref(returnUrl, campusSearch);
   const google = !!nuni?.session;
   const Heading = headingLevel === 3 ? 'h3' : 'h2';
+  if (selection && !schoolReady) return <SchoolScopePlaceholder />;
   if (options.loading) {
     return (
       <section className={styles.panel} aria-label="需要學校帳號">
@@ -55,7 +68,7 @@ export function SchoolAccountRequired({
     <section className={styles.panel} aria-label="需要學校帳號">
       <Heading>{SCHOOL_ACCOUNT_REQUIRED_COPY}</Heading>
       {google && <p className={styles.notice}>{SWITCH_TO_SCHOOL_COPY}</p>}
-      <Link className="btn primary" href={`/login?returnUrl=${encodeURIComponent(returnUrl)}`}>
+      <Link className="btn primary" href={schoolLoginHref(destination)}>
         {google ? '改用學校帳號登入' : '用學校帳號登入'}
       </Link>
     </section>

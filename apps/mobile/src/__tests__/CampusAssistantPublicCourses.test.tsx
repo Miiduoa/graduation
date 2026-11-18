@@ -215,7 +215,7 @@ test.each(['school', 'public'])('the global overlay actually navigates the activ
   const params = { publicSchoolId: 'nthu', filter: { keyword: '資料庫' }, autoSearch: true };
   if (owner === 'school') {
     expect(mockRootDispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params } },
+      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params, initial: false } },
     }));
     expect(mockPublicDispatch).not.toHaveBeenCalled();
   } else {
@@ -292,7 +292,7 @@ test.each(['school', 'public'])('the %s overlay preserves all filters through th
   const params = { publicSchoolId: 'nthu', filter: { keyword: '資料庫', weekday: 1, credits: 3 }, autoSearch: true };
   if (owner === 'school') {
     expect(mockRootDispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params } },
+      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params, initial: false } },
     }));
     expect(mockPublicDispatch).not.toHaveBeenCalled();
   } else {

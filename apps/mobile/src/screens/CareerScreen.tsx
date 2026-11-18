@@ -5,7 +5,8 @@ import {
   CAREER_LINKS,
   careerCalendarUrl,
   careerSoon,
-  emptyCareerFeed,
+  CAREER_FEED_UNAVAILABLE,
+  CAREER_SOURCES_STALE,
   fetchCareerFeed,
   type CareerFeed,
 } from '../../../../packages/shared/src/career';
@@ -13,11 +14,13 @@ import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServ
 import { CareerHost } from '../components/career/CareerHost';
 import { useSchool } from '../state/school';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { safeNavigate } from '../utils/safeNavigate';
 function Body({ children }: { children: React.ReactNode }) {
   return <Text style={{ color: aiTokens.text, fontSize: 16, lineHeight: 25 }}>{children}</Text>;
 }
 function Content({ schoolId }: { schoolId: string }) {
   const [feed, setFeed] = useState<CareerFeed | null>(null);
+  const [feedFailed, setFeedFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
@@ -28,7 +31,7 @@ function Content({ schoolId }: { schoolId: string }) {
         if (!controller.signal.aborted) setFeed(data);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setFeed(emptyCareerFeed());
+        if (!controller.signal.aborted) setFeedFailed(true);
       });
     return () => controller.abort();
   }, [schoolId, retry]);
@@ -41,7 +44,9 @@ function Content({ schoolId }: { schoolId: string }) {
         <Body>
           職產處、系所與校園徵才的明確日期，最多顯示 5 筆。日期來自標題，詳細時段請回原文確認。
         </Body>
-        {!feed ? (
+        {feedFailed ? (
+          <Text accessibilityRole="alert">{CAREER_FEED_UNAVAILABLE}</Text>
+        ) : !feed ? (
           <Body>正在讀取公開職涯資訊…</Body>
         ) : !feed.timeline.length ? (
           <Body>目前沒有可確認日期的近期截止日或活動。</Body>
@@ -85,11 +90,13 @@ function Content({ schoolId }: { schoolId: string }) {
           ))
         )}
         <Body>點選日期列可「加入行事曆」，將開啟 Google 日曆確認；不會自動建立或發送提醒。</Body>
+        {feed?.sourceSettingsStale && <Body>{CAREER_SOURCES_STALE}</Body>}
         {feed?.announcementsUnavailable && <Body>部分校方公告暫時讀不到，仍可前往官方網站。</Body>}
         <AIButton
           label="重新整理"
           onPress={() => {
             setFeed(null);
+            setFeedFailed(false);
             setRetry((v) => v + 1);
           }}
         />
@@ -105,18 +112,16 @@ function Content({ schoolId }: { schoolId: string }) {
         {feed && !feed.supported && (
           <Body>目前尚未接上這所學校的公告來源，請從校方職涯入口查詢。</Body>
         )}
-        {feed?.announcements.length ? (
-          feed.announcements.map((a) => (
-            <View key={a.url} style={{ gap: 6, paddingVertical: 10 }}>
-              <Body>
-                {a.source} · {a.date || '未提供公告日期'}
-              </Body>
-              <AIButton label={`${a.title} ↗`} onPress={() => open(a.url)} />
-            </View>
-          ))
-        ) : (
-          <Body>目前沒有可顯示的公告。</Body>
-        )}
+        {feed?.announcements.length
+          ? feed.announcements.map((a) => (
+              <View key={a.url} style={{ gap: 6, paddingVertical: 10 }}>
+                <Body>
+                  {a.source} · {a.date || '未提供公告日期'}
+                </Body>
+                <AIButton label={`${a.title} ↗`} onPress={() => open(a.url)} />
+              </View>
+            ))
+          : feed && <Body>目前沒有可顯示的公告。</Body>}
         {official && <AIButton label="前往校方職涯資源 ↗" onPress={() => open(official.url)} />}
       </AICard>
       <AICard title="附近職缺補充">
@@ -161,7 +166,7 @@ function Content({ schoolId }: { schoolId: string }) {
 export function CareerScreen({
   navigation,
 }: {
-  navigation?: { goBack?: () => void; navigate?: (route: '公告總覽') => void };
+  navigation?: Parameters<typeof safeNavigate>[0] & { goBack?: () => void };
 }) {
   const { school, selectionReady } = useSchool();
   return (
@@ -170,7 +175,7 @@ export function CareerScreen({
       subtitle={`生活 › 職涯 · ${school.name}`}
       onBack={() => navigation?.goBack?.()}
     >
-      <AIButton label="查看校方公告" onPress={() => navigation?.navigate?.('公告總覽')} />
+      <AIButton label="查看校方公告" onPress={() => safeNavigate(navigation, '公告總覽')} />
       {selectionReady !== false && school.id ? (
         <Content key={school.id} schoolId={school.id} />
       ) : (

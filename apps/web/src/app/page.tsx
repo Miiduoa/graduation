@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
 import { StudentCardEntry } from '@/components/StudentCardEntry';
-import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/TodayCampusEntry';
+import { TodayAssistantDisclosure, type TodayAssistantHandle } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
@@ -28,7 +28,7 @@ const courseHref = (course: HomeCourse) =>
   course.href ?? `/course/${encodeURIComponent(course.id)}`;
 
 export default function HomePage() {
-  const voiceEntry = useRef<TodayVoiceHandle>(null);
+  const assistantEntry = useRef<TodayAssistantHandle>(null);
   const hydrated = useClientHydrated();
   const { user, loading: authLoading } = useAuth();
   const nuni = useNuniSession();
@@ -46,11 +46,37 @@ export default function HomePage() {
         : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
-  const assistantScope = JSON.stringify([owner, school?.selectedSchoolId, blocked]);
+  const assistantIdentity = JSON.stringify([owner, blocked]);
+  // Pending selection may settle once; a confirmed null means all campuses.
+  const assistantCampusId =
+    school?.loading || school?.catalogStatus === 'loading'
+      ? undefined
+      : (school?.selectedSchoolId ?? null);
+  const [assistantBoundary, setAssistantBoundary] = useState({
+    identity: assistantIdentity,
+    campusId: assistantCampusId,
+    version: 0,
+  });
+  if (
+    assistantBoundary.identity !== assistantIdentity ||
+    (assistantBoundary.campusId !== undefined && assistantBoundary.campusId !== assistantCampusId)
+  ) {
+    setAssistantBoundary({
+      identity: assistantIdentity,
+      campusId: assistantCampusId,
+      version: assistantBoundary.version + 1,
+    });
+  } else if (assistantBoundary.campusId !== assistantCampusId) {
+    setAssistantBoundary({ ...assistantBoundary, campusId: assistantCampusId });
+  }
+  const assistantScope = JSON.stringify([assistantIdentity, assistantBoundary.version]);
   const [openAssistantScope, setOpenAssistantScope] = useState<string | null>(null);
-  const handleAssistantToggle = useCallback((open: boolean) => {
-    setOpenAssistantScope(open ? assistantScope : null);
-  }, [assistantScope]);
+  const handleAssistantToggle = useCallback(
+    (open: boolean) => {
+      setOpenAssistantScope(open ? assistantScope : null);
+    },
+    [assistantScope],
+  );
   if (openAssistantScope !== null && openAssistantScope !== assistantScope) {
     setOpenAssistantScope(null);
   }
@@ -253,13 +279,13 @@ export default function HomePage() {
   const assistant = (
     <TodayAssistantDisclosure
       key={`assistant:${assistantScope}`}
-      ref={voiceEntry}
+      ref={assistantEntry}
       onOpenChange={handleAssistantToggle}
     />
   );
   const agent = context && accountId && !sessionLoading && !blocked && !nuni.error ? (
     <TodayAgent
-      key={`agent:${assistantScope}`}
+      key={JSON.stringify(['agent', owner, school?.selectedSchoolId, blocked])}
       compact
       context={context}
       accountId={accountId}
@@ -301,7 +327,10 @@ export default function HomePage() {
       <a href="#today-content" className={styles.skip}>
         跳到主要內容
       </a>
-      <AppHeader onOpenVoice={() => voiceEntry.current?.openVoice()} />
+      <AppHeader
+        onOpenAssistant={() => assistantEntry.current?.openAssistant()}
+        assistantExpanded={openAssistantScope === assistantScope}
+      />
       <main id="today-content" className={styles.main} tabIndex={-1}>
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">

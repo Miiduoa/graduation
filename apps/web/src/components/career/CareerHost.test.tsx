@@ -1,11 +1,11 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { CareerHost } from './CareerHost';
 import type { CareerWorkstudyProps } from './CareerWorkstudy';
 import type { InternshipCalendarItem } from '@campus/shared/src/careerInternship';
 import { savePersonalImportBatch } from '@/lib/personalImports';
 const state = vi.hoisted(() => ({
-  user: { uid: 'alice' },
+  user: { uid: 'alice' } as { uid: string } | null,
   events: null as CareerWorkstudyProps['onCareerEvents'] | null,
   calendar: null as null | ((item: InternshipCalendarItem) => Promise<unknown>),
 }));
@@ -44,6 +44,24 @@ vi.mock('./CareerInternship', () => ({
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  state.user = { uid: 'alice' };
+});
+
+it('preserves the career campus on both the login form and its return destination', () => {
+  state.user = null;
+  const view = render(<CareerHost schoolId="pu" />);
+  const destination = () =>
+    new URL(
+      screen
+        .getByRole('link', { name: '登入後可申請校內工讀與查看實習學分' })
+        .getAttribute('href')!,
+      'https://campus.local',
+    );
+  expect(destination().searchParams.get('schoolId')).toBe('pu');
+  expect(destination().searchParams.get('returnUrl')).toBe('/career?schoolId=pu');
+  view.rerender(<CareerHost schoolId="nthu" />);
+  expect(destination().searchParams.get('schoolId')).toBe('nthu');
+  expect(destination().searchParams.get('returnUrl')).toBe('/career?schoolId=nthu');
 });
 it('invalidates old calendar scopes on school/account changes and unmount', async () => {
   vi.stubGlobal(
@@ -120,4 +138,13 @@ it('navigates in the same tab to school event list and both event sources', asyn
     });
     expect(location.href).toBe('/events/event%20%2F1?schoolId=pu&source=' + source);
   }
+});
+
+it('shows an honest sign-in state for guests before querying opportunities', () => {
+  state.user = null;
+  const view = render(<CareerHost schoolId="pu" />);
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
+  expect(view.queryByText(/職產處還沒/)).toBeNull();
+  expect(view.queryByText(/實習工作區/)).toBeNull();
+  state.user = { uid: 'alice' };
 });

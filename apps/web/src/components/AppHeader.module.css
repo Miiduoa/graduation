@@ -160,7 +160,6 @@
   font-weight: 600;
 }
 
-.account > .profileLink,
 .account > .operatorLink {
   border-color: transparent;
   background: transparent;
@@ -220,10 +219,6 @@
   }
 
   .nav > a > svg {
-    display: none;
-  }
-
-  .account > .profileLink {
     display: none;
   }
 }
@@ -389,9 +384,10 @@
 .voicePanel {
   position: fixed;
   z-index: 90;
-  width: min(440px, calc(100vw - 28px));
+  width: min(560px, calc(100vw - 28px));
   max-height: min(660px, calc(100dvh - 115px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   top: 78px;
   right: max(14px, env(safe-area-inset-right, 0px));
   border: 1px solid var(--border);
@@ -400,15 +396,26 @@
   background: var(--bg);
   box-shadow: 0 24px 70px color-mix(in srgb, var(--text) 17%, transparent);
 }
+.voicePanel[hidden] {
+  display: none;
+}
 .voicePanelHeading {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 4px 12px;
+  padding: 12px 4px;
+  background: var(--bg);
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
+}
+.voicePanelHeading h2 {
+  margin: 0;
+  font: inherit;
 }
 .voicePanelHeading button {
   min-height: 40px;
@@ -420,9 +427,13 @@
   font: inherit;
   cursor: pointer;
 }
-.voicePanel:focus { outline: none; }
+.voicePanel:focus {
+  outline: none;
+}
 @media (max-width: 760px) {
-  .voiceTrigger span { display: none; }
+  .voiceTrigger span {
+    display: none;
+  }
   .voicePanel {
     top: auto;
     bottom: calc(var(--mobile-nav-offset, 72px) + 10px);
@@ -433,47 +444,8 @@
   }
 }
 @media (max-width: 360px) {
-  .account > .voiceTrigger { min-width: 40px; padding-inline: 7px; }
-}
-
-.today .account > a,
-.today .account > button {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 6px;
-  font-weight: 500;
-}
-
-.today .account > .voiceTrigger,
-.today .account > .quickSearch {
-  min-width: 44px;
-  padding-inline: 10px;
-}
-
-.today .account > .login {
-  color: var(--brand);
-}
-
-.today .nav > a[aria-current='page'] {
-  background: transparent;
-}
-
-.today .nav > a[aria-current='page']::after {
-  display: none;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .today .account > a:hover,
-  .today .account > button:not(:disabled):hover {
-    color: var(--text);
-    background: var(--panel);
-    border-color: transparent;
-  }
-}
-
-@media (max-width: 760px) {
-  .today .account {
-    gap: 0;
+  .account > .voiceTrigger {
+    min-width: 40px;
+    padding-inline: 7px;
   }
 }

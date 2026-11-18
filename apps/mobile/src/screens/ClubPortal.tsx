@@ -1,3 +1,4 @@
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { shareClubCsv } from '../services/clubExport';
 import { ClubCheckIn } from './ClubCheckIn';
 import React, { useEffect, useRef, useState } from 'react';
@@ -16,10 +17,6 @@ import {
 const MEETING_TIME_PLACEHOLDER = '社課時間未提供';
 const roleOfficeLabel = (role: string) =>
   role === 'owner' ? '社長' : role === 'admin' ? '幹部' : clubRoleLabel(role);
-function displayMeetingTime(value?: string) {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text && text !== MEETING_TIME_PLACEHOLDER ? text : '';
-}
 
 export function ClubPortal({
   uid,
@@ -28,6 +25,7 @@ export function ClubPortal({
   onChanged,
   onBack,
   searchQuery,
+  onOpen,
 }: {
   uid: string;
   schoolId: string;
@@ -35,6 +33,7 @@ export function ClubPortal({
   onChanged?: () => void;
   onBack?: () => void;
   searchQuery?: string;
+  onOpen?: (groupId: string) => void;
 }) {
   const [view, setView] = useState<ClubPortalView | null>(null),
     [selected, setSelected] = useState(groupId || ''),
@@ -85,7 +84,12 @@ export function ClubPortal({
           if (data.club)
             setValues({
               ...Object.fromEntries(
-                clubProfileFields.map(([key]) => [key, String(data.club?.[key] || '')]),
+                clubProfileFields.map(([key]) => [
+                  key,
+                  key === 'meetingTime' || key === 'description'
+                    ? normalizeClubProfileText(data.club?.[key])
+                    : String(data.club?.[key] || ''),
+                ]),
               ),
               joinPolicy: data.club.joinPolicy,
               recruiting: String(data.club.recruiting),
@@ -317,14 +321,17 @@ export function ClubPortal({
                 {[
                   c.name,
                   c.category,
-                  displayMeetingTime(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
+                  normalizeClubProfileText(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
                   c.recruiting ? '招新中' : '',
                   office ? c.approval : '',
                 ]
                   .filter(Boolean)
                   .join(' · ')}
               </Text>
-              <Button text={`查看社團：${c.name}`} onPress={() => setSelected(c.id)} />
+              <Button
+                text={`查看社團：${c.name}`}
+                onPress={() => (onOpen ? onOpen(c.id) : setSelected(c.id))}
+              />
             </View>
           ))}
           {!!view.clubs?.length && !directoryClubs.length && !!directorySearch.trim() && (
@@ -350,13 +357,13 @@ export function ClubPortal({
             {[
               club.category,
               `${club.memberCount ?? '未提供'} 位社員`,
-              displayMeetingTime(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
+              normalizeClubProfileText(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
               club.recruiting ? '招新中' : '',
             ]
               .filter(Boolean)
               .join(' · ')}
           </Text>
-          {officer && !displayMeetingTime(club.meetingTime) ? (
+          {officer && !normalizeClubProfileText(club.meetingTime) ? (
             <Button text="填寫社課時間" onPress={() => setManage(true)} />
           ) : null}
           {club.approval === 'approved' ? <Text style={style}>本校社團（課外組核可）</Text> : null}
@@ -504,8 +511,10 @@ export function ClubPortal({
             </Text>
           )}
           <Text style={style}>介紹</Text>
-          <Text style={style}>{club.description?.trim() || '社團尚未提供介紹。'}</Text>
-          {officer && !club.description?.trim() ? (
+          <Text style={style}>
+            {normalizeClubProfileText(club.description) || '社團尚未提供介紹。'}
+          </Text>
+          {officer && !normalizeClubProfileText(club.description) ? (
             <Button text="填寫社團介紹" onPress={() => setManage(true)} />
           ) : null}
           {club.instagram ? (
@@ -558,7 +567,9 @@ export function ClubPortal({
                 field(
                   key,
                   label,
-                  key === 'meetingTime' ? displayMeetingTime(club.meetingTime) : '',
+                  key === 'meetingTime' || key === 'description'
+                    ? normalizeClubProfileText(club[key])
+                    : '',
                   key === 'meetingTime' ? MEETING_TIME_PLACEHOLDER : undefined,
                 ),
               )}

@@ -56,6 +56,16 @@ beforeEach(() => {
   state.request.mockResolvedValue(record());
 });
 
+it('returns an unsigned account to assistant permissions by default', () => {
+  state.auth.session = null;
+  render(<PlatformAssistantPermissions />);
+  const link = screen.getByRole('link', { name: '前往登入' });
+  expect(Object.fromEntries(new URL(link.getAttribute('href')!, 'https://campus.local').searchParams)).toEqual({
+    returnUrl: '/settings?section=assistant',
+  });
+  expect(state.request).not.toHaveBeenCalled();
+});
+
 it('lets a Google-only account save independent permissions and reads them after remount', async () => {
   let stored = record();
   state.request.mockImplementation(

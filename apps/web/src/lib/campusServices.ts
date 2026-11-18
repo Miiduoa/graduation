@@ -32,7 +32,7 @@ export const CAMPUS_SERVICES = [
     href: '/student-card',
     access: 'account',
     keywords: '學生證 數位證件 證件 學號 student id card',
-    category: 'campus',
+    category: 'account',
   },
   {
     name: academicLabel('/calendar'),
@@ -298,19 +298,19 @@ export const CAMPUS_SERVICES = [
     category: 'campus',
   },
   {
+    name: '職涯',
+    text: '查看職涯資訊、工讀申請與實習學分進度',
+    href: '/career',
+    access: 'public',
+    keywords: '職涯 校內工讀 實習 學分 校園徵才 就業 工作 career internship',
+    category: 'campus',
+  },
+  {
     name: '學校資訊',
     text: '查看官方聯絡電話、網站與名錄地址',
     href: '/school-info',
     access: 'public',
-    keywords: '總機 官網 地址 名錄 聯絡 職涯 實習 徵才 就業 school info contact career',
-    category: 'campus',
-  },
-  {
-    name: '職涯',
-    text: '查找校內工讀、實習學分進度與校方職涯資訊',
-    href: '/career',
-    access: 'public',
-    keywords: '工讀 實習 學分 職涯 校園徵才 就業 career internship',
+    keywords: '總機 官網 地址 名錄 聯絡 school info contact',
     category: 'campus',
   },
   {
