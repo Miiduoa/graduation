@@ -259,6 +259,7 @@ module.exports = {
   orderNotification,
   writeOrderTransition,
   writeOrderPatch,
+  validateOrder,
   OPEN_STATUSES,
   identifier,
 };
