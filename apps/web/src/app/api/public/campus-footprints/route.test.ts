@@ -1657,4 +1657,40 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it('honours upstream Retry-After on HTTP 200 with an empty verified building set', async () => {
+    // Synthetic 200 + valid JSON, but no verified building ways: never cache
+    // the empty result or ignore an explicit provider backoff request.
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ elements: [] }), {
+          status: 200, headers: { 'Retry-After': '3600' },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+
+      const unavailable = await GET();
+      expect(unavailable.status).toBe(503);
+      expect(unavailable.headers.get('Cache-Control')).toBe('no-store');
+      expect(unavailable.headers.get('Retry-After')).toBe('3600');
+      expect((await unavailable.json()).error).toMatch(/temporarily unavailable/);
+
+      clock.mockReturnValue(start + 11 * 60_000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      clock.mockReturnValue(start + 60 * 60_000 + 1_000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 });
