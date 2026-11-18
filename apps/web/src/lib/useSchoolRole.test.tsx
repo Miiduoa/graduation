@@ -47,7 +47,7 @@ it('updates work navigation when an active membership is revoked or changed', ()
   expect(result.current).toBeNull();
   act(() => state.listeners[0].next(snapshot({ role: 'teacher', status: 'active' })));
   expect(result.current).toBe('teacher');
-  act(() => state.listeners[0].next(snapshot({ role: 'teacher', status: 'inactive' })));
+  act(() => state.listeners[0].next(snapshot(null)));
   expect(result.current).toBeNull();
   act(() => state.listeners[0].next(snapshot({ role: 'student', status: 'active' })));
   expect(result.current).toBe('student');
@@ -55,12 +55,12 @@ it('updates work navigation when an active membership is revoked or changed', ()
   expect(result.current).toBeNull();
 });
 
-it('does not expose a work role from pending, missing, cached, or locally edited membership', () => {
+it('does not expose a work role from missing, malformed, cached, or locally edited membership', () => {
   const { result } = renderHook(() => useSchoolRole('account-a', 'school-a'));
   for (const entry of [
     snapshot(null),
-    snapshot({ role: 'admin' }),
-    snapshot({ role: 'admin', status: 'pending' }),
+    snapshot({ status: 'active' }),
+    snapshot({ role: 123 }),
     snapshot({ role: 'admin', status: 'active' }, true),
     snapshot({ role: 'admin', status: 'active' }, false, true),
   ]) {
@@ -117,7 +117,11 @@ it('distinguishes server-confirmed non-membership from an unconfirmed cached mem
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
   expect(result.current).toMatchObject({ status: 'ready', role: 'admin' });
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'inactive' })));
-  expect(result.current).toMatchObject({ status: 'ready', role: null });
+  expect(result.current).toMatchObject({
+    status: 'ready',
+    role: 'admin',
+    memberStatus: 'inactive',
+  });
 });
 
 it('retries a failed listener without accepting late callbacks or retries from its previous attempt', () => {
@@ -170,3 +174,16 @@ it('ignores a retry from an older account scope even after returning to the same
   expect(result.current).toMatchObject({ status: 'ready', role: 'student' });
   expect(state.listeners).toHaveLength(3);
 });
+
+it.each(['admin', 'editor', 'teacher', 'student', 'vendor'])(
+  'preserves main role reading for %s without requiring status',
+  (role) => {
+    const { result } = renderHook(() => useSchoolRole('account-a', 'school-a'));
+    for (const status of [undefined, null, '', 'active', 'pending', 'inactive']) {
+      act(() =>
+        state.listeners[0].next(snapshot({ role, ...(status === undefined ? {} : { status }) })),
+      );
+      expect(result.current).toBe(role);
+    }
+  },
+);

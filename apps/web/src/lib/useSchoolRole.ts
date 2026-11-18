@@ -8,7 +8,7 @@ export type SchoolRole = 'student' | 'teacher' | 'admin' | 'editor' | 'vendor' |
 
 type RoleResult =
   | { status: 'loading' | 'error'; role: null }
-  | { status: 'ready'; role: SchoolRole | null };
+  | { status: 'ready'; role: SchoolRole | null; memberStatus?: unknown };
 
 export type SchoolRoleState = RoleResult & { retry: () => void };
 
@@ -63,8 +63,10 @@ export function useSchoolRoleState(
           const member = snapshot.exists() ? snapshot.data() : null;
           update({
             status: 'ready',
-            role:
-              member?.status === 'active' && typeof member.role === 'string' ? member.role : null,
+            // Main reads roles independently of membership status. Consumers that
+            // write announcements apply the backend's active-or-legacy policy.
+            role: typeof member?.role === 'string' ? member.role : null,
+            memberStatus: member?.status,
           });
         },
         () => update({ status: 'error', role: null }),
@@ -80,11 +82,11 @@ export function useSchoolRoleState(
 
   if (state.key !== key) return { status: key ? 'loading' : 'ready', role: null, retry };
   return state.status === 'ready'
-    ? { status: 'ready', role: state.role, retry }
+    ? { status: 'ready', role: state.role, memberStatus: state.memberStatus, retry }
     : { status: state.status, role: null, retry };
 }
 
-/** Display only the current account's active, server-confirmed school membership. */
+/** Display only the current account's server-confirmed school role. */
 export function useSchoolRole(
   uid: string | null | undefined,
   schoolId: string | null | undefined,
