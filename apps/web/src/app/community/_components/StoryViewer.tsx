@@ -25,6 +25,7 @@ export function StoryViewer({
   const closeButton = useRef<HTMLButtonElement>(null);
   const videoElement = useRef<HTMLVideoElement>(null);
   const videoBar = useRef<HTMLElement>(null);
+  // Save whether a video was already playing before either a panel or keyboard reading interrupted it.
   const beforePanel = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
   const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const [auto, setAuto] = useState(false);
@@ -78,7 +79,7 @@ export function StoryViewer({
       });
     }
     const saved = beforePanel.current;
-    if (panelOpen && element) {
+    if ((panelOpen || readingFocused) && element) {
       if (saved?.element !== element) {
         beforePanel.current = { element, playing: !element.paused && !element.ended };
       }
@@ -93,7 +94,7 @@ export function StoryViewer({
       setHidden(document.hidden);
       if (!element) return;
       if (document.hidden) {
-        resumeOnReturn = !panelOpen && auto && !element.paused && !element.ended;
+        resumeOnReturn = !panelOpen && !readingFocused && auto && !element.paused && !element.ended;
         element.pause();
       } else if (resumeOnReturn) {
         resumeOnReturn = false;
@@ -105,7 +106,7 @@ export function StoryViewer({
       live = false;
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [auto, panelOpen, failedVideo, story.id]);
+  }, [auto, panelOpen, readingFocused, failedVideo, story.id]);
 
   useEffect(() => {
     remaining.current = DWELL_MS;
@@ -268,7 +269,7 @@ export function StoryViewer({
                 }
               }}
               onEnded={() => {
-                if (auto && !panelOpen && !document.hidden) viewer.next();
+                if (auto && !panelOpen && !readingFocused && !document.hidden) viewer.next();
               }}
               onError={() => {
                 setFailedId(story.id);
