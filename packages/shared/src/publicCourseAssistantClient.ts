@@ -34,6 +34,15 @@ export function exceedsPublicCourseResponseByteLimit(text: string): boolean {
 // buffer an unbounded server reply before the 512 KiB post-read check runs.
 // Native fetch implementations without ReadableStream/TextDecoder retain the
 // existing post-read guard; do not assume they support browser streaming.
+//
+// Some fetch adapters ignore AbortSignal after sending response headers. Release
+// their unread body explicitly when rejecting a response, without buffering it.
+function cancelUnreadPublicCourseResponse(response: Response): void {
+  const body = response.body;
+  if (body && typeof body.cancel === 'function' && !body.locked) {
+    void body.cancel().catch(() => undefined);
+  }
+}
 async function readBoundedPublicCourseBody(response: Response, signal: AbortSignal): Promise<string> {
   const reader = typeof TextDecoder === 'function' ? response.body?.getReader?.() : undefined;
   if (!reader) {
@@ -169,6 +178,7 @@ export async function answerPublicCourseQuestion(input: {
         response.url &&
         !isPublicCourseResponseUrl(response.url, intent)
       ) {
+        cancelUnreadPublicCourseResponse(response);
         controller.abort();
         throw new Error('Unexpected public course response URL');
       }
@@ -180,6 +190,7 @@ export async function answerPublicCourseQuestion(input: {
           (lengthHeader !== null && (!/^\d+$/.test(lengthHeader.trim()) ||
             !Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_RESPONSE_BYTES)) ||
           (contentType !== null && !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) {
+        cancelUnreadPublicCourseResponse(response);
         controller.abort();
         throw new Error('Public course source unavailable');
       }
