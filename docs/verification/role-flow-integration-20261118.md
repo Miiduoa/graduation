@@ -45,14 +45,16 @@
 | Web 生活／搜尋／共用目錄／服務選單 | 5 檔、156 項通過 |
 | 核心服務、導航、帳號識別與搜尋復原 | 9 檔、218 項通過 |
 | Shared 助理服務契約 | 64 項通過 |
+| 最終課程來源導覽與麵包屑修正 | 4 檔、168 項通過；與前列有重疊 |
 | Mobile 已修改與整合相關套件 | 最終 12 個套件均通過；含真實 NavigationContainer 重入、冷啟動與未知提交結果恢復 |
 | Web／Mobile／Shared TypeScript | 全專案檢查通過 |
+| Next production build | 完整成功：編譯、TypeScript、13 頁 prerender 與最佳化完成 |
 | 相關 Web／Mobile ESLint | 0 errors，既有 warnings 保留 |
 | UI design gate、Python 語法、差異格式 | 通過 |
 
 以上測試範圍有重疊，不合計為不同案例總數。首次失敗的舊職涯標題、冷啟動助理捷徑與重複職涯別名，均保留失敗紀錄並於修正後重跑。
 
-完整 Next production build 的兩次本機嘗試均完成編譯，但在其 TypeScript 子程序以無詳細診斷的錯誤結束；獨立的完整 Web TypeScript 檢查通過。不能據此聲稱本機完整 build 成功，正式建置結果另由目前提交的 CI 核對。
+完整 Next production build 最終成功：編譯 8.4 秒、TypeScript 23.9 秒、13 頁 prerender 與最佳化全部完成。先前兩次編譯後的 TypeScript 子程序無診斷結束，原紀錄保留；獨立執行相同 Next TypeScript CLI 命令取得 exit 0、signal null，限制 Node heap 為 4096 MB 後完整 build 成功。沒有略過型別檢查、修改產品設定或放寬驗收；先前子程序失敗原因未確認。遠端 standalone runtime 與部署仍須另外驗證。
 
 角色 Browser bundle 可編譯。本機 Chromium 啟動被作業系統以 `socket() failed: Operation not permitted` 拒絕，尚未執行任何 browser 情境。既有遠端 Role Workflows、Timetable、Today Agent 等 workflows 會驗收目前提交。
 
