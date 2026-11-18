@@ -468,3 +468,48 @@ describe('nested and long POI qualifiers never override classroom destinations',
     }
   });
 });
+
+
+describe('malformed import rows never crash classroom lookup', () => {
+  it('skips null, primitive and non-string-ID rows without hiding a valid classroom destination', () => {
+    // Synthetic malformed Firestore payload: no assertion about actual campus
+    // data or physical building coordinates. The valid hall stays selectable.
+    const malformed = [
+      null,
+      undefined,
+      42,
+      'not-a-place',
+      { id: 123, name: '主顧樓', category: '教學', lat: hall.lat, lng: hall.lng },
+      { id: null, name: '主顧樓', category: '教學', lat: hall.lat, lng: hall.lng },
+      { id: 'incomplete-place', name: '主顧樓', category: '教學' },
+      hall,
+    ] as unknown as CampusMapPlaceLike[];
+    for (const schoolId of ['pu', 'another-school']) {
+      const result = resolveCampusClassroom({
+        schoolId, query: schoolId === 'pu' ? 'PH303' : '主顧樓 PH303',
+        locations: malformed,
+      });
+      expect(result.status, schoolId).toBe('matched');
+      expect(result.matches, schoolId).toEqual([hall]);
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303',
+      locations: null as unknown as CampusMapPlaceLike[],
+    }).status).toBe('unmatched');
+  });
+
+  it('fails closed on a duplicate published-ID import even when one row is malformed', () => {
+    const published = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+    expect(published).toBeDefined();
+    // The damaged duplicate is not a valid destination, but its string ID
+    // must still block ambiguous MapClient ID-based selection.
+    const duplicate = {
+      ...published!, lat: 'invalid-coordinate',
+    } as unknown as CampusMapPlaceLike;
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [duplicate, published!],
+    });
+    expect(result.status).toBe('unmatched');
+    expect(result.matches).toEqual([]);
+  });
+});
