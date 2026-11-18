@@ -3,6 +3,7 @@ import { PLATFORM_ASSISTANT_PERMISSION_DEFINITIONS } from '@campus/shared/src/pl
 import { directReads, directReadAnswer, directReadCourseworkTargets } from './directRead';
 import { prepareExplicitEventRequest } from './explicitEventRequest';
 import { prepareCourseworkStudyRequest } from './courseworkStudyRequest';
+import { prepareFoodPickupRequest } from './foodPickupRequest';
 import {
   formatImportedAcademicSummary,
   type ImportedAcademicSummary,
@@ -295,6 +296,15 @@ export async function run(input: RunInput) {
       stopReason = study.stopReason;
       log('assistant.completed');
       return { version: 2, ...study, modelCalls: 0, usage, simulation: input.adapter.simulation };
+    }
+    const pickup = input.planRevision ? null : await prepareFoodPickupRequest({ question: input.question,
+      adapter: input.adapter, binding: input.binding, secret: input.secret,
+      writes: input.writes, now, signal });
+    if (pickup) {
+      steps.push(...pickup.steps);
+      stopReason = pickup.stopReason;
+      log('assistant.completed');
+      return { version: 2, ...pickup, modelCalls: 0, usage, simulation: input.adapter.simulation };
     }
     const explicitEvent = input.planRevision ? null : await prepareExplicitEventRequest({ question: input.question, tools, signal, now });
     if (explicitEvent) {

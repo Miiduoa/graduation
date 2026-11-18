@@ -1,6 +1,7 @@
 import { withOperationSignal } from './operation';
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
+import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
 import { createPlanProtection, validatePlanProtection, type PlanProtection } from '@/lib/assistantPlanProtection';
 import {
   boundedJson,
@@ -19,6 +20,7 @@ import { run, safeCode } from './runner';
 import { courseworkStudyTarget } from './courseworkStudy';
 import { COURSEWORK_STUDY_MESSAGES, prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import { readCourseworkFollowup } from './courseworkFollowup';
+import { FOOD_PICKUP_MESSAGES } from './foodPickupRequest';
 const ACTIONS = ['capability', 'ask', 'plan', 'followup', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
@@ -138,6 +140,10 @@ export async function handleV2(request: NextRequest, action: string) {
       ? courseworkStudyTarget(raw.task)
       : action === 'ask' && raw.studyTarget !== undefined
         ? courseworkStudyTarget(raw.studyTarget) : undefined;
+    // This whole-question parser also returns bounded, local guidance for an
+    // unsupported pickup request. Both paths are intercepted before the model.
+    const pickupRequest = action === 'ask' && raw.planProtection === undefined &&
+      typeof raw.question === 'string' && parseAssistantFoodPickupIntent(raw.question) !== null;
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
@@ -190,7 +196,7 @@ export async function handleV2(request: NextRequest, action: string) {
       // They can never issue a replacement for a client-selected old binding.
       if (raw.routeToken === undefined) {
         if (action === 'ask') {
-          if (raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
+          if (raw.consent !== true && !studyTarget && !pickupRequest) throw new V2Error(422, 'CONSENT_REQUIRED');
           text(raw.question, 1000);
           history(raw.history);
         }
@@ -234,14 +240,14 @@ export async function handleV2(request: NextRequest, action: string) {
         ),
       );
     if (action === 'revise' && !writes) throw new V2Error(403, 'ASSISTANT_WRITE_UNAVAILABLE');
-    if (action === 'ask' && raw.consent !== true && !studyTarget) throw new V2Error(422, 'CONSENT_REQUIRED');
+    if (action === 'ask' && raw.consent !== true && !studyTarget && !pickupRequest) throw new V2Error(422, 'CONSENT_REQUIRED');
     const question = action === 'ask' ? text(raw.question, 1000) : '',
       memory = action === 'ask' ? history(raw.history) : [];
     const key = hash(principal.platformAccountId),
       sessionKey = hash(session.sessionHandle);
     const now = Date.now();
     // Structured previews have their own allowance; chat quota belongs to chat.
-    const allowance = action === 'plan' ? planHits : hits;
+    const allowance = action === 'plan' || pickupRequest ? planHits : hits;
     for (const [k, times] of allowance) {
       if (!times.some((t) => t > now - 3600000)) allowance.delete(k);
     }
@@ -284,7 +290,7 @@ export async function handleV2(request: NextRequest, action: string) {
       const result = await run({
         question,
         ...(studyTarget ? { studyTarget } : {}),
-        history: studyTarget ? [] : memory,
+        history: studyTarget || pickupRequest ? [] : memory,
         binding,
         adapter: source.adapter,
         secret,
@@ -367,6 +373,7 @@ export async function handleV2(request: NextRequest, action: string) {
           ? { message: PLAN_PROTECTION_MESSAGES[code] }
           : code === 'EVENT_START_PASSED'
           ? { message: '這個時段已經開始，請重新安排時間。' }
+          : FOOD_PICKUP_MESSAGES[code] ? { message: FOOD_PICKUP_MESSAGES[code] }
           : COURSEWORK_STUDY_MESSAGES[code] ? { message: COURSEWORK_STUDY_MESSAGES[code] }
           : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
       },

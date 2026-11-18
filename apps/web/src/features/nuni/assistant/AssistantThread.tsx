@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
 import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
 import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -18,6 +19,8 @@ import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
+const PICKUP_SUGGESTION = '把最近訂單的取餐時間加入行事曆';
+
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
   if (reply.local || reply.dataRead)
     return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
@@ -28,6 +31,7 @@ export function AssistantThread({
   inline = false,
   schoolId,
   ready,
+  foodPickupEnabled = false,
   fallback,
   consent,
   onConsent,
@@ -55,6 +59,7 @@ export function AssistantThread({
   inline?: boolean;
   schoolId: string;
   ready: boolean;
+  foodPickupEnabled?: boolean;
   fallback: boolean;
   consent: boolean;
   onConsent: (value: boolean) => void;
@@ -135,9 +140,12 @@ export function AssistantThread({
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
   const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
+  const foodPickup = parseAssistantFoodPickupIntent(question) !== null;
+  const suggestions = foodPickupEnabled ? [...SUGGESTIONS, PICKUP_SUGGESTION] : SUGGESTIONS;
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
-      (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
+    (foodPickup ? foodPickupEnabled
+      : !!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+        (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -181,6 +189,7 @@ export function AssistantThread({
       {!ready ? (
         <p className={styles.notice} role="status">
           雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
+          {foodPickupEnabled ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -196,7 +205,7 @@ export function AssistantThread({
             <h2>今天想問什麼？</h2>
             <p>可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。</p>
             <div className={styles.chips}>
-              {SUGGESTIONS.map((phrase) => (
+              {suggestions.map((phrase) => (
                 <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                   {phrase}
                 </button>
@@ -323,7 +332,7 @@ export function AssistantThread({
         ) : null}
         {turns.length > 0 && !inline ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
-            {SUGGESTIONS.map((phrase) => (
+            {suggestions.map((phrase) => (
               <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
@@ -398,9 +407,9 @@ export function AssistantThread({
         <p id={`${fieldId}-hint`} className={styles.composerHint}>
           {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
         </p>
-        {inline && ready && !turns.length && !question && !pending && (
+        {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (
+            {['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])].map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

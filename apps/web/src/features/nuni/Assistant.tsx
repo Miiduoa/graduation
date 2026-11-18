@@ -39,6 +39,7 @@ import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, pe
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
+import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -60,6 +61,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [fallback, setFallback] = useState(false);
   const [capabilityUnavailable, setCapabilityUnavailable] = useState(!cloudEnabled);
   const [capabilityChecked, setCapabilityChecked] = useState(!cloudEnabled);
@@ -107,6 +109,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
           onFreeformReady?.(value.version === 2 && value.enabled === true && value.ready === true);
           setReady(value.enabled === true);
           setProviderReady(value.ready === true);
+          setPlanning(value.enabled === true && value.version === 2 && value.planning === true);
           setFallback(value.fallback === true);
           setCapabilityUnavailable(value.enabled !== true);
           setCapabilityChecked(true);
@@ -156,7 +159,8 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
   if (!capabilityChecked) return <p role="status">正在確認助理是否啟用…</p>;
   if (v2 || capabilityUnavailable) return <>
     {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
-    <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback} />
+    <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback}
+      foodPickupEnabled={planning && !!accountId && !!context} />
   </>;
   return (
     <section aria-label="公開校園助理">
@@ -253,6 +257,7 @@ function V2Conversation({
   fallback,
   inlineDraft,
   accountId,
+  foodPickupEnabled = false,
 }: {
   context: string;
   schoolId: string;
@@ -261,6 +266,7 @@ function V2Conversation({
   fallback: boolean;
   inlineDraft?: InlineDraft;
   accountId: string;
+  foodPickupEnabled?: boolean;
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
@@ -314,7 +320,8 @@ function V2Conversation({
         }]));
         setStates(actionStates.current);
         setTurns(cards.map((card) => ({ question: '核對先前送出的行程',
-          reply: { answer: '已保留原確認內容，這次先查核執行結果。', steps: [], cards: [card] } })));
+          reply: { answer: '已保留原確認內容，這次先查核執行結果。', steps: [], cards: [card],
+            ...(card.sourceBound === 'food-pickup' ? { dataRead: true } : {}) } })));
         busy.current = true;
         setPendingAction('reconcile');
         setPending(true);
@@ -457,7 +464,11 @@ function V2Conversation({
       }
       studySelection = { target: targets[0], ...(studyDate ? { date: studyDate } : {}) };
     }
-    const local = !studySelection && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
+    // Only the shared, complete pickup request can use the model-free server
+    // planner. Its account/session still comes from the authenticated route.
+    const foodPickup = !studySelection && parseAssistantFoodPickupIntent(current) !== null;
+    if (foodPickup && !foodPickupEnabled) return;
+    const local = !studySelection && !foodPickup && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -465,8 +476,8 @@ function V2Conversation({
       setError('');
       return;
     }
-    const personalRead = !studySelection && canAnswerAssistantPersonalQuestion(current);
-    if ((!consent || !ready) && !publicCourseIntent && !personalRead && !studySelection) return;
+    const personalRead = !studySelection && !foodPickup && canAnswerAssistantPersonalQuestion(current);
+    if ((!consent || !ready) && !publicCourseIntent && !personalRead && !studySelection && !foodPickup) return;
     busy.current = true;
     const pendingAsk = new AbortController();
     askRequest.current = pendingAsk;
@@ -512,8 +523,8 @@ function V2Conversation({
           return;
         }
       }
-      if ((!ready || !consent) && !studySelection) return;
-      const history = studySelection ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
+      if ((!ready || !consent) && !studySelection && !foodPickup) return;
+      const history = studySelection || foodPickup ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -535,6 +546,7 @@ function V2Conversation({
         reply.dataRead = true;
         reply.courseworkDate = studySelection.date;
       }
+      if (foodPickup) reply.dataRead = true;
       if (reply.cards.length) {
         for (const card of turns.flatMap((turn) => turn.reply.cards)) {
           if (canConfirmAction(actionStates.current[card.mutationId]))
@@ -993,6 +1005,7 @@ function V2Conversation({
       inline={!!inlineDraft}
       schoolId={schoolId}
       ready={ready}
+      foodPickupEnabled={foodPickupEnabled}
       fallback={fallback}
       consent={consent}
       onConsent={value => { revisionConsent.current = value; setConsent(value); }}
@@ -1025,6 +1038,7 @@ function V2Conversation({
           : <AssistantPlanComparison {...comparison} /> : null;
       }}
       renderPlanRevision={turn => {
+        if (turn.reply.cards.some(card => card.sourceBound === 'food-pickup')) return null;
         const source = sourceForTurn(turn);
         return <>
           <AssistantPlanSelection turn={turn} states={states} pending={pending}

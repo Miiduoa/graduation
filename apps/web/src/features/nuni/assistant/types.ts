@@ -7,6 +7,8 @@ export type V2Card = {
   mutationId: string;
   schoolId: string;
   destination: string;
+  /** Display policy only; the server's signed token retains source authority. */
+  sourceBound?: 'food-pickup';
   /** Kept with recovery cards; never derived from model-generated arguments. */
   conversationId?: string;
 };
