@@ -434,3 +434,37 @@ describe('malformed imported transit stop markers cannot become classroom destin
     }
   });
 });
+
+describe('nested and long POI qualifiers never override classroom destinations', () => {
+  it('rejects synthetically nested or long stop and dining labels', () => {
+    const nonBuildingCategories = [
+      'Bus Stop (Campus (Inbound))',
+      '公車站（校內（臨時站））',
+      '餐飲 [North [B1]]',
+      'Bus Stop (Campus detail '.concat('long annotation '.repeat(4), ')'),
+    ];
+    for (const category of nonBuildingCategories) {
+      const unrelated = {
+        ...hall, id: 'synthetic-nested-category', category, building: '主顧樓',
+      };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [unrelated, hall],
+      });
+      expect(result.status, category).toBe('matched');
+      expect(result.matches, category).toEqual([hall]);
+    }
+  });
+
+  it('retains legitimate annotated teaching categories without substring blocking', () => {
+    for (const category of [
+      '教學 (主校區 (北側))',
+      '圖書館 [Main [East]]',
+      '交通工程學院 (公車站 (校內))',
+    ]) {
+      const building = { ...hall, category };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [building],
+      }).matches, category).toEqual([building]);
+    }
+  });
+});
