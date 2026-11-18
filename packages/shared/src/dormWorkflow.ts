@@ -72,6 +72,9 @@ export type DormWorkflowRows = {
   residents: DormResident[];
 };
 export type DormWorkflowCall = <T>(data: Record<string, unknown>) => Promise<T>;
+export function formatDormWorkflowTime(at: number): string {
+  return new Date(at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+}
 export function dormWorkdaysSince(at: number, now = Date.now()): number {
   let days = 0;
   const date = new Date(at + 8 * 3600000),
