@@ -1,4 +1,4 @@
-import type { CampusMapPlaceLike } from './providenceCampus';
+import { PROVIDENCE_BUS_STOPS, type CampusMapPlaceLike } from './providenceCampus';
 
 export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
 
@@ -69,14 +69,20 @@ const NON_CLASSROOM_POI_CATEGORIES = new Set([
   'shop', 'store', 'convenience store', 'convenience_store', 'atm',
 ]);
 
-/** A published transit-stop ID is not a building, even if a later catalog
- * edit labels the stop "教學" or copies a building name into its fields.
- * Use only the explicitly supplied stop IDs; never infer one from a name.
+/** Match bundled stop IDs against the actual published catalog, rather
+ * than inferring transport identity from a place name or an ID prefix.
+ * A Firestore replacement can accidentally omit optional transitStopIds;
+ * the bundled stop ID must still never become a classroom destination.
  */
-function hasTransitStopIdentity(location: CampusMapPlaceLike): boolean {
+const PUBLISHED_PROVIDENCE_BUS_STOP_IDS = new Set(PROVIDENCE_BUS_STOPS.map((stop) => stop.id));
+
+function hasTransitStopIdentity(location: CampusMapPlaceLike, school: string): boolean {
   const ids = 'transitStopIds' in location ? location.transitStopIds : undefined;
-  return Array.isArray(ids) && ids.some(
-    (id: unknown) => typeof id === 'string' && id.trim().length > 0,
+  return (
+    (Array.isArray(ids) && ids.some(
+      (id: unknown) => typeof id === 'string' && id.trim().length > 0,
+    )) ||
+    (school === 'pu' && PUBLISHED_PROVIDENCE_BUS_STOP_IDS.has(location.id))
   );
 }
 
@@ -181,7 +187,7 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     if ('schoolId' in location && location.schoolId !== school) return false;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
-    if (hasTransitStopIdentity(location) || isExplicitNonClassroomCategory(location.category)) return false;
+    if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category)) return false;
     return (
       nameMatchesRoom(comparable, location.name) ||
       nameMatchesRoom(comparable, location.building) ||
