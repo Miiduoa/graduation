@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Audits paired, human-verified study tasks. Never uploads study material or grades AI. */
-import { readFileSync, realpathSync, statSync, openSync, readSync, fstatSync, closeSync, constants } from 'node:fs';
+import { realpathSync, statSync, openSync, readSync, fstatSync, closeSync, constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -294,10 +294,45 @@ export function verifyLocalStudyFixtures(raw, manifestPath) {
 // Malformed JSON error messages may include excerpts of private course notes;
  // filesystem errors also embed a student's local directory. Neither belongs in
  // CI logs, CLI output or shared bug reports.
+// The local comparison manifest is user-selected input, not necessarily a
+// regular JSON file. Never block on FIFOs/devices or exhaust RAM on a huge file.
+const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 function readLocalManifest(path) {
+  let descriptor;
   let content;
-  try { content = readFileSync(path, 'utf8'); }
-  catch { fail('manifest', 'file unreadable'); }
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK |
+      (constants.O_NOFOLLOW ?? 0));
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!before.isFile()) fail('manifest', 'regular JSON file required');
+    if (before.size > BigInt(MAX_MANIFEST_BYTES))
+      fail('manifest', 'JSON exceeds 16 MiB limit');
+    const chunks = [];
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let total = 0;
+    while (true) {
+      // The extra byte detects a file that grows after its initial size check.
+      const count = readSync(descriptor, buffer, 0,
+        Math.min(buffer.length, MAX_MANIFEST_BYTES + 1 - total), null);
+      if (count === 0) break;
+      total += count;
+      if (total > MAX_MANIFEST_BYTES) fail('manifest', 'JSON exceeds 16 MiB limit');
+      chunks.push(Buffer.from(buffer.subarray(0, count)));
+    }
+    const after = fstatSync(descriptor, { bigint: true });
+    if (after.size !== before.size || after.size !== BigInt(total) ||
+        after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs)
+      fail('manifest', 'JSON changed during read');
+    content = Buffer.concat(chunks, total).toString('utf8');
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('manifest: ')) throw error;
+    fail('manifest', 'file unreadable');
+  } finally {
+    // Closing a read descriptor is best-effort and must not reveal local paths.
+    if (descriptor !== undefined) {
+      try { closeSync(descriptor); } catch { /* The file is no longer needed. */ }
+    }
+  }
   try { return JSON.parse(content); }
   catch { fail('manifest', 'invalid JSON'); }
 }

@@ -1674,3 +1674,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 過去只驗證 `sourceSha256`／`questionSha256` 格式，無法辨識測試紀錄使用的本地檔案已被誤換。新增可選的 `--verify-fixtures`：逐題讀取相對 manifest 目錄的 `sourceFile` 與 `questionFile`，用原始檔案位元組重新計算 SHA-256，不符即拒絕產生驗證報告。僅允許 manifest 目錄內的相對路徑，包含實際符號連結位置；不輸出原文、檔案路徑、人工審查者資訊。
 - 用法：`node scripts/qa/course-study/compare.mjs local-observations.json --verify-fixtures`。嚴格模式需要每筆 trial 加上本地 `sourceFile`、`questionFile`；原有 `schemaVersion: 1`、一般比較指令與學生閱讀／練習 checkpoint 不變。輸出 `fixtureIntegrityVerified`：一般模式為 false，僅全部本地檔案核對成功為 true。PDF hash 對原始 PDF 位元組計算，不能以其擷取後純文字的 hash 混用。
 - 新增 Node CLI／函式回歸檢查正確檔案、遭改寫教材、向上層逃逸路徑、缺少路徑與結果輸出不洩漏文本。只驗證本地檔案與記錄 SHA 相同，**不能證明**使用者實際用該檔完成考題、人工評分正確或任何產品領先；無網路教材傳輸、付費 API、新套件或學生備份格式變更。CI／CodeQL、Security Gates、App 5504170、Maestro／真機及 Ahaboard 同題同機仍須另外驗收，PR 維持 Draft、不合併、不部署。
+
+### 2026-11-18：同題對照的本機 JSON 載入防止特殊檔案卡死與超大輸入耗盡記憶體
+
+- `compare.mjs` 的觀測紀錄 JSON 現在先以非阻塞模式開啟並驗證實際 descriptor 是一般檔案，不接受資料夾、FIFO、裝置等特殊檔案；避免誤選檔案時永久卡住 Node 程序。
+- 以 64 KiB 分塊讀取，嚴格限制 **16 MiB 原始 JSON 位元組**，並驗證讀取前後的檔案大小、時間戳及已讀位元組。檔案異常變化、超限、無效 JSON 與開檔失敗使用不帶教材內容及本機路徑的固定錯誤訊息，失敗不生成比較報告。正常小型紀錄及既有 `--verify-fixtures` 流程相容。
+- 新增 Node CLI 回歸檢查資料夾、16 MiB 超限及在 Unix 可用時的 FIFO，包含時間限制與輸出不洩漏測試。這是本地紀錄工具的程式修補；**不代表**已獲得 Ahaboard 實際對照資料或 iOS／Android 真機驗收。不改動學生原文、筆記、閱讀進度與練習 checkpoint，不新增套件或傳輸私人教材；完整 CI、CodeQL、指定 App 5504170 審查與真機驗收仍須依精確新 SHA 查核，PR 維持 Draft。

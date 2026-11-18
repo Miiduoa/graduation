@@ -439,3 +439,41 @@ test('invalid or missing manifest never prints private source text or local path
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('CLI refuses oversized and nonregular manifests without disclosing local paths', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nuni-private-manifest-'));
+  try {
+    const script = fileURLToPath(new URL('./compare.mjs', import.meta.url));
+    const run = (path) => spawnSync(process.execPath, [script, path],
+      { encoding: 'utf8', timeout: 2500 });
+    const directoryRun = run(directory);
+    assert.notEqual(directoryRun.status, 0);
+    assert.match(directoryRun.stderr, /manifest: regular JSON file required/);
+    assert.equal(directoryRun.stdout, '');
+    assert.equal(directoryRun.stderr.includes(directory), false);
+
+    const tooLarge = join(directory, 'private-observations.json');
+    writeFileSync(tooLarge, Buffer.alloc(16 * 1024 * 1024 + 1, 65));
+    const oversizedRun = run(tooLarge);
+    assert.notEqual(oversizedRun.status, 0);
+    assert.match(oversizedRun.stderr, /manifest: JSON exceeds 16 MiB limit/);
+    assert.equal(oversizedRun.stdout, '');
+    assert.equal(oversizedRun.stderr.includes(directory), false);
+
+    // On Unix, an unopened FIFO can hang a blocking read forever.
+    if (process.platform !== 'win32') {
+      const fifo = join(directory, 'private-observations.fifo');
+      const mkfifo = spawnSync('mkfifo', [fifo], { encoding: 'utf8', timeout: 2500 });
+      if (mkfifo.status === 0) {
+        const fifoRun = run(fifo);
+        assert.equal(fifoRun.error, undefined);
+        assert.notEqual(fifoRun.status, 0);
+        assert.match(fifoRun.stderr, /manifest: regular JSON file required/);
+        assert.equal(fifoRun.stdout, '');
+        assert.equal(fifoRun.stderr.includes(directory), false);
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
