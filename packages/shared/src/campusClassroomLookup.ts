@@ -54,7 +54,7 @@ function isRoomSuffix(value: string): boolean {
   const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
   // Bare 3F / B1F is a floor designation, even if the generic room
   // pattern could interpret its final F as an alphabetic room suffix.
-  if (new RegExp(`^${floor}$`, 'u').test(suffix)) return false;
+  if (new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
   if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   // A timetable may explicitly write floor and room together (3F303 / 3樓303).
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
