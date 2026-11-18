@@ -573,43 +573,61 @@ it('adds source-checked Providence building shapes without changing navigation o
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// A Firestore/custom marker can reuse a bundled Providence POI ID after
-// its name or coordinates have changed. A valid API snapshot still must not
-// attach an audited building outline to that different map location.
+// Firestore/custom map markers can reuse a bundled source ID, but their
+// name, category or position may no longer identify the audited building.
+// Without any source-checked *visible* candidate, do not request the entire
+// campus OSM snapshot merely because its old ID happens to match.
 it.each([
   { reason: 'same ID at a moved coordinate', override: { lat: 24.237 } },
-  // Both axes are within the old 0.0005° limit, but the combined drift is 52.7 m.
   { reason: 'same ID moved 53m diagonally', override: { lat: 24.226632, lng: 120.581727 } },
   { reason: 'same ID under a different name', override: { name: '另一棟圖書館' } },
-])('does not misattribute a valid OSM building to $reason', async ({ override }) => {
+  { reason: 'same ID reclassified as a bus stop', override: { category: '公車站' } },
+])('skips OSM network work for $reason without losing navigation', async ({ override }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const mapPlace: MapLocation = { ...library, ...override };
-  const buildings = parseProvidenceOsmFootprints({ elements: [{
-    type: 'way', id: 255784049, tags: { building: 'yes' },
-    geometry: [
-      { lat: 24.22624, lon: 120.58131 },
-      { lat: 24.22624, lon: 120.58143 },
-      { lat: 24.22634, lon: 120.58143 },
-      { lat: 24.22634, lon: 120.58131 },
-      { lat: 24.22624, lon: 120.58131 },
-    ],
-  }] });
-  expect(buildings).toHaveLength(1);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({
-      schoolId: 'pu', source: 'OpenStreetMap', buildings,
-      fetchedAt: new Date().toISOString(), stale: false,
-    }),
-  }));
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[mapPlace]} selected={mapPlace} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/0 棟公開建築輪廓/)).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).getByText(/目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
+  expect(within(dialog).queryByRole('button', { name: '重新讀取建築輪廓' })).toBeNull();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).queryByRole('link', { name: '查看此棟建築的 OpenStreetMap 原始輪廓' })).toBeNull();
-  expect(within(dialog).getByText(/沒有可用的已核對 OSM 建築外框/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
+});
+
+it('starts OSM loading only after a reused library ID regains its audited identity, then aborts when lost', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const displaced: MapLocation = { ...library, lat: library.lat + 0.01 };
+  let signal: AbortSignal | undefined;
+  const fetchMock = vi.fn((_url: string, options: { signal: AbortSignal }) => {
+    signal = options.signal;
+    return new Promise<Response>(() => {});
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const onSelect = vi.fn();
+  const view = render(
+    <CampusSpatialExplorer school="pu" locations={[displaced]} selected={displaced} onSelect={onSelect} />,
+  );
+  const dialog = await open();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  view.rerender(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={onSelect} />);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(signal?.aborted).toBe(false);
+  expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+
+  // Even though the ID remains constant, a later POI identity withdrawal
+  // must revoke the request before any response can be treated as sourced.
+  view.rerender(<CampusSpatialExplorer school="pu" locations={[displaced]} selected={displaced} onSelect={onSelect} />);
+  await waitFor(() => expect(signal?.aborted).toBe(true));
+  expect(within(dialog).getByText(/沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  fireEvent(window, new Event('pageshow'));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it('withdraws a visible OSM building when the map POI identity changes while the dialog is open', async () => {
