@@ -2736,10 +2736,14 @@ it('cancels a permanently pending mobile Blob.arrayBuffer without waiting or lau
     await Promise.resolve();
     expect(startedFallback).not.toHaveBeenCalled();
 
+    // The sentinel only guards the cancelled read. A separate import may
+    // legitimately use the browser's real FileReader fallback, so restore it
+    // before verifying that a new, independent file can still be imported.
+    vi.stubGlobal('FileReader', nativeReader);
     const next = new File(['可讀取的新教材'], '另一份.txt', { type: 'text/plain' });
-    const actual = new TextEncoder().encode('可讀取的新教材').buffer;
-    Object.defineProperty(next, 'arrayBuffer', { value: vi.fn().mockResolvedValue(actual) });
-    await expect(readStudyFileBytes(next, new AbortController().signal)).resolves.toEqual(actual);
+    Object.defineProperty(next, 'arrayBuffer', { value: undefined });
+    const recovered = await readStudyFileBytes(next, new AbortController().signal);
+    expect(new TextDecoder().decode(recovered)).toBe('可讀取的新教材');
     expect(startedFallback).not.toHaveBeenCalled();
   } finally {
     vi.stubGlobal('FileReader', nativeReader);

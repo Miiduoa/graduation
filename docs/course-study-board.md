@@ -1,3 +1,9 @@
+## 2026-11-18：修復手機讀檔取消回歸測試的錯誤替身造成 Web Tests 紅燈
+
+- 精確前版 head `65fb16bd8e422440c629dd1dcc6c0d5c290b67bf` 的 [CI #44295068582](https://github.com/Miiduoa/graduation/actions/runs/44295068582) Web Tests job `134769881577` 實際失敗 1 題（其他 16,644 通過）：`CourseStudyPanel.test.tsx` 永久掛起 `Blob.arrayBuffer()` 取消測試使用不含 `readAsArrayBuffer` 的 `FileReader` 監視替身，卻又讓後續**獨立新檔案**沿用該替身；當新檔依法進入備援路徑時拋出 `TypeError`。這不是舊匯入未解除取消的證據。
+- 測試現在在完成「取消立即結束／遲到結果不觸發第二次讀取」斷言後，還原真實 `FileReader`；用下一份教材明確走備援讀取並逐字解碼確認新檔成功，避免測試替身汙染獨立讀檔。只修補測試與本文件，保留正式取消邏輯、私人資料界線及閱讀／練習 checkpoint；不新增依賴。
+- 新 head 需重新經 GitHub Web／Mobile／Build／Lint／Security／CodeQL 與指定 App 5504170 審查；DOM 模擬不等於真實 iOS／Android／讀屏、WebGPU 或 Ahaboard 同機實測，PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-18：取消手機讀檔不再被永不回應的 Blob.arrayBuffer 卡住
 
 - iOS／Android 內嵌 WebView 有機會讓原生 `Blob.arrayBuffer()` Promise 一直未完成；之前學生即使按「取消讀取」，舊匯入 Promise 仍掛著直到底層回應。現在將原生讀取與本次 `AbortSignal` 競速，取消即讓等待者以 `AbortError` 結束，撤銷取消事件監聽，也不對遲到／損壞的舊結果啟動第二個 `FileReader`；下一份已授權教材可獨立載入。此作法不宣稱能中斷瀏覽器底層不可取消的 I/O。
