@@ -27,6 +27,7 @@ const returnBook = require('./agent/tools/returnBook');
 const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
+const { resolveWashReserveInput } = require('./lib/campusWriteIntentResolve');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 const { libraryLoanVersion } = require('./agent/libraryLoanSource');
 const read = async (path) => (await db.doc(path).get()).data();
@@ -160,6 +161,55 @@ test('normal and Agent washing reservations cannot both own the same machine', a
   const reservations = await db.collection('schools/pu/washingReservations').get();
   assert.equal(reservations.size, 1);
   assert.equal((await read('schools/pu/washingMachines/M1')).reservedBy, reservations.docs[0].data().userId);
+});
+
+async function explicitWashingProposal() {
+  await seed([
+    ['schools/pu/washingMachines/A1', { dormitory: 'A棟', status: 'available' }],
+    ['schools/pu/washingMachines/A2', { dormitory: 'A棟', status: 'available' }],
+    ['users/alice/settings/assistantPermissions', { reserveWashingMachine: true }],
+  ]);
+  const input = await resolveWashReserveInput('幫我預約 A棟洗衣機 A2 2030/01/02 晚上八點', 'pu');
+  assert.equal(input?.machineId, 'A2');
+  assert.equal((await db.collection('schools/pu/washingReservations').get()).size, 0);
+  const action = await proposal(
+    { actionProposals: [{ toolName: 'reserveWashingMachine', input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = 'reserveWashingMachine';
+  action.data.input = input;
+  return action;
+}
+
+test('an exact washing draft reserves only A2 after confirmation and cannot be replayed', async () => {
+  const action = await explicitWashingProposal();
+  const a1Before = await read('schools/pu/washingMachines/A1');
+  const receipt = await executeAgentWrite.run(action);
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.machineId, 'A2');
+  const reservations = await db.collection('schools/pu/washingReservations').get();
+  assert.equal(reservations.size, 1);
+  const saved = reservations.docs[0].data();
+  assert.equal(saved.machineId, 'A2');
+  assert.equal(saved.userId, 'alice');
+  assert.equal(saved.schoolId, 'pu');
+  assert.equal((await read('schools/pu/washingMachines/A2')).reservedBy, 'alice');
+  assert.deepEqual(await read('schools/pu/washingMachines/A1'), a1Before);
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  const replayed = await db.collection('schools/pu/washingReservations').get();
+  assert.equal(replayed.size, 1);
+  assert.deepEqual(replayed.docs[0].data(), saved);
+});
+
+test('a machine becoming unavailable after the exact draft never redirects confirmation or retries to A1', async () => {
+  const action = await explicitWashingProposal();
+  const a1Before = await read('schools/pu/washingMachines/A1');
+  await db.doc('schools/pu/washingMachines/A2').update({ status: 'maintenance' });
+  await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.equal((await db.collection('schools/pu/washingReservations').get()).size, 0);
+  assert.deepEqual(await read('schools/pu/washingMachines/A1'), a1Before);
+  assert.equal((await read('schools/pu/washingMachines/A2')).status, 'maintenance');
 });
 
 test('cancelling an old washing reservation cannot release a newer reservation', async () => {
@@ -340,18 +390,20 @@ async function runAfterCommittedClaim(action, change) {
         }
         return value;
       };
-      if (!changedAfterClaim || !change.failAccountRead) return execute();
+      if (!changedAfterClaim || (!change.failAccountRead && !change.failPermissionsRead)) return execute();
+      const sourcePath = change.failPermissionsRead
+        ? 'users/alice/settings/assistantPermissions' : 'users/alice';
       const originalGet = tx.get;
       const originalGetAll = tx.getAll;
       tx.get = function (reference, ...args) {
-        if (reference.path === 'users/alice') {
+        if (reference.path === sourcePath) {
           failedAccountReads += 1;
           return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
         }
         return originalGet.call(this, reference, ...args);
       };
       tx.getAll = function (...references) {
-        if (references.some((reference) => reference?.path === 'users/alice')) {
+        if (references.some((reference) => reference?.path === sourcePath)) {
           failedAccountReads += 1;
           return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
         }
@@ -379,8 +431,102 @@ async function runAfterCommittedClaim(action, change) {
     db.runTransaction = originalRunTransaction;
     assert.equal(changedAfterClaim, true, 'the source change must occur after a committed claim');
     if (change.failAccountRead) assert.ok(failedAccountReads > 0, 'the service transaction must attempt the account read');
+    if (change.failPermissionsRead) assert.ok(failedAccountReads > 0, 'the service transaction must read the tool permission after claim');
     if (change.abortServiceCommit) assert.equal(abortedServiceCommit, true, 'the staged service transaction must abort');
   }
+}
+
+
+async function permissionBoundLibraryProposal(toolName) {
+  if (toolName !== 'borrowBook') {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    return libraryProposal(toolName, loan.loanId);
+  }
+  const input = { bookId: 'B1' };
+  await db.doc('users/alice/settings/assistantPermissions').set({ borrowBook: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+const libraryWriteTools = ['borrowBook', 'renewBook', 'returnBook'];
+for (const toolName of libraryWriteTools) {
+  for (const permissionState of ['revoked', 'deleted', 'unreadable']) {
+    test(`an Agent ${toolName} rejects ${permissionState} write permission after its committed claim`, async () => {
+      const action = await permissionBoundLibraryProposal(toolName);
+      const before = await serviceRecordSnapshot();
+      const settings = db.doc('users/alice/settings/assistantPermissions');
+      const change = {
+        failPermissionsRead: permissionState === 'unreadable',
+        apply: async () => {
+          if (permissionState === 'deleted') await settings.delete();
+          else if (permissionState === 'revoked') await settings.set({ [toolName]: false });
+        },
+      };
+
+      await assert.rejects(runAfterCommittedClaim(action, change), {
+        code: permissionState === 'unreadable' ? 'unavailable' : 'permission-denied',
+      });
+
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'revoked Agent permission must leave canonical loans, mirrors, inventory and service guards unchanged');
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'unverified');
+      assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+      assert.equal(run.steps.some((step) => step.output?.success === true), false);
+      await settings.set({ [toolName]: true });
+      await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'granting permission again must not replay the previously attempted confirmation');
+    });
+  }
+  for (const permissionState of ['retained grant', 'other tools revoked']) {
+    test(`an Agent ${toolName} preserves ${permissionState} at service transaction time`, async () => {
+      const action = await permissionBoundLibraryProposal(toolName);
+      const grants = Object.fromEntries(libraryWriteTools.map((name) => [
+        name, permissionState === 'retained grant' || name === toolName,
+      ]));
+
+      const receipt = await runAfterCommittedClaim(action, {
+        apply: () => db.doc('users/alice/settings/assistantPermissions').set(grants),
+      });
+
+      assert.equal(receipt.success, true);
+      assert.equal(receipt.toolName, toolName);
+      const loanId = toolName === 'borrowBook' ? receipt.loanId : action.data.input.loanId;
+      const canonical = await read(`schools/pu/libraryLoans/${loanId}`);
+      assert.equal(canonical.userId, 'alice');
+      assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${loanId}`), canonical);
+      assert.equal(canonical.status, toolName === 'returnBook' ? 'returned' : 'borrowed');
+      if (toolName === 'renewBook') assert.equal(canonical.renewCount, 1);
+      const book = await read('schools/pu/libraryBooks/B1');
+      assert.equal(book.availableCopies, toolName === 'returnBook' ? 1 : 0);
+      assert.equal(book.available, book.availableCopies);
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'completed');
+    });
+  }
+  test(`the direct ${toolName} callable remains usable with all Agent write permissions disabled`, async () => {
+    const input = toolName === 'borrowBook'
+      ? { bookId: 'B1' }
+      : { loanId: (await borrow.execute(scope(), { bookId: 'B1' })).loanId };
+    await db.doc('users/alice/settings/assistantPermissions').set(
+      Object.fromEntries(libraryWriteTools.map((name) => [name, false])),
+    );
+
+    const receipt = await service[toolName].run(request('alice', input));
+
+    const loanId = toolName === 'borrowBook' ? receipt.loanId : input.loanId;
+    const canonical = await read(`schools/pu/libraryLoans/${loanId}`);
+    assert.equal(canonical.status, toolName === 'returnBook' ? 'returned' : 'borrowed');
+    assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${loanId}`), canonical);
+    if (toolName === 'renewBook') assert.equal(canonical.renewCount, 1);
+    assert.equal((await read('schools/pu/libraryBooks/B1')).availableCopies, toolName === 'returnBook' ? 1 : 0);
+  });
 }
 
 const blockedAccountChanges = [
@@ -950,4 +1096,91 @@ test('closed assistant write permission denies before claim and leaves no claim'
   const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
   assert.equal(run.actionClaims, undefined);
   assert.equal((await db.collection('leaveRequests').get()).size, 0);
+});
+
+
+// These status-reader regressions use the same guarded localhost demo project as the transaction fixtures above.
+const leaveStatusReader = require('./agent/tools/getLeaveRequestStatus');
+const leaveStatusCreatedAt = (offset) => Timestamp.fromMillis(Date.parse('2030-01-01T00:00:00Z') + offset * 1000);
+
+test('leave status filters by campus before the limit when more than ten newer rows belong to another campus', async () => {
+  await seed([
+    ['leaveRequests/local-old', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ...Array.from({ length: 12 }, (_, index) => [`leaveRequests/foreign-${index}`, {
+      uid: 'alice', schoolId: 'ntu', date: '2099-01-01', type: '他校假別', status: 'rejected',
+      createdAt: leaveStatusCreatedAt(100 + index),
+    }]),
+  ]);
+  const before = await db.collection('leaveRequests').get();
+  const result = await leaveStatusReader.execute(scope(), { limit: 10 });
+  assert.equal(result.count, 1);
+  assert.equal(result.items[0].requestId, 'local-old');
+  const after = await db.collection('leaveRequests').get();
+  assert.equal(after.size, before.size);
+  const original = new Map(before.docs.map((document) => [document.id, document]));
+  for (const document of after.docs) {
+    assert.deepEqual(document.data(), original.get(document.id).data());
+    assert.equal(document.updateTime.isEqual(original.get(document.id).updateTime), true);
+  }
+});
+
+test('leave status keeps same-campus canonical and legacy records without requiring source and excludes unknown campus records', async () => {
+  await seed([
+    ['leaveRequests/canonical', {
+      uid: 'alice', schoolId: 'pu', source: 'campus-one', kind: 'sick', status: 'partial',
+      startDate: '2030-02-01', endDate: '2030-02-02', courses: [{ courseId: 'c1' }],
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/legacy-no-source', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/unknown-campus', {
+      uid: 'alice', source: 'campus-one', date: '2099-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/empty-campus', {
+      uid: 'alice', schoolId: '', date: '2098-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(101),
+    }],
+  ]);
+  const result = await leaveStatusReader.execute(scope(), {});
+  assert.deepEqual(result, { count: 2, items: [
+    { requestId: 'canonical', date: '2030-02-01 至 2030-02-02', type: '病假', status: 'partial',
+      courseId: 'c1', createdAt: leaveStatusCreatedAt(2).toDate().toISOString() },
+    { requestId: 'legacy-no-source', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1).toDate().toISOString() },
+  ] });
+});
+
+test('leave status respects selected campus and account while returning the newest local row', async () => {
+  await seed([
+    ['schools/ntu/members/alice', { status: 'active' }],
+    ['leaveRequests/alice-pu', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/alice-ntu-old', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-02', type: '病假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/alice-ntu-new', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-03', type: '病假', status: 'approved',
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/bob-pu', {
+      uid: 'bob', schoolId: 'pu', date: '2030-02-04', type: '公假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(200),
+    }],
+  ]);
+  for (const [uid, schoolId, expectedId] of [
+    ['alice', 'pu', 'alice-pu'], ['alice', 'ntu', 'alice-ntu-new'], ['bob', 'pu', 'bob-pu'],
+  ]) {
+    const result = await leaveStatusReader.execute({ uid, schoolId }, { limit: 1 });
+    assert.equal(result.count, 1);
+    assert.equal(result.items[0].requestId, expectedId);
+  }
 });

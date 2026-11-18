@@ -19,6 +19,10 @@ const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 // Respect its Retry-After while bounding malformed or extreme upstream values.
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+// A misbehaving upstream can emit unlimited empty/tiny ReadableStream chunks.
+// Cap the number of reads as well as bytes so microtasks cannot indefinitely
+// starve the 12-second deadline timer or monopolize the Node event loop.
+const MAX_RESPONSE_STREAM_CHUNKS = 8_192;
 // AbortSignal is advisory: intermediaries and stream mocks may never settle.
 // Bound the entire upstream operation so global pending requests can recover.
 const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
@@ -175,6 +179,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const segments: string[] = [];
   let size = 0;
+  let chunks = 0;
   let completed = false;
   try {
     while (true) {
@@ -183,6 +188,11 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       // truncated stream into an apparently complete Overpass snapshot.
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
+      // Count empty chunks too: the byte cap alone cannot stop a zero-byte
+      // stream from spinning through unbounded already-resolved reads.
+      if (++chunks > MAX_RESPONSE_STREAM_CHUNKS) {
+        throw new Error('OSM response exceeded chunk limit');
+      }
       size += value.byteLength;
       // On identity responses, the first byte beyond Content-Length already
       // proves truncation/overdelivery. Do not wait for EOF from an upstream
@@ -192,6 +202,13 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
+      // A long sequence of already-resolved reads can starve timers even
+      // before reaching the absolute chunk cap. Give Node's event loop a
+      // chance to run the deadline and other requests every 128 chunks.
+      if (chunks % 128 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (signal.aborted) throw new Error('OSM response aborted');
+      }
     }
     if (verifyIdentityLength && size !== declared) {
       throw new Error('OSM response length mismatch');
@@ -263,7 +280,22 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  const raw = await readBoundedResponse(response, signal);
+  let raw: string;
+  try {
+    raw = await readBoundedResponse(response, signal);
+  } catch (error) {
+    // Overpass or an intermediary can return HTTP 200 with unusable framing
+    // (empty/oversized/invalid stream) and still request a longer cooldown.
+    // Reject the geometry as before, but respect that explicit retry window
+    // rather than sending another request after our default ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (!signal.aborted && retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(raw) as unknown;
@@ -283,17 +315,43 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   const now = Date.now();
-  // A way's edit timestamp cannot be newer than the Overpass replication
-  // snapshot that contains it. Preserve checked geometry, but drop any
-  // contradictory revision label rather than advertising false provenance.
-  // Legacy replies without osm3s are bounded by their HTTP fetch time.
-  const buildings = stripOsmRevisionsAfter(
-    parseProvidenceOsmFootprints(payload),
-    osmBaseAt ? Date.parse(osmBaseAt) : now,
-  );
-  if (!buildings.length) throw new Error('No verified building outlines in response');
+  let osmBaseAt: string | null;
+  let buildings: ProvidenceFootprint[];
+  try {
+    osmBaseAt = verifyOverpassReplicationTime(payload, now);
+    // A way's edit timestamp cannot be newer than the Overpass replication
+    // snapshot that contains it. Preserve checked geometry, but drop any
+    // contradictory revision label rather than advertising false provenance.
+    // Legacy replies without osm3s are bounded by their HTTP fetch time.
+    buildings = stripOsmRevisionsAfter(
+      parseProvidenceOsmFootprints(payload),
+      osmBaseAt ? Date.parse(osmBaseAt) : now,
+    );
+  } catch (error) {
+    // Even syntactically valid JSON can carry invalid replication metadata or
+    // unusable geometry. Never cache that snapshot; also do not ignore an
+    // explicit upstream Retry-After and retry a known-bad source after 10m.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
+  if (!buildings.length) {
+    // A valid JSON object can still contain no verified outlines during an
+    // upstream partial/outage response. Never cache it as a fresh map. If the
+    // origin explicitly asks us to pause, do not retry after only ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw new Error('No verified building outlines in response');
+  }
   // The 48-hour replication-age check must remain true for the *entire* time
   // this snapshot is presented as fresh, not only when Overpass was fetched.
   // Otherwise a 47-hour-old OSM database could be marked fresh for another
