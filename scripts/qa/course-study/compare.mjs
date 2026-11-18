@@ -54,6 +54,9 @@ export function auditStudyComparisons(raw) {
   // Without case IDs and per-case outcomes, a low aggregate can conceal which
   // licensed question failed or where a measurement was absent.
   const caseIds = [];
+  // Keep the exact fixture and environment metadata beside each reported case,
+  // without embedding private teaching material or the human reviewer's name.
+  const caseProvenance = [];
   const pairedVerifiedOutcomes = [];
   const pairedOfflineOutcomes = [];
   const observations = { nuni: [], Ahaboard: [] };
@@ -85,21 +88,21 @@ export function auditStudyComparisons(raw) {
       fail(key, 'permission to use source must be confirmed');
     text(trial.manualReviewer, `${key}.manualReviewer`);
     const env = object(trial.environment, `${key}.environment`);
-    for (const field of ['date', 'device', 'browser', 'network'])
-      text(env[field], `${key}.environment.${field}`);
+    const environment = Object.fromEntries(['date', 'device', 'browser', 'network']
+      .map((field) => [field, text(env[field], `${key}.environment.${field}`)]));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(env.date) ||
         (!Number.isFinite(Date.parse(`${env.date}T00:00:00Z`)) ||
          new Date(`${env.date}T00:00:00Z`).toISOString().slice(0, 10) !== env.date))
       fail(key, 'valid ISO date required');
     if (!Array.isArray(trial.results) || trial.results.length !== 2)
       fail(key, 'exactly one nuni and one Ahaboard result required');
-    const seen = new Set(), pair = {};
+    const seen = new Set(), pair = {}, versions = {};
     trial.results.forEach((item, n) => {
       const where = `${key}.results[${n}]`, run = object(item, where);
       if (!Object.hasOwn(observations, run.product) || seen.has(run.product))
         fail(where, 'unknown or repeated product');
       seen.add(run.product);
-      text(run.version, `${where}.version`);
+      versions[run.product] = text(run.version, `${where}.version`);
       const completed = bool(run.completed, `${where}.completed`);
       const correct = bool(run.correct, `${where}.correct`);
       const sourceVerified = bool(run.sourceVerified, `${where}.sourceVerified`);
@@ -121,6 +124,15 @@ export function auditStudyComparisons(raw) {
         warmStartMs, peakMemoryMiB, offlineCompleted, costTwd };
       observations[run.product].push(measurement);
       pair[run.product] = measurement;
+    });
+    // Report each pair's provenance in the same order as caseIds and deltas.
+    // Digest case differences instead of copying raw source or question text.
+    caseProvenance.push({
+      caseId: id,
+      sourceSha256: trial.sourceSha256.toLowerCase(),
+      questionSha256: trial.questionSha256.toLowerCase(),
+      environment,
+      versions: { nuni: versions.nuni, Ahaboard: versions.Ahaboard },
     });
     pairedColdStartDeltasMs.push(
       pair.nuni.coldStartMs !== null && pair.Ahaboard.coldStartMs !== null
@@ -194,7 +206,7 @@ export function auditStudyComparisons(raw) {
     pairedMeasuredCounts[metric] = measured.length;
     pairedAverageDeltas[metric] = mean(measured);
   }
-  return { trialCount: input.trials.length, summary, caseIds,
+  return { trialCount: input.trials.length, summary, caseIds, caseProvenance,
     pairedVerifiedOutcomes, pairedOfflineOutcomes, pairedColdStartDeltasMs,
     pairedWarmStartDeltasMs, pairedStepsDeltas, pairedPeakMemoryDeltasMiB,
     pairedCostDeltasTwd, pairedMeasuredCounts, pairedAverageDeltas,

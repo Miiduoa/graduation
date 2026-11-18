@@ -279,3 +279,42 @@ test('all missing paired measurements remain null despite one-sided data', () =>
   assert.equal(report.pairedAverageDeltas.warmStartMs, null);
   assert.equal(report.summary.nuni.averageWarmStartMs, 500);
 });
+
+test('keeps per-case source hashes, device/date and versions aligned without exposing reviewer text', () => {
+  const paired = fixture();
+  paired.trials[0].sourceSha256 = 'A'.repeat(64);
+  paired.trials[0].results = [
+    { ...result('Ahaboard', false), version: 'Ahaboard 2.1' },
+    { ...result('nuni'), version: 'nuni 2026.11' },
+  ]; // Deliberately reverse product order.
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = 'pair-2';
+  second.sourceSha256 = 'c'.repeat(64);
+  second.questionSha256 = 'd'.repeat(64);
+  second.environment = { date: '2026-11-18', device: 'Android handset',
+    browser: 'Chrome 140', network: 'offline' };
+  second.results = [
+    { ...result('nuni'), version: 'nuni 2026.12' },
+    { ...result('Ahaboard'), version: 'Ahaboard 2.2' },
+  ];
+  paired.trials.push(second);
+  const original = structuredClone(paired);
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.caseIds, ['pair-1', 'pair-2']);
+  assert.deepEqual(report.caseProvenance, [
+    { caseId: 'pair-1', sourceSha256: 'a'.repeat(64),
+      questionSha256: 'b'.repeat(64),
+      environment: { date: '2026-11-17', device: 'same phone',
+        browser: 'same browser', network: 'same WiFi' },
+      versions: { nuni: 'nuni 2026.11', Ahaboard: 'Ahaboard 2.1' } },
+    { caseId: 'pair-2', sourceSha256: 'c'.repeat(64),
+      questionSha256: 'd'.repeat(64),
+      environment: { date: '2026-11-18', device: 'Android handset',
+        browser: 'Chrome 140', network: 'offline' },
+      versions: { nuni: 'nuni 2026.12', Ahaboard: 'Ahaboard 2.2' } },
+  ]);
+  assert.deepEqual(report.pairedVerifiedOutcomes, ['nuniOnly', 'both']);
+  assert.deepEqual(paired, original); // Never rewrite the manifest itself.
+  assert.equal(JSON.stringify(report).includes('human test operator'), false);
+  assert.equal(JSON.stringify(report).includes('model unavailable'), false);
+});
