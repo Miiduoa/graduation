@@ -587,3 +587,41 @@ describe('explicitly joined floor and room classroom labels', () => {
     expect(result.matches).toEqual([hall]);
   });
 });
+
+describe('verified PH code with explicit floor and room text', () => {
+  const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+
+  it('resolves compact floor-room notations only to the existing sourced building POI', () => {
+    expect(sourcedHall).toBeDefined();
+    // These are synthetic timetable strings, not verified PH indoor room
+    // locations or floor-by-floor wayfinding.
+    for (const query of [
+      'PH3F303', 'ＰＨ３Ｆ３０３', 'PH 3F 303',
+      'PH3樓303', 'PHB1F12', 'PH B1F-12',
+    ]) {
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [sourcedHall!],
+      });
+      expect(result.status, query).toBe('matched');
+      expect(result.matches, query).toEqual([sourcedHall]);
+    }
+  });
+
+  it('rejects incomplete or malformed floor-room text and never leaks the PH code to other schools', () => {
+    expect(sourcedHall).toBeDefined();
+    for (const query of ['PH3F', 'PH3Froom303', 'PH3Fabc303', 'PH3F999999']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [sourcedHall!],
+      }).status, query).toBe('unmatched');
+    }
+    const renamedStop = {
+      ...sourcedHall!, id: 'synthetic-stop', category: '公車站', building: 'Providence Hall',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH3F303', locations: [renamedStop, sourcedHall!],
+    }).matches).toEqual([sourcedHall]);
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: 'PH3F303', locations: [sourcedHall!],
+    }).status).toBe('unmatched');
+  });
+});
