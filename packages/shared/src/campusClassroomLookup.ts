@@ -149,6 +149,24 @@ const VERIFIED_CLASSROOM_BUILDING_CODES = [
   { schoolId: 'pu', code: 'ph', buildingNames: ['主顧樓', 'Providence Hall'] },
 ] as const;
 
+/** A bundled, source-identified POI cannot inherit a different building's
+ * classroom destination just because Firestore adds a `building` label.
+ * Allow its own sourced name and explicitly verified bilingual code aliases;
+ * other schools and unsourced records retain the existing matching behavior.
+ */
+function sourcedBuildingLabel(school: string, published: CampusMapPlaceLike | undefined, building: unknown): unknown {
+  if (!published || !comparisonText(building)) return building;
+  const label = comparisonText(building);
+  if (label === comparisonText(published.name)) return building;
+  const verifiedAlias = VERIFIED_CLASSROOM_BUILDING_CODES.some(
+    (entry) =>
+      entry.schoolId === school &&
+      entry.buildingNames.some((name) => comparisonText(name) === comparisonText(published.name)) &&
+      entry.buildingNames.some((name) => comparisonText(name) === label),
+  );
+  return verifiedAlias ? building : undefined;
+}
+
 function nameMatchesVerifiedCode(school: string, query: string, suppliedName: unknown): boolean {
   const name = comparisonText(suppliedName);
   if (!name) return false;
@@ -200,25 +218,25 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // Recheck the existing sourced identity rather than trusting a reused ID.
     // The shared attribution helper checks name and position; do not invent
     // a building location when an imported catalog row has drifted.
-    if (school === 'pu') {
-      const published = PUBLISHED_PROVIDENCE_PLACES.get(location.id);
-      if (
-        published &&
-        // The imported row cannot promote a sourced restaurant/shop to a
-        // classroom by changing its category to "teaching" while retaining
-        // the published ID, name and coordinates. Check both source and row.
-        (isExplicitNonClassroomCategory(published.category) ||
-          !providencePlaceSourceUrl(school, location))
-      ) return false;
-    }
+    const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
+    if (
+      published &&
+      // Source identity and source category are both necessary: a matching
+      // ID/name/coordinate does not make a restaurant a classroom building.
+      (isExplicitNonClassroomCategory(published.category) ||
+        !providencePlaceSourceUrl(school, location))
+    ) return false;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
     if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category)) return false;
+    // A sourced clinic, chapel or sports POI must not navigate to another
+    // building through an unsourced Firestore `building` override.
+    const building = sourcedBuildingLabel(school, published, location.building);
     return (
       nameMatchesRoom(comparable, location.name) ||
-      nameMatchesRoom(comparable, location.building) ||
+      nameMatchesRoom(comparable, building) ||
       nameMatchesVerifiedCode(school, comparable, location.name) ||
-      nameMatchesVerifiedCode(school, comparable, location.building)
+      nameMatchesVerifiedCode(school, comparable, building)
     );
   });
   return {
