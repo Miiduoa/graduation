@@ -194,6 +194,9 @@ jobs:
       - name: Test platform public Agent admission contracts
         run: node scripts/test-platform-public-agent.mjs
 
+      - name: Test TronClass contract privacy and optional retention profile
+        run: node --test scripts/tronclass/analyze-har.test.mjs scripts/tronclass/prepare-ttl-profile.test.cjs
+
   test-mobile:
     name: Mobile Tests
     runs-on: ubuntu-latest
@@ -483,7 +486,8 @@ jobs:
 
   build-web:
     name: Build Web
-    runs-on: ubuntu-latest
+    # Match the OS supported by the pinned Chromium tooling used by browser checks.
+    runs-on: ubuntu-24.04
     needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
@@ -549,6 +553,30 @@ jobs:
           test -s /tmp/campus-service-directory.html
           test "$(docker exec campus-one-web-ci id -u)" != "0"
           test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
+
+      - name: Setup Python for TronClass browser checks
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install TronClass browser test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+
+      - name: Verify built TronClass workspace in Chromium
+        env:
+          TRONCLASS_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/tronclass/check-browser.py
+
+      - name: Preserve TronClass browser screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tronclass-browser
+          path: artifacts/tronclass-browser
+          if-no-files-found: ignore
+          retention-days: 7
 
   deploy-functions:
     name: Deploy Firebase backend

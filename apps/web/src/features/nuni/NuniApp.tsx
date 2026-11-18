@@ -629,7 +629,19 @@ function NuniContent() {
         )}
       </section>
     );
-  else if (pathname === '/classroom') content = <WorkspaceList key={session.context} />;
+  else if (pathname === '/classroom')
+    content = (
+      <>
+        <section className={styles.panel}>
+          <h2>連接學校的 TronClass 課程</h2>
+          <p className={styles.muted}>同步學校作業、公告與教材，並在 nuni 整理要繳交的內容。</p>
+          <Link className={styles.button} href="/tronclass">
+            連接 TronClass
+          </Link>
+        </section>
+        <WorkspaceList key={session.context} />
+      </>
+    );
   else if (pathname === '/classroom/material-bookmarks') content = <MaterialBookmarks />;
   else if (/^\/classroom\/course\/cw_[0-9a-f-]{36}$/.test(pathname))
     content = <Workspace key={`${session.context}:${pathname}`} id={pathname.split('/')[3]} />;

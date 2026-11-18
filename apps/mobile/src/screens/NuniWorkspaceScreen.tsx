@@ -32,6 +32,7 @@ import type { PreAuthStackParamList } from './preAuthTypes';
 import { NuniCourses } from './nuni/NuniCourses';
 import { NuniMerchant } from './nuni/NuniMerchant';
 import { NuniFood } from './nuni/NuniFood';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type Tab = 'courses' | 'food' | 'merchant' | 'account';
 
@@ -336,6 +337,9 @@ function SignedInWorkspace({
         ))}
       </View>
       {tab === 'food' ? <NuniFood /> : null}
+      {tab === 'courses' ? <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+        <Action label="連接 TronClass 與查看校方作業" onPress={() => safeNavigate(navigation, 'TronClassWorkspace')} />
+      </View> : null}
       <View
         style={[s.page, tab !== 'courses' && s.hidden]}
         accessibilityElementsHidden={tab !== 'courses'}

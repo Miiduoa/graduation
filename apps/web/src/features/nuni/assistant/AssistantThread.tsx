@@ -10,6 +10,7 @@ import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
+import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
@@ -50,6 +51,7 @@ export function AssistantThread({
   onReconcile,
   renderPlanRevision,
   renderPlanComparison,
+  renderTronClass,
   allowBatchConfirmation,
 }: {
   inline?: boolean;
@@ -77,6 +79,7 @@ export function AssistantThread({
   onReconcile?: (card: V2Card) => void;
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
+  renderTronClass?: (turn: V2Turn) => ReactNode;
   allowBatchConfirmation?: (turn: V2Turn) => boolean;
 }) {
   const fieldId = useId();
@@ -136,7 +139,7 @@ export function AssistantThread({
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
   const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+    (!!publicCourseIntent || canAnswerTronClassQuestion(question) || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
       (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
@@ -170,7 +173,7 @@ export function AssistantThread({
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
         <>
-          <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程。連接並授權後，可請助理查詢 TronClass、下載教材與準備作業。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -180,7 +183,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -218,6 +221,7 @@ export function AssistantThread({
                     <ReplyBody reply={turn.reply} />
                   </SpokenReply>
                 ) : <ReplyBody reply={turn.reply} />}
+                {renderTronClass?.(turn)}
                 {onStudyTarget && parseAssistantCourseworkTargets(turn.reply.courseworkTargets).length > 0 ? (
                   <div className={styles.courseworkChoices} role="group" aria-label="安排作業準備時間">
                     <p className={styles.muted}>先找時段並預覽，確認後才加入個人行程。</p>

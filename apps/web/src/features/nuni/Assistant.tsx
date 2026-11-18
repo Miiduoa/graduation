@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
@@ -39,6 +39,10 @@ import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, pe
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
+import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
+import { createTronClassAgentClient, isTronClassAuthorityError, type TronClassAgentQuestion } from '@/lib/tronClassAgentClient';
+import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
+import { AssistantTronClassResult } from './assistant/AssistantTronClassResult';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -277,6 +281,9 @@ function V2Conversation({
   const [pendingAction, setPendingAction] = useState<keyof typeof ASSISTANT_PENDING_STATUS>('ask');
   const [asking, setAsking] = useState(false);
   const askRequest = useRef<AbortController | null>(null);
+  const tronClassAskRequest = useRef<AbortController | null>(null);
+  const tronClassAuthorityEpoch = useRef(0);
+  const tronClassObservedGrant = useRef<{ revision: string; version: string } | null>(null);
   const [error, setError] = useState('');
   const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
@@ -294,6 +301,7 @@ function V2Conversation({
   const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[]; preciseIndex?: number; retainedIndices?: number[]; shiftedIndices?: number[]; offsetMinutes?: number }>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
+  const tronClassAgent = useMemo(() => createTronClassAgentClient({ kind: 'platform', context }), [context]);
   const journalScope = { ...localScope, context };
   const active = () => !!controller.current && !controller.current.signal.aborted;
   function setAction(card: V2Card, value: V2ActionState) {
@@ -432,13 +440,22 @@ function V2Conversation({
       if (active()) setError('行程結果已核對，待核對清單暫時無法更新；再次開啟時只會查核，不會重複建立。');
     }
   }
-  async function ask(selection?: AssistantCourseworkSelection) {
-    const current = selection
+  function invalidateTronClassAuthority(currentRequest?: AbortController) {
+    tronClassAuthorityEpoch.current += 1;
+    tronClassObservedGrant.current = null;
+    if (tronClassAskRequest.current !== currentRequest) tronClassAskRequest.current?.abort();
+    setTurns(previous => previous.map(item => item.tronClass
+      ? { ...item, tronClass: { ...item.tronClass, inactive: true } } : item));
+  }
+  async function ask(selection?: AssistantCourseworkSelection, tronClassSelection?: TronClassAgentQuestion) {
+    const current = tronClassSelection?.question ?? (selection
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
-      : question.trim();
+      : question.trim());
     if (!current || busy.current) return;
-    const publicCourseIntent = !selection && resolvePublicCourseAssistantIntent(current, schoolId);
-    const followup = !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
+    const tronClass = !selection && (!!tronClassSelection || canAnswerTronClassQuestion(current));
+    const tronClassEpoch = tronClassAuthorityEpoch.current;
+    const publicCourseIntent = !tronClass && !selection && resolvePublicCourseAssistantIntent(current, schoolId);
+    const followup = !tronClass && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
     const targets = parseAssistantCourseworkTargets(turns.at(-1)?.reply.courseworkTargets);
     const studyDate = followup?.date ?? turns.at(-1)?.reply.courseworkDate;
     let studySelection = selection;
@@ -457,7 +474,7 @@ function V2Conversation({
       }
       studySelection = { target: targets[0], ...(studyDate ? { date: studyDate } : {}) };
     }
-    const local = !studySelection && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
+    const local = !tronClass && !studySelection && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -465,11 +482,12 @@ function V2Conversation({
       setError('');
       return;
     }
-    const personalRead = !studySelection && canAnswerAssistantPersonalQuestion(current);
-    if ((!consent || !ready) && !publicCourseIntent && !personalRead && !studySelection) return;
+    const personalRead = !tronClass && !studySelection && canAnswerAssistantPersonalQuestion(current);
+    if ((!consent || !ready) && !tronClass && !publicCourseIntent && !personalRead && !studySelection) return;
     busy.current = true;
     const pendingAsk = new AbortController();
     askRequest.current = pendingAsk;
+    if (tronClass) tronClassAskRequest.current = pendingAsk;
     const scopeSignal = controller.current!.signal;
     const abortForScope = () => pendingAsk.abort();
     if (scopeSignal.aborted) pendingAsk.abort();
@@ -480,8 +498,32 @@ function V2Conversation({
     setError('');
     // Free the composer immediately so the next thought can be typed during a slow response.
     // The sent content remains captured in `current` and can be recovered on failure.
-    if (!selection) setQuestion('');
+    if (!selection && !tronClassSelection) setQuestion('');
     try {
+      if (tronClass) {
+        try {
+          const result = await tronClassAgent.ask(tronClassSelection ?? { question: current }, pendingAsk.signal);
+          if (pendingAsk.signal.aborted || scopeSignal.aborted || tronClassEpoch !== tronClassAuthorityEpoch.current) return;
+          const observed = tronClassObservedGrant.current;
+          if (observed && (observed.revision !== result.revision || observed.version !== result.grantVersion))
+            invalidateTronClassAuthority(pendingAsk);
+          tronClassObservedGrant.current = { revision: result.revision, version: result.grantVersion };
+          setTurns(previous => [...previous, { question: current,
+            reply: { answer: result.answer, steps: [], cards: [], dataRead: true }, tronClass: { result } }]);
+          setRecoverableQuestion(previous => previous === current ? '' : previous);
+        } catch (reason) {
+          if (tronClassEpoch !== tronClassAuthorityEpoch.current) return;
+          if (pendingAsk.signal.aborted || scopeSignal.aborted || !(reason instanceof TronClassRequestError)) throw reason;
+          if (isTronClassAuthorityError(reason)) invalidateTronClassAuthority(pendingAsk);
+          setTurns(previous => [...previous, { question: current,
+            reply: { answer: reason.message, steps: [], cards: [], dataRead: true },
+            tronClass: {
+              accessRequired: reason.code.includes('AGENT_PERMISSION'),
+              unconnected: reason.status === 401 || /RECONNECT_REQUIRED|NOT_CONNECTED|BINDING_CHANGED/.test(reason.code),
+            } }]);
+        }
+        return;
+      }
       if (publicCourseIntent) {
         const result = await answerPublicCourseQuestion({
           question: current,
@@ -513,7 +555,7 @@ function V2Conversation({
         }
       }
       if ((!ready || !consent) && !studySelection) return;
-      const history = studySelection ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
+      const history = studySelection ? [] : turns.filter((turn) => !turn.tronClass && !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -544,14 +586,16 @@ function V2Conversation({
       setTurns((t) => [...t, { question: current, reply }]);
       setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
+      if (tronClass && tronClassEpoch !== tronClassAuthorityEpoch.current) return;
       if (!controller.current?.signal.aborted) {
         setError(pendingAsk.signal.aborted ? '已停止這次回答。原問題已保留，沒有執行任何確認操作。'
           : e instanceof Error ? e.message : '查詢失敗');
-        if (!selection) setRecoverableQuestion(current);
+        if (!selection && !tronClassSelection) setRecoverableQuestion(current);
       }
     } finally {
       scopeSignal.removeEventListener('abort', abortForScope);
       if (askRequest.current === pendingAsk) askRequest.current = null;
+      if (tronClassAskRequest.current === pendingAsk) tronClassAskRequest.current = null;
       busy.current = false;
       if (!scopeSignal.aborted) {
         setAsking(false);
@@ -1014,6 +1058,11 @@ function V2Conversation({
       allowBatchConfirmation={turn => !individualConfirmationTurns.current.has(turn)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
+      renderTronClass={turn => turn.tronClass ? <AssistantTronClassResult
+        key={turn.tronClass.result?.requestId ?? turn.question} data={turn.tronClass} question={turn.question}
+        client={tronClassAgent} owner={localScope.owner} pending={pending}
+        onAuthorityChanged={() => invalidateTronClassAuthority()}
+        onAsk={input => void ask(undefined, input)} /> : null}
       renderPlanComparison={turn => {
         const comparison = planComparisons.current.get(turn);
         return comparison ? comparison.shiftedIndices !== undefined
