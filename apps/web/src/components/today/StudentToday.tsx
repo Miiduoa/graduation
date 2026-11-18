@@ -383,7 +383,7 @@ function TodoList({
               <li
                 key={item.id}
                 data-testid={primary ? 'next-action' : undefined}
-                className={styles.workItem + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
+                className={styles.workItem + (primary ? ' ' + styles.priority : '') + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
               >
                 <Link
                   href={assignmentHref(item)}
