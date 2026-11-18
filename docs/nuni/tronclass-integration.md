@@ -382,13 +382,13 @@ production `createTronClassSubmissionSource()` 目前為 `contractVerified: fals
 
 `tronClassSubmissionProtocol.ts` 已根據官方公開 client 實作新作業 POST 的固定 body、一般檔案 metadata body、S3／WRPC callback body，以及保守的 acknowledgment／metadata parser。純文字先做 HTML escape 再保留換行；一般附件使用數字 ID，不把 `operationId` 或猜測的 upload key 放入校方 body。Metadata 的 `parent_id: 0` 代表個人資源根目錄，不是課程或活動 ID。
 
-Metadata parser 只回傳 `metadata-created` 和數字 ID，二進位能力固定為 `unsupported`；不使用或回傳任意 `upload_url`。Acknowledgment parser 要求明確的本人、課程、活動、新 ID 與非草稿／非教師代標等欄位；缺少任何必要證據保持 `unconfirmed`。這是保守候選 schema，尚無真人 POST 回應證明所有必填欄位一定存在。結果不含本文、教師資料、時間或 `receipt`，尤其不將 `created_at` 改成 `submittedAt`。
+Metadata parser 只回傳 `metadata-created` 和數字 ID，二進位能力固定為 `unsupported`；不使用或回傳任意 `upload_url`。Acknowledgment parser 要求明確的本人、活動、新 ID 與非草稿／非教師代標等欄位；課程由已授權的活動與 server context 固定，回應可省略 `course_id`，但明示的課程／活動／本人歸屬若不一致仍拒絕。缺少必要證據保持 `unconfirmed`，後續仍須精確本人版本讀回。這是保守候選 schema，尚無真人 POST 回應證明所有必填欄位一定存在。結果不含本文、教師資料、時間或 `receipt`，尤其不將 `created_at` 改成 `submittedAt`。
 
 `createTronClassTextSubmissionCandidate()` 是供受控環境驗證的獨立候選，不是 production `TronClassSubmissionSource`。其限制為：
 
 - `enabled` 預設 false，`contractVerified` 固定 false；沒有公開 HTTP 入口，也沒有環境變數可把它接入既有正式送出流程。
 - 只接受 normal、個人、一般窗口、首次、純文字；呼叫端必須提供從校方資料取得的權限確認、完整空歷史、零送出次數及前置活動已符合的證明。候選不以 raw activity 缺少欄位推論放行。
-- 使用固定靜宜 origin 與 `/api/course/activities/{id}/submissions` POST，拒絕任意路徑、query、附件 ID、二進位或其他作業模式。XSRF cookie 缺少或格式不符時停止；目前只實作公開 Angular 預設策略，仍需實測校方要求。
+- 使用固定靜宜 origin 與 `/api/course/activities/{id}/submissions` POST，拒絕任意路徑、query、附件 ID、二進位或其他作業模式。沿用已核對的官方 client header 序列化：`XSRF-TOKEN` 缺少或空值時省略 `X-XSRF-TOKEN`；有值時先 URL decode 並檢查格式，格式不符即停止。這不證明校方已接受 CSRF 或 POST，實際 session／寫入契約仍須驗收。
 - 送出前後重新檢查 binding revision；預設 15 秒、最多 1 MiB 回應、無 redirect／fallback／retry。單一 candidate 實例只允許一次外部嘗試，競態或逾時不會再送。
 - 上述單一實例保護不能代替既有持久化 operation／作業鎖。接入正式 provider 前，仍須完成真實權限 reader、CSRF／session 契約、持久化 claim 與本人／教師 readback 驗收。
 
