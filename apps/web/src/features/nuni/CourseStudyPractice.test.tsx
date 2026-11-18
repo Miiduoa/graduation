@@ -135,7 +135,7 @@ it('lets students move forward without accidentally skipping an unanswered quest
   expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
   expect(answerInput().value).toBe('');
   expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
-    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，草稿待自評' })).toBeTruthy();
   writeAnswer('第二題也先留草稿');
   fireEvent.click(screen.getByRole('button', { name: '上一題' }));
   expect(answerInput().value).toBe('第一題先留著，不表示已答完');
@@ -162,7 +162,7 @@ it('jumps to the next not-yet-self-assessed card, wrapping without marking a dra
   fireEvent.click(screen.getByRole('button', { name: '下一題未自評' }));
   expect(screen.getByRole('heading', { name: '第 3 題' })).toBeTruthy();
   expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
-    .getByRole('button', { name: '第 2 題：第 5 頁 · 第 1 段，未完成' })).toBeTruthy();
+    .getByRole('button', { name: '第 2 題：第 5 頁 · 第 1 段，草稿待自評' })).toBeTruthy();
   selectQuestion(2);
   expect(answerInput().value).toBe('第二題暫時只有草稿');
   expect(screen.getByRole('button', { name: '下一題未自評' }).hasAttribute('disabled')).toBe(false);
@@ -222,7 +222,7 @@ it('keeps a learner self-rating when concealing an already read answer but clear
   // Editing the attempt is different from choosing to conceal the answer.
   writeAnswer('重新作答的內容');
   expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
-    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，草稿待自評' })).toBeTruthy();
   expect(model.run).not.toHaveBeenCalled();
 });
 
@@ -257,7 +257,7 @@ it('lets the learner undo a skipped question without losing a prior draft or rev
   expect(answerInput().value).toBe('保留這段未完成的試答');
   expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(false);
   expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
-    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，草稿待自評' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
   expect(model.run).not.toHaveBeenCalled();
 });
@@ -309,6 +309,29 @@ it('navigates every exact repeated hint quote without losing the answer, focus o
   expect(model.run).not.toHaveBeenCalled();
 });
 
+it('marks blank and drafted unanswered questions differently without treating a draft as assessed', () => {
+  render(<Controller deck={cards.slice(0, 2)} />);
+  const overview = within(screen.getByRole('navigation', { name: '本輪題目' }));
+  const first = '第 1 題：第 2 頁 · 第 1 段';
+  const second = '第 2 題：第 5 頁 · 第 1 段';
+  expect(overview.getByRole('button', { name: `${first}，未完成` })).toBeTruthy();
+  writeAnswer('   \n  ');
+  expect(overview.getByRole('button', { name: `${first}，未完成` })).toBeTruthy();
+  writeAnswer('我先記下尚未對照的草稿');
+  expect(overview.getByRole('button', { name: `${first}，草稿待自評` })).toBeTruthy();
+  expect(overview.getByText('草稿待自評')).toBeTruthy();
+  selectQuestion(2);
+  expect(overview.getByRole('button', { name: `${second}，未完成` })).toBeTruthy();
+  expect(overview.getByRole('button', { name: `${first}，草稿待自評` })).toBeTruthy();
+  selectQuestion(1);
+  expect(answerInput().value).toBe('我先記下尚未對照的草稿');
+  writeAnswer('');
+  expect(overview.getByRole('button', { name: `${first}，未完成` })).toBeTruthy();
+  decide('understood');
+  expect(overview.getByRole('button', { name: `${first}，自評理解` })).toBeTruthy();
+  expect(model.run).not.toHaveBeenCalled();
+});
+
 it('shows each self-assessment count after a finite round without inventing a score', () => {
   render(<Controller />);
   skip();
@@ -355,7 +378,7 @@ it('prioritizes an unassessed draft from the finished summary without treating i
   expect(answerInput().value).toBe('第二題有草稿，尚未自評');
   expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
   expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
-    .getByRole('button', { name: '第 2 題：第 5 頁 · 第 1 段，未完成' })).toBeTruthy();
+    .getByRole('button', { name: '第 2 題：第 5 頁 · 第 1 段，草稿待自評' })).toBeTruthy();
   selectQuestion(2);
   writeAnswer('');
   selectQuestion(3);

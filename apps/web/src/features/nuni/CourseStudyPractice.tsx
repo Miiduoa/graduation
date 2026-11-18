@@ -30,10 +30,12 @@ const modeLabels: Record<StudyMode, string> = {
   understand: '理解概念', exam: '考前複習', practice: '練習思路',
 };
 
-function outcomeLabel(outcome: StudyPracticeResponse['outcome'] | undefined): string {
-  if (outcome === 'understood') return '自評理解';
-  if (outcome === 'again') return '還要加強';
-  if (outcome === 'skipped') return '略過';
+function outcomeLabel(response: StudyPracticeResponse | undefined): string {
+  if (response?.outcome === 'understood') return '自評理解';
+  if (response?.outcome === 'again') return '還要加強';
+  if (response?.outcome === 'skipped') return '略過';
+  // A saved draft is still unassessed, but should be findable before the summary.
+  if (response?.outcome === null && response.attempt.trim()) return '草稿待自評';
   return '未完成';
 }
 
@@ -207,7 +209,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
         <h5>本輪題目</h5>
         <ol className={styles.cardList}>
           {round.cards.map((item, index) => {
-            const outcome = outcomeLabel(round.responses[item.id]?.outcome);
+            const outcome = outcomeLabel(round.responses[item.id]);
             return <li key={item.id}>
               <button type="button" className={styles.cardButton} aria-current={!round.finished && index === round.index ? 'step' : undefined}
                 aria-label={`第 ${index + 1} 題：${item.label}，${outcome}`} onClick={() => onAction({ type: 'go', index })}>
