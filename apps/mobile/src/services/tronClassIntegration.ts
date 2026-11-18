@@ -143,7 +143,8 @@ export function parseNativeTronClassSnapshot(value: unknown): TronClassSnapshot 
       (row) =>
         record(row) &&
         (row.courseId === null || id(row.courseId)) &&
-        ['courses', 'homework', 'materials', 'announcements'].includes(String(row.area)) &&
+        typeof row.area === 'string' &&
+        ['courses', 'homework', 'materials', 'announcements'].includes(row.area) &&
         text(row.message),
       1000,
     )
@@ -199,8 +200,10 @@ function isDetails(value: unknown): value is TronClassDetails {
       'resubmissionOpen',
       'retractAllowed',
     ]) ||
-    !['individual', 'group', 'unknown'].includes(String(value.submissionType)) ||
-    !['normal', 'multiple', 'unknown'].includes(String(value.mode)) ||
+    typeof value.submissionType !== 'string' ||
+    !['individual', 'group', 'unknown'].includes(value.submissionType) ||
+    typeof value.mode !== 'string' ||
+    !['normal', 'multiple', 'unknown'].includes(value.mode) ||
     !(value.opensAt === null || time(value.opensAt)) ||
     !(value.deadline === null || time(value.deadline)) ||
     !flag(value.isInProgress) ||
@@ -289,7 +292,7 @@ export function parseNativeTronClassResult(
     !record(value) ||
     !only(value, ['status', 'operationId', 'receipt']) ||
     value.operationId !== scope.operationId ||
-    !['submitted', 'unknown'].includes(String(value.status)) ||
+    (value.status !== 'submitted' && value.status !== 'unknown') ||
     (value.status === 'submitted' ? !isReceipt(value.receipt, scope) : value.receipt !== null)
   )
     return invalid();

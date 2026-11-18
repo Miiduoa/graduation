@@ -399,6 +399,14 @@ Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟�
 
 本輪嘗試瀏覽器畫面驗收，但本機瀏覽器啟動受執行環境限制、連接的瀏覽器不可用，雲端瀏覽器也無法連到本機測試頁；沒有將程式／DOM 檢查宣稱為實際視覺驗收。HAR、Mobile 真機及教師收件本輪未重新驗收。
 
+## 2026-11-18 收尾修正與瀏覽器驗證入口
+
+原生 client 的繳交狀態不再先做字串轉換。JSON 陣列 `['unknown']` 或 `['submitted']` 必須拒絕，不能進入完成分支而清除草稿及待查操作；同步錯誤類別、作業模式及個人／小組型別也改為嚴格字串 enum。正常 `unknown`、`submitted` 與 `confirmed` 回應維持原本語意。
+
+兩種 Web Docker recipe 及各自的 deny-all build context 必須明列 `tronClassAccountLifecycle.js`，讓平台關帳 worker 的靜態 import 能在容器內解析；一般 Next build 成功不能替代這項容器驗證。既有 release safety 檢查會核對明列的後端來源及相對依賴閉包。
+
+[Web 瀏覽器回歸](../../scripts/tronclass/README.md#web-瀏覽器回歸) 使用實際 Next standalone，測試 1440 px／390 px 的淺色與深色畫面、合成綁定、選課、教材下載、預覽、停用送交及原操作查證。CI 上傳截圖與帶 checkout／tree／Build ID 的報告；此段說明已加入的驗證入口，執行是否通過須查看目前 head 的 CI artifact，不能由腳本存在推定。瀏覽器只接收合成 API 回應，未進行真人校方登入或繳交。
+
 ## 官方依據
 
 - [靜宜大學教學發展中心：TronClass 登入說明](https://tdcenter.pu.edu.tw/p/406-1061-45101,r1105.php?Lang=zh-tw)：校方正式入口與登入帳密說明。

@@ -31,6 +31,21 @@ it('parses partial school observations without changing an unknown submission in
   expect(parsed.partial).toBe(true);
   expect(parsed.homework[0].submitted).toBeNull();
 });
+it('rejects a JSON array error area instead of assigning it a partial-result category', () => {
+  expect(() => parseNativeTronClassSnapshot({ ...snapshot, partial: true,
+    errors: [{ courseId: 10, area: ['homework'], message: '暫時無法讀取作業。' }],
+  })).toThrow('INVALID_RESPONSE');
+});
+it.each([
+  ['submissionType', ['individual']],
+  ['mode', ['normal']],
+])('rejects a JSON array details %s at the preparation boundary', (field, value) => {
+  const details = { status: 'available', fetchedAt: stamp, submissionType: 'individual', mode: 'normal',
+    opensAt: null, deadline: stamp, isInProgress: true, isClosed: false,
+    attempts: { unlimited: false, limit: 1, used: 0, remaining: 1 }, resubmissionOpen: false, retractAllowed: false };
+  expect(() => parseNativeTronClassPreparation({ ...preparation, details: { ...details, [String(field)]: value } }, scope))
+    .toThrow('INVALID_RESPONSE');
+});
 it('refuses coursework outside the returned course set and duplicate assignments', () => {
   expect(() =>
     parseNativeTronClassSnapshot({ ...snapshot, homework: [{ ...homework, courseId: 99 }] }),
@@ -88,6 +103,41 @@ it('accepts acknowledged readback without inventing a submittedAt', () => {
   const result = parseNativeTronClassResult(acknowledged(), scope);
   expect(result.status).toBe('confirmed');
   expect(JSON.stringify(result)).not.toContain('submittedAt');
+});
+it('preserves a legitimate unknown result for read-only reconciliation', () => {
+  const result = { status: 'unknown', operationId, receipt: null };
+  expect(parseNativeTronClassResult(result, scope)).toEqual(result);
+});
+it.each([
+  ['unknown JSON array', ['unknown']],
+  ['submitted JSON array', ['submitted']],
+  ['nested JSON array', [['unknown']]],
+  ['boxed status string', Object('unknown')],
+  ['null', null],
+  ['boolean', true],
+  ['number', 0],
+])('rejects %s instead of coercing it into a completed result', (_label, status) => {
+  expect(() => parseNativeTronClassResult({ status, operationId, receipt: null }, scope)).toThrow(
+    'INVALID_RESPONSE',
+  );
+});
+it('does not invoke a status object string converter', () => {
+  const toString = jest.fn(() => 'unknown');
+  expect(() =>
+    parseNativeTronClassResult({ status: { toString }, operationId, receipt: null }, scope),
+  ).toThrow('INVALID_RESPONSE');
+  expect(toString).not.toHaveBeenCalled();
+});
+it.each(['unknown', 'submitted'])('rejects a JSON array %s response before submit or reconcile reaches the UI', async status => {
+  const client = createNativeTronClassClient({
+    owner: 'platform:fixture',
+    isCurrent: () => true,
+    request: jest.fn(async () => ({ status: [status], operationId, receipt: null })),
+    upload: jest.fn(),
+  });
+  await expect(client.submit({ ...scope, revision, content: 'fixture text', attachments: [], confirmed: true }))
+    .rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+  await expect(client.reconcile({ ...scope, revision })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
 });
 it('rejects a different operation or homework and never accepts a history entry as a new receipt', () => {
   expect(() =>

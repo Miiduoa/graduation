@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -44,8 +45,8 @@ for (const name of ['Dockerfile', 'Dockerfile.nuni']) {
 
 test('production Web forwards the optional public file storage backend build arg', () => {
   const workflow = read('.github/workflows/web-release.yml');
-  assert.match(workflow, /^      NEXT_PUBLIC_FILE_STORAGE_BACKEND: \$\{\{ vars\.NEXT_PUBLIC_FILE_STORAGE_BACKEND \}\}$/m);
-  assert.match(workflow, /^            --build-arg NEXT_PUBLIC_FILE_STORAGE_BACKEND \\$/m);
+  assert.match(workflow, /^ {6}NEXT_PUBLIC_FILE_STORAGE_BACKEND: \$\{\{ vars\.NEXT_PUBLIC_FILE_STORAGE_BACKEND \}\}$/m);
+  assert.match(workflow, /^ {12}--build-arg NEXT_PUBLIC_FILE_STORAGE_BACKEND \\$/m);
 });
 
 test('functions package keeps index.js as the upload entry', () => {
@@ -71,7 +72,7 @@ for (const name of ['Dockerfile', 'Dockerfile.nuni']) {
   });
 }
 
-// Web 的校務讀取共用這些純來源檔，不應把整個 Functions 部署內容帶進映像。
+// Web 的校務讀取與帳號關閉共用這些純來源檔，不應把整個 Functions 部署內容帶進映像。
 const schoolReaderSources = [
   'backend/functions/dormWorkflow.js',
   'backend/functions/authz.js',
@@ -79,6 +80,7 @@ const schoolReaderSources = [
   'backend/functions/dormSsoIdentity.js',
   'backend/functions/puScraper.js',
   'backend/functions/tronClassScraper.js',
+  'backend/functions/tronClassAccountLifecycle.js',
   'backend/functions/campusStoryAccessBinding.js',
   'backend/functions/campusAnnouncements/catalog.js',
   'backend/functions/lib/puGradeDocument.js',
@@ -94,6 +96,46 @@ const schoolReaderDirectories = [
   'backend/functions/campusAnnouncements/',
   'backend/functions/lib/',
 ];
+
+test('Web backend module dependency closure is included in the exact image source list', () => {
+  const backendRoot = join(root, 'backend/functions');
+  const generatedRoot = join(backendRoot, 'generated/shared');
+  const pending = [];
+  const checked = new Set();
+  const imports = /\b(?:from\s+|(?:import|require)\s*\(\s*|import\s+)(['"])([^'"]+)\1/g;
+  function checkImports(file) {
+    for (const match of read(file).matchAll(imports)) {
+      const specifier = match[2];
+      if (!specifier.startsWith('.')) continue;
+      const target = resolve(root, dirname(file), specifier);
+      if (!target.startsWith(`${backendRoot}${sep}`)) continue;
+      if (target.startsWith(`${generatedRoot}${sep}`)) {
+        // These files are compiled from the copied shared sources before Next.
+        const sharedSource = relative(generatedRoot, target).replace(/\.js$/, '') + '.ts';
+        assert.ok(existsSync(join(root, 'packages/shared/src', sharedSource)),
+          `missing generated shared source for ${file}: ${specifier}`);
+        continue;
+      }
+      const dependency = relative(root, createRequire(join(root, file)).resolve(specifier)).split(sep).join('/');
+      assert.ok(schoolReaderSources.includes(dependency), `missing image source: ${dependency}, imported by ${file}`);
+      if (!checked.has(dependency)) pending.push(dependency);
+    }
+  }
+  function scan(directory) {
+    for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+      const file = `${directory}/${entry.name}`;
+      if (entry.isDirectory() && !['node_modules', '.next', '__tests__', '__mocks__'].includes(entry.name)) scan(file);
+      else if (entry.isFile() && /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) checkImports(file);
+    }
+  }
+  scan('apps/web/src');
+  while (pending.length) {
+    const file = pending.pop();
+    if (checked.has(file)) continue;
+    checked.add(file);
+    checkImports(file);
+  }
+});
 
 for (const recipe of ['Dockerfile', 'Dockerfile.nuni']) {
   test(`school-reader packaging: ${recipe} supplies only the required backend sources before building`, () => {

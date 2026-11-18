@@ -111,3 +111,23 @@ entry 順序與先後關係來自 HAR，本工具不信任其真實性，也不�
 先以已獲授權的受控操作紀錄確認靜宜站點實際使用的 storage 分支及完整 response schema，再決定是否擴充固定來源範圍。跨來源 upload_url、QINIU、多選題、外部資源、小組與重交政策均不因本次分析器更新而開放。完成正式 adapter 前，仍須驗證 binary／callback 的真正結果、完整附件與 final 的關聯、本人與教師收件一致，以及網路逾時後如何避免重複提交。
 
 參考來源：[官方公開前端契約查核](../../docs/nuni/tronclass-public-contract-2026-11-16.md)、[TronClass 官方作業說明](https://support.tronclass.com/tw/question/homework)、[官方操作手冊](https://support.tronclass.com/public-manual/manual-teacher.html)。公開前端與操作文件可定位接口及政策差異，仍不能替代靜宜站點的受控 HTTP 寫入驗收。
+
+
+## Web 瀏覽器回歸
+
+`check-browser.py` 會啟動已完成的 Next standalone 產物，使用真正的頁面、CSS、client codec 與互動元件。Playwright 僅在瀏覽器攔截 API 回覆，提供合成平台 session、綁定、課程、教材、作業和確認結果；所有外部來源請求都會中止，server 不載入私人環境設定。這不會登入真實帳號或打開正式校方 writer，也不驗證伺服器端認證或真實收件。
+
+在已安裝 Node 22、pnpm 與 Web 建置所需公開設定的環境執行：
+
+```sh
+pnpm --filter web build
+python -m pip install playwright==1.57.0
+bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
+python scripts/tronclass/check-browser.py
+```
+
+CI 的 Build Web 會在 Docker runtime 檢查後執行此回歸，並上傳 `tronclass-browser` artifact。四種版面是 1440 px／390 px，各自搭配淺色與深色；每種版面檢查未登入、綁定表單、正式 writer 關閉，以及合成 provider 允許寫入的操作流程。
+
+檢查包括課程隔離、公告／教材切換、真實瀏覽器檔案下載、文字與附件預覽、停用 writer 時即使勾選確認仍不能送交，以及未知結果只保留原 operation 並透過查證取得確認，期間不得再發第二次 submit。截圖同時檢查水平溢出、控制元件超出畫面及未捕捉的頁面錯誤。
+
+`artifacts/tronclass-browser/report.json` 記錄實際 checkout、程式樹、parents、PR head、Next Build ID、Chromium 版本、合成操作紀錄及每張截圖結果；失敗時保留失敗原因。報告沒有校方密碼、cookie 或真實學生作業。`TRONCLASS_BROWSER_OUTPUT` 可指定輸出目錄，`TRONCLASS_BROWSER_NODE` 和 `TRONCLASS_BROWSER_CHROMIUM` 可選擇已安裝的執行檔。瀏覽器未能啟動或任何情境失敗，都不能算驗收通過。
