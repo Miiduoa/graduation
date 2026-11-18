@@ -631,7 +631,7 @@ async def main():
             results.append('home titles, copy and actions grow with the large-text preference at 320/768/1440px')
             await expect(page.locator('html')).to_have_attribute('data-reduced-motion', 'true')
             assert await page.locator('body').evaluate(
-                'el => getComputedStyle(el).backgroundColor === "rgb(248, 247, 243)"'
+                'el => getComputedStyle(el).backgroundColor === "rgb(246, 247, 245)"'
             ), 'Explicit light theme must remain light'
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'home-large-text.png'), full_page=True, animations='disabled')
