@@ -171,7 +171,7 @@ function hasOwnEvidenceFields(value: unknown, required: readonly string[], optio
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
-  if (!hasOwnEvidenceFields(value, ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements']) ||
+  if (!value || !hasOwnEvidenceFields(value, ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements']) ||
       !isRealTimestamp(value.checkedAt)) return false;
   const schedule = value.schedule;
   const assignments = value?.assignments;
@@ -270,7 +270,7 @@ export function formatOnDeviceSchoolPrompt(
 ): string {
   // Reject caller-supplied scope/timetable getters before they are consulted.
   // Legitimate cached JSON and the live collector always use own data fields.
-  const context = hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
+  const context = snapshot && hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
     ? snapshot : null;
   // A missing or malformed campus ID cannot authorize the same account's
   // cached timetable or synchronized assignments from an unknown school.
@@ -306,7 +306,7 @@ export function formatOnDeviceSchoolPrompt(
   // Validate the complete small on-device excerpt before handing any private
   // evidence (including synchronized campus summaries) to the local model.
   const timetable = context?.timetable;
-  const validTimetable = hasOwnEvidenceFields(timetable, ['source', 'updatedAt', 'courses'],
+  const validTimetable = !!timetable && hasOwnEvidenceFields(timetable, ['source', 'updatedAt', 'courses'],
     ['nextClasses', 'currentClasses', 'classGaps']) &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
     // The saved timetable must predate the context that collected it. Comparing
