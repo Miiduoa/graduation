@@ -79,7 +79,10 @@ function isExplicitNonClassroomCategory(value: unknown): boolean {
   // "Bus Stop (Campus) (Inbound)". Strip only complete trailing qualifiers;
   // unrelated building categories such as "交通工程學院" stay eligible.
   let unqualified = category;
-  for (let i = 0; i < 3; i += 1) {
+  // The category is already bounded to MAX_CAMPUS_CLASSROOM_QUERY_LENGTH.
+  // Stop only when no complete qualifier remains: four or more qualifiers
+  // must not silently turn a known bus stop into a classroom destination.
+  while (true) {
     const next = unqualified.replace(/\s*(?:\([^()]{1,32}\)|\[[^\[\]]{1,32}\])\s*$/u, '').trim();
     if (next === unqualified) break;
     unqualified = next;
@@ -158,7 +161,10 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       !Number.isFinite(location.lat) ||
       !Number.isFinite(location.lng) ||
       Math.abs(location.lat) > 90 ||
-      Math.abs(location.lng) > 180
+      Math.abs(location.lng) > 180 ||
+      // (0, 0) is a common unset-coordinate sentinel, never a safe campus
+      // classroom destination. Do not reject genuine equator/meridian points.
+      (location.lat === 0 && location.lng === 0)
     )
       return false;
     if ('schoolId' in location && location.schoolId !== school) return false;

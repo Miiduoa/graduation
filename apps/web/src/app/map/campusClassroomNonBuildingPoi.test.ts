@@ -152,3 +152,49 @@ describe('classroom map destination classification', () => {
     }
   });
 });
+
+describe('defensive classroom destination coordinates and category qualifiers', () => {
+  it('does not navigate to unset (0, 0) coordinates for an otherwise matching hall', () => {
+    const unset = { ...hall, id: 'synthetic-unset-coordinates', lat: 0, lng: 0 };
+    const scoped = { schoolId: 'pu', query: 'PH303' };
+    expect(resolveCampusClassroom({
+      ...scoped, locations: [unset],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      ...scoped, locations: [unset, hall],
+    }).matches).toEqual([hall]);
+
+    // A zero latitude OR longitude on its own is not an unset pair;
+    // these are synthetic coordinates, not claims about a campus.
+    for (const place of [
+      { ...hall, lat: 0 },
+      { ...hall, lng: 0 },
+    ]) {
+      expect(resolveCampusClassroom({
+        ...scoped, locations: [place],
+      }).matches).toEqual([place]);
+    }
+  });
+
+  it('still excludes a known bus category after more than three full qualifiers', () => {
+    const stop = {
+      ...hall,
+      id: 'synthetic-many-qualifiers-stop',
+      category: 'Bus Stop (Campus) (Inbound) (Shuttle) (Temporary)',
+      building: '主顧樓',
+    };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [stop, hall],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([hall]);
+
+    const legitimate = {
+      ...hall,
+      category: '交通工程學院 (Main) (North) (Level) (Wing)',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [legitimate],
+    }).matches).toEqual([legitimate]);
+  });
+});
