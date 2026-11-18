@@ -551,6 +551,70 @@ it('uses native FileReader if mobile Blob.arrayBuffer rejects without using File
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+
+it('recovers local Chinese lesson bytes after a WebView Blob read never resolves', async () => {
+  const text = '停滯的檔案讀取必須能退回本機讀取，不得遺失教材。';
+  const bytes = new TextEncoder().encode(text);
+  const file = new File([bytes], '課堂講義.txt', { type: 'text/plain' });
+  const hangingRead = vi.fn(() => new Promise<ArrayBuffer>(() => {}));
+  Object.defineProperty(file, 'arrayBuffer', { value: hangingRead });
+  let fallbackReads = 0;
+  class CompletedReader {
+    readyState = 0;
+    result: ArrayBuffer | null = null;
+    error = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    readAsArrayBuffer() {
+      fallbackReads += 1;
+      this.readyState = 2;
+      this.result = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      this.onload?.();
+    }
+    abort() { this.readyState = 2; this.onabort?.(); }
+  }
+  vi.useFakeTimers();
+  vi.stubGlobal('FileReader', CompletedReader);
+  try {
+    const pending = readStudyFileBytes(file);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(new TextDecoder().decode(await pending)).toBe(text);
+    expect(hangingRead).toHaveBeenCalledOnce();
+    expect(fallbackReads).toBe(1);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
+
+it('rejects a permanently stalled native FileReader without retaining a pending import', async () => {
+  const file = new File(['主鍵'], '課堂講義.txt', { type: 'text/plain' });
+  Object.defineProperty(file, 'arrayBuffer', { value: undefined });
+  let aborts = 0;
+  class HangingReader {
+    readyState = 0;
+    result = null;
+    error = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    readAsArrayBuffer() { this.readyState = 1; }
+    abort() { aborts += 1; this.readyState = 2; }
+  }
+  vi.useFakeTimers();
+  vi.stubGlobal('FileReader', HangingReader);
+  try {
+    const rejection = expect(readStudyFileBytes(file)).rejects.toThrow(/timed out/);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejection;
+    expect(aborts).toBe(1);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
+
 it('rejects corrupted backup after both Blob APIs fail, preserving current notes', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;

@@ -60,6 +60,10 @@ const MANUAL_COPY_LABELS: Record<ManualCopyKind, { region: string; field: string
 // A mobile WebView clipboard bridge may never settle. Restore the same exact
 // selectable TXT/JSON snapshot instead of leaving the student waiting forever.
 const STUDY_CLIPBOARD_CONFIRM_MS = 5000;
+// Some mobile WebViews leave native file reads pending forever. After a
+// bounded wait, retry the same local bytes with FileReader; if that also
+// stalls, fail without replacing the existing course or unsaved notes.
+const STUDY_LOCAL_FILE_READ_TIMEOUT_MS = 30_000;
 
 // Mobile browsers and embedded WebViews may throw SecurityError merely when
 // reading navigator.clipboard or clipboard.writeText. Fall back to a selectable
@@ -146,24 +150,32 @@ export async function readStudyFileBytes(file: File, signal?: AbortSignal): Prom
   // Compare exact byte counts, then retry the original file via FileReader.
   if (typeof file.arrayBuffer === 'function') {
     let cancelPending: (() => void) | undefined;
+    let nativeReadTimeout: ReturnType<typeof setTimeout> | undefined;
     try {
       // Blob.arrayBuffer has no AbortSignal argument. A broken mobile WebView
       // can leave it pending forever; cancellation must release this import
       // immediately instead of waiting for the original read to settle.
       // This does not claim to interrupt the browser's underlying native I/O.
       const nativeRead = file.arrayBuffer();
-      const bytes = await (signal ? Promise.race<ArrayBuffer>([
+      const bytes = await Promise.race<ArrayBuffer>([
         nativeRead,
         new Promise<ArrayBuffer>((_, reject) => {
-          cancelPending = () => reject(new DOMException('Local file read aborted', 'AbortError'));
-          signal.addEventListener('abort', cancelPending, { once: true });
-          if (signal.aborted) cancelPending();
+          nativeReadTimeout = setTimeout(
+            () => reject(new Error('Local Blob read timed out')),
+            STUDY_LOCAL_FILE_READ_TIMEOUT_MS,
+          );
+          if (signal) {
+            cancelPending = () => reject(new DOMException('Local file read aborted', 'AbortError'));
+            signal.addEventListener('abort', cancelPending, { once: true });
+            if (signal.aborted) cancelPending();
+          }
         }),
-      ]) : nativeRead);
+      ]);
       if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
       if (bytes instanceof ArrayBuffer && bytes.byteLength === file.size) return bytes;
     } catch { /* Fall through to the native on-device FileReader unless cancelled. */ }
     finally {
+      if (nativeReadTimeout !== undefined) clearTimeout(nativeReadTimeout);
       if (cancelPending) signal?.removeEventListener('abort', cancelPending);
     }
   }
@@ -179,7 +191,9 @@ export async function readStudyFileBytes(file: File, signal?: AbortSignal): Prom
       return;
     }
     let settled = false;
+    let readerTimeout: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
+      if (readerTimeout !== undefined) clearTimeout(readerTimeout);
       signal?.removeEventListener('abort', cancel);
       reader.onload = null;
       reader.onerror = null;
@@ -210,6 +224,13 @@ export async function readStudyFileBytes(file: File, signal?: AbortSignal): Prom
     reader.onabort = () => settle(undefined, new DOMException('Local file read aborted', 'AbortError'));
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) { cancel(); return; }
+    readerTimeout = setTimeout(() => {
+      // WebViews can omit onload/onerror/onabort entirely. Ignore late events
+      // and release this import rather than displaying an endless spinner.
+      try { if (reader.readyState === 1) reader.abort(); }
+      catch { /* The fallback promise still settles below. */ }
+      settle(undefined, new Error('Local FileReader timed out'));
+    }, STUDY_LOCAL_FILE_READ_TIMEOUT_MS);
     try { reader.readAsArrayBuffer(file); }
     catch (error) { settle(undefined, error instanceof Error ? error : new Error('Local file reader failed')); }
   });
