@@ -2,6 +2,15 @@
 
 const { z } = require('zod');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { isAccountUnavailable } = require('../../accountLifecycle');
+const {
+  ASSISTANT_PERMISSIONS_DOC_ID,
+  normalizeAssistantWritePermissions,
+  isAssistantWriteToolAllowed,
+  assistantWritePermissionDeniedMessage,
+} = require('../../lib/assistantWritePermissions');
+const { assertServiceScope } = require('./serviceWriteGuard');
 
 const inputSchema = z.object({
   dormitory: z.string().min(1),
@@ -49,12 +58,35 @@ async function execute(ctx, rawInput) {
       };
     }
 
+    assertServiceScope(ctx);
     const db = getFirestore();
-    const repairRef = await db
-      .collection('schools')
-      .doc(schoolId)
-      .collection('repairRequests')
-      .add({
+    const userRef = db.collection('users').doc(uid);
+    const schoolRef = db.collection('schools').doc(schoolId);
+    const repairRef = schoolRef.collection('repairRequests').doc();
+
+    // A proposal claim prevents duplicate confirmations; it does not freeze
+    // authority. Read the current actor and grant in the same transaction as
+    // the memo so a retry also observes revocation before any business write.
+    return await db.runTransaction(async (tx) => {
+      const [account, member, permission] = await Promise.all([
+        tx.get(userRef),
+        tx.get(schoolRef.collection('members').doc(uid)),
+        tx.get(userRef.collection('settings').doc(ASSISTANT_PERMISSIONS_DOC_ID)),
+      ]);
+      // Preserve the existing admission semantics for new/legacy profiles.
+      if (isAccountUnavailable(account.exists ? account.data() : {})) {
+        throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。');
+      }
+      const membership = member.exists ? member.data() : null;
+      if (!membership || (membership.status && membership.status !== 'active')) {
+        throw new HttpsError('permission-denied', '請使用目前學校的有效帳號。');
+      }
+      const permissions = normalizeAssistantWritePermissions(permission.exists ? permission.data() : null);
+      if (!isAssistantWriteToolAllowed(permissions, 'createDormRepairRequest')) {
+        throw new HttpsError('permission-denied', assistantWritePermissionDeniedMessage('createDormRepairRequest'));
+      }
+
+      tx.create(repairRef, {
         schoolId,
         userId: uid,
         dormitory: input.dormitory,
@@ -67,24 +99,17 @@ async function execute(ctx, rawInput) {
         createdAt: FieldValue.serverTimestamp(),
       });
 
-    const verify = await repairRef.get();
-    if (!verify.exists) {
+      // The caller receives this receipt only after the transaction commits.
+      // An uncertain commit still follows the existing failure path below.
       return {
-        success: false,
-        errorCode: 'verify_failed',
-        errorMessage: 'Repair document missing after write',
+        success: true,
+        repairId: repairRef.id,
+        requestId: repairRef.id,
+        status: 'pending',
+        dormitory: input.dormitory,
+        room: input.room,
       };
-    }
-
-    const repairId = repairRef.id;
-    return {
-      success: true,
-      repairId,
-      requestId: repairId,
-      status: 'pending',
-      dormitory: input.dormitory,
-      room: input.room,
-    };
+    });
   } catch (e) {
     const isZod = e && typeof e === 'object' && e.name === 'ZodError';
     return {
