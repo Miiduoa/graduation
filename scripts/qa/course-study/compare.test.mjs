@@ -35,6 +35,20 @@ test('rejects missing comparisons, unauthorized sources and duplicate cases', ()
   const duplicated = fixture(); duplicated.trials.push(structuredClone(duplicated.trials[0]));
   assert.throws(() => auditStudyComparisons(duplicated), /duplicate caseId/);
 });
+test('rejects canonically equivalent Unicode case IDs without rewriting labels', () => {
+  const paired = fixture();
+  paired.trials[0].caseId = '題目-é';
+  const second = structuredClone(paired.trials[0]);
+  second.caseId = '題目-e\u0301'; // Decomposed spelling of the same ID.
+  paired.trials.push(second);
+  assert.throws(() => auditStudyComparisons(paired), /duplicate caseId/);
+
+  // Different cases still appear in the original authored spelling and order.
+  second.caseId = '題目-另一題';
+  const report = auditStudyComparisons(paired);
+  assert.deepEqual(report.caseIds, ['題目-é', '題目-另一題']);
+  assert.equal(report.trialCount, 2);
+});
 test('rejects false success for failures and non-finite values', () => {
   const bad = fixture(); bad.trials[0].results[1].correct = true;
   assert.throws(() => auditStudyComparisons(bad), /failed attempt/);

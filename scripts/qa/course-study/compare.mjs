@@ -78,8 +78,11 @@ export function auditStudyComparisons(raw) {
     const key = `trials[${index}]`;
     const trial = object(item, key);
     const id = text(trial.caseId, `${key}.caseId`);
-    if (ids.has(id)) fail(key, 'duplicate caseId');
-    ids.add(id);
+    // Canonically equivalent Unicode case IDs must not count as two trials.
+    // Preserve the original label in the report and do not alter fixture bytes.
+    const identity = id.normalize('NFC');
+    if (ids.has(identity)) fail(key, 'duplicate caseId');
+    ids.add(identity);
     caseIds.push(id);
     for (const digest of ['sourceSha256', 'questionSha256']) {
       if (typeof trial[digest] !== 'string' || !/^[a-f0-9]{64}$/i.test(trial[digest]))
