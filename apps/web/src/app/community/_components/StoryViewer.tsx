@@ -233,6 +233,17 @@ export function StoryViewer({
             const start = gesture.current;
             gesture.current = null;
             if (!start || e.pointerId !== start.pointerId) return;
+            // A pointer may begin on the canvas and finish over selectable text or
+            // native seek controls. Touch pointer capture can keep e.target on the
+            // original canvas, so also inspect the actual release coordinates.
+            const isProtectedRelease = (target: EventTarget | null) =>
+              (target instanceof Element && target.closest('[data-story-caption]') !== null) ||
+              (target instanceof HTMLVideoElement &&
+                e.clientY >= target.getBoundingClientRect().bottom - 60);
+            if (
+              isProtectedRelease(e.target) ||
+              isProtectedRelease(document.elementFromPoint?.(e.clientX, e.clientY) ?? null)
+            ) return;
             const dx = e.clientX - start.x;
             const dy = e.clientY - start.y;
             if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {

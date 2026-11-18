@@ -339,6 +339,19 @@ it('keeps a gesture from navigating when it finishes on caption text or native v
   fireEvent.pointerUp(video, { ...pointer, clientX: 90, clientY: 95 });
   expect(viewer.switchAuthor).not.toHaveBeenCalled();
 
+  // Touch pointer capture can keep the release target on the original canvas.
+  // Hit testing must still recognize the caption at the pointer's coordinates.
+  const originalHitTest = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => caption });
+  try {
+    fireEvent.pointerDown(canvas, { ...pointer, clientX: 95 });
+    fireEvent.pointerUp(canvas, { ...pointer, clientX: 95 });
+  } finally {
+    if (originalHitTest) Object.defineProperty(document, 'elementFromPoint', originalHitTest);
+    else Reflect.deleteProperty(document, 'elementFromPoint');
+  }
+  expect(viewer.next).not.toHaveBeenCalled();
+
   fireEvent.pointerDown(canvas, { ...pointer, clientX: 90 });
   fireEvent.pointerUp(canvas, { ...pointer, clientX: 5 });
   expect(viewer.switchAuthor).toHaveBeenCalledOnce();
