@@ -427,3 +427,15 @@ it('explains blocked continuous video playback and lets the student retry with n
   expect(screen.queryByRole('status')).toBeNull();
   expect(screen.getByRole('button', { name: '停止連播' }).getAttribute('aria-pressed')).toBe('true');
 });
+
+it('ignores a harmless interrupted play promise without reporting a playback error', async () => {
+  const { video } = renderVideo();
+  vi.spyOn(HTMLMediaElement.prototype, 'play')
+    .mockRejectedValue(new DOMException('Interrupted by pause', 'AbortError'));
+
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '停止連播' }).getAttribute('aria-pressed')).toBe('true');
+  expect(video).toHaveProperty('controls', true);
+});
