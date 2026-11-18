@@ -1749,4 +1749,48 @@ describe('public Providence building geometry route', () => {
   });
 
 
+
+  it.each([
+    { label: 'malformed replication header', osm3s: 'not-an-object', retryAfter: '3600', cooldown: 3600 },
+    { label: 'missing replication timestamp', osm3s: {}, retryAfter: '3600', cooldown: 3600 },
+    { label: 'invalid replication timestamp without provider cooldown',
+      osm3s: { timestamp_osm_base: '2026-11-18T99:00:00Z' }, retryAfter: null, cooldown: 600 },
+  ])('fails closed on $label and preserves the correct retry window', async ({ osm3s, retryAfter, cooldown }) => {
+    // Synthetic upstream: a valid JSON document with a known building must not
+    // bypass a broken replication header or ignore the operator's Retry-After.
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          osm3s, elements: JSON.parse(osmPayload).elements,
+        }), {
+          status: 200,
+          headers: retryAfter === null ? {} : { 'Retry-After': retryAfter },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect(rejected.headers.get('Retry-After')).toBe(String(cooldown));
+      expect((await rejected.json()).error).toMatch(/temporarily unavailable/);
+
+      clock.mockReturnValue(start + (cooldown - 60) * 1000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('60');
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      clock.mockReturnValue(start + (cooldown + 1) * 1000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).buildings).toHaveLength(1);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 });
