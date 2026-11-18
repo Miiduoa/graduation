@@ -177,6 +177,10 @@ describe('readable Unicode passage boundaries', () => {
     { label: 'emoji skin tone', prefixLength: 1_598, cluster: '👍🏽' },
     { label: 'emoji variation selector', prefixLength: 1_599, cluster: '☀️' },
     { label: 'regional flag pair', prefixLength: 1_598, cluster: '🇹🇼' },
+    { label: 'Indic virama before ZWNJ', prefixLength: 1_598, cluster: 'क\u094d\u200cष' },
+    { label: 'Indic ZWNJ before consonant', prefixLength: 1_597, cluster: 'क\u094d\u200cष' },
+    { label: 'Hangul decomposed L+V', prefixLength: 1_599, cluster: '\u1100\u1161' },
+    { label: 'Hangul decomposed L+V+T', prefixLength: 1_598, cluster: '\u1100\u1161\u11a8' },
   ])('keeps a $label in one original-source passage', ({ prefixLength, cluster }) => {
     const prefix = '甲'.repeat(prefixLength);
     const original = prefix + cluster + '乙'.repeat(1_700);

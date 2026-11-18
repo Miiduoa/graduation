@@ -1640,3 +1640,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - `StudyReadAloud` 在 `Intl.Segmenter` 不存在或回傳錯誤邊界時，原本可合併組合音標、ZWJ、韓文 Jamo 與 emoji，卻可能將印度語文的 virama + ZWNJ 組字拆在 160 UTF-16 單位上限兩邊，讓手機中文語音朗讀外語專有名詞／引用文字時出現不自然的中斷。回退分段器現在把 U+200C（ZWNJ）也視為延續邊界；完整原文與每個 chunk 上限不變。
 - 增加 Devānāgarī 組字 `क\u094d\u200c` 在正常瀏覽器分段與「WebView 假稱各 code point 為完整 grapheme」兩種模擬情境的回歸測試。僅改動本機朗讀的分段與測試，不修改教材、JSON checkpoint、權限、模型或外部傳輸；這不是 iOS／Android 真機驗收，仍需按新 SHA 驗證全部 CI、CodeQL、App 5504170、Maestro 與同題同機 Ahaboard 比較，PR 保留 Draft。
+
+### 2026-11-18：跨語講義的 1,600 字元分段保留印地語組字與韓文 Jamo
+
+- 閱讀白板把 PDF/TXT 原文切成最長 1,600 UTF-16 單位的 AI 教學段落。舊版在邊界落在印地語 virama + ZWNJ 或韓文分解型 Jamo L+V(+T) 之間時，可能把同一個字的組成單位拆到相鄰段落，影響外語術語閱讀及後續逐字來源對照。現於原有有限回退規則補上 ZWNJ 兩側與 Hangul Jamo 連續邊界，文字內容、順序與上限不變；不改動已保存教材或任何 checkpoint 格式。
+- 擴充 `studyTutor.test.ts` 四種跨語組字在 1,600 單位邊界兩側的正向案例，原有 emoji、旗幟、結合音標、CRLF 及超長組合字測試繼續保留。測試須核對第一段精確內容、下一段起點、全文逐字還原、每段不超限。
+- 這是程式及 Web 單元回歸，不是 WebGPU 真機正確率、iOS／Android／Maestro 實測或 Ahaboard 同題同機對照。新版 GitHub CI／CodeQL、安全閘門、App 5504170 APPROVED 依確切 head 另核對；PR 保持 Draft，禁止合併或部署。

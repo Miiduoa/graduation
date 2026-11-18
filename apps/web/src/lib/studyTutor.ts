@@ -120,6 +120,19 @@ function keepStudyGraphemeTogether(text: string, start: number, end: number): nu
       (/\p{M}/u.test(String.fromCodePoint(nextPoint)) ||
         (nextPoint >= 0x1f3fb && nextPoint <= 0x1f3ff));
     const emojiJoiner = nextPoint === 0x200d || previousPoint === 0x200d;
+    // Virama + ZWNJ clusters in licensed multilingual lessons should stay
+    // together when a 1,600-unit passage boundary crosses their join control.
+    // Keep the same bounded local fallback rule as the read-aloud component.
+    const zeroWidthNonJoiner = nextPoint === 0x200c || previousPoint === 0x200c;
+    // Decomposed Korean syllables use Hangul L+V(+T), including extended Jamo.
+    const isHangulL = (point: number | undefined) => point !== undefined &&
+      ((point >= 0x1100 && point <= 0x115f) || (point >= 0xa960 && point <= 0xa97f));
+    const isHangulV = (point: number | undefined) => point !== undefined &&
+      ((point >= 0x1160 && point <= 0x11a7) || (point >= 0xd7b0 && point <= 0xd7c6));
+    const isHangulT = (point: number | undefined) => point !== undefined &&
+      ((point >= 0x11a8 && point <= 0x11ff) || (point >= 0xd7cb && point <= 0xd7fb));
+    const joinedHangul = (isHangulV(nextPoint) && (isHangulL(previousPoint) || isHangulV(previousPoint))) ||
+      (isHangulT(nextPoint) && (isHangulV(previousPoint) || isHangulT(previousPoint)));
     // Emoji subdivision flags (e.g. Scotland) encode a black flag followed
     // by invisible tag letters and a cancel tag. Keep the tag sequence
     // together when a passage boundary lands inside it. This does not
@@ -146,7 +159,8 @@ function keepStudyGraphemeTogether(text: string, start: number, end: number): nu
       splitsFlag = precedingIndicators % 2 === 1;
     }
     if (!((previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) ||
-      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner || splitsFlag || splitsEmojiTagFlag)) break;
+      (previous === 13 && next === 10) || joinsPrevious || emojiJoiner ||
+      zeroWidthNonJoiner || joinedHangul || splitsFlag || splitsEmojiTagFlag)) break;
     end = previousStudyCodePointStart(text, end);
   }
   // Extremely long clusters cannot fit within the passage budget. Keep the
