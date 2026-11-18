@@ -609,7 +609,7 @@ describe('verified PH code with explicit floor and room text', () => {
 
   it('rejects incomplete or malformed floor-room text and never leaks the PH code to other schools', () => {
     expect(sourcedHall).toBeDefined();
-    for (const query of ['PH3F', 'PH3Froom303', 'PH3Fabc303', 'PH3F999999']) {
+    for (const query of ['PH3F', 'PH3F室', 'PH23F', 'PH3Froom303', 'PH3Fabc303', 'PH3F999999']) {
       expect(resolveCampusClassroom({
         schoolId: 'pu', query, locations: [sourcedHall!],
       }).status, query).toBe('unmatched');
