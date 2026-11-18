@@ -156,6 +156,10 @@ function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
   return names.some((candidate) => {
     if (!query.startsWith(candidate)) return false;
     const suffix = query.slice(candidate.length);
+    // A shorter alias must not consume the original building suffix as a room:
+    // "Providence Hall 3F" is a floor-only request, not "Providence" + room "Hall 3F".
+    // The full sourced name was checked first, so legitimate "Hall 303" still works.
+    if (candidate !== name && suffix.startsWith(name.slice(candidate.length))) return false;
     // "Lab" must not become "Laboratory 101" merely through a Latin prefix collision.
     if (/[a-z]$/u.test(candidate) && /^[a-z]/u.test(suffix)) return false;
     // "R101" does not establish that the building is "R1" and the room is "01".
