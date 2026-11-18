@@ -235,6 +235,32 @@ it('pauses a playing video while its caption is focused and resumes only playbac
   expect(play).toHaveBeenCalledTimes(priorPlayCount);
 });
 
+it('keeps a video stopped when the student disables continuous playback while reading its caption', () => {
+  const { video } = renderVideo();
+  let paused = true;
+  Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
+    paused = false;
+    return Promise.resolve();
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {
+    paused = true;
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  expect(paused).toBe(false);
+  const caption = screen.getByRole('region', { name: '限時動態說明文字' });
+  act(() => caption.focus());
+  expect(paused).toBe(true);
+
+  // Touch/screen-reader activation need not blur the focused caption first.
+  fireEvent.click(screen.getByRole('button', { name: '停止連播' }));
+  expect(paused).toBe(true);
+  act(() => screen.getByRole('button', { name: '連續播放' }).focus());
+  expect(paused).toBe(true);
+  expect(play).toHaveBeenCalledTimes(1);
+});
+
 it('lets students focus and read media captions without switching stories by arrow keys or caption taps', () => {
   const { viewer } = renderVideo();
   const canvas = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
