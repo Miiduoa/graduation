@@ -139,7 +139,7 @@ export function StoryViewer({
           e.shiftKey ||
           e.target instanceof HTMLVideoElement ||
           (e.target instanceof Element &&
-            e.target.closest('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable="true"]') !== null)
+            e.target.closest('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable="true"], [data-story-caption]') !== null)
         )
           return;
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -211,10 +211,11 @@ export function StoryViewer({
             if (e.target === e.currentTarget) setReadingFocused(false);
           }}
           onPointerDown={(e) => {
-            // Leave native play/seek controls alone; swipes across the picture can still change author.
+            // Keep native seek controls and selectable captions free of story gestures.
             if (
-              e.target instanceof HTMLVideoElement &&
-              e.clientY >= e.target.getBoundingClientRect().bottom - 60
+              (e.target instanceof Element && e.target.closest('[data-story-caption]') !== null) ||
+              (e.target instanceof HTMLVideoElement &&
+                e.clientY >= e.target.getBoundingClientRect().bottom - 60)
             ) {
               gesture.current = null;
               return;
@@ -294,7 +295,20 @@ export function StoryViewer({
           ) : photo ? (
             <p className={styles.unavailable}>照片暫時無法顯示</p>
           ) : null}
-          {!!story.text && <p className={media ? styles.caption : styles.text}>{story.text}</p>}
+          {!!story.text && (
+            <p
+              className={media ? styles.caption : styles.text}
+              role={media ? 'region' : undefined}
+              aria-label={media ? '限時動態說明文字' : undefined}
+              aria-description={media ? '使用方向鍵閱讀說明文字，不會切換限時動態。' : undefined}
+              tabIndex={media ? 0 : undefined}
+              data-story-caption={media ? 'true' : undefined}
+              onFocus={media ? () => setReadingFocused(true) : undefined}
+              onBlur={media ? () => setReadingFocused(false) : undefined}
+            >
+              {story.text}
+            </p>
+          )}
         </div>
         <footer className={styles.footer}>
           {viewer.isOwner && (

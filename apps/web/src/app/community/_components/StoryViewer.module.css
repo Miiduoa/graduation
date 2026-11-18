@@ -166,6 +166,10 @@
   background: #161b19;
   line-height: 1.5;
 }
+.caption:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: -4px;
+}
 .unavailable {
   padding: 16px;
 }
