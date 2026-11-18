@@ -91,7 +91,7 @@ export async function handlePersonalImportCloudImage(
               { type: 'image_url', image_url: { url: 'data:' + input.mime + ';base64,' + encoded } },
             ] }],
             stream: false, temperature: 0, max_tokens: 4096, reasoning_effort: 'low',
-            response_format: { type: 'json_schema', json_schema: outputSchema() },
+            response_format: { type: 'json_schema', json_schema: { name: 'personal_import_timetable', schema: outputSchema() } },
           }),
         });
       if (!result.ok) {

@@ -90,7 +90,6 @@ import {
 } from '../services/personalImports';
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
 import { personalImportDocumentAiSource, parsePersonalImportAiResponse } from '@campus/shared/src/imports/aiRecognition';
-import { requestPersonalImportCloudImage } from '@campus/shared/src/imports/aiCloudImage';
 import {
   getMobileImportAiAvailability,
   MOBILE_IMPORT_AI_MAX_CHARACTERS,
@@ -1010,12 +1009,10 @@ function ImportWorkspace({
       if (mode === 'ai' && cloudImageConsent && session?.context) {
         setNotice('雲端視覺模型正在直接辨識原圖，尚未修改課表，可隨時取消。');
         try {
-          const cloud = await requestPersonalImportCloudImage({
+          const cloud = await platform.recognizeImportImage(session.context, {
             base64, mime: mime as 'image/png' | 'image/jpeg',
             kind: 'timetable', academicYear, semester,
             explicitConsent: true,
-            endpoint: 'https://nuni.tw/api/personal-import/recognize-image',
-            headers: { Authorization: 'Platform ' + session.context },
             signal: abort.current.signal,
           });
           if (!current(run)) return;

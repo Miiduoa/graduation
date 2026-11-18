@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { outputSchema } from './personalImportCloud';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handlePersonalImportCloudImage, PERSONAL_IMPORT_VISION_MODEL } from './personalImportCloudImage';
 
@@ -103,7 +104,10 @@ it('uploads a consented screenshot as real image_url input to a vision model and
   expect(sent.messages[0].content[1]).toEqual({
     type: 'image_url', image_url: { url: 'data:image/png;base64,' + sample.imageBase64 },
   });
-  expect(sent.response_format.type).toBe('json_schema');
+  expect(sent.response_format).toEqual({
+    type: 'json_schema',
+    json_schema: { name: 'personal_import_timetable', schema: outputSchema() },
+  });
   expect(await result.json()).toMatchObject({ provider: 'cloud-vision',
     output: expect.stringContaining('資料庫') });
   expect(result.headers.get('cache-control')).toContain('no-store');

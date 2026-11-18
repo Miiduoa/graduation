@@ -1202,6 +1202,20 @@ it('shows clear source choices and never starts a model download without choosin
   );
 });
 
+it('keeps the local fallback download notice visible when cloud image consent is enabled', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  context.session = {
+    platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    context: 'verified-account-context', isPlatformOperator: false,
+  };
+  vi.mocked(browserRequest).mockResolvedValue({ workspaces: [] });
+  render(<PersonalImportCenter />);
+  fireEvent.click(screen.getByLabelText('同意上傳原始課表截圖給雲端視覺模型'));
+  expect(screen.getByText(/你已選擇雲端看圖/)).toBeTruthy();
+  expect(screen.getByText(/本機備援模型首次下載約 1.9 GB/)).toBeTruthy();
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+});
+
 it('explains unsupported AI while preserving ordinary import paths', async () => {
   vi.mocked(getPersonalImportAiAvailability).mockReturnValue({
     available: false,

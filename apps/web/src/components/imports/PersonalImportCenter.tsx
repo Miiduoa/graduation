@@ -1558,6 +1558,7 @@ function ImportWorkspace({
               : '目前先由本機 OCR 讀取圖片，再以雲端整理文字。原圖不會上傳，送出文字前會遮罩可辨識個資；雲端無法使用時改用本機備援。'
             : aiAvailability.reason ||
               '目前瀏覽器無法使用裝置端 AI，可使用學校表格、檔案或一般圖片讀取。'}
+          {aiAvailability.available && ` 本機備援模型首次下載${aiAvailability.downloadLabel}，請留意網路流量與裝置儲存空間。`}
         </p>
         <div className={styles.modelTools}>
           <button
