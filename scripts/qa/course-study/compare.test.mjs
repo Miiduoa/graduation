@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -368,6 +368,14 @@ test('verifies local course/question bytes without exposing private content or p
     delete missing.trials[0].questionFile;
     assert.throws(() => verifyLocalStudyFixtures(missing, manifestPath),
       /relative file path required/);
+    // Never try to hash a directory, FIFO, device or socket as a fixture.
+    // Some special files can block a synchronous reader indefinitely.
+    mkdirSync(join(directory, 'not-a-file'));
+    const special = structuredClone(input);
+    special.trials[0].sourceFile = 'not-a-file';
+    assert.throws(() => verifyLocalStudyFixtures(special, manifestPath),
+      /regular fixture file required/);
+    assert.equal(verifyLocalStudyFixtures(input, manifestPath).fixtureIntegrityVerified, true);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

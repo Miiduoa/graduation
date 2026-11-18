@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Audits paired, human-verified study tasks. Never uploads study material or grades AI. */
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -230,6 +230,15 @@ function fixturePath(root, name, where) {
   try { actual = realpathSync(candidate); }
   catch { fail(where, 'fixture file unavailable'); }
   if (!contained(actual)) fail(where, 'file must remain inside manifest directory');
+  // A path can resolve to a FIFO, socket or device. readFileSync on a FIFO
+  // may block indefinitely, so never treat non-regular files as fixtures.
+  // Keep a clear local error without echoing the learner's private path.
+  try {
+    if (!statSync(actual).isFile()) fail(where, 'regular fixture file required');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('regular fixture file required')) throw error;
+    fail(where, 'fixture file unavailable');
+  }
   return actual;
 }
 export function verifyLocalStudyFixtures(raw, manifestPath) {
