@@ -128,6 +128,79 @@ describe('public course transport', () => {
     expect(result?.content).not.toContain('0 筆');
   });
 
+  it('stops an unbounded chunked course reply before buffering the full body', async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        // Missing Content-Length: the old response.text() path would continue
+        // reading forever instead of rejecting after exceeding 512 KiB.
+        controller.enqueue(new Uint8Array(300_000).fill(65));
+      },
+      cancel() { cancelled = true; },
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(stream, { headers: { 'content-type': 'application/json' } }),
+    );
+    const result = await answer({ ...options, fetcher });
+    expect(result?.read?.status).toBe('unavailable');
+    expect(result?.content).not.toContain('0 筆');
+    expect(pulls).toBeGreaterThanOrEqual(2);
+    expect(cancelled).toBe(true);
+  });
+
+  it('decodes an official Chinese course name split across streaming UTF-8 chunks', async () => {
+    const course = {
+      code: 'CS100', section: '01', title: '資料庫', department: '資工系',
+      teacher: '王老師', time: '一2', room: '教室101', semester: '1151', credits: '3',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify({ ...data(), courses: [course] }));
+    const chinese = bytes.findIndex((byte) => byte >= 0xe0);
+    expect(chinese).toBeGreaterThan(0);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, chinese + 1));
+        controller.enqueue(bytes.slice(chinese + 1));
+        controller.close();
+      },
+    });
+    const result = await answer({
+      ...options,
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(stream, { headers: { 'content-type': 'application/json' } }),
+      ),
+    });
+    expect(result?.read?.status).toBe('ready');
+    expect(result?.content).toContain('資料庫');
+  });
+
+  it('rejects damaged UTF-8 in a chunked Chinese course instead of accepting replacement text', async () => {
+    const course = {
+      code: 'CS100', section: '01', title: '資料庫', department: '資工系',
+      teacher: '王老師', time: '一2', room: '教室101', semester: '1151', credits: '3',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify({ ...data(), courses: [course] }));
+    const chinese = bytes.findIndex((byte) => byte >= 0xe0);
+    expect(chinese).toBeGreaterThan(0);
+    bytes[chinese + 1] = 0xff;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, chinese + 1));
+        controller.enqueue(bytes.slice(chinese + 1));
+        controller.close();
+      },
+    });
+    const result = await answer({
+      ...options,
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(stream, { headers: { 'content-type': 'application/json' } }),
+      ),
+    });
+    expect(result?.read?.status).toBe('unavailable');
+    expect(result?.content).not.toContain('資料庫');
+  });
+
   it('omits error and request details from failures', async () => {
     const result = await answer({
       ...options,
