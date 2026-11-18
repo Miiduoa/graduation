@@ -1,8 +1,10 @@
 import { nuniBffFilePut, nuniBffRequest } from '../services/nuniClient';
 import {
   nativeTronClassFirebaseRequest,
+  nativeTronClassFirebaseSubmissionDownload,
   tronClassUploadQuery,
 } from '../services/tronClassNativeTransport';
+import { requestNativeTronClassSubmissionDownload } from '../services/tronClassNativeDownload';
 import { operationId, revision } from './fixtures/tronClassIntegration';
 
 const handle = `ps_${'a'.repeat(43)}`;
@@ -10,9 +12,16 @@ const originalFetch = global.fetch;
 const mockGetIdToken = jest.fn();
 let mockUser: { uid: string; getIdToken: typeof mockGetIdToken } | null;
 jest.mock('../firebase', () => ({ getAuthInstance: () => ({ currentUser: mockUser }) }));
+jest.mock('../services/tronClassNativeDownload', () => ({
+  ...jest.requireActual('../services/tronClassNativeDownload'),
+  requestNativeTronClassSubmissionDownload: jest.fn(),
+}));
+const submissionInput = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 40, revision };
+const downloadMock = jest.mocked(requestNativeTronClassSubmissionDownload);
 beforeEach(() => {
   mockUser = { uid: 'school-a', getIdToken: mockGetIdToken };
   mockGetIdToken.mockReset().mockResolvedValue('fresh-token');
+  downloadMock.mockReset().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'answer.pdf', contentType: 'application/pdf' });
 });
 afterEach(() => {
   global.fetch = originalFetch;
@@ -115,4 +124,42 @@ it('sanitizes Firebase error messages and does not replay school writes', async 
     message: 'TRONCLASS_WRITES_DISABLED',
   });
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('binds submission attachment downloads to the same Firebase owner and copies input before obtaining its token', async () => {
+  const scope = { ...submissionInput };
+  mockGetIdToken.mockImplementationOnce(async () => {
+    scope.submissionId = '999';
+    scope.uploadId = 999;
+    return 'fresh-token';
+  });
+  await nativeTronClassFirebaseSubmissionDownload('school-a', () => true, scope);
+  expect(downloadMock).toHaveBeenCalledWith('Bearer fresh-token', submissionInput, expect.any(Function), undefined);
+  mockGetIdToken.mockImplementationOnce(async () => {
+    mockUser = { uid: 'school-b', getIdToken: mockGetIdToken };
+    return 'wrong-owner-token';
+  });
+  await expect(nativeTronClassFirebaseSubmissionDownload('school-a', () => true, submissionInput))
+    .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  expect(downloadMock).toHaveBeenCalledTimes(1);
+});
+
+it('rejects invalid and already cancelled attachment requests before obtaining a Firebase token', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(nativeTronClassFirebaseSubmissionDownload('school-a', () => true, submissionInput, controller.signal))
+    .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  await expect(nativeTronClassFirebaseSubmissionDownload('school-a', () => true, { ...submissionInput, submissionId: '030' }))
+    .rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+  expect(mockGetIdToken).not.toHaveBeenCalled();
+  expect(downloadMock).not.toHaveBeenCalled();
+});
+
+it('discards attachment bytes if the Firebase owner changes during download', async () => {
+  downloadMock.mockImplementationOnce(async () => {
+    mockUser = { uid: 'school-b', getIdToken: mockGetIdToken };
+    return { bytes: new Uint8Array([1]), filename: 'private.pdf', contentType: 'application/pdf' };
+  });
+  await expect(nativeTronClassFirebaseSubmissionDownload('school-a', () => true, submissionInput))
+    .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
 });

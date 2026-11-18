@@ -1,10 +1,15 @@
 import { NuniError } from '@campus/shared/src/nuni';
-import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import {
+  isTronClassSubmissionHistory,
+  type TronClassSubmissionHistoryEntry,
+} from '@campus/shared/src/tronClassSubmissionHistory';
 import { isTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import {
   validNativeTronClassDownload,
+  validNativeTronClassSubmissionDownload,
   type NativeTronClassDownloadInput,
   type NativeTronClassDownloadedFile,
+  type NativeTronClassSubmissionDownloadInput,
 } from './tronClassNativeDownload';
 import type {
   TronClassConnection,
@@ -22,6 +27,7 @@ export type TronClassAccess = {
   isCurrent(): boolean;
   request(input: Record<string, unknown>): Promise<unknown>;
   download?(input: NativeTronClassDownloadInput): Promise<NativeTronClassDownloadedFile>;
+  downloadSubmissionAttachment?(input: NativeTronClassSubmissionDownloadInput, signal?: AbortSignal): Promise<NativeTronClassDownloadedFile>;
   upload(scope: TronClassUploadScope, bytes: Uint8Array, contentType: string): Promise<unknown>;
 };
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -310,9 +316,32 @@ export function createNativeTronClassClient(access: TronClassAccess) {
       throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
     return value;
   };
+  const downloadSubmissionAttachment = access.downloadSubmissionAttachment
+    ? async (input: NativeTronClassSubmissionDownloadInput, signal?: AbortSignal) => {
+      const check = () => {
+        assertCurrent();
+        if (signal?.aborted) throw new NuniError(409, 'SESSION_CHANGED');
+      };
+      check();
+      if (!validNativeTronClassSubmissionDownload(input)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+      // Freeze the selector before asynchronous token acquisition. Neither a
+      // caller-supplied path nor later mutations can retarget the request.
+      const target = { courseId: input.courseId, homeworkId: input.homeworkId,
+        submissionId: input.submissionId, uploadId: input.uploadId, revision: input.revision };
+      try {
+        const value = await access.downloadSubmissionAttachment!(target, signal);
+        check();
+        return value;
+      } catch (failure) {
+        check();
+        throw failure;
+      }
+    }
+    : undefined;
   return {
     owner: access.owner,
     isCurrent: access.isCurrent,
+    downloadSubmissionAttachment,
     async status() {
       return parseNativeTronClassConnection(await request('status'));
     },
@@ -491,8 +520,10 @@ export function nativeTronClassError(error: unknown): string {
     TRONCLASS_SUBMISSION_BLOCKED: '最新規則不允許繳交，請重新查看作業要求。',
     TRONCLASS_SUBMISSION_NOT_FOUND: '尚未找到這次操作的確認紀錄，請到校方原頁確認；App 不會重送。',
     TRONCLASS_READ_TIMEOUT: '校方回應較慢，請稍後重試。',
-    TRONCLASS_DOWNLOAD_TOO_LARGE: '教材超過 25 MB，請使用校方原頁下載。',
-    TRONCLASS_DOWNLOAD_TIMEOUT: '教材下載逾時，請稍後重試。',
+    TRONCLASS_DOWNLOAD_TOO_LARGE: '檔案超過 25 MB，請使用校方原頁下載。',
+    TRONCLASS_DOWNLOAD_TIMEOUT: '檔案下載逾時，請稍後重試。',
+    TRONCLASS_SUBMISSION_ATTACHMENT_DENIED: '校方尚未允許下載這份作業附件，請重新讀取作業紀錄。',
+    TRONCLASS_SUBMISSION_ATTACHMENT_CHANGED: '校方附件已更新，請重新讀取作業紀錄後再下載。',
     TRONCLASS_MATERIAL_DOWNLOAD_DENIED: '校方尚未允許下載這份教材，請重新讀取課程。',
     INVALID_RESPONSE: '尚未收到可確認的回覆，請重新查詢。',
     NETWORK_ERROR: '目前無法連線，請確認網路後重試。',
@@ -540,4 +571,29 @@ export function nativeTronClassDownloadTarget(
   } catch {
     return null;
   }
+}
+
+/** Select only an attachment from the currently validated, personal history. */
+export function nativeTronClassSubmissionDownloadTarget(
+  preparation: TronClassPreparation,
+  entry: TronClassSubmissionHistoryEntry,
+  file: TronClassSubmissionHistoryEntry['attachments'][number],
+  expectedRevision: string,
+): NativeTronClassSubmissionDownloadInput | null {
+  const history = preparation.history;
+  // The full history was validated once by parseNativeTronClassPreparation.
+  // Avoid rescanning every entry for each rendered attachment.
+  if (preparation.revision !== expectedRevision || !history || history.state !== 'available' ||
+    history.courseId !== preparation.courseId || history.homeworkId !== preparation.homeworkId ||
+    !history.entries.includes(entry) || !entry.attachments.includes(file) || !file.download ||
+    Object.keys(file.download).join(',') !== 'uploadId' ||
+    !['submitted', 'draft', 'returned'].includes(entry.state)) return null;
+  const input = {
+    courseId: preparation.courseId,
+    homeworkId: preparation.homeworkId,
+    submissionId: entry.id,
+    uploadId: file.download.uploadId,
+    revision: expectedRevision,
+  };
+  return validNativeTronClassSubmissionDownload(input) ? input : null;
 }

@@ -6,6 +6,8 @@ import type {
   TronClassSubmissionHistoryEntry,
 } from '@campus/shared/src/tronClassSubmissionHistory';
 import { SourceLink, tronClassTime } from './TronClassSource';
+import type { TronClassClient } from '@/lib/tronClassIntegrationClient';
+import { TronClassSubmissionAttachmentDownload } from './TronClassSubmissionAttachmentDownload';
 import styles from './tronclass.module.css';
 
 const stateLabels: Record<TronClassSubmissionHistoryEntry['state'], string> = {
@@ -29,11 +31,17 @@ export function TronClassSubmissionHistory({
   sourceHref,
   onRetry,
   retryDisabled = false,
+  attachmentDownload,
 }: {
   history: History;
   sourceHref: string;
   onRetry: () => void;
   retryDisabled?: boolean;
+  attachmentDownload?: {
+    revision: string;
+    download: TronClassClient['downloadSubmissionAttachment'];
+    onConnectionChanged?: (reason?: unknown) => void;
+  };
 }) {
   const headingId = useId();
   const latest = history.entries.find((entry) => entry.isLatest && entry.id === history.latestId);
@@ -81,7 +89,19 @@ export function TronClassSubmissionHistory({
                     {entry.attachments.length > 0 && (
                       <ul className={styles.fileLinks} aria-label="這筆紀錄的附件">
                         {entry.attachments.map((file, index) => (
-                          <li key={`${index}:${file.name}`}>{file.name} · {fileSize(file.size)}</li>
+                          <li key={`${index}:${file.name}`}>
+                            {file.name} · {fileSize(file.size)}
+                            {file.download && attachmentDownload && !retryDisabled && (
+                              <TronClassSubmissionAttachmentDownload
+                                key={`${attachmentDownload.revision}:${history.courseId}:${history.homeworkId}:${entry.id}:${file.download.uploadId}`}
+                                download={attachmentDownload.download}
+                                revision={attachmentDownload.revision}
+                                courseId={history.courseId} homeworkId={history.homeworkId}
+                                submissionId={entry.id} uploadId={file.download.uploadId} name={file.name}
+                                onConnectionChanged={attachmentDownload.onConnectionChanged}
+                              />
+                            )}
+                          </li>
                         ))}
                       </ul>
                     )}

@@ -165,7 +165,7 @@ export async function handleTronClassIntegration(
           only(input, ['action', 'courseId']);
           if (!dependencies.rateLimit) syncLimiter.check(actor.ownerKey);
           result = await (dependencies.read ?? createTronClassIntegrationReader({ bindings }))(actor.ownerKey,
-            input.courseId === undefined ? {} : { courseId: id(input.courseId) });
+            input.courseId === undefined ? {} : { courseId: id(input.courseId) }, request.signal);
           break;
         case 'prepare':
           only(input, ['action', 'courseId', 'homeworkId']);

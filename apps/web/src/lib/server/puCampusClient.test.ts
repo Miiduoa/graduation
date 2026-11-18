@@ -424,6 +424,47 @@ it('accepts TronClass login only after profile returns this account', async () =
   });
 });
 
+it('keeps profile-rotated session and XSRF cookies for the next course request', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) {
+      const response = jsonResponse(200, { id: 44 }, {
+        'set-cookie': 'session=login-session; Path=/; HttpOnly',
+      });
+      response.headers.append('set-cookie', 'XSRF-TOKEN=login-xsrf; Path=/');
+      response.headers.append('set-cookie', 'route=school-node; Path=/');
+      return response;
+    }
+    if (url.endsWith('/api/profile')) {
+      expect(new Headers(init?.headers).get('Cookie')).toContain('session=login-session');
+      const response = jsonResponse(200, {
+        id: 44, login_name: 'changyi', name: '王老師', role: 'teacher',
+      }, { 'set-cookie': 'session=profile-session; Path=/; HttpOnly' });
+      response.headers.append('set-cookie', 'XSRF-TOKEN=profile-xsrf; Path=/');
+      return response;
+    }
+    if (url.endsWith('/api/my-courses')) {
+      const cookie = new Headers(init?.headers).get('Cookie') ?? '';
+      if (!cookie.includes('session=profile-session') || !cookie.includes('XSRF-TOKEN=profile-xsrf')) {
+        return jsonResponse(401, { error: 'expired session' });
+      }
+      expect(cookie).toContain('route=school-node');
+      expect(cookie).not.toContain('login-session');
+      expect(cookie).not.toContain('login-xsrf');
+      return jsonResponse(200, { courses: [{ name: '資料庫', role: 'teacher' }] });
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const session = await gateway.loginTronClass('changyi', SECRET);
+  expect(session.cookies).toEqual({
+    session: 'profile-session', 'XSRF-TOKEN': 'profile-xsrf', route: 'school-node',
+  });
+  await expect(gateway.fetchTronClassCourses(session)).resolves.toEqual([
+    { name: '資料庫', role: 'teacher', teachers: [] },
+  ]);
+  expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/api/login'))).toHaveLength(1);
+});
+
 it('reads student info even if the portal HTML still has a maintenance comment', async () => {
   const gateway = createPuCampusGateway({
     fetch: async () =>

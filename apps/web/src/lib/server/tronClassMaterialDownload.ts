@@ -136,6 +136,60 @@ export function createTronClassBoundedBinaryFetch(
   });
 }
 
+/** Shared byte checks for an already authorized, fixed-origin school file. */
+export async function readTronClassDownloadResponse(
+  response: Response,
+  signal: AbortSignal,
+  check: () => Promise<void>,
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  if (response.status === 401 || response.status === 403) {
+    void response.body?.cancel().catch(() => {});
+    fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
+  }
+  if (response.status >= 300 && response.status < 400) {
+    void response.body?.cancel().catch(() => {});
+    fail(502, 'TRONCLASS_DOWNLOAD_REDIRECT_UNSUPPORTED');
+  }
+  if (response.status !== 200 || !response.body) {
+    void response.body?.cancel().catch(() => {});
+    unavailable();
+  }
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const cancelReader = () => { void reader?.cancel().catch(() => {}); };
+  try {
+    await check();
+    const expectedLength = checkedLength(response.headers, TRONCLASS_DOWNLOAD_MAX_BYTES);
+    const type = contentType(response.headers);
+    reader = response.body.getReader();
+    signal.addEventListener('abort', cancelReader, { once: true });
+    if (signal.aborted) cancelReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    while (true) {
+      if (signal.aborted) fail(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
+      const next = await reader.read();
+      if (next.done) break;
+      length += next.value.byteLength;
+      if (length > TRONCLASS_DOWNLOAD_MAX_BYTES) fail(413, 'TRONCLASS_DOWNLOAD_TOO_LARGE');
+      chunks.push(next.value);
+    }
+    if (expectedLength !== null && expectedLength !== length) unavailable();
+    const bytes = Buffer.concat(chunks);
+    if (/^\s*(?:<!doctype\s+html\b|<html\b|<form\b)/i.test(bytes.subarray(0, 512).toString('utf8'))) {
+      fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
+    }
+    await check();
+    return { bytes, contentType: type };
+  } catch (error) {
+    if (reader) void reader.cancel().catch(() => {});
+    else void response.body.cancel().catch(() => {});
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', cancelReader);
+    reader?.releaseLock();
+  }
+}
+
 export function createTronClassMaterialDownloader(dependencies: {
   bindings?: BindingReader; source?: LmsReadonlySource; fetch?: FetchLike; timeoutMs?: number;
 } = {}) {
@@ -147,6 +201,7 @@ export function createTronClassMaterialDownloader(dependencies: {
   }> => {
     if (!input || positiveId(input.courseId) !== input.courseId || positiveId(input.activityId) !== input.activityId ||
       !validKey(input.uploadKey) || typeof input.revision !== 'string' || !REVISION.test(input.revision)) fail(422, 'TRONCLASS_INVALID_INPUT');
+    const deadlineAt = Date.now() + (dependencies.timeoutMs ?? TRONCLASS_DOWNLOAD_TIMEOUT_MS);
     const controller = new AbortController();
     const cancelled = () => controller.abort();
     let abortDeadline: (() => void) | undefined;
@@ -156,7 +211,12 @@ export function createTronClassMaterialDownloader(dependencies: {
     });
     signal?.addEventListener('abort', cancelled, { once: true });
     if (signal?.aborted) controller.abort();
-    const timer = setTimeout(cancelled, dependencies.timeoutMs ?? TRONCLASS_DOWNLOAD_TIMEOUT_MS);
+    const timer = setTimeout(cancelled, Math.max(1, deadlineAt - Date.now()));
+    const readOptions = () => {
+      const remaining = deadlineAt - Date.now();
+      if (controller.signal.aborted || remaining <= 0) fail(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
+      return { signal: controller.signal, timeoutMs: remaining };
+    };
     const check = async () => {
       if (controller.signal.aborted) fail(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
       await bindings.assertCurrent(ownerKey, input.revision);
@@ -167,15 +227,15 @@ export function createTronClassMaterialDownloader(dependencies: {
       if (binding.revision !== input.revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
       await check();
       const lists = await Promise.all(['ongoing', 'upcoming'].map((status) =>
-        source.fetchCourses(binding.cookies, { userId: binding.userId, status: status as 'ongoing' | 'upcoming' })));
+        source.fetchCourses(binding.cookies, { userId: binding.userId, status: status as 'ongoing' | 'upcoming' }, readOptions())));
       await check();
       if (lists.some((list) => !Array.isArray(list) || list.length > 1000)) unavailable();
       if (!(lists as unknown[][]).flat().some((row) => positiveId(record(row).id) === input.courseId)) {
         fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
       }
       const activities = await Promise.all([
-        source.fetchActivities(binding.cookies, input.courseId, ''),
-        source.fetchActivities(binding.cookies, input.courseId, 'type=courseware_activity'),
+        source.fetchActivities(binding.cookies, input.courseId, '', readOptions()),
+        source.fetchActivities(binding.cookies, input.courseId, 'type=courseware_activity', readOptions()),
       ]);
       await check();
       for (let i = 0; i < activities.length; i++) {
@@ -210,52 +270,8 @@ export function createTronClassMaterialDownloader(dependencies: {
         method: 'GET', redirect: 'manual', cache: 'no-store', signal: controller.signal,
         headers: { Cookie: cookie, Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
       });
-      if (response.status === 401 || response.status === 403) {
-        void response.body?.cancel().catch(() => {});
-        fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-      }
-      if (response.status >= 300 && response.status < 400) {
-        void response.body?.cancel().catch(() => {});
-        fail(502, 'TRONCLASS_DOWNLOAD_REDIRECT_UNSUPPORTED');
-      }
-      if (response.status !== 200 || !response.body) {
-        void response.body?.cancel().catch(() => {});
-        unavailable();
-      }
-      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-      const cancelReader = () => { void reader?.cancel().catch(() => {}); };
-      try {
-        await check();
-        const expectedLength = checkedLength(response.headers, TRONCLASS_DOWNLOAD_MAX_BYTES);
-        const type = contentType(response.headers);
-        reader = response.body.getReader();
-        controller.signal.addEventListener('abort', cancelReader, { once: true });
-        if (controller.signal.aborted) cancelReader();
-        const chunks: Uint8Array[] = [];
-        let length = 0;
-        while (true) {
-          if (controller.signal.aborted) fail(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
-          const next = await reader.read();
-          if (next.done) break;
-          length += next.value.byteLength;
-          if (length > TRONCLASS_DOWNLOAD_MAX_BYTES) fail(413, 'TRONCLASS_DOWNLOAD_TOO_LARGE');
-          chunks.push(next.value);
-        }
-        if (expectedLength !== null && expectedLength !== length) unavailable();
-        const bytes = Buffer.concat(chunks);
-        if (/^\s*(?:<!doctype\s+html\b|<html\b|<form\b)/i.test(bytes.subarray(0, 512).toString('utf8'))) {
-          fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-        }
-        await check();
-        return { bytes, name: names[0], contentType: type };
-      } catch (error) {
-        if (reader) void reader.cancel().catch(() => {});
-        else void response.body.cancel().catch(() => {});
-        throw error;
-      } finally {
-        controller.signal.removeEventListener('abort', cancelReader);
-        reader?.releaseLock();
-      }
+      const file = await readTronClassDownloadResponse(response, controller.signal, check);
+      return { ...file, name: names[0] };
     };
     try { return await Promise.race([operation(), deadline]); }
     catch (error) {

@@ -1,10 +1,12 @@
 import { NuniError } from '@campus/shared/src/nuni';
+import type { NativeTronClassDownloadedFile, NativeTronClassSubmissionDownloadInput } from '../services/tronClassNativeDownload';
 import {
   createNativeTronClassClient,
   parseNativeTronClassConnection,
   parseNativeTronClassPreparation,
   parseNativeTronClassResult,
   parseNativeTronClassSnapshot,
+  nativeTronClassSubmissionDownloadTarget,
   safeTronClassSourceHref,
 } from '../services/tronClassIntegration';
 import {
@@ -16,6 +18,7 @@ import {
   revision,
   snapshot,
   stamp,
+  submissionHistory,
 } from './fixtures/tronClassIntegration';
 
 const scope = { courseId: homework.courseId, homeworkId: homework.id, operationId };
@@ -192,4 +195,52 @@ it.each([
   '//evil.test',
 ])('never opens unsafe source URL %s', (url) => {
   expect(safeTronClassSourceHref(url)).toBeNull();
+});
+
+it('selects a download only from the current personal history, never a caller-provided resource URL', () => {
+  const prepared = parseNativeTronClassPreparation({ ...preparation, history: submissionHistory }, scope);
+  const entry = prepared.history!.entries[0];
+  const file = entry.attachments[0];
+  expect(nativeTronClassSubmissionDownloadTarget(prepared, entry, file, revision)).toEqual({
+    courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 50, revision,
+  });
+  expect(nativeTronClassSubmissionDownloadTarget(prepared, entry, file, 'b'.repeat(32))).toBeNull();
+  expect(nativeTronClassSubmissionDownloadTarget(prepared, { ...entry }, file, revision)).toBeNull();
+  expect(nativeTronClassSubmissionDownloadTarget(prepared, entry, { ...file }, revision)).toBeNull();
+  expect(nativeTronClassSubmissionDownloadTarget({ ...prepared, history: undefined }, entry, file, revision)).toBeNull();
+  const withoutDownload = { ...file, download: undefined };
+  const withoutEntry = { ...entry, attachments: [withoutDownload] };
+  const withoutPrepared = { ...prepared, history: { ...submissionHistory, entries: [withoutEntry] } };
+  expect(nativeTronClassSubmissionDownloadTarget(withoutPrepared, withoutEntry, withoutDownload, revision)).toBeNull();
+  expect(() => parseNativeTronClassPreparation({ ...prepared, history: {
+    ...submissionHistory, entries: [{ ...entry, attachments: [{ ...file, download: { uploadId: 50, url: 'https://example.test/private' } }] }],
+  } }, scope)).toThrow('INVALID_RESPONSE');
+});
+
+it('exposes no history download capability when the native transport is unavailable', () => {
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true,
+    request: jest.fn(), upload: jest.fn() });
+  expect(client.downloadSubmissionAttachment).toBeUndefined();
+});
+
+it('freezes the history selector and rejects cancellation, extra routing fields, and a late previous-owner result', async () => {
+  let current = true;
+  let finish: (value: NativeTronClassDownloadedFile) => void = () => undefined;
+  const download = jest.fn((_input: NativeTronClassSubmissionDownloadInput, _signal?: AbortSignal) =>
+    new Promise<NativeTronClassDownloadedFile>((resolve) => { finish = resolve; }));
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => current,
+    request: jest.fn(), upload: jest.fn(), downloadSubmissionAttachment: download });
+  const target = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 50, revision };
+  const controller = new AbortController();
+  controller.abort();
+  await expect(client.downloadSubmissionAttachment!(target, controller.signal)).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  await expect(client.downloadSubmissionAttachment!({ ...target, url: 'https://example.test' } as typeof target))
+    .rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+  expect(download).not.toHaveBeenCalled();
+  const pending = client.downloadSubmissionAttachment!(target);
+  target.uploadId = 99;
+  expect(download.mock.calls[0][0]).toEqual({ ...target, uploadId: 50 });
+  current = false;
+  finish({ bytes: new Uint8Array([1]), filename: '先前答案.pdf', contentType: 'application/pdf' });
+  await expect(pending).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
 });

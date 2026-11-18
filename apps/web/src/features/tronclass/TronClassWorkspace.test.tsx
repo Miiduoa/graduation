@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TronClassWorkspace } from './TronClassWorkspace';
 import type { TronClassPreparation, TronClassSnapshot } from '@/lib/tronClassIntegrationTypes';
@@ -430,9 +430,118 @@ describe('TronClass account isolation and course reads', () => {
     await screen.findByRole('button', { name: '查看作業' });
     expect(screen.queryByRole('button', { name: '查看繳交內容' })).toBeNull();
   });
+
+  it('sorts unfinished and unknown homework by deadline and filters without conflating unknown with unsubmitted', async () => {
+    const items = [
+      { ...homework, id: 61, title: '已完成報告', submitted: true, deadline: '2026-11-01T00:00:00Z' },
+      { ...homework, id: 62, title: '未提供期限的作業', deadline: null },
+      { ...homework, id: 63, title: '狀態尚未取得的報告', submitted: null, deadline: '2026-11-13T00:00:00Z' },
+      { ...homework, id: 64, title: '近期報告', deadline: '2026-11-14T00:00:00Z' },
+      { ...homework, id: 65, courseId: 13, courseName: '資料庫', title: '資料庫練習', deadline: '2026-11-20T00:00:00Z' },
+    ];
+    fetchMock.mockImplementation((url, init) => body(init).action === 'sync'
+      ? Promise.resolve(json({ ...snapshot, homework: items }))
+      : defaultResponse(url, init));
+    render(<TronClassWorkspace />);
+    const list = await screen.findByRole('list', { name: '作業清單' });
+    expect(within(list).getAllByRole('heading').map((heading) => heading.textContent)).toEqual([
+      '狀態尚未取得的報告', '近期報告', '資料庫練習', '未提供期限的作業', '已完成報告',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: '待繳交，3 份' }));
+    expect(within(list).getAllByRole('heading').map((heading) => heading.textContent)).toEqual([
+      '近期報告', '資料庫練習', '未提供期限的作業',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: '狀態待確認，1 份' }));
+    expect(within(list).getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['狀態尚未取得的報告']);
+    expect(within(list).getByText('狀態待確認')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '已繳交，1 份' }));
+    expect(within(list).getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['已完成報告']);
+    fireEvent.click(screen.getByRole('button', { name: '全部作業，5 份' }));
+    fireEvent.change(screen.getByLabelText('搜尋'), { target: { value: '資料庫' } });
+    expect(within(list).getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['資料庫練習']);
+    expect(screen.getByRole('button', { name: '待繳交，1 份' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '狀態待確認，0 份' })).toBeTruthy();
+    expect(calls('sync')).toHaveLength(1);
+  });
 });
 
 describe('TronClass submission confirmation', () => {
+  it('keeps the active assignment mounted during submission even when another assignment is clicked', async () => {
+    const pending = deferred<Response>();
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (input.action === 'sync') return Promise.resolve(json({ ...snapshot,
+        homework: [homework, { ...homework, id: 52, title: '另一份作業' }] }));
+      if (input.action === 'submit') return pending.promise;
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    const list = await screen.findByRole('list', { name: '作業清單' });
+    fireEvent.click(within(list).getAllByRole('button', { name: '準備作業' })[0]);
+    await screen.findByLabelText('作業內容');
+    await waitFor(() => expect(screen.queryByText('正在確認繳交條件與既有紀錄…')).toBeNull());
+    fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '我的心得' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
+    fireEvent.click(screen.getByLabelText('我已確認課程、作業內容與附件正確'));
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await waitFor(() => expect(calls('submit')).toHaveLength(1));
+    const assignmentButtons = within(list).getAllByRole('button') as HTMLButtonElement[];
+    expect(assignmentButtons.every((button) => button.disabled)).toBe(true);
+    fireEvent.click(assignmentButtons[1]);
+    expect(calls('prepare')).toHaveLength(2);
+    expect(screen.getByRole('heading', { level: 2, name: '期中報告' })).toBeTruthy();
+    const input = body(calls('submit')[0][1]);
+    await act(async () => pending.resolve(json({ status: 'submitted', operationId: input.operationId, receipt })));
+    await screen.findByText('TronClass 已確認收到');
+    expect(within(list).getAllByRole('button').every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it('retires an older overview after confirmation without preventing a later authoritative refresh', async () => {
+    const oldRead = deferred<Response>();
+    let reads = 0;
+    fetchMock.mockImplementation((url, init) => {
+      if (body(init).action === 'sync' && ++reads === 2) return oldRead.promise;
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await previewAnswer();
+    fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+    await waitFor(() => expect(reads).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByText('TronClass 已確認收到');
+    expect(screen.getByRole('button', { name: '已繳交，1 份' })).toBeTruthy();
+    await act(async () => oldRead.resolve(json(snapshot)));
+    expect(within(screen.getByRole('list', { name: '作業清單' })).getByText('TronClass 已繳交')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '同步最新資料' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '待繳交，1 份' })).toBeTruthy());
+    expect(reads).toBe(3);
+  });
+
+  it('locks assignment changes only while an uncertain operation is being checked', async () => {
+    const pendingCheck = deferred<Response>();
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (input.action === 'submit') return Promise.resolve(json({ status: 'unknown', operationId: input.operationId, receipt: null }));
+      if (input.action === 'reconcile') return pendingCheck.promise;
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await previewAnswer();
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByText('繳交結果待確認');
+    const list = screen.getByRole('list', { name: '作業清單' });
+    expect((within(list).getByRole('button', { name: '準備作業' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '查證繳交結果' }));
+    await waitFor(() => expect(calls('reconcile')).toHaveLength(1));
+    expect((within(list).getByRole('button', { name: '準備作業' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '重新連接／更換帳號' }) as HTMLButtonElement).disabled).toBe(true);
+    const input = body(calls('reconcile')[0][1]);
+    await act(async () => pendingCheck.resolve(json({ status: 'unknown', operationId: input.operationId, receipt: null })));
+    expect((within(list).getByRole('button', { name: '準備作業' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(sessionStorage.length).toBe(1);
+  });
+
   it('returns an expired assignment preparation to the connection form before any write', async () => {
     fetchMock.mockImplementation((url, init) => body(init).action === 'prepare'
       ? Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401))

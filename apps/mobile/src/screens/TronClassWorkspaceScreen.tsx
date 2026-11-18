@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Linking, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import { NavigationContext } from '@react-navigation/native';
 import { NuniError } from '@campus/shared/src/nuni';
 import { useAuth } from '../state/auth';
@@ -17,6 +17,7 @@ import {
   isNativeTronClassFirebaseOwner,
   nativeTronClassFirebaseRequest,
   nativeTronClassFirebaseDownload,
+  nativeTronClassFirebaseSubmissionDownload,
   tronClassUploadQuery,
 } from '../services/tronClassNativeTransport';
 import type {
@@ -45,6 +46,28 @@ const field = {
   color: aiTokens.text,
   marginBottom: 12,
 };
+
+type HomeworkFilter = 'all' | 'pending' | 'unknown' | 'submitted';
+const homeworkFilters: { value: HomeworkFilter; label: string }[] = [
+  { value: 'all', label: '全部作業' },
+  { value: 'pending', label: '待繳交' },
+  { value: 'unknown', label: '狀態待確認' },
+  { value: 'submitted', label: '已繳交' },
+];
+function homeworkState(item: TronClassHomework): Exclude<HomeworkFilter, 'all'> {
+  return item.submitted === true ? 'submitted' : item.submitted === false ? 'pending' : 'unknown';
+}
+function homeworkDeadline(item: TronClassHomework): number {
+  const value = item.deadline ? Date.parse(item.deadline) : NaN;
+  return Number.isFinite(value) ? value : Infinity;
+}
+function homeworkOrder(left: TronClassHomework, right: TronClassHomework): number {
+  const completed = Number(left.submitted === true) - Number(right.submitted === true);
+  if (completed) return completed;
+  const leftDeadline = homeworkDeadline(left);
+  const rightDeadline = homeworkDeadline(right);
+  return leftDeadline === rightDeadline ? 0 : leftDeadline < rightDeadline ? -1 : 1;
+}
 
 /** One independently verified BFF owner, with platform-session precedence over Firebase. */
 export function TronClassWorkspaceScreen() {
@@ -93,6 +116,9 @@ export function TronClassWorkspaceScreen() {
           isCurrent,
           request: (input) => latest.current.platform.bffRequest('tronclass', context, input),
           download: (input) => latest.current.platform.tronClassDownload(input, context),
+          downloadSubmissionAttachment: typeof platform.tronClassSubmissionDownload === 'function'
+            ? (input, signal) => latest.current.platform.tronClassSubmissionDownload(input, context, signal)
+            : undefined,
           upload: (target, bytes, contentType) =>
             latest.current.platform.upload(
               'tronclass',
@@ -128,6 +154,8 @@ export function TronClassWorkspaceScreen() {
           nativeTronClassFirebaseRequest(uid, isCurrent, input, controller.signal),
         download: (input) =>
           nativeTronClassFirebaseDownload(uid, isCurrent, input, controller.signal),
+        downloadSubmissionAttachment: (input, signal) =>
+          nativeTronClassFirebaseSubmissionDownload(uid, isCurrent, input, signal),
         upload: (target, bytes, contentType) =>
           nativeTronClassFirebaseRequest(
             uid,
@@ -191,6 +219,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const [reconnecting, setReconnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [courseId, setCourseId] = useState<number | null>(null);
+  const [homeworkFilter, setHomeworkFilter] = useState<HomeworkFilter>('all');
+  const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<TronClassHomework | null>(null);
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [draft, setDraft] = useState<TronClassLocalDraft | null>(null);
@@ -216,6 +246,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       clearDraft();
     if (!value.connected && value.revision === null) clearDraft();
     rememberedKey.current = key;
+    latestConnection.current = value;
     setConnection(value);
     setStatusKnown(true);
     setAccount(value.account || '');
@@ -223,9 +254,11 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   }
   async function synchronize(value: TronClassConnection) {
     if (!value.connected || !value.revision) return;
+    const run = ++courseRequest.current;
     setBusy('正在讀取課程、作業與教材…');
     const data = await client.sync(value.revision);
-    if (current()) setSnapshot(data);
+    if (current() && run === courseRequest.current && latestConnection.current?.revision === value.revision)
+      setSnapshot(data);
   }
   function lost(failure: unknown) {
     ++courseRequest.current;
@@ -241,6 +274,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     if (!rememberedKey.current && !draftIdentity.current) clearDraft();
     // Keep only local text and URI handles. Revisions, preparations and confirmations are discarded.
     rememberedKey.current = null;
+    latestConnection.current = null;
     setConnection(null);
   }
   async function load() {
@@ -462,8 +496,15 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const catalogReady = !!connection?.connected && !!snapshot && !busy && statusKnown;
   const ready = catalogReady && !courseLoading;
   const courses = snapshot?.courses ?? [];
-  const homework =
-    snapshot?.homework.filter((row) => courseId === null || row.courseId === courseId) ?? [];
+  const matchingHomework = snapshot?.homework.filter((row) =>
+    (courseId === null || row.courseId === courseId) &&
+    `${row.title} ${row.courseName}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+  ) ?? [];
+  const homeworkCounts: Record<HomeworkFilter, number> = { all: matchingHomework.length, pending: 0, unknown: 0, submitted: 0 };
+  for (const row of matchingHomework) homeworkCounts[homeworkState(row)]++;
+  const homework = matchingHomework
+    .filter((row) => homeworkFilter === 'all' || homeworkState(row) === homeworkFilter)
+    .sort(homeworkOrder);
   const chooseAssignment = (row: TronClassHomework) => {
     if (!ready || assignmentBusy || !current()) return;
     if (draft && (draft.courseId !== row.courseId || draft.homeworkId !== row.id)) clearDraft();
@@ -623,7 +664,29 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
             setDraft(value);
           }}
           onBusy={setAssignmentBusy}
-          onConnectionLost={lost}
+          isBindingCurrent={() => {
+            const binding = latestConnection.current;
+            return current() && binding?.connected === true && binding.revision === connection.revision &&
+              typeof binding.expiresAt === 'string' && Number.isFinite(Date.parse(binding.expiresAt)) &&
+              new Date(binding.expiresAt).toISOString() === binding.expiresAt && Date.parse(binding.expiresAt) > Date.now();
+          }}
+          onConnectionLost={(failure) => {
+            if (latestConnection.current?.revision === connection.revision) lost(failure);
+          }}
+          onSubmitted={() => {
+            if (!current() || latestConnection.current?.revision !== connection.revision) return;
+            // A read already in flight may still contain the pre-submission
+            // status. Later explicit refreshes remain authoritative.
+            ++courseRequest.current;
+            setCourseLoading(false);
+            setSnapshot((value) => value?.revision === connection.revision ? {
+              ...value,
+              homework: value.homework.map((row) => row.courseId === selected.courseId && row.id === selected.id
+                ? { ...row, submitted: true } : row),
+            } : value);
+            setSelected((value) => value?.courseId === selected.courseId && value.id === selected.id
+              ? { ...value, submitted: true } : value);
+          }}
           onClose={() => {
             setSelected(null);
             clearDraft();
@@ -686,6 +749,26 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
                 : '全部作業'
             }
           >
+            <TextInput accessibilityLabel="搜尋作業" placeholder="搜尋作業或課程名稱"
+              placeholderTextColor={aiTokens.muted} value={query} onChangeText={setQuery}
+              autoCorrect={false} style={field} />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              {homeworkFilters.map(({ value, label }) => (
+                <Pressable key={value} accessibilityRole="button"
+                  accessibilityLabel={`${label}，${homeworkCounts[value]} 份`}
+                  accessibilityState={{ selected: homeworkFilter === value }}
+                  onPress={() => setHomeworkFilter(value)}
+                  style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12,
+                    borderRadius: 8, borderWidth: 1,
+                    borderColor: homeworkFilter === value ? aiTokens.ai : aiTokens.border,
+                    backgroundColor: homeworkFilter === value ? aiTokens.aiSoft : aiTokens.surface }}>
+                  <Text style={{ color: aiTokens.text, fontSize: 14 }}>{label} {homeworkCounts[value]}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={{ ...copy, fontSize: 12, color: aiTokens.muted }}>
+              待繳交與狀態待確認優先，按截止時間排列。
+            </Text>
             {homework.map((row) => (
               <AIRow
                 key={`${row.courseId}:${row.id}`}
@@ -697,8 +780,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
             {!homework.length && !courseLoading ? (
               <Text style={copy}>
                 {snapshot.partial
-                  ? '目前已讀到的資料中沒有作業；仍有資料未完成。'
-                  : '目前清單沒有作業。'}
+                  ? '目前已讀到的資料中沒有符合條件的作業；仍有資料未完成。'
+                  : '目前沒有符合條件的作業。'}
               </Text>
             ) : null}
             {draft ? (

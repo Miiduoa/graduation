@@ -28,6 +28,33 @@ import { sameTronClassDraftScope, type TronClassLocalDraft } from './tronClassLo
 import styles from './tronclass.module.css';
 
 type SchoolDraft = { studentKey: string; draft: TronClassLocalDraft };
+type HomeworkFilter = 'all' | 'pending' | 'unknown' | 'submitted';
+const homeworkFilters: { value: HomeworkFilter; label: string }[] = [
+  { value: 'all', label: '全部作業' },
+  { value: 'pending', label: '待繳交' },
+  { value: 'unknown', label: '狀態待確認' },
+  { value: 'submitted', label: '已繳交' },
+];
+
+function homeworkState(item: TronClassHomeworkItem): Exclude<HomeworkFilter, 'all'> {
+  return item.submitted === true ? 'submitted' : item.submitted === false ? 'pending' : 'unknown';
+}
+
+function homeworkDeadline(item: TronClassHomeworkItem): number {
+  const value = item.deadline ? Date.parse(item.deadline) : NaN;
+  return Number.isFinite(value) ? value : Infinity;
+}
+
+function homeworkOrder(left: TronClassHomeworkItem, right: TronClassHomeworkItem): number {
+  // Unknown school status remains visible alongside unfinished work. A missing
+  // deadline sorts last without inventing a due date or submission permission.
+  const completed = Number(left.submitted === true) - Number(right.submitted === true);
+  if (completed) return completed;
+  const leftDeadline = homeworkDeadline(left);
+  const rightDeadline = homeworkDeadline(right);
+  return leftDeadline === rightDeadline ? 0 : leftDeadline < rightDeadline ? -1 : 1;
+}
+
 function verifiedStudentKey(connection: TronClassConnection | null): string | null {
   return connection?.connected && typeof connection.studentKey === 'string' &&
     /^[a-f0-9]{64}$/.test(connection.studentKey) ? connection.studentKey : null;
@@ -439,6 +466,8 @@ function ConnectedWorkspace({
   const [course, setCourse] = useState('all');
   const [tab, setTab] = useState<'homework' | 'announcements' | 'materials'>('homework');
   const [query, setQuery] = useState('');
+  const [homeworkFilter, setHomeworkFilter] = useState<HomeworkFilter>('all');
+  const [submissionBusy, setSubmissionBusy] = useState(false);
   const [selected, setSelected] = useState<TronClassHomeworkItem | null>(null);
   const [selectedDraft, setSelectedDraft] = useState<TronClassLocalDraft | undefined>();
   const alive = useRef(true);
@@ -497,7 +526,12 @@ function ConnectedWorkspace({
     `${item.title} ${item.courseName}`
       .toLocaleLowerCase()
       .includes(query.trim().toLocaleLowerCase());
-  const homework = snapshot?.homework.filter(includes) ?? [];
+  const matchingHomework = snapshot?.homework.filter(includes) ?? [];
+  const homeworkCounts: Record<HomeworkFilter, number> = { all: matchingHomework.length, pending: 0, unknown: 0, submitted: 0 };
+  for (const item of matchingHomework) homeworkCounts[homeworkState(item)]++;
+  const homework = matchingHomework
+    .filter((item) => homeworkFilter === 'all' || homeworkState(item) === homeworkFilter)
+    .sort(homeworkOrder);
   const announcements = snapshot?.announcements.filter(includes) ?? [];
   const materials = snapshot?.materials.filter(includes) ?? [];
   const count =
@@ -515,7 +549,7 @@ function ConnectedWorkspace({
       <section className={styles.panel}>
         <div className={styles.heading}>
           <div>
-            <h2>我的課程</h2>
+            <h2 id="tronclass-courses-heading" tabIndex={-1}>我的課程</h2>
             <p className={styles.muted}>
               {snapshot
                 ? `更新於 ${tronClassTime(snapshot.fetchedAt)} · ${snapshot.courses.length} 門課程`
@@ -605,6 +639,18 @@ function ConnectedWorkspace({
                 </button>
               ))}
             </div>
+            {tab === 'homework' && <>
+              <div className={styles.homeworkFilters} role="group" aria-label="作業繳交狀態">
+                {homeworkFilters.map(({ value, label }) => (
+                  <button key={value} aria-pressed={homeworkFilter === value}
+                    aria-label={`${label}，${homeworkCounts[value]} 份`}
+                    onClick={() => setHomeworkFilter(value)}>
+                    {label} <span aria-hidden="true">{homeworkCounts[value]}</span>
+                  </button>
+                ))}
+              </div>
+              <p className={styles.sortHint}>待繳交與狀態待確認優先，按截止時間排列。</p>
+            </>}
             {course === 'all' && tab !== 'homework' ? (
               <p className={styles.empty}>
                 請先選擇一門課程，查看該課程的{tab === 'announcements' ? '公告' : '教材'}。
@@ -624,7 +670,7 @@ function ConnectedWorkspace({
               </>
             )}
             {tab === 'homework' && (
-              <ul className={styles.list}>
+              <ul className={styles.list} aria-label="作業清單">
                 {homework.map((item) => (
                   <li className={styles.homeworkRow} key={`${item.courseId}:${item.id}`}>
                     <div className={styles.itemContent}>
@@ -647,7 +693,9 @@ function ConnectedWorkspace({
                       <button
                         id={`tronclass-homework-${item.courseId}-${item.id}`}
                         className="btn"
+                        disabled={submissionBusy}
                         onClick={() => {
+                          if (submissionBusy) return;
                           setSelectedDraft(recoveryDraft && sameTronClassDraftScope(recoveryDraft, item.courseId, item.id)
                             ? recoveryDraft : undefined);
                           setSelected(item);
@@ -735,15 +783,23 @@ function ConnectedWorkspace({
           initialDraft={selectedDraft}
           onDraftChange={(draft) => onDraftChange(draft, selected.courseId, selected.id)}
           onClose={() => {
-            document
-              .getElementById(`tronclass-homework-${selected.courseId}-${selected.id}`)
-              ?.focus();
+            const returnTarget = document.getElementById(`tronclass-homework-${selected.courseId}-${selected.id}`)
+              ?? document.getElementById('tronclass-courses-heading');
+            returnTarget?.focus();
             setSelected(null);
             setSelectedDraft(undefined);
           }}
-          onBusy={onSubmissionBusy}
+          onBusy={(value) => {
+            setSubmissionBusy(value);
+            onSubmissionBusy(value);
+          }}
           onConnectionChanged={onConnectionChanged}
           onSubmitted={() => {
+            // An overview request started before the confirmation can contain
+            // the old "not submitted" state. Retire it before updating the list;
+            // an explicit later sync may still return a newer school status.
+            ++generation.current;
+            setLoading(false);
             setSnapshot((value) =>
               value
                 ? {

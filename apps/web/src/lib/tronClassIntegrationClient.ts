@@ -372,6 +372,30 @@ export function createTronClassClient(identity: TronClassIdentity) {
     return parseTronClassResult(action, value, input) as T;
   }
 
+  async function downloadFile(path: '/api/tronclass/material-download' | '/api/tronclass/submission-attachment',
+    input: Record<string, unknown>, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const timer = setTimeout(abort, 60000);
+    try {
+      const authHeaders = await headers();
+      if (controller.signal.aborted) throw new TronClassRequestError('REQUEST_CANCELLED', '下載已取消。');
+      const response = await fetch(path, {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin', redirect: 'error',
+        signal: controller.signal,
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) await responseValue<unknown>(response);
+      return await downloadedTronClassFile(response);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    }
+  }
+
   return {
     status: () => request<TronClassConnection>('status'),
     connect: (account: string, password: string, expectedRevision: string | null) =>
@@ -390,7 +414,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
       activityId: number;
       uploadKey: string;
       revision: string;
-    }): Promise<{ blob: Blob; filename: string }> {
+    }, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
       if (
         !isId(input.courseId) ||
         !isId(input.activityId) ||
@@ -399,18 +423,22 @@ export function createTronClassClient(identity: TronClassIdentity) {
         ['.', '..'].includes(input.uploadKey)
       )
         return invalidResponse();
-      const authHeaders = await headers();
-      const response = await fetch('/api/tronclass/material-download', {
-        method: 'POST',
-        cache: 'no-store',
-        credentials: 'same-origin',
-        redirect: 'error',
-        signal: AbortSignal.timeout(60000),
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      if (!response.ok) await responseValue<unknown>(response);
-      return downloadedTronClassFile(response);
+      return downloadFile('/api/tronclass/material-download', input, signal);
+    },
+    async downloadSubmissionAttachment(input: {
+      courseId: number;
+      homeworkId: number;
+      submissionId: string;
+      uploadId: number;
+      revision: string;
+    }, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+      if (!isId(input.courseId) || !isId(input.homeworkId) || !isId(input.uploadId) ||
+        !isRevision(input.revision) || typeof input.submissionId !== 'string' ||
+        !/^[1-9]\d{0,15}$/.test(input.submissionId) || !Number.isSafeInteger(Number(input.submissionId)) ||
+        Object.keys(input).some(key => !['courseId', 'homeworkId', 'submissionId', 'uploadId', 'revision'].includes(key))) {
+        return invalidResponse();
+      }
+      return downloadFile('/api/tronclass/submission-attachment', input, signal);
     },
     prepare: (courseId: number, homeworkId: number) =>
       request<TronClassPreparation>('prepare', { courseId, homeworkId }),

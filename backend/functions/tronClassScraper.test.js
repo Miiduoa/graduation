@@ -12,6 +12,7 @@ const {
   tcFetchHomeworkActivitiesPage,
   tcFetchActivitiesRaw,
   tcFetchCourseAnnouncementsStrict,
+  tcFetchAnnouncementsStrict,
   tcFetchHomeworkActivityStrict,
   tcFetchStudentHomeworkSubmissionList,
   setCampusHttpFetch,
@@ -249,6 +250,9 @@ describe('tronClassScraper', () => {
       ['homework page', options => tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, options)],
       ['activity', options => tcFetchHomeworkActivityStrict({}, 20001, options)],
       ['student history', options => tcFetchStudentHomeworkSubmissionList({}, 20001, 123, options)],
+      ['course activities', options => tcFetchActivitiesRaw({}, 10001, '', options)],
+      ['course announcements', options => tcFetchCourseAnnouncementsStrict({}, 10001, options)],
+      ['site announcements', options => tcFetchAnnouncementsStrict({}, options)],
     ];
 
     test.each(reads)('does not start an already cancelled %s read', async (_name, read) => {

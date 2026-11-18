@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { createTronClassIntegrationReader } from './tronClassIntegrationSource';
-import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 
 vi.mock('./tronClassLmsSource', () => ({ tronClassLmsReadonlySource: {} }));
 
@@ -24,13 +24,15 @@ function setup() {
 }
 
 beforeEach(() => vi.restoreAllMocks());
+afterEach(() => vi.useRealTimers());
 
 describe('independent TronClass source', () => {
   it('uses the verified binding without a school portal and never exposes its cookies', async () => {
     const { reader, bindings, source } = setup();
     const result = await reader('platform:pa_fixture');
     expect(bindings.requireBinding).toHaveBeenCalledWith('platform:pa_fixture');
-    expect(source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 12, status: 'ongoing' });
+    expect(source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 12, status: 'ongoing' },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
     expect(result).toMatchObject({ revision: binding.revision, partial: false, homework: [{ id: 201, submitted: false, description: '請上傳報告' }] });
     expect(JSON.stringify(result)).not.toContain('private-cookie');
     expect(source.fetchActivities).not.toHaveBeenCalled();
@@ -149,7 +151,8 @@ describe('independent TronClass source', () => {
     const result = await reader('platform:pa_fixture');
     expect(result).toMatchObject({ partial: false, homework: [{ id: 201 }] });
     expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
-    expect(source.fetchHomeworkPage).toHaveBeenLastCalledWith(binding.cookies, 101, 2, 50);
+    expect(source.fetchHomeworkPage).toHaveBeenLastCalledWith(binding.cookies, 101, 2, 50,
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
   });
 
   it.each(['repeated-hidden-id', 'missing-page'] as const)('still reports %s after filtering a full hidden page', async (failure) => {
@@ -222,5 +225,138 @@ describe('independent TronClass source', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(source.fetchCourses).toHaveBeenCalledTimes(1);
     expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(vi.mocked(source.fetchCourses).mock.calls[0][2]?.signal?.aborted).toBe(true);
+  });
+
+  it.each(['courses', 'homework', 'activities', 'announcements'] as const)(
+    'cancels an in-flight %s transport when the whole sync reaches its deadline', async phase => {
+      vi.useFakeTimers();
+      const { source, bindings } = setup();
+      const activeSignals: AbortSignal[] = [];
+      const stall = (options?: LmsReadOptions) => new Promise<never>((_resolve, reject) => {
+        expect(options?.signal).toBeInstanceOf(AbortSignal);
+        expect(options?.timeoutMs).toBeGreaterThan(0);
+        expect(options?.timeoutMs).toBeLessThanOrEqual(100);
+        activeSignals.push(options!.signal!);
+        options!.signal!.addEventListener('abort', () => reject(new Error('private transport cancellation')), { once: true });
+      });
+      if (phase === 'courses') vi.mocked(source.fetchCourses).mockImplementationOnce((_cookies, _query, options) => stall(options));
+      if (phase === 'homework') vi.mocked(source.fetchHomeworkPage).mockImplementation((_cookies, _course, _page, _size, options) => stall(options));
+      if (phase === 'activities') vi.mocked(source.fetchActivities).mockImplementation((_cookies, _course, _query, options) => stall(options));
+      if (phase === 'announcements') vi.mocked(source.fetchCourseAnnouncements).mockImplementation((_cookies, _course, options) => stall(options));
+      const read = createTronClassIntegrationReader({ source, bindings, budgetMs: 100 });
+      const result = expect(read('platform:pa_fixture', { courseId: 101 }))
+        .rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT', status: 503 });
+      await vi.advanceTimersByTimeAsync(100);
+      await result;
+      expect(activeSignals.length).toBe(phase === 'activities' ? 2 : 1);
+      expect(activeSignals.every(signal => signal.aborted)).toBe(true);
+      expect(new Set(activeSignals).size).toBe(1);
+    },
+  );
+
+  it('does not start binding or school reads for an already cancelled request', async () => {
+    const { reader, source, bindings } = setup();
+    await expect(reader('platform:pa_fixture', {}, AbortSignal.abort(new Error('private caller reason'))))
+      .rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT' });
+    expect(bindings.requireBinding).not.toHaveBeenCalled();
+    expect(source.fetchCourses).not.toHaveBeenCalled();
+  });
+
+  it('cancels every active content read on client disconnect without returning a partial success', async () => {
+    const { reader, source } = setup();
+    const controller = new AbortController();
+    const signals: AbortSignal[] = [];
+    let allStarted!: () => void;
+    const started = new Promise<void>(resolve => { allStarted = resolve; });
+    const stall = (options?: LmsReadOptions) => new Promise<never>((_resolve, reject) => {
+      signals.push(options!.signal!);
+      if (signals.length === 3) allStarted();
+      options!.signal!.addEventListener('abort', () => reject(new Error('private cancellation detail')), { once: true });
+    });
+    vi.mocked(source.fetchActivities).mockImplementation((_cookies, _course, _query, options) => stall(options));
+    vi.mocked(source.fetchCourseAnnouncements).mockImplementation((_cookies, _course, options) => stall(options));
+    const result = expect(reader('platform:pa_fixture', { courseId: 101 }, controller.signal))
+      .rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT', message: 'TRONCLASS_READ_TIMEOUT' });
+    await started;
+    controller.abort(new Error('private client cancellation'));
+    await result;
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+  });
+
+  it.each([401, 403])('cancels sibling course workers immediately when one loses access (%s)', async status => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, query) => query.status === 'ongoing'
+      ? [101, 102, 103, 104].map(id => ({ ...course, id })) : []);
+    const signals: AbortSignal[] = [];
+    let allStarted!: () => void;
+    let revoke!: (result: LmsReadResult<{ homework_activities: unknown[]; total: number }>) => void;
+    const started = new Promise<void>(resolve => { allStarted = resolve; });
+    vi.mocked(source.fetchHomeworkPage).mockImplementation((_cookies, courseId, _page, _size, options) => new Promise((resolve, reject) => {
+      signals.push(options!.signal!);
+      if (signals.length === 3) allStarted();
+      if (courseId === 101) revoke = resolve;
+      options!.signal!.addEventListener('abort', () => reject(new Error('sibling request cancelled')), { once: true });
+    }));
+    const result = expect(reader('platform:pa_fixture')).rejects.toMatchObject({
+      status, code: status === 401 ? 'TRONCLASS_RECONNECT_REQUIRED' : 'TRONCLASS_COURSE_ACCESS_DENIED',
+    });
+    await started;
+    revoke({ ok: false, status });
+    await result;
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(3);
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+  });
+
+  it('cancels stalled sibling content requests as soon as a feed returns forbidden', async () => {
+    const { reader, source } = setup();
+    const signals: AbortSignal[] = [];
+    vi.mocked(source.fetchActivities).mockImplementation((_cookies, _course, _query, options) => new Promise((_resolve, reject) => {
+      signals.push(options!.signal!);
+      options!.signal!.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    }));
+    vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 403 });
+    await expect(reader('platform:pa_fixture', { courseId: 101 }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_COURSE_ACCESS_DENIED', status: 403 });
+    expect(signals).toHaveLength(2);
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+  });
+
+  it('shares the remaining budget across courses, homework and parallel content feeds', async () => {
+    const { source, bindings } = setup();
+    let time = 1_000;
+    vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, query) => {
+      time += 10;
+      return query.status === 'ongoing' ? [course] : [];
+    });
+    vi.mocked(source.fetchHomeworkPage).mockImplementation(async () => {
+      time += 20;
+      return { ok: true, value: { homework_activities: [assignment], total: 1 } };
+    });
+    const read = createTronClassIntegrationReader({ source, bindings, now: () => time, budgetMs: 100 });
+    await expect(read('platform:pa_fixture', { courseId: 101 })).resolves.toMatchObject({ partial: false });
+    const calls = [
+      ...vi.mocked(source.fetchCourses).mock.calls.map(call => call[2]),
+      ...vi.mocked(source.fetchHomeworkPage).mock.calls.map(call => call[4]),
+      ...vi.mocked(source.fetchActivities).mock.calls.map(call => call[3]),
+      ...vi.mocked(source.fetchCourseAnnouncements).mock.calls.map(call => call[2]),
+    ];
+    expect(calls.map(options => options?.timeoutMs)).toEqual([100, 90, 80, 60, 60, 60]);
+    expect(new Set(calls.map(options => options?.signal)).size).toBe(1);
+  });
+
+  it('bounds a stalled binding check and never starts school reads when it resolves late', async () => {
+    vi.useFakeTimers();
+    const { source, bindings } = setup();
+    let finish!: (value: typeof binding) => void;
+    bindings.requireBinding.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const read = createTronClassIntegrationReader({ source, bindings, budgetMs: 100 });
+    const result = expect(read('platform:pa_fixture')).rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(100);
+    await result;
+    finish(binding);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(source.fetchCourses).not.toHaveBeenCalled();
   });
 });

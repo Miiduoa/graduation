@@ -4,6 +4,7 @@ import type {
   TronClassPreparation,
   TronClassSnapshot,
 } from '../../services/tronClassIntegrationTypes';
+import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 
 export const revision = 'a'.repeat(32);
 export const nextRevision = 'b'.repeat(32);
@@ -80,6 +81,19 @@ export const preparation: TronClassPreparation = {
     maxTotalBytes: 20 * 1024 * 1024,
   },
   receipt: null,
+};
+export const submissionHistory: TronClassSubmissionHistory = {
+  source: 'tronclass',
+  courseId: 10,
+  homeworkId: 20,
+  fetchedAt: stamp,
+  state: 'available',
+  latestId: '30',
+  entries: [{
+    id: '30', state: 'submitted', isLatest: true, createdAt: stamp,
+    content: '先前版本的答案', contentTruncated: false, hasOtherResources: false,
+    attachments: [{ name: '先前答案.pdf', size: 3, download: { uploadId: 50 } }],
+  }],
 };
 export function acknowledged(op: string = operationId) {
   return {

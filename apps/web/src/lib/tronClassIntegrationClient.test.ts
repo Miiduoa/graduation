@@ -138,6 +138,23 @@ describe('TronClass client response boundary', () => {
     expect(preparation.receipt).toBeNull();
   });
 
+  it('accepts a projected history download selector without accepting raw source fields', () => {
+    const value = { ...preparation, history: { ...history, entries: [{ ...history.entries[0],
+      attachments: [{ name: '報告.pdf', size: 1234, download: { uploadId: 11 } }],
+    }] } };
+    expect(parseTronClassResult('prepare', value, { courseId: 1, homeworkId: 2 })).toEqual(value);
+    for (const download of [{ uploadId: '11' }, { uploadId: 0 }, { uploadId: 11, url: 'https://other.example' },
+      { uploadId: 11, studentId: 33 }, null]) {
+      const invalid = { ...value, history: { ...value.history, entries: [{ ...value.history.entries[0],
+        attachments: [{ name: '報告.pdf', size: 1234, download }],
+      }] } };
+      expect(() => parseTronClassResult('prepare', invalid, { courseId: 1, homeworkId: 2 })).toThrow();
+    }
+    expect(() => parseTronClassResult('prepare', { ...value, history: { ...value.history,
+      entries: [{ ...value.history.entries[0], state: 'unknown' }],
+    } }, { courseId: 1, homeworkId: 2 })).toThrow();
+  });
+
   it('accepts confirmed zero limits and keeps old responses readable without inventing confirmed rules', () => {
     const value = { ...preparation, canSubmit: true, blockedReason: null,
       rules: { status: 'confirmed', allowsText: true, allowsAttachments: false, maxTotalBytes: 0 } };

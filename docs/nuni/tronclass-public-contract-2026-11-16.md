@@ -144,3 +144,20 @@ module `539963` 判斷「已提交」時，同時檢查教師代標、草稿與�
 目前分析器已區分 POST 新版本與 PUT 既有草稿轉正式，核對事前本人歷史、comment／數字 uploads、created_by、唯一最新版及草稿／退回／教師代標旗標。created_at 仍只表示來源紀錄時間；同來源 URL 的離線一致性也不構成線上 PUT 授權。跨來源儲存服務、QINIU 及外部資源尚未支援，**空 entries 或缺少 chain 不代表 HAR 中沒有這些動作**。去值化、輸入上限、未知狀態與 `contractVerified: false` 均保留，仍不能取代真人收件驗收。
 
 操作與工具限制另見 [離線查核說明](../../scripts/tronclass/README.md)。[TronClass 官方作業 FAQ](https://support.tronclass.com/tw/question/homework) 亦說明資源庫檔案必須與作業活動建立關聯，單有檔案不等於繳交完成；容量、次數與補交規則依校方及教師設定。
+
+## 2026-11-18：本人繳交紀錄的一般附件下載
+
+本輪重新匿名 GET 官方 [public-course](https://tronclass.pu.edu.tw/public-course) 與上述 `72914`、`88788` 公開資源。沒有使用真人登入、取得私人附件或執行寫入。兩份 JS 的 SHA-256 仍分別為 `ec0f18dd4da0b05bc656334e0a05306d0e61fe912d34130c288efd398f7d1d77`、`a99eb2e9c80e9d68fb54de90ebe7d224241c68515ed3de22c34c77f9f414529a`；本次 HTML bytes 的 SHA-256 為 `b138e9b9c2dfd14dc71137fcb693848e728732ccbf6f0fba9580baa72ed5022e`。HTML 包含動態內容，雜湊只定位此次取得的版本。
+
+| 官方來源與定位 | 已確認的行為 |
+| --- | --- |
+| `public-course` 的 `#file-previewer .toolbar-buttons`，此次 HTML 約 1137–1138 行 | 一般附件以數字 `upload.id` 建立 `/api/uploads/{id}/blob`；檢查下載旗標，排除外部／專案資源、link、上傳失敗與裁切中等狀態。 |
+| 同頁 `.attachments-wrapper .attachment-operations`，約 4125–4150 行 | 非零 `reference_id` 使用 `/api/uploads/reference/{reference_id}/blob`；一般無 source 的附件使用 upload ID 路徑；LARK、WEDRIVE、外部及批改 PDF 有不同條件。 |
+| `72914-965f4ad4.js` module `572585`，字元約 142430 | `canShowResource` 對學生檢查 `audit_status`，缺少／空或 `agree` 才顯示可讀資源；不沿用教師視圖的放行條件。 |
+| `88788.161d6b6a.js` module `948921`，字元約 361845 | 批改文字 PDF 使用 `source: auto-generated-pdf`；前端可能建立 `id: -1` 的合成附件，不能當一般學生上傳檔。 |
+
+依此新增的歷史附件能力只處理本人一般附件：明確 `allow_download: true`、正整數 upload ID、非教師建立紀錄、來源可見且未刪除、沒有非零 reference ID 或非空 source，並排除未通過審核及上傳／裁切失敗等狀態。其他契約維持唯讀 metadata，不猜測其下載網址或權限。
+
+公開 DTO 只新增可選的 `download: { uploadId }`；不回傳來源網址、Cookie、storage key 或建立人 ID。BFF 從當前綁定取得本人 ID，讀取完整本人歷史及活動歸屬，核對所選 submission ID 和附件後才讀取固定 origin 的 blob。下載完成後再次核對來源，撤權、刪除、換綁或 metadata 變更時不回傳 bytes。附件下載不改寫任何提交狀態，也不作為一次新繳交的收據。
+
+公開前端證據不保證所有校方 response 都帶有下載旗標，也未取代真人下載驗收；缺少權限欄位的附件不提供站內下載按鈕。

@@ -77,7 +77,8 @@ export function TronClassAssignment({
   initialDraft,
   onDraftChange,
 }: {
-  client: Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'>;
+  client: Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'> &
+    Partial<Pick<TronClassClient, 'downloadSubmissionAttachment'>>;
   revision: string;
   owner: string;
   homework: TronClassHomeworkItem;
@@ -465,6 +466,7 @@ export function TronClassAssignment({
   async function reconcile() {
     if (lock.current || !operation.current || phase !== 'unknown') return;
     lock.current = true;
+    callbacks.current.onBusy(true);
     setChecking(true);
     setError('');
     try {
@@ -495,7 +497,10 @@ export function TronClassAssignment({
       } else setError(tronClassErrorMessage(reason));
     } finally {
       lock.current = false;
-      if (alive.current) setChecking(false);
+      if (alive.current) {
+        setChecking(false);
+        callbacks.current.onBusy(false);
+      }
     }
   }
 
@@ -587,6 +592,10 @@ export function TronClassAssignment({
           sourceHref={homework.href}
           onRetry={retryPreparation}
           retryDisabled={working}
+          attachmentDownload={client.downloadSubmissionAttachment ? {
+            revision, download: client.downloadSubmissionAttachment,
+            onConnectionChanged: (reason) => callbacks.current.onConnectionChanged(reason),
+          } : undefined}
         />
       )}
       {blocked && phase !== 'unknown' && !completed && (

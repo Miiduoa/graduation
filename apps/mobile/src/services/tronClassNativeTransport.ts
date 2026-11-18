@@ -5,8 +5,11 @@ import { validTronClassUploadQuery } from './nuniClient';
 import type { TronClassUploadScope } from './tronClassIntegrationTypes';
 import {
   requestNativeTronClassDownload,
+  requestNativeTronClassSubmissionDownload,
   validNativeTronClassDownload,
+  validNativeTronClassSubmissionDownload,
   type NativeTronClassDownloadInput,
+  type NativeTronClassSubmissionDownloadInput,
 } from './tronClassNativeDownload';
 
 export function isNativeTronClassFirebaseOwner(uid: string): boolean {
@@ -34,6 +37,33 @@ export async function nativeTronClassFirebaseDownload(
   const token = await user.getIdToken();
   if (!current()) throw new NuniError(409, 'SESSION_CHANGED');
   return requestNativeTronClassDownload(`Bearer ${token}`, scope, current, signal);
+}
+
+export async function nativeTronClassFirebaseSubmissionDownload(
+  uid: string,
+  isCurrent: () => boolean,
+  input: NativeTronClassSubmissionDownloadInput,
+  signal?: AbortSignal,
+) {
+  if (!validNativeTronClassSubmissionDownload(input))
+    throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+  const scope = {
+    courseId: input.courseId,
+    homeworkId: input.homeworkId,
+    submissionId: input.submissionId,
+    uploadId: input.uploadId,
+    revision: input.revision,
+  };
+  const current = () => !signal?.aborted && isCurrent() && isNativeTronClassFirebaseOwner(uid);
+  if (!current()) throw new NuniError(409, 'SESSION_CHANGED');
+  const user = getAuthInstance().currentUser;
+  if (!user || typeof user.getIdToken !== 'function' || uid.startsWith('demo_'))
+    throw new NuniError(401, 'SIGN_IN_REQUIRED');
+  const token = await user.getIdToken();
+  if (!current()) throw new NuniError(409, 'SESSION_CHANGED');
+  const result = await requestNativeTronClassSubmissionDownload(`Bearer ${token}`, scope, current, signal);
+  if (!current()) throw new NuniError(409, 'SESSION_CHANGED');
+  return result;
 }
 
 export function tronClassUploadQuery(scope: TronClassUploadScope): Record<string, string> {

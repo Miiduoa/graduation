@@ -272,6 +272,40 @@
   font-weight: 600;
   border-bottom-color: var(--brand);
 }
+.homeworkFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+.homeworkFilters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.homeworkFilters button[aria-pressed='true'] {
+  border-color: var(--brand);
+  color: var(--text);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+}
+.homeworkFilters button span {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.panel .sortHint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 10px 0 0;
+}
 .resultCount {
   color: var(--muted);
   font-size: 12px;

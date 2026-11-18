@@ -1,7 +1,9 @@
 import {
   NATIVE_TRONCLASS_DOWNLOAD_MAX_BYTES,
   requestNativeTronClassDownload,
+  requestNativeTronClassSubmissionDownload,
   validNativeTronClassDownload,
+  validNativeTronClassSubmissionDownload,
 } from '../services/tronClassNativeDownload';
 import { nativeTronClassDownloadTarget } from '../services/tronClassIntegration';
 import { revision } from './fixtures/tronClassIntegration';
@@ -9,6 +11,7 @@ import { revision } from './fixtures/tronClassIntegration';
 const mockFetch = jest.fn();
 jest.mock('expo/fetch', () => ({ fetch: (...args: unknown[]) => mockFetch(...args) }));
 const input = { courseId: 10, activityId: 30, uploadKey: 'material-key', revision };
+const submissionInput = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 40, revision };
 function response(
   chunks: Uint8Array[] = [new Uint8Array([1, 2, 3])],
   headers: Record<string, string> = {},
@@ -39,6 +42,7 @@ function response(
 beforeEach(() => {
   mockFetch.mockReset();
 });
+afterEach(() => { jest.useRealTimers(); });
 it('uses only the authenticated native BFF, identity encoding and a bounded readable stream', async () => {
   const file = response();
   mockFetch.mockResolvedValue(file);
@@ -159,4 +163,92 @@ it('derives only an explicitly allowed activity upload key from fixed school URL
   expect(
     nativeTronClassDownloadTarget(material, { ...file, allowDownload: false }, revision),
   ).toBeNull();
+});
+
+it('downloads a submission attachment only through its fixed authenticated BFF with an immutable numeric scope', async () => {
+  mockFetch.mockResolvedValue(response());
+  const scope = { ...submissionInput };
+  const work = requestNativeTronClassSubmissionDownload('Platform private-session', scope, () => true);
+  scope.submissionId = '999';
+  scope.uploadId = 99;
+  expect((await work).filename).toBe('教材.pdf');
+  expect(mockFetch).toHaveBeenCalledWith('https://nuni.tw/api/tronclass/submission-attachment',
+    expect.objectContaining({ method: 'POST', redirect: 'error', credentials: 'omit',
+      body: JSON.stringify(submissionInput),
+      headers: expect.objectContaining({ Authorization: 'Platform private-session',
+        'Accept-Encoding': 'identity', 'Cache-Control': 'no-store' }),
+    }));
+});
+
+it.each([
+  { ...submissionInput, submissionId: '030' },
+  { ...submissionInput, submissionId: '0' },
+  { ...submissionInput, submissionId: '-1' },
+  { ...submissionInput, submissionId: '1e2' },
+  { ...submissionInput, submissionId: '9007199254740992' },
+  { ...submissionInput, submissionId: 30 },
+  { ...submissionInput, uploadId: '40' },
+  { ...submissionInput, uploadId: -1 },
+  { ...submissionInput, revision: { toString: () => revision } },
+  { ...submissionInput, url: 'https://foreign.test' },
+  { ...submissionInput, studentId: 123 },
+  { ...submissionInput, uploadKey: 'untrusted-key' },
+])('rejects unbounded IDs or extra authority before a submission attachment request: %j', async (value) => {
+  expect(validNativeTronClassSubmissionDownload(value as typeof submissionInput)).toBe(false);
+  await expect(requestNativeTronClassSubmissionDownload('Bearer token', value as typeof submissionInput, () => true))
+    .rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it.each([
+  { headers: { 'content-type': 'text/html' }, chunks: undefined, code: 'INVALID_RESPONSE' },
+  { headers: { 'content-length': String(NATIVE_TRONCLASS_DOWNLOAD_MAX_BYTES + 1) }, chunks: undefined, code: 'TRONCLASS_DOWNLOAD_TOO_LARGE' },
+  { headers: {}, chunks: [new Uint8Array([1])], code: 'INVALID_RESPONSE' },
+])('applies the bounded byte contract to submission attachments: $code', async ({ headers, chunks, code }) => {
+  mockFetch.mockResolvedValue(response(chunks, headers));
+  await expect(requestNativeTronClassSubmissionDownload('Bearer token', submissionInput, () => true))
+    .rejects.toMatchObject({ code });
+});
+
+it('does not fetch an attachment for an already aborted request', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(requestNativeTronClassSubmissionDownload('Bearer token', submissionInput, () => true, controller.signal))
+    .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it('ends a stalled attachment request at 60 seconds and discards a late response without retrying', async () => {
+  jest.useFakeTimers();
+  let finish!: (value: ReturnType<typeof response>) => void;
+  mockFetch.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const work = requestNativeTronClassSubmissionDownload('Bearer token', submissionInput, () => true);
+  const rejected = expect(work).rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+  jest.advanceTimersByTime(60_000);
+  await rejected;
+  const file = response();
+  finish(file);
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  expect(file.body.cancel).toHaveBeenCalledTimes(1);
+  expect(file.reader.read).not.toHaveBeenCalled();
+  expect(mockFetch).toHaveBeenCalledTimes(1);
+});
+
+it.each(['deadline', 'external'] as const)('cancels a stalled submission attachment body at the %s boundary', async (reason) => {
+  jest.useFakeTimers();
+  const file = response();
+  file.reader.read.mockImplementationOnce(() => new Promise(() => undefined));
+  mockFetch.mockResolvedValue(file);
+  const controller = new AbortController();
+  const work = requestNativeTronClassSubmissionDownload('Bearer token', submissionInput, () => true, controller.signal);
+  const rejected = expect(work).rejects.toMatchObject({
+    code: reason === 'deadline' ? 'TRONCLASS_DOWNLOAD_TIMEOUT' : 'SESSION_CHANGED',
+  });
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  expect(file.reader.read).toHaveBeenCalledTimes(1);
+  if (reason === 'external') controller.abort();
+  else jest.advanceTimersByTime(60_000);
+  await rejected;
+  expect(file.reader.cancel).toHaveBeenCalledTimes(1);
+  expect(mockFetch).toHaveBeenCalledTimes(1);
 });

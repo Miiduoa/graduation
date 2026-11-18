@@ -4,6 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Crypto from 'expo-crypto';
 import * as Clipboard from 'expo-clipboard';
 import { NuniError } from '@campus/shared/src/nuni';
+import type { TronClassSubmissionHistoryEntry } from '@campus/shared/src/tronClassSubmissionHistory';
 import {
   discardTronClassPickerCopies,
   type NativeTronClassFileCache,
@@ -11,6 +12,7 @@ import {
 import { AIButton, AICard, aiTokens } from '../../ui/aiFirst';
 import {
   nativeTronClassError,
+  nativeTronClassSubmissionDownloadTarget,
   safeTronClassSourceHref,
   tronClassConnectionLost,
   type NativeTronClassClient,
@@ -70,6 +72,8 @@ export function TronClassAssignmentPanel({
   onDraftChange,
   onConnectionLost,
   onBusy,
+  isBindingCurrent,
+  onSubmitted,
   onClose,
 }: {
   client: NativeTronClassClient;
@@ -80,6 +84,8 @@ export function TronClassAssignmentPanel({
   onDraftChange(draft: TronClassLocalDraft | null): void;
   onConnectionLost(error: unknown): void;
   onBusy(value: boolean): void;
+  isBindingCurrent(): boolean;
+  onSubmitted(): void;
   onClose(): void;
 }) {
   const [preparation, setPreparation] = useState<TronClassPreparation | null>(null);
@@ -98,8 +104,9 @@ export function TronClassAssignmentPanel({
   const operation = useRef<string | null>(null);
   const draftToRestore = useRef(initialDraft);
   const frozen = useRef(new Map<string, { bytes: Uint8Array; sha256: string }>());
-  const callbacks = useRef({ onDraftChange, onConnectionLost, onBusy });
-  callbacks.current = { onDraftChange, onConnectionLost, onBusy };
+  const pendingDownload = useRef<AbortController | null>(null);
+  const callbacks = useRef({ onDraftChange, onConnectionLost, onBusy, onSubmitted, isBindingCurrent });
+  callbacks.current = { onDraftChange, onConnectionLost, onBusy, onSubmitted, isBindingCurrent };
   const current = () => mounted.current && client.isCurrent();
   const setWorking = (label: string) => {
     setBusy(label);
@@ -139,6 +146,7 @@ export function TronClassAssignmentPanel({
     frozen.current.clear();
     draftToRestore.current = undefined;
     callbacks.current.onDraftChange(null);
+    callbacks.current.onSubmitted();
     setError('');
     try {
       await clearNativeTronClassPending(client.owner, homework.courseId, homework.id);
@@ -234,6 +242,7 @@ export function TronClassAssignmentPanel({
     void load();
     return () => {
       mounted.current = false;
+      pendingDownload.current?.abort();
       bytes.clear();
       callbacks.current.onBusy(false);
     };
@@ -432,6 +441,48 @@ export function TronClassAssignmentPanel({
     try {
       await reconcile(operation.current);
     } finally {
+      lock.current = false;
+      if (current()) setWorking('');
+    }
+  }
+  async function downloadHistoryAttachment(
+    entry: TronClassSubmissionHistoryEntry,
+    file: TronClassSubmissionHistoryEntry['attachments'][number],
+  ) {
+    if (lock.current || !current() || !preparation || !client.downloadSubmissionAttachment) return;
+    const target = nativeTronClassSubmissionDownloadTarget(preparation, entry, file, revision);
+    if (!target) return;
+    const expireIfNeeded = () => {
+      if (current() && !callbacks.current.isBindingCurrent())
+        callbacks.current.onConnectionLost(new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED'));
+    };
+    if (!callbacks.current.isBindingCurrent()) {
+      expireIfNeeded();
+      return;
+    }
+    const controller = new AbortController();
+    pendingDownload.current = controller;
+    lock.current = true;
+    setWorking(`正在下載作業附件 ${file.name}…`);
+    setError('');
+    setNotice('');
+    const matches = () => current() && !controller.signal.aborted && callbacks.current.isBindingCurrent();
+    try {
+      const downloaded = await client.downloadSubmissionAttachment(target, controller.signal);
+      if (!matches()) {
+        if (!controller.signal.aborted) expireIfNeeded();
+        return;
+      }
+      await fileCache.share(downloaded, matches);
+      if (matches()) setNotice('已開啟作業附件分享。');
+    } catch (failure) {
+      if (!matches()) {
+        if (!controller.signal.aborted) expireIfNeeded();
+        return;
+      }
+      failed(failure);
+    } finally {
+      if (pendingDownload.current === controller) pendingDownload.current = null;
       lock.current = false;
       if (current()) setWorking('');
     }
@@ -764,10 +815,17 @@ export function TronClassAssignmentPanel({
                 </Text>
               ) : null}
               {entry.attachments.map((file, index) => (
-                <Text key={index} style={body}>
-                  {file.name}
-                  {file.size === null ? '' : ` · ${nativeTronClassSize(file.size)}`}
-                </Text>
+                <View key={index}>
+                  <Text style={body}>
+                    {file.name}
+                    {file.size === null ? '' : ` · ${nativeTronClassSize(file.size)}`}
+                  </Text>
+                  {client.downloadSubmissionAttachment &&
+                    nativeTronClassSubmissionDownloadTarget(preparation, entry, file, revision) ? (
+                    <AIButton label={`下載並分享作業附件：${file.name}`} variant="ghost" disabled={!!busy}
+                      onPress={() => void downloadHistoryAttachment(entry, file)} />
+                  ) : null}
+                </View>
               ))}
               {entry.hasOtherResources ? (
                 <Text style={body}>另有校方資源，請至原頁查看。</Text>

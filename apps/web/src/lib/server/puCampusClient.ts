@@ -769,7 +769,9 @@ export function createPuCampusGateway(
     const profileData = authenticatedJson(profilePage);
     if (profileData && identityBelongsToAccount(account, profileData)) {
       return {
-        cookies,
+        // The authenticated profile response may rotate the session or issue
+        // the XSRF token needed by later LMS requests. Keep that latest jar.
+        cookies: profilePage.cookies,
         userId: userIdFrom(profileData) ?? userIdFrom(loginData),
         userName: displayNameFrom(profileData, account),
         role: roleFrom(profileData),

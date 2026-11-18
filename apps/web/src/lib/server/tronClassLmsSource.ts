@@ -51,12 +51,14 @@ export type LmsReadonlySource = {
     cookies: Record<string, string>,
     courseId: number,
     query: '' | 'sub_course_id=0' | 'type=courseware_activity',
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown[]>>;
   fetchCourseAnnouncements: (
     cookies: Record<string, string>,
     courseId: number,
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown[]>>;
-  fetchSiteAnnouncements: (cookies: Record<string, string>) => Promise<LmsReadResult<unknown[]>>;
+  fetchSiteAnnouncements: (cookies: Record<string, string>, readOptions?: LmsReadOptions) => Promise<LmsReadResult<unknown[]>>;
 };
 
 async function wrapRead<T>(run: () => Promise<T>): Promise<LmsReadResult<T>> {
@@ -84,10 +86,10 @@ export const tronClassLmsReadonlySource: LmsReadonlySource = {
     wrapRead(() => tronClassScraper.tcFetchHomeworkActivityStrict(cookies, activityId, readOptions)),
   fetchStudentSubmissionList: (cookies, activityId, studentId, readOptions) =>
     wrapRead(() => tronClassScraper.tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId, readOptions)),
-  fetchActivities: (cookies, courseId, query) =>
-    wrapRead(() => tronClassScraper.tcFetchActivitiesRaw(cookies, courseId, query)),
-  fetchCourseAnnouncements: (cookies, courseId) =>
-    wrapRead(() => tronClassScraper.tcFetchCourseAnnouncementsStrict(cookies, courseId)),
-  fetchSiteAnnouncements: (cookies) =>
-    wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies)),
+  fetchActivities: (cookies, courseId, query, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchActivitiesRaw(cookies, courseId, query, readOptions)),
+  fetchCourseAnnouncements: (cookies, courseId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions)),
+  fetchSiteAnnouncements: (cookies, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchAnnouncementsStrict(cookies, readOptions)),
 };

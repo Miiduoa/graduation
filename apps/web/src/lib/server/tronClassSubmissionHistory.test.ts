@@ -57,6 +57,37 @@ describe('read-only student submission history', () => {
     expect(result.entries.map(row => row.state)).toEqual(['submitted', 'returned']);
   });
 
+  it('exposes only an upload ID for an explicitly downloadable ordinary own attachment', () => {
+    const result = normalize([{ ...submission, uploads: [{ ...submission.uploads[0],
+      allow_download: true, reference_id: 0, audit_status: 'agree', status: 'ready',
+      download_url: 'https://untrusted.example/private',
+    }] }]);
+    expect(result.entries[0].attachments).toEqual([{ name: '報告.pdf', size: 2048, download: { uploadId: 601 } }]);
+    expect(isTronClassSubmissionHistory(result, scope)).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(/private-upload-key|download_url|untrusted/);
+    expect(result).not.toHaveProperty('receipt');
+  });
+
+  it.each([
+    { allow_download: undefined }, { allow_download: false }, { allow_download: 1 },
+    { reference_id: 701 }, { reference_id: '0' }, { source: 'LARK' }, { source: 'auto-generated-pdf' },
+    { source: false }, { audit_status: 'pending' }, { audit_status: 'rejected' }, { audit_status: false },
+    { deleted: true }, { is_deleted: 1 }, { from_project: true }, { isFromKnowledgeGraph: true },
+    { type: 'link' }, { status: 'uploading' }, { status: 'failed' }, { status: 'cliping' },
+    { status: 'clip_failed' }, { status: ['ready'] },
+  ])('does not grant a normal attachment download for a different or unknown contract: %j', change => {
+    const result = normalize([{ ...submission, uploads: [{ ...submission.uploads[0], allow_download: true, ...change }] }]);
+    expect(result.entries[0].attachments).toEqual([{ name: '報告.pdf', size: 2048 }]);
+    expect(isTronClassSubmissionHistory(result, scope)).toBe(true);
+  });
+
+  it('does not offer attachment downloads for an uncertain submission state', () => {
+    const result = normalize([{ ...submission, is_draft: undefined,
+      uploads: [{ ...submission.uploads[0], allow_download: true }] }]);
+    expect(result.entries[0]).toMatchObject({ state: 'unknown', attachments: [{ name: '報告.pdf', size: 2048 }] });
+    expect(result.entries[0].attachments[0]).not.toHaveProperty('download');
+  });
+
   it('does not guess a latest version from order, dates or identifiers', () => {
     const result = normalize([{ ...submission, is_latest_version: undefined },
       { ...submission, id: 502, created_at: '2026-11-16T11:00:00Z', is_latest_version: false }]);

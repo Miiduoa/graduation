@@ -7,7 +7,12 @@ export type TronClassSubmissionHistoryEntry = {
   createdAt: string | null;
   content: string;
   contentTruncated: boolean;
-  attachments: { name: string; size: number | null }[];
+  attachments: {
+    name: string;
+    size: number | null;
+    /** A server-authorized selector, never a raw URL or storage credential. */
+    download?: { uploadId: number };
+  }[];
   hasOtherResources: boolean;
 };
 
@@ -62,10 +67,12 @@ export function isTronClassSubmissionHistory(
       typeof entry.contentTruncated !== 'boolean' || typeof entry.hasOtherResources !== 'boolean' ||
       !Array.isArray(entry.attachments) || entry.attachments.length > TRONCLASS_HISTORY_MAX_ATTACHMENTS) return false;
     for (const file of entry.attachments) {
-      if (!object(file) || !only(file, ['name', 'size']) ||
+      if (!object(file) || !only(file, ['name', 'size', 'download']) ||
         typeof file.name !== 'string' || !file.name.trim() || file.name.length > 200 ||
         Array.from(file.name).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ||
-        !(file.size === null || (typeof file.size === 'number' && Number.isSafeInteger(file.size) && file.size >= 0))) return false;
+        !(file.size === null || (typeof file.size === 'number' && Number.isSafeInteger(file.size) && file.size >= 0)) ||
+        (file.download !== undefined && (!object(file.download) || !only(file.download, ['uploadId']) ||
+          !id(file.download.uploadId) || !['submitted', 'draft', 'returned'].includes(entry.state)))) return false;
     }
     if (entry.state === 'teacher-marked' && (entry.content || entry.attachments.length || entry.hasOtherResources)) return false;
     ids.add(entry.id);

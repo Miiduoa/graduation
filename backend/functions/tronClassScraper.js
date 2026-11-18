@@ -1006,9 +1006,11 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
   };
 }
 
-async function tcFetchActivitiesRaw(cookies, courseId, query = '') {
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchActivitiesRaw(cookies, courseId, query = '', readOptions = {}) {
   const suffix = query ? `?${query}` : '';
-  const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities${suffix}`, cookies);
+  const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities${suffix}`, cookies,
+    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const activities = data?.activities;
   if (!Array.isArray(activities)) {
     throw httpError(200);
@@ -1126,15 +1128,19 @@ async function tcFetchAnnouncements(cookies) {
   }
 }
 
-async function tcFetchAnnouncementsStrict(cookies) {
-  const data = await tcFetchJson(`${TC_BASE}/api/announcement`, cookies);
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchAnnouncementsStrict(cookies, readOptions = {}) {
+  const data = await tcFetchJson(`${TC_BASE}/api/announcement`, cookies,
+    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const items = data?.announcements;
   if (!Array.isArray(items)) throw httpError(200);
   return items;
 }
 
-async function tcFetchCourseAnnouncementsStrict(cookies, courseId) {
-  const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/announcements`, cookies);
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions = {}) {
+  const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/announcements`, cookies,
+    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const items =
     data?.announcements ??
     data?.notifications ??

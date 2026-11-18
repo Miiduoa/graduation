@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { createTronClassBoundedBinaryFetch, createTronClassMaterialDownloader, TRONCLASS_DOWNLOAD_MAX_BYTES } from './tronClassMaterialDownload';
 import type { LmsReadonlySource } from './tronClassLmsSource';
@@ -15,6 +15,7 @@ const binding = {
 const material = { id: 202, course_id: 101, type: 'material', title: '課堂講義',
   uploads: [{ key: input.uploadKey, name: '第一週講義.pdf', allow_download: true }] };
 const fixtureBytes = Buffer.from('%PDF-test');
+afterEach(() => vi.useRealTimers());
 
 function fixture(timeoutMs?: number) {
   const bindings = { requireBinding: vi.fn(async () => binding), assertCurrent: vi.fn(async () => {}) };
@@ -37,8 +38,10 @@ describe('authorized material download', () => {
       method: 'GET', redirect: 'manual', cache: 'no-store',
       headers: { Cookie: 'session=server-only-fixture', Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
     }));
-    expect(f.source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'ongoing' });
-    expect(f.source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'upcoming' });
+    expect(f.source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'ongoing' },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
+    expect(f.source.fetchCourses).toHaveBeenCalledWith(binding.cookies, { userId: 303, status: 'upcoming' },
+      { signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) });
     expect(JSON.stringify(result)).not.toContain('server-only-fixture');
   });
 
@@ -162,6 +165,48 @@ describe('authorized material download', () => {
     f.fetch.mockResolvedValue(new Response(new ReadableStream({ cancel }), { headers: { 'Content-Type': 'application/pdf' } }));
     await expect(f.download(owner, input)).rejects.toMatchObject({ status: 504, code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('includes binding checks in the total budget and aborts stalled course metadata requests', async () => {
+    vi.useFakeTimers();
+    const f = fixture(100);
+    f.bindings.requireBinding.mockImplementation(() => new Promise(resolve => {
+      setTimeout(() => resolve(binding), 20);
+    }));
+    vi.mocked(f.source.fetchCourses).mockImplementation((_cookies, _query, options) => new Promise((_resolve, reject) => {
+      options!.signal!.addEventListener('abort', () => reject(new Error('metadata cancelled')), { once: true });
+    }));
+    const pending = expect(f.download(owner, input)).rejects.toMatchObject({ status: 504, code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(20);
+    const calls = vi.mocked(f.source.fetchCourses).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls.map(call => call[2]?.timeoutMs)).toEqual([80, 80]);
+    expect(new Set(calls.map(call => call[2]?.signal)).size).toBe(1);
+    await vi.advanceTimersByTimeAsync(80);
+    await pending;
+    expect(calls.every(call => call[2]?.signal?.aborted)).toBe(true);
+    expect(f.source.fetchActivities).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels both activity metadata feeds when the client disconnects before the file request', async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const signals: AbortSignal[] = [];
+    vi.mocked(f.source.fetchActivities).mockImplementation((_cookies, _course, _query, options) => new Promise((_resolve, reject) => {
+      signals.push(options!.signal!);
+      if (signals.length === 2) started();
+      options!.signal!.addEventListener('abort', () => reject(new Error('metadata cancelled')), { once: true });
+    }));
+    const pending = expect(f.download(owner, input, controller.signal)).rejects.toMatchObject({ status: 504, code: 'TRONCLASS_DOWNLOAD_TIMEOUT' });
+    await ready;
+    controller.abort();
+    await pending;
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(new Set(signals).size).toBe(1);
+    expect(f.fetch).not.toHaveBeenCalled();
   });
 
   it('maps expired source authentication to reconnect and never downloads', async () => {

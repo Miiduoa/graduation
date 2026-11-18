@@ -15,7 +15,10 @@ import {
 } from './nuniClient';
 import {
   requestNativeTronClassDownload,
+  requestNativeTronClassSubmissionDownload,
+  validNativeTronClassSubmissionDownload,
   type NativeTronClassDownloadInput,
+  type NativeTronClassSubmissionDownloadInput,
   type NativeTronClassDownloadedFile,
 } from './tronClassNativeDownload';
 
@@ -583,6 +586,44 @@ export class NuniSessionController {
       if (error instanceof NuniError && error.status === 401) await this.refresh();
       throw error;
     } finally { this.controllers.delete(controller); }
+  };
+  tronClassSubmissionDownload = async (
+    input: NativeTronClassSubmissionDownloadInput,
+    expectedContext: string,
+    signal?: AbortSignal,
+  ): Promise<NativeTronClassDownloadedFile> => {
+    if (!validNativeTronClassSubmissionDownload(input))
+      throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+    const session = this.state.session;
+    if (signal?.aborted || !session || !this.record ||
+      !this.isSessionCurrent(session.platformAccountId, expectedContext))
+      throw new NuniError(409, 'SESSION_CHANGED');
+    const run = this.generation;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    this.controllers.add(controller);
+    try {
+      const result = await requestNativeTronClassSubmissionDownload(
+        `Platform ${this.record.sessionHandle}`,
+        input,
+        () => !controller.signal.aborted && this.current(run) &&
+          this.isSessionCurrent(session.platformAccountId, expectedContext),
+        controller.signal,
+      );
+      if (controller.signal.aborted || !this.current(run) ||
+        !this.isSessionCurrent(session.platformAccountId, expectedContext))
+        throw new NuniError(409, 'SESSION_CHANGED');
+      return result;
+    } catch (error) {
+      if (!this.current(run) || signal?.aborted)
+        throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+      this.controllers.delete(controller);
+    }
   };
   upload = async (
     path: string,

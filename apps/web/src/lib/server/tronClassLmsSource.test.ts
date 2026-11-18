@@ -6,6 +6,9 @@ const scraper = vi.hoisted(() => ({
   tcFetchHomeworkActivitiesPage: vi.fn(),
   tcFetchHomeworkActivityStrict: vi.fn(),
   tcFetchStudentHomeworkSubmissionList: vi.fn(),
+  tcFetchActivitiesRaw: vi.fn(),
+  tcFetchCourseAnnouncementsStrict: vi.fn(),
+  tcFetchAnnouncementsStrict: vi.fn(),
 }));
 vi.mock('../../../../../backend/functions/tronClassScraper.js', () => scraper);
 
@@ -53,6 +56,22 @@ describe('real read-only source cancellation bridge', () => {
       tronClassLmsReadonlySource.fetchHomeworkActivity!(cookies, 505),
     ]);
     expect(scraper.tcFetchHomeworkActivityStrict.mock.calls.map(call => call[2])).toEqual([first, second, undefined]);
+  });
+
+  it('forwards the shared sync signal and remaining budget into activity and announcement feeds', async () => {
+    const options = { signal: new AbortController().signal, timeoutMs: 2345 };
+    scraper.tcFetchActivitiesRaw.mockResolvedValue([]);
+    scraper.tcFetchCourseAnnouncementsStrict.mockResolvedValue([]);
+    scraper.tcFetchAnnouncementsStrict.mockResolvedValue([]);
+    await expect(tronClassLmsReadonlySource.fetchActivities(cookies, 101, 'type=courseware_activity', options))
+      .resolves.toEqual({ ok: true, value: [] });
+    await expect(tronClassLmsReadonlySource.fetchCourseAnnouncements(cookies, 101, options))
+      .resolves.toEqual({ ok: true, value: [] });
+    await expect(tronClassLmsReadonlySource.fetchSiteAnnouncements(cookies, options))
+      .resolves.toEqual({ ok: true, value: [] });
+    expect(scraper.tcFetchActivitiesRaw).toHaveBeenCalledExactlyOnceWith(cookies, 101, 'type=courseware_activity', options);
+    expect(scraper.tcFetchCourseAnnouncementsStrict).toHaveBeenCalledExactlyOnceWith(cookies, 101, options);
+    expect(scraper.tcFetchAnnouncementsStrict).toHaveBeenCalledExactlyOnceWith(cookies, options);
   });
 
   it('keeps transport errors private after cancellation', async () => {

@@ -18,6 +18,7 @@ import {
   revision,
   snapshot,
   studentKey,
+  submissionHistory,
 } from './fixtures/tronClassIntegration';
 import { fileBytes, directories, deleted, resetFileSystem } from './fixtures/tronClassFileSystem';
 
@@ -26,6 +27,7 @@ const accountB = 'pa_22222222-2222-4222-8222-222222222222';
 const mockBffRequest = jest.fn();
 const mockUpload = jest.fn();
 const mockDownload = jest.fn();
+const mockSubmissionDownload = jest.fn();
 const mockShare = jest.fn();
 const mockSharingAvailable = jest.fn();
 const mockRefresh = jest.fn(async () => undefined);
@@ -42,6 +44,7 @@ let mockPreparation = preparation;
 let mockConnection = connection;
 let mockSnapshot = snapshot;
 let mockId = 0;
+let mockSubmissionDownloadEnabled = true;
 
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
@@ -49,6 +52,7 @@ jest.mock('../state/nuniSession', () => ({
     bffRequest: mockBffRequest,
     upload: mockUpload,
     tronClassDownload: mockDownload,
+    tronClassSubmissionDownload: mockSubmissionDownloadEnabled ? mockSubmissionDownload : undefined,
     refresh: mockRefresh,
     logout: mockLogout,
     isSessionCurrent: (owner: string, context: string) =>
@@ -166,6 +170,7 @@ beforeEach(async () => {
   mockConnection = { ...connection };
   mockSnapshot = { ...snapshot };
   mockId = 0;
+  mockSubmissionDownloadEnabled = true;
   resetFileSystem();
   fileBytes.set('file:///cache/picked-answer.pdf', new Uint8Array([1, 2, 3]));
   mockShare.mockResolvedValue(undefined);
@@ -174,6 +179,11 @@ beforeEach(async () => {
   mockDownload.mockResolvedValue({
     bytes: new Uint8Array([5, 6, 7]),
     filename: '講義.pdf',
+    contentType: 'application/pdf',
+  });
+  mockSubmissionDownload.mockResolvedValue({
+    bytes: new Uint8Array([4, 5, 6]),
+    filename: '先前答案.pdf',
     contentType: 'application/pdf',
   });
   mockBffRequest.mockImplementation(defaultRequest);
@@ -209,6 +219,102 @@ async function confirmAndSend(view: ReturnType<typeof render>) {
   fireEvent(view.getByLabelText('我已確認要把這份作業送至校方'), 'valueChange', true);
   fireEvent.press(view.getByRole('button', { name: '確認並繳交至 TronClass' }));
 }
+
+it('filters school submission states and orders unfinished work by deadline without hiding unknown status', async () => {
+  const items = [
+    { ...homework, id: 21, title: '已完成報告', submitted: true, deadline: '2026-11-01T00:00:00.000Z' },
+    { ...homework, id: 22, title: '未提供期限的作業', submitted: false, deadline: null },
+    { ...homework, id: 23, title: '狀態尚未取得的報告', deadline: '2026-11-13T00:00:00.000Z' },
+    { ...homework, id: 24, title: '近期報告', submitted: false, deadline: '2026-11-14T00:00:00.000Z' },
+    { ...homework, id: 25, courseId: 11, courseName: '資料庫', title: '資料庫練習', submitted: false, deadline: '2026-11-20T00:00:00.000Z' },
+  ];
+  mockSnapshot = { ...snapshot,
+    courses: [...snapshot.courses, { ...snapshot.courses[0], id: 11, name: '資料庫' }],
+    homework: items,
+  };
+  const view = render(<TronClassWorkspaceScreen />);
+  await view.findByRole('button', { name: '全部作業，5 份' });
+  const visibleTitles = () => view.getAllByRole('button')
+    .map((button) => button.props.accessibilityLabel as string)
+    .filter((label) => items.some((item) => item.title === label));
+  expect(visibleTitles()).toEqual(['狀態尚未取得的報告', '近期報告', '資料庫練習', '未提供期限的作業', '已完成報告']);
+  fireEvent.press(view.getByRole('button', { name: '待繳交，3 份' }));
+  expect(view.getByRole('button', { name: '待繳交，3 份' })).toHaveAccessibilityState({ selected: true });
+  expect(visibleTitles()).toEqual(['近期報告', '資料庫練習', '未提供期限的作業']);
+  fireEvent.press(view.getByRole('button', { name: '狀態待確認，1 份' }));
+  expect(visibleTitles()).toEqual(['狀態尚未取得的報告']);
+  fireEvent.press(view.getByRole('button', { name: '已繳交，1 份' }));
+  expect(visibleTitles()).toEqual(['已完成報告']);
+  fireEvent.press(view.getByRole('button', { name: '全部作業，5 份' }));
+  fireEvent.changeText(view.getByLabelText('搜尋作業'), '資料庫');
+  expect(visibleTitles()).toEqual(['資料庫練習']);
+  expect(view.getByRole('button', { name: '待繳交，1 份' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '狀態待確認，0 份' })).toBeTruthy();
+  expect(actions('sync')).toHaveLength(1);
+});
+
+it.each(['confirmed', 'submitted'] as const)(
+  'updates the assignment list only after a verified %s result and allows a later source refresh',
+  async (status) => {
+    mockPreparation = { ...preparation, canSubmit: true, blockedReason: null };
+    mockSnapshot = { ...snapshot, homework: [{ ...homework, submitted: false }] };
+    if (status === 'submitted') mockBffRequest.mockImplementation((path, context, input) =>
+      input.action === 'submit' ? Promise.resolve({ status, operationId: input.operationId,
+        receipt: { id: 'receipt-30', courseId: 10, homeworkId: 20, status: 'submitted',
+          source: 'tronclass', submittedAt: '2026-11-18T10:00:00.000Z', content: '我的答案', attachments: [] },
+      }) : defaultRequest(path, context, input));
+    const view = render(<TronClassWorkspaceScreen />);
+    await openAssignment(view);
+    await previewDraft(view);
+    await confirmAndSend(view);
+    await view.findByText(status === 'confirmed' ? '已確認校方版本' : '校方已確認繳交');
+    expect(view.getByText('目前清單狀態：已繳交')).toBeTruthy();
+    await waitFor(() => expect(view.getByRole('button', { name: '返回作業清單' })).not.toBeDisabled());
+    fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+    expect(view.getByRole('button', { name: '已繳交，1 份' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '待繳交，0 份' })).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '已繳交，1 份' }));
+    expect(view.getByRole('button', { name: homework.title })).toBeTruthy();
+    // The school's next explicit read can report a changed/returned state.
+    fireEvent.press(view.getByRole('button', { name: '重新整理課務資料' }));
+    await view.findByRole('button', { name: '待繳交，1 份' });
+    expect(view.getByRole('button', { name: '已繳交，0 份' })).toBeTruthy();
+    expect(actions('submit')).toHaveLength(1);
+  },
+);
+
+it.each(['submit', 'reconcile'] as const)(
+  'keeps assignment and account navigation locked during %s and never marks an unknown result as submitted',
+  async (action) => {
+    mockPreparation = { ...preparation, canSubmit: true, blockedReason: null };
+    mockSnapshot = { ...snapshot, homework: [{ ...homework, submitted: false }] };
+    let resolveOperation: (value: unknown) => void = () => undefined;
+    const pending = new Promise((resolve) => { resolveOperation = resolve; });
+    mockBffRequest.mockImplementation((path, context, input) =>
+      input.action === action ? pending : defaultRequest(path, context, input));
+    if (action === 'reconcile') await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    const view = render(<TronClassWorkspaceScreen />);
+    if (action === 'submit') {
+      await openAssignment(view);
+      await previewDraft(view);
+      await confirmAndSend(view);
+    } else fireEvent.press(await view.findByRole('button', { name: homework.title }));
+    await waitFor(() => expect(actions(action)).toHaveLength(1));
+    for (const name of ['返回作業清單', '重新連接或切換校方帳號', '解除 TronClass 連接', '重新整理課務資料']) {
+      expect(view.getByRole('button', { name })).toBeDisabled();
+      fireEvent.press(view.getByRole('button', { name }));
+    }
+    expect(actions('status')).toHaveLength(1);
+    expect(view.queryByRole('button', { name: homework.title })).toBeNull();
+    const input = actions(action)[0];
+    await act(async () => resolveOperation({ status: 'unknown', operationId: input.operationId, receipt: null }));
+    await waitFor(() => expect(view.getByRole('button', { name: '返回作業清單' })).not.toBeDisabled());
+    fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+    expect(view.getByRole('button', { name: '已繳交，0 份' })).toBeTruthy();
+    expect(view.getByRole('button', { name: '待繳交，1 份' })).toBeTruthy();
+    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(input.operationId);
+  },
+);
 
 it('loads courses, distinguishes unknown submitted state and permits a read-only local preview without writes', async () => {
   const view = render(<TronClassWorkspaceScreen />);
@@ -530,6 +636,94 @@ const material = {
     },
   ],
 };
+
+it('downloads a permitted submission-history attachment through the private native capability and clears its share copy', async () => {
+  mockPreparation = { ...preparation, history: submissionHistory };
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.press(view.getByRole('button', { name: '下載並分享作業附件：先前答案.pdf' }));
+  await waitFor(() => expect(mockShare).toHaveBeenCalledTimes(1));
+  expect(mockSubmissionDownload).toHaveBeenCalledWith({
+    courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 50, revision,
+  }, 'context-a', expect.any(AbortSignal));
+  const sharedUri = mockShare.mock.calls[0][0];
+  await waitFor(() => expect(fileBytes.has(sharedUri)).toBe(false));
+  expect(deleted).toContain(sharedUri);
+  expect(view.getByText('目前清單狀態：尚未確認')).toBeTruthy();
+  expect(actions('submit')).toHaveLength(0);
+  expect(actions('reconcile')).toHaveLength(0);
+  expect(mockDownload).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+it.each(['no-descriptor', 'no-capability'] as const)('keeps history attachment names readable without a %s download', async (condition) => {
+  mockSubmissionDownloadEnabled = condition !== 'no-capability';
+  mockPreparation = { ...preparation, history: condition === 'no-descriptor' ? {
+    ...submissionHistory,
+    entries: [{ ...submissionHistory.entries[0], attachments: [{ name: '先前答案.pdf', size: 3 }] }],
+  } : submissionHistory };
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  expect(view.getByText('先前答案.pdf · 3 B')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '下載並分享作業附件：先前答案.pdf' })).toBeNull();
+  expect(mockSubmissionDownload).not.toHaveBeenCalled();
+});
+
+it('keeps a denied history download out of the native share sheet without altering the pending operation', async () => {
+  mockPreparation = { ...preparation, history: submissionHistory };
+  mockSubmissionDownload.mockRejectedValueOnce(new NuniError(403, 'TRONCLASS_SUBMISSION_ATTACHMENT_DENIED'));
+  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  const view = render(<TronClassWorkspaceScreen />);
+  fireEvent.press(await view.findByRole('button', { name: homework.title }));
+  const download = await view.findByRole('button', { name: '下載並分享作業附件：先前答案.pdf' });
+  await waitFor(() => expect(download).not.toBeDisabled());
+  fireEvent.press(download);
+  await view.findByText('校方尚未允許下載這份作業附件，請重新讀取作業紀錄。');
+  expect(mockShare).not.toHaveBeenCalled();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+  expect(actions('submit')).toHaveLength(0);
+  expect(actions('reconcile')).toHaveLength(1);
+  expect(view.getByText('前次送出結果待確認')).toBeTruthy();
+});
+
+it.each(['owner-change', 'unmount'] as const)('cancels a history download on %s and drops late bytes before sharing', async (change) => {
+  mockPreparation = { ...preparation, history: submissionHistory };
+  let finish: (value: unknown) => void = () => undefined;
+  mockSubmissionDownload.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.press(view.getByRole('button', { name: '下載並分享作業附件：先前答案.pdf' }));
+  await waitFor(() => expect(mockSubmissionDownload).toHaveBeenCalledTimes(1));
+  const signal = mockSubmissionDownload.mock.calls[0][2] as AbortSignal;
+  if (change === 'owner-change') {
+    mockAuth = { ...mockAuth, session: { platformAccountId: accountB, context: 'context-b' } };
+    mockConnection = { ...disconnected };
+    view.rerender(<TronClassWorkspaceScreen />);
+    await view.findByLabelText('TronClass 帳號');
+  } else view.unmount();
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish({ bytes: new Uint8Array([4, 5, 6]), filename: '先前答案.pdf', contentType: 'application/pdf' }));
+  expect(mockShare).not.toHaveBeenCalled();
+  expect([...fileBytes.keys()].some((uri) => uri.includes('nuni-tronclass-'))).toBe(false);
+  expect(actions('submit')).toHaveLength(0);
+});
+
+it('does not share a history attachment when the school binding expires before sharing becomes available', async () => {
+  mockPreparation = { ...preparation, history: submissionHistory };
+  mockConnection = { ...connection, expiresAt: '2026-11-18T10:00:01.000Z' };
+  let available: (value: boolean) => void = () => undefined;
+  mockSharingAvailable.mockImplementationOnce(() => new Promise((resolve) => { available = resolve; }));
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.press(view.getByRole('button', { name: '下載並分享作業附件：先前答案.pdf' }));
+  await waitFor(() => expect(mockSharingAvailable).toHaveBeenCalledTimes(1));
+  jest.mocked(Date.now).mockReturnValue(Date.parse('2026-11-18T10:00:02.000Z'));
+  await act(async () => available(true));
+  await view.findByText('TronClass 登入已到期，請重新連接。');
+  expect(mockShare).not.toHaveBeenCalled();
+  expect([...fileBytes.keys()].some((uri) => uri.includes('nuni-tronclass-'))).toBe(false);
+});
+
 it('requests the selected course explicitly and downloads its authorized material through the native BFF', async () => {
   mockBffRequest.mockImplementation((path, context, input) =>
     input.action === 'sync' && input.courseId === 10

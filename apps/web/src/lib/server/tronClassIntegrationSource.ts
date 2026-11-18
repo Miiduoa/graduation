@@ -20,7 +20,7 @@ import type {
   TronClassSnapshot,
   TronClassSyncError,
 } from '../tronClassIntegrationTypes';
-import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 import { tronClassLmsReadonlySource } from './tronClassLmsSource';
 import { createTronClassBindingService } from './tronClassBinding';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
@@ -32,6 +32,7 @@ const MAX_FEED_ITEMS = 5_000;
 type BindingReader = Pick<ReturnType<typeof createTronClassBindingService>, 'requireBinding' | 'assertCurrent'>;
 type Source = LmsReadonlySource;
 type CourseContents = Pick<TronClassSnapshot, 'announcements' | 'materials' | 'errors'>;
+type ReadStep = <T>(request: (options: LmsReadOptions) => Promise<T>) => Promise<T>;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -56,13 +57,15 @@ function time(value: unknown): string | null {
 
 function requireAuthorized(status: number | null): void {
   if (status === 401) throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
+  if (status === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
 }
 
 function rethrowSession(error: unknown): void {
-  if (error instanceof NuniError && [401, 403, 409].includes(error.status)) throw error;
+  if (error instanceof NuniError && ([401, 403, 409].includes(error.status) || error.code === 'TRONCLASS_READ_TIMEOUT')) throw error;
   if (classifySchoolReadError(error) === 'session' || schoolHttpStatus(error) === 401) {
     throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED');
   }
+  if (schoolHttpStatus(error) === 403) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
 }
 
 function parseCourses(raw: unknown): TronClassCourseSummary[] {
@@ -108,7 +111,7 @@ function courseError(course: TronClassCourseSummary, area: TronClassSyncError['a
 
 async function readHomework(
   source: Source, cookies: Record<string, string>, course: TronClassCourseSummary,
-  check: () => Promise<void>,
+  check: () => Promise<void>, read: ReadStep,
 ): Promise<{ homework: TronClassHomeworkItem[]; errors: TronClassSyncError[] }> {
   const items: TronClassHomeworkItem[] = [];
   const seen = new Set<number>();
@@ -116,7 +119,7 @@ async function readHomework(
   try {
     for (let page = 1; page <= HOMEWORK_MAX_PAGES; page++) {
       await check();
-      const response = await source.fetchHomeworkPage(cookies, course.id, page, HOMEWORK_PAGE_SIZE);
+      const response = await read(options => source.fetchHomeworkPage(cookies, course.id, page, HOMEWORK_PAGE_SIZE, options));
       if (!response.ok) {
         requireAuthorized(response.status);
         return { homework: [], errors: [courseError(course, 'homework')] };
@@ -199,17 +202,21 @@ function visibleSourceRows(rows: unknown[]): unknown[] {
 
 async function readContents(
   source: Source, cookies: Record<string, string>, course: TronClassCourseSummary,
-  check: () => Promise<void>,
+  check: () => Promise<void>, read: ReadStep,
 ): Promise<CourseContents> {
   await check();
-  const load = async <T>(request: () => Promise<T>) => {
-    try { return await request(); }
+  const load = async (request: (options: LmsReadOptions) => Promise<LmsReadResult<unknown[]>>) => {
+    try {
+      const response = await read(request);
+      if (!response.ok) requireAuthorized(response.status);
+      return response;
+    }
     catch (error) { rethrowSession(error); return { ok: false as const, status: schoolHttpStatus(error) }; }
   };
   const [activities, courseware, notices] = await Promise.all([
-    load(() => source.fetchActivities(cookies, course.id, '')),
-    load(() => source.fetchActivities(cookies, course.id, 'type=courseware_activity')),
-    load(() => source.fetchCourseAnnouncements(cookies, course.id)),
+    load(options => source.fetchActivities(cookies, course.id, '', options)),
+    load(options => source.fetchActivities(cookies, course.id, 'type=courseware_activity', options)),
+    load(options => source.fetchCourseAnnouncements(cookies, course.id, options)),
   ]);
   await check();
   for (const response of [activities, courseware, notices]) if (!response.ok) requireAuthorized(response.status);
@@ -246,25 +253,57 @@ export function createTronClassIntegrationReader(dependencies: {
   const bindings = dependencies.bindings ?? createTronClassBindingService();
   const source = dependencies.source ?? tronClassLmsReadonlySource;
   const now = dependencies.now ?? Date.now;
-  return async (ownerKey: string, options: { courseId?: number } = {}): Promise<TronClassSnapshot> => {
+  return async (ownerKey: string, options: { courseId?: number } = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
     if (options.courseId !== undefined && positiveId(options.courseId) !== options.courseId) {
       throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     }
-    const binding = await bindings.requireBinding(ownerKey);
     const deadline = now() + (dependencies.budgetMs ?? READ_BUDGET_MS);
-    let expired = false;
-    const check = async () => {
-      if (expired || now() >= deadline) throw new NuniError(503, 'TRONCLASS_READ_TIMEOUT');
-      await bindings.assertCurrent(ownerKey, binding.revision);
+    const controller = new AbortController();
+    let failure: NuniError | undefined;
+    let rejectCancelled!: (error: NuniError) => void;
+    const cancelled = new Promise<never>((_, reject) => { rejectCancelled = reject; });
+    const stop = (error: NuniError): NuniError => {
+      if (!controller.signal.aborted) {
+        failure = error;
+        controller.abort();
+        rejectCancelled(error);
+      }
+      return failure ?? error;
+    };
+    const timeout = () => new NuniError(503, 'TRONCLASS_READ_TIMEOUT');
+    const abort = () => { stop(timeout()); };
+    const active = () => {
+      if (controller.signal.aborted) throw failure ?? timeout();
+      if (now() >= deadline) throw stop(timeout());
+    };
+    const read: ReadStep = async request => {
+      active();
+      try {
+        const result = await request({ signal: controller.signal, timeoutMs: Math.max(1, Math.ceil(deadline - now())) });
+        active();
+        return result;
+      } catch (error) {
+        // Abort-aware transports and legacy adapters may fail differently.
+        // Keep the original cancellation/authorization outcome for this sync.
+        active();
+        throw error;
+      }
     };
     const operation = async (): Promise<TronClassSnapshot> => {
       try {
+        active();
+        const binding = await bindings.requireBinding(ownerKey);
+        const check = async () => {
+          active();
+          await bindings.assertCurrent(ownerKey, binding.revision);
+          active();
+        };
         await check();
-        const courses = parseCourses(await source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'ongoing' }));
+        const courses = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'ongoing' }, readOptions)));
         const errors: TronClassSyncError[] = [];
         await check();
         try {
-          const upcoming = parseCourses(await source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'upcoming' }));
+          const upcoming = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'upcoming' }, readOptions)));
           const seen = new Set(courses.map((item) => item.id));
           for (const item of upcoming) if (!seen.has(item.id)) { seen.add(item.id); courses.push(item); }
         } catch (error) {
@@ -286,14 +325,14 @@ export function createTronClassIntegrationReader(dependencies: {
           try {
             while (!stopped && cursor < selected.length) {
               const course = selected[cursor++];
-              const result = await readHomework(source, binding.cookies, course, check);
+              const result = await readHomework(source, binding.cookies, course, check, read);
               homework.push(...result.homework);
               errors.push(...result.errors);
             }
           } catch (error) { stopped = true; throw error; }
         };
         await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
-        const contents = options.courseId ? await readContents(source, binding.cookies, selected[0], check)
+        const contents = options.courseId ? await readContents(source, binding.cookies, selected[0], check, read)
           : { announcements: [], materials: [], errors: [] };
         errors.push(...contents.errors);
         await check();
@@ -304,19 +343,23 @@ export function createTronClassIntegrationReader(dependencies: {
           errors, partial: errors.length > 0,
         };
       } catch (error) {
-        rethrowSession(error);
-        if (error instanceof NuniError) throw error;
-        throw new NuniError(503, 'TRONCLASS_SOURCE_UNAVAILABLE');
+        let reason = error;
+        try { rethrowSession(error); }
+        catch (classified) { reason = classified; }
+        throw stop(reason instanceof NuniError ? reason : new NuniError(503, 'TRONCLASS_SOURCE_UNAVAILABLE'));
       }
     };
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    // One deadline covers binding checks, all course workers and content reads.
+    // Racing the cancellation also bounds providers that ignore AbortSignal.
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const timer = setTimeout(abort, Math.max(1, deadline - now()));
     try {
-      return await Promise.race([
-        operation(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => { expired = true; reject(new NuniError(503, 'TRONCLASS_READ_TIMEOUT')); }, Math.max(1, deadline - now()));
-        }),
-      ]);
-    } finally { expired = true; clearTimeout(timer); }
+      return await Promise.race([operation(), cancelled]);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      controller.abort();
+    }
   };
 }

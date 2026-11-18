@@ -52,6 +52,20 @@ it('requires authentication before any binding or school access', async () => {
   expect(bindings.getStatus).not.toHaveBeenCalled();
 });
 
+it('passes request cancellation to the sync reader separately from caller-supplied scope', async () => {
+  const { dependencies, read } = setup();
+  const controller = new AbortController();
+  const request = new NextRequest('https://nuni.tw/api/tronclass', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw' },
+    body: JSON.stringify({ action: 'sync', courseId: 101 }), signal: controller.signal,
+  });
+  const response = await handleTronClassIntegration(request, dependencies);
+  expect(response.status).toBe(200);
+  expect(read).toHaveBeenCalledExactlyOnceWith(ownerKey, { courseId: 101 }, request.signal);
+  controller.abort();
+  expect(read.mock.calls[0][2].aborted).toBe(true);
+});
+
 it('preserves passwords exactly for the login adapter and omits them from its response', async () => {
   const { request, bindings } = setup();
   const response = await request({ action: 'connect', schoolId: 'pu', account: '410000001', password: ' password with spaces ', expectedRevision: null });

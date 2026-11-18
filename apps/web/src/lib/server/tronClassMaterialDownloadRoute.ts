@@ -7,13 +7,16 @@ import { createUidRateLimiter } from './uidRateLimit';
 import { createTronClassMaterialDownloader, type TronClassMaterialDownloadInput } from './tronClassMaterialDownload';
 
 type Bindings = Pick<ReturnType<typeof createTronClassBindingService>, 'requireBinding' | 'assertCurrent'>;
-export type TronClassMaterialDownloadRouteDependencies = {
+export type TronClassFileDownloadRouteDependencies<Input extends { revision: string }> = {
   authenticate?: typeof authenticateTronClassActor;
   bindings?: Bindings;
-  download?: ReturnType<typeof createTronClassMaterialDownloader>;
+  download?: (ownerKey: string, input: Input, signal?: AbortSignal) => Promise<{
+    bytes: Uint8Array; name: string; contentType: string;
+  }>;
   rateLimit?: (ownerKey: string) => void;
   acquireSlot?: () => () => void;
 };
+export type TronClassMaterialDownloadRouteDependencies = TronClassFileDownloadRouteDependencies<TronClassMaterialDownloadInput>;
 
 /** Bound concurrent buffered files in each process; there is no waiting queue. */
 export function createTronClassDownloadSlots(maximum = 2): () => () => void {
@@ -106,9 +109,13 @@ function attachmentStream(data: Uint8Array, signal: AbortSignal, release: () => 
   }, { highWaterMark: 0 });
 }
 
-export async function handleTronClassMaterialDownload(
+/** All school downloads share the same process slots and per-owner quota. */
+export async function handleTronClassFileDownload<Input extends { revision: string }>(
   request: NextRequest,
-  dependencies: TronClassMaterialDownloadRouteDependencies = {},
+  parse: (value: unknown) => Input,
+  createDownload: (bindings: Bindings) => NonNullable<TronClassFileDownloadRouteDependencies<Input>['download']>,
+  dependencies: TronClassFileDownloadRouteDependencies<Input> = {},
+  messages: Record<string, string> = {},
 ): Promise<Response> {
   let release: (() => void) | undefined;
   try {
@@ -121,11 +128,13 @@ export async function handleTronClassMaterialDownload(
     if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
       throw new NuniError(415, 'TRONCLASS_INVALID_INPUT');
     }
-    const input = parseInput(await boundedJson(request, 8 * 1024));
+    const input = parse(await boundedJson(request, 8 * 1024));
+    if (request.signal.aborted) throw new NuniError(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
     release = (dependencies.acquireSlot ?? acquireDownloadSlot)();
     const bindings = dependencies.bindings ?? createTronClassBindingService();
     await bindings.assertCurrent(actor.ownerKey, input.revision);
-    const result = await (dependencies.download ?? createTronClassMaterialDownloader({ bindings }))(actor.ownerKey, input, request.signal);
+    if (request.signal.aborted) throw new NuniError(504, 'TRONCLASS_DOWNLOAD_TIMEOUT');
+    const result = await (dependencies.download ?? createDownload(bindings))(actor.ownerKey, input, request.signal);
     const current = await authenticate(request);
     if (current.ownerKey !== actor.ownerKey || current.provider !== actor.provider) throw new NuniError(409, 'SESSION_CHANGED');
     await bindings.assertCurrent(actor.ownerKey, input.revision);
@@ -150,7 +159,7 @@ export async function handleTronClassMaterialDownload(
     const status = error instanceof NuniError ? error.status : rateLimited ? 429 : 503;
     const candidate = error instanceof NuniError ? error.code : rateLimited ? 'TRONCLASS_RATE_LIMITED' : 'TRONCLASS_DOWNLOAD_UNAVAILABLE';
     const code = /^[A-Z][A-Z0-9_]{0,99}$/.test(candidate) ? candidate : 'TRONCLASS_DOWNLOAD_UNAVAILABLE';
-    const message = MESSAGES[code] ?? (status === 401 ? '登入已到期，請重新登入或連接 TronClass。'
+    const message = messages[code] ?? MESSAGES[code] ?? (status === 401 ? '登入已到期，請重新登入或連接 TronClass。'
       : status === 429 ? '下載過於頻繁，請稍後再試。'
       : status === 400 || status === 422 ? '下載資料格式不正確，請重新整理課程。'
       : '目前無法下載教材，請稍後再試或使用 TronClass 原始下載連結。');
@@ -158,4 +167,12 @@ export async function handleTronClassMaterialDownload(
       status, headers: { ...PRIVATE_HEADERS, 'Content-Type': 'application/json; charset=utf-8' },
     });
   } finally { release?.(); }
+}
+
+export async function handleTronClassMaterialDownload(
+  request: NextRequest,
+  dependencies: TronClassMaterialDownloadRouteDependencies = {},
+): Promise<Response> {
+  return handleTronClassFileDownload(request, parseInput,
+    (bindings) => createTronClassMaterialDownloader({ bindings }), dependencies);
 }

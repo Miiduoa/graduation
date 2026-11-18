@@ -33,6 +33,21 @@ function stateOf(row: Record<string, unknown>): TronClassSubmissionHistoryEntry[
   return 'unknown';
 }
 
+function isPlainDownload(file: Record<string, unknown>): boolean {
+  // The official resource template uses different routes for references,
+  // external providers and generated marking PDFs. Those are not this route.
+  return file.allow_download === true &&
+    [undefined, null, 0].includes(file.reference_id as undefined | null | number) &&
+    [undefined, null, ''].includes(file.source as undefined | null | string) &&
+    [undefined, null, '', 'agree'].includes(file.audit_status as undefined | null | string) &&
+    [undefined, false, 0].includes(file.deleted as undefined | boolean | number) &&
+    [undefined, false, 0].includes(file.is_deleted as undefined | boolean | number) &&
+    [undefined, false, 0].includes(file.from_project as undefined | boolean | number) &&
+    [undefined, false, 0].includes(file.isFromKnowledgeGraph as undefined | boolean | number) &&
+    file.type !== 'link' && (file.status === undefined || file.status === null ||
+      (typeof file.status === 'string' && !['cliping', 'clip_failed', 'uploading', 'failed'].includes(file.status)));
+}
+
 /** Projection of the official student submission_list; not a final-write receipt. */
 export function normalizeTronClassSubmissionHistory(
   value: unknown, binding: Pick<TronClassSubmissionBinding, 'userId'>,
@@ -85,7 +100,14 @@ export function normalizeTronClassSubmissionHistory(
         !(file.size === null || file.size === undefined ||
           (typeof file.size === 'number' && Number.isSafeInteger(file.size) && file.size >= 0))) return invalid();
       uploadIds.add(file.id);
-      return { name: file.name, size: typeof file.size === 'number' ? file.size : null };
+      return {
+        name: file.name, size: typeof file.size === 'number' ? file.size : null,
+        // Missing permissions, teacher markers and ambiguous states never
+        // become download authority. The BFF checks the current source again.
+        ...(isPlainDownload(file) && row.submit_by_instructor === false &&
+          creator.id === binding.userId && state !== 'unknown'
+          ? { download: { uploadId: file.id } } : {}),
+      };
     });
     return {
       id: String(row.id), state, isLatest, createdAt: createdAt(row.created_at, now),
