@@ -120,14 +120,19 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
     await expect(reveal).to_be_in_viewport(ratio=1)
     metrics = await dialog.locator('#fixture-password').evaluate('''node => {
       const style=getComputedStyle(node), field=node.getBoundingClientRect();
-      const button=node.parentElement.querySelector('button').getBoundingClientRect();
+      const reveal=node.parentElement.querySelector('button');
+      const button=reveal.getBoundingClientRect();
       return {padding:parseFloat(style.paddingRight), reserve:field.right-button.left,
         available:field.width-parseFloat(style.paddingRight)-parseFloat(style.paddingLeft),
         minimumText:2*parseFloat(style.fontSize),
-        targetWidth:button.width,targetHeight:button.height};
+        targetWidth:button.width,targetHeight:button.height,
+        minimumHeight:parseFloat(getComputedStyle(reveal).minHeight)};
     }''')
     assert metrics['padding'] >= metrics['reserve'] - 1 and metrics['available'] >= metrics['minimumText'], metrics
-    assert metrics['targetWidth'] >= 44 and metrics['targetHeight'] >= 44, metrics
+    # Transformed layout coordinates may report 43.999969px for a 44px target.
+    # Keep the actual CSS minimum strict; allow only 0.01px geometric rounding.
+    assert metrics['minimumHeight'] >= 44, metrics
+    assert metrics['targetWidth'] >= 43.99 and metrics['targetHeight'] >= 43.99, metrics
     await reveal.press('Enter')
     await expect(dialog.locator('#fixture-password')).to_have_attribute('type', 'text')
     for selector in ('#fixture-icon-field', '#fixture-reminder-time', '#fixture-note'):
