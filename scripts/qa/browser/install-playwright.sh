@@ -14,9 +14,16 @@ retry_install() {
   local label="$1"
   local deadline="$2"
   shift 2
+  # timeout must run as root when its descendants do. A user-owned timeout
+  # cannot kill apt started through sudo, leaving its lock held on retry.
+  local -a runner=(timeout --kill-after=5s "$deadline")
+  if [[ "$1" == sudo ]]; then
+    runner=(sudo "${runner[@]}")
+    shift
+  fi
   local attempt
   for attempt in 1 2 3; do
-    if timeout --kill-after=5s "$deadline" "$@"; then
+    if "${runner[@]}" "$@"; then
       return 0
     fi
     if (( attempt == 3 )); then
@@ -29,13 +36,14 @@ retry_install() {
 }
 
 if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
-  retry_install 'Playwright Chromium/dependencies' 180s python -m playwright install --with-deps chromium
+  retry_install 'Playwright Chromium' 180s python -m playwright install chromium
+  retry_install 'Playwright system dependencies' 180s sudo "$(command -v python)" -m playwright install-deps chromium
   retry_install 'Noto CJK fonts' 60s sudo apt-get \
     -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \
     -o Acquire::Retries=3 install -y fonts-noto-cjk
 else
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
-  if ! retry_install 'Playwright system dependencies' 90s python -m playwright install-deps chromium; then
+  if ! retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium; then
     echo 'Skipping extra system packages after bounded retries; continuing with actual browser checks (Ubuntu mirror may be unreachable).' >&2
   fi
 fi
