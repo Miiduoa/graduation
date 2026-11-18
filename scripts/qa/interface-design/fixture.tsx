@@ -62,7 +62,7 @@ function Fixture() {
   return (
     <SchoolLmsReadonlyProvider enabled>
       <ToastProvider position="bottom-right">
-        <div className={home.page}>
+        <div className={pathname === '/' ? `${home.page} ${home.todayPage}` : home.page}>
           <AppHeader />
           <main className={home.main} id="page-content" tabIndex={-1}>
             {pathname === '/' ? (
