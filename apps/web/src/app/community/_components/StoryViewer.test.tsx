@@ -406,3 +406,65 @@ it('pauses image-story auto-advance while the caption is focused and resumes the
   act(() => vi.advanceTimersByTime(1));
   expect(viewer.next).toHaveBeenCalledOnce();
 });
+
+it('does not inherit a failed video from a different campus with the same story ID', () => {
+  const makeViewer = (schoolId: string, mediaUrl: string) => ({
+    group: {
+      authorUid: 'one',
+      latestAt: 0,
+      stories: [{
+        id: 'shared-story-id', schoolId, authorUid: 'one',
+        kind: 'video' as const, mediaUrl, text: '校園活動',
+      }],
+    },
+    viewerUid: 'reader',
+    isOwner: false,
+    index: 0,
+    hasPrevious: false,
+    hasNext: true,
+    next: vi.fn(),
+    previous: vi.fn(),
+    close: vi.fn(),
+    switchAuthor: vi.fn(),
+  });
+  const { rerender } = render(<StoryViewer author="同學" viewer={makeViewer('pu', '/old-campus.mp4')} />);
+  fireEvent.error(screen.getByLabelText('限時動態影片'));
+  expect(screen.getByRole('status').textContent).toContain('無法播放');
+
+  // The same document ID at another school is a separate story and must be usable.
+  rerender(<StoryViewer author="同學" viewer={makeViewer('ntcu', '/new-campus.mp4')} />);
+  const newVideo = screen.getByLabelText('限時動態影片');
+  expect(newVideo.getAttribute('src')).toBe('/new-campus.mp4');
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '連續播放' })).not.toHaveProperty('disabled', true);
+});
+
+it('releases a previous story caption focus when navigating to an uncaptioned video', () => {
+  const stories: CampusStoryDoc[] = [
+    { id: 'first', schoolId: 'pu', authorUid: 'one', kind: 'video', mediaUrl: '/first.mp4', text: '請先看完這段說明' },
+    { id: 'second', schoolId: 'pu', authorUid: 'one', kind: 'video', mediaUrl: '/second.mp4' },
+  ];
+  const next = vi.fn();
+  const base = {
+    group: { authorUid: 'one', latestAt: 0, stories },
+    viewerUid: 'reader',
+    isOwner: false,
+    index: 0,
+    hasPrevious: false,
+    hasNext: true,
+    next,
+    previous: vi.fn(),
+    close: vi.fn(),
+    switchAuthor: vi.fn(),
+  };
+  const { rerender } = render(<StoryViewer author="同學" viewer={base} />);
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  act(() => screen.getByRole('region', { name: '限時動態說明文字' }).focus());
+  expect(screen.getByRole('button', { name: '停止連播' })).toBeTruthy();
+
+  // Navigation replaces the focused caption; its stale focus state must not pause the next story.
+  rerender(<StoryViewer author="同學" viewer={{ ...base, index: 1 }} />);
+  expect(screen.queryByRole('region', { name: '限時動態說明文字' })).toBeNull();
+  fireEvent.ended(screen.getByLabelText('限時動態影片'));
+  expect(next).toHaveBeenCalledOnce();
+});
