@@ -15,6 +15,13 @@ const FILES = [
 ];
 const COMMENT = buildTronClassNewSubmission({ activityId: 202,
   content: '我的 <作業> & 說明\n第二行', uploadIds: FILES.map(file => file.id) }).body.comment as string;
+// Redacted shape observed in an authenticated student submission_list. IDs,
+// names and sizes are synthetic; this is not evidence of a new live submission.
+function generatedPdf(change: Record<string, unknown> = {}) {
+  return { id: 603, name: 'synthetic-system-document', size: 1024,
+    source: 'auto-generated-pdf', status: 'ready', type: 'document',
+    allow_download: true, deleted: false, reference_id: 0, ...change };
+}
 function row(change: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 501, course_id: 101, activity_id: 202, created_by: { id: 303 },
@@ -58,6 +65,81 @@ describe('authenticated final POST readback matching', () => {
     expect(verifyTronClassSubmissionReadback({ list: [row()] }, first, NOW)).toEqual(VERIFIED);
     expect(verifyTronClassSubmissionReadback(source(row({ uploads: [] })), context({ uploads: [] }), NOW)).toEqual(VERIFIED);
     expect(verifyTronClassSubmissionReadback(source(row({ comment: '' })), context({ comment: '' }), NOW)).toEqual(VERIFIED);
+  });
+
+  it.each([true, false])('matches original uploads and one explicit school-generated PDF (has originals=%s)', withOriginals => {
+    const originals = withOriginals ? FILES.map(file => ({ ...file, source: '' })) : [];
+    const target = row({ uploads: [generatedPdf(), ...originals.toReversed()] });
+    delete target.course_id; // The authenticated history response omits this redundant field.
+    const comparison = context({ uploads: withOriginals ? FILES : [] });
+    const raw = source(target);
+    const before = JSON.stringify({ raw, comparison });
+    const result = verifyTronClassSubmissionReadback(raw, comparison, NOW);
+    expect(result).toEqual(VERIFIED);
+    expect(JSON.stringify({ raw, comparison })).toBe(before);
+    expect(JSON.stringify(result)).not.toMatch(/auto-generated|synthetic-system|uploads|comment/);
+  });
+
+  it.each([
+    { source: '' }, { source: undefined }, { source: null }, { source: 'LARK' },
+    { source: 'auto-generated-pdf ' }, { source: ['auto-generated-pdf'] },
+    { status: undefined }, { status: 'uploading' }, { status: 'failed' },
+    { type: undefined }, { type: 'image' }, { allow_download: undefined }, { allow_download: false },
+    { deleted: undefined }, { deleted: true }, { deleted: 0 }, { is_deleted: true },
+    { reference_id: undefined }, { reference_id: 1 },
+    { id: -1 }, { id: '603' }, { size: null }, { size: undefined }, { size: 0 },
+    { hidden: true }, { published: false },
+  ])('keeps an extra resource unknown unless it matches the observed generated-PDF shape: %j', change => {
+    expect(verifyTronClassSubmissionReadback(source(row({ uploads: [...FILES, generatedPdf(change)] })), context(), NOW)).toEqual(UNKNOWN);
+  });
+
+  it('never uses a generated PDF to replace a missing original, disguise an original ID, or hide another extra file', () => {
+    for (const uploads of [
+      [FILES[0], generatedPdf()],
+      [generatedPdf({ ...FILES[0] }), FILES[1]],
+      [...FILES, generatedPdf(), generatedPdf({ id: 604 })],
+      [...FILES, generatedPdf(), generatedPdf()],
+      [...FILES, generatedPdf(), { id: 604, name: 'extra.pdf', size: 1024, source: '' }],
+      [...FILES, generatedPdf(), generatedPdf({ id: 604, source: 'LARK' })],
+      [{ ...FILES[0], source: 'LARK' }, FILES[1], generatedPdf()],
+    ]) {
+      expect(verifyTronClassSubmissionReadback(source(row({ uploads })), context(), NOW)).toEqual(UNKNOWN);
+    }
+  });
+
+  it.each([
+    { deleted: true }, { is_deleted: 1 }, { from_project: true }, { isFromKnowledgeGraph: true },
+    { reference_id: 804 }, { type: 'link' }, { audit_status: 'reject' }, { audit_status: 'pending' },
+    { status: 'failed' }, { status: 'uploading' }, { status: 'cliping' }, { status: 'clip_failed' },
+  ])('rejects explicit unusable or external metadata on original and generated files: %j', change => {
+    const original = source(row({ uploads: [{ ...FILES[0], ...change }, FILES[1]] }));
+    const generated = source(row({ uploads: [...FILES, generatedPdf(change)] }));
+    expect([
+      verifyTronClassSubmissionReadback(original, context(), NOW),
+      verifyTronClassSubmissionReadback(generated, context(), NOW),
+    ]).toEqual([UNKNOWN, UNKNOWN]);
+  });
+
+  it.each([
+    {}, { allow_download: false },
+    { audit_status: 'agree', deleted: false, is_deleted: 0, from_project: false,
+      isFromKnowledgeGraph: 0, reference_id: 0, type: 'document', status: 'ready', allow_download: false },
+    { audit_status: null, reference_id: null, type: null, status: null },
+  ])('preserves legacy optional original-file metadata and does not require download permission: %j', change => {
+    const uploads = FILES.map(file => ({ ...file, ...change }));
+    expect(verifyTronClassSubmissionReadback(source(row({ uploads })), context(), NOW)).toEqual(VERIFIED);
+    expect(verifyTronClassSubmissionReadback(source(row({ uploads: [...uploads, generatedPdf()] })), context(), NOW)).toEqual(VERIFIED);
+  });
+
+  it('does not let a generated PDF weaken the owner, version, body or complete-history checks', () => {
+    for (const change of [
+      { created_by: { id: 999 } }, { is_latest_version: false }, { is_draft: true },
+      { comment: `${COMMENT} changed` }, { activity_id: 999 },
+    ]) {
+      expect(verifyTronClassSubmissionReadback(source(row({ uploads: [...FILES, generatedPdf()], ...change })), context(), NOW)).toEqual(UNKNOWN);
+    }
+    expect(verifyTronClassSubmissionReadback(source(row({ uploads: [...FILES, generatedPdf()] }), { has_next: true }), context(), NOW)).toEqual(UNKNOWN);
+    expect(verifyTronClassSubmissionReadback({ list: [row({ uploads: [...FILES, generatedPdf()] })] }, context(), NOW)).toEqual(UNKNOWN);
   });
 
   it.each([undefined, null, '', 'bad-time', 1794902400000, '2026-11-18T00:00:00Z'])

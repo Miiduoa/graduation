@@ -93,8 +93,9 @@ function assignmentShape(assignment: TronClassAssignment) {
 
 /**
  * Public DTO adapter for the existing v2 journal/candidates. The production
- * factory supplies neither tenant authorization nor a storage policy, and its
- * contractVerified remains false. A runtime flag alone cannot enable this path.
+ * factory supplies the PU read-only authorization reader but no verified CSRF,
+ * final-acknowledgment contract or storage policy; contractVerified stays false.
+ * A runtime flag alone cannot enable this path.
  * No v2 upload/final call ever passes through the legacy v1 writer or receipt parser.
  */
 export function createTronClassPublicSubmissionService(dependencies: TronClassPublicSubmissionDependencies): TronClassPublicSubmissionService {

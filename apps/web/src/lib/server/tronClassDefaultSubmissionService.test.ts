@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The production authorization reader is server-only; Vitest runs outside
+// Next's react-server condition while exercising this server-side factory.
+vi.mock('server-only', () => ({}));
+
 const runtime = vi.hoisted(() => ({
   getFirebaseAdmin: vi.fn(), createBinding: vi.fn(), createSource: vi.fn(),
 }));

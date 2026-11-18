@@ -64,7 +64,7 @@ export type TronClassFinalCandidateAttempt = TronClassFinalCandidateClaim & {
 
 type Dependencies = {
   enabled?: () => boolean;
-  authorize(ownerKey: string, scope: TronClassHomeworkScope): Promise<TronClassCandidateAuthorization>;
+  authorize(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassCandidateAuthorization>;
   assertCurrent(ownerKey: string, revision: string): Promise<void>;
   readUploadedFiles(ownerKey: string, input: Omit<TronClassFinalCandidateInput, 'content'>): Promise<TronClassCandidateUploadedFile[]>;
   /** Must atomically reserve the school student/activity across owners and processes. */
@@ -229,7 +229,7 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
       const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
       return bounded(signal, async (signal, check) => {
         check();
-        const raw = await dependencies.authorize(ownerKey, scope);
+        const raw = await dependencies.authorize(ownerKey, scope, signal);
         check();
         assertTronClassCandidateAuthorization(raw, scope, now(), !!input.content.trim());
         let authorization = capturedAuthorization(raw);
@@ -261,7 +261,7 @@ export function createTronClassFinalSubmissionCandidate(dependencies: Dependenci
         // Uploads and the durable claim can take time. Re-read the actual school
         // rules and baseline before POST; a second school-tab submission or a
         // teacher's changed limits must not be accepted using our first snapshot.
-        const freshRaw = await dependencies.authorize(ownerKey, scope);
+        const freshRaw = await dependencies.authorize(ownerKey, scope, signal);
         check();
         assertTronClassCandidateAuthorization(freshRaw, scope, now(), !!input.content.trim());
         const fresh = capturedAuthorization(freshRaw);

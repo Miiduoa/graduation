@@ -1,6 +1,18 @@
 # TronClass 獨立綁定與作業整合
 
-更新日期：2026-11-18。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
+更新日期：2026-11-18。此文件描述本分支的實作與驗證範圍；已完成指定真人帳號的校方唯讀抽樣，尚未完成 nuni 綁定、正式繳交及 Web 部署驗收。
+
+## 2026-11-18：真人唯讀資料、PU 權限來源與系統 PDF
+
+已經使用明確授權的校方帳號核對本人課程、作業清單、兩份活動詳情、已交與空白的本人歷史。實際活動與歷史回應確認現有 reader 的數字 ID、本人／課程歸屬、boolean 狀態及 ISO 時間規則；未將姓名、學號、課程 ID、作業內容或原始 JSON 放入程式庫。直接觀察與尚未完成的項目見 [真人唯讀查核](tronclass-live-read-verification-2026-11-18.md)。
+
+- **新增 PU tenant authorization reader。** 依已確認的本人完整課程／作業範圍與即時活動、空本人歷史，確認一般期間、首次、全班指派、空先決條件的 normal 個人線上作業；不以截止時間單獨授權。重核綁定、活動及歷史，並以共用期限中止後續請求。此版只產生文字能力，附件額度為零，不授予補交、重交、撤回或小組能力。
+- **修正校方自動產生 PDF 的讀回。** 真實已交紀錄含兩份原始附件及一份 `source: auto-generated-pdf` 文件。讀回仍完整比對每個原始附件及逐字本文，但可額外接受最多一份符合實測明確形狀的校方 PDF，避免把正常來源紀錄誤判成未知；未知額外附件或缺原始檔仍不確認。
+- **修正 Firebase Admin 環境範例。** Web runtime 實際讀取 `FIREBASE_SERVICE_ACCOUNT_JSON`，主要範例原本誤寫為不支援的 BASE64 變數；現已統一，避免依範例設定後無法進入綁定流程。
+
+Production factory 已注入唯讀授權 reader；`TRONCLASS_HOMEWORK_WRITE_ENABLED` 只控制既有 runtime gate，`contractVerified: false` 保留。CSRF、final POST acknowledgment 與附件 storage 尚未取得本輪真實寫入證據，舊課程來源的預設學生角色也不當作原始選課角色證據，所以不把這次校方資料查核宣稱成 nuni 站內繳交成功。附件下載測試亦未取得完成檔案，仍列待驗收。
+
+本輪合併 `7fea550f` 後，以 Node **22.23.5** 執行完整 TronClass 範圍回歸：**60 個測試檔、2,006 項通過，4 檔／38 項環境相關測試略過，0 失敗**。完整 Web `tsc --noEmit --incremental false` 與修改的 TypeScript 檔案 ESLint 均通過；略過的測試不計為成功。這些程式測試與上述校方唯讀查核分開記錄，沒有把合成 final／upload 測試當成真人送交。
 
 ## 2026-11-18：登入期限、一般教材與純文字繳交
 
@@ -218,7 +230,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 ### 2026-11-18：公開查證、原生 Mobile 與實際資料庫驗證
 
-`getDefaultTronClassSubmissionService()` 現在回傳 `tronClassPublicSubmissionService.ts`：公開 prepare／upload／submit 均使用 v2 adapter，僅保留舊 service 的唯讀 prepare 與 v1 reconcile，不再讓新的公開寫入建立 v1 ledger。這層可獨立完成的程式接線不列為校方外部 blocker。production factory 明確傳入 `contractVerified: false`，沒有注入 tenant authorization／storage policy，也沒有新增能以環境變數解鎖的設定；實際學校送交仍關閉。
+`getDefaultTronClassSubmissionService()` 現在回傳 `tronClassPublicSubmissionService.ts`：公開 prepare／upload／submit 均使用 v2 adapter，僅保留舊 service 的唯讀 prepare 與 v1 reconcile，不再讓新的公開寫入建立 v1 ledger。這層可獨立完成的程式接線不列為校方外部 blocker。production factory 已注入依真人唯讀形狀實作的 PU tenant authorization reader，但明確保留 `contractVerified: false`，沒有已驗證的 CSRF／final acknowledgment 契約或 attachment storage policy；既有環境開關不能單獨解鎖，實際學校送交仍關閉。
 
 公開 prepare 重用本人詳情與歷史，只有明確受控的 server authorization、CSRF、完整空歷史、一般期間、個人首次作業及兩個 server gates 都通過，才投影最新規則與 `canSubmit`。公開 upload 必須完成 metadata／binary／callback 且 journal 已持久化，才回傳不透明 fileId、名稱、MIME、大小與 hash；不公開校方 uploadId、owner、studentId、cookie 或儲存 URL。submit 將已確認的 attachments 映射為本次 v2 manifest，使用單次 final claim／POST；新 confirmation 不硬塞進需要 `submittedAt` 的舊收據型別。HTTP request 的 abort signal 會傳至 upload／submit。
 
@@ -302,7 +314,7 @@ production `createTronClassSubmissionSource()` 目前為 `contractVerified: fals
 - 真正送出後，校方學生頁與教師收件都能看到同一筆結果。
 - 在隔離環境驗證之後，才能實作 verified adapter，再開啟 runtime write switch。
 
-目前未使用真人校方帳號、未對學校送出作業，也未證明所有上述契約已成立。
+2026-11-18 已使用真人校方帳號完成上述唯讀抽樣；未對學校送出作業，也未證明所有寫入契約已成立。
 
 ### 受控候選實作的範圍
 
@@ -332,16 +344,26 @@ Binary 證據只採用先前 metadata 中完全相同的同來源 `upload_url`�
 
 ## 環境設定
 
-沿用既有平台 API、`WEB_PUBLIC_ORIGIN`、Firebase Admin 服務帳號與校方網路 relay。Firebase Admin 由既有 `getFirebaseAdmin()` 初始化，必須符合目前專案的 project ID；不要建立替代資料庫或放寬 Firestore client rules。
+這組 `/api/tronclass` 路由執行於 **Next.js Web server runtime**。沿用既有平台 API、Firebase Admin 服務帳號與校方網路設定；只把設定放在 `nuni-functions` 不會啟用這些 Web 路由。Firebase Admin 由既有 `getFirebaseAdmin()` 初始化，服務帳戶的 project ID 必須是 `campus-one-tw`；不要建立替代資料庫或放寬 Firestore client rules。
 
 | 設定 | 行為 |
 | --- | --- |
+| `WEB_PUBLIC_ORIGIN` | Web 頁面的完整 origin，例如正式站 `https://nuni.tw`；Platform cookie 操作以此核對同源。測試站須填入其實際來源，不能直接沿用正式站 origin。 |
+| `NUNI_API_BASE_URL` | 平台 session 查證的既有 API；預設為 `https://api.nuni.tw`。使用 Platform 帳號時須可連線。 |
+| `BFF_SESSION_SECRET` | Platform session 加密及頁面身分核對所需，至少 32 字元；也可作為未另設 TronClass secret 時的加密來源。 |
 | `TRONCLASS_INTEGRATION_ENABLED=false` | 緊急停止本整合路由；未設時允許綁定與唯讀操作 |
 | `TRONCLASS_SESSION_SECRET` | 至少 32 字元，用來衍生 session 加密密鑰；未設時沿用 `BFF_SESSION_SECRET` |
 | `TRONCLASS_HOMEWORK_WRITE_ENABLED=true` | 只有來源契約也已驗證時才可能允許寫入；本分支 adapter 仍固定拒絕 |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | 沿用既有伺服器密鑰設定；內容必須是該 runtime 可解析的 JSON |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | 放在 **Web runtime** 的既有 `campus-one-tw` 服務帳戶原始 JSON。`getFirebaseAdmin()` 不讀 `FIREBASE_SERVICE_ACCOUNT_BASE64`；缺少此設定時綁定狀態、登入限流與 session 保存皆不可用。 |
+| `PU_EDGE_RELAY_URL`、`PU_EDGE_RELAY_SECRET` | Web 主機若已使用校方 relay，沿用該組設定；兩者未完整設定時預設 IPv4 直連。備援 relay 另依既有部署設定，不自行改換目的地。 |
 
-換密鑰後，舊加密 session 需重新連接，不應在錯誤訊息或 log 中輸出密鑰與 cookie。設定範例在 `apps/web/nuni.env.example`。
+密鑰只放既有 Web 主機的 secret store，不可使用 `NEXT_PUBLIC_*` 或 Docker build args。Firebase Admin 初始化失敗會由目前 process 記住；修正設定後須重啟該 Web process。換 session 加密密鑰後，舊綁定需重新連接，不應在錯誤訊息或 log 中輸出密鑰與 cookie。設定範例在 `apps/web/.env.example` 與 `apps/web/nuni.env.example`。
+
+### 測試入口與部署狀態（2026-11-18）
+
+候選站必須包含本分支的 `/tronclass` 頁面與 `/api/tronclass` 路由，並完成上述 Web runtime 設定。使用者先登入 nuni，再於 `/tronclass` 驗證學校帳號；既有校方瀏覽器登入不會自行轉成 nuni 綁定。連接成功後，工作區才會呼叫 `sync` 讀取課程與作業，選擇課程後再讀教材及公告。
+
+截至本輪，PR #616 尚無已驗證可用的 Web 預覽部署。現有 `.github/workflows/preview-deploy.yml` 只發布 EAS Mobile Update，`Preview Deploy` skipped 或其他 CI 成功都不表示 Web 已上線。Web 正式發布依 `deploy/web/RELEASE.md` 的 main 手動流程辦理；沒有候選站發布紀錄前，不能把正式站網址當成此分支的驗收入口。即使綁定與唯讀同步已部署，正式作業繳交仍需 production provider 的契約與收件驗證，不能只切換環境旗標。
 
 新增私有集合 `_tronClassBindings`、`_tronClassLoginAttempts`、`_tronClassSubmissionOperations`、`_tronClassSubmissionLocks` 沿用 server-only 存取；現有 Firestore rules 沒有給它們 client 讀寫權限。不得對 unknown operation 或對應作業鎖設定自動刪除，否則會失去防重送依據。
 
@@ -464,5 +486,6 @@ Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟�
 - [靜宜大學教學發展中心：TronClass 登入說明](https://tdcenter.pu.edu.tw/p/406-1061-45101,r1105.php?Lang=zh-tw)：校方正式入口與登入帳密說明。
 - [TronClass 官方作業說明](https://support.tronclass.com/tw/question/homework/)：上傳檔案與正式繳交是不同步驟；作業規則與版本需要依實際作業確認。
 - [2026-11-16 官方公開前端契約查核](tronclass-public-contract-2026-11-16.md)：記錄靜宜官方資源 URL、版本、SHA-256、模組及本人歷史／final／upload 證據，並列出完整 schema、CSRF、真實寫入及工具缺口。
+- [2026-11-18 真人帳號唯讀查核](tronclass-live-read-verification-2026-11-18.md)：去識別化記錄實際本人活動、歷史及校方衍生 PDF 結構，區分成功讀取、未完成下載與尚未執行的正式寫入。
 
 公開說明與前端程式提供部分接口證據，尚不足以構成經過受控校方驗收的完整學生 REST 寫入契約。

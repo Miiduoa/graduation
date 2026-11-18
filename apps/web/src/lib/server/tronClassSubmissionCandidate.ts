@@ -217,7 +217,7 @@ export async function readTronClassCandidateJson(response: Response, signal: Abo
  */
 export function createTronClassTextSubmissionCandidate(dependencies: {
   enabled?: () => boolean;
-  authorize: (ownerKey: string, scope: TronClassHomeworkScope) => Promise<TronClassCandidateAuthorization>;
+  authorize: (ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal) => Promise<TronClassCandidateAuthorization>;
   assertCurrent: (ownerKey: string, revision: string) => Promise<void>;
   fetch?: FetchLike;
   now?: () => number;
@@ -253,7 +253,7 @@ export function createTronClassTextSubmissionCandidate(dependencies: {
       const checkCancelled = () => { if (controller.signal.aborted) throw timedOut(); };
       const operation = async () => {
         checkCancelled();
-        const authorization = await dependencies.authorize(ownerKey, scope);
+        const authorization = await dependencies.authorize(ownerKey, scope, controller.signal);
         checkCancelled();
         assertTronClassCandidateAuthorization(authorization, scope, now());
         // Capture the checked identity and source rules before the next await.

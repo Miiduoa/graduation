@@ -85,7 +85,7 @@ export type TronClassAttachmentTransfer = {
 
 export type TronClassAttachmentCandidateDependencies = {
   enabled?: () => boolean;
-  authorize: (ownerKey: string, scope: TronClassHomeworkScope) => Promise<TronClassAttachmentCandidateAuthorization>;
+  authorize: (ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal) => Promise<TronClassAttachmentCandidateAuthorization>;
   assertCurrent: (ownerKey: string, revision: string) => Promise<void>;
   claim: (claim: TronClassAttachmentClaim) => Promise<boolean>;
   /**
@@ -315,7 +315,7 @@ export function createTronClassAttachmentUploadCandidate(dependencies: TronClass
         finally { dispose(response); }
       };
       const operation = async (): Promise<TronClassAttachmentTransfer> => {
-        const granted = await stage(() => dependencies.authorize(ownerKey, scope));
+        const granted = await stage(() => dependencies.authorize(ownerKey, scope, controller.signal));
         checkedAuthorization(granted, input, now());
         // Snapshot all identity/rule values before another async dependency runs.
         authorization = { ...granted, binding: { ...granted.binding, cookies: { ...granted.binding.cookies } },

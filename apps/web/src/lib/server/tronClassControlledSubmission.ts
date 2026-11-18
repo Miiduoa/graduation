@@ -14,7 +14,7 @@ export type TronClassControlledSubmissionDependencies = {
   db: TronClassSubmissionFirestore;
   bindings: TronClassSubmissionBindings;
   /** Source-confirmed authorization, never browser-supplied permissions. */
-  authorize(ownerKey: string, scope: TronClassHomeworkScope): Promise<TronClassCandidateAuthorization>;
+  authorize(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassCandidateAuthorization>;
   readHistory(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, signal: AbortSignal): Promise<unknown>;
   /** Required only for attachment writes; text still needs the verified authorizer. */
   resolveStorageTarget?: TronClassAttachmentCandidateDependencies['resolveStorageTarget'];
@@ -25,10 +25,10 @@ export type TronClassControlledSubmissionDependencies = {
 };
 
 /**
- * Server-only wiring for a controlled verification session. There is no default
- * source permission reader, storage allowlist or environment toggle that can
- * enable production writes. The public DTO adapter delegates only after its
- * independent server gates pass. The journal uses the existing
+ * Server-only wiring for a controlled verification session. A source permission
+ * reader does not verify CSRF, final POST or storage behavior, and an environment
+ * toggle cannot enable production writes. The public DTO adapter delegates
+ * only after its independent server gates pass. The journal uses the existing
  * server-only Firestore collections and account-closure barrier.
  */
 export function createTronClassControlledSubmission(dependencies: TronClassControlledSubmissionDependencies) {

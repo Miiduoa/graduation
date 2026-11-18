@@ -51,7 +51,7 @@ function setup(options: { kind?: 'raw' | 'multipart'; url?: string; value?: Tron
   const value = options.value ?? authorization();
   const raw = metadata(file, options.url ?? STORAGE, options.kind ?? 'raw');
   const enabled = vi.fn(() => true);
-  const authorize = vi.fn(async () => value);
+  const authorize = vi.fn<TronClassAttachmentCandidateDependencies['authorize']>(async () => value);
   const assertCurrent = vi.fn(async () => {});
   const claims = new Map<string, TronClassAttachmentClaim>();
   const claim = vi.fn(async (entry: TronClassAttachmentClaim) => {
@@ -375,6 +375,35 @@ describe('controlled attachment transfer', () => {
     await vi.advanceTimersByTimeAsync(20);
     await rejected;
     expect(cancel).toHaveBeenCalled();
+    expect(s.fetchStorage).not.toHaveBeenCalled();
+  });
+
+  it('stops the authorization source on caller cancellation without claiming or uploading', async () => {
+    const s = setup();
+    const caller = new AbortController();
+    const sourceStopped = vi.fn();
+    let started!: () => void;
+    const sourceStarted = new Promise<void>(resolve => { started = resolve; });
+    s.authorize.mockImplementationOnce((_owner, _scope, signal) => {
+      const pending = new Promise<TronClassAttachmentCandidateAuthorization>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          sourceStopped();
+          reject(new DOMException('Cancelled', 'AbortError'));
+        }, { once: true });
+      });
+      started();
+      return pending;
+    });
+    const rejected = expect(s.candidate.dispatch(OWNER, s.file, caller.signal))
+      .rejects.toMatchObject({ code: 'TRONCLASS_UPLOAD_CANCELLED' });
+    await sourceStarted;
+    caller.abort();
+    await rejected;
+    expect(sourceStopped).toHaveBeenCalledTimes(1);
+    expect(s.authorize.mock.calls[0][2]?.aborted).toBe(true);
+    expect(s.claim).not.toHaveBeenCalled();
+    expect(s.resolveStorageTarget).not.toHaveBeenCalled();
+    expect(s.fetchSchool).not.toHaveBeenCalled();
     expect(s.fetchStorage).not.toHaveBeenCalled();
   });
 

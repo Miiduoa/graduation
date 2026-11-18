@@ -531,8 +531,8 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
 
 /** Request-local construction; credentials and sessions never enter a client bundle. */
 export async function getDefaultTronClassSubmissionService(): Promise<TronClassPublicSubmissionService> {
-  const [{ getFirebaseAdmin }, { createTronClassBindingService }, { createTronClassSubmissionSource }, { createTronClassPublicSubmissionService }] = await Promise.all([
-    import('./firebaseAdmin'), import('./tronClassBinding'), import('./tronClassSubmissionSource'), import('./tronClassPublicSubmissionService'),
+  const [{ getFirebaseAdmin }, { createTronClassBindingService }, { createTronClassSubmissionSource }, { createTronClassPublicSubmissionService }, { createTronClassPuAuthorizationReader }] = await Promise.all([
+    import('./firebaseAdmin'), import('./tronClassBinding'), import('./tronClassSubmissionSource'), import('./tronClassPublicSubmissionService'), import('./tronClassPuAuthorization'),
   ]);
   const runtime = await getFirebaseAdmin();
   if (!runtime?.db) unavailable();
@@ -541,8 +541,11 @@ export async function getDefaultTronClassSubmissionService(): Promise<TronClassP
   const legacy = createTronClassSubmissionService({ db, bindings, source: createTronClassSubmissionSource() });
   return createTronClassPublicSubmissionService({
     db, bindings, readonlyPrepare: legacy.prepare, legacyReconcile: legacy.reconcile,
-    // No verified tenant authorization/CSRF reader or storage policy is
-    // registered yet. Environment flags cannot enable this production writer.
+    authorization: createTronClassPuAuthorizationReader({ bindings }),
+    enabled: () => process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
+    // The PU reader confirms ordinary-window, first-attempt permissions only.
+    // Live CSRF/final acknowledgment and attachment storage remain unverified;
+    // an environment flag cannot enable this production writer by itself.
     contractVerified: false,
   });
 }

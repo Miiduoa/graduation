@@ -41,7 +41,7 @@ function setup() {
   const attempts = new Map<string, TronClassFinalCandidateAttempt>();
   const locks = new Set<string>();
   const enabled = vi.fn(() => true);
-  const authorize = vi.fn(async () => auth);
+  const authorize = vi.fn<Parameters<typeof createTronClassFinalSubmissionCandidate>[0]['authorize']>(async () => auth);
   const assertCurrent = vi.fn(async () => {});
   const readUploadedFiles = vi.fn<(owner: string, input: Omit<TronClassFinalCandidateInput, 'content'>) => Promise<TronClassCandidateUploadedFile[]>>(async () => files);
   const claim = vi.fn(async (attempt: TronClassFinalCandidateClaim) => {
@@ -259,6 +259,38 @@ describe('controlled final POST and exact student readback', () => {
     });
     await expect(s.candidate.dispatch(OWNER, INPUT)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
     expect(s.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['initial', 'pre-post'] as const)('cancels the %s authorization source before any further write', async phase => {
+    const s = setup();
+    const caller = new AbortController();
+    const sourceStopped = vi.fn();
+    let started!: () => void;
+    const sourceStarted = new Promise<void>(resolve => { started = resolve; });
+    if (phase === 'pre-post') s.authorize.mockResolvedValueOnce(s.auth);
+    s.authorize.mockImplementationOnce((_owner, _scope, signal) => {
+      const pending = new Promise<TronClassCandidateAuthorization>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          sourceStopped();
+          reject(new DOMException('Cancelled', 'AbortError'));
+        }, { once: true });
+      });
+      started();
+      return pending;
+    });
+    const rejected = expect(s.candidate.dispatch(OWNER, INPUT, caller.signal))
+      .rejects.toMatchObject({ code: 'TRONCLASS_CANDIDATE_TIMEOUT' });
+    await sourceStarted;
+    caller.abort();
+    await rejected;
+    expect(sourceStopped).toHaveBeenCalledTimes(1);
+    const sourceSignal = s.authorize.mock.calls.at(-1)![2];
+    expect(sourceSignal?.aborted).toBe(true);
+    expect(sourceSignal).toBe(s.authorize.mock.calls[0][2]);
+    expect(s.claim).toHaveBeenCalledTimes(phase === 'initial' ? 0 : 1);
+    expect(s.fetch).not.toHaveBeenCalled();
+    expect(s.rememberAcknowledgment).not.toHaveBeenCalled();
+    expect(s.readHistory).not.toHaveBeenCalled();
   });
 
   it('aborts a stalled final request while retaining its durable claim', async () => {

@@ -94,12 +94,45 @@ function sourceRecordedAt(value: unknown, now: number): string | null {
 }
 
 /**
+ * The existing attachment readers distinguish failed/deleted resources and
+ * external references from an ordinary received file. Apply those same source
+ * flags to confirmation, without requiring optional legacy fields or download
+ * permission: a teacher can disable downloading a successfully submitted file.
+ */
+function isUsableSubmissionFile(file: Record<string, unknown>): boolean {
+  return [undefined, null, 0].includes(file.reference_id as undefined | null | number) &&
+    [undefined, null, '', 'agree'].includes(file.audit_status as undefined | null | string) &&
+    [undefined, false, 0].includes(file.deleted as undefined | boolean | number) &&
+    [undefined, false, 0].includes(file.is_deleted as undefined | boolean | number) &&
+    [undefined, false, 0].includes(file.from_project as undefined | boolean | number) &&
+    [undefined, false, 0].includes(file.isFromKnowledgeGraph as undefined | boolean | number) &&
+    (file.type === undefined || file.type === null || (typeof file.type === 'string' && file.type !== 'link')) &&
+    (file.status === undefined || file.status === null ||
+      (typeof file.status === 'string' && !['cliping', 'clip_failed', 'uploading', 'failed'].includes(file.status)));
+}
+
+/**
+ * The authenticated student history can include one school-generated marking
+ * document in addition to the submitted uploads. Official homework clients
+ * remove source=auto-generated-pdf when restoring a submission for editing.
+ * Accept only the observed ready document shape, never infer it from a name,
+ * extension, MIME guess or an unknown extra upload. Normal history validation
+ * has already checked its ID, filename, size, visibility and duplicate IDs.
+ */
+function isSchoolGeneratedPdf(file: Record<string, unknown>): boolean {
+  return file.source === 'auto-generated-pdf' && file.status === 'ready' && file.type === 'document' &&
+    file.allow_download === true && file.deleted === false && file.reference_id === 0 &&
+    typeof file.size === 'number' && Number.isSafeInteger(file.size) && file.size > 0;
+}
+
+/**
  * Match a complete, authenticated submission_list read to one captured POST.
  * The caller supplies the current student's fixed school GET and must recheck
  * binding/access before using the result. This pure matcher is not authorization
  * or a production-contract attestation. No timestamp establishes freshness:
  * the acknowledged ID must be absent from the complete baseline and be the only
- * new ID and the unique latest version, with exactly the sent body and files.
+ * new ID and the unique latest version, with exactly the sent body and original
+ * files. One explicitly identified school-generated PDF is not a sent upload.
  */
 export function verifyTronClassSubmissionReadback(
   raw: unknown, context: TronClassSubmissionReadbackContext, now = Date.now(),
@@ -129,8 +162,7 @@ export function verifyTronClassSubmissionReadback(
     if (!matched || matched.is_latest_version !== true || matched.is_draft !== false ||
       matched.is_redo !== false || matched.submit_by_instructor !== false ||
       (has(matched, 'marked_submitted') && typeof matched.marked_submitted !== 'boolean') ||
-      matched.comment !== context.comment || !Array.isArray(matched.uploads) ||
-      matched.uploads.length !== context.uploads.length) return unconfirmed();
+      matched.comment !== context.comment || !Array.isArray(matched.uploads)) return unconfirmed();
     // A source may omit unused optional resource fields. If supplied, only an
     // explicit empty array is compatible with the normal text/file request.
     for (const key of ['other_resources', 'slide_references', 'slides', 'uploads_in_rich_text']) {
@@ -138,12 +170,20 @@ export function verifyTronClassSubmissionReadback(
     }
     if (has(matched, 'mode') && matched.mode !== 'normal') return unconfirmed();
     const expectedFiles = new Map(context.uploads.map(file => [file.id, file]));
+    let generatedPdfs = 0;
     for (const value of matched.uploads) {
       const file = object(value);
-      const expected = file && id(file.id) ? expectedFiles.get(file.id) : undefined;
-      if (!file || !expected || file.name !== expected.name || file.size !== expected.size ||
-        !isTronClassSourceVisible(file)) return unconfirmed();
-      expectedFiles.delete(expected.id);
+      if (!file || !id(file.id) || !isTronClassSourceVisible(file) || !isUsableSubmissionFile(file)) return unconfirmed();
+      const expected = expectedFiles.get(file.id);
+      if (expected) {
+        // A generated or external resource cannot stand in for an original ID.
+        if ((file.source !== undefined && file.source !== null && file.source !== '') ||
+          file.name !== expected.name || file.size !== expected.size) return unconfirmed();
+        expectedFiles.delete(expected.id);
+      } else {
+        if (!isSchoolGeneratedPdf(file) || generatedPdfs > 0) return unconfirmed();
+        generatedPdfs += 1;
+      }
     }
     if (expectedFiles.size > 0) return unconfirmed();
     return {

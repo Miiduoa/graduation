@@ -32,7 +32,7 @@ function authorization(): TronClassCandidateAuthorization {
 }
 function setup(value = authorization()) {
   const enabled = vi.fn(() => true);
-  const authorize = vi.fn(async () => value);
+  const authorize = vi.fn<Parameters<typeof createTronClassTextSubmissionCandidate>[0]['authorize']>(async () => value);
   const assertCurrent = vi.fn(async () => {});
   const fetch = vi.fn(async () => new Response(JSON.stringify(acknowledgment()), { headers: { 'Content-Type': 'application/json' } }));
   const dependencies = { enabled, authorize, assertCurrent, fetch, now: () => NOW };
@@ -57,10 +57,11 @@ describe('controlled text submission candidate', () => {
     expect(result).toEqual({ state: 'acknowledged', submissionId: 90, courseId: 10, activityId: 20, studentId: 30 });
     expect(result).not.toHaveProperty('submittedAt');
     expect(result).not.toHaveProperty('receipt');
-    expect(s.authorize).toHaveBeenCalledWith('firebase:fixture', { courseId: 10, homeworkId: 20 });
+    expect(s.authorize).toHaveBeenCalledWith('firebase:fixture', { courseId: 10, homeworkId: 20 }, expect.any(AbortSignal));
     expect(s.assertCurrent).toHaveBeenCalledTimes(2);
     expect(s.fetch).toHaveBeenCalledTimes(1);
     const [url, request] = s.fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(s.authorize.mock.calls[0][2]).toBe(request.signal);
     expect(url).toBe('https://tronclass.pu.edu.tw/api/course/activities/20/submissions');
     expect(request).toMatchObject({ method: 'POST', redirect: 'manual', cache: 'no-store' });
     const headers = new Headers(request.headers);
@@ -194,6 +195,7 @@ describe('controlled text submission candidate', () => {
     const rejected = expect(candidate.dispatch('firebase:fixture', input)).rejects.toMatchObject({ code: 'TRONCLASS_CANDIDATE_TIMEOUT' });
     await vi.advanceTimersByTimeAsync(20);
     await rejected;
+    expect(s.authorize.mock.calls[0][2]?.aborted).toBe(true);
     allow(authorization());
     await vi.runAllTimersAsync();
     expect(s.fetch).not.toHaveBeenCalled();
