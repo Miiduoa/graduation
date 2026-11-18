@@ -196,6 +196,45 @@ it('pauses timed text stories while a keyboard reader focuses the story content,
   expect(viewer.next).toHaveBeenCalledOnce();
 });
 
+it('pauses a playing video while its caption is focused and resumes only playback that was active', () => {
+  const { viewer, video } = renderVideo();
+  let paused = true;
+  Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
+    paused = false;
+    return Promise.resolve();
+  });
+  const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {
+    paused = true;
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  expect(paused).toBe(false);
+  // Focusing the native video controls must not interrupt playback.
+  act(() => video.focus());
+  expect(paused).toBe(false);
+
+  const caption = screen.getByRole('region', { name: '限時動態說明文字' });
+  act(() => caption.focus());
+  expect(paused).toBe(true);
+  expect(pause).toHaveBeenCalled();
+  fireEvent.ended(video);
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  act(() => screen.getByRole('button', { name: '停止連播' }).focus());
+  expect(paused).toBe(false);
+  expect(play).toHaveBeenCalledTimes(2);
+
+  // A video manually paused before caption reading must stay paused afterward.
+  fireEvent.click(screen.getByRole('button', { name: '停止連播' }));
+  expect(paused).toBe(true);
+  const priorPlayCount = play.mock.calls.length;
+  act(() => caption.focus());
+  act(() => screen.getByRole('button', { name: '連續播放' }).focus());
+  expect(paused).toBe(true);
+  expect(play).toHaveBeenCalledTimes(priorPlayCount);
+});
+
 it('lets students focus and read media captions without switching stories by arrow keys or caption taps', () => {
   const { viewer } = renderVideo();
   const canvas = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
