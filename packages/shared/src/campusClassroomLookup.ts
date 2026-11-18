@@ -217,11 +217,23 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
   const school = validSchoolId(schoolId);
   if (!school) return { query, status: 'unmatched', matches: [] };
   const comparable = comparisonText(query);
+  // Imported map records are runtime data even when TypeScript callers use the
+  // CampusMapPlaceLike interface. A single null row or a numeric ID must not
+  // crash classroom lookup and prevent navigation to an otherwise valid hall.
+  if (!Array.isArray(locations)) return { query, status: 'unmatched', matches: [] };
   const counts = new Map<string, number>();
-  for (const location of locations) counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
+  for (const location of locations) {
+    if (!location || typeof location !== 'object' ||
+        typeof location.id !== 'string' || !location.id.trim()) continue;
+    counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
+  }
   const matches = locations.filter((location) => {
-    // A duplicate ID cannot be selected safely by MapClient's existing ID-based contract.
-    if (!location.id?.trim() || counts.get(location.id) !== 1) return false;
+    // An invalid row is never a destination. Still count duplicate *string*
+    // IDs above, even when the other row is malformed, to fail closed rather
+    // than let a broken import impersonate a published building ID.
+    if (!location || typeof location !== 'object' ||
+        typeof location.id !== 'string' || !location.id.trim() ||
+        counts.get(location.id) !== 1) return false;
     if (
       !Number.isFinite(location.lat) ||
       !Number.isFinite(location.lng) ||
