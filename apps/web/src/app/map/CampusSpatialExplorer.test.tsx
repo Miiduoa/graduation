@@ -2480,13 +2480,13 @@ it.each([
   const unverified: MapLocation = displaced
     ? { ...zhugu, lat: zhugu.lat + 0.004 }
     : { ...zhugu, name: '主顧樓（位置待查）' };
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: false, status: 503, headers: { get: () => null }, body: null,
-  }));
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[unverified]} selected={unverified} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(within(dialog).getByRole('heading', { name: unverified.name })).toBeTruthy();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).getByText(/目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
   expect(within(dialog).queryByText('主顧樓 · 校方公開樓層資訊')).toBeNull();
   expect(within(dialog).queryByText(/4 樓：資訊管理學系/)).toBeNull();
   expect(within(dialog).queryByRole('link', { name: '查看校史資料室主顧樓單位清單' })).toBeNull();
