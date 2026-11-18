@@ -77,10 +77,8 @@ export type ProvidencePlace = CampusMapPlaceLike & {
   transitStopIds?: readonly string[];
 };
 
-/** 來源歸屬需用實際平面距離核對，而非兩軸各 0.0005°（斜向可偏離超過 70 公尺）。 */
-const MAX_PLACE_IDENTITY_DISPLACEMENT_METERS = 50;
-const EARTH_RADIUS_METERS = 6_371_008.8;
-const DEGREES_TO_RADIANS = Math.PI / 180;
+/** 同一地點識別：名稱相同且座標差在約 50 公尺內，避免只靠撞 ID 誤標來源。 */
+const PLACE_COORD_EPSILON = 0.0005;
 
 const osmWay = (id: number) => `https://www.openstreetmap.org/way/${id}`;
 const osmNode = (id: number) => `https://www.openstreetmap.org/node/${id}`;
@@ -179,21 +177,13 @@ export const PROVIDENCE_BUS_STOPS: readonly ProvidencePlace[] = [
   { id: 'pu-bus-jingyuan', name: '靜宜大學靜園餐廳', category: '公車站', description: '301 往台中車站或往校內，方向請到公車頁確認。到站時間請到公車頁查詢。', lat: 24.227364, lng: 120.581741, sourceUrl: PROVIDENCE_CAMPUS_SOURCE.transitDatasetUrl, verification: 'cross-checked', transitStopIds: ['TCOD_aa06abf0361ecf11cd5e97609aa9b851ff0e3a3d', 'TCOD_aa355281c75ccfb3b062cb7d80a530d77c287a6d'] },
 ];
 
-function samePlaceCoordinates(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  // Local tangent-plane distance is accurate at campus scale. Reject corrupt
-  // coordinates; an invalid marker must not inherit a source or hide a bus stop.
-  const northMeters = (a.lat - b.lat) * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS;
-  const eastMeters = (a.lng - b.lng) * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS *
-    Math.cos((a.lat + b.lat) / 2 * DEGREES_TO_RADIANS);
-  return Number.isFinite(northMeters) && Number.isFinite(eastMeters) &&
-    Math.hypot(northMeters, eastMeters) <= MAX_PLACE_IDENTITY_DISPLACEMENT_METERS;
-}
-
 function samePlaceIdentity(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  // Only provenance is withheld when a marker's identity, category or location
-  // differs; the marker itself stays visible.
-  return a.id === b.id && a.name === b.name && a.category === b.category &&
-    samePlaceCoordinates(a, b);
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    Math.abs(a.lat - b.lat) < PLACE_COORD_EPSILON &&
+    Math.abs(a.lng - b.lng) < PLACE_COORD_EPSILON
+  );
 }
 
 function allBundledProvidencePlaces(): readonly ProvidencePlace[] {
@@ -209,10 +199,9 @@ export function isBusStopLocation(location: CampusMapPlaceLike): boolean {
 }
 
 function samePlace(a: CampusMapPlaceLike, b: CampusMapPlaceLike): boolean {
-  // Server-bundled stop deduplication uses the same metre-based tolerance as
-  // provenance matching; two 53m-diagonal stops must not be collapsed.
-  return a.category === '公車站' && b.category === '公車站' &&
-    a.name === b.name && samePlaceCoordinates(a, b);
+  const latGap = Math.abs(a.lat - b.lat);
+  const lngGap = Math.abs(a.lng - b.lng);
+  return a.name === b.name && latGap < PLACE_COORD_EPSILON && lngGap < PLACE_COORD_EPSILON;
 }
 
 /**
