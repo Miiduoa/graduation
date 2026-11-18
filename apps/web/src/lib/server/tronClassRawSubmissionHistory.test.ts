@@ -49,7 +49,8 @@ describe('private authenticated raw school history', () => {
     const raw = await s.reader(OWNER, s.expected, SCOPE);
     expect(raw).toEqual({ list: [SUBMISSION] });
     expect(raw).not.toBe(SUBMISSION);
-    expect(s.source.fetchStudentSubmissionList).toHaveBeenCalledExactlyOnceWith({ session: 'current-server-cookie' }, 202, 303);
+    expect(s.source.fetchStudentSubmissionList).toHaveBeenCalledExactlyOnceWith({ session: 'current-server-cookie' }, 202, 303,
+      { signal: expect.any(AbortSignal), timeoutMs: 8000 });
     expect(s.source.fetchCourses).toHaveBeenCalledTimes(4); // both course lists, before and after the school read
     expect(s.bindings.assertCurrent).toHaveBeenCalledTimes(3);
   });
@@ -155,5 +156,47 @@ describe('private authenticated raw school history', () => {
     expect(s.source.fetchHomeworkPage).not.toHaveBeenCalled();
     expect(s.source.fetchHomeworkActivity).not.toHaveBeenCalled();
     expect(s.source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+  });
+
+  it('passes the same cancellation signal to courses, pages, details and the actual history source', async () => {
+    const s = setup();
+    await s.reader(OWNER, s.expected, SCOPE);
+    const options = vi.mocked(s.source.fetchCourses).mock.calls[0][2]!;
+    expect(options).toEqual({ signal: expect.any(AbortSignal), timeoutMs: 8000 });
+    expect(options.signal!.aborted).toBe(false);
+    expect(vi.mocked(s.source.fetchCourses).mock.calls.every(call => call[2] === options)).toBe(true);
+    expect(vi.mocked(s.source.fetchHomeworkPage).mock.calls.every(call => call[4] === options)).toBe(true);
+    expect(vi.mocked(s.source.fetchHomeworkActivity!).mock.calls.every(call => call[2] === options)).toBe(true);
+    expect(vi.mocked(s.source.fetchStudentSubmissionList!).mock.calls[0][3]).toBe(options);
+  });
+
+  it.each(['deadline', 'caller'] as const)('actively cancels the history transport on %s, then starts no further GET', async cause => {
+    vi.useFakeTimers();
+    const s = setup();
+    let aborted = false;
+    let started!: () => void;
+    const didStart = new Promise<void>(resolve => { started = resolve; });
+    vi.mocked(s.source.fetchStudentSubmissionList!).mockImplementation((_cookies, _activity, _student, options) => {
+      expect(options?.timeoutMs).toBe(100);
+      started();
+      return new Promise((_resolve, reject) => {
+        options!.signal!.addEventListener('abort', () => {
+          aborted = true;
+          reject(new Error('private transport message'));
+        }, { once: true });
+      });
+    });
+    const controller = new AbortController();
+    const reader = createTronClassRawSubmissionHistoryReader({ bindings: s.bindings, source: s.source, now: () => NOW, timeoutMs: 100 });
+    const pending = expect(reader(OWNER, s.expected, SCOPE, controller.signal)).rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT' });
+    await didStart;
+    const courseReads = vi.mocked(s.source.fetchCourses).mock.calls.length;
+    const activityReads = vi.mocked(s.source.fetchHomeworkActivity!).mock.calls.length;
+    if (cause === 'deadline') await vi.advanceTimersByTimeAsync(101);
+    else controller.abort();
+    await pending;
+    expect(aborted).toBe(true);
+    expect(s.source.fetchCourses).toHaveBeenCalledTimes(courseReads);
+    expect(s.source.fetchHomeworkActivity).toHaveBeenCalledTimes(activityReads);
   });
 });

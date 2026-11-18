@@ -1,6 +1,6 @@
 import { NuniError } from '@campus/shared/src/nuni';
 import { classifySchoolReadError, schoolHttpStatus } from '@campus/shared/src/puLmsReadonly';
-import type { LmsReadonlySource, LmsReadResult } from './tronClassLmsSource';
+import type { LmsReadonlySource, LmsReadOptions, LmsReadResult } from './tronClassLmsSource';
 import type { TronClassSubmissionBindings } from './tronClassSubmission';
 import {
   createTronClassSubmissionSource,
@@ -60,6 +60,7 @@ export function createTronClassRawSubmissionHistoryReader({
     if (signal?.aborted) abort();
     const timer = setTimeout(abort, timeoutMs);
     const check = () => { if (controller.signal.aborted) throw timeout(); };
+    const readOptions: LmsReadOptions = Object.freeze({ signal: controller.signal, timeoutMs: Math.min(8000, timeoutMs) });
 
     const current = async () => {
       check();
@@ -107,21 +108,21 @@ export function createTronClassRawSubmissionHistoryReader({
         check();
         return value;
       };
-      // The existing source GETs have their own transport deadline. Guard every
-      // page as well so a timed-out outer operation cannot continue paging or
-      // start further course/detail requests after a late response arrives.
+      // Forward cancellation to the real transport and internal course paging.
+      // The local guard also stops injected or late-returning sources from
+      // starting the next assignment request after the outer deadline.
       const assignmentSource: LmsReadonlySource = {
         ...source,
-        fetchCourses: (cookies, options) => guarded(() => source.fetchCourses(cookies, options)),
-        fetchHomeworkPage: (cookies, courseId, page, pageSize) => guarded(() => source.fetchHomeworkPage(cookies, courseId, page, pageSize)),
-        fetchHomeworkActivity: (cookies, activityId) => guarded(() => source.fetchHomeworkActivity!(cookies, activityId)),
+        fetchCourses: (cookies, options) => guarded(() => source.fetchCourses(cookies, options, readOptions)),
+        fetchHomeworkPage: (cookies, courseId, page, pageSize) => guarded(() => source.fetchHomeworkPage(cookies, courseId, page, pageSize, readOptions)),
+        fetchHomeworkActivity: (cookies, activityId) => guarded(() => source.fetchHomeworkActivity!(cookies, activityId, readOptions)),
       };
       const assignments = suppliedAssignments ?? createTronClassSubmissionSource(assignmentSource);
       const checkAccess = async (binding: TronClassSubmissionBinding) => {
         const assignment = await assignments.getAssignment(binding, scope);
         check();
         if (assignment.studentId !== binding.userId || assignment.courseId !== scope.courseId || assignment.homeworkId !== scope.homeworkId) unavailable();
-        const raw = await read(() => source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId), true);
+        const raw = await read(() => source.fetchHomeworkActivity!(binding.cookies, scope.homeworkId, readOptions), true);
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) unavailable();
         const activity = raw as Record<string, unknown>;
         if (activity.id !== scope.homeworkId || activity.course_id !== scope.courseId || activity.type !== 'homework') unavailable();
@@ -131,7 +132,7 @@ export function createTronClassRawSubmissionHistoryReader({
       const binding = await current();
       await checkAccess(binding);
       check();
-      const raw = structuredClone(await read(() => source.fetchStudentSubmissionList!(binding.cookies, scope.homeworkId, binding.userId), false));
+      const raw = structuredClone(await read(() => source.fetchStudentSubmissionList!(binding.cookies, scope.homeworkId, binding.userId, readOptions), false));
       // Validate ownership, duplicate IDs and complete-list evidence, but retain
       // the exact wire comment/upload IDs for the private readback verifier.
       normalizeTronClassSubmissionHistory(raw, binding, scope, now());

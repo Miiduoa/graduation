@@ -146,9 +146,9 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 ### 2026-11-18：公開查證、原生 Mobile 與實際資料庫驗證
 
-`getDefaultTronClassSubmissionService()` 的 `reconcile` 已按持久化版本分流。v1 沿用既有正式收據與時間檢查；v2 只讀取受控 journal 保存的原 attempt 與 acknowledgment，再使用目前綁定重新讀取本人校方歷史。未知版本一律拒絕，不能以 v1 parser 處理 v2 記錄。這條路徑沒有上傳或 POST 依賴，也不會釋放作業鎖、重寫原 revision 或把紀錄改成可重送。
+`getDefaultTronClassSubmissionService()` 的 `reconcile` 已按持久化版本分流。v1 沿用既有正式收據與時間檢查；v2 只讀取受控 journal 保存的原 attempt 與 acknowledgment，再使用目前綁定重新讀取本人校方歷史。未知版本一律拒絕，不能以 v1 parser 處理 v2 記錄。這條路徑沒有附件上傳或作業寫入依賴，也不會釋放作業鎖、重寫原 revision 或把紀錄改成可重送。校方既有課程查詢使用唯讀用途的 `/api/my-courses` POST，不能把 HTTP 方法本身當作作業寫入證據。
 
-新增 `tronClassRawSubmissionHistory.ts` 在讀取前後核對當下綁定、課程完整清單、作業活動與個人繳交模式，並驗證歷史的完整性、重複 ID 與本人範圍。401／403／隱藏／404／410 不能退回舊內容；每頁有 deadline guard，逾時的晚回覆不會繼續發起下一頁或活動讀取。原始 HTML 與附件 ID 只用於伺服器內部精確比對，不回傳給公開介面。
+新增 `tronClassRawSubmissionHistory.ts` 在讀取前後核對當下綁定、課程完整清單、作業活動與個人繳交模式，並驗證歷史的完整性、重複 ID 與本人範圍。401／403／隱藏／404／410 不能退回舊內容；外層 15 秒期限的 abort signal 會一路傳入 scraper 的 HTTPS／relay、內部課程分頁與 fallback，每頁亦有 deadline guard，逾時會取消進行中的來源請求且不再啟動下一頁。作業分頁另有預設傳輸時間與回應大小上限。原始 HTML 與附件 ID 只用於伺服器內部精確比對，不回傳給公開介面。
 
 有可信 acknowledgment 且精確讀回成功時，公開回應新增獨立的 `status: confirmed`、`receipt: null`、`confirmation.kind: acknowledged-readback`。確認包含本次 operation、校方版本 ID、課程／作業與 `confirmedAt`；可空的 `sourceRecordedAt` 仍只是校方建立紀錄時間。它沒有虛構 `submittedAt`，也不改變舊收據格式。Web 與 Mobile 都核對 operation 及作業範圍後才清除本地 pending；錯誤範圍、暫時讀取失敗、沒有 acknowledgment 或仍在 preparing 的 v2 操作保留待查證。準備中的另一個 actor 仍可能取得 final claim，因此唯讀查證不能聲稱「確定不會送出」。
 
@@ -305,7 +305,8 @@ Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟�
 | 範圍 | 實際結果 |
 | --- | --- |
 | 完整 Web Vitest | 770 個檔案通過、16 個略過；16,641 項通過、141 項略過、0 失敗 |
-| 最後 TronClass 與 instrumentation 回歸 | 48 個檔案通過、4 個略過；1,504 項通過、33 項略過、0 失敗 |
+| 最後 TronClass、relay 與 instrumentation 回歸 | 50 個檔案通過、4 個略過；1,527 項通過、33 項略過、0 失敗；包含底層取消接線後的回歸 |
+| 底層 scraper／relay／PU pause 回歸 | 3 suites、152 項通過、0 略過；涵蓋 direct socket 及 relay body 取消、內部分頁／fallback deadline、舊呼叫相容性 |
 | 真 Firestore Emulator | controlled journal 8 項與 retention 6 項，合計 14 / 14 通過 |
 | 真 PostgreSQL 17.12 | 關帳 outbox、角色權限、lease、rollback 與實際 SQL 逾時，16 / 16 通過 |
 | 最新原生 Mobile／transport／session 測試 | 9 suites、149 / 149 通過 |

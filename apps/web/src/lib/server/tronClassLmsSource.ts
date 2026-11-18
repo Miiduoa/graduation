@@ -13,6 +13,11 @@ export type LmsReadOk<T> = { ok: true; value: T };
 export type LmsReadFail = { ok: false; status: number | null };
 export type LmsReadResult<T> = LmsReadOk<T> | LmsReadFail;
 
+export type LmsReadOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export type LmsHomeworkPage = {
   homework_activities: unknown[];
   total: number | null;
@@ -22,21 +27,25 @@ export type LmsReadonlySource = {
   fetchCourses: (
     cookies: Record<string, string>,
     options: { userId?: number; status: 'ongoing' | 'upcoming' },
+    readOptions?: LmsReadOptions,
   ) => Promise<unknown>;
   fetchHomeworkPage: (
     cookies: Record<string, string>,
     courseId: number,
     page: number,
     pageSize: number,
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<LmsHomeworkPage>>;
   fetchHomeworkActivity?: (
     cookies: Record<string, string>,
     activityId: number,
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown>>;
   fetchStudentSubmissionList?: (
     cookies: Record<string, string>,
     activityId: number,
     studentId: number,
+    readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown>>;
   fetchActivities: (
     cookies: Record<string, string>,
@@ -64,17 +73,17 @@ export function sessionKind(error: unknown): SchoolReadErrorKind {
 }
 
 export const tronClassLmsReadonlySource: LmsReadonlySource = {
-  fetchCourses: (cookies, options) =>
+  fetchCourses: (cookies, options, readOptions) =>
     tronClassScraper.tcFetchCourses(cookies, {
       ...options,
       status: options.status,
-    }),
-  fetchHomeworkPage: (cookies, courseId, page, pageSize) =>
-    wrapRead(() => tronClassScraper.tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize)),
-  fetchHomeworkActivity: (cookies, activityId) =>
-    wrapRead(() => tronClassScraper.tcFetchHomeworkActivityStrict(cookies, activityId)),
-  fetchStudentSubmissionList: (cookies, activityId, studentId) =>
-    wrapRead(() => tronClassScraper.tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId)),
+    }, readOptions),
+  fetchHomeworkPage: (cookies, courseId, page, pageSize, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize, readOptions)),
+  fetchHomeworkActivity: (cookies, activityId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchHomeworkActivityStrict(cookies, activityId, readOptions)),
+  fetchStudentSubmissionList: (cookies, activityId, studentId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId, readOptions)),
   fetchActivities: (cookies, courseId, query) =>
     wrapRead(() => tronClassScraper.tcFetchActivitiesRaw(cookies, courseId, query)),
   fetchCourseAnnouncements: (cookies, courseId) =>

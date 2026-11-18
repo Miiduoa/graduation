@@ -14,9 +14,10 @@ const {
   tcFetchCourseAnnouncementsStrict,
   tcFetchHomeworkActivityStrict,
   tcFetchStudentHomeworkSubmissionList,
+  setCampusHttpFetch,
 } = require('./tronClassScraper');
 
-function mockHttpsResponse({ status = 200, headers = {}, body = '{}' }) {
+function mockHttpsResponse({ status = 200, headers = {}, body = '{}', delayMs, afterEnd }) {
   https.request.mockImplementationOnce((options, callback) => {
     const req = new EventEmitter();
     req.write = jest.fn();
@@ -26,10 +27,13 @@ function mockHttpsResponse({ status = 200, headers = {}, body = '{}' }) {
       res.statusCode = status;
       res.headers = headers;
       callback(res);
-      process.nextTick(() => {
+      const respond = () => {
         res.emit('data', Buffer.from(body));
         res.emit('end');
-      });
+        afterEnd?.();
+      };
+      if (delayMs === undefined) process.nextTick(respond);
+      else setTimeout(respond, delayMs);
     });
     return req;
   });
@@ -38,11 +42,13 @@ function mockHttpsResponse({ status = 200, headers = {}, body = '{}' }) {
 describe('tronClassScraper', () => {
   beforeEach(() => {
     https.request.mockReset();
+    setCampusHttpFetch(null);
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
     jest.useRealTimers();
+    setCampusHttpFetch(null);
   });
 
   test('fetches courses through current my-courses endpoint first', async () => {
@@ -234,6 +240,161 @@ describe('tronClassScraper', () => {
     mockHttpsResponse({ status: 500, body: '{}' });
     await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).rejects.toMatchObject({
       status: 500,
+    });
+  });
+
+  describe('caller cancellation and read budgets', () => {
+    const reads = [
+      ['courses', options => tcFetchCourses({}, { userId: 9 }, options)],
+      ['homework page', options => tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, options)],
+      ['activity', options => tcFetchHomeworkActivityStrict({}, 20001, options)],
+      ['student history', options => tcFetchStudentHomeworkSubmissionList({}, 20001, 123, options)],
+    ];
+
+    test.each(reads)('does not start an already cancelled %s read', async (_name, read) => {
+      const controller = new AbortController();
+      controller.abort(new Error('private-reason'));
+      await expect(read({ signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError', code: 'ABORT_ERR' });
+      expect(https.request).not.toHaveBeenCalled();
+    });
+
+    test.each(reads)('destroys an active direct %s request when its caller aborts', async (_name, read) => {
+      const controller = new AbortController();
+      https.request.mockImplementation(() => {
+        const request = new EventEmitter();
+        request.write = jest.fn(); request.end = jest.fn(); request.destroy = jest.fn();
+        return request;
+      });
+      const pending = expect(read({ signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError', code: 'ABORT_ERR' });
+      await Promise.resolve(); await Promise.resolve();
+      expect(https.request).toHaveBeenCalledTimes(1);
+      controller.abort(new Error('private-reason'));
+      await pending;
+      expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+      expect(https.request).toHaveBeenCalledTimes(1); // no course fallback
+    });
+
+    test.each(reads)('shortens the actual %s transport deadline from caller options', async (_name, read) => {
+      jest.useFakeTimers();
+      https.request.mockImplementation(() => {
+        const request = new EventEmitter();
+        request.write = jest.fn(); request.end = jest.fn(); request.destroy = jest.fn();
+        return request;
+      });
+      const pending = expect(read({ timeoutMs: 100 })).rejects.toThrow('timed out');
+      await jest.advanceTimersByTimeAsync(100);
+      await pending;
+      expect(https.request).toHaveBeenCalledTimes(1);
+      expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([0, -1, 1.5, NaN, Infinity])('rejects an invalid timeout before transport: %p', async timeoutMs => {
+      await expect(tcFetchCourses({}, {}, { timeoutMs })).rejects.toMatchObject({ code: 'TC_READ_INVALID_OPTIONS' });
+      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, { timeoutMs })).rejects.toMatchObject({ code: 'TC_READ_INVALID_OPTIONS' });
+      expect(https.request).not.toHaveBeenCalled();
+    });
+
+    test('bounds a homework page by default and does not allow options to remove its eight-second limit', async () => {
+      jest.useFakeTimers();
+      https.request.mockImplementation(() => {
+        const request = new EventEmitter();
+        request.end = jest.fn(); request.destroy = jest.fn();
+        return request;
+      });
+      const pending = expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, { timeoutMs: 60_000 })).rejects.toThrow('timed out');
+      await jest.advanceTimersByTimeAsync(8_000);
+      await pending;
+      expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    test('bounds a homework page response before JSON parsing', async () => {
+      mockHttpsResponse({ body: 'x'.repeat(2 * 1024 * 1024 + 1) });
+      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toThrow('response is too large');
+      expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not start another course page or fallback after cancellation at the first response', async () => {
+      const controller = new AbortController();
+      mockHttpsResponse({ body: JSON.stringify({ courses: [{ id: 1, name: '課程' }], pages: 2 }),
+        afterEnd: () => controller.abort() });
+      await expect(tcFetchCourses({}, { userId: 9 }, { signal: controller.signal })).rejects.toMatchObject({ code: 'ABORT_ERR' });
+      expect(https.request).toHaveBeenCalledTimes(1);
+    });
+
+    test('destroys a direct request whose headers arrived but body never finished, ignoring late body events', async () => {
+      const controller = new AbortController();
+      let response;
+      https.request.mockImplementation((_options, callback) => {
+        const request = new EventEmitter();
+        request.destroy = jest.fn();
+        request.end = jest.fn(() => {
+          response = new EventEmitter();
+          response.statusCode = 200; response.headers = {};
+          callback(response);
+          response.emit('data', Buffer.from('{"list":'));
+        });
+        return request;
+      });
+      const pending = expect(tcFetchStudentHomeworkSubmissionList({}, 20001, 123, { signal: controller.signal }))
+        .rejects.toMatchObject({ code: 'ABORT_ERR' });
+      await Promise.resolve(); await Promise.resolve();
+      expect(response).toBeDefined();
+      controller.abort();
+      await pending;
+      expect(https.request.mock.results[0].value.destroy).toHaveBeenCalledTimes(1);
+      response.emit('data', Buffer.from('[]}'));
+      response.emit('end');
+      expect(https.request).toHaveBeenCalledTimes(1);
+    });
+
+    test('uses one total budget across internal course pages and discards a late second page', async () => {
+      jest.useFakeTimers();
+      mockHttpsResponse({ delayMs: 600, body: JSON.stringify({ courses: [{ id: 1, name: '第一頁' }], pages: 2 }) });
+      mockHttpsResponse({ delayMs: 600, body: JSON.stringify({ courses: [{ id: 2, name: '第二頁' }], pages: 2 }) });
+      const pending = expect(tcFetchCourses({}, { userId: 9 }, { timeoutMs: 1_000 })).rejects.toThrow('timed out');
+      await jest.advanceTimersByTimeAsync(1_000);
+      await pending;
+      expect(https.request).toHaveBeenCalledTimes(2);
+      expect(https.request.mock.results[1].value.destroy).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(https.request).toHaveBeenCalledTimes(2);
+    });
+
+    test('shares the remaining course budget across profile and HTML fallback instead of renewing it', async () => {
+      jest.useFakeTimers();
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      mockHttpsResponse({ delayMs: 300, status: 404 });
+      mockHttpsResponse({ delayMs: 300, body: '{}' });
+      mockHttpsResponse({ delayMs: 600, body: '<html>late profile</html>' });
+      const pending = expect(tcFetchCourses({}, {}, { timeoutMs: 1_000 })).rejects.toThrow('timed out');
+      await jest.advanceTimersByTimeAsync(1_000);
+      await pending;
+      expect(https.request.mock.calls.map(([options]) => options.path)).toEqual(['/api/my-courses', '/api/profile', '/user/index']);
+      expect(https.request.mock.results[2].value.destroy).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(https.request).toHaveBeenCalledTimes(3);
+    });
+
+    test('passes caller cancellation through injected relay fetch without falling back to HTTPS', async () => {
+      const controller = new AbortController();
+      let upstream;
+      setCampusHttpFetch(jest.fn((_url, init) => new Promise((_resolve, reject) => {
+        upstream = init.signal;
+        init.signal.addEventListener('abort', () => reject(Object.assign(new Error('private-reason'), { name: 'AbortError' })), { once: true });
+      })));
+      const pending = expect(tcFetchCourses({}, { userId: 9 }, { signal: controller.signal })).rejects.toMatchObject({ code: 'ABORT_ERR' });
+      controller.abort();
+      await pending;
+      expect(upstream.aborted).toBe(true);
+      expect(https.request).not.toHaveBeenCalled();
+    });
+
+    test('removes its caller listener when direct request construction throws', async () => {
+      const controller = new AbortController();
+      const remove = jest.spyOn(controller.signal, 'removeEventListener');
+      https.request.mockImplementation(() => { throw new Error('synthetic socket creation failure'); });
+      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, { signal: controller.signal })).rejects.toThrow('synthetic socket creation failure');
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
     });
   });
 

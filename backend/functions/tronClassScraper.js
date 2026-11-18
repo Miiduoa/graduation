@@ -15,6 +15,7 @@ const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTrans
 
 const TC_BASE = 'https://tronclass.pu.edu.tw';
 const TC_LOGIN_ENTRY_URL = `${TC_BASE}/login?next=/user/index`;
+/** @typedef {{ signal?: AbortSignal, timeoutMs?: number }} TronClassReadOptions */
 const COMMON_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -101,7 +102,33 @@ function isCredentialError(body) {
   );
 }
 
-function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes } = {}) {
+function cancelledRead() {
+  const error = new Error('TronClass request cancelled');
+  error.name = 'AbortError';
+  error.code = 'ABORT_ERR';
+  return error;
+}
+
+function assertReadActive(signal) {
+  if (signal?.aborted) throw cancelledRead();
+}
+
+/** @param {TronClassReadOptions} options */
+function checkedReadOptions(options, defaultTimeoutMs) {
+  if (!options || typeof options !== 'object' || Array.isArray(options) ||
+    (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1)) ||
+    (options.signal !== undefined && (!options.signal || typeof options.signal.aborted !== 'boolean' ||
+      typeof options.signal.addEventListener !== 'function' || typeof options.signal.removeEventListener !== 'function'))) {
+    const error = new Error('TC_READ_INVALID_OPTIONS');
+    error.code = 'TC_READ_INVALID_OPTIONS';
+    throw error;
+  }
+  assertReadActive(options.signal);
+  return { signal: options.signal, timeoutMs: Math.min(defaultTimeoutMs, options.timeoutMs ?? defaultTimeoutMs) };
+}
+
+function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes, signal } = {}) {
+  if (signal?.aborted) return Promise.reject(cancelledRead());
   const parsed = normalizeRequestUrl(url);
   return sendWithCampusFetch({
     url: parsed.toString(),
@@ -111,8 +138,10 @@ function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {}, t
     headers: { ...COMMON_HEADERS, ...headers },
     timeoutMs,
     maxResponseBytes,
+    signal,
     timeoutMessage: 'TronClass request timed out',
   }).then((relayed) => {
+    assertReadActive(signal);
     if (relayed) {
       return {
         status: relayed.status,
@@ -122,12 +151,13 @@ function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {}, t
         url: parsed.toString(),
       };
     }
-    return httpsRequestDirect(parsed, { method, body, cookies, headers, timeoutMs, maxResponseBytes });
+    return httpsRequestDirect(parsed, { method, body, cookies, headers, timeoutMs, maxResponseBytes, signal });
   });
 }
 
-function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes } = {}) {
+function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, headers = {}, timeoutMs, maxResponseBytes, signal } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(cancelledRead()); return; }
     const bodyBuffer = body ? Buffer.from(body, 'utf8') : null;
     const requestHeaders = {
       ...COMMON_HEADERS,
@@ -149,9 +179,16 @@ function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, header
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       if (error) reject(error);
       else resolve(result);
     };
+    const abort = () => {
+      finish(cancelledRead());
+      request?.destroy?.();
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) { abort(); return; }
     if (timeoutMs) {
       timer = setTimeout(() => {
         finish(new Error('TronClass request timed out'));
@@ -159,7 +196,7 @@ function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, header
       }, timeoutMs);
       timer.unref?.();
     }
-    request = https.request(
+    try { request = https.request(
       {
         protocol: parsed.protocol,
         hostname: parsed.hostname,
@@ -171,6 +208,7 @@ function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, header
         servername: parsed.hostname,
       },
       (response) => {
+        if (settled) { response.destroy?.(); return; }
         const chunks = [];
         let responseBytes = 0;
         const jar = { ...cookies };
@@ -179,6 +217,7 @@ function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, header
         response.on('error', error => finish(error));
         response.on('aborted', () => finish(new Error('TronClass response interrupted')));
         response.on('data', (chunk) => {
+          if (settled) return;
           responseBytes += chunk.length;
           if (maxResponseBytes && responseBytes > maxResponseBytes) {
             finish(new Error('TronClass response is too large'));
@@ -197,9 +236,11 @@ function httpsRequestDirect(parsed, { method = 'GET', body, cookies = {}, header
           });
         });
       },
-    );
+    ); } catch (error) { finish(error); return; }
 
     request.on('error', error => finish(error));
+
+    if (settled) { request.destroy?.(); return; }
 
     if (bodyBuffer) {
       request.write(bodyBuffer);
@@ -293,12 +334,13 @@ async function tcFetchJson(url, cookies, options = {}) {
     cookies,
     timeoutMs: options.timeoutMs,
     maxResponseBytes: options.maxResponseBytes,
+    signal: options.signal,
     headers: {
       Accept: 'application/json',
       ...(options.headers || {}),
     },
   });
-
+  assertReadActive(options.signal);
   return parseTcJsonResponse(result);
 }
 
@@ -337,10 +379,13 @@ async function tcFetchAllPages(basePath, dataKey, cookies, params = {}, pageSize
 }
 
 async function tcEnsureUserId(cookies, knownUserId = null, requestLimits = {}) {
+  const limits = () => typeof requestLimits === 'function' ? requestLimits() : requestLimits;
+  assertReadActive(limits().signal);
   if (knownUserId) return knownUserId;
 
-  const profile = await tcFetchJson(`${TC_BASE}/api/profile`, cookies, requestLimits).catch((error) => {
-    if (isSessionExpiredError(error)) {
+  const profile = await tcFetchJson(`${TC_BASE}/api/profile`, cookies, limits()).catch((error) => {
+    assertReadActive(limits().signal);
+    if (isSessionExpiredError(error) || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
       throw error;
     }
     return null;
@@ -349,7 +394,7 @@ async function tcEnsureUserId(cookies, knownUserId = null, requestLimits = {}) {
   if (profileUserId) return profileUserId;
 
   const indexPage = await httpsRequest(`${TC_BASE}/user/index`, {
-    ...requestLimits,
+    ...limits(),
     cookies,
     headers: {
       Accept: 'text/html',
@@ -596,21 +641,25 @@ async function tcLogin(uid, password) {
   }
 }
 
-async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}) {
-  const deadline = Date.now() + 25_000;
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}, readOptions = {}) {
+  const { signal, timeoutMs } = checkedReadOptions(readOptions, 25_000);
+  const deadline = Date.now() + timeoutMs;
   let items;
   try {
-    items = await tcFetchMyCourses(cookies, status, deadline);
+    items = await tcFetchMyCourses(cookies, status, deadline, signal);
   } catch (error) {
+    courseRequestLimits(deadline, signal);
     if (isSessionExpiredError(error) || error.code === 'TC_COURSES_INVALID' || error instanceof SyntaxError) {
       throw error;
     }
-    console.warn('[TronClass] /api/my-courses failed, falling back to user courses:', error);
+    if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+    console.warn('[TronClass] /api/my-courses failed, falling back to user courses');
   }
 
   if (!items) {
     const knownUserId = Number.isSafeInteger(Number(userId)) && Number(userId) > 0 ? Number(userId) : null;
-    const resolvedUserId = await tcEnsureUserId(cookies, knownUserId, courseRequestLimits(deadline));
+    const resolvedUserId = await tcEnsureUserId(cookies, knownUserId, () => courseRequestLimits(deadline, signal));
     if (!resolvedUserId) {
       throw new Error('TronClass session 已失效，請重新登入');
     }
@@ -620,10 +669,10 @@ async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}) {
       'id,name,course_code,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role';
     items = await tcFetchCoursePages(async (page, pageSize) => {
       const query = new URLSearchParams({ conditions, fields, page: String(page), page_size: String(pageSize) });
-      return tcFetchJson(`${TC_BASE}/api/users/${resolvedUserId}/courses?${query}`, cookies, courseRequestLimits(deadline));
+      return tcFetchJson(`${TC_BASE}/api/users/${resolvedUserId}/courses?${query}`, cookies, courseRequestLimits(deadline, signal));
     });
   }
-
+  courseRequestLimits(deadline, signal);
   return items.map((course) => normalizeTcCourse(course, status));
 }
 
@@ -633,10 +682,15 @@ function invalidCourseResponse(message) {
   return error;
 }
 
-function courseRequestLimits(deadline) {
+function courseRequestLimits(deadline, signal) {
+  assertReadActive(signal);
   const remaining = deadline - Date.now();
-  if (remaining <= 0) throw new Error('TronClass course request timed out');
-  return { timeoutMs: Math.min(8_000, remaining), maxResponseBytes: 2 * 1024 * 1024 };
+  if (remaining <= 0) {
+    const error = new Error('TronClass course request timed out');
+    error.code = 'ETIMEDOUT';
+    throw error;
+  }
+  return { signal, timeoutMs: Math.min(8_000, remaining), maxResponseBytes: 2 * 1024 * 1024 };
 }
 
 async function tcFetchCoursePages(fetchPage) {
@@ -676,10 +730,10 @@ async function tcFetchCoursePages(fetchPage) {
   throw invalidCourseResponse('TronClass course pagination exceeded its limit');
 }
 
-async function tcFetchMyCourses(cookies, status = 'ongoing', deadline) {
+async function tcFetchMyCourses(cookies, status = 'ongoing', deadline, signal) {
   const tronStatus = status === 'upcoming' ? 'notStarted' : status;
   return tcFetchCoursePages((page, pageSize) => tcFetchJson(`${TC_BASE}/api/my-courses`, cookies, {
-    ...courseRequestLimits(deadline),
+    ...courseRequestLimits(deadline, signal),
     method: 'POST',
     body: JSON.stringify({ conditions: { status: [tronStatus] }, page, page_size: pageSize }),
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -933,10 +987,12 @@ function httpError(status) {
   return error;
 }
 
-async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50) {
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50, readOptions = {}) {
   const data = await tcFetchJson(
     `${TC_BASE}/api/courses/${courseId}/homework-activities?page=${page}&page_size=${pageSize}`,
     cookies,
+    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 },
   );
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
     throw httpError(200);
@@ -978,9 +1034,10 @@ function isHomeworkResponseObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-async function readHomeworkJson(url, cookies) {
+async function readHomeworkJson(url, cookies, readOptions = {}) {
   try {
-    return await tcFetchJson(url, cookies, { method: 'GET', ...HOMEWORK_DETAIL_READ_LIMITS });
+    return await tcFetchJson(url, cookies, { method: 'GET', ...HOMEWORK_DETAIL_READ_LIMITS,
+      ...checkedReadOptions(readOptions, HOMEWORK_DETAIL_READ_LIMITS.timeoutMs) });
   } catch (error) {
     // JSON parser errors can quote a student's source content. Expose a fixed
     // failure instead; never convert malformed or failed reads into no history.
@@ -991,9 +1048,10 @@ async function readHomeworkJson(url, cookies) {
 
 // Official Providence activityApi.getActivity (98133-ef5ebb8f.js, 2026-11-16).
 // This is a raw read only: callers must still verify course/type/visibility.
-async function tcFetchHomeworkActivityStrict(cookies, activityId) {
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchHomeworkActivityStrict(cookies, activityId, readOptions = {}) {
   requireHomeworkReadId(activityId);
-  const data = await readHomeworkJson(`${TC_BASE}/api/activities/${activityId}`, cookies);
+  const data = await readHomeworkJson(`${TC_BASE}/api/activities/${activityId}`, cookies, readOptions);
   const id = isHomeworkResponseObject(data) && (
     typeof data.id === 'number' ? data.id : typeof data.id === 'string' && /^[1-9]\d*$/.test(data.id) ? Number(data.id) : NaN
   );
@@ -1004,10 +1062,11 @@ async function tcFetchHomeworkActivityStrict(cookies, activityId) {
 // Official student homework detail (55200.e380810d.js / 88788.161d6b6a.js).
 // Preserve the exact { list: [...] } envelope. Do not probe alternate endpoints,
 // add pagination, infer a final status, or fall back to another student's data.
-async function tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId) {
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId, readOptions = {}) {
   requireHomeworkReadId(activityId);
   requireHomeworkReadId(studentId);
-  const data = await readHomeworkJson(`${TC_BASE}/api/activities/${activityId}/students/${studentId}/submission_list`, cookies);
+  const data = await readHomeworkJson(`${TC_BASE}/api/activities/${activityId}/students/${studentId}/submission_list`, cookies, readOptions);
   if (!isHomeworkResponseObject(data) || !Array.isArray(data.list) || data.list.length > HOMEWORK_SUBMISSION_LIST_MAX_ITEMS) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
