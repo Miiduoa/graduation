@@ -345,8 +345,8 @@ export function StoryViewer({
               aria-pressed={auto}
               disabled={failedVideo}
               onClick={() => {
-                // Stopping continuous playback while reading must cancel a saved resume.
-                if (auto && beforePanel.current) beforePanel.current.playing = false;
+                // Keep the student's latest playback choice, but defer playing until reading ends.
+                if (beforePanel.current) beforePanel.current.playing = !auto;
                 setAuto((v) => !v);
               }}
             >
