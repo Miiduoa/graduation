@@ -483,3 +483,36 @@ it('focuses the heading for a replacement round even when it reuses the same car
   expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
   expect(answerInput().value).toBe('');
 });
+
+
+it('lets keyboard and screen-reader students focus an exact practice quote and never points aria-controls to absent panels', () => {
+  render(<Controller />);
+  const hintToggle = screen.getByRole('button', { name: '查看原文提示' });
+  expect(hintToggle.getAttribute('aria-expanded')).toBe('false');
+  expect(hintToggle.hasAttribute('aria-controls')).toBe(false);
+  expect(screen.queryByRole('button', { name: '定位本題原文引句' })).toBeNull();
+
+  fireEvent.click(hintToggle);
+  const hintRegion = screen.getByRole('region', { name: '本題原文提示' });
+  const expandedHint = screen.getByRole('button', { name: '收起原文提示' });
+  expect(expandedHint.getAttribute('aria-controls')).toBe(hintRegion.id);
+  const quotedText = within(hintRegion).getByText(cards[0].sourceQuote, { selector: 'mark' });
+  expect(quotedText.getAttribute('tabindex')).toBe('-1');
+  fireEvent.click(screen.getByRole('button', { name: '定位本題原文引句' }));
+  expect(document.activeElement).toBe(quotedText);
+
+  fireEvent.click(expandedHint);
+  expect(screen.queryByRole('region', { name: '本題原文提示' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '定位本題原文引句' })).toBeNull();
+  expect(screen.getByRole('button', { name: '查看原文提示' }).hasAttribute('aria-controls')).toBe(false);
+
+  const hiddenAnswer = screen.getByRole('button', { name: '對照參考回答' });
+  expect(hiddenAnswer.hasAttribute('aria-controls')).toBe(false);
+  writeAnswer('我先自行回答。');
+  revealAnswer();
+  const shownAnswer = screen.getByRole('button', { name: '收起參考回答' });
+  expect(shownAnswer.getAttribute('aria-controls'))
+    .toBe(screen.getByRole('region', { name: '本題參考回答' }).id);
+  fireEvent.click(shownAnswer);
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('aria-controls')).toBe(false);
+});

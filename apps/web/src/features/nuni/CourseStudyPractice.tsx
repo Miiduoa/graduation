@@ -125,13 +125,15 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
         </div>
         <p className={styles.question}>{card.question}</p>
 
-        <button type="button" className={styles.button} aria-expanded={response.hintVisible} aria-controls={hintId}
+        <button type="button" className={styles.button} aria-expanded={response.hintVisible} aria-controls={response.hintVisible ? hintId : undefined}
           onClick={() => onAction({ type: 'toggle_hint' })}>{response.hintVisible ? '收起原文提示' : '查看原文提示'}</button>
         {response.hintVisible && <section id={hintId} className={styles.hint} aria-label="本題原文提示">
           <h5>原文提示</h5>
           <blockquote className={styles.source}>
-            {evidence ? <>{evidence.before}<mark ref={evidenceMark} className={styles.highlight}>{evidence.quote}</mark>{evidence.after}</> : card.sourceText}
+            {evidence ? <>{evidence.before}<mark ref={evidenceMark} tabIndex={-1} className={styles.highlight}>{evidence.quote}</mark>{evidence.after}</> : card.sourceText}
           </blockquote>
+          {evidence && <button type="button" className={styles.button}
+            onClick={() => evidenceMark.current?.focus()}>定位本題原文引句</button>}
           {evidence && evidence.occurrences > 1 && <>
             <p className={styles.note} role="status" aria-live="polite">
               相同引句在本段出現 {evidence.occurrences} 處，目前標示第 {evidenceOccurrence + 1} 處。
@@ -155,7 +157,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
             placeholder="先憑記憶回答，不確定的地方也可以寫下來。" />
         </label>
         <p id={attemptHelpId} className={styles.note}>先寫下自己的回答，再對照參考回答；修改回答會清除原自評，單純收起參考回答不會。</p>
-        <button type="button" className={styles.button} disabled={!canRevealAnswer} aria-expanded={answerVisible} aria-controls={answerId}
+        <button type="button" className={styles.button} disabled={!canRevealAnswer} aria-expanded={answerVisible} aria-controls={answerVisible ? answerId : undefined}
           onClick={() => onAction({ type: 'toggle_answer' })}>{answerVisible ? '收起參考回答' : '對照參考回答'}</button>
         {answerVisible && <section id={answerId} className={styles.answer} aria-label="本題參考回答">
           <h5>參考回答</h5>
