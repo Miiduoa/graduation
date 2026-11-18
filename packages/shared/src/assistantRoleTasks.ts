@@ -43,6 +43,12 @@ export function assistantRoleTaskGuide(
   if (parseAssistantCalendarIntent(question, now)?.kind === 'draft') return null;
   if (resolveAssistantServiceIntent(question)?.kind === 'open') return null;
   const normalized = question.normalize('NFKC');
+  // Complete personal timetable reads take priority over role keywords on both
+  // the client and server, including when only the cloud ledger has the data.
+  const timetableQuery = normalized.trim().replace(/[？?。!！\s]+$/u, '')
+    .replace(/^(?:(?:請問|請|麻煩)\s*)?(?:(?:幫我|我想知道|我想看|我要看)\s*)?(?:(?:查詢|查看|查一下|看一下|看看|告訴我|列出|查)\s*)?/u, '');
+  if (/^(?:我的?)?(?:(?:今天|今日|明天|明日|後天)(?:的)?(?:課表|(?:有|要上|上)?(?:什麼|哪些|幾堂|幾節)?(?:課|課程))|課表|(?:下一堂|下堂|接下來一堂)(?:課|課程)?(?:的)?(?:是(?:什麼|哪一堂|哪堂)(?:課)?|在(?:哪裡|哪|哪個教室)|教室(?:在哪裡|在哪|是什麼)?|幾點(?:開始|上課)?|什麼時間)?)$/u.test(timetableQuery))
+    return null;
   if (/^(?:請|幫我|請幫我)?\s*(?:查|查詢|看看?|查看)\s*(?:近期|最近|今天)?\s*(?:校園公告|公開公告|近期活動|校園活動|活動|公車|地圖|圖書館)[？?。!！\s]*$/.test(normalized))
     return null;
   const orientation = /(?:可以|能|會)幫我|能做什麼|可以做什麼|工作重點|我的工作|今天.*待辦|工作流程/.test(normalized);

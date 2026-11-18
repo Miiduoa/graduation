@@ -59,6 +59,24 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('role context in the actual runner and tool dispatcher', () => {
+  it.each((['student', 'teacher', 'merchant', 'club', 'school', 'platform'] as const).flatMap(profile =>
+    ['今天有什麼課程', '下一堂課在哪裡', '查我的課表'].map(question => [profile, question] as const),
+  ))('%s reads the cloud timetable without any device timetable: %s', async (profile, question) => {
+    const fixture = observedFixture();
+    const result = await answer(profile, question, fixture);
+    expect(fixture.reads.ledger).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ modelCalls: 0, cards: [] });
+    expect(result).not.toHaveProperty('roleGuide');
+    expect(result.answer).toContain('資料結構');
+    expect(result.answer).toContain('資訊202');
+    expect(result.answer).toContain('13:00');
+    expect(result.answer).not.toContain('也可以給我明確日期');
+    expect(result.steps).toContainEqual(expect.objectContaining({ name: 'get_schedule', status: 'ok' }));
+    expect(fixture.reads.courses).not.toHaveBeenCalled();
+    expect(fixture.writes).toHaveLength(0);
+    expect(noModel).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['teacher', '幫我查學生待繳作業'], ['teacher', '查我的授課概況'],
     ['merchant', '查門市訂單與營收'], ['merchant', '把我最近一筆訂單的取餐時間加入行事曆，預留15分鐘'],

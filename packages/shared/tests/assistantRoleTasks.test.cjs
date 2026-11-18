@@ -34,7 +34,7 @@ test('professional questions point at existing workspaces without repeating priv
 
 test('student and buyer source questions cannot be reinterpreted as professional records', () => {
   for (const profileId of ['teacher', 'merchant', 'club', 'school', 'platform']) {
-    for (const question of ['查我的待繳作業', '下一堂課在哪裡', '查最近一筆訂單', '取餐號碼是多少']) {
+    for (const question of ['查我的待繳作業', '查最近一筆訂單', '取餐號碼是多少']) {
       const result = assistantRoleTaskGuide(profileId, question, now);
       assert.equal(result?.profileId, profileId, `${profileId}: ${question}`);
       assert.doesNotMatch(result.answer, /沒有作業|沒有訂單|已全部繳交|已經取餐/);
@@ -42,6 +42,17 @@ test('student and buyer source questions cannot be reinterpreted as professional
   }
   assert.equal(assistantRoleTaskGuide('student', '查我的待繳作業', now), null);
   assert.equal(assistantRoleTaskGuide('student', '查最近一筆訂單', now), null);
+});
+
+test('complete personal timetable queries precede role keywords in every context', () => {
+  for (const { id } of ASSISTANT_ROLE_PROFILES) {
+    for (const question of ['今天有什麼課程', '下一堂課在哪裡', '查我的課表']) {
+      assert.equal(assistantRoleTaskGuide(id, question, now), null, `${id}: ${question}`);
+    }
+  }
+  for (const question of ['今天有什麼課程可以幫我備課', '下一堂課在哪裡，順便批改作業']) {
+    assert.equal(assistantRoleTaskGuide('teacher', question, now)?.profileId, 'teacher');
+  }
 });
 
 test('fixed role orientation remains available for all contexts without inventing live work counts', () => {

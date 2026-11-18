@@ -110,6 +110,30 @@ it('a complete personal timetable query is not redirected by broad teacher keywo
   noRemoteRead();
 });
 
+it.each(['今天有什麼課程', '下一堂課在哪裡', '查我的課表'])(
+  'teacher falls back from a missing device timetable to the cloud answer: %s', async question => {
+    localStorage.clear();
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+      expect(url).toBe('/api/nuni/assistant/ask');
+      const input = JSON.parse(String(init?.body));
+      expect(input).toMatchObject({ question, taskProfile: 'teacher' });
+      // Actual Runner/ledger retrieval is covered by roleContext.integration.test.ts.
+      return json({ version: 2, answer: '已同步課表：13:00–15:00 資料結構；資訊202',
+        steps: [{ name: 'get_schedule', status: 'ok', summary: '已讀取課表' }], cards: [], modelCalls: 0 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await open('teacher');
+    fireEvent.click(screen.getByRole('checkbox'));
+    send(question);
+    const answer = await screen.findByText(/資訊202/);
+    expect(answer.textContent).toContain('資料結構');
+    expect(answer.textContent).toContain('13:00');
+    expect(screen.queryByText(/也可以給我明確日期、起訖時間與名稱/)).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  },
+);
+
 it('keeps the nonstudent personal calendar on its existing scoped reader', async () => {
   await open('merchant');
   send('查我的行程');
