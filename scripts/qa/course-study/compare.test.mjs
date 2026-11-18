@@ -49,6 +49,29 @@ test('rejects canonically equivalent Unicode case IDs without rewriting labels',
   assert.deepEqual(report.caseIds, ['題目-é', '題目-另一題']);
   assert.equal(report.trialCount, 2);
 });
+test('preserves exact case and environment labels, rejecting hidden or ambiguous evidence', () => {
+  const padded = fixture();
+  padded.trials[0].caseId = ' pair-1 ';
+  assert.throws(() => auditStudyComparisons(padded), /unambiguous single-line evidence label/);
+
+  const multiline = fixture();
+  multiline.trials[0].environment.device = 'iPhone 16\nAndroid';
+  assert.throws(() => auditStudyComparisons(multiline), /unambiguous single-line evidence label/);
+
+  const hidden = fixture();
+  hidden.trials[0].results[0].version = 'nuni-\u202e2026';
+  assert.throws(() => auditStudyComparisons(hidden), /unambiguous single-line evidence label/);
+
+  const legitimate = fixture();
+  legitimate.trials[0].caseId = '課程 1｜題目 1';
+  legitimate.trials[0].environment.device = 'iPhone 16 Pro';
+  legitimate.trials[0].results[0].version = 'nuni 測試 v1';
+  const report = auditStudyComparisons(legitimate);
+  assert.deepEqual(report.caseIds, ['課程 1｜題目 1']);
+  assert.equal(report.caseProvenance[0].environment.device, 'iPhone 16 Pro');
+  assert.equal(report.caseProvenance[0].versions.nuni, 'nuni 測試 v1');
+});
+
 test('rejects false success for failures and non-finite values', () => {
   const bad = fixture(); bad.trials[0].results[1].correct = true;
   assert.throws(() => auditStudyComparisons(bad), /failed attempt/);

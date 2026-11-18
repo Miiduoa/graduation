@@ -14,6 +14,15 @@ function text(value, where) {
   if (typeof value !== 'string' || !value.trim()) fail(where, 'nonempty string required');
   return value.trim();
 }
+// Evidence labels must remain identical to the human-entered manifest.
+// Trimming or silently accepting control/bidi formatting characters can
+// make two case IDs or recorded device/version names appear identical.
+function evidenceLabel(value, where) {
+  const label = text(value, where);
+  if (label !== value || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value))
+    fail(where, 'unambiguous single-line evidence label required');
+  return value;
+}
 function number(value, where, nullable = false) {
   if (nullable && value === null) return null;
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
@@ -77,7 +86,7 @@ export function auditStudyComparisons(raw) {
   input.trials.forEach((item, index) => {
     const key = `trials[${index}]`;
     const trial = object(item, key);
-    const id = text(trial.caseId, `${key}.caseId`);
+    const id = evidenceLabel(trial.caseId, `${key}.caseId`);
     // Canonically equivalent Unicode case IDs must not count as two trials.
     // Preserve the original label in the report and do not alter fixture bytes.
     const identity = id.normalize('NFC');
@@ -93,7 +102,7 @@ export function auditStudyComparisons(raw) {
     text(trial.manualReviewer, `${key}.manualReviewer`);
     const env = object(trial.environment, `${key}.environment`);
     const environment = Object.fromEntries(['date', 'device', 'browser', 'network']
-      .map((field) => [field, text(env[field], `${key}.environment.${field}`)]));
+      .map((field) => [field, evidenceLabel(env[field], `${key}.environment.${field}`)]));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(env.date) ||
         (!Number.isFinite(Date.parse(`${env.date}T00:00:00Z`)) ||
          new Date(`${env.date}T00:00:00Z`).toISOString().slice(0, 10) !== env.date))
@@ -106,7 +115,7 @@ export function auditStudyComparisons(raw) {
       if (!Object.hasOwn(observations, run.product) || seen.has(run.product))
         fail(where, 'unknown or repeated product');
       seen.add(run.product);
-      versions[run.product] = text(run.version, `${where}.version`);
+      versions[run.product] = evidenceLabel(run.version, `${where}.version`);
       const completed = bool(run.completed, `${where}.completed`);
       const correct = bool(run.correct, `${where}.correct`);
       const sourceVerified = bool(run.sourceVerified, `${where}.sourceVerified`);
