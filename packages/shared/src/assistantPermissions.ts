@@ -11,6 +11,7 @@ export const ASSISTANT_WRITE_PERMISSION_KEYS = [
   'returnBook',
   'createDormRepairRequest',
   'reserveWashingMachine',
+  'cancelWashingReservation',
   'createOrder',
   'cancelOrder',
   'submitQuizAttempt',
@@ -62,6 +63,11 @@ export const ASSISTANT_WRITE_PERMISSION_DEFINITIONS: readonly AssistantWritePerm
     key: 'reserveWashingMachine',
     label: '預約洗衣機',
     description: '預約宿舍洗衣機，確認後會寫入預約並更新機台狀態。',
+  },
+  {
+    key: 'cancelWashingReservation',
+    label: '取消洗衣預約',
+    description: '查核本人洗衣預約，經你確認後取消指定紀錄；不會新增或改訂預約。',
   },
   {
     key: 'createOrder',

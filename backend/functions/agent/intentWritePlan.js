@@ -38,6 +38,7 @@ const INTENT_WRITE_PLANS = {
     toolName: 'createDormRepairRequest',
     requiresConfirmation: true,
   },
+  wash_cancel: { toolName: 'cancelWashingReservation', requiresConfirmation: true },
   wash_reserve: {
     toolName: 'reserveWashingMachine',
     requiresConfirmation: true,

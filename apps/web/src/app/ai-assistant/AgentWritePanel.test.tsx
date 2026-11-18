@@ -106,3 +106,69 @@ it('非報修確認仍保留通用送出與執行成功句', async () => {
   });
   expect(screen.queryByText('報修備忘已存好')).toBeNull();
 });
+
+const cancelProposal = { toolName: 'cancelWashingReservation', label: '取消洗衣預約', agentRunId: proposal.agentRunId,
+  input: { reservationId: 'wash-1', expectedReservationVersion: 'a'.repeat(64), machineId: 'A2', dormitory: '女生宿舍',
+    startTime: '2030-01-02T09:00:00+08:00', reservedUntil: '2030-01-02T02:00:00.000Z' } };
+const cancelReceipt = { success: true, toolName: 'cancelWashingReservation', reservationId: 'wash-1', machineId: 'A2',
+  dormitory: '女生宿舍', startTime: cancelProposal.input.startTime, reservedUntil: cancelProposal.input.reservedUntil,
+  status: 'cancelled', schoolId: 'pu', userId: 'alice' };
+function openCancellation(onCompleted = vi.fn()) {
+  const view = render(<AgentWritePanel proposal={cancelProposal} userId="alice" schoolId="pu" onCompleted={onCompleted} />);
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  return { ...view, onCompleted };
+}
+it.each([cancelProposal.input.reservedUntil, null])('shows the exact cancellation target and end %s before confirmation', reservedUntil => {
+  render(<AgentWritePanel proposal={{ ...cancelProposal, input: { ...cancelProposal.input, reservedUntil } }} userId="alice" schoolId="pu" onCompleted={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  for (const value of ['wash-1', 'A2', '女生宿舍', cancelProposal.input.startTime, reservedUntil ?? '未提供到期時間'])
+    expect(screen.getByText(value)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '先不要' }));
+  expect(mocks.execute).not.toHaveBeenCalled();
+});
+it('confirms cancellation once and shows only the verified cancellation receipt', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.execute.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { onCompleted } = openCancellation();
+  const button = screen.getByRole('button', { name: '確認並執行' });
+  act(() => { button.click(); button.click(); });
+  expect(mocks.execute).toHaveBeenCalledTimes(1);
+  await act(async () => finish(cancelReceipt));
+  expect(screen.getByText('洗衣預約已取消')).toBeTruthy();
+  expect(screen.getByText('紀錄編號：wash-1')).toBeTruthy();
+  expect(onCompleted).toHaveBeenCalledTimes(1);
+});
+it.each(['bare-success', 'mismatch', 'timeout'])('does not retry or claim cancellation after %s', async mode => {
+  if (mode === 'timeout') mocks.execute.mockRejectedValue(new Error('timeout'));
+  else mocks.execute.mockResolvedValue(mode === 'bare-success' ? { success: true, toolName: cancelProposal.toolName }
+    : { ...cancelReceipt, machineId: 'A1' });
+  const { onCompleted } = openCancellation();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '確認並執行' })));
+  expect(screen.queryByText('洗衣預約已取消')).toBeNull();
+  expect(screen.getByText(/重新查詢洗衣預約/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看服務紀錄' }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.queryByRole('button', { name: '確認並執行' })).toBeNull();
+  expect(mocks.execute).toHaveBeenCalledTimes(1);
+  expect(onCompleted).not.toHaveBeenCalled();
+});
+it.each(['school', 'account', 'unmount'])('ignores cancellation completion after %s changes', async change => {
+  let finish!: (value: unknown) => void;
+  mocks.execute.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const view = openCancellation();
+  fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  const signal = mocks.execute.mock.calls[0][1] as AbortSignal | undefined;
+  if (change === 'unmount') view.unmount();
+  else view.rerender(<AgentWritePanel proposal={cancelProposal} userId={change === 'account' ? 'bob' : 'alice'} schoolId={change === 'school' ? 'nthu' : 'pu'} onCompleted={view.onCompleted} />);
+  await act(async () => finish(cancelReceipt));
+  expect(signal?.aborted).toBe(true);
+  expect(view.onCompleted).not.toHaveBeenCalled();
+  expect(screen.queryByText('洗衣預約已取消')).toBeNull();
+});
+
+it('uses the verified reservation ID even if the response also includes an unrelated reference', async () => {
+  mocks.execute.mockResolvedValue({ ...cancelReceipt, requestId: 'other-transaction' });
+  openCancellation();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '確認並執行' })));
+  expect(screen.getByText('紀錄編號：wash-1')).toBeTruthy();
+  expect(screen.queryByText(/other-transaction/)).toBeNull();
+});
