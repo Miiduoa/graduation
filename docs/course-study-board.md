@@ -1714,3 +1714,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 行動 WebView 有時讓 `Blob.arrayBuffer()` 永遠沒有結果，原本只有學生主動取消才能脫離載入等待；現在超過 30 秒改用裝置上的 `FileReader` 讀取同一份原始位元組。如果原生 `FileReader` 也沒有觸發完成、錯誤或取消事件，另在 30 秒後中止並回報讀取失敗，不讓學生無限等候。
 - 加入兩組模擬 WebView／假計時器回歸：`Blob` 永遠 pending 後自動退回並保留逐字繁體中文，以及 `FileReader` 永遠 pending 後安全失敗且嘗試取消。原有主動取消、完整位元組驗證和遲到回覆隔離仍保留；這不是瀏覽器底層 I/O 一定可取消的保證，也不代表實際 iOS／Android 真機已驗收。
 - 不新增套件或網路傳送教材、不改原始教材與閱讀／逐題練習 checkpoint 格式；新版本 CI、CodeQL、指定 App 5504170 APPROVED、Maestro、手機真機與 Ahaboard 同教材同題同裝置比較仍須獨立通過。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-18：手機教材備援讀取測試的跨 Realm ArrayBuffer 修正
+
+- 上一版 head `0863072756e251b363849ac9a5151038da439e62` 的 CI Web Tests 在 17,084 項中有 1 項失敗（16,968 通過、115 跳過）：`recovers local Chinese lesson bytes after a WebView Blob read never resolves`。實際 job log 指向模擬 `CompletedReader` 的回傳位元組未被 `instanceof ArrayBuffer` 辨認，導致 `Incomplete local file reader result` 和未處理錯誤。
+- 修正測試用的 `CompletedReader`：以測試瀏覽器環境的 `new ArrayBuffer(bytes.byteLength)` 建立結果，再逐位元組寫回原始繁體中文教材。這確保模擬符合原生 FileReader 的 ArrayBuffer 來源，仍維持正式程式的精確 byteLength 驗證與逾時／取消防護，**未放寬檔案檢查**。
+- 本輪不改產品邏輯、學生 v1/v2 進度或 v1 練習 checkpoint，不增套件、不外傳教材。須以此修補產生的確切新 SHA 重跑 Web Tests／全部 GitHub CI、CodeQL；App 5504170 APPROVED、Maestro、iOS/Android 真機與 Ahaboard 同題同機對照仍缺證據。PR 保持 Draft、不合併、不部署。

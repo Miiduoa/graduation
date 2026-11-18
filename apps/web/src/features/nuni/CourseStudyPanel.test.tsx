@@ -569,7 +569,12 @@ it('recovers local Chinese lesson bytes after a WebView Blob read never resolves
     readAsArrayBuffer() {
       fallbackReads += 1;
       this.readyState = 2;
-      this.result = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      // A Node TextEncoder buffer can belong to a different realm than
+      // jsdom's FileReader ArrayBuffer, making instanceof checks fail even
+      // though the bytes are correct. Simulate a browser-owned result.
+      const buffer = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(buffer).set(bytes);
+      this.result = buffer;
       this.onload?.();
     }
     abort() { this.readyState = 2; this.onabort?.(); }
