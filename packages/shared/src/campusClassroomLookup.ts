@@ -89,13 +89,16 @@ const PUBLISHED_PROVIDENCE_BUS_STOP_IDS = new Set(PROVIDENCE_BUS_STOPS.map((stop
 const PUBLISHED_PROVIDENCE_PLACES = new Map(PROVIDENCE_CAMPUS_PLACES.map((place) => [place.id, place]));
 
 function hasTransitStopIdentity(location: CampusMapPlaceLike, school: string): boolean {
-  const ids = 'transitStopIds' in location ? location.transitStopIds : undefined;
-  return (
-    (Array.isArray(ids) && ids.some(
-      (id: unknown) => typeof id === 'string' && id.trim().length > 0,
-    )) ||
-    (school === 'pu' && PUBLISHED_PROVIDENCE_BUS_STOP_IDS.has(location.id))
-  );
+  // Some imported Firestore rows store a single stop ID as a string, or
+  // contain malformed non-string array elements. Treat a nonblank marker
+  // conservatively as transit identity; never route it to a classroom.
+  const ids: unknown = 'transitStopIds' in location ? location.transitStopIds : undefined;
+  const hasMarker = typeof ids === 'string'
+    ? ids.trim().length > 0
+    : Array.isArray(ids) && ids.some(
+      (id: unknown) => typeof id === 'string' ? id.trim().length > 0 : id != null,
+    );
+  return hasMarker || (school === 'pu' && PUBLISHED_PROVIDENCE_BUS_STOP_IDS.has(location.id));
 }
 
 /** Firestore category labels may append a campus/terminal qualifier in parentheses.
