@@ -12,6 +12,7 @@ import {
   type FoodPickupGuard,
 } from './contracts';
 import { operationSignal } from './operation';
+import { parseAssistantFoodPickupTarget, type AssistantFoodPickupTarget } from '@campus/shared/src/assistantFoodPickupTarget';
 
 const MINUTE = 60_000;
 const PICKUP_STATES = new Set(['paid', 'accepted', 'preparing', 'ready']);
@@ -94,6 +95,24 @@ async function verifyRealm(adapter: Adapter, binding: Binding, tenantId: string)
   const realms = await schoolRealms(adapter, binding);
   if (realms.filter((realm) => realm.tenantId === tenantId).length !== 1)
     return fail('FOOD_PICKUP_CHANGED', 403);
+}
+
+/** Selecting a source never grants access to it. Check the chosen school realm
+ * before requesting the account-scoped detail, then recheck after the read.
+ */
+export async function readSelectedFoodPickup(
+  adapter: Adapter, binding: Binding, raw: AssistantFoodPickupTarget, now: number,
+): Promise<FoodPickupSource> {
+  if (!Number.isFinite(now)) return fail('INVALID_INPUT', 422);
+  let target: Required<AssistantFoodPickupTarget>;
+  try { target = parseAssistantFoodPickupTarget(raw); }
+  catch { return fail('INVALID_FOOD_PICKUP_TARGET', 422); }
+  await verifyRealm(adapter, binding, target.tenantId);
+  const source = pickupSource(await adapter.order(target.tenantId, target.orderId),
+    target.tenantId, target.orderId, now);
+  operationSignal()?.throwIfAborted();
+  await verifyRealm(adapter, binding, target.tenantId);
+  return source;
 }
 
 /** Resolve latest only once. A cancelled latest order never selects an older one. */

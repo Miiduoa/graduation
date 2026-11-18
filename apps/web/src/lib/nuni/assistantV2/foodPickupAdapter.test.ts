@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import { createAdapter } from './adapter';
 import { confirm } from './actions';
-import { prepareFoodPickupRequest } from './foodPickupRequest';
+import { prepareFoodPickupRequest, prepareSelectedFoodPickupRequest } from './foodPickupRequest';
 import { fixtureAdapter, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
 import type { Binding, Ledger, Obj } from './contracts';
 
@@ -41,7 +41,7 @@ async function httpFixture() {
     pickup: { displayCode: 'PRIVATE_PICKUP_CODE' }, paymentToken: 'PRIVATE_PAYMENT_TOKEN',
     lines: [], updatedAt: '2026-11-04T10:25:00+08:00',
   };
-  const state = { newestId: 'order-a', sessionChanged: false };
+  const state = { newestId: 'order-a', sessionChanged: false, multiWorkspace: false };
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input));
     expect(url.origin).toBe('https://pickup-fixture.invalid');
@@ -60,6 +60,7 @@ async function httpFixture() {
     if (path === 'realms' && method === 'GET') return Response.json({ realms: [
       { tenantId: 'other-realm', schoolId: 'other-school' },
       { tenantId: 'fixture-realm', schoolId: binding.schoolId },
+      ...(state.multiWorkspace ? [{ tenantId: 'second-school-realm', schoolId: binding.schoolId }] : []),
     ] });
     if (path === 'realms/fixture-realm/food/orders' && method === 'GET') {
       expect(url.search).toBe('?limit=5');
@@ -96,7 +97,15 @@ async function httpFixture() {
       binding, secret, now, writes: true, signal: signal() });
     return { source, reply };
   }
-  return { calls, order, state, fresh, preview, ledger: () => ledger };
+  async function previewSelected() {
+    const source = await fresh();
+    const reply = await prepareSelectedFoodPickupRequest({
+      target: { tenantId: 'fixture-realm', orderId: 'order-a', durationMinutes: 20 },
+      adapter: source.adapter, binding, secret, now, writes: true, signal: signal(),
+    });
+    return { source, reply };
+  }
+  return { calls, order, state, fresh, preview, previewSelected, ledger: () => ledger };
 }
 
 it('uses authenticated scoped HTTP reads, a fresh confirmation budget and one verified calendar write', async () => {
@@ -167,5 +176,30 @@ it('propagates an upstream session change without exposing partial order data or
   f.state.sessionChanged = true;
   await expect(f.preview()).rejects.toMatchObject({ status: 409, code: 'SESSION_CHANGED' });
   expect(f.calls.some(call => call.path.startsWith('personal-imports/'))).toBe(false);
+  expect(f.calls.filter(call => call.path.includes('/food/')).every(call => call.method === 'GET')).toBe(true);
+});
+
+it('uses the selected account-scoped HTTP order across multiple workspaces without enumerating or mutating orders', async () => {
+  const f = await httpFixture(), initial = structuredClone(f.ledger());
+  f.state.multiWorkspace = true;
+  f.state.newestId = 'different-latest-order';
+  const { source, reply } = await f.previewSelected();
+  expect(reply).toMatchObject({ dataRead: true, stopReason: '',
+    pickupTarget: { tenantId: 'fixture-realm', orderId: 'order-a', durationMinutes: 20 } });
+  expect(reply.cards).toHaveLength(1);
+  expect(reply.cards[0].args).toMatchObject({ startTime: '12:00', endTime: '12:20' });
+  expect(JSON.stringify(reply)).not.toContain('PRIVATE_');
+  expect(source.apiCalls()).toBe(5);
+  expect(f.calls.map(call => `${call.method} ${call.path}${call.query}`)).toEqual([
+    'GET sessions/current', 'GET realms', 'GET realms/fixture-realm/food/orders/order-a',
+    'GET realms', 'POST personal-imports/read',
+  ]);
+  expect(f.ledger()).toEqual(initial);
+  const card = reply.cards[0], confirmation = await f.fresh();
+  expect(await confirm(binding, { token: card.token, args: card.args }, secret, now,
+    confirmation.adapter, true, () => now)).toMatchObject({ status: 'verified', replay: false });
+  expect(f.calls.filter(call => call.path === 'personal-imports/write')).toHaveLength(1);
+  expect(f.calls.some(call => call.path.includes('second-school-realm') ||
+    call.path.includes('different-latest-order') || call.path.endsWith('/food/orders'))).toBe(false);
   expect(f.calls.filter(call => call.path.includes('/food/')).every(call => call.method === 'GET')).toBe(true);
 });

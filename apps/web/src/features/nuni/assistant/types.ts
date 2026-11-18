@@ -22,6 +22,9 @@ export type V2Reply = {
   simulation?: boolean;
   /** Verified reader output stays literal and out of later model history. */
   dataRead?: boolean;
+  /** Fixed capability guidance; not a completed private-data read. */
+  roleGuide?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
+  serviceIds?: readonly import('@campus/shared/src/assistantServices').AssistantServiceId[];
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
   courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
   courseworkDate?: string;
@@ -30,6 +33,7 @@ export type V2Reply = {
 export type V2Turn = {
   question: string;
   reply: V2Reply;
+  taskProfile?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
   /** Local public lookup, outside the model conversation and signed action cards. */
   publicCourse?: { read?: PublicCourseAssistantRead };
 };

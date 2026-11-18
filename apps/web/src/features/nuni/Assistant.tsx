@@ -8,7 +8,7 @@ import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssis
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
-import { AssistantThread } from './assistant/AssistantThread';
+import { AssistantThread, assistantQuestionReadRoute } from './assistant/AssistantThread';
 import { AssistantPlanRevision } from './assistant/AssistantPlanRevision';
 import { AssistantPrecisePlanRevision, AssistantPrecisePlanComparison } from './assistant/AssistantPrecisePlanRevision';
 import { buildPrecisePlanRevision, type PrecisePlanRevisionChange } from './assistant/precisePlanRevision';
@@ -35,11 +35,12 @@ import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assist
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
-import { answerAssistantPersonalQuestion, canAnswerAssistantPersonalQuestion, personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
+import { answerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
+import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -49,8 +50,9 @@ type Step = {
 };
 type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
 class AssistantPermissionFailure extends Error {}
-export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady, initialDraft = '' }: {
+export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady, initialDraft = '', initialTaskProfile = 'student' }: {
   initialDraft?: string;
+  initialTaskProfile?: AssistantRoleProfileId;
   context: string;
   schoolId: string;
   accountId: string;
@@ -160,11 +162,13 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
   if (v2 || capabilityUnavailable) return <>
     {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
     <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback}
+      initialTaskProfile={initialTaskProfile}
       foodPickupEnabled={planning && !!accountId && !!context} />
   </>;
   return (
     <section aria-label="公開校園助理">
       <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId}
+        initialTaskProfile={initialTaskProfile}
         inlineDraft={inlineDraft} ready={false} fallback={false} />
       <details>
       <summary>公開校園資訊查詢</summary>
@@ -258,6 +262,7 @@ function V2Conversation({
   inlineDraft,
   accountId,
   foodPickupEnabled = false,
+  initialTaskProfile = 'student',
 }: {
   context: string;
   schoolId: string;
@@ -267,8 +272,10 @@ function V2Conversation({
   inlineDraft?: InlineDraft;
   accountId: string;
   foodPickupEnabled?: boolean;
+  initialTaskProfile?: AssistantRoleProfileId;
 }) {
   const conversation = useRef(crypto.randomUUID());
+  const [taskProfile, setTaskProfile] = useState<AssistantRoleProfileId>(initialTaskProfile);
   const [consent, setConsent] = useState(false);
   const [localQuestion, setLocalQuestion] = useState(initialDraft);
   const question = inlineDraft?.text ?? localQuestion;
@@ -443,9 +450,9 @@ function V2Conversation({
     const current = selection
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim();
-    if (!current || busy.current) return;
+    if (!current || busy.current || (selection && taskProfile !== 'student')) return;
     const publicCourseIntent = !selection && resolvePublicCourseAssistantIntent(current, schoolId);
-    const followup = !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
+    const followup = taskProfile === 'student' && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
     const targets = parseAssistantCourseworkTargets(turns.at(-1)?.reply.courseworkTargets);
     const studyDate = followup?.date ?? turns.at(-1)?.reply.courseworkDate;
     let studySelection = selection;
@@ -466,9 +473,19 @@ function V2Conversation({
     }
     // Only the shared, complete pickup request can use the model-free server
     // planner. Its account/session still comes from the authenticated route.
-    const foodPickup = !studySelection && parseAssistantFoodPickupIntent(current) !== null;
+    const readRoute = !studySelection ? assistantQuestionReadRoute(taskProfile, current) : null;
+    const roleGuide = readRoute?.roleGuide;
+    if (roleGuide) {
+      setTurns(previous => [...previous, { question: current, taskProfile,
+        reply: { answer: roleGuide.answer, roleGuide: roleGuide.profileId,
+          serviceIds: roleGuide.serviceIds, dataRead: true, steps: [], cards: [] } }]);
+      setQuestion('');
+      setError('');
+      return;
+    }
+    const foodPickup = !studySelection && taskProfile === 'student' && parseAssistantFoodPickupIntent(current) !== null;
     if (foodPickup && !foodPickupEnabled) return;
-    const local = !studySelection && !foodPickup && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: personalAssistantReadIntent(current)?.kind === 'calendar' });
+    const local = !foodPickup && readRoute?.local && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: readRoute.preferCampusReads });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -476,7 +493,7 @@ function V2Conversation({
       setError('');
       return;
     }
-    const personalRead = !studySelection && !foodPickup && canAnswerAssistantPersonalQuestion(current);
+    const personalRead = !foodPickup && readRoute?.personal;
     if ((!consent || !ready) && !publicCourseIntent && !personalRead && !studySelection && !foodPickup) return;
     busy.current = true;
     const pendingAsk = new AbortController();
@@ -524,18 +541,19 @@ function V2Conversation({
         }
       }
       if ((!ready || !consent) && !studySelection && !foodPickup) return;
-      const history = studySelection || foodPickup ? [] : turns.filter((turn) => !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
+      const history = studySelection || foodPickup ? [] : turns.filter((turn) => (turn.taskProfile ?? 'student') === taskProfile &&
+        !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
       ]);
       const studyTarget = studySelection ? courseworkStudyTarget(studySelection) : undefined;
-      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current,
+      let reply = await send('ask', { question: current, history, consent, taskProfile, routeToken: routeToken.current,
         ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       if (reply.bootstrap) {
         conversation.current = reply.conversationId;
         routeToken.current = reply.routeToken;
-        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current,
+        reply = await send('ask', { question: current, history, consent, taskProfile, routeToken: routeToken.current,
           ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
@@ -553,7 +571,7 @@ function V2Conversation({
             setAction(card, { status: 'superseded' });
         }
       }
-      setTurns((t) => [...t, { question: current, reply }]);
+      setTurns((t) => [...t, { question: current, reply, taskProfile }]);
       setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
       if (!controller.current?.signal.aborted) {
@@ -1004,6 +1022,15 @@ function V2Conversation({
     <AssistantThread
       inline={!!inlineDraft}
       schoolId={schoolId}
+      taskProfile={taskProfile}
+      onTaskProfile={next => {
+        if (!active() || busy.current || hasUnresolvedAssistantAction(actionStates.current) ||
+          turns.some(turn => turn.reply.cards.some(card => canConfirmAction(actionStates.current[card.mutationId])))) return;
+        const profile = getAssistantRoleProfile(next);
+        if (profile) setTaskProfile(profile.id);
+      }}
+      taskProfileLocked={pending || hasUnresolvedAssistantAction(states) ||
+        turns.some(turn => turn.reply.cards.some(card => canConfirmAction(states[card.mutationId])))}
       ready={ready}
       foodPickupEnabled={foodPickupEnabled}
       fallback={fallback}
@@ -1131,6 +1158,8 @@ function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {
     school: search.get('school') ?? undefined,
   });
   const initialDraft = (search.get('q') || '').slice(0, 1000);
+  const initialTaskProfile = getAssistantRoleProfile(search.get('taskProfile'))?.id ??
+    (auth.session?.isPlatformOperator ? 'platform' : 'student');
   if (auth.loading) return <p role="status">正在確認登入狀態…</p>;
   if (auth.pendingLogout || auth.error)
     return <p role="alert">登入狀態尚未確認，請先完成登入或登出。</p>;
@@ -1141,12 +1170,13 @@ function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {
   if (campus.status !== 'ready' || !campus.schoolId) return <p role="status">請先選擇學校。</p>;
   return (
     <Conversation
-      key={JSON.stringify([auth.session.context, auth.session.platformAccountId, campus.schoolId, cloudEnabled, initialDraft])}
+      key={JSON.stringify([auth.session.context, auth.session.platformAccountId, campus.schoolId, cloudEnabled, initialDraft, initialTaskProfile])}
       context={auth.session.context}
       accountId={auth.session.platformAccountId}
       cloudEnabled={cloudEnabled}
       schoolId={campus.schoolId}
       initialDraft={initialDraft}
+      initialTaskProfile={initialTaskProfile}
     />
   );
 }
