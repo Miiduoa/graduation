@@ -1001,3 +1001,90 @@ test('closed assistant write permission denies before claim and leaves no claim'
   assert.equal(run.actionClaims, undefined);
   assert.equal((await db.collection('leaveRequests').get()).size, 0);
 });
+
+
+// These status-reader regressions use the same guarded localhost demo project as the transaction fixtures above.
+const leaveStatusReader = require('./agent/tools/getLeaveRequestStatus');
+const leaveStatusCreatedAt = (offset) => Timestamp.fromMillis(Date.parse('2030-01-01T00:00:00Z') + offset * 1000);
+
+test('leave status filters by campus before the limit when more than ten newer rows belong to another campus', async () => {
+  await seed([
+    ['leaveRequests/local-old', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ...Array.from({ length: 12 }, (_, index) => [`leaveRequests/foreign-${index}`, {
+      uid: 'alice', schoolId: 'ntu', date: '2099-01-01', type: '他校假別', status: 'rejected',
+      createdAt: leaveStatusCreatedAt(100 + index),
+    }]),
+  ]);
+  const before = await db.collection('leaveRequests').get();
+  const result = await leaveStatusReader.execute(scope(), { limit: 10 });
+  assert.equal(result.count, 1);
+  assert.equal(result.items[0].requestId, 'local-old');
+  const after = await db.collection('leaveRequests').get();
+  assert.equal(after.size, before.size);
+  const original = new Map(before.docs.map((document) => [document.id, document]));
+  for (const document of after.docs) {
+    assert.deepEqual(document.data(), original.get(document.id).data());
+    assert.equal(document.updateTime.isEqual(original.get(document.id).updateTime), true);
+  }
+});
+
+test('leave status keeps same-campus canonical and legacy records without requiring source and excludes unknown campus records', async () => {
+  await seed([
+    ['leaveRequests/canonical', {
+      uid: 'alice', schoolId: 'pu', source: 'campus-one', kind: 'sick', status: 'partial',
+      startDate: '2030-02-01', endDate: '2030-02-02', courses: [{ courseId: 'c1' }],
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/legacy-no-source', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/unknown-campus', {
+      uid: 'alice', source: 'campus-one', date: '2099-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/empty-campus', {
+      uid: 'alice', schoolId: '', date: '2098-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(101),
+    }],
+  ]);
+  const result = await leaveStatusReader.execute(scope(), {});
+  assert.deepEqual(result, { count: 2, items: [
+    { requestId: 'canonical', date: '2030-02-01 至 2030-02-02', type: '病假', status: 'partial',
+      courseId: 'c1', createdAt: leaveStatusCreatedAt(2).toDate().toISOString() },
+    { requestId: 'legacy-no-source', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1).toDate().toISOString() },
+  ] });
+});
+
+test('leave status respects selected campus and account while returning the newest local row', async () => {
+  await seed([
+    ['schools/ntu/members/alice', { status: 'active' }],
+    ['leaveRequests/alice-pu', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/alice-ntu-old', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-02', type: '病假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/alice-ntu-new', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-03', type: '病假', status: 'approved',
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/bob-pu', {
+      uid: 'bob', schoolId: 'pu', date: '2030-02-04', type: '公假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(200),
+    }],
+  ]);
+  for (const [uid, schoolId, expectedId] of [
+    ['alice', 'pu', 'alice-pu'], ['alice', 'ntu', 'alice-ntu-new'], ['bob', 'pu', 'bob-pu'],
+  ]) {
+    const result = await leaveStatusReader.execute({ uid, schoolId }, { limit: 1 });
+    assert.equal(result.count, 1);
+    assert.equal(result.items[0].requestId, expectedId);
+  }
+});
