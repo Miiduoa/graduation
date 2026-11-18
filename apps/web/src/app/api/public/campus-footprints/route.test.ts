@@ -1616,4 +1616,45 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+
+  it('cooperatively yields during many immediately resolved Overpass chunks', async () => {
+    // Synthetic ReadableStream reader: 256 empty chunks plus one valid JSON
+    // chunk are under both the absolute chunk and byte limits. They must not
+    // monopolize Node's microtask queue until completion.
+    let reads = 0;
+    const reader = {
+      read: vi.fn(async () => {
+        const index = reads++;
+        if (index < 256) return { done: false, value: new Uint8Array(0) };
+        if (index === 256) {
+          return { done: false, value: new TextEncoder().encode(osmPayload) };
+        }
+        return { done: true, value: undefined };
+      }),
+      cancel: vi.fn(async () => {}),
+      releaseLock: vi.fn(),
+    };
+    const upstream = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      body: { getReader: () => reader },
+    });
+    vi.stubGlobal('fetch', upstream);
+    const eventLoopYields = vi.spyOn(globalThis, 'setImmediate');
+    try {
+      const { GET } = await import('./route');
+      const response = await GET();
+      expect(response.status).toBe(200);
+      expect((await response.json()).buildings).toHaveLength(1);
+      expect(reads).toBe(258);
+      // Every 128 non-final chunks must allow timers and other I/O to run.
+      expect(eventLoopYields.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(reader.cancel).not.toHaveBeenCalled();
+      expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      eventLoopYields.mockRestore();
+    }
+  });
+
 });
