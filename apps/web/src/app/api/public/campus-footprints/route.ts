@@ -310,7 +310,18 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     parseProvidenceOsmFootprints(payload),
     osmBaseAt ? Date.parse(osmBaseAt) : now,
   );
-  if (!buildings.length) throw new Error('No verified building outlines in response');
+  if (!buildings.length) {
+    // A valid JSON object can still contain no verified outlines during an
+    // upstream partial/outage response. Never cache it as a fresh map. If the
+    // origin explicitly asks us to pause, do not retry after only ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw new Error('No verified building outlines in response');
+  }
   // The 48-hour replication-age check must remain true for the *entire* time
   // this snapshot is presented as fresh, not only when Overpass was fetched.
   // Otherwise a 47-hour-old OSM database could be marked fresh for another
