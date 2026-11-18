@@ -498,7 +498,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     if (!focusReadingOnReturn.current || reading || practiceRound) return;
     focusReadingOnReturn.current = false;
     (readingFocus.current ?? heading.current)?.focus();
-  }, [reading, practiceRound, source, sectionIndex, passageIndex]);
+  }, [reading, practiceRound, pausedRound, pendingPracticeAction, source, sectionIndex, passageIndex]);
 
   // Invalidate an outstanding clipboard result whenever the source position or study state changes.
   function invalidateCopyFeedback() {
@@ -1004,7 +1004,14 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           <button type="button" className={`${styles.button} ${styles.primary}`}
             onClick={() => {
               if (pendingPracticeAction === 'replace') beginPractice();
-              else { setPausedRound(null); setPendingPracticeAction(null); clearDownload(); }
+              else {
+                // The confirmation button unmounts on discard. Return keyboard and
+                // screen-reader focus to the preserved reading passage, not <body>.
+                focusReadingOnReturn.current = true;
+                setPausedRound(null);
+                setPendingPracticeAction(null);
+                clearDownload();
+              }
             }}>{pendingPracticeAction === 'replace' ? '確認開始新一輪' : '確認結束暫停練習'}</button>
           <button type="button" className={styles.button} onClick={() => {
             const trigger = pendingPracticeAction === 'replace' ? startPracticeButton.current : endPausedPracticeButton.current;

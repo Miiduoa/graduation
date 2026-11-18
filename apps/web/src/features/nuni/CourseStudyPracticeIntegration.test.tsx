@@ -458,7 +458,10 @@ it('asks before replacing a paused draft with a new round and preserves it on ca
   expect(value(practiceLabel)).toBe('還沒有備份的第一題草稿');
   fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
   begin();
-  fireEvent.click(screen.getByRole('button', { name: '確認開始新一輪' }));
+  const replace = screen.getByRole('button', { name: '確認開始新一輪' });
+  replace.focus();
+  fireEvent.click(replace);
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
   expect(value(practiceLabel)).toBe('');
   expect(screen.getByText('逐題複習 · 理解概念')).toBeTruthy();
   expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
@@ -514,8 +517,11 @@ it('pauses a practice round for source review, resumes drafts, and saves the pau
   expect(value(practiceLabel)).toBe('我暫停前的回答😀');
   fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
   fireEvent.click(screen.getByRole('button', { name: '結束暫停的練習' }));
-  fireEvent.click(screen.getByRole('button', { name: '確認結束暫停練習' }));
+  const discard = screen.getByRole('button', { name: '確認結束暫停練習' });
+  discard.focus(); // Confirming removes this active button from the DOM.
+  fireEvent.click(discard);
   expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('group', { name: '目前閱讀段落：第 2 頁 · 第 1 段' }));
   expect(screen.getByRole('button', { name: '儲存閱讀進度' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '複製閱讀進度 JSON' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '開始逐題複習' }).hasAttribute('disabled')).toBe(false);
