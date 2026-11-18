@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { createHash } = require('node:crypto');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 function id(value, name) {
   if (typeof value !== 'string' || !value.trim() || value.length > 160 || value.includes('/')) {
@@ -325,11 +326,11 @@ function createGroupMembershipHandlers({ db }) {
 }
 
 function assertEligibleAccount(userDoc, label) {
-  // Preserve main's legacy profile compatibility in transfers and receipt recovery.
-  // Keep these transaction checks separate from the existing callable admission guard.
-  const data = userDoc.exists ? userDoc.data() || {} : {};
-  if (data.accountDeletionInProgress === true || data.status === 'deleted') {
-    throw new HttpsError('failed-precondition', `${label}正在刪除或已刪除，無法完成轉讓。`);
+  // Recheck canonical accounts inside the transaction, including SDK retries.
+  // Existing empty profiles remain compatible; a missing account is unavailable.
+  const data = userDoc.exists ? userDoc.data() : null;
+  if (isAccountUnavailable(data)) {
+    throw new HttpsError('failed-precondition', `${label}不存在、正在刪除、已刪除或已停用，無法完成轉讓。`);
   }
   if (data.role === 'guest' || data.accountKind === 'guest') {
     throw new HttpsError('permission-denied', `${label}為訪客身分，無法持有或接收群組擁有權。`);
