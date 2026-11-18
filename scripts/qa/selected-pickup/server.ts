@@ -4,7 +4,7 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { handleV2 } from '../../../apps/web/src/lib/nuni/assistantV2/handler';
 import { sealCookie, SESSION_COOKIE } from '../../../apps/web/src/lib/nuni/server';
-import { config, current, customerRead, reset, snapshot } from './serverBoundary';
+import { config, current, customerRead, reset, snapshot, verifyCustomerFixtures } from './serverBoundary';
 
 const output = path.resolve(process.argv[2] || 'artifacts/selected-pickup');
 reset();
@@ -72,10 +72,13 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'QA_FAILED' }));
   }
 });
-server.listen(0, '127.0.0.1', () => {
+void verifyCustomerFixtures().then(() => server.listen(0, '127.0.0.1', () => {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing local address');
   const origin = `http://127.0.0.1:${address.port}`;
   process.env.WEB_PUBLIC_ORIGIN = origin;
   console.log(JSON.stringify({ ready: true, origin }));
+})).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
 });

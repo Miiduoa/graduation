@@ -803,7 +803,19 @@ async def protected_good_case(page, name):
     if len(before) == 2:
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        # The previous native Tab may still be scrolling the textarea into view.
+        # Observe both elements settling before measuring this Tab's baseline;
+        # never move focus, scroll the page, or change motion/CSS for the check.
+        settling = {
+            'button': await settled_comparison_geometry(button),
+            'dock': await settled_comparison_geometry(dock),
+        }
         before_tab = await geometry_against_composer(button, await dock.element_handle())
+        before_tab['settling'] = settling
+        (OUT / f'protected-{name}-preview-before-tab.json').write_text(
+            json.dumps(before_tab, ensure_ascii=False, indent=2), encoding='utf-8')
+        assert all(value['settled'] for value in settling.values()), (
+            f'Native focus layout did not settle before Tab: {settling}')
         # Observe only this button instance; every product call delegates unchanged to native.
         await button.evaluate('''node => {
           const original=node.scrollIntoView, requests=[];

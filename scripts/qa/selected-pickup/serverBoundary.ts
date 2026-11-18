@@ -3,6 +3,7 @@ import { fixtureAdapter, FIXTURE_SECRET } from '../../../apps/web/src/lib/nuni/a
 import { V2Error } from '../../../apps/web/src/lib/nuni/assistantV2/contracts';
 import { sessionContext, type PlatformSession } from '../../../apps/web/src/lib/nuni/server';
 import { orderFixture, orderSummary } from '../../../apps/web/src/features/food/foodTestFixtures';
+import { createNuniFoodClient } from '../../../packages/shared/src/nuniFood';
 
 export const SCHOOL = 'fixture-school';
 export const TENANT = 'selected-realm';
@@ -56,9 +57,19 @@ export function customerRead(path: string) {
   if (path === 'food-order-realms') return { realms: [
     { tenantId: 'another-realm', name: '合成第二工作區' }, { tenantId: TENANT, name: '合成取餐工作區' },
   ] };
-  if (path === `realms/${TENANT}/food/orders`) return { orders: [orderSummary(state.order)], nextCursor: null };
+  if (path === `realms/${TENANT}/food/orders`) return { orders: [orderSummary(state.order)] };
   if (path === `realms/${TENANT}/food/orders/${ORDER}`) return state.order;
   throw new Error('Unexpected synthetic customer read: ' + path);
+}
+/** Fail before browser startup if a synthetic projection drifts from the real client contract. */
+export async function verifyCustomerFixtures() {
+  const client = createNuniFoodClient(async path => customerRead(path));
+  const realms = await client.listOrderRealms();
+  const orders = await client.listOrders(TENANT, { limit: 30 });
+  const order = await client.getOrder(TENANT, ORDER);
+  if (realms.length !== 2 || !realms.some(realm => realm.tenantId === TENANT) ||
+      orders.orders.length !== 1 || orders.orders[0].id !== ORDER || order.id !== ORDER)
+    throw new Error('Synthetic customer projections do not contain the selected order');
 }
 export function createAdapter(session: PlatformSession, _school: string, signal: AbortSignal) {
   return { adapter: state.database.adapter, apiCalls: () => state.operations.length,
