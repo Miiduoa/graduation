@@ -1081,6 +1081,34 @@ async function tcFetchHomeworkActivityStrict(cookies, activityId, readOptions = 
   return data;
 }
 
+// The official prerequisite controller reads the server-rendered courseId and
+// enrollment-is-student hidden inputs. This is raw read-only evidence, never a
+// student-role inference from normalizeTcCourse's display fallback.
+/** @param {TronClassReadOptions} readOptions @returns {Promise<string>} */
+async function tcFetchCoursePageForAuthorization(cookies, courseId, readOptions = {}) {
+  requireHomeworkReadId(courseId);
+  const response = await httpsRequest(`${TC_BASE}/course/${courseId}`, {
+    method: 'GET', cookies,
+    headers: { Accept: 'text/html', 'Accept-Encoding': 'identity' },
+    ...checkedReadOptions(readOptions, 8000),
+    maxResponseBytes: 2 * 1024 * 1024,
+  });
+  assertReadActive(readOptions.signal);
+  // Do not follow a login/other redirect or probe an alternative course URL.
+  if (response.status !== 200) throw httpError(response.status);
+  const contentType = response.headers['content-type'];
+  const encoding = response.headers['content-encoding'];
+  const length = response.headers['content-length'];
+  if (typeof contentType !== 'string' || contentType.split(';')[0].trim().toLowerCase() !== 'text/html' ||
+    (encoding !== undefined && encoding !== 'identity') || typeof response.body !== 'string' ||
+    !response.body.trim() || Buffer.byteLength(response.body, 'utf8') > 2 * 1024 * 1024 ||
+    (length !== undefined && (typeof length !== 'string' || !/^(?:0|[1-9]\d*)$/.test(length) ||
+      !Number.isSafeInteger(Number(length)) || Number(length) !== Buffer.byteLength(response.body, 'utf8')))) {
+    throw homeworkReadError('TC_COURSE_CONTEXT_INVALID', 502);
+  }
+  return response.body;
+}
+
 // Official student homework detail (55200.e380810d.js / 88788.161d6b6a.js).
 // Preserve the exact { list: [...] } envelope. Do not probe alternate endpoints,
 // add pagination, infer a final status, or fall back to another student's data.
@@ -1538,6 +1566,7 @@ module.exports = {
   tcFetchHomeworkActivitiesPage,
   tcFetchActivitiesRaw,
   tcFetchHomeworkActivityStrict,
+  tcFetchCoursePageForAuthorization,
   tcFetchStudentHomeworkSubmissionList,
   tcFetchHomeworkScores,
   tcFetchExamStatus,

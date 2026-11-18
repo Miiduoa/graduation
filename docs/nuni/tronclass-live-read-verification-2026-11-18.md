@@ -82,6 +82,8 @@
 | CSRF、正式 POST acknowledgment、上傳 storage host／callback | 尚無本輪真實寫入證據 |
 | 正式作業繳交或教師收件 | 未執行；沒有以測試內容改動校方作業 |
 
-`contractVerified` 仍保持 false。新增的唯讀 tenant authorization reader 可補上上述活動資格來源，但不等於已證明 CSRF、POST 回應或附件儲存契約；環境旗標不能單獨取代這些驗收。reader 會拒絕目標課程明示的非學生角色；既有 `tcFetchCourses` 在來源沒有角色時會預設 `student`，因此 normalized role 本身不能作為原始選課角色的新增證據。此 provenance 亦須於寫入開放前核實，不能把舊預設值說成完成角色驗證。
+`contractVerified` 仍保持 false。新增的唯讀 tenant authorization reader 可補上上述活動資格來源，但不等於已證明 CSRF、POST 回應或附件儲存契約；環境旗標不能單獨取代這些驗收。既有 `tcFetchCourses` 在來源沒有角色時會預設 `student`，因此 normalized role 本身不能作為原始選課角色的正面證據。
+
+2026-11-18 後續實作已補上獨立課程頁證據：在每輪活動／本人歷史查核前，使用同一綁定 session 讀取固定的 `/course/{id}`，要求唯一、有效的 hidden `courseId` 與 `enrollment-is-student: "True"`。缺失、重複、錯誤課程、非學生、來源失敗或逾時一律拒絕；這個標記來自官方公開課程模組的明確使用方式，見 [公開來源定位](tronclass-public-contract-2026-11-16.md#2026-11-18一般個人純文字授權讀取的最小範圍)。角色檢查已接入 reader 並以合成來源驗證；本輪真人唯讀抽樣沒有取得這條新 nuni 傳輸路徑的端對端成功證據，仍須於開放寫入前驗收。
 
 CI、GitHub PR 合併及 Web 部署狀態須以當時的完整 SHA 另行查核；本文件不把一輪測試成功或 Mobile Preview 工作流程視為 Web 已上線。

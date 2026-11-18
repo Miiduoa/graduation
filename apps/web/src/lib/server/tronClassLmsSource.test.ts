@@ -5,6 +5,7 @@ const scraper = vi.hoisted(() => ({
   tcFetchCourses: vi.fn(),
   tcFetchHomeworkActivitiesPage: vi.fn(),
   tcFetchHomeworkActivityStrict: vi.fn(),
+  tcFetchCoursePageForAuthorization: vi.fn(),
   tcFetchStudentHomeworkSubmissionList: vi.fn(),
   tcFetchActivitiesRaw: vi.fn(),
   tcFetchCourseAnnouncementsStrict: vi.fn(),
@@ -44,6 +45,15 @@ describe('real read-only source cancellation bridge', () => {
     expect(await tronClassLmsReadonlySource.fetchStudentSubmissionList!(cookies, 202, 303, options)).toEqual({ ok: true, value: history });
     expect(scraper.tcFetchHomeworkActivityStrict).toHaveBeenCalledExactlyOnceWith(cookies, 202, options);
     expect(scraper.tcFetchStudentHomeworkSubmissionList).toHaveBeenCalledExactlyOnceWith(cookies, 202, 303, options);
+  });
+
+  it('preserves the fixed course page response and cancellation budget for the enrollment reader', async () => {
+    const options = { signal: new AbortController().signal, timeoutMs: 1250 };
+    const page = '<input type="hidden" id="courseId" value="101">';
+    scraper.tcFetchCoursePageForAuthorization.mockResolvedValue(page);
+    expect(await tronClassLmsReadonlySource.fetchCoursePage!(cookies, 101, options))
+      .toEqual({ ok: true, value: page });
+    expect(scraper.tcFetchCoursePageForAuthorization).toHaveBeenCalledExactlyOnceWith(cookies, 101, options);
   });
 
   it('keeps concurrent owners on separate signals, while legacy callers use bounded scraper defaults', async () => {

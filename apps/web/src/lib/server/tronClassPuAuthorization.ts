@@ -2,6 +2,7 @@ import 'server-only';
 import { NuniError } from '@campus/shared/src/nuni';
 import { classifySchoolReadError, schoolHttpStatus } from '@campus/shared/src/puLmsReadonly';
 import { normalizeTronClassAssignmentDetails } from './tronClassAssignmentDetails';
+import { assertTronClassStudentEnrollment } from './tronClassCourseEnrollment';
 import type { LmsReadonlySource, LmsReadOptions, LmsReadResult } from './tronClassLmsSource';
 import type { TronClassSubmissionBindings } from './tronClassSubmission';
 import type { TronClassCandidateAuthorization } from './tronClassSubmissionCandidate';
@@ -105,8 +106,9 @@ function permittedAssignment(
  * This reader only returns private evidence to a controlled candidate. It does
  * not verify CSRF, enable contractVerified, upload, save drafts or submit work.
  * Resubmit/retract settings do not authorize an existing version or make-up work.
- * The legacy course source can default a missing role to student; raw enrollment
- * provenance still needs independent verification before enabling the contract.
+ * The legacy course source can default a missing role to student. Each access
+ * check also requires the fixed course HTML's positive enrollment observation;
+ * this does not verify the tenant's separate final-write or CSRF contract.
  */
 export function createTronClassPuAuthorizationReader({
   bindings, source: suppliedSource, now = Date.now, timeoutMs = 15_000,
@@ -173,7 +175,7 @@ export function createTronClassPuAuthorizationReader({
       const binding = await current();
       const source = suppliedSource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
       check();
-      if (!source.fetchHomeworkActivity || !source.fetchStudentSubmissionList) unavailable();
+      if (!source.fetchHomeworkActivity || !source.fetchStudentSubmissionList || !source.fetchCoursePage) unavailable();
       // getAssignment owns the complete course/homework membership traversal.
       // Share the total deadline through all of its internal reads, including
       // pagination, and stop legacy sources from continuing after a late reply.
@@ -198,6 +200,8 @@ export function createTronClassPuAuthorizationReader({
       const access = async (latest: TronClassSubmissionBinding) => {
         const assignment = await guarded(() => assignments.getAssignment(latest, scope));
         if (assignment.studentId !== latest.userId || assignment.courseId !== scope.courseId || assignment.homeworkId !== scope.homeworkId) unavailable();
+        const coursePage = await read(() => source.fetchCoursePage!(latest.cookies, scope.courseId, readOptions()), false);
+        assertTronClassStudentEnrollment(coursePage, scope.courseId);
         const activity = record(await read(() => source.fetchHomeworkActivity!(latest.cookies, scope.homeworkId, readOptions()), true));
         if (!activity) unavailable();
         permittedAssignment(activity, assignment, latest, scope, checkedNow(now));

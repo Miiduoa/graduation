@@ -6,6 +6,10 @@ import { createTronClassPublicSubmissionService, type TronClassPublicSubmissionD
 import type { TronClassCandidateAuthorization } from './tronClassSubmissionCandidate';
 import type { TronClassPreparedSubmission, TronClassSubmissionBindings, TronClassSubmissionFirestore, TronClassSubmissionRef } from './tronClassSubmission';
 import type { TronClassSubmissionBinding } from './tronClassSubmissionSource';
+import type { LmsReadonlySource } from './tronClassLmsSource';
+import { createTronClassPuAuthorizationReader } from './tronClassPuAuthorization';
+
+vi.mock('server-only', () => ({}));
 
 // Real candidate/journal/parser code with atomic in-memory transactions and
 // synthetic HTTP only. These fixtures do not attest a school contract.
@@ -141,6 +145,67 @@ const upload = () => ({ ...SCOPE, revision: REVISION, operationId: OPERATION, fi
 const submit = (attachments: string[] = []): TronClassPublicSubmitInput => ({ ...SCOPE, revision: REVISION,
   operationId: OPERATION, content: '本文 <測試>\n第二行', attachments, confirmed: true });
 const finalCalls = (f: ReturnType<typeof fixture>) => f.fetchSchool.mock.calls.filter(([url]) => url.endsWith('/submissions'));
+
+function sourceBackedTextService(f: ReturnType<typeof fixture>) {
+  let student = true;
+  const activity = {
+    id: SCOPE.homeworkId, course_id: SCOPE.courseId, type: 'homework', title: '來源已確認的純文字作業',
+    published: true, submit_by_group: false, is_assigned_to_all: true, has_assign_student: false,
+    has_assign_group: false, prerequisites: [], teaching_model: 'online', is_started: true,
+    is_in_progress: true, is_closed: false, need_make_up: false, user_submit_count: 0,
+    non_submit_times: true, submit_times: null, start_time: null, end_time: '2026-11-18T03:00:00Z',
+    data: { mode: 'normal', homework_type: 'file_upload', has_assign_target: false, description: '合成來源說明' },
+  };
+  const source: LmsReadonlySource = {
+    fetchCourses: vi.fn(async (_cookies, options) => options.status === 'ongoing'
+      ? [{ id: SCOPE.courseId, name: '合成課程', role: 'student' }] : []),
+    fetchHomeworkPage: vi.fn(async () => ({ ok: true as const, value: { homework_activities: [structuredClone(activity)], total: 1 } })),
+    fetchHomeworkActivity: vi.fn(async () => ({ ok: true as const, value: structuredClone(activity) })),
+    fetchCoursePage: vi.fn(async () => ({ ok: true as const, value: '<!doctype html><html><body>' +
+      `<input type="hidden" id="courseId" value="${SCOPE.courseId}">` +
+      `<input type="hidden" id="enrollment-is-student" value="${student ? 'True' : 'False'}">` +
+      '</body></html>' })),
+    fetchStudentSubmissionList: vi.fn(async () => ({ ok: true as const, value: await f.readHistory(OWNER, f.identity, SCOPE) })),
+    fetchActivities: vi.fn(async () => ({ ok: true as const, value: [] })),
+    fetchCourseAnnouncements: vi.fn(async () => ({ ok: true as const, value: [] })),
+    fetchSiteAnnouncements: vi.fn(async () => ({ ok: true as const, value: [] })),
+  };
+  const authorization = createTronClassPuAuthorizationReader({ bindings: f.bindings, source, now: () => NOW });
+  const service = createTronClassPublicSubmissionService({ ...f.dependencies, authorization, resolveStorageTarget: undefined });
+  return { service, source, setStudent: (value: boolean) => { student = value; } };
+}
+
+describe('source-backed text authorization through the public v2 service', () => {
+  it('uses actual enrollment/activity/history reads before the single final claim and exact readback', async () => {
+    const f = fixture();
+    const { service, source } = sourceBackedTextService(f);
+    const prepared = await service.prepare(OWNER, SCOPE);
+    expect(prepared).toMatchObject({ canSubmit: true, title: '來源已確認的純文字作業',
+      maxFiles: 0, maxFileBytes: 0, allowedContentTypes: [],
+      rules: { status: 'confirmed', allowsText: true, allowsAttachments: false, maxTotalBytes: 0 } });
+    expect(await service.submit(OWNER, submit())).toMatchObject({ status: 'confirmed', operationId: OPERATION,
+      confirmation: { kind: 'acknowledged-readback', submissionId: 501, ...SCOPE } });
+    expect(f.authorization).not.toHaveBeenCalled();
+    expect(source.fetchCoursePage).toHaveBeenCalled();
+    expect(source.fetchStudentSubmissionList).toHaveBeenCalled();
+    expect(finalCalls(f)).toHaveLength(1);
+    expect(f.fetchStorage).not.toHaveBeenCalled();
+    expect(f.rows.get(operationPath)).toMatchObject({ version: 2, state: 'acknowledged', files: [] });
+  });
+
+  it('does not reuse a prior prepare when current student enrollment has been withdrawn', async () => {
+    const f = fixture();
+    const { service, setStudent } = sourceBackedTextService(f);
+    expect((await service.prepare(OWNER, SCOPE)).canSubmit).toBe(true);
+    setStudent(false);
+    // The candidate boundary deliberately returns its fixed public error;
+    // the denied enrollment must still prevent both a claim and a school POST.
+    await expect(service.submit(OWNER, submit())).rejects.toMatchObject({ code: 'TRONCLASS_CANDIDATE_UNCONFIRMED' });
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+    expect(f.rows.has(operationPath)).toBe(false);
+    expect(f.rows.has(lockPath)).toBe(false);
+  });
+});
 
 describe('public v2 submission adapter gates and preparation', () => {
   it.each([

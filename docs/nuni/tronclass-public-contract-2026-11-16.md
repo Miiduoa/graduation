@@ -161,3 +161,18 @@ module `539963` 判斷「已提交」時，同時檢查教師代標、草稿與�
 公開 DTO 只新增可選的 `download: { uploadId }`；不回傳來源網址、Cookie、storage key 或建立人 ID。BFF 從當前綁定取得本人 ID，讀取完整本人歷史及活動歸屬，核對所選 submission ID 和附件後才讀取固定 origin 的 blob。下載完成後再次核對來源，撤權、刪除、換綁或 metadata 變更時不回傳 bytes。附件下載不改寫任何提交狀態，也不作為一次新繳交的收據。
 
 公開前端證據不保證所有校方 response 都帶有下載旗標，也未取代真人下載驗收；缺少權限欄位的附件不提供站內下載按鈕。
+
+## 2026-11-18：一般個人純文字授權讀取的最小範圍
+
+本輪再次匿名取得 `66297`、`88788`、`55200` 三份官方資源，HTTP 200，SHA-256 與上表相同。這次補查的用途，是將可以根據明確來源寫好的權限讀取程式與仍待真人收件驗收的條件分開。
+
+| 官方來源與定位 | 可用的正面證據 |
+| --- | --- |
+| `66297.9aa2f6d5.js` module `22033`，字元約 2197 | 從目前課程頁的 `#courseId` 取得課程 ID；`#enrollment-is-student` 的值必須是字串 `True`，才視為學生身分。這與課程清單的展示用 role 預設不同。 |
+| 同一 module，字元約 2602 | 讀取 `activity.prerequisites`，逐項檢查 `completion_criterion.has_completed`。最小 reader 僅支援來源明示 `prerequisites: []`，不推定缺欄位或未知先修條件已完成。 |
+| `66297.9aa2f6d5.js` module `473669`，字元約 47572–48400 | `canSubmit()` 接受非空文字，與附件／簡報並列；同一送交方法使用 comment、uploads、slides 與 activity 的 mode。這支持顯式 normal 模式的純文字子集合，不必猜測 `allows_text` 欄位。 |
+| `88788.161d6b6a.js` module `921443`，字元約 351087 | `/unavailable-prerequisites` 的回應用於教師編輯先修條件選單。它不是學生完成證明；空清單不能拿來授權繳交。 |
+
+實作只讀固定本人課程頁與既有活動／本人歷史接口。課程 HTML 必須有唯一且符合目標的 hidden courseId，以及明確的學生 enrollment 標記；活動仍需明示 published、個人、normal、一般開放期間、未關閉、零次既有繳交、可用次數與空先修清單。本人完整歷史也必須為空，不隱藏草稿、教師標記或舊版本後再當成首次。
+
+這個子集合只輸出純文字能力，附件額度為零；不替未知 storage URL、學生角色、學校時間、補交、重交或小組模式補預設值。實際 Cookie／CSRF 接受方式、final 與本人精確讀回、教師端收件仍需受控帳號驗收；新增讀取程式不把 production `contractVerified` 改成 true。

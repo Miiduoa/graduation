@@ -12,6 +12,7 @@ import type { TronClassHomeworkScope, TronClassSubmissionBinding } from './tronC
 const NOW = Date.parse('2027-02-16T03:00:00.000Z');
 const OWNER = 'platform:pa_pu_authorization_fixture';
 const SCOPE = { courseId: 101, homeworkId: 202 };
+const COURSE_PAGE = '<!doctype html><input type="hidden" id="courseId" value="101"><input type="hidden" id="enrollment-is-student" value="True">';
 const ACTIVITY = {
   id: 202, course_id: 101, type: 'homework', title: '合成練習', published: true,
   submit_by_group: false, is_assigned_to_all: true, has_assign_student: false, has_assign_group: false,
@@ -53,6 +54,7 @@ function setup() {
     fetchCourseAnnouncements: vi.fn(async () => ({ ok: true as const, value: [] })),
     fetchSiteAnnouncements: vi.fn(async () => ({ ok: true as const, value: [] })),
     fetchHomeworkActivity: vi.fn(async () => ({ ok: true as const, value: structuredClone(activity) })),
+    fetchCoursePage: vi.fn(async () => ({ ok: true as const, value: COURSE_PAGE })),
     fetchStudentSubmissionList: vi.fn(async () => ({ ok: true as const, value: structuredClone(history) })),
   };
   const now = () => at;
@@ -100,6 +102,10 @@ describe('PU source-backed first individual submission authorization', () => {
     expect(s.source.fetchCourses).toHaveBeenCalledTimes(4);
     expect(vi.mocked(s.source.fetchCourses).mock.calls.every(call => call[1].userId === 303)).toBe(true);
     expect(s.source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+    expect(s.source.fetchCoursePage).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(s.source.fetchCoursePage!).mock.calls) {
+      expect(call).toEqual([{ session: 'synthetic-server-cookie' }, 101, { signal: expect.any(AbortSignal), timeoutMs: 8000 }]);
+    }
     expect(s.bindings.assertCurrent).toHaveBeenCalledTimes(3);
   });
 
@@ -192,14 +198,51 @@ describe('PU source-backed first individual submission authorization', () => {
     await expect(s.reader(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_COURSE_ACCESS_DENIED' });
   });
 
-  it('retains the legacy missing-role shape as an unresolved contract-verification limitation', async () => {
+  it('requires independent positive enrollment when the legacy course list lacks role provenance', async () => {
     const s = setup();
-    // The production source can turn this absence into role: student. This
-    // reader cannot recover that provenance, and does not verify the contract.
+    // The normalized course role is not the proof: both actual course pages
+    // must independently confirm this binding's student enrollment.
     vi.mocked(s.source.fetchCourses).mockImplementation(async (_cookies, options) => options.status === 'ongoing' ? [{ id: 101 }] : []);
     const result = await s.reader(OWNER, SCOPE);
     expect(result.assignment.allowsText).toBe(true);
     expect(result).not.toHaveProperty('contractVerified');
+    expect(s.source.fetchCoursePage).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['missing', 'defaulted'] as const)('does not grant from %s role without positive HTML enrollment', async role => {
+    const s = setup();
+    vi.mocked(s.source.fetchCourses).mockImplementation(async (_cookies, options) => options.status === 'ongoing'
+      ? [{ id: 101, ...(role === 'defaulted' ? { role: 'student' } : {}) }] : []);
+    vi.mocked(s.source.fetchCoursePage!).mockResolvedValue({ ok: true, value: COURSE_PAGE.replace('value="True"', 'value="False"') });
+    await expect(s.reader(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_COURSE_ACCESS_DENIED' });
+    expect(s.source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+  });
+
+  it('refuses to authorize without the authenticated fixed course-page hook', async () => {
+    const s = setup();
+    delete s.source.fetchCoursePage;
+    await expect(s.reader(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(s.source.fetchCourses).not.toHaveBeenCalled();
+    expect(s.source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 404])('does not treat course-page status %i as positive enrollment', async status => {
+    const s = setup();
+    vi.mocked(s.source.fetchCoursePage!).mockResolvedValue({ ok: false, status });
+    await expect(s.reader(OWNER, SCOPE)).rejects.toMatchObject({ code: status === 401 ? 'TRONCLASS_RECONNECT_REQUIRED'
+      : status === 403 ? 'TRONCLASS_COURSE_ACCESS_DENIED' : 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(s.source.fetchStudentSubmissionList).not.toHaveBeenCalled();
+  });
+
+  it('checks positive enrollment again after the first history, stopping when student access is revoked', async () => {
+    const s = setup();
+    vi.mocked(s.source.fetchStudentSubmissionList!).mockImplementationOnce(async () => {
+      vi.mocked(s.source.fetchCoursePage!).mockResolvedValue({ ok: true, value: COURSE_PAGE.replace('value="True"', 'value="False"') });
+      return { ok: true, value: { list: [] } };
+    });
+    await expect(s.reader(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_COURSE_ACCESS_DENIED' });
+    expect(s.source.fetchCoursePage).toHaveBeenCalledTimes(2);
+    expect(s.source.fetchStudentSubmissionList).toHaveBeenCalledTimes(1);
   });
 
   it('requires complete homework enumeration even when the target appeared on the first page', async () => {
@@ -418,12 +461,34 @@ describe('PU authorization cancellation and total read deadline', () => {
     const courseOptions = vi.mocked(s.source.fetchCourses).mock.calls.map(call => call[2]!);
     const pageOptions = vi.mocked(s.source.fetchHomeworkPage).mock.calls.map(call => call[4]!);
     const activityOptions = vi.mocked(s.source.fetchHomeworkActivity!).mock.calls.map(call => call[2]!);
+    const enrollmentOptions = vi.mocked(s.source.fetchCoursePage!).mock.calls.map(call => call[2]!);
     const historyOptions = vi.mocked(s.source.fetchStudentSubmissionList!).mock.calls.map(call => call[3]!);
-    const all: LmsReadOptions[] = [...courseOptions, ...pageOptions, ...activityOptions, ...historyOptions];
+    const all: LmsReadOptions[] = [...courseOptions, ...pageOptions, ...activityOptions, ...enrollmentOptions, ...historyOptions];
     expect(all.every(options => options.signal === courseOptions[0].signal && !options.signal!.aborted)).toBe(true);
     expect(courseOptions.map(options => options.timeoutMs)).toEqual([100, 100, 70, 70]);
     expect(pageOptions.map(options => options.timeoutMs)).toEqual([70, 40]);
+    expect(enrollmentOptions.map(options => options.timeoutMs)).toEqual([70, 40]);
     expect(historyOptions.map(options => options.timeoutMs)).toEqual([70, 40]);
+  });
+
+  it.each(['deadline', 'caller'] as const)('aborts the course-page transport on %s and refuses its late result', async cause => {
+    vi.useFakeTimers();
+    const s = setup();
+    let finish!: (value: LmsReadResult<string>) => void;
+    vi.mocked(s.source.fetchCoursePage!).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const controller = new AbortController();
+    const reader = createTronClassPuAuthorizationReader({ bindings: s.bindings, source: s.source, now: s.now, timeoutMs: 100 });
+    const pending = expect(reader(OWNER, SCOPE, controller.signal)).rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(0);
+    const options = vi.mocked(s.source.fetchCoursePage!).mock.calls[0][2]!;
+    if (cause === 'deadline') await vi.advanceTimersByTimeAsync(101);
+    else controller.abort();
+    await pending;
+    expect(options.signal!.aborted).toBe(true);
+    finish({ ok: true, value: COURSE_PAGE });
+    await vi.runAllTimersAsync();
+    expect(s.source.fetchHomeworkActivity).toHaveBeenCalledTimes(1);
+    expect(s.source.fetchStudentSubmissionList).not.toHaveBeenCalled();
   });
 
   it('cancels a running source read and does not continue if that source returns late', async () => {

@@ -41,6 +41,12 @@ export type LmsReadonlySource = {
     activityId: number,
     readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown>>;
+  /** Fixed course HTML, for positive server-rendered enrollment evidence only. */
+  fetchCoursePage?: (
+    cookies: Record<string, string>,
+    courseId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<string>>;
   fetchStudentSubmissionList?: (
     cookies: Record<string, string>,
     activityId: number,
@@ -84,6 +90,8 @@ export const tronClassLmsReadonlySource: LmsReadonlySource = {
     wrapRead(() => tronClassScraper.tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize, readOptions)),
   fetchHomeworkActivity: (cookies, activityId, readOptions) =>
     wrapRead(() => tronClassScraper.tcFetchHomeworkActivityStrict(cookies, activityId, readOptions)),
+  fetchCoursePage: (cookies, courseId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchCoursePageForAuthorization(cookies, courseId, readOptions)),
   fetchStudentSubmissionList: (cookies, activityId, studentId, readOptions) =>
     wrapRead(() => tronClassScraper.tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId, readOptions)),
   fetchActivities: (cookies, courseId, query, readOptions) =>

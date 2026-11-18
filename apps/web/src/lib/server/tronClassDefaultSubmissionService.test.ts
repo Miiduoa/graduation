@@ -6,11 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 const runtime = vi.hoisted(() => ({
-  getFirebaseAdmin: vi.fn(), createBinding: vi.fn(), createSource: vi.fn(),
+  getFirebaseAdmin: vi.fn(), createBinding: vi.fn(), createSource: vi.fn(), createAuthorization: vi.fn(),
 }));
 vi.mock('./firebaseAdmin', () => ({ getFirebaseAdmin: runtime.getFirebaseAdmin }));
 vi.mock('./tronClassBinding', () => ({ createTronClassBindingService: runtime.createBinding }));
 vi.mock('./tronClassSubmissionSource', () => ({ createTronClassSubmissionSource: runtime.createSource }));
+vi.mock('./tronClassPuAuthorization', () => ({ createTronClassPuAuthorizationReader: runtime.createAuthorization }));
 
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
 import type { TronClassSubmissionBinding, TronClassSubmissionSource } from './tronClassSubmissionSource';
@@ -46,7 +47,9 @@ function setup() {
   runtime.getFirebaseAdmin.mockResolvedValue({ db });
   runtime.createBinding.mockReturnValue(bindings);
   runtime.createSource.mockReturnValue(source);
-  return { binding, bindings, db, source };
+  const authorization = vi.fn(async () => { throw new Error('unverified writer must not probe tenant authorization'); });
+  runtime.createAuthorization.mockReturnValue(authorization);
+  return { binding, bindings, db, source, authorization };
 }
 
 beforeEach(() => vi.resetAllMocks());
@@ -67,6 +70,8 @@ describe('production default public submission factory', () => {
       .rejects.toMatchObject({ status: 503 });
     expect(s.source.uploadFile).not.toHaveBeenCalled();
     expect(s.source.submit).not.toHaveBeenCalled();
+    expect(runtime.createAuthorization).toHaveBeenCalledExactlyOnceWith({ bindings: s.bindings });
+    expect(s.authorization).not.toHaveBeenCalled();
     expect(s.db.runTransaction).not.toHaveBeenCalled();
     expect(JSON.stringify(prepared)).not.toContain('private-synthetic-cookie');
   });
@@ -77,5 +82,6 @@ describe('production default public submission factory', () => {
     await expect(getDefaultTronClassSubmissionService()).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
     expect(runtime.createBinding).not.toHaveBeenCalled();
     expect(runtime.createSource).not.toHaveBeenCalled();
+    expect(runtime.createAuthorization).not.toHaveBeenCalled();
   });
 });
