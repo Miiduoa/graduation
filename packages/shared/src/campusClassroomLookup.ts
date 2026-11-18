@@ -86,7 +86,7 @@ const PUBLISHED_PROVIDENCE_BUS_STOP_IDS = new Set(PROVIDENCE_BUS_STOPS.map((stop
  * authorize classroom routing after a Firestore replacement or bad import.
  * Unknown IDs and other schools retain the existing shared resolver behavior.
  */
-const PUBLISHED_PROVIDENCE_PLACE_IDS = new Set(PROVIDENCE_CAMPUS_PLACES.map((place) => place.id));
+const PUBLISHED_PROVIDENCE_PLACES = new Map(PROVIDENCE_CAMPUS_PLACES.map((place) => [place.id, place]));
 
 function hasTransitStopIdentity(location: CampusMapPlaceLike, school: string): boolean {
   const ids = 'transitStopIds' in location ? location.transitStopIds : undefined;
@@ -200,11 +200,17 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // Recheck the existing sourced identity rather than trusting a reused ID.
     // The shared attribution helper checks name and position; do not invent
     // a building location when an imported catalog row has drifted.
-    if (
-      school === 'pu' &&
-      PUBLISHED_PROVIDENCE_PLACE_IDS.has(location.id) &&
-      !providencePlaceSourceUrl(school, location)
-    ) return false;
+    if (school === 'pu') {
+      const published = PUBLISHED_PROVIDENCE_PLACES.get(location.id);
+      if (
+        published &&
+        // The imported row cannot promote a sourced restaurant/shop to a
+        // classroom by changing its category to "teaching" while retaining
+        // the published ID, name and coordinates. Check both source and row.
+        (isExplicitNonClassroomCategory(published.category) ||
+          !providencePlaceSourceUrl(school, location))
+      ) return false;
+    }
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
     if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category)) return false;
