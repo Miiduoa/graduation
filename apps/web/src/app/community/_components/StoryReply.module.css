@@ -1,0 +1,63 @@
+.form,
+.result {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+.form label {
+  font-weight: 650;
+}
+.form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 84px;
+  max-height: 30dvh;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid #738477;
+  border-radius: 12px;
+  background: #101813;
+  color: #fff;
+  font: inherit;
+  font-size: max(16px, 1rem);
+  line-height: 1.5;
+}
+.form textarea:focus-visible,
+.result a:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: 2px;
+}
+.form p[role='alert'] {
+  margin: 0;
+  color: #ffd3c7;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.actions small {
+  color: #bdd2c4;
+  font-variant-numeric: tabular-nums;
+}
+.actions button,
+.result a {
+  min-height: 44px;
+  border-radius: 24px;
+  border-color: transparent;
+  background: #d8f3df;
+  color: #12351d;
+  font-weight: 650;
+}
+.actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.result a {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  padding: 0 16px;
+  text-decoration: none;
+}

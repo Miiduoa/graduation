@@ -194,6 +194,9 @@ function createDeleteUserAccountHandler({
       },
     });
 
+    // Isolated dorm cleanup: revoke dorm authority and erase new private records.
+    await require('./dormAccountDeletion').clearDormAccountData({ db, uid, scanPages });
+
     // Remove school authority first so ordinary membership-checked writes stop.
     for (const collection of ['members', 'directory', 'serviceRoles', 'operators']) {
       await scanPages(db.collectionGroup(collection), async (doc) => {
@@ -268,6 +271,52 @@ function createDeleteUserAccountHandler({
       if (!(await releaseEventRegistration({ db, registrationRef: doc.ref, uid }))) {
         precondition('event-registration', '活動報名需要主辦人確認，帳號尚未刪除。');
       }
+    });
+
+    // Career records belong to the student uid, never the referenced teacher.
+    // Scan like other collection groups so deletion does not depend on a new
+    // collection-group uid index. Filter exact school paths and the owner uid.
+    for (const collection of ['careerApplications', 'internshipRecords']) {
+      await scanPages(db.collectionGroup(collection), async (doc) => {
+        const parts = doc.ref.path.split('/');
+        if (
+          parts.length === 4 &&
+          parts[0] === 'schools' &&
+          parts[2] === collection &&
+          doc.data()?.uid === uid
+        )
+          await db.recursiveDelete(doc.ref);
+      });
+    }
+
+    await scanPages(db.collectionGroup('clubMemberRecords'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length === 4 &&
+        parts[0] === 'groups' &&
+        parts[2] === 'clubMemberRecords' &&
+        parts[3] === uid
+      )
+        await db.recursiveDelete(doc.ref);
+    });
+
+    // Keep the historical officer seat, replacing all personal/attribution fields.
+    await scanPages(db.collectionGroup('officers'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length !== 6 ||
+        parts[0] !== 'schools' ||
+        parts[2] !== 'clubs' ||
+        parts[4] !== 'officers' ||
+        parts[5] !== uid
+      )
+        return;
+      const data = doc.data();
+      const placeholder = { accountClosed: true };
+      for (const field of ['role', 'confirmedAt']) {
+        if (data[field] !== undefined) placeholder[field] = data[field];
+      }
+      await doc.ref.set(placeholder);
     });
 
     for (const [collection, field] of [

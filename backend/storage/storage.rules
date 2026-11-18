@@ -90,6 +90,22 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
+    function isGroupMember(groupId) {
+      return isAuthenticated()
+        && firestore.exists(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function canManageGroup(groupId) {
+      return isGroupMember(groupId)
+        && (
+          firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin'
+          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
+          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
+          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
+        );
+    }
+
     function conversationMember(conversationId) {
       // Conversation memberIds may survive account deletion; require a live canonical profile.
       // Storage rules can access only two unique Firestore documents per request.

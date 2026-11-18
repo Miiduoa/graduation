@@ -19,6 +19,10 @@
 !scripts/import-ai/**
 !backend/
 !backend/functions/
+!backend/functions/dormWorkflow.js
+!backend/functions/authz.js
+!backend/functions/dormName.js
+!backend/functions/dormSsoIdentity.js
 !backend/functions/puScraper.js
 !backend/functions/tronClassScraper.js
 !backend/functions/campusStoryAccessBinding.js

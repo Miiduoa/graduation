@@ -215,11 +215,11 @@ function HomeFeedContent() {
     } catch (cause) {
       if (loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
+        setStories([]);
         setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
-        setStories([]);
         setNameByUid({});
         setAvatarByUid({});
         setHasMore(false);
@@ -868,12 +868,16 @@ function HomeFeedContent() {
                     </View>
                     <Pressable
                       hitSlop={6}
-                      onPress={() =>
+                      accessibilityRole="button"
+                      accessibilityLabel={`開啟${board}看板`}
+                      onPress={(event) => {
+                        // This button lives inside the post card; never also open PostDetail.
+                        event.stopPropagation?.();
                         nav?.navigate?.('BoardDetail' as never, {
                           boardId: item.boardId,
                           boardName: board,
-                        })
-                      }
+                        });
+                      }}
                     >
                       <Text style={styles.boardChip}>＃{board}</Text>
                     </Pressable>

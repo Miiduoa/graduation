@@ -214,14 +214,6 @@ AI_ALLOWED_ORIGINS: list[str] = _parse_csv(
 )
 
 FIRESTORE_SYNC_INTERVAL_MINUTES = 15
-FIRESTORE_COLLECTIONS = [
-    "announcements",
-    "events",
-    "courses",
-    "cafeterias",
-    "menuItems",
-    "pois",
-]
 
 # ─── Paths ───────────────────────────────────────────────────────────
 

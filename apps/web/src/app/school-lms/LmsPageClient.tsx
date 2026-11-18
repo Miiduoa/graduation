@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
+import { SchoolLearningLinks } from '@/components/academic/SchoolLearningLinks';
 import { SiteShell } from '@/components/SiteShell';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { isOfficialAcademicSchool } from '@/lib/academicOfficialSchool';
@@ -42,7 +43,7 @@ function areaLabel(area: string) {
   return area === 'homework' ? '作業' : area === 'announcements' ? '公告' : '教材';
 }
 
-function HomeworkCard({ item }: { item: LmsHomeworkItem }) {
+function HomeworkCard({ item, schoolId }: { item: LmsHomeworkItem; schoolId: string }) {
   return (
     <li>
       <div className={lmsStyles.heading}>
@@ -53,7 +54,7 @@ function HomeworkCard({ item }: { item: LmsHomeworkItem }) {
       </div>
       <p className={lmsStyles.meta}>{item.courseName} · {item.deadlineLabel || '截止時間未提供'}</p>
       <div className={lmsStyles.actions}>
-        <Link href={`/school-lms/homework/${item.courseId}/${item.id}`}>查看說明</Link>
+        <Link href={`/school-lms/homework/${item.courseId}/${item.id}?campus=${schoolId}`}>查看說明</Link>
         <a href={item.href} target="_blank" rel="noopener noreferrer">玩課雲同一筆 ↗</a>
       </div>
     </li>
@@ -205,7 +206,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                   {axis.overdue.length ? (
                     <ul className={lmsStyles.list}>
                       {axis.overdue.map((item) => (
-                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
+                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                       ))}
                     </ul>
                   ) : <p className={styles.note}>目前沒有逾期未交的作業。</p>}
@@ -215,7 +216,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                   {axis.today.length ? (
                     <ul className={lmsStyles.list}>
                       {axis.today.map((item) => (
-                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
+                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                       ))}
                     </ul>
                   ) : <p className={styles.note}>今天沒有未交且尚未截止的作業。</p>}
@@ -225,7 +226,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                   {axis.next7Days.length ? (
                     <ul className={lmsStyles.list}>
                       {axis.next7Days.map((item) => (
-                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
+                        <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                       ))}
                     </ul>
                   ) : <p className={styles.note}>七天內沒有其他未交作業。</p>}
@@ -236,7 +237,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
               homework.length ? (
                 <ul className={lmsStyles.list}>
                   {homework.map((item) => (
-                    <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} />
+                    <HomeworkCard key={`${item.courseId}:${item.id}`} item={item} schoolId={schoolId} />
                   ))}
                 </ul>
               ) : <div className={styles.status} role="status"><h2>目前沒有作業資料</h2><p>若上方有讀取錯誤，請改到玩課雲核對，不要把這當成「沒有作業」。</p></div>
@@ -252,7 +253,7 @@ function LmsBody({ uid, schoolId, returnUrl }: { uid: string; schoolId: 'pu'; re
                         <li key={course.id}>
                           <h3>{course.name}</h3>
                           <div className={lmsStyles.actions}>
-                            <Link href={`/school-lms?course=${course.id}`}>{view === 'announcements' ? '讀取此課公告' : '讀取此課教材'}</Link>
+                            <Link href={`/school-lms?course=${course.id}&campus=${schoolId}`}>{view === 'announcements' ? '讀取此課公告' : '讀取此課教材'}</Link>
                           </div>
                         </li>
                       ))}
@@ -317,17 +318,20 @@ export default function SchoolLmsPage() {
   });
   const returnUrl = `${path}${browse.schoolSearch}`;
   return (
-    <SiteShell title="玩課雲作業與教材" subtitle="跨課程查看截止、已交狀態、公告與可下載教材。">
-      {loading || browse.status === 'loading' ? (
+    <SiteShell title="校方作業與教材" subtitle="依所選校園查看課程、作業與教材。">
+      {browse.status === 'loading' || (isOfficialAcademicSchool(browse.schoolId) && loading) ? (
         <div className={styles.status} role="status">正在確認學校與帳號…</div>
-      ) : browse.status === 'error' || error ? (
+      ) : browse.status === 'error' || (isOfficialAcademicSchool(browse.schoolId) && error) ? (
         <section className={styles.status} role="alert"><h2>暫時無法確認學校與帳號</h2><p>請重新整理後再讀取。</p></section>
       ) : browse.status !== 'ready' || !browse.schoolId ? (
         <section className={styles.status}><h2>請先選擇一所學校</h2><p>選擇校園後，再連線該校的學習平臺。</p></section>
       ) : !isOfficialAcademicSchool(browse.schoolId) ? (
-        <section className={styles.status}><h2>這所學校的課堂連線尚未接通</h2><p>目前無法讀取「{browse.schoolName}」的學習平臺。</p></section>
+        <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} />
       ) : !user ? (
-        <SchoolAccountRequired returnUrl={returnUrl} alternative="請先至玩課雲查看作業。" />
+        <>
+          <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} />
+          <SchoolAccountRequired returnUrl={returnUrl} alternative="請先至玩課雲查看作業。" />
+        </>
       ) : <LmsBody key={`${user.uid}:${browse.schoolId}`} uid={user.uid} schoolId={browse.schoolId} returnUrl={returnUrl} />}
     </SiteShell>
   );

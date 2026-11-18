@@ -8,6 +8,20 @@ export const SUGGESTIONS = [
   '幫我排今晚寫作業',
 ];
 
+const PERMISSION_MESSAGES: Record<string, string> = {
+  ASSISTANT_PERMISSION_DENIED: '這項 AI 代辦權限尚未開啟或已關閉，這次沒有執行。請到助理權限調整後再確認。',
+  ASSISTANT_PERMISSION_STORE_UNAVAILABLE: '目前無法確認 AI 代辦權限，這次沒有執行。請到助理權限重新讀取設定後再試。',
+};
+
+export function assistantPermissionMessage(code: unknown): string | undefined {
+  return typeof code === 'string' && Object.hasOwn(PERMISSION_MESSAGES, code)
+    ? PERMISSION_MESSAGES[code] : undefined;
+}
+
+export function assistantPermissionSettingsHref(message: string): string | null {
+  return Object.values(PERMISSION_MESSAGES).includes(message) ? '/settings?section=assistant' : null;
+}
+
 export const PAGE_LABELS: Record<string, string> = {
   ...Object.fromEntries(ASSISTANT_SERVICES.map((service) => [service.href.split('?')[0].slice(1), service.label])),
   today: '今日',

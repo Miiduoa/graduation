@@ -1,3 +1,5 @@
+import type { PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
+
 export type V2Card = {
   tool: string;
   args: Record<string, unknown>;
@@ -5,6 +7,8 @@ export type V2Card = {
   mutationId: string;
   schoolId: string;
   destination: string;
+  /** Display policy only; the server's signed token retains source authority. */
+  sourceBound?: 'food-pickup';
   /** Kept with recovery cards; never derived from model-generated arguments. */
   conversationId?: string;
 };
@@ -16,10 +20,23 @@ export type V2Reply = {
   steps: V2Step[];
   cards: V2Card[];
   simulation?: boolean;
+  /** Verified reader output stays literal and out of later model history. */
+  dataRead?: boolean;
+  /** Fixed capability guidance; not a completed private-data read. */
+  roleGuide?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
+  serviceIds?: readonly import('@campus/shared/src/assistantServices').AssistantServiceId[];
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
+  courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
+  courseworkDate?: string;
 };
 
-export type V2Turn = { question: string; reply: V2Reply };
+export type V2Turn = {
+  question: string;
+  reply: V2Reply;
+  taskProfile?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
+  /** Local public lookup, outside the model conversation and signed action cards. */
+  publicCourse?: { read?: PublicCourseAssistantRead };
+};
 
 export type V2ActionState =
   | { status: 'executing' | 'checking' }

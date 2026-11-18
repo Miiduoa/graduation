@@ -16,6 +16,7 @@ on:
       - 'packages/shared/src/campusClassroomLookup*'
       - 'packages/shared/src/campusMapLookup*'
       - 'scripts/qa/campus-spatial/**'
+      - 'scripts/qa/browser/**'
       - 'apps/web/tsconfig.json'
       - 'apps/web/package.json'
       - 'package.json'
@@ -46,17 +47,19 @@ jobs:
           version: '10.28.2'
       - uses: actions/setup-node@v7
         with:
-          node-version: '22.23.4'
+          node-version: '22.23.5'
           cache: pnpm
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+      - name: Test browser installer retry behavior
+        run: bash scripts/qa/browser/install-playwright.test.sh
       - name: Install Chromium test tools
         run: |
           python -m pip install playwright==1.57.0
-          python -m playwright install --with-deps chromium
+          bash scripts/qa/browser/install-playwright.sh
       - name: Build production component fixture
         run: node scripts/qa/campus-spatial/build.mjs
       - name: Check local interactions and real WebGL recovery

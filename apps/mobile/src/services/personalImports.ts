@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   parsePersonalImportSyncState,
   type PersonalImportSyncState,
@@ -164,11 +165,27 @@ export function appendPersonalImports(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
-  options: { restoreBackup?: boolean } = {},
+  options: { restoreBackup?: boolean; protectCatalogTimetableSlots?: boolean; expectedRecordsJson?: string } = {},
 ) {
   return mutate(scope, active, (current) => {
     if (rows.some((row) => row.schoolId !== scope.schoolId))
       throw new Error('資料的學校與目前選擇不同。');
+    // A conflict acknowledgement is valid only for the exact records reviewed.
+    if (options.expectedRecordsJson !== undefined && JSON.stringify(current.records) !== options.expectedRecordsJson)
+      throw new Error('個人課表已更新，請重新核對衝堂後再加入。');
+    if (options.protectCatalogTimetableSlots) {
+      // Use the same source-change check as the review screen, but repeat it
+      // under the owner/school write lock so direct calls cannot bypass it.
+      const changed = findCatalogSameSlotChange(rows, current.records);
+      if (changed === 'teacher')
+        throw new Error('相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。');
+      if (changed === 'room')
+        throw new Error('相同課號、班別與時段已有不同教室的個人紀錄；請先核對原有資料。');
+      if (changed === 'title')
+        throw new Error('相同課號、班別與時段已有不同課名的個人紀錄；請先核對原有資料。');
+      if (changed === 'time')
+        throw new Error('相同課號與班別的原有上課時段與官方資料不同；請先核對原有資料。');
+    }
     const id = createPersonalImportId();
     const createdAt = new Date().toISOString();
     const incoming = options.restoreBackup
@@ -294,7 +311,7 @@ export function personalImportCourses(
         row.schoolId === schoolId &&
         Number.isInteger(row.dayOfWeek) &&
         row.dayOfWeek! >= 1 &&
-        row.dayOfWeek! <= 5 &&
+        row.dayOfWeek! <= 7 &&
         Number.isInteger(row.startPeriod) &&
         Number.isInteger(row.endPeriod) &&
         row.startPeriod! >= 1 &&

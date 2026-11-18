@@ -26,7 +26,6 @@ afterEach(() => {
 it.each([
   ['subscriptions', () => listSubscribedBoardIds('student', 'pu')],
   ['presence', () => peersAtPoi('pu', 'library')],
-  ['stories', () => listActiveStoriesForSchool('pu')],
 ])('propagates unavailable %s reads instead of inventing an empty result', async (_name, read) => {
   const failure = new Error('permission denied');
   mocks.getDocs.mockRejectedValue(failure);

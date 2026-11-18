@@ -17,6 +17,7 @@ export type NuniCourseworkStudyActionProps = {
   assignmentIds: readonly string[];
   initialTime?: CourseworkStudyTime;
   suggestTime?: boolean;
+  suggestDate?: string;
   context: AssistantCalendarContext;
   requests?: CourseworkRequests;
   disabled?: boolean;
@@ -50,7 +51,7 @@ function sourceIdentity(props: NuniCourseworkStudyActionProps): string {
     context.uid, context.schoolId, context.platformTimetable?.accountId,
     read.anchor, read.checkedAt, read.changedAssignmentId,
     read.selectedWorkspaceId, read.expectedReviewed, read.expectedLinkedWorkspaceId,
-    read.result, props.assignmentIds, props.initialTime, props.suggestTime,
+    read.result, props.assignmentIds, props.initialTime, props.suggestTime, props.suggestDate,
   ]);
 }
 
@@ -148,7 +149,8 @@ function StudyActionInstance({ props, live, identity }: {
     notifying?.(true);
     try {
       const result = await abortableCampusRead(() => findCourseworkStudyDrafts(read, selectedId,
-        { ...props.context, isCurrent: findingCurrent }, { signal: abort.signal }), abort.signal);
+        { ...props.context, isCurrent: findingCurrent }, { signal: abort.signal,
+          ...(props.suggestDate !== undefined && { date: props.suggestDate }) }), abort.signal);
       if (!findingCurrent()) return;
       if (result.kind !== 'available') {
         setStage(result.kind === 'blocked' ? { kind: 'blocked', message: result.message }

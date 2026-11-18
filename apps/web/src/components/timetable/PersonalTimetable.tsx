@@ -578,6 +578,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                   `${row.academicYear}|${row.semester}` === activeTerm,
               );
             const clock = source ? actualClockLabel(source.startTime, source.endTime) : null;
+            const periodLabel = source ? source.periodLabel?.trim() : '';
             return (
               <li key={course.id}>
                 <strong>{course.name}</strong>
@@ -585,7 +586,9 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                   {WEEKDAY_LABELS[course.day - 1] || '星期未填'} ·{' '}
                   {clock
                     ? clock
-                    : course.start > 0
+                    : periodLabel
+                      ? `校方節次 ${periodLabel}`
+                      : course.start > 0
                       ? `第 ${course.start}–${course.end} 節（時間未確認）`
                       : '時間未確認'}
                   {' · '}
@@ -604,7 +607,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
                     record.dayOfWeek || 0
                   ] || '星期未填'}
                   {' · '}
-                  {clock || '時間未確認'}
+                  {clock || (record.periodLabel?.trim() ? `校方節次 ${record.periodLabel}` : '時間未確認')}
                   {' · '}
                   {record.location || '教室未填'}
                 </p>
@@ -618,6 +621,13 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         <Link className="btn" href={importHref}>
           整理個人紀錄
         </Link>
+        <PersonalCalendarExport
+          key={`calendar:${schoolId}:${uid}:${activeTerm}`}
+          records={withClassExceptions(imported.records, timetable.classExceptions)}
+          schoolId={schoolId}
+          termKey={activeTerm}
+          disabled={busy || imported.loading || !!imported.error}
+        />
       </section>
     );
   }

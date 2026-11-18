@@ -1,3 +1,4 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
 import {
   getOfficialLibrary,
   isProvidenceSchoolId,
@@ -238,6 +239,9 @@ export function buildSchoolScopedEmergencyFallback(
     .filter(Boolean)
     .slice(0, 5);
 
+  const contact = getSchoolContactAnswer(schoolId, userText, schoolName);
+  if (contact) return { content: contact, suggestions: ['學校總機', '學校地址', '學校官網'] };
+
   const transport = buildSchoolScopedTransportDirections(schoolId, text, schoolName);
   if (transport) return transport;
 
@@ -252,7 +256,7 @@ export function buildSchoolScopedEmergencyFallback(
       {
         pattern: /宿舍|住宿|寢室|報修|漏水|洗衣/,
         answer:
-          '靜宜大學宿舍相關資訊：\n\n🏠 宿舍包含男生宿舍與女生宿舍，住宿申請通常於每學期初開放。\n\n常見服務：\n- 報修：可至宿舍管理室填報修單或透過學校系統線上報修\n- 洗衣機/烘衣機：各樓層設有投幣式洗衣設備\n- 包裹：宿舍管理室代收，請攜帶學生證領取\n- 門禁時間：通常為 23:00，請留意各宿舍公告\n\n有其他宿舍問題可以繼續問我！',
+          '靜宜大學宿舍相關資訊：\n\n🏠 宿舍包含男生宿舍與女生宿舍，住宿申請通常於每學期初開放。\n\n常見服務：\n- 報修：可至宿舍管理室填報修單或透過學校系統線上報修\n- 洗衣機/烘衣機：各樓層設有投幣式洗衣設備\n- 包裹：宿舍管理室代收，請攜帶學生證領取\n- 門禁：24 小時以學生證刷卡進出，00:00–06:00 須刷卡登記\n\n有其他宿舍問題可以繼續問我！',
         suggestions: ['宿舍報修', '洗衣機位置', '門禁時間'],
       },
       {
@@ -284,12 +288,6 @@ export function buildSchoolScopedEmergencyFallback(
         answer:
           '靜宜大學停車與 YouBike 位置請以校安／總務公告與現場標示為準。緊急回退不會捏造車位數量或拖吊規則；可改開校園地圖查看動線。',
         suggestions: ['開啟校園地圖', 'YouBike 在哪'],
-      },
-      {
-        pattern: /校園|學校|靜宜|在哪|怎麼走|地圖|位置/,
-        answer:
-          '靜宜大學校園資訊：\n\n📍 地址：台中市沙鹿區台灣大道七段 200 號\n📞 總機：(04) 2632-8001\n\n特定建築動線請改開校園地圖；開放時間與服務規定以校方公告為準。',
-        suggestions: ['開啟校園地圖', '圖書館在哪', '怎麼去台中車站'],
       },
     ];
 

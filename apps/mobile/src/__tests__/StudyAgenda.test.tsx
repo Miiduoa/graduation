@@ -4,6 +4,31 @@ import type { NuniStudyAgenda, NuniStudyTask } from '@campus/shared/src/nuniStud
 import { StudyAgenda } from '../screens/nuni/StudyAgenda';
 import { NuniDraftProvider } from '../state/nuniDrafts';
 
+const mockImportScope = { owner: 'test', schoolId: 's' };
+jest.mock('../state/personalImportScope', () => ({
+  usePersonalImportScope: () => mockImportScope,
+}));
+jest.mock('../services/personalImports', () => ({
+  personalImportStorageKey: (scope: { owner: string; schoolId: string }) =>
+    `${scope.owner}:${scope.schoolId}`,
+  subscribePersonalImports: () => () => {},
+  loadPersonalImports: jest.fn(async () => ({
+    records: [
+      {
+        id: 'e',
+        kind: 'events',
+        schoolId: 's',
+        academicYear: '115',
+        semester: '1',
+        title: '本機活動',
+        date: '2026-10-26',
+        startTime: '18:00',
+        endTime: '20:00',
+      },
+    ],
+  })),
+}));
+
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').theme }));
 
 const task = (id: string, overrides: Partial<NuniStudyTask> = {}): NuniStudyTask => ({
@@ -993,4 +1018,50 @@ describe('assignment receipt dates in the real agenda assistant', () => {
       expect(retry).not.toHaveBeenCalled();
     },
   );
+});
+
+it('connects local event records to the deadline preview', async () => {
+  const view = render(
+    <StudyAgenda
+      data={agenda([
+        task('local', {
+          dueAt: '2026-10-26T19:00:00+08:00',
+        }),
+      ])}
+      loading={false}
+      error=""
+      retry={jest.fn()}
+      open={jest.fn()}
+    />,
+  );
+  await act(async () => {});
+  fireEvent.press(view.getByText('匯出未繳期限 ICS'));
+  fireEvent.press(view.getByRole('checkbox'));
+  fireEvent.press(view.getByRole('button', { name: /預覽/ }));
+  expect(view.getByText(/與個人事件衝突：本機活動/)).toBeTruthy();
+  expect(view.getByText(/個人事件未知/)).toBeTruthy();
+});
+
+it('keeps a failed local read unknown instead of treating it as free', async () => {
+  const { loadPersonalImports } = require('../services/personalImports');
+  loadPersonalImports.mockRejectedValueOnce(new Error('本機讀取失敗'));
+  const view = render(
+    <StudyAgenda
+      data={agenda([
+        task('failed', {
+          dueAt: '2026-10-26T19:00:00+08:00',
+        }),
+      ])}
+      loading={false}
+      error=""
+      retry={jest.fn()}
+      open={jest.fn()}
+    />,
+  );
+  await act(async () => {});
+  fireEvent.press(view.getByText('匯出未繳期限 ICS'));
+  fireEvent.press(view.getByRole('checkbox'));
+  fireEvent.press(view.getByRole('button', { name: /預覽/ }));
+  expect(view.getByText(/個人事件未知/)).toBeTruthy();
+  expect(view.queryByText(/與個人事件衝突/)).toBeNull();
 });

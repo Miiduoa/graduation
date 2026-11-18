@@ -627,6 +627,8 @@ it('reports review drafts and opening confirmations to the shared navigation gua
   expect(onDraftChange).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole('button', { name: '檢查開通條件' }));
   await screen.findByRole('button', { name: '確認開通 待開放學校' });
+  // The confirmation button can appear before the parent's useEffect-based
+  // navigation guard callback has committed. Assert the eventual contract.
   await waitFor(() => expect(onDraftChange).toHaveBeenLastCalledWith(true));
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(onDraftChange).toHaveBeenLastCalledWith(false);

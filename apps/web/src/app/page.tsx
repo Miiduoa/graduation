@@ -10,6 +10,7 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
+import { TodayAgent } from '@/features/nuni/TodayAgent';
 import { loadHomeData, type HomeCourse, type HomeData } from '@/lib/homeOverview';
 import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { useClientHydrated } from '@/lib/useClientHydrated';
@@ -254,6 +255,18 @@ export default function HomePage() {
       onOpenChange={handleAssistantToggle}
     />
   );
+  const agent = context && accountId && !sessionLoading && !blocked && !nuni.error ? (
+    <TodayAgent
+      key={assistantScope}
+      context={context}
+      accountId={accountId}
+      tasks={rows.nuni?.data?.tasks ?? []}
+      now={now}
+      loading={!rows.nuni || rows.nuni.loading}
+      error={rows.nuni?.error || rows.nuni?.data?.tasksError || ''}
+      onRetry={() => void readSource('nuni', generation.current)}
+    />
+  ) : null;
   return (
     <div className={styles.page + ' ' + styles.todayPage}>
       <a href="#today-content" className={styles.skip}>
@@ -290,6 +303,7 @@ export default function HomePage() {
         ) : (
           <StudentTodayPage
             assistant={assistant}
+            agent={agent}
             now={now}
             updatedAt={updatedAt}
             signedIn={signedIn}

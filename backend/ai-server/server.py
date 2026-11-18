@@ -66,7 +66,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("campus-ai")
 
-_campus_knowledge: str = ""
 _growth_task: asyncio.Task | None = None
 
 
@@ -84,7 +83,7 @@ async def _scheduled_growth_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _campus_knowledge, _growth_task
+    global _growth_task
 
     bind_host = resolve_bind_host()
     assert_bind_allowed(bind_host)
@@ -97,13 +96,18 @@ async def lifespan(app: FastAPI):
     logger.info("LLM provider: %s", LLM_PROVIDER)
     register_default_tools()
     logger.info("Agent tools registered: createDormRepairRequest / listMyDormRepairs / createFoodOrder")
-    _campus_knowledge = get_full_knowledge_text()
     if ENABLE_RAG:
         logger.info("Indexing APP knowledge (RAG enabled)...")
         await asyncio.to_thread(index_all_app_knowledge)
-        logger.info("APP knowledge indexed (%d chars)", len(_campus_knowledge))
+        logger.info("APP knowledge indexed")
+        try:
+            from rag.sync_firestore import migrate_legacy_firestore_index
+            migration = await asyncio.to_thread(migrate_legacy_firestore_index)
+            logger.info("Legacy Firestore RAG migration: %s", migration)
+        except Exception as exc:
+            logger.error("Legacy Firestore RAG migration failed: %s", exc)
     else:
-        logger.info("RAG disabled – using hardcoded knowledge only (%d chars)", len(_campus_knowledge))
+        logger.info("RAG disabled")
 
     if ENABLE_SELF_TRAIN_LOOP and LLM_PROVIDER == "ollama":
         _growth_task = asyncio.create_task(_scheduled_growth_loop())
@@ -217,8 +221,9 @@ class AgentChatRequest(BaseModel):
 # ─── Chat Endpoints ──────────────────────────────────────────────────
 
 async def _build_messages(req: ChatRequest) -> list[dict]:
+    school_id = req.context.get("schoolId")
     if ENABLE_RAG:
-        rag_chunks = await asyncio.to_thread(retrieve, req.message)
+        rag_chunks = await asyncio.to_thread(retrieve, req.message, school_id=school_id)
         rag_context = format_context(rag_chunks)
     else:
         rag_context = ""
@@ -226,17 +231,17 @@ async def _build_messages(req: ChatRequest) -> list[dict]:
     web_context = ""
     if ENABLE_WEB_SEARCH and should_use_web_search(req.message):
         try:
-            web_content, web_sources = await search_public_web(req.message)
+            web_content, web_sources = await search_public_web(req.message, school_id=school_id)
             web_context = format_web_context(web_content, web_sources)
         except Exception as e:
             logger.warning("Web search failed: %s", e)
 
     system_prompt = build_system_prompt(
-        campus_knowledge=_campus_knowledge,
+        campus_knowledge=get_full_knowledge_text(school_id),
         rag_context=rag_context,
         web_context=web_context,
         user_context=req.context,
-        school_id=req.context.get("schoolId", "unknown"),
+        school_id=school_id or "unknown",
     )
 
     messages = [{"role": "system", "content": system_prompt}]

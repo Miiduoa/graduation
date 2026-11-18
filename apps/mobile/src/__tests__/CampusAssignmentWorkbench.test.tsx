@@ -8,7 +8,7 @@ import { refreshCampusSenseSnapshot, type CampusSenseSnapshot, type CampusSenseP
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchool, name: '測試學校' } }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ selectionReady: true, selection: { schoolId: mockSchool }, school: { id: mockSchool, name: '測試學校' } }) }));
 jest.mock('../features/campusAssistant', () => ({
   askCampusAssistant: jest.fn(),
   getOnDeviceAssistantReadiness: jest.fn(async () => ({ available: true, ready: false, modelId: 'qwen2.5-0.5b' })),

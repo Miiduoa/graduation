@@ -32,6 +32,8 @@ export type AdminLocation = {
   schoolLifecycle: SchoolLifecycleFilter;
   boardsCreate: boolean;
   auditQuery: string;
+  auditTenantId: string;
+  auditSchoolName: string;
 };
 
 export const sectionMeta: Record<
@@ -112,6 +114,8 @@ export function defaultAdminLocation(): AdminLocation {
     schoolLifecycle: 'all',
     boardsCreate: false,
     auditQuery: '',
+    auditTenantId: '',
+    auditSchoolName: '',
   };
 }
 
@@ -175,6 +179,8 @@ export function parseAdminHash(hash: string): AdminLocation {
     schoolLifecycle: section === 'schools' ? schoolLifecycle : 'all',
     boardsCreate: section === 'boards' && params.get('create') === '1',
     auditQuery: section === 'audit' ? readParam(params, 'q') : '',
+    auditTenantId: section === 'audit' ? readParam(params, 'tenantId') : '',
+    auditSchoolName: section === 'audit' ? readParam(params, 'schoolName') : '',
   };
 }
 
@@ -204,6 +210,10 @@ export function serializeAdminHash(location: AdminLocation): string {
     if (location.boardsCreate) params.set('create', '1');
   } else if (location.section === 'audit') {
     if (location.auditQuery) params.set('q', location.auditQuery);
+    if (location.auditTenantId) {
+      params.set('tenantId', location.auditTenantId);
+      if (location.auditSchoolName) params.set('schoolName', location.auditSchoolName);
+    }
   }
   const query = params.toString();
   return query ? `#${path}?${query}` : `#${path}`;

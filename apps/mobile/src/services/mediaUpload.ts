@@ -4,8 +4,9 @@ import { privateFileNonce } from './privateFileNonce';
 import { isSupabaseFileStorageEnabled, privateStoryPath, uploadPrivateFile } from './privateFiles';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getStorageInstance } from '../firebase';
-import { campusPostStoragePath, conversationMediaPath,
+import { campusPostStoragePath,
   storyStoragePath, } from './campusSocialPaths';
+import { uploadDmAttachment } from './dmAttachments';
 
 export async function uploadRawToPath(path: string, data: Blob, contentType: string, customMetadata?: Record<string, string>) {
   const r = ref(getStorageInstance(), path);
@@ -87,7 +88,9 @@ export async function uploadConversationAttachment(
   const ct =
     contentTypeHint ||
     (/\.(mp4|mov)$/.test(lower) ? 'video/mp4' : /\.png$/.test(lower) ? 'image/png' : 'image/jpeg');
-  const safe = fileName.replace(/[^\w.-]+/g, '_');
-  const path = conversationMediaPath(conversationId, uploadId, safe);
-  return uploadLocalUri(path, localUri, ct);
+  // uploadId used to be a client-selected Storage path. New objects receive a
+  // server-generated ID so retries cannot replace previously delivered media.
+  // Persist only receipt.path. receipt.previewUrl expires after one minute.
+  void uploadId;
+  return uploadDmAttachment(conversationId, localUri, fileName, ct);
 }

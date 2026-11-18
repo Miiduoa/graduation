@@ -1,0 +1,17 @@
+{
+  "schema": "campus.platform-assistant-permissions-source/v1",
+  "baseManifestSha256": "8e0877e879c00830611cd2bfd7eb86986f02448c384b799dba7c6c1996471004",
+  "composedManifestSha256": "ec988e40163fcc194d2555b7ad79bc16a54bfc87b5858b8cb012ebb9ad9c97c1",
+  "lostFoundManifestSha256": "612ecc0e5ae98cac6d85fa0cba7c8d31b03269144156006924ae379ef7ae77d7",
+  "adapterSha256": "e4385689866efd46e9ee66c4fe84353641e8d87be56a9b6242e0412e659d1e4a",
+  "sourceFiles": {
+    "apps/api/src/migrations/283_platform_assistant_permissions.sql": {
+      "source": "deploy/nuni-api/assistant-permissions/283_platform_assistant_permissions.sql",
+      "sha256": "86a8b1df2018a8686de602d978a29998946af12f0cbce34fd56aad3ed45a3996"
+    }
+  },
+  "migration": "283_platform_assistant_permissions",
+  "preservesLostFoundMigration": "282_platform_lost_found",
+  "inputTree": "fffde885da74a84cfd9ae702f955db99507dc855",
+  "candidateTree": "841c117c46775fec3af27da9d88abaf0ae13b2f7"
+}

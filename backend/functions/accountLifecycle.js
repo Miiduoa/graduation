@@ -1,10 +1,15 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 
+function isAccountUnavailable(data) {
+  return !data || data.accountDeletionInProgress === true
+    || ['deleted', 'disabled', 'suspended', 'inactive'].includes(data.status);
+}
+
 async function assertAccountAvailable(db, uid) {
   if (!uid) return;
   const profile = await db.collection('users').doc(uid).get();
   const data = profile.exists ? profile.data() : {};
-  if (data.accountDeletionInProgress === true || ['deleted', 'disabled', 'suspended', 'inactive'].includes(data.status)) {
+  if (isAccountUnavailable(data)) {
     throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
       reason: 'account-deletion',
     });
@@ -25,4 +30,4 @@ function createAccountGuardedOnCall({ onCall, getDb }) {
   };
 }
 
-module.exports = { assertAccountAvailable, createAccountGuardedOnCall };
+module.exports = { isAccountUnavailable, assertAccountAvailable, createAccountGuardedOnCall };

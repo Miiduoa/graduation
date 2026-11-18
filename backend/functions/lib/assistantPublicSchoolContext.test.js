@@ -20,6 +20,19 @@ describe('assistantPublicSchoolContext', () => {
     expect(resolvePublicSchoolRecord('unknown-school')).toBeNull();
   });
 
+  test('resolves every production directory entry without borrowing another school', () => {
+    const { publicSchoolInfoDirectory } = require('../generated/shared/publicSchoolInfo');
+    for (const { id, name } of Object.values(publicSchoolInfoDirectory)) {
+      expect(resolveRouteOrigin({ schoolId: id })).toEqual({ origin: name, source: 'school' });
+      expect(buildGroundedWebQuery('宿舍公告', id)).toBe(`${name} 宿舍公告`);
+      expect(buildGroundedWebQuery(`${name} 宿舍公告`, 'pu')).toBe(`${name} 宿舍公告`);
+    }
+    for (const schoolId of [null, 'tw-demo-uni', '__proto__', 'constructor', 'unknown']) {
+      expect(resolvePublicSchoolRecord(schoolId)).toBeNull();
+    }
+    expect(findExplicitSchoolMentions('中興大學宿舍公告')).toHaveLength(1);
+  });
+
   test('route origin prefers explicit text over selected school', () => {
     expect(resolveRouteOrigin({ explicitOrigin: '台大', schoolId: 'pu' })).toEqual({
       origin: '台大',

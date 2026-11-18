@@ -7,7 +7,9 @@ import {
   type SchoolPublicServiceKind,
   type SchoolPublicServiceLink,
 } from '@campus/shared/src/schoolPublicServices';
-import { findSchoolById, findSchoolsByCode } from '@campus/shared/src/schools';
+import { getPublicSchoolInfo, getSafePublicSchoolWebsiteUrl } from '@campus/shared/src/publicSchoolInfo';
+import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
+import { findSchoolsByCode } from '@campus/shared/src/schools';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import type { SchoolSearchParams } from '@/lib/pageContext';
@@ -143,16 +145,24 @@ export function SchoolPublicServiceLinks({ service = 'career' }: Props) {
     explicit.kind === 'id' ? explicit.id : selection?.selectedSchoolId ?? null;
   const profile = resolveSchoolPublicServices(targetId);
 
+  const selected = selection?.selectedSchool;
+  const record = getPublicSchoolInfo(
+    profile?.schoolId ?? targetId,
+    selected?.id === targetId ? selected?.name : undefined,
+  );
+  if (!record) {
+    return <StatusCard title="尚未提供入口">目前無法核對這所學校的校方資訊。</StatusCard>;
+  }
+
   if (!profile) {
-    const schoolName =
-      (targetId ? findSchoolById(targetId)?.name : null) ||
-      (context.schoolId === targetId ? context.schoolName : '') ||
-      '所選校園';
+    const course = service === 'courses' ? resolveOfficialCourseQueryLink(targetId) : null;
+    const url = course?.url ?? getSafePublicSchoolWebsiteUrl(record.websiteUrl);
     return (
-      <section className="card" role="status">
-        <p className="eyebrow">{schoolName}</p>
-        <h2>尚未提供入口</h2>
-        <p>這所學校的公開服務入口尚未整理，請至學校網站查詢。</p>
+      <section className="card">
+        <p className="eyebrow">{record.name}</p>
+        <h2>{serviceHeading(service)}</h2>
+        <p>{course ? '開課資料與查詢方式請以校方公告為準。' : '請從學校官網查找相關單位與服務辦法。'}</p>
+        {url && <a href={url} target="_blank" rel="noopener noreferrer">{course?.label ?? `前往${record.name}官網`}</a>}
       </section>
     );
   }

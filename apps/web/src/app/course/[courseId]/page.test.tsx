@@ -91,6 +91,17 @@ it('keeps guests outside coursework while showing its sign-in destination in the
   expect(loadCourseWork).not.toHaveBeenCalled();
 });
 
+it('keeps the original course content route usable by teachers', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({ canTeach: true }));
+  await mount();
+  expect(screen.getByRole('heading', { level: 1, name: '資料結構' })).toBeTruthy();
+  expect(screen.getByText('私人教材')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '作業 A' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '管理課堂點名' }).getAttribute('href')).toBe(
+    '/course/course/attendance',
+  );
+});
+
 it('keeps sibling edits mounted through another assignment submission and its background refresh', async () => {
   const save = deferred<void>();
   const refresh = deferred<CourseWork>();

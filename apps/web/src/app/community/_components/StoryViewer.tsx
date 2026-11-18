@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { usePrivateMedia } from '@/lib/usePrivateMedia';
 import { openModalSession } from '@/components/ui/modalSession';
 import { StoryAudience } from './StoryAudience';
+import { StoryReply } from './StoryReply';
 import type { useStoryShelf } from './useStoryShelf';
 import styles from './StoryViewer.module.css';
 
@@ -24,10 +25,11 @@ export function StoryViewer({
   const closeButton = useRef<HTMLButtonElement>(null);
   const videoElement = useRef<HTMLVideoElement>(null);
   const videoBar = useRef<HTMLElement>(null);
-  const beforeAudience = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
+  const beforePanel = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
   const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const [auto, setAuto] = useState(false);
-  const [audienceFor, setAudienceFor] = useState<string | null>(null);
+  const [readingFocused, setReadingFocused] = useState(false);
+  const [panelFor, setPanelFor] = useState<string | null>(null);
   const [hidden, setHidden] = useState(() => document.hidden);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
@@ -38,13 +40,20 @@ export function StoryViewer({
   const video = story.kind === 'video';
   const media = photo || video;
   const failedVideo = video && (!mediaUrl || failedId === story.id);
-  const scope = JSON.stringify([story.schoolId, story.authorUid, story.id]);
-  const audienceOpen = viewer.isOwner && audienceFor === scope;
-  if (audienceFor !== null && !audienceOpen) setAudienceFor(null);
+  const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
+  const canReply =
+    story.allowReplies !== false &&
+    !!viewer.viewerUid &&
+    viewer.viewerUid !== story.authorUid &&
+    !viewer.isOwner &&
+    viewer.group.authorUid === story.authorUid;
+  const panelOpen = panelFor === scope && (viewer.isOwner || canReply);
+  if (panelFor !== null && !panelOpen) setPanelFor(null);
   const running =
     auto &&
-    !audienceOpen &&
+    !panelOpen &&
     !hidden &&
+    !readingFocused &&
     !video &&
     (!photo || loadedId === story.id || failedId === story.id);
   const onNext = useRef(viewer.next);
@@ -68,15 +77,15 @@ export function StoryViewer({
         if (live && !(error instanceof DOMException && error.name === 'AbortError')) setAuto(false);
       });
     }
-    const saved = beforeAudience.current;
-    if (audienceOpen && element) {
+    const saved = beforePanel.current;
+    if (panelOpen && element) {
       if (saved?.element !== element) {
-        beforeAudience.current = { element, playing: !element.paused && !element.ended };
+        beforePanel.current = { element, playing: !element.paused && !element.ended };
       }
       element.pause();
     } else {
       const shouldPlay = saved?.element === element ? saved.playing : auto;
-      beforeAudience.current = null;
+      beforePanel.current = null;
       if (shouldPlay && !document.hidden) play();
       else element?.pause();
     }
@@ -84,7 +93,7 @@ export function StoryViewer({
       setHidden(document.hidden);
       if (!element) return;
       if (document.hidden) {
-        resumeOnReturn = !audienceOpen && auto && !element.paused && !element.ended;
+        resumeOnReturn = !panelOpen && auto && !element.paused && !element.ended;
         element.pause();
       } else if (resumeOnReturn) {
         resumeOnReturn = false;
@@ -96,7 +105,7 @@ export function StoryViewer({
       live = false;
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [auto, audienceOpen, failedVideo, story.id]);
+  }, [auto, panelOpen, failedVideo, story.id]);
 
   useEffect(() => {
     remaining.current = DWELL_MS;
@@ -119,16 +128,18 @@ export function StoryViewer({
       aria-modal="true"
       onCancel={(e) => {
         e.preventDefault();
-        if (!audienceOpen) viewer.close();
+        if (!panelOpen) viewer.close();
       }}
       onKeyDown={(e) => {
         if (
-          audienceOpen ||
+          panelOpen ||
           e.altKey ||
           e.metaKey ||
           e.ctrlKey ||
           e.shiftKey ||
-          e.target instanceof HTMLVideoElement
+          e.target instanceof HTMLVideoElement ||
+          (e.target instanceof Element &&
+            e.target.closest('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable="true"], [data-story-caption]') !== null)
         )
           return;
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -189,11 +200,22 @@ export function StoryViewer({
         </header>
         <div
           className={styles.canvas}
+          role="region"
+          aria-label="限時動態內容，左右方向鍵切換"
+          aria-description="閱讀區取得鍵盤焦點時會暫停自動播放，移開焦點後接續剩餘時間。"
+          tabIndex={0}
+          onFocus={(e) => {
+            if (e.target === e.currentTarget) setReadingFocused(true);
+          }}
+          onBlur={(e) => {
+            if (e.target === e.currentTarget) setReadingFocused(false);
+          }}
           onPointerDown={(e) => {
-            // Leave native play/seek controls alone; swipes across the picture can still change author.
+            // Keep native seek controls and selectable captions free of story gestures.
             if (
-              e.target instanceof HTMLVideoElement &&
-              e.clientY >= e.target.getBoundingClientRect().bottom - 60
+              (e.target instanceof Element && e.target.closest('[data-story-caption]') !== null) ||
+              (e.target instanceof HTMLVideoElement &&
+                e.clientY >= e.target.getBoundingClientRect().bottom - 60)
             ) {
               gesture.current = null;
               return;
@@ -246,7 +268,7 @@ export function StoryViewer({
                 }
               }}
               onEnded={() => {
-                if (auto && !audienceOpen && !document.hidden) viewer.next();
+                if (auto && !panelOpen && !document.hidden) viewer.next();
               }}
               onError={() => {
                 setFailedId(story.id);
@@ -273,7 +295,20 @@ export function StoryViewer({
           ) : photo ? (
             <p className={styles.unavailable}>照片暫時無法顯示</p>
           ) : null}
-          {!!story.text && <p className={media ? styles.caption : styles.text}>{story.text}</p>}
+          {!!story.text && (
+            <p
+              className={media ? styles.caption : styles.text}
+              role={media ? 'region' : undefined}
+              aria-label={media ? '限時動態說明文字' : undefined}
+              aria-description={media ? '使用方向鍵閱讀說明文字，不會切換限時動態。' : undefined}
+              tabIndex={media ? 0 : undefined}
+              data-story-caption={media ? 'true' : undefined}
+              onFocus={media ? () => setReadingFocused(true) : undefined}
+              onBlur={media ? () => setReadingFocused(false) : undefined}
+            >
+              {story.text}
+            </p>
+          )}
         </div>
         <footer className={styles.footer}>
           {viewer.isOwner && (
@@ -281,10 +316,21 @@ export function StoryViewer({
               className={styles.audienceButton}
               type="button"
               aria-haspopup="dialog"
-              aria-expanded={audienceOpen}
-              onClick={() => setAudienceFor(scope)}
+              aria-expanded={panelOpen}
+              onClick={() => setPanelFor(scope)}
             >
               誰看過
+            </button>
+          )}
+          {canReply && (
+            <button
+              className={styles.audienceButton}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={panelOpen}
+              onClick={() => setPanelFor(scope)}
+            >
+              私下回覆
             </button>
           )}
           {!viewer.isOwner && <small className={styles.receiptNotice}>作者可查看誰看過</small>}
@@ -307,8 +353,18 @@ export function StoryViewer({
           </nav>
         </footer>
       </div>
-      {audienceOpen && (
-        <StoryAudience key={scope} story={story} onClose={() => setAudienceFor(null)} />
+      {viewer.isOwner && panelOpen && (
+        <StoryAudience key={scope} story={story} onClose={() => setPanelFor(null)} />
+      )}
+      {canReply && viewer.viewerUid && (
+        <StoryReply
+          key={scope}
+          story={story}
+          author={author}
+          viewerUid={viewer.viewerUid}
+          open={panelOpen}
+          onClose={() => setPanelFor(null)}
+        />
       )}
     </dialog>
   );

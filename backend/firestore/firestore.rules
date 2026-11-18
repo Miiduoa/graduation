@@ -182,8 +182,9 @@ service cloud.firestore {
     }
 
     function isConversationMember(conversationId) {
+      // get() on a missing conversation denies. Existing chats stay at
+      // signed-in identity + membership, matching main.
       return isSignedIn()
-        && exists(/databases/$(database)/documents/conversations/$(conversationId))
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
     }
 
@@ -947,9 +948,11 @@ service cloud.firestore {
 
     // Conversations (DMs and group chats)
     match /conversations/{conversationId} {
-      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.memberIds;
       allow create: if isSignedIn()
         && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.get('schoolId', '') != ''
         && request.resource.data.schoolId != null
         && isSchoolMember(request.resource.data.schoolId);
       allow update: if isSignedIn()
@@ -959,16 +962,11 @@ service cloud.firestore {
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
-        allow create: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+        allow read: if isConversationMember(conversationId);
+        allow create: if isConversationMember(conversationId)
+          && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
           && request.resource.data.senderId == request.auth.uid;
-        allow update: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+        allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
           && (
             (
@@ -978,6 +976,9 @@ service cloud.firestore {
             || (
               resource.data.senderId == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recalledAt', 'updatedAt'])
+              && (!('attachmentPath' in resource.data) || (
+                !('recalledAt' in resource.data) && request.resource.data.recalledAt == request.time
+              ))
             )
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'updatedAt'])
           );
@@ -1892,8 +1893,9 @@ service cloud.firestore {
         // forged view counters or unbounded text payloads.
         && request.resource.data.keys().hasOnly([
           'schoolId', 'authorUid', 'kind', 'text', 'mediaUrl', 'bgColor',
-          'poiId', 'poiName', 'createdAt', 'expiresAt', 'viewCount'
+          'poiId', 'poiName', 'createdAt', 'expiresAt', 'viewCount', 'allowReplies'
         ])
+        && request.resource.data.get('allowReplies', false) is bool
         && request.resource.data.kind in ['image', 'video', 'text']
         && request.resource.data.get('viewCount', 0) == 0
         && request.resource.data.get('text', '') is string

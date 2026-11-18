@@ -21,7 +21,8 @@ function mockRef(path, constraints = []) {
       const data = mockDocuments.get(path);
       if (data instanceof Error) throw data;
       if (Array.isArray(data) || path.split('/').length % 2 === 1) {
-        const docs = (data || []).map((row) => ({ id: row.id, data: () => row.data }));
+        const maximum = constraints.find(([kind]) => kind === 'limit')?.[1] ?? Infinity;
+        const docs = (data || []).slice(0, maximum).map((row) => ({ id: row.id, data: () => row.data }));
         return { empty: docs.length === 0, docs };
       }
       return { exists: Boolean(data), data: () => data };
@@ -117,6 +118,26 @@ test.each([
     expect(mockWebSearch).not.toHaveBeenCalled();
   },
 );
+
+test('answers school contact requests from the selected campus directory snapshot', async () => {
+  const result = await executeCampusAssistantCore({
+    request: {
+      auth: null,
+      data: {
+        messages: [{ role: 'user', content: '我們學校的總機電話是多少？' }],
+        context: { schoolId: 'yuntech' },
+      },
+    },
+    runId: 'school-directory',
+    startedAt: Date.now(),
+  });
+  expect(result.content).toContain('國立雲林科技大學');
+  expect(result.content).toContain('(05)5342601');
+  expect(result.citations[0].source).toBe('https://data.gov.tw/dataset/6091');
+  expect(result.debug).toMatchObject({ freshness: 'snapshot', sourcesUsed: 1 });
+  expect(mockWebSearch).not.toHaveBeenCalled();
+  expect(mockModel).not.toHaveBeenCalled();
+});
 
 test('web search fallback forwards the selected authorized schoolId', async () => {
   mockWebSearch.mockResolvedValueOnce({
@@ -483,13 +504,17 @@ describe('authorization failures inside the real core stop the callable', () => 
     ['查我的請假狀態', 'leaveRequests', '目前無法讀取請假紀錄'],
     [`查我的報修狀態，單號：${repairId}`, `schools/pu/repairRequests/${repairId}`, '暫時讀不到這筆報修狀態'],
     ['我的報修', 'schools/pu/repairRequests', '暫時讀不到報修列表'],
-    ['幫我續借快到期的書', `users/${uid}/schools/pu/libraryLoans`, '目前找不到可續借的借閱紀錄'],
+    ['幫我續借快到期的書', `users/${uid}/schools/pu/libraryLoans`, '無法完整讀取'],
   ])('an ordinary reader outage keeps the existing recovery response: %s', async (message, path, copy) => {
     mockDocuments.set(path, new Error('temporary-reader-outage'));
     const result = await ask(message);
 
     expect(result.run.status).toBe('completed');
     expect(result.content).toContain(copy);
+    if (path.endsWith('/libraryLoans')) {
+      expect(result.actions).toEqual([]);
+      expect(result.content).not.toContain('目前找不到');
+    }
     expect(mockModel).not.toHaveBeenCalled();
   });
 });

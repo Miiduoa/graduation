@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from typing import Sequence
 
@@ -84,17 +85,12 @@ def get_or_create_collection(name: str = "campus") -> chromadb.Collection:
     return collection
 
 
-def _doc_id(source: str, idx: int, text: str = "") -> str:
-    h = hashlib.md5(f"{source}:{idx}:{text[:80]}".encode()).hexdigest()[:12]
-    return f"{source}_{idx}_{h}"
-
-
-def index_documents(
+def index_written_ids(
     documents: Sequence[dict],
     collection_name: str = "campus",
     embedding_fn=None,
-) -> int:
-    """Index a batch of documents.
+) -> tuple[int, list[str]]:
+    """Index a batch of documents and return written chunk IDs.
 
     Each document dict must have ``text`` and ``source`` keys,
     and may optionally include ``metadata``.
@@ -112,15 +108,17 @@ def index_documents(
         chunks = _splitter.split_text(text)
 
         for i, chunk in enumerate(chunks):
-            doc_id = _doc_id(source, i, chunk)
+            identity = [source, extra_meta.get("schoolId"), extra_meta.get("firestore_id"), i, chunk]
+            doc_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
             all_chunks.append(chunk)
             all_ids.append(doc_id)
-            all_metas.append({"source": source, "chunk_index": i, **extra_meta})
+            all_metas.append({**extra_meta, "source": source, "chunk_index": i})
 
     if not all_chunks:
-        return 0
+        return 0, []
 
     batch_size = 256
+    written: list[str] = []
     for start in range(0, len(all_chunks), batch_size):
         end = start + batch_size
         batch_texts = all_chunks[start:end]
@@ -136,9 +134,19 @@ def index_documents(
             kwargs["embeddings"] = embedding_fn(batch_texts)
 
         collection.upsert(**kwargs)
+        written.extend(batch_ids)
 
     logger.info("Indexed %d chunks from %d documents into '%s'", len(all_chunks), len(documents), collection_name)
-    return len(all_chunks)
+    return len(all_chunks), written
+
+
+def index_documents(
+    documents: Sequence[dict],
+    collection_name: str = "campus",
+    embedding_fn=None,
+) -> int:
+    count, _ids = index_written_ids(documents, collection_name=collection_name, embedding_fn=embedding_fn)
+    return count
 
 
 def delete_by_source(source: str, collection_name: str = "campus") -> None:

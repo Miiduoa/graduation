@@ -13,6 +13,7 @@ import {
 jest.mock('../state/auth', () => ({
   useAuth: () => mockAuth,
 }));
+jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => null }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../services/assistantPermissions', () => ({

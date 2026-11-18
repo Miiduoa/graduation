@@ -21,6 +21,7 @@ if str(AI_SERVER_ROOT) not in sys.path:
 import config
 from rag import indexer, retriever
 
+# Must match the immutable legacy checkout used by CI for seed and rollback.
 COLLECTION = "upgrade_test"
 HOUSING_TEXT = "Campus housing: dormitory maintenance and repair requests."
 BUS_TEXT = "Campus transit: shuttle bus arrivals and stations."
@@ -59,11 +60,38 @@ def assert_saved_records(expected_count: int) -> None:
             where={"source": "smoke:bus"}, include=["documents", "metadatas"]
         )
         assert bus["documents"] == [BUS_TEXT], bus
-        matches = retriever.retrieve(
-            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed
+    # Legacy records remain readable, but lack the public campus metadata
+    # required by the current retriever and must not leak into scoped results.
+    for school in (None, "pu", "nchu"):
+        assert not retriever.retrieve(
+            "housing", collection_name=COLLECTION, embedding_fn=embed, school_id=school
         )
-        assert len(matches) == 1 and matches[0].source == "smoke:housing", matches
-        assert matches[0].score > 0.99, matches
+
+
+def assert_school_scoped_records() -> None:
+    # Exercise current indexing separately: its IDs and metadata intentionally
+    # differ from the immutable legacy fixture, without migrating legacy rows.
+    name = "upgrade_school_scope_test"
+    documents = [
+        {"source": "firestore:announcements", "text": HOUSING_TEXT,
+         "metadata": {"schoolId": "pu", "visibility": "public"}},
+        {"source": "firestore:events", "text": BUS_TEXT,
+         "metadata": {"schoolId": "nchu", "visibility": "public"}},
+    ]
+    for _ in range(2):
+        indexer.index_documents(documents, collection_name=name, embedding_fn=embed)
+        assert indexer.get_or_create_collection(name).count() == 2
+    matches = retriever.retrieve(
+        "housing", top_k=1, collection_name=name, embedding_fn=embed, school_id="pu"
+    )
+    assert len(matches) == 1 and matches[0].text == HOUSING_TEXT, matches
+    assert matches[0].source == "firestore:announcements", matches
+    assert matches[0].score > 0.99, matches
+    other = retriever.retrieve(
+        "housing", top_k=1, collection_name=name, embedding_fn=embed, school_id="nchu"
+    )
+    assert [row.text for row in other] == [BUS_TEXT], other
+    assert not retriever.retrieve("housing", collection_name=name, embedding_fn=embed)
 
 
 def assert_legacy_rollback() -> None:
@@ -106,12 +134,17 @@ def main() -> None:
     elif args.stage == "verify":
         assert store.exists(), "migration store is missing"
         assert_saved_records(2)
-        indexer.index_documents(
-            [DOCS[0]], collection_name=COLLECTION, embedding_fn=embed
+        collection = indexer.get_or_create_collection(COLLECTION)
+        housing = collection.get(where={"source": "smoke:housing"})
+        # Preserve the legacy ID: the current indexer uses a different ID scheme.
+        collection.upsert(
+            ids=housing["ids"], documents=housing["documents"],
+            metadatas=housing["metadatas"], embeddings=embed(housing["documents"]),
         )
         assert_saved_records(2)  # upsert does not duplicate the known ID
         indexer.delete_by_source("smoke:bus", collection_name=COLLECTION)
         assert_saved_records(1)
+        assert_school_scoped_records()
     elif args.stage == "restart":
         assert store.exists(), "migration store is missing"
         assert_saved_records(1)
@@ -119,6 +152,7 @@ def main() -> None:
             [DOCS[1]], collection_name=COLLECTION, embedding_fn=embed
         )
         assert_saved_records(2)
+        assert_school_scoped_records()
     else:
         assert store.exists(), "restored legacy snapshot is missing"
         assert_legacy_rollback()

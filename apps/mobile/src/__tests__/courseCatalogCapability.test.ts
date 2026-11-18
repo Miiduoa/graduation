@@ -25,7 +25,7 @@ test.each(['ncku', 'ntpu', 'ntu'])(
   },
 );
 
-test.each(['nthu', 'tenant-school-12', '', null])(
+test.each(['tenant-school-12', '', null])(
   'unknown school has neither integrated catalog nor public course link: %s',
   (schoolId) => {
     expect(resolveCourseCatalogCapability(schoolId)).toBeNull();
@@ -33,6 +33,12 @@ test.each(['nthu', 'tenant-school-12', '', null])(
     expect(resolveOfficialCourseQueryLink(schoolId)).toBeNull();
   },
 );
+
+test.each(['ncnu', 'nthu'])('public catalog and official source resolve for %s', (schoolId) => {
+  expect(resolveCourseCatalogCapability(schoolId)?.providerId).toBe(schoolId + '-public');
+  expect(hasIntegratedCourseCatalog(schoolId)).toBe(true);
+  expect(resolveOfficialCourseQueryLink(schoolId)?.url).toMatch(/^https:\/\//);
+});
 
 test('unsupported copy is truthful Traditional Chinese without inventing data', () => {
   const message = unsupportedCourseCatalogMessage('ncku', '國立成功大學');

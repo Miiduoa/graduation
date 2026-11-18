@@ -170,7 +170,7 @@ export function prepareCourseworkStudyDraft(read: CourseworkRead, assignmentId: 
 
 /** Read-only suggestions retain both the exact assignment and private clock evidence. */
 export async function findCourseworkStudyDrafts(read: CourseworkRead, assignmentId: string,
-  context: AssistantCalendarContext, options: { signal?: AbortSignal } = {}): Promise<CourseworkStudySuggestions> {
+  context: AssistantCalendarContext, options: { signal?: AbortSignal; date?: string } = {}): Promise<CourseworkStudySuggestions> {
   const abort = new AbortController();
   const stop = () => abort.abort();
   let running = true;
@@ -189,7 +189,8 @@ export async function findCourseworkStudyDrafts(read: CourseworkRead, assignment
       if (sourceKey(event.accountId, event.workspaceId, event.assignmentId) === id) stop();
     });
     const access = { ...context, isCurrent: active };
-    const result = await findCourseworkStudySlots(access, source.dueAt, { signal: abort.signal });
+    const result = await findCourseworkStudySlots(access, source.dueAt, { signal: abort.signal,
+      ...(options.date !== undefined && { date: options.date }) });
     if (!active()) return { kind: 'blocked', message: (sourceVersions.get(id) ?? 0) !== version ? SOURCE_CHANGED : STOPPED };
     if (result.kind !== 'available') return result;
     return { kind: 'available', checkedAt: result.checkedAt, message: result.message,

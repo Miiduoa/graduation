@@ -25,6 +25,24 @@ export default [
     },
   },
   {
+    files: [
+      '**/dmConversations.emulator.cjs',
+      '**/scripts/revokeDmAttachmentTokens.cjs',
+    ],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'script',
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-console': 'off',
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-undef': 'warn',
+    },
+  },
+  {
     files: ['**/*.test.js', '**/__tests__/**/*.js'],
     languageOptions: {
       globals: {

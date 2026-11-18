@@ -71,15 +71,17 @@ it('counts tool_use_failed and unknown calls as failed steps and continues', asy
   expect(r.modelCalls).toBe(3);
   expect(r.steps.map((s) => s.status)).toEqual(['error', 'error']);
 });
-it('retains deterministic partial results and cards when a later model call fails', async () => {
+it('answers from verified assignment data without relying on a model call', async () => {
   let calls = 0;
   const r = await ask(async () => {
     if (++calls === 1) return response('get_due_work');
     throw new V2Error(503, 'PROVIDER_UNAVAILABLE');
   }, '作業');
-  expect(r.answer).toContain('部分結果');
+  expect(r.answer).toContain('待繳作業');
   expect(r.answer).toContain('樹與圖');
-  expect(r.answer).toContain('/classroom');
+  expect(r.answer).toContain('2026-11-05 23:59');
+  expect(r.answer).not.toContain('請至頁面確認');
+  expect(calls).toBe(0);
 });
 it('strips unknown fields, resolves only exact unique titles, and reports available ids', async () => {
   const tools = createTools(fixtureAdapter().adapter, binding, secret, now, true);

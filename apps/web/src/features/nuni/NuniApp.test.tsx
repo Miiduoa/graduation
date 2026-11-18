@@ -39,7 +39,8 @@ vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: null, loading: false, signOutUser: vi.fn() }),
   GuestAuthProvider: ({ children }: { children: unknown }) => children,
 }));
-vi.mock('./Session', () => ({
+vi.mock('./Session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./Session')>()),
   NuniSessionProvider: ({ children }: { children: unknown }) => children,
   useNuniSession: () => ({
     session: mocks.signedIn

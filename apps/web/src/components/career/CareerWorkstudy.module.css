@@ -1,0 +1,67 @@
+.stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.card {
+  display: grid;
+  gap: 12px;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--border, #d7dce2);
+  border-radius: 16px;
+  overflow-wrap: anywhere;
+}
+.card h2,
+.stack p {
+  margin: 0;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.muted {
+  color: var(--text-secondary, #626870);
+  font-size: 0.9rem;
+}
+.field {
+  display: grid;
+  gap: 8px;
+}
+.stack input:not([type='checkbox']),
+.stack textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px;
+  border: 1px solid var(--border, #d7dce2);
+  border-radius: 8px;
+  background: var(--surface, white);
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
+}
+.stack textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+.stack button {
+  min-height: 48px;
+  padding: 10px 16px;
+  border: 1px solid var(--border, #d7dce2);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--surface, white);
+  font: inherit;
+  cursor: pointer;
+}
+.stack button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.stack :is(button, input, textarea, a):focus-visible {
+  outline: 3px solid var(--primary, #496cd0);
+  outline-offset: 3px;
+}
+.card p {
+  white-space: pre-wrap;
+}

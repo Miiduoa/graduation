@@ -84,7 +84,7 @@ it('lists today homework and reaches the description in one click', async () => 
   expect(screen.queryByRole('heading', { name: '週次練習' })).toBeNull();
   const today = screen.getByRole('heading', { name: '今天截止' }).closest('section');
   expect(today).toBeTruthy();
-  expect(within(today as HTMLElement).getByRole('link', { name: '查看說明' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001');
+  expect(within(today as HTMLElement).getByRole('link', { name: '查看說明' }).getAttribute('href')).toBe('/school-lms/homework/10001/20001?campus=pu');
   expect(within(today as HTMLElement).getByRole('link', { name: '玩課雲同一筆 ↗' }).getAttribute('href')).toBe(
     'https://tronclass.pu.edu.tw/course/10001/content#/activity/20001',
   );
@@ -118,7 +118,7 @@ it('does not load course materials until the user opens a course', async () => {
   await screen.findByRole('heading', { name: '期末專題提案' });
   fireEvent.click(screen.getByRole('tab', { name: '教材' }));
   expect(screen.getByRole('heading', { name: '進入課程後才讀取教材' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '讀取此課教材' }).getAttribute('href')).toBe('/school-lms?course=10001');
+  expect(screen.getByRole('link', { name: '讀取此課教材' }).getAttribute('href')).toBe('/school-lms?course=10001&campus=pu');
 });
 
 it('does not offer a download for files the school locked', async () => {
@@ -211,4 +211,14 @@ it('refreshes from the school instead of silently keeping stale rows', async () 
   await screen.findByRole('heading', { name: '期末專題提案' });
   fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
   expect(loadTronClassLms).toHaveBeenLastCalledWith('one', { refresh: true, expectedSchool: 'pu' });
+});
+
+it('opens the selected school’s public LMS even while account state is pending', () => {
+  context.schoolId = 'nthu';
+  context.uid = null;
+  context.loading = true;
+  render(<SchoolLmsPage />);
+  expect(screen.getByRole('link', { name: '清大 eLearn ↗' }).getAttribute('href')).toBe('https://elearn.nthu.edu.tw/');
+  expect(screen.getByRole('link', { name: '清大 eeclass ↗' }).getAttribute('href')).toBe('https://eeclass.nthu.edu.tw/');
+  expect(loadTronClassLms).not.toHaveBeenCalled();
 });

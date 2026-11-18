@@ -32,6 +32,7 @@ jest.mock('../../firebase', () => ({
 }));
 jest.mock('../../state/auth', () => ({ useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }) }));
 jest.mock('../../state/school', () => ({ useSchool: () => ({
+  selection: { schoolId: mockSchool },
   school: { id: mockSchool, name: mockSchool === 'pu' ? '靜宜大學' : '其他學校' },
   selectionReady: mockSelectionReady,
 }) }));

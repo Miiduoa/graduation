@@ -237,3 +237,16 @@
     flex: 1;
   }
 }
+
+.replySetting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.replySetting input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}

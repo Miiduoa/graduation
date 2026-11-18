@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-/* global require, structuredClone */
+/* global require, structuredClone, URL */
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
@@ -12,6 +12,8 @@ require.extensions['.ts'] = (module, filename) => {
   module._compile(source, filename);
 };
 const { searchSchools } = require('../src/schools.ts');
+const { resolveSchoolPublicServices } = require('../src/schoolPublicServices.ts');
+const { resolveOfficialCourseQueryLink, hasIntegratedCourseCatalog } = require('../src/courseCatalogCapability.ts');
 require.extensions['.ts'] = original;
 const schools = [
   { id: 'pu', name: '靜宜大學', shortName: '靜宜', code: 'PU' },
@@ -52,4 +54,41 @@ test('保留別名、網域與預設名錄搜尋', () => {
   assert.deepEqual(searchSchools('別 名', directory), directory);
   assert.deepEqual(searchSchools('example.EDU', directory), directory);
   assert.ok(searchSchools('NTU').some(s => s.id === 'ntu'));
+});
+
+
+test('所選校的課程、住宿、諮商、職涯入口皆屬於同一校', () => {
+  for (const id of ['nchu', 'yuntech', 'nkust', 'fcu']) {
+    const { services, schoolId } = resolveSchoolPublicServices(id);
+    assert.equal(schoolId, id);
+    for (const kind of ['courses', 'dormitory', 'health', 'career']) {
+      const { url } = services[kind];
+      assert.equal(new URL(url).protocol, 'https:');
+      assert.ok(new URL(url).hostname.endsWith(`.${id}.edu.tw`));
+    }
+    assert.equal(new Set(Object.values(services).map(link => link.url)).size, 4);
+    assert.equal(resolveOfficialCourseQueryLink(id).url, services.courses.url);
+    assert.equal(hasIntegratedCourseCatalog(id), false);
+  }
+  assert.equal(resolveSchoolPublicServices('tw-nchu'), resolveSchoolPublicServices('nchu'));
+});
+
+test('有校方課程查詢或說明頁時，只開放該校已核實的功能', () => {
+  for (const id of ['ncue', 'ncut', 'ncyu', 'ndhu', 'nfu', 'nuk', 'nuu']) {
+    const { url, label } = resolveOfficialCourseQueryLink(id);
+    const { protocol, hostname } = new URL(url);
+    assert.equal(protocol, 'https:');
+    assert.ok(hostname === `${id}.edu.tw` || hostname.endsWith(`.${id}.edu.tw`));
+    assert.ok(label);
+    assert.equal(hasIntegratedCourseCatalog(id), false);
+  }
+  for (const id of ['all', 'no-such-school', 'constructor', 'tw-nchu-unknown', null]) {
+    assert.equal(resolveSchoolPublicServices(id), null);
+    assert.equal(resolveOfficialCourseQueryLink(id), null);
+  }
+});
+
+test('暨南大學公開課程目錄有獨立的校內查詢入口', () => {
+  assert.equal(hasIntegratedCourseCatalog('ncnu'), true);
+  assert.equal(new URL(resolveOfficialCourseQueryLink('ncnu').url).hostname, 'ccweb6.ncnu.edu.tw');
 });

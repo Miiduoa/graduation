@@ -18,8 +18,8 @@ it('keeps a stable academic secondary-nav vocabulary', () => {
     '行事曆',
   ]);
   expect(ACADEMIC_LMS_SECTIONS.map((section) => section.label)).toEqual([
-    '玩課雲課程',
-    '玩課雲作業',
+    '校方課程',
+    '校方作業與教材',
   ]);
 });
 

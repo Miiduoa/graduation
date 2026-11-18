@@ -167,6 +167,7 @@ export function fixtureAdapter(ordering = false) {
   ];
   const writes: Obj[] = [];
   const adapter: Adapter = {
+    permissions: async () => ({ createPersonalEvent: true, prepareFoodOrder: true }),
     simulation: true,
     food: {
       enabled: () => ordering,

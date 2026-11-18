@@ -218,3 +218,27 @@ test('separates teaching todos from grading under matching section titles', asyn
   expect(groupIdx).toBeLessThan(gradingIdx);
   expect(assignmentIdx).toBeGreaterThan(gradingIdx);
 });
+
+test('each teaching course opens its own workspace without starting attendance', async () => {
+  jest.mocked(loadTeacherHome).mockResolvedValue({
+    courses: [
+      { id: 'a', groupId: 'group-a', name: '資料結構', role: 'instructor' },
+      { id: 'b', groupId: 'group-b', name: '資料庫', role: 'instructor' },
+    ],
+    tasks: [],
+  });
+  const view = render(<TeacherTodayScreen />);
+  fireEvent.press(await view.findByRole('button', { name: '資料結構，開啟課程工作台' }));
+  expect(safeNavigate).toHaveBeenLastCalledWith({}, 'CourseHub', {
+    groupId: 'group-a',
+    groupName: '資料結構',
+  });
+  fireEvent.press(view.getByRole('button', { name: '資料庫，開啟課程工作台' }));
+  expect(safeNavigate).toHaveBeenLastCalledWith({}, 'CourseHub', {
+    groupId: 'group-b',
+    groupName: '資料庫',
+  });
+  expect(startAttendanceSession).not.toHaveBeenCalled();
+  expect(view.getByRole('button', { name: '資料結構，開始點名' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '資料結構，成績簿' })).toBeTruthy();
+});

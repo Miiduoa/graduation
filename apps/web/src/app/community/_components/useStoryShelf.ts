@@ -88,6 +88,7 @@ export function useStoryShelf(source: StoryAuthorGroup[], schoolId: string, uid?
         ? {
             group,
             index,
+            viewerUid: uid,
             isOwner: !!uid && group.authorUid === uid && group.stories[index].authorUid === uid,
             hasPrevious: !!previous,
             hasNext: !!next,
