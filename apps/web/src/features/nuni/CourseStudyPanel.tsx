@@ -136,7 +136,7 @@ type StudyTextEncoding = 'utf-8' | 'big5';
 // plausible, valid-looking paragraph. Always decode the original bytes for
 // both private lessons and progress backups. A genuine UTF-8 U+FFFD remains
 // valid, while legacy WebViews can use their on-device FileReader fallback.
-async function readStudyFileBytes(file: File, signal?: AbortSignal): Promise<ArrayBuffer> {
+export async function readStudyFileBytes(file: File, signal?: AbortSignal): Promise<ArrayBuffer> {
   // A cancelled import must never start another on-device read, especially
   // after a WebView's non-cancellable Blob.arrayBuffer() finally settles.
   if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
@@ -145,11 +145,27 @@ async function readStudyFileBytes(file: File, signal?: AbortSignal): Promise<Arr
   // syntactically valid JSON must not replace the student's actual source.
   // Compare exact byte counts, then retry the original file via FileReader.
   if (typeof file.arrayBuffer === 'function') {
+    let cancelPending: (() => void) | undefined;
     try {
-      const bytes = await file.arrayBuffer();
+      // Blob.arrayBuffer has no AbortSignal argument. A broken mobile WebView
+      // can leave it pending forever; cancellation must release this import
+      // immediately instead of waiting for the original read to settle.
+      // This does not claim to interrupt the browser's underlying native I/O.
+      const nativeRead = file.arrayBuffer();
+      const bytes = await (signal ? Promise.race<ArrayBuffer>([
+        nativeRead,
+        new Promise<ArrayBuffer>((_, reject) => {
+          cancelPending = () => reject(new DOMException('Local file read aborted', 'AbortError'));
+          signal.addEventListener('abort', cancelPending, { once: true });
+          if (signal.aborted) cancelPending();
+        }),
+      ]) : nativeRead);
       if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
       if (bytes instanceof ArrayBuffer && bytes.byteLength === file.size) return bytes;
-    } catch { /* Fall through to the native on-device FileReader. */ }
+    } catch { /* Fall through to the native on-device FileReader unless cancelled. */ }
+    finally {
+      if (cancelPending) signal?.removeEventListener('abort', cancelPending);
+    }
   }
   if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
   if (typeof FileReader !== 'function') throw new Error('No local binary file reader');

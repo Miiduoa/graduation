@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { TutorExplanation } from '@/lib/studyTutor';
-import { CourseStudyPanel } from './CourseStudyPanel';
+import { CourseStudyPanel, readStudyFileBytes } from './CourseStudyPanel';
 import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress } from './courseStudyProgress';
 import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
 
@@ -2708,6 +2708,39 @@ it('cancelling a native FileReader backup read aborts actual device work and kee
     expect(note.value).toBe('手機讀檔前的未備份筆記');
     expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
     expect(screen.getByText(material.body)).toBeTruthy();
+  } finally {
+    vi.stubGlobal('FileReader', nativeReader);
+  }
+});
+
+it('cancels a permanently pending mobile Blob.arrayBuffer without waiting or launching a second reader', async () => {
+  const nativeReader = globalThis.FileReader;
+  const startedFallback = vi.fn();
+  vi.stubGlobal('FileReader', class {
+    constructor() { startedFallback(); }
+  });
+  let resolveLate!: (bytes: ArrayBuffer) => void;
+  const file = new File(['尚未載入的私人教材'], '待取消.txt', { type: 'text/plain' });
+  const readBlob = vi.fn(() => new Promise<ArrayBuffer>((resolve) => { resolveLate = resolve; }));
+  Object.defineProperty(file, 'arrayBuffer', { value: readBlob });
+  try {
+    const controller = new AbortController();
+    const pending = readStudyFileBytes(file, controller.signal);
+    expect(readBlob).toHaveBeenCalledOnce();
+    controller.abort();
+    // Do not resolve readBlob first: cancellation must settle an otherwise
+    // permanently hung browser promise and must not read private data twice.
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(startedFallback).not.toHaveBeenCalled();
+    resolveLate(new TextEncoder().encode('short').buffer);
+    await Promise.resolve();
+    expect(startedFallback).not.toHaveBeenCalled();
+
+    const next = new File(['可讀取的新教材'], '另一份.txt', { type: 'text/plain' });
+    const actual = new TextEncoder().encode('可讀取的新教材').buffer;
+    Object.defineProperty(next, 'arrayBuffer', { value: vi.fn().mockResolvedValue(actual) });
+    await expect(readStudyFileBytes(next, new AbortController().signal)).resolves.toEqual(actual);
+    expect(startedFallback).not.toHaveBeenCalled();
   } finally {
     vi.stubGlobal('FileReader', nativeReader);
   }

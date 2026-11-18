@@ -1,3 +1,9 @@
+## 2026-11-18：取消手機讀檔不再被永不回應的 Blob.arrayBuffer 卡住
+
+- iOS／Android 內嵌 WebView 有機會讓原生 `Blob.arrayBuffer()` Promise 一直未完成；之前學生即使按「取消讀取」，舊匯入 Promise 仍掛著直到底層回應。現在將原生讀取與本次 `AbortSignal` 競速，取消即讓等待者以 `AbortError` 結束，撤銷取消事件監聽，也不對遲到／損壞的舊結果啟動第二個 `FileReader`；下一份已授權教材可獨立載入。此作法不宣稱能中斷瀏覽器底層不可取消的 I/O。
+- 新增 DOM 測試所在檔案的直接非同步回歸：故意建立永不解決的 `arrayBuffer`，證實不需等它完成就能取消、不啟動備援讀取、遲到結果不影響新選檔。僅改白板讀取流程、回歸測試及文件，不新增套件／付費 API／私人教材傳輸，也不更改閱讀 v1/v2 或練習 v1 checkpoint。
+- 此為模擬行動瀏覽器的程式驗證，不等於 iOS Safari／Android Chrome 真機、VoiceOver／TalkBack、WebGPU 繁中教學或 Ahaboard 同機對照。所有精確 head CI／CodeQL、App 5504170 APPROVED、Maestro 及真機 gates 未齊前，PR 維持 Draft，不合併、不部署。
+
 ## 2026-11-18：同題競品觀測標籤禁止隱形字元與自動修剪
 
 - 改善人工觀測紀錄的來源可信度：`caseId`、日期／裝置／瀏覽器／網路與雙產品版本原本會被自動 `trim()`，且可混入換行、控制字元或 Unicode 雙向控制符，令輸出報告的題號與原 manifest 不完全相同，或讓人看錯裝置／版本。現在拒收這些含糊標籤，不擅自更改原始測量資料；保留合法繁體中文、內部空格與原順序。
