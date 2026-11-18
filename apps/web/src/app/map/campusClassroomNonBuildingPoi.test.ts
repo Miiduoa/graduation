@@ -397,3 +397,40 @@ describe('published POI classroom routing never trusts an unrelated Firestore bu
     }).matches).toEqual([otherSchool]);
   });
 });
+
+
+describe('malformed imported transit stop markers cannot become classroom destinations', () => {
+  it('rejects a scalar stop ID after an otherwise teaching-labelled POI import', () => {
+    // Synthetic Firestore schema drift: one string instead of a string array.
+    const imported = {
+      ...hall, id: 'synthetic-scalar-stop', transitStopIds: 'stop-123',
+      category: '教學', building: '主顧樓',
+    } as unknown as CampusMapPlaceLike;
+    for (const schoolId of ['pu', 'another-school']) {
+      expect(resolveCampusClassroom({
+        schoolId, query: 'PH303', locations: [imported, hall],
+      }).matches, schoolId).toEqual([hall]);
+    }
+  });
+
+  it('rejects malformed non-string stop markers while accepting blank metadata', () => {
+    // A number from a damaged import still signals transit metadata; no
+    // physical bus stop or room location is claimed by these synthetic rows.
+    const malformed = {
+      ...hall, id: 'synthetic-numeric-stop',
+      transitStopIds: ['', 42, null],
+    } as unknown as CampusMapPlaceLike;
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [malformed, hall],
+    }).matches).toEqual([hall]);
+
+    for (const transitStopIds of ['', '  ', []]) {
+      const building = {
+        ...hall, transitStopIds,
+      } as unknown as CampusMapPlaceLike;
+      expect(resolveCampusClassroom({
+        schoolId: 'another-school', query: 'PH303', locations: [building],
+      }).matches).toEqual([building]);
+    }
+  });
+});
