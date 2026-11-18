@@ -661,7 +661,8 @@ it('withdraws a visible OSM building when the map POI identity changes while the
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   rerender(<CampusSpatialExplorer school="pu" locations={[moved]} selected={moved} onSelect={onSelect} />);
   await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
-  expect(within(dialog).getByText(/0 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
+  expect(within(dialog).queryByText(/棟公開建築輪廓/)).toBeNull();
   expect(within(dialog).queryByRole('link', { name: '查看此棟建築的 OpenStreetMap 原始輪廓' })).toBeNull();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(1);
