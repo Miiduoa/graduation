@@ -198,3 +198,44 @@ describe('defensive classroom destination coordinates and category qualifiers', 
     }).matches).toEqual([legitimate]);
   });
 });
+
+describe('source-identified transport stops remain non-classroom destinations', () => {
+  it('rejects a relabelled bundled stop even when its category and building name look like a hall', () => {
+    const publishedStop = PROVIDENCE_BUS_STOPS.find((stop) => stop.id === 'pu-bus-zhugu');
+    expect(publishedStop?.transitStopIds?.length).toBeGreaterThan(0);
+    // The stop ID list comes from the bundled transit catalog. The changed
+    // category/name/building are synthetic data-integrity regression inputs.
+    const relabelledStop = {
+      ...publishedStop!,
+      id: 'synthetic-relabelled-stop',
+      name: '主顧樓',
+      category: '教學',
+      building: '主顧樓',
+    };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu',
+      query: 'PH303',
+      locations: [relabelledStop, hall],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([hall]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu',
+      query: '主顧樓 PH303',
+      locations: [relabelledStop],
+    }).status).toBe('unmatched');
+  });
+
+  it('does not reject a genuine hall for an empty or whitespace-only optional transit marker', () => {
+    for (const transitStopIds of [[], [' ', '']]) {
+      const building = { ...hall, transitStopIds };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu',
+        query: 'PH303',
+        locations: [building],
+      });
+      expect(result.status).toBe('matched');
+      expect(result.matches).toEqual([building]);
+    }
+  });
+});
