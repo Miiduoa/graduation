@@ -9,6 +9,7 @@ const INSTANT = '2026-11-09T12:00:00.000Z';
 const DRAFT_PREFIX = 'campus.assistant-plan-draft.v1:';
 const BACKEND_KEY = 'qa.assistant-backend.v1';
 const persistentBackend = new URLSearchParams(location.search).get('draft-reload') === '1';
+const pickupScenario = new URLSearchParams(location.search).get('pickup') === '1';
 const nativeStorage = {
   getItem: Storage.prototype.getItem,
   setItem: Storage.prototype.setItem,
@@ -19,8 +20,12 @@ const original: FixtureEvent[] = [
   { title: '測試微積分複習', date: DATE, allDay: false, startTime: '19:00', endTime: '19:30' },
   { title: '測試英文閱讀', date: DATE, allDay: false, startTime: '20:00', endTime: '20:30' },
 ];
-type Card = { tool: string; args: FixtureEvent; token: string; mutationId: string; schoolId: string; destination: string };
-type RequestRow = { sequence: number; action: string; account: string; body: Record<string, any>; outcome?: string };
+const pickupEvent: FixtureEvent = {
+  title: '取餐：測試學生餐廳', date: '2099-11-18', allDay: false, startTime: '12:00', endTime: '12:15',
+};
+type Card = { tool: string; args: FixtureEvent; token: string; mutationId: string; schoolId: string; destination: string;
+  sourceBound?: 'food-pickup' };
+type RequestRow = { sequence: number; action: string; account: string; body: Record<string, unknown>; outcome?: string };
 type FixtureScope = { account: string; school: string; context: string };
 type PlanFixture = { originalEvents: FixtureEvent[]; revisedEvents: FixtureEvent[] | null };
 type Preview = { ask: number; account: string; cards: Card[] };
@@ -64,7 +69,7 @@ const qa = {
   snapshot: () => ({
     school: qa.school, account: qa.account, requests, writes, revoked: [...revoked],
     records: [...records.values()], previews, waiting: !!release,
-    pageEpoch, pageAskCount, persistentBackend, backendKey: persistentBackend ? BACKEND_KEY : null,
+    pageEpoch, pageAskCount, persistentBackend, pickupScenario, backendKey: persistentBackend ? BACKEND_KEY : null,
     backendPurpose: 'QA-only fake backend and fake tokens; this is not product draft storage.',
   }),
   configure: (value: Partial<typeof faults>) => { Object.assign(faults, value); persistBackend(); },
@@ -148,7 +153,7 @@ Storage.prototype.removeItem = function(key: string) {
   return nativeStorage.removeItem.call(this, key);
 };
 persistBackend();
-(window as any).__agentQA = qa;
+(window as Window & { __agentQA: typeof qa }).__agentQA = qa;
 async function hold() { await new Promise<void>((resolve) => { release = resolve; }); }
 function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -170,22 +175,24 @@ function sameEventContent(left: FixtureEvent, right: unknown) {
     keys.every(key => Object.hasOwn(other, key) && other[key] === left[key as keyof FixtureEvent]);
 }
 function preview(schoolId: string, revised: boolean, account: string, requestAsk: number) {
-  const events = revised ? planFixture.revisedEvents || planFixture.originalEvents.map((event, index) =>
+  const events = pickupScenario ? [pickupEvent] : revised ? planFixture.revisedEvents || planFixture.originalEvents.map((event, index) =>
     index === 1 ? { ...event, startTime: '21:00', endTime: '21:30' } : event) : planFixture.originalEvents;
   const next = events.map((event, index) => {
     const mutationId = persistentBackend
       ? 'qa-page-' + pageEpoch + '-ask-' + requestAsk + '-' + (revised ? 'revised' : 'original') + '-' + (index + 1)
       : 'qa-' + (revised ? 'revised-' + requestAsk : 'original') + '-' + (index + 1);
     const card: Card = { tool: 'propose_personal_event', schoolId, mutationId,
-      token: 'fixture-token-' + mutationId, destination: '/calendar', args: { ...event } };
+      token: 'fixture-token-' + mutationId, destination: '/calendar', args: { ...event },
+      ...(pickupScenario ? { sourceBound: 'food-pickup' as const } : {}) };
     cards.set(card.token, card);
     cardAccounts.set(card.token, account);
     return card;
   });
   previews.push({ ask: requestAsk, account, cards: next });
   persistBackend();
-  return { answer: revised ? '已重新預覽測試安排；請逐筆確認。' : '這是尚未寫入的測試安排。',
-    steps: [], cards: next, simulation: true };
+  return { answer: pickupScenario ? '已核對測試訂單的取餐時間，請確認後再加入個人行事曆。'
+    : revised ? '已重新預覽測試安排；請逐筆確認。' : '這是尚未寫入的測試安排。',
+    steps: [], cards: next, simulation: true, ...(pickupScenario ? { dataRead: true } : {}) };
 }
 window.fetch = async (input, init) => {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
@@ -200,7 +207,9 @@ window.fetch = async (input, init) => {
   persistBackend(); // Dispatch survives reload even if no response is delivered.
   const finish = (value: unknown, status = 200) => { row.outcome = String(status); persistBackend(); return response(value, status); };
   if (!account) return finish({ message: 'Invalid fixture account' }, 400);
-  if (action === 'capability') return finish({ version: 2, enabled: true, ready: true, fallback: false });
+  if (action === 'capability') return finish(pickupScenario
+    ? { version: 2, enabled: true, planning: true, ready: false, fallback: false }
+    : { version: 2, enabled: true, ready: true, fallback: false });
   if (!['fixture-campus-a', 'fixture-campus-b'].includes(body.schoolId)) return finish({ message: 'Invalid fixture school' }, 400);
   if (action === 'ask') {
     askCount += 1;

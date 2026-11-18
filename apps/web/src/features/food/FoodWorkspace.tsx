@@ -246,6 +246,7 @@ function FoodAccount({
                 client={client}
                 cache={cache}
                 accountId={accountId}
+                context={context}
                 tenantId={tenantId}
                 initialOrder={
                   created?.tenantId === tenantId
