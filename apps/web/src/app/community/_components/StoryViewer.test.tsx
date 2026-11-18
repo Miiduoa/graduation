@@ -224,7 +224,7 @@ it('lets students focus and read media captions without switching stories by arr
   expect(viewer.next).toHaveBeenCalledTimes(2);
 });
 
-it('pauses image-story auto-advance while the caption is focused and resumes the remaining time', () => {
+it('pauses image-story auto-advance while the caption is focused and resumes the remaining time', async () => {
   vi.useFakeTimers();
   const viewer = {
     group: {
@@ -250,7 +250,11 @@ it('pauses image-story auto-advance while the caption is focused and resumes the
     switchAuthor: vi.fn(),
   };
   render(<StoryViewer author="同學" viewer={viewer} />);
-  fireEvent.load(screen.getByRole('img', { name: '限時動態照片' }));
+  // Next/Image resolves image decoding asynchronously before invoking the supplied onLoad.
+  // Flush that promise before advancing fake timers, just as a decoded image is ready in the browser.
+  await act(async () => {
+    fireEvent.load(screen.getByRole('img', { name: '限時動態照片' }));
+  });
   fireEvent.click(screen.getByRole('button', { name: '自動播放' }));
   act(() => vi.advanceTimersByTime(3_000));
 
