@@ -275,7 +275,9 @@ function hashLocalFixture(file, where) {
 }
 export function verifyLocalStudyFixtures(raw, manifestPath) {
   const report = auditStudyComparisons(raw);
-  const root = realpathSync(dirname(resolve(manifestPath)));
+  let root;
+  try { root = realpathSync(dirname(resolve(manifestPath))); }
+  catch { fail('manifest', 'directory unavailable'); }
   raw.trials.forEach((trial, index) => {
     for (const [fileKey, digestKey] of [
       ['sourceFile', 'sourceSha256'], ['questionFile', 'questionSha256'],
@@ -289,12 +291,22 @@ export function verifyLocalStudyFixtures(raw, manifestPath) {
   });
   return { ...report, fixtureIntegrityVerified: true };
 }
+// Malformed JSON error messages may include excerpts of private course notes;
+ // filesystem errors also embed a student's local directory. Neither belongs in
+ // CI logs, CLI output or shared bug reports.
+function readLocalManifest(path) {
+  let content;
+  try { content = readFileSync(path, 'utf8'); }
+  catch { fail('manifest', 'file unreadable'); }
+  try { return JSON.parse(content); }
+  catch { fail('manifest', 'invalid JSON'); }
+}
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.argv.length !== 3 &&
         !(process.argv.length === 4 && process.argv[3] === '--verify-fixtures'))
       fail('usage', 'node compare.mjs <paired-observations.json> [--verify-fixtures]');
-    const manifest = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+    const manifest = readLocalManifest(process.argv[2]);
     const report = process.argv[3] === '--verify-fixtures'
       ? verifyLocalStudyFixtures(manifest, process.argv[2])
       : auditStudyComparisons(manifest);

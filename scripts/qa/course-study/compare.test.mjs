@@ -407,3 +407,35 @@ test('streams large binary PDF fixtures and detects a changed last byte', () => 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+
+test('invalid or missing manifest never prints private source text or local paths to stderr', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nuni-private-course-'));
+  try {
+    const script = fileURLToPath(new URL('./compare.mjs', import.meta.url));
+    const secret = 'PRIVATE_LECTURE_QUOTE_2748';
+    const malformed = join(directory, 'private-lesson-manifest.json');
+    writeFileSync(malformed, `{"privateLesson":"${secret}", trailing-bad-json}`);
+    const invalid = spawnSync(process.execPath, [script, malformed],
+      { encoding: 'utf8' });
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /manifest: invalid JSON/);
+    assert.equal(invalid.stderr.includes(secret), false);
+    assert.equal(invalid.stderr.includes(directory), false);
+    assert.equal(invalid.stdout, '');
+
+    const missing = join(directory, 'never-created-observations.json');
+    const absent = spawnSync(process.execPath, [script, missing, '--verify-fixtures'],
+      { encoding: 'utf8' });
+    assert.notEqual(absent.status, 0);
+    assert.match(absent.stderr, /manifest: file unreadable/);
+    assert.equal(absent.stderr.includes(directory), false);
+    assert.equal(absent.stdout, '');
+
+    const missingParent = join(directory, 'missing-subdirectory', 'observations.json');
+    assert.throws(() => verifyLocalStudyFixtures(fixture(), missingParent),
+      /manifest: directory unavailable/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
