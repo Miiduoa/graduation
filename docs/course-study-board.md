@@ -1721,3 +1721,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 上一版 head `0863072756e251b363849ac9a5151038da439e62` 的 CI Web Tests 在 17,084 項中有 1 項失敗（16,968 通過、115 跳過）：`recovers local Chinese lesson bytes after a WebView Blob read never resolves`。實際 job log 指向模擬 `CompletedReader` 的回傳位元組未被 `instanceof ArrayBuffer` 辨認，導致 `Incomplete local file reader result` 和未處理錯誤。
 - 修正測試用的 `CompletedReader`：以測試瀏覽器環境的 `new ArrayBuffer(bytes.byteLength)` 建立結果，再逐位元組寫回原始繁體中文教材。這確保模擬符合原生 FileReader 的 ArrayBuffer 來源，仍維持正式程式的精確 byteLength 驗證與逾時／取消防護，**未放寬檔案檢查**。
 - 本輪不改產品邏輯、學生 v1/v2 進度或 v1 練習 checkpoint，不增套件、不外傳教材。須以此修補產生的確切新 SHA 重跑 Web Tests／全部 GitHub CI、CodeQL；App 5504170 APPROVED、Maestro、iOS/Android 真機與 Ahaboard 同題同機對照仍缺證據。PR 保持 Draft、不合併、不部署。
+
+
+### 2026-11-18：行動 WebView 跨 Realm 檔案位元組可安全匯入
+
+- 某些 iframe／原生橋接把真正的 `ArrayBuffer` 從另一個 JavaScript Realm 回傳，雖然每個位元組正確，原本 `instanceof ArrayBuffer` 會誤判失敗，學生無法匯入教材或恢復閱讀進度。現在本地 Blob 路徑及 `FileReader` 備援共用相同的完整位元組確認：本 Realm 的 ArrayBuffer 不額外複製；跨 Realm 僅接受真正可轉為 Uint8Array 且與檔案大小完全相符的 ArrayBuffer，複製回目前 Realm 後再交由既有嚴格解碼與 JSON 邊界檢查。
+- 新增三組 Vitest／模擬 WebView 回歸：跨 Realm Blob、跨 Realm FileReader、偽造型別標籤與截短緩衝區。維持原有取消／30 秒逾時、UTF-8 嚴格解碼、失敗不覆蓋未備份筆記；不改 v1/v2 閱讀與 v1 練習 checkpoint，不新增套件或外傳教材。
+- 此修補屬程式及模擬瀏覽器測試，不是 iOS／Android 真機或 Ahaboard 競品驗收。完整 CI、CodeQL、指定 App 5504170 正式 APPROVED、Maestro／手機及 WebGPU 中文品質須依本 commit 重新核對。PR 保持 Draft，不合併、不部署。

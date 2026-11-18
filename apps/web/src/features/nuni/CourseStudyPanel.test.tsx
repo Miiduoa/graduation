@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { runInNewContext } from 'node:vm';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel, readStudyFileBytes } from './CourseStudyPanel';
@@ -591,6 +592,62 @@ it('recovers local Chinese lesson bytes after a WebView Blob read never resolves
     vi.unstubAllGlobals();
     vi.useRealTimers();
   }
+});
+
+it('reads exact UTF-8 from a foreign-realm Blob buffer without silently replacing the source', async () => {
+  const content = '跨視窗讀取的資料庫講義，仍要逐字保留原文。';
+  const bytes = new TextEncoder().encode(content);
+  const foreign = runInNewContext('new ArrayBuffer(size)', { size: bytes.byteLength }) as ArrayBuffer;
+  expect(foreign instanceof ArrayBuffer).toBe(false);
+  new Uint8Array(foreign).set(bytes);
+  const file = new File([bytes], '跨視窗講義.txt', { type: 'text/plain' });
+  const nativeRead = vi.fn().mockResolvedValue(foreign);
+  Object.defineProperty(file, 'arrayBuffer', { value: nativeRead });
+  const decoded = await readStudyFileBytes(file);
+  expect(decoded instanceof ArrayBuffer).toBe(true);
+  expect(new TextDecoder('utf-8', { fatal: true }).decode(decoded)).toBe(content);
+  expect(nativeRead).toHaveBeenCalledOnce();
+});
+
+it('reads exact bytes from a foreign-realm FileReader bridge after Blob fails', async () => {
+  const content = '行動版備援仍可還原完整繁體中文課程原文。';
+  const bytes = new TextEncoder().encode(content);
+  const foreign = runInNewContext('new ArrayBuffer(size)', { size: bytes.byteLength }) as ArrayBuffer;
+  new Uint8Array(foreign).set(bytes);
+  const file = new File([bytes], '跨視窗備援.txt', { type: 'text/plain' });
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockRejectedValue(new Error('native bridge failed')) });
+  let fallbackReads = 0;
+  class ForeignReader {
+    readyState = 0;
+    result: ArrayBuffer | null = null;
+    error = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    readAsArrayBuffer() { fallbackReads += 1; this.readyState = 2; this.result = foreign; this.onload?.(); }
+    abort() { this.readyState = 2; this.onabort?.(); }
+  }
+  vi.stubGlobal('FileReader', ForeignReader);
+  try {
+    expect(new TextDecoder('utf-8', { fatal: true }).decode(await readStudyFileBytes(file))).toBe(content);
+    expect(fallbackReads).toBe(1);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('rejects spoofed or truncated cross-realm buffers and reads the real local file', async () => {
+  const content = '假冒位元組長度不可以污染本次教材。';
+  const bytes = new TextEncoder().encode(content);
+  const fake = { byteLength: bytes.byteLength, [Symbol.toStringTag]: 'ArrayBuffer' };
+  const file = new File([bytes], '防止錯誤讀取.txt', { type: 'text/plain' });
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(fake) });
+  const decoded = await readStudyFileBytes(file);
+  expect(new TextDecoder('utf-8', { fatal: true }).decode(decoded)).toBe(content);
+  const truncated = runInNewContext('new ArrayBuffer(size)', { size: bytes.byteLength - 1 }) as ArrayBuffer;
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(truncated) });
+  const recovered = await readStudyFileBytes(file);
+  expect(new TextDecoder('utf-8', { fatal: true }).decode(recovered)).toBe(content);
 });
 
 it('rejects a permanently stalled native FileReader without retaining a pending import', async () => {

@@ -140,6 +140,25 @@ type StudyTextEncoding = 'utf-8' | 'big5';
 // plausible, valid-looking paragraph. Always decode the original bytes for
 // both private lessons and progress backups. A genuine UTF-8 U+FFFD remains
 // valid, while legacy WebViews can use their on-device FileReader fallback.
+// Some embedded mobile WebViews return a genuine ArrayBuffer from an iframe
+// or native bridge realm. instanceof fails across realms although the exact
+// bytes are valid. Copy foreign-realm bytes into this realm, but reject fake
+// ArrayBuffer tags, short reads, SharedArrayBuffer and detached buffers.
+function exactStudyLocalArrayBuffer(value: unknown, expectedSize: number): ArrayBuffer | null {
+  try {
+    if (value instanceof ArrayBuffer)
+      return value.byteLength === expectedSize ? value : null;
+    if (Object.prototype.toString.call(value) !== '[object ArrayBuffer]') return null;
+    const bytes = new Uint8Array(value as ArrayBuffer);
+    if (bytes.byteLength !== expectedSize) return null;
+    const local = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(local).set(bytes);
+    return local;
+  } catch {
+    return null;
+  }
+}
+
 export async function readStudyFileBytes(file: File, signal?: AbortSignal): Promise<ArrayBuffer> {
   // A cancelled import must never start another on-device read, especially
   // after a WebView's non-cancellable Blob.arrayBuffer() finally settles.
@@ -172,7 +191,8 @@ export async function readStudyFileBytes(file: File, signal?: AbortSignal): Prom
         }),
       ]);
       if (signal?.aborted) throw new DOMException('Local file read aborted', 'AbortError');
-      if (bytes instanceof ArrayBuffer && bytes.byteLength === file.size) return bytes;
+      const completeBytes = exactStudyLocalArrayBuffer(bytes, file.size);
+      if (completeBytes) return completeBytes;
     } catch { /* Fall through to the native on-device FileReader unless cancelled. */ }
     finally {
       if (nativeReadTimeout !== undefined) clearTimeout(nativeReadTimeout);
@@ -216,8 +236,8 @@ export async function readStudyFileBytes(file: File, signal?: AbortSignal): Prom
     reader.onload = () => {
       // FileReader is the final local fallback: never accept a short/extra
       // buffer as if it were the complete on-disk lesson or progress JSON.
-      if (reader.result instanceof ArrayBuffer && reader.result.byteLength === file.size)
-        settle(reader.result);
+      const completeBytes = exactStudyLocalArrayBuffer(reader.result, file.size);
+      if (completeBytes) settle(completeBytes);
       else settle(undefined, new Error('Incomplete local file reader result'));
     };
     reader.onerror = () => settle(undefined, reader.error ?? new Error('Local file reader failed'));
