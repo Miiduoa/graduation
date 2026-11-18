@@ -16,7 +16,7 @@ import {
 import type { CampusSpatialScene } from './campusSpatialScene';
 import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
-import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
+import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
 import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
@@ -32,6 +32,17 @@ type Props = {
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
+// The 3D overlay is scoped to the *filtered* map. When the view contains
+// only transit stops (official transit feed), OSM nodes or other non-outline
+// POIs, downloading every campus building wastes bandwidth on mobile.
+// Include relation IDs for future reviewed relation support, without
+// claiming that each way/relation has passed the building geometry parser.
+const POTENTIAL_OUTLINE_POI_IDS = new Set(
+  PROVIDENCE_CAMPUS_PLACES
+    .filter((place) => place.verification === 'cross-checked' &&
+      /^https:\/\/www\.openstreetmap\.org\/(?:way|relation)\/[1-9]\d*$/.test(place.sourceUrl))
+    .map((place) => place.id),
+);
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 // Link the original university building-unit listing, not the virtual tour.
 // No university photographs or floor plans are copied into nuni.
@@ -398,6 +409,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 
 function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
+  const hasOutlineCandidate = school === 'pu' &&
+    model.points.some((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id));
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
@@ -631,6 +644,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) {
       staleSnapshotRef.current = false;
+      return;
+    }
+    if (!hasOutlineCandidate) {
+      // With no audited outline candidate, do not contact Overpass and do not
+      // retain unused volumes in memory. An in-flight request is aborted by
+      // this effect's previous cleanup when the map filter changes.
+      deferredExpiredRefreshRef.current = false;
+      footprintExpiresAtRef.current = null;
+      staleSnapshotRef.current = false;
+      setFootprintClock(null);
+      setFootprints([]);
+      setFootprintDate(null);
+      setFootprintBaseDate(null);
+      setFootprintStale(false);
+      setFootprintRefreshing(false);
+      setFootprintRefreshFailed(false);
+      setFootprintStatus('unavailable');
       return;
     }
     if (restoredCooldownRef.current) {
@@ -874,7 +904,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       document.removeEventListener('visibilitychange', onVisibilityChange);
       controller.abort();
     };
-  }, [school, model.unavailableReason, footprintAttempt]);
+  }, [school, model.unavailableReason, hasOutlineCandidate, footprintAttempt]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
@@ -930,9 +960,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             <p className={styles.note}>選擇地點或拖動導覽進度，讓視角跟著移動。步行路線請使用導航。</p>
             {school === 'pu' && (
               <div className={styles.footprintInfo}>
-                {footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
-                {footprintStatus === 'deferred' && <span role="status">目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓；地點標記與導航仍可使用。</span>}
-                {footprintStatus === 'unavailable' && <>
+                {hasOutlineCandidate && footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
+                {hasOutlineCandidate && footprintStatus === 'deferred' && <span role="status">目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓；地點標記與導航仍可使用。</span>}
+                {!hasOutlineCandidate && <span role="status">
+                  目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源，不下載整座校園的建築資料；地點標記與步行導航仍可使用。
+                </span>}
+                {hasOutlineCandidate && footprintStatus === 'unavailable' && <>
                   <span role="status">公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
                   {footprintRetryAfter !== null && <span id={footprintCooldownNoteId} role="status">
                     為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
@@ -944,7 +977,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     重新讀取建築輪廓
                   </button>
                 </>}
-                {footprintStatus === 'ready' && (
+                {hasOutlineCandidate && footprintStatus === 'ready' && (
                   <>
                     <strong role="status">{visibleFootprints.length} 棟公開建築輪廓</strong>
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
