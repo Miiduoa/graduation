@@ -438,8 +438,6 @@ it('retries incomplete course content after its stored one-minute TTL expires', 
 });
 
 it.each([
-  { status: 401, thrown: false },
-  { status: 401, thrown: true },
   { status: 404, thrown: false },
   { status: 503, thrown: false },
   { status: 503, thrown: true },
@@ -466,19 +464,26 @@ it.each([
   expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
 
-it('keeps original course data when supplementary courseware throws a session error', async () => {
-  const { request, source } = setup();
+it.each([
+  { caseName: 'returned 401', mode: 'result' },
+  { caseName: 'thrown HTTP 401', mode: 'http-error' },
+  { caseName: 'thrown session-expired error', mode: 'expired' },
+])('requires reconnect without caching when supplementary courseware has $caseName', async ({ mode }) => {
+  const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
-    if (query === 'type=courseware_activity') throw new Error('TronClass session 已失效，請重新登入');
-    return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+    if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+    if (mode === 'result') return { ok: false, status: 401 };
+    if (mode === 'http-error') throw Object.assign(new Error('HTTP 401'), { status: 401 });
+    throw new Error('TronClass session 已失效，請重新登入');
   });
+
   const response = await request({ courseId: 10001 });
-  expect(response.status).toBe(200);
   const body = await response.json();
-  expect(body.result.materials).toHaveLength(1);
-  expect(body.result.courseErrors).toEqual([
-    expect.objectContaining({ area: 'materials', status: 401 }),
-  ]);
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(store.docs.has(RETRY)).toBe(false);
+  expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
 
 it.each(['homework', 'activities', 'announcements'] as const)(
