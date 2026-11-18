@@ -62,6 +62,11 @@ const NON_CLASSROOM_POI_CATEGORIES = new Set([
   'bus', 'bus stop', 'bus_stop', 'bus station', 'bus_station',
   'shuttle stop', 'shuttle_stop', 'transit', 'parking', 'car park', 'car_park',
   'road', 'gate', 'entrance',
+  // Restaurant/retail POIs may point to a teaching building through a
+  // Firestore `building` field, but their own coordinates are not its entrance.
+  '餐飲', '餐廳', '咖啡廳', '商店', '販賣部',
+  'restaurant', 'cafe', 'cafeteria', 'food court', 'food_court',
+  'shop', 'store', 'convenience store', 'convenience_store', 'atm',
 ]);
 
 /** Firestore category labels may append a campus/terminal qualifier in parentheses.
@@ -70,7 +75,15 @@ const NON_CLASSROOM_POI_CATEGORIES = new Set([
  */
 function isExplicitNonClassroomCategory(value: unknown): boolean {
   const category = comparisonText(value);
-  const unqualified = category.replace(/\s*\([^()]{1,32}\)\s*$/u, '').trim();
+  // Firestore may append multiple short parenthetical qualifiers, e.g.
+  // "Bus Stop (Campus) (Inbound)". Strip only complete trailing qualifiers;
+  // unrelated building categories such as "交通工程學院" stay eligible.
+  let unqualified = category;
+  for (let i = 0; i < 3; i += 1) {
+    const next = unqualified.replace(/\s*(?:\([^()]{1,32}\)|\[[^\[\]]{1,32}\])\s*$/u, '').trim();
+    if (next === unqualified) break;
+    unqualified = next;
+  }
   return NON_CLASSROOM_POI_CATEGORIES.has(category) || NON_CLASSROOM_POI_CATEGORIES.has(unqualified);
 }
 
