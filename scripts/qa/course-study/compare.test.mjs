@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { auditStudyComparisons } from './compare.mjs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { auditStudyComparisons, verifyLocalStudyFixtures } from './compare.mjs';
 const result = (product, completed = true) => ({
   product, version: '2026-11-17', completed, correct: completed,
   sourceVerified: completed, failureReason: completed ? undefined : 'model unavailable',
@@ -317,4 +323,49 @@ test('keeps per-case source hashes, device/date and versions aligned without exp
   assert.deepEqual(paired, original); // Never rewrite the manifest itself.
   assert.equal(JSON.stringify(report).includes('human test operator'), false);
   assert.equal(JSON.stringify(report).includes('model unavailable'), false);
+});
+
+test('verifies local course/question bytes without exposing private content or paths', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nuni-study-fixture-'));
+  try {
+    const source = Buffer.from('授權課程教材：原文段落', 'utf8');
+    const question = Buffer.from('主鍵的用途是什麼？', 'utf8');
+    writeFileSync(join(directory, 'lesson.txt'), source);
+    writeFileSync(join(directory, 'question.txt'), question);
+    const input = fixture();
+    const trial = input.trials[0];
+    trial.sourceFile = 'lesson.txt';
+    trial.questionFile = 'question.txt';
+    trial.sourceSha256 = createHash('sha256').update(source).digest('hex');
+    trial.questionSha256 = createHash('sha256').update(question).digest('hex');
+    const manifestPath = join(directory, 'observations.json');
+    writeFileSync(manifestPath, JSON.stringify(input));
+    assert.equal(auditStudyComparisons(input).fixtureIntegrityVerified, false);
+    const verified = verifyLocalStudyFixtures(input, manifestPath);
+    assert.equal(verified.fixtureIntegrityVerified, true);
+    assert.equal(verified.caseProvenance[0].sourceSha256, trial.sourceSha256);
+    assert.equal(JSON.stringify(verified).includes('lesson.txt'), false);
+    assert.equal(JSON.stringify(verified).includes('授權課程教材'), false);
+    const script = fileURLToPath(new URL('./compare.mjs', import.meta.url));
+    const cli = spawnSync(process.execPath,
+      [script, manifestPath, '--verify-fixtures'], { encoding: 'utf8' });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.equal(JSON.parse(cli.stdout).fixtureIntegrityVerified, true);
+    const defaultCli = spawnSync(process.execPath, [script, manifestPath], { encoding: 'utf8' });
+    assert.equal(defaultCli.status, 0, defaultCli.stderr);
+    assert.equal(JSON.parse(defaultCli.stdout).fixtureIntegrityVerified, false);
+    const tampered = structuredClone(input);
+    writeFileSync(join(directory, 'lesson.txt'), '資料遭到修改');
+    assert.throws(() => verifyLocalStudyFixtures(tampered, manifestPath), /SHA-256 mismatch/);
+    const outside = structuredClone(input);
+    outside.trials[0].sourceFile = '../outside.txt';
+    assert.throws(() => verifyLocalStudyFixtures(outside, manifestPath),
+      /inside manifest directory/);
+    const missing = structuredClone(input);
+    delete missing.trials[0].questionFile;
+    assert.throws(() => verifyLocalStudyFixtures(missing, manifestPath),
+      /relative file path required/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

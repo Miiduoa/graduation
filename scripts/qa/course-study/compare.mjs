@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /** Audits paired, human-verified study tasks. Never uploads study material or grades AI. */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 function fail(where, reason) { throw new Error(`${where}: ${reason}`); }
@@ -211,13 +212,55 @@ export function auditStudyComparisons(raw) {
     pairedWarmStartDeltasMs, pairedStepsDeltas, pairedPeakMemoryDeltasMiB,
     pairedCostDeltasTwd, pairedMeasuredCounts, pairedAverageDeltas,
     pairedOfflineCounts, pairedVerifiedCounts,
+    fixtureIntegrityVerified: false,
     sourceOfTruth: 'manually recorded observations, not automatic grading or proof of superiority' };
+}
+// Strict opt-in verification of actual local source/question file bytes.
+// Metadata hashes alone are unverified claims, not fixture-integrity evidence.
+function fixturePath(root, name, where) {
+  if (typeof name !== 'string' || !name.trim() || isAbsolute(name))
+    fail(where, 'relative file path required');
+  const candidate = resolve(root, name);
+  const contained = (path) => {
+    const part = relative(root, path);
+    return part && part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part);
+  };
+  if (!contained(candidate)) fail(where, 'file must remain inside manifest directory');
+  let actual;
+  try { actual = realpathSync(candidate); }
+  catch { fail(where, 'fixture file unavailable'); }
+  if (!contained(actual)) fail(where, 'file must remain inside manifest directory');
+  return actual;
+}
+export function verifyLocalStudyFixtures(raw, manifestPath) {
+  const report = auditStudyComparisons(raw);
+  const root = realpathSync(dirname(resolve(manifestPath)));
+  raw.trials.forEach((trial, index) => {
+    for (const [fileKey, digestKey] of [
+      ['sourceFile', 'sourceSha256'], ['questionFile', 'questionSha256'],
+    ]) {
+      const where = `trials[${index}].${fileKey}`;
+      const file = fixturePath(root, trial[fileKey], where);
+      let bytes;
+      try { bytes = readFileSync(file); }
+      catch { fail(where, 'fixture file unreadable'); }
+      const actual = createHash('sha256').update(bytes).digest('hex');
+      if (actual !== trial[digestKey].toLowerCase())
+        fail(where, 'local fixture SHA-256 mismatch');
+    }
+  });
+  return { ...report, fixtureIntegrityVerified: true };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    if (process.argv.length !== 3) fail('usage', 'node compare.mjs <paired-observations.json>');
-    process.stdout.write(JSON.stringify(auditStudyComparisons(
-      JSON.parse(readFileSync(process.argv[2], 'utf8'))), null, 2) + '\n');
+    if (process.argv.length !== 3 &&
+        !(process.argv.length === 4 && process.argv[3] === '--verify-fixtures'))
+      fail('usage', 'node compare.mjs <paired-observations.json> [--verify-fixtures]');
+    const manifest = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+    const report = process.argv[3] === '--verify-fixtures'
+      ? verifyLocalStudyFixtures(manifest, process.argv[2])
+      : auditStudyComparisons(manifest);
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } catch (error) {
     process.stderr.write((error instanceof Error ? error.message : String(error)) + '\n');
     process.exitCode = 1;

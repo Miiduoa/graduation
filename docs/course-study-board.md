@@ -1652,3 +1652,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 比較報告新增 `caseProvenance`：逐題保留題目與教材 SHA-256、實際測試日期、裝置、瀏覽器、網路，以及 nuni／Ahaboard 各自版本，順序和 `caseIds`、逐題成對結果一致。先前只有成功率、平均數與案例 ID，匯出後無法單憑報告核對哪些版本、設備和授權教材題目產生差異；這次補齊重做同條件測試所需的基本證據。
 - 不匯出教材、題目全文、人工審查者名稱或失敗原因；只輸出 manifest 已明確記載且驗證過的非原文測試資訊。SHA-256 轉小寫以便重複比對；原 manifest 不會改寫。新增 Node 回歸涵蓋兩個不同日期／版本案例、反序的產品測量、逐題對齊和隱私邊界。
 - `caseProvenance` 僅是供人重現的測試中繼資料，並非已完成真實 Ahaboard 對照、來源正確性或勝負證明。未新增套件、私人教材外傳、付費 API 或修改 v1/v2 閱讀與 v1 練習 checkpoint。全部 CI／CodeQL、指定 GitHub App 5504170 APPROVED、Maestro 與 iOS／Android 真機及同教材同題同機實測必須按新 SHA 另驗；PR 保持 Draft，不合併、不部署。
+
+## 2026-11-18：同題對照可核對本地教材與題目 SHA-256 的真實位元組
+
+- 過去只驗證 `sourceSha256`／`questionSha256` 格式，無法辨識測試紀錄使用的本地檔案已被誤換。新增可選的 `--verify-fixtures`：逐題讀取相對 manifest 目錄的 `sourceFile` 與 `questionFile`，用原始檔案位元組重新計算 SHA-256，不符即拒絕產生驗證報告。僅允許 manifest 目錄內的相對路徑，包含實際符號連結位置；不輸出原文、檔案路徑、人工審查者資訊。
+- 用法：`node scripts/qa/course-study/compare.mjs local-observations.json --verify-fixtures`。嚴格模式需要每筆 trial 加上本地 `sourceFile`、`questionFile`；原有 `schemaVersion: 1`、一般比較指令與學生閱讀／練習 checkpoint 不變。輸出 `fixtureIntegrityVerified`：一般模式為 false，僅全部本地檔案核對成功為 true。PDF hash 對原始 PDF 位元組計算，不能以其擷取後純文字的 hash 混用。
+- 新增 Node CLI／函式回歸檢查正確檔案、遭改寫教材、向上層逃逸路徑、缺少路徑與結果輸出不洩漏文本。只驗證本地檔案與記錄 SHA 相同，**不能證明**使用者實際用該檔完成考題、人工評分正確或任何產品領先；無網路教材傳輸、付費 API、新套件或學生備份格式變更。CI／CodeQL、Security Gates、App 5504170、Maestro／真機及 Ahaboard 同題同機仍須另外驗收，PR 維持 Draft、不合併、不部署。
