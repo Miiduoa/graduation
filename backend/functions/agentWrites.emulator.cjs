@@ -30,6 +30,7 @@ const washing = require('./agent/tools/reserveWashingMachine');
 const { resolveWashReserveInput } = require('./lib/campusWriteIntentResolve');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 const { libraryLoanVersion } = require('./agent/libraryLoanSource');
+const { createOrderStatusHandlers } = require('./orderTransitions');
 const read = async (path) => (await db.doc(path).get()).data();
 const scope = (uid = 'alice') => ({ uid, schoolId: 'pu' });
 const request = (uid, data) => ({ auth: { uid }, data: { schoolId: 'pu', ...data } });
@@ -925,6 +926,186 @@ for (const change of [
     assert.deepEqual(await collectionRecordSnapshot(orderSourceCollections), sources);
   });
 }
+
+
+async function orderReceiptRaceFixture() {
+  const action = await orderProposal();
+  await db.doc('schools/pu/cafeterias/cafe/operators/bob').set({ status: 'active' });
+  return action;
+}
+
+async function onlyCommittedOrderId() {
+  const orders = await db.collection('schools/pu/orders').get();
+  assert.equal(orders.size, 1);
+  return orders.docs[0].id;
+}
+
+// Real order transition handlers, with only the external notification sender
+// replaced so these synthetic fixture transitions cannot send a notification.
+function receiptRaceTransitions() {
+  return createOrderStatusHandlers({ db, sendPushToUser: async () => ({ status: 'not_requested' }) });
+}
+
+async function completeReceiptFixture(orderId) {
+  const transitions = receiptRaceTransitions();
+  for (const status of ['confirmed', 'preparing', 'ready', 'completed']) {
+    await transitions.updateOrderStatus(request('bob', { orderId, status }));
+  }
+}
+
+const replayProtectedOrderCollections = orderCollections.filter((path) => path !== 'users/alice/schools/pu/orders');
+
+test('createOrder returns the actual cancellation committed before its queue transaction', async () => {
+  const action = await orderReceiptRaceFixture();
+  let afterCancellation;
+
+  const { receipt } = await runAfterOrderCommit(action, {
+    apply: async () => {
+      const orderId = await onlyCommittedOrderId();
+      await service.cancelOrder.run(request('alice', { orderId, reason: 'Cancel before initial number' }));
+      afterCancellation = await collectionRecordSnapshot(orderCollections);
+    },
+  });
+
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.status, 'cancelled');
+  assert.equal(receipt.queueStatus, 'cancelled');
+  assert.equal(receipt.queueNumber, null);
+  assert.equal(receipt.orderOutcome, undefined);
+  assert.equal(receipt.paymentStatus, 'pending');
+  assert.equal((await read(`schools/pu/orders/${receipt.orderId}`)).status, 'cancelled');
+  assert.equal((await db.collection('schools/pu/queueCounters').get()).size, 0);
+  assert.deepEqual(await collectionRecordSnapshot(orderCollections), afterCancellation,
+    'the receipt must reflect the committed cancellation without rewriting or numbering its order');
+});
+
+for (const existingNumber of [false, true]) {
+  test(`createOrder does not adopt another buyer's ${existingNumber ? 'historical' : 'new'} queue after its creation commits`, async () => {
+    const action = await orderReceiptRaceFixture();
+    const observedCollections = [...orderCollections, 'users/bob/schools/pu/orders'];
+    let afterOwnerChange;
+
+    const { receipt } = await runAfterOrderCommit(action, {
+      apply: async () => {
+        const orderId = await onlyCommittedOrderId();
+        // A synthetic canonical integrity fault between two real transactions.
+        await db.doc(`schools/pu/orders/${orderId}`).update({
+          userId: 'bob', status: existingNumber ? 'completed' : 'pending',
+          queueNumber: existingNumber ? 7 : null,
+          queueStatus: existingNumber ? 'assigned' : 'pending_confirmation',
+        });
+        afterOwnerChange = await collectionRecordSnapshot(observedCollections);
+      },
+    });
+
+    assert.equal(receipt.success, true, 'the earlier creation really committed');
+    assert.equal(receipt.userId, 'alice');
+    assert.equal(receipt.status, 'pending');
+    assert.equal(receipt.queueNumber, null);
+    assert.equal(receipt.queueStatus, 'pending_confirmation');
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.deepEqual(await collectionRecordSnapshot(observedCollections), afterOwnerChange,
+      'an owner mismatch must neither allocate a number nor repair either buyer mirror');
+  });
+}
+
+for (const withNumber of [false, true]) {
+  test(`createOrder returns a completed receipt with ${withNumber ? 'its historical number' : 'no number'} after a post-commit transition`, async () => {
+    const action = await orderReceiptRaceFixture();
+    let afterCompletion;
+
+    const { receipt } = await runAfterOrderCommit(action, {
+      apply: async () => {
+        const orderId = await onlyCommittedOrderId();
+        if (withNumber) await service.assignQueueNumber.run(request('alice', { orderId }));
+        await completeReceiptFixture(orderId);
+        afterCompletion = await collectionRecordSnapshot(orderCollections);
+      },
+    });
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.status, 'completed');
+    assert.equal(receipt.queueNumber, withNumber ? 1 : null);
+    assert.equal(receipt.queueStatus, withNumber ? 'assigned' : 'completed');
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.equal((await read(`schools/pu/orders/${receipt.orderId}`)).status, 'completed');
+    const counters = await db.collection('schools/pu/queueCounters').get();
+    assert.equal(counters.size, withNumber ? 1 : 0);
+    if (withNumber) assert.equal(counters.docs[0].data().nextSerial, 1);
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), afterCompletion,
+      'a terminal receipt must neither allocate another number nor rewrite the committed result');
+  });
+}
+
+for (const legacyNumber of [false, true]) {
+  test(`createOrder replays a cancelled order ${legacyNumber ? 'with a leftover legacy number' : 'without a number'} as cancelled`, async () => {
+    const action = await orderReceiptRaceFixture();
+    const created = await service.createOrder.run(request('alice', action.data.input));
+    await service.cancelOrder.run(request('alice', { orderId: created.orderId, reason: 'Already cancelled' }));
+    if (legacyNumber) {
+      const legacy = { queueNumber: 7, queueStatus: 'assigned' };
+      await seed([
+        [`schools/pu/orders/${created.orderId}`, { ...(await read(`schools/pu/orders/${created.orderId}`)), ...legacy }],
+        [`users/alice/schools/pu/orders/${created.orderId}`, { ...(await read(`users/alice/schools/pu/orders/${created.orderId}`)), ...legacy }],
+      ]);
+    }
+    const beforeReplay = await collectionRecordSnapshot(replayProtectedOrderCollections);
+
+    const receipt = await service.createOrder.run(request('alice', action.data.input));
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.reused, true);
+    assert.equal(receipt.orderId, created.orderId);
+    assert.equal(receipt.status, 'cancelled');
+    assert.equal(receipt.queueStatus, 'cancelled');
+    assert.equal(receipt.queueNumber, null);
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.deepEqual(await collectionRecordSnapshot(replayProtectedOrderCollections), beforeReplay,
+      'cancelled replay must not revive counters, canonical order state or payment data');
+    assert.deepEqual(await read(`users/alice/schools/pu/orders/${created.orderId}`),
+      await read(`schools/pu/orders/${created.orderId}`));
+  });
+}
+
+test('createOrder preserves a completed replay and its original assigned number', async () => {
+  const action = await orderReceiptRaceFixture();
+  const created = await service.createOrder.run(request('alice', action.data.input));
+  await completeReceiptFixture(created.orderId);
+  const beforeReplay = await collectionRecordSnapshot(replayProtectedOrderCollections);
+
+  const receipt = await service.createOrder.run(request('alice', action.data.input));
+
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.reused, true);
+  assert.equal(receipt.status, 'completed');
+  assert.equal(receipt.queueStatus, 'assigned');
+  assert.equal(receipt.queueNumber, 1);
+  assert.deepEqual(await collectionRecordSnapshot(replayProtectedOrderCollections), beforeReplay);
+  assert.deepEqual(await read(`users/alice/schools/pu/orders/${created.orderId}`),
+    await read(`schools/pu/orders/${created.orderId}`));
+});
+
+test('createOrder carries the current confirmed status from its successful queue transaction', async () => {
+  const action = await orderReceiptRaceFixture();
+
+  const { receipt } = await runAfterOrderCommit(action, {
+    apply: async () => {
+      const orderId = await onlyCommittedOrderId();
+      await receiptRaceTransitions().updateOrderStatus(request('bob', { orderId, status: 'confirmed' }));
+    },
+  });
+
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.status, 'confirmed');
+  assert.equal(receipt.queueStatus, 'assigned');
+  assert.equal(receipt.queueNumber, 1);
+  const canonical = await read(`schools/pu/orders/${receipt.orderId}`);
+  assert.equal(canonical.status, receipt.status);
+  assert.deepEqual(await read(`users/alice/schools/pu/orders/${receipt.orderId}`), canonical);
+  const counters = await db.collection('schools/pu/queueCounters').get();
+  assert.equal(counters.size, 1);
+  assert.equal(counters.docs[0].data().nextSerial, 1);
+});
 
 async function manualQueueFixture(role, hasNumber = false) {
   await orderProposal();
