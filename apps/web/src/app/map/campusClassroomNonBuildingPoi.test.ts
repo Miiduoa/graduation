@@ -239,3 +239,45 @@ describe('source-identified transport stops remain non-classroom destinations', 
     }
   });
 });
+
+describe('published stop identity survives missing imported metadata', () => {
+  it('keeps a bundled Providence stop out of PH303 even when a Firestore row loses stop IDs and category', () => {
+    const stop = PROVIDENCE_BUS_STOPS.find((entry) => entry.id === 'pu-bus-zhugu');
+    expect(stop).toBeDefined();
+    // This simulates an incomplete server row replacing the bundled stop by
+    // the exact published ID. Name/category/building edits are synthetic.
+    const { transitStopIds: _omitted, ...withoutOptionalMarker } = stop!;
+    const incompleteServerStop = {
+      ...withoutOptionalMarker,
+      name: '主顧樓',
+      building: '主顧樓',
+      category: '教學',
+    };
+    expect('transitStopIds' in incompleteServerStop).toBe(false);
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303',
+      locations: [incompleteServerStop, hall],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([hall]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: '主顧樓 PH303',
+      locations: [incompleteServerStop],
+    }).status).toBe('unmatched');
+  });
+
+  it('does not reserve guessed bus ID prefixes or apply Providence IDs to other schools', () => {
+    const nonPublished = { ...hall, id: 'pu-bus-not-in-catalog' };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303',
+      locations: [nonPublished],
+    }).matches).toEqual([nonPublished]);
+
+    const knownStopId = PROVIDENCE_BUS_STOPS.find((stop) => stop.id === 'pu-bus-zhugu')!.id;
+    const otherSchoolBuilding = { ...hall, id: knownStopId };
+    expect(resolveCampusClassroom({
+      schoolId: 'other-school', query: '主顧樓 PH303',
+      locations: [otherSchoolBuilding],
+    }).matches).toEqual([otherSchoolBuilding]);
+  });
+});
