@@ -2,6 +2,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { normalizeCafeteriaOperatorRecord } = require('./authz');
 const { formatAssistantDate } = require('./lib/assistantFormat');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 const NEXT_STATUS = {
   pending: 'confirmed',
@@ -171,10 +172,16 @@ function createOrderStatusHandlers({ db, sendPushToUser, logger = console }) {
     const schoolRef = db.collection('schools').doc(schoolId);
     const orderRef = schoolRef.collection('orders').doc(orderId);
     const result = await db.runTransaction(async (transaction) => {
-      const [orderDoc, membershipDoc] = await transaction.getAll(
+      const [orderDoc, membershipDoc, accountDoc] = await transaction.getAll(
         orderRef,
         schoolRef.collection('members').doc(uid),
+        db.collection('users').doc(uid),
       );
+      if (isAccountUnavailable(accountDoc.exists ? accountDoc.data() : {})) {
+        throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+          reason: 'account-deletion',
+        });
+      }
       if (!orderDoc.exists) throw new HttpsError('not-found', 'Order not found');
       const order = orderDoc.data();
       const membership = activeMembership(membershipDoc);
