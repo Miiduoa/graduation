@@ -148,7 +148,10 @@ function exactStudyLocalArrayBuffer(value: unknown, expectedSize: number): Array
   try {
     if (value instanceof ArrayBuffer)
       return value.byteLength === expectedSize ? value : null;
-    if (Object.prototype.toString.call(value) !== '[object ArrayBuffer]') return null;
+    // Calling the native getter validates the internal ArrayBuffer brand even
+    // across realms; a forged Symbol.toStringTag/array-like cannot pass.
+    const byteLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength')?.get?.call(value);
+    if (byteLength !== expectedSize) return null;
     const bytes = new Uint8Array(value as ArrayBuffer);
     if (bytes.byteLength !== expectedSize) return null;
     const local = new ArrayBuffer(bytes.byteLength);

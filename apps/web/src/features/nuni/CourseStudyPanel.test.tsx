@@ -639,7 +639,10 @@ it('reads exact bytes from a foreign-realm FileReader bridge after Blob fails', 
 it('rejects spoofed or truncated cross-realm buffers and reads the real local file', async () => {
   const content = '假冒位元組長度不可以污染本次教材。';
   const bytes = new TextEncoder().encode(content);
-  const fake = { byteLength: bytes.byteLength, [Symbol.toStringTag]: 'ArrayBuffer' };
+  // A spoofed array-like can have every byte and report the correct size,
+  // so toStringTag and typed-array length checks alone are insufficient.
+  const fake = Object.assign(Array.from({ length: bytes.byteLength }, () => 0x41),
+    { byteLength: bytes.byteLength, [Symbol.toStringTag]: 'ArrayBuffer' });
   const file = new File([bytes], '防止錯誤讀取.txt', { type: 'text/plain' });
   Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(fake) });
   const decoded = await readStudyFileBytes(file);

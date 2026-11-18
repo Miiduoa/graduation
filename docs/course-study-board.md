@@ -1728,3 +1728,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 某些 iframe／原生橋接把真正的 `ArrayBuffer` 從另一個 JavaScript Realm 回傳，雖然每個位元組正確，原本 `instanceof ArrayBuffer` 會誤判失敗，學生無法匯入教材或恢復閱讀進度。現在本地 Blob 路徑及 `FileReader` 備援共用相同的完整位元組確認：本 Realm 的 ArrayBuffer 不額外複製；跨 Realm 僅接受真正可轉為 Uint8Array 且與檔案大小完全相符的 ArrayBuffer，複製回目前 Realm 後再交由既有嚴格解碼與 JSON 邊界檢查。
 - 新增三組 Vitest／模擬 WebView 回歸：跨 Realm Blob、跨 Realm FileReader、偽造型別標籤與截短緩衝區。維持原有取消／30 秒逾時、UTF-8 嚴格解碼、失敗不覆蓋未備份筆記；不改 v1/v2 閱讀與 v1 練習 checkpoint，不新增套件或外傳教材。
 - 此修補屬程式及模擬瀏覽器測試，不是 iOS／Android 真機或 Ahaboard 競品驗收。完整 CI、CodeQL、指定 App 5504170 正式 APPROVED、Maestro／手機及 WebGPU 中文品質須依本 commit 重新核對。PR 保持 Draft，不合併、不部署。
+
+
+#### 同輪補強：跨 Realm ArrayBuffer 必須驗證內部 brand
+
+- 僅以 `Symbol.toStringTag` 與 `Uint8Array` 長度確認跨 Realm 結果，仍可能把惡意的偽裝 array-like 物件當成本機教材位元組。因此改用原生 `ArrayBuffer.prototype.byteLength` getter 對真正的 ArrayBuffer 內部槽位做跨 Realm 品牌驗證，再確認資料長度、複製位元組；偽造型別名稱、陣列索引及宣稱的長度皆不能通過。
+- 模擬回歸加強為「提供完整錯誤位元組、正確宣稱長度與偽裝 ArrayBuffer 標籤」的假物件，必須被拒收後從真正 FileReader 取得原教材。保留原本的短讀拒收、取消及 30 秒逾時。仍非真機驗收；此新增 commit 的 CI／CodeQL 需另核對。
