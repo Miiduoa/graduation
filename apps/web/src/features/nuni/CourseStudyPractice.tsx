@@ -49,6 +49,12 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
   const card = round.cards[round.index];
   const response = card ? round.responses[card.id] : undefined;
   const summary = getStudyPracticeSummary(round);
+  // Unassessed drafts are worth finishing before starting blank questions.
+  // This is derived display state, never a saved self-rating or checkpoint.
+  const unfinishedDraftIndices = round.cards.flatMap((item, index) => {
+    const saved = round.responses[item.id];
+    return saved?.outcome === null && saved.attempt.trim() ? [index] : [];
+  });
   const nextUnreviewedIndex = round.finished ? null : nextUnreviewedStudyPracticeIndex(round);
   const previousUnreviewedIndex = round.finished ? null : previousUnreviewedStudyPracticeIndex(round);
   const canRevealAnswer = !!response?.attempt.trim();
@@ -103,7 +109,14 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           <div><dt>略過</dt><dd>{summary.skipped} 題</dd></div>
           <div><dt>未完成</dt><dd>{summary.unreviewed} 題</dd></div>
         </dl>
+        {unfinishedDraftIndices.length > 0 && <p className={styles.note}>
+          尚有 {unfinishedDraftIndices.length} 題已寫草稿但尚未自評；草稿不代表完成，回到題目後仍需自行對照教材。
+        </p>}
         <div className={styles.actions}>
+          {unfinishedDraftIndices.length > 0 && <button type="button" className={`${styles.button} ${styles.primary}`}
+            onClick={() => onAction({ type: 'go', index: unfinishedDraftIndices[0] })}>
+            先完成已寫草稿（{unfinishedDraftIndices.length} 題）
+          </button>}
           {summary.unreviewed > 0 && <button type="button" className={`${styles.button} ${styles.primary}`}
             onClick={() => {
               const index = round.cards.findIndex((item) => round.responses[item.id]?.outcome == null);

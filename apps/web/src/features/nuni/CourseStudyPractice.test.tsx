@@ -339,6 +339,31 @@ it('counts untouched questions as unfinished when jumping to the last card and a
   expect(answerInput().value).toBe('');
 });
 
+it('prioritizes an unassessed draft from the finished summary without treating it as completed', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  selectQuestion(2);
+  writeAnswer('第二題有草稿，尚未自評');
+  selectQuestion(3);
+  skip();
+  expect(summaryCount('未完成')).toBe('2 題');
+  expect(screen.getByText(/尚有 1 題已寫草稿但尚未自評/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '先完成已寫草稿（1 題）' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 1 });
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 2 題' }));
+  expect(answerInput().value).toBe('第二題有草稿，尚未自評');
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 2 題：第 5 頁 · 第 1 段，未完成' })).toBeTruthy();
+  selectQuestion(2);
+  writeAnswer('');
+  selectQuestion(3);
+  skip();
+  expect(screen.queryByRole('button', { name: /先完成已寫草稿/ })).toBeNull();
+  expect(summaryCount('未完成')).toBe('2 題');
+});
+
 it('continues unfinished questions from the summary without clearing earlier drafts or self-assessments', () => {
   render(<Controller />);
   writeAnswer('第一題尚待自評，必須保留草稿');
