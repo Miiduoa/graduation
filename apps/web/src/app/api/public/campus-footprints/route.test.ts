@@ -1693,4 +1693,60 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each([
+    ['declared empty', '0', ''],
+    ['declared oversized', '500001', '{'],
+  ])('respects Retry-After for HTTP 200 with %s framing instead of retrying in ten minutes',
+    async (_case, contentLength, responseBody) => {
+      // Synthetic upstream: the status is 200, but the declared body cannot
+      // represent a complete OSM snapshot. The retry header still applies.
+      const start = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response(responseBody, {
+            status: 200,
+            headers: { 'Content-Length': contentLength, 'Retry-After': '3600' },
+          }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const failed = await GET();
+        expect(failed.status).toBe(503);
+        expect(failed.headers.get('Cache-Control')).toBe('no-store');
+        expect(failed.headers.get('Retry-After')).toBe('3600');
+        expect((await failed.json()).error).toMatch(/temporarily unavailable/);
+
+        clock.mockReturnValue(start + 11 * 60_000);
+        const cooling = await GET();
+        expect(cooling.status).toBe(503);
+        expect(cooling.headers.get('Retry-After')).toBe('2940');
+        expect(upstream).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(start + 60 * 60_000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it('still accepts valid HTTP 200 geometry when Retry-After happens to be present', async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200, headers: { 'Retry-After': '3600' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+
 });
