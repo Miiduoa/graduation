@@ -225,6 +225,11 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
   for (const location of locations) {
     if (!location || typeof location !== 'object' ||
         typeof location.id !== 'string' || !location.id.trim()) continue;
+    // An out-of-scope campus row cannot be selected, so it must not reserve
+    // this school's ID and hide a valid destination with the same identifier.
+    // Rows without a schoolId still count: legacy data may be unscoped, and
+    // duplicate IDs within the selected campus must continue to fail closed.
+    if ('schoolId' in location && location.schoolId !== school) continue;
     counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
   }
   const matches = locations.filter((location) => {
