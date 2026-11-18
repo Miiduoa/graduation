@@ -27,6 +27,7 @@ const returnBook = require('./agent/tools/returnBook');
 const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
+const { resolveWashReserveInput } = require('./lib/campusWriteIntentResolve');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 const { libraryLoanVersion } = require('./agent/libraryLoanSource');
 const read = async (path) => (await db.doc(path).get()).data();
@@ -160,6 +161,55 @@ test('normal and Agent washing reservations cannot both own the same machine', a
   const reservations = await db.collection('schools/pu/washingReservations').get();
   assert.equal(reservations.size, 1);
   assert.equal((await read('schools/pu/washingMachines/M1')).reservedBy, reservations.docs[0].data().userId);
+});
+
+async function explicitWashingProposal() {
+  await seed([
+    ['schools/pu/washingMachines/A1', { dormitory: 'A棟', status: 'available' }],
+    ['schools/pu/washingMachines/A2', { dormitory: 'A棟', status: 'available' }],
+    ['users/alice/settings/assistantPermissions', { reserveWashingMachine: true }],
+  ]);
+  const input = await resolveWashReserveInput('幫我預約 A棟洗衣機 A2 2030/01/02 晚上八點', 'pu');
+  assert.equal(input?.machineId, 'A2');
+  assert.equal((await db.collection('schools/pu/washingReservations').get()).size, 0);
+  const action = await proposal(
+    { actionProposals: [{ toolName: 'reserveWashingMachine', input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = 'reserveWashingMachine';
+  action.data.input = input;
+  return action;
+}
+
+test('an exact washing draft reserves only A2 after confirmation and cannot be replayed', async () => {
+  const action = await explicitWashingProposal();
+  const a1Before = await read('schools/pu/washingMachines/A1');
+  const receipt = await executeAgentWrite.run(action);
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.machineId, 'A2');
+  const reservations = await db.collection('schools/pu/washingReservations').get();
+  assert.equal(reservations.size, 1);
+  const saved = reservations.docs[0].data();
+  assert.equal(saved.machineId, 'A2');
+  assert.equal(saved.userId, 'alice');
+  assert.equal(saved.schoolId, 'pu');
+  assert.equal((await read('schools/pu/washingMachines/A2')).reservedBy, 'alice');
+  assert.deepEqual(await read('schools/pu/washingMachines/A1'), a1Before);
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  const replayed = await db.collection('schools/pu/washingReservations').get();
+  assert.equal(replayed.size, 1);
+  assert.deepEqual(replayed.docs[0].data(), saved);
+});
+
+test('a machine becoming unavailable after the exact draft never redirects confirmation or retries to A1', async () => {
+  const action = await explicitWashingProposal();
+  const a1Before = await read('schools/pu/washingMachines/A1');
+  await db.doc('schools/pu/washingMachines/A2').update({ status: 'maintenance' });
+  await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.equal((await db.collection('schools/pu/washingReservations').get()).size, 0);
+  assert.deepEqual(await read('schools/pu/washingMachines/A1'), a1Before);
+  assert.equal((await read('schools/pu/washingMachines/A2')).status, 'maintenance');
 });
 
 test('cancelling an old washing reservation cannot release a newer reservation', async () => {
@@ -950,4 +1000,91 @@ test('closed assistant write permission denies before claim and leaves no claim'
   const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
   assert.equal(run.actionClaims, undefined);
   assert.equal((await db.collection('leaveRequests').get()).size, 0);
+});
+
+
+// These status-reader regressions use the same guarded localhost demo project as the transaction fixtures above.
+const leaveStatusReader = require('./agent/tools/getLeaveRequestStatus');
+const leaveStatusCreatedAt = (offset) => Timestamp.fromMillis(Date.parse('2030-01-01T00:00:00Z') + offset * 1000);
+
+test('leave status filters by campus before the limit when more than ten newer rows belong to another campus', async () => {
+  await seed([
+    ['leaveRequests/local-old', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ...Array.from({ length: 12 }, (_, index) => [`leaveRequests/foreign-${index}`, {
+      uid: 'alice', schoolId: 'ntu', date: '2099-01-01', type: '他校假別', status: 'rejected',
+      createdAt: leaveStatusCreatedAt(100 + index),
+    }]),
+  ]);
+  const before = await db.collection('leaveRequests').get();
+  const result = await leaveStatusReader.execute(scope(), { limit: 10 });
+  assert.equal(result.count, 1);
+  assert.equal(result.items[0].requestId, 'local-old');
+  const after = await db.collection('leaveRequests').get();
+  assert.equal(after.size, before.size);
+  const original = new Map(before.docs.map((document) => [document.id, document]));
+  for (const document of after.docs) {
+    assert.deepEqual(document.data(), original.get(document.id).data());
+    assert.equal(document.updateTime.isEqual(original.get(document.id).updateTime), true);
+  }
+});
+
+test('leave status keeps same-campus canonical and legacy records without requiring source and excludes unknown campus records', async () => {
+  await seed([
+    ['leaveRequests/canonical', {
+      uid: 'alice', schoolId: 'pu', source: 'campus-one', kind: 'sick', status: 'partial',
+      startDate: '2030-02-01', endDate: '2030-02-02', courses: [{ courseId: 'c1' }],
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/legacy-no-source', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/unknown-campus', {
+      uid: 'alice', source: 'campus-one', date: '2099-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/empty-campus', {
+      uid: 'alice', schoolId: '', date: '2098-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(101),
+    }],
+  ]);
+  const result = await leaveStatusReader.execute(scope(), {});
+  assert.deepEqual(result, { count: 2, items: [
+    { requestId: 'canonical', date: '2030-02-01 至 2030-02-02', type: '病假', status: 'partial',
+      courseId: 'c1', createdAt: leaveStatusCreatedAt(2).toDate().toISOString() },
+    { requestId: 'legacy-no-source', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1).toDate().toISOString() },
+  ] });
+});
+
+test('leave status respects selected campus and account while returning the newest local row', async () => {
+  await seed([
+    ['schools/ntu/members/alice', { status: 'active' }],
+    ['leaveRequests/alice-pu', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/alice-ntu-old', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-02', type: '病假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/alice-ntu-new', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-03', type: '病假', status: 'approved',
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/bob-pu', {
+      uid: 'bob', schoolId: 'pu', date: '2030-02-04', type: '公假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(200),
+    }],
+  ]);
+  for (const [uid, schoolId, expectedId] of [
+    ['alice', 'pu', 'alice-pu'], ['alice', 'ntu', 'alice-ntu-new'], ['bob', 'pu', 'bob-pu'],
+  ]) {
+    const result = await leaveStatusReader.execute({ uid, schoolId }, { limit: 1 });
+    assert.equal(result.count, 1);
+    assert.equal(result.items[0].requestId, expectedId);
+  }
 });

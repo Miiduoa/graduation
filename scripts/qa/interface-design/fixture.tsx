@@ -1,9 +1,17 @@
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppHeader } from '../../../apps/web/src/components/AppHeader';
 import { AcademicNavigation } from '../../../apps/web/src/components/academic/AcademicNavigation';
 import { StudentToday } from '../../../apps/web/src/components/today/StudentToday';
 import { Button } from '../../../apps/web/src/components/ui/Button';
 import { ToastProvider, useToast } from '../../../apps/web/src/components/ui/Toast';
+import { Modal, ConfirmModal } from '../../../apps/web/src/components/ui/Modal';
+import { Input, Textarea, Select } from '../../../apps/web/src/components/ui/Input';
+import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
+import {
+  applyWebAppearancePreferences,
+  defaultWebPreferences,
+} from '../../../apps/web/src/lib/webPreferences';
 import { SchoolLmsReadonlyProvider } from '../../../apps/web/src/components/SchoolLmsReadonlyProvider';
 import { navigate, usePathname } from './boundaries';
 import home from '../../../apps/web/src/app/home.module.css';
@@ -14,10 +22,19 @@ const query = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = query.get('theme') === 'dark' ? 'dark' : 'light';
 if (query.get('motion') === 'reduce') document.documentElement.dataset.reducedMotion = 'true';
 if (query.get('text') === '200') document.documentElement.style.fontSize = '200%';
+if (query.get('font') === 'large') {
+  applyWebAppearancePreferences(document, {
+    ...defaultWebPreferences.appearance,
+    theme: query.get('theme') === 'dark' ? 'dark' : 'light',
+    fontSize: 'large',
+    animations: query.get('motion') !== 'reduce',
+  });
+}
 const guest = query.get('role') === 'guest';
 
 function Controls() {
   const toast = useToast();
+  const [dialog, setDialog] = useState<'form' | 'confirmation' | null>(null);
   return (
     <section className="fixture-controls" aria-label="介面驗收控制">
       <p>介面驗收：固定合成帳號、學校與課程資料，沒有正式 API 寫入。</p>
@@ -52,7 +69,80 @@ function Controls() {
         <Button type="button" disabled>
           尚未開放
         </Button>
+        <Button type="button" variant="outline" onClick={() => setDialog('form')}>
+          檢查輸入與對話視窗
+        </Button>
+        <Button type="button" variant="ghost" onClick={() => setDialog('confirmation')}>
+          檢查長篇確認內容
+        </Button>
       </div>
+      <Modal
+        isOpen={dialog === 'form'}
+        onClose={() => setDialog(null)}
+        title="編輯課程提醒"
+        description="確認課程、提醒時間與備註。這些欄位只用於介面驗收。"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => setDialog(null)}>
+              取消編輯
+            </Button>
+            <Button type="button" onClick={() => setDialog(null)}>
+              完成編輯
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: 'grid', gap: 20 }}>
+          <Input
+            id="fixture-task-title"
+            label="提醒名稱"
+            defaultValue="下課後整理小組討論紀錄"
+            hint="標籤、輸入與提示都應跟隨文字偏好。"
+          />
+          <Input id="fixture-large-field" label="較大欄位" inputSize="lg" defaultValue="資料結構" />
+          <Input id="fixture-small-field" label="較小欄位" inputSize="sm" defaultValue="選填" />
+          <Input
+            id="fixture-password"
+            label="驗收用密碼"
+            type="password"
+            defaultValue="fixture-only"
+            hint="僅為合成文字，沒有登入或帳號寫入。"
+          />
+          <Input
+            id="fixture-icon-field"
+            label="教室"
+            defaultValue="資訊大樓 I208"
+            leftIcon={<CampusIcon name="map" />}
+            rightIcon={<CampusIcon name="search" />}
+          />
+          <Select
+            id="fixture-reminder-time"
+            label="提醒時間"
+            defaultValue="30"
+            options={[
+              { value: '10', label: '提前 10 分鐘' },
+              { value: '30', label: '提前 30 分鐘' },
+            ]}
+          />
+          <Textarea id="fixture-note" label="備註" defaultValue="帶上筆記與上次的討論紀錄。" />
+        </div>
+      </Modal>
+      <ConfirmModal
+        isOpen={dialog === 'confirmation'}
+        onClose={() => setDialog(null)}
+        onConfirm={() => setDialog(null)}
+        title="確認移除提醒"
+        message={[
+          '請先閱讀這份提醒的內容，再決定是否移除。',
+          ...Array.from(
+            { length: 12 },
+            (_, index) =>
+              `第 ${index + 1} 項：這是用來檢查較大字體與較短視窗的合成說明，沒有連接任何正式資料。`,
+          ),
+        ].join('\n\n')}
+        confirmText="移除提醒"
+        variant="danger"
+      />
     </section>
   );
 }

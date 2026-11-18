@@ -183,7 +183,7 @@ it('dismisses voice on outside pointer or keyboard focus without moving focus ba
   expect(document.activeElement).toBe(outside);
 });
 
-it('reserves the actual header while voice is open and releases its resize observation on close', () => {
+it('keeps the measured header inset available to menus and voice without changing focus', () => {
   let onResize: (() => void) | undefined;
   const observe = vi.fn();
   const disconnect = vi.fn();
@@ -204,6 +204,8 @@ it('reserves the actual header while voice is open and releases its resize obser
     .spyOn(navigation, 'getBoundingClientRect')
     .mockImplementation(() => ({ bottom }) as DOMRect);
   try {
+    fireEvent(window, new Event('resize'));
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('68px');
     const { panel } = openVoice();
     expect(observe).toHaveBeenCalledWith(navigation);
     expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('68px');
@@ -213,6 +215,7 @@ it('reserves the actual header while voice is open and releases its resize obser
     bottom = 112;
     act(() => onResize?.());
     expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('112px');
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('112px');
     expect(document.activeElement).toBe(input);
 
     bottom = 88;
@@ -225,11 +228,19 @@ it('reserves the actual header while voice is open and releases its resize obser
 
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(disconnect).toHaveBeenCalledOnce();
     bottom = 96;
     fireEvent(window, new Event('resize'));
     fireEvent(window, new Event('scroll'));
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('96px');
     expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('0px');
+
+    const disconnectsBeforeUnmount = disconnect.mock.calls.length;
+    view.unmount();
+    expect(disconnect).toHaveBeenCalledTimes(disconnectsBeforeUnmount + 1);
+    bottom = 120;
+    fireEvent(window, new Event('resize'));
+    fireEvent(window, new Event('scroll'));
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('96px');
   } finally {
     view.unmount();
     geometry.mockRestore();

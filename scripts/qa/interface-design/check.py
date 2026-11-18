@@ -17,12 +17,154 @@ SCENARIOS = [
     {'name': 'large-text-system-motion', 'width': 390, 'height': 844, 'theme': 'light', 'role': 'student', 'text': '200', 'system_motion': 'reduce'},
     {'name': 'compact-dark-site-motion', 'width': 320, 'height': 740, 'theme': 'dark', 'role': 'operator', 'text': '200', 'motion': 'reduce'},
     {'name': 'guest-light', 'width': 390, 'height': 844, 'theme': 'light', 'role': 'guest'},
+    {'name': 'large-preference', 'width': 390, 'height': 844, 'theme': 'light', 'role': 'student', 'font': 'large'},
 ]
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_args):
         pass
+
+
+async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
+    opener = page.get_by_role('button', name='檢查輸入與對話視窗', exact=True)
+    await opener.click()
+    dialog = page.get_by_role('dialog', name='編輯課程提醒', exact=True)
+    await expect(dialog).to_be_visible()
+    await expect(dialog.get_by_role('heading', name='編輯課程提醒')).to_be_in_viewport(ratio=1)
+    await expect(dialog.get_by_role('button', name='關閉視窗')).to_be_focused()
+    assert await dialog.evaluate('''node => {
+      const r=node.getBoundingClientRect();
+      return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+    }'''), 'Dialog exceeded the available viewport'
+    if config.get('motion') == 'reduce' or config.get('system_motion') == 'reduce':
+        await expect(dialog).to_have_css('animation-name', 'none')
+
+    root_size = await page.locator('html').evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
+    expected_body = root_size * (1.0625 if config.get('font') == 'large' else .9375)
+    field_sizes = {
+        '#fixture-task-title': expected_body,
+        '#fixture-large-field': root_size * (1.1875 if config.get('font') == 'large' else 1.0625),
+        '#fixture-small-field': root_size * (.9375 if config.get('font') == 'large' else .8125),
+        '#fixture-password': expected_body,
+        '#fixture-icon-field': expected_body,
+        '#fixture-reminder-time': expected_body,
+        '#fixture-note': expected_body,
+    }
+    for selector, desired in field_sizes.items():
+        expected = max(16, desired) if page.viewport_size['width'] <= 760 else desired
+        actual = await dialog.locator(selector).evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
+        assert abs(actual - expected) < .1, (selector, actual, expected)
+    title = dialog.get_by_role('heading', name='編輯課程提醒')
+    expected_title = root_size * (1.375 if config.get('font') == 'large' else 1.25)
+    assert abs(await title.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') - expected_title) < .1, 'Dialog heading lost the active text preference'
+    await capture('form-start' + suffix, full_page=False)
+
+    # Exercise the native Tab order and scrolling, rather than scrolling elements
+    # into view in the test and hiding an unreachable control in the product.
+    for selector in ('#fixture-task-title', '#fixture-large-field', '#fixture-small-field', '#fixture-password'):
+        await page.keyboard.press('Tab')
+        target = dialog.locator(selector)
+        await expect(target).to_be_focused()
+        await expect(target).to_be_in_viewport(ratio=1)
+    await page.keyboard.press('Tab')
+    reveal = dialog.get_by_role('button', name='顯示密碼', exact=True)
+    await expect(reveal).to_be_focused()
+    await expect(reveal).to_be_in_viewport(ratio=1)
+    metrics = await dialog.locator('#fixture-password').evaluate('''node => {
+      const style=getComputedStyle(node), field=node.getBoundingClientRect();
+      const button=node.parentElement.querySelector('button').getBoundingClientRect();
+      return {padding:parseFloat(style.paddingRight), reserve:field.right-button.left,
+        available:field.width-parseFloat(style.paddingRight)-parseFloat(style.paddingLeft),
+        minimumText:2*parseFloat(style.fontSize),
+        targetWidth:button.width,targetHeight:button.height};
+    }''')
+    assert metrics['padding'] >= metrics['reserve'] - 1 and metrics['available'] >= metrics['minimumText'], metrics
+    assert metrics['targetWidth'] >= 44 and metrics['targetHeight'] >= 44, metrics
+    await reveal.press('Enter')
+    await expect(dialog.locator('#fixture-password')).to_have_attribute('type', 'text')
+    for selector in ('#fixture-icon-field', '#fixture-reminder-time', '#fixture-note'):
+        await page.keyboard.press('Tab')
+        target = dialog.locator(selector)
+        await expect(target).to_be_focused()
+        await expect(target).to_be_in_viewport(ratio=1)
+    icons = await dialog.locator('#fixture-icon-field').evaluate('''node => {
+      const style=getComputedStyle(node), field=node.getBoundingClientRect();
+      const [left,right]=[...node.parentElement.querySelectorAll('span')].map(icon=>icon.getBoundingClientRect());
+      return {leftSpace:parseFloat(style.paddingLeft),rightSpace:parseFloat(style.paddingRight),
+        leftUsed:left.right-field.left,rightUsed:field.right-right.left};
+    }''')
+    assert icons['leftSpace'] >= icons['leftUsed'] and icons['rightSpace'] >= icons['rightUsed'], icons
+    await page.keyboard.press('Tab')
+    await expect(dialog.get_by_role('button', name='取消編輯')).to_be_focused()
+    await expect(dialog.get_by_role('button', name='取消編輯')).to_be_in_viewport(ratio=1)
+    await page.keyboard.press('Tab')
+    finish = dialog.get_by_role('button', name='完成編輯')
+    await expect(finish).to_be_focused()
+    await expect(finish).to_be_in_viewport(ratio=1)
+    assert abs(await finish.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') - expected_body) < .1, 'Shared button lost the active text preference'
+    await capture('form-actions' + suffix, full_page=False)
+    await page.keyboard.press('Tab')
+    await expect(dialog.get_by_role('button', name='關閉視窗')).to_be_focused()
+    await expect(dialog.get_by_role('button', name='關閉視窗')).to_be_in_viewport(ratio=1)
+    await page.keyboard.press('Escape')
+    await expect(dialog).to_have_count(0)
+    await expect(opener).to_be_focused()
+    report['checks'].append('Real dialog and Input/Select/Textarea respect text size; native Tab reaches every field and both footer actions, wraps inside the dialog and returns to its opener')
+
+    confirm_opener = page.get_by_role('button', name='檢查長篇確認內容', exact=True)
+    await confirm_opener.click()
+    confirm = page.get_by_role('dialog', name='確認移除提醒')
+    heading = confirm.get_by_role('heading', name='確認移除提醒')
+    await expect(heading).to_be_in_viewport(ratio=1)
+    await expect(heading).to_be_focused()
+    assert await confirm.evaluate('node => node.scrollTop <= 1'), 'Long confirmation skipped its opening explanation'
+    await capture('confirmation-start' + suffix, full_page=False)
+    await page.keyboard.press('Tab')
+    cancel = confirm.get_by_role('button', name='取消', exact=True)
+    await expect(cancel).to_be_focused()
+    await expect(cancel).to_be_in_viewport(ratio=1)
+    await page.keyboard.press('Tab')
+    await expect(confirm.get_by_role('button', name='移除提醒')).to_be_focused()
+    await expect(confirm.get_by_role('button', name='移除提醒')).to_be_in_viewport(ratio=1)
+    await page.keyboard.press('Escape')
+    await expect(confirm).to_have_count(0)
+    await expect(confirm_opener).to_be_focused()
+    report['checks'].append('Long confirmation begins at the readable heading; keyboard reaches cancel before the destructive action and Escape restores its opener')
+
+
+async def check_short_service_menu(page, report, capture):
+    original = page.viewport_size
+    try:
+        for width, height in ((390, 320), (640, 360)):
+            await page.set_viewport_size({'width': width, 'height': height})
+            await page.evaluate('window.scrollTo({top:0,behavior:"instant"})')
+            trigger = page.locator('summary[aria-label="所有服務"]')
+            await trigger.click()
+            close = page.get_by_role('button', name='關閉所有服務')
+            await expect(close).to_be_in_viewport(ratio=1)
+            assert await close.evaluate('''node => {
+              const panel=node.parentElement.parentElement.getBoundingClientRect();
+              const header=node.closest('header').getBoundingClientRect();
+              const navigation=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();
+              return panel.top >= header.bottom-1 && panel.bottom <= navigation.top+1;
+            }'''), 'Short-window service menu covered the header or bottom navigation'
+            last = page.locator('[data-service-link]').last
+            await last.focus()
+            await expect(last).to_be_in_viewport(ratio=1)
+            assert await last.evaluate('''node => {
+              const link=node.getBoundingClientRect();
+              const panel=node.closest('details').querySelector('[aria-label="關閉所有服務"]').parentElement.parentElement.getBoundingClientRect();
+              return link.top >= panel.top-1 && link.bottom <= panel.bottom+1;
+            }'''), 'Last service was clipped within its panel'
+            await capture(f'services-short-{width}', full_page=False)
+            await close.focus()
+            await expect(close).to_be_in_viewport(ratio=1)
+            await close.press('Enter')
+            await expect(trigger).to_be_focused()
+        report['checks'].append('390×320 and 640×360 service menus keep header and bottom navigation clear; last service and close action are reachable')
+    finally:
+        await page.set_viewport_size(original)
 
 
 async def font_evidence(context, page):
@@ -93,7 +235,7 @@ async def scenario(browser, origin, config, reports):
         await expect(page.get_by_role('dialog', name='校園語音與 AI 快速操作')).to_have_count(1 if voice else 0)
 
     try:
-        params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion')}
+        params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion', 'font')}
         await page.goto(origin + '/?' + urlencode(params))
         await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
         try:
@@ -228,6 +370,14 @@ async def scenario(browser, origin, config, reports):
         await trigger.focus()
         await expect(notification).to_have_count(0, timeout=5000)
         report['checks'].append('Pressed feedback respects motion preferences; completion toast fits, announces status, pauses during focus and resumes afterward')
+
+        await check_dialogs_and_fields(page, config, report, capture)
+        if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
+            await check_short_service_menu(page, report, capture)
+            # The same real modal must remain operable in a short window, too.
+            await page.set_viewport_size({'width': config['width'] if config['width'] < 400 else 390, 'height': 360})
+            await check_dialogs_and_fields(page, config, report, capture, '-short')
+            await page.set_viewport_size({'width': config['width'], 'height': config['height']})
 
         ledger = await page.evaluate('window.__interfaceQA.snapshot()')
         report['ledger'] = ledger

@@ -654,3 +654,24 @@ it.each([
     }
   },
 );
+
+it.each([
+  ['2026-11-17T15:04:05+08:00', '2026/11/17 15:04:05'],
+  ['2026-11-17T17:04:05Z', '2026/11/18 01:04:05'],
+])('工單與外宿歷程以台灣時間顯示（%s）', async (instant, expected) => {
+  const at = Date.parse(instant);
+  api.rows.repairs = [{
+    id: 'r-time', title: '歷程時間測試', dormitory: 'A', room: '101',
+    dormStatus: 'fixed', expectedDate: '2026-11-19',
+    history: [{ status: 'fixed', at }],
+  }];
+  api.rows.leaves = [{
+    id: 'l-time', building: 'A', room: '101', date: '2026-11-18',
+    reason: '外宿歷程時間測試', status: 'approved', history: [{ status: 'approved', at }],
+  }];
+  render(<DormWorkflow schoolId="pu" uid="alice" />);
+  expect(await screen.findByText(`已修好，請確認 · ${expected}`)).toBeTruthy();
+  expect(screen.getByText(`已核可 · ${expected}`)).toBeTruthy();
+  expect(screen.getByText('2026-11-18 · A 101 · 已核可')).toBeTruthy();
+  expect(screen.getByText('預計日期：2026-11-19')).toBeTruthy();
+});

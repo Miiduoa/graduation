@@ -118,11 +118,12 @@ function Header({ onOpenVoice }: HeaderProps) {
   useLayoutEffect(() => {
     const navigation = header.current;
     const panel = quickPanel.current;
-    if (!quickOpen || !navigation || !panel) return;
+    if (!navigation) return;
     const updateHeaderInset = () => {
       // A nonmodal panel must leave the other header destinations reachable.
       const bottom = Math.max(0, navigation.getBoundingClientRect().bottom);
-      panel.style.setProperty('--voice-header-bottom', `${bottom}px`);
+      navigation.style.setProperty('--navigation-header-bottom', `${bottom}px`);
+      panel?.style.setProperty('--voice-header-bottom', `${bottom}px`);
     };
     updateHeaderInset();
     const observer =

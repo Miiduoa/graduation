@@ -141,6 +141,9 @@ function Workspace({
   const [draft, setDraft] = useState<CareerOpportunity | null>(null);
   const [slotsText, setSlotsText] = useState('');
   const [deadline, setDeadline] = useState('');
+  const draftSession = useRef(0);
+  const opportunityDraft = useRef({ draft, slotsText, deadline });
+  opportunityDraft.current = { draft, slotsText, deadline };
   const [message, setMessage] = useState<Record<string, { value: string; revision: number }>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -240,6 +243,13 @@ function Workspace({
   }, [service, loadCourses]);
   async function execute(command: Exclude<CareerCommand, { action: 'list' }>) {
     if (inFlight.current) return;
+    const submittedDraftSession = draftSession.current;
+    const submittedDraft = JSON.stringify(opportunityDraft.current);
+    const submittedMessage =
+      command.action === 'review'
+        ? (command.message ??
+          snapshot?.applications.find((a) => a.id === command.applicationId)?.message)
+        : undefined;
     inFlight.current = true;
     setBusy(true);
     setError('');
@@ -248,18 +258,36 @@ function Workspace({
     pendingRefresh.current = false;
     readController.current?.abort();
     try {
-      await service.execute(command);
+      const reply = await service.execute(command);
       if (!alive.current) return;
       if (command.action === 'review') {
         setMessage((previous) => {
+          const current = previous[command.applicationId];
+          if (current?.value !== submittedMessage || current?.revision !== command.revision)
+            return previous;
           const next = { ...previous };
           delete next[command.applicationId];
           return next;
         });
       }
-      setSelected(null);
-      setConfirmed(false);
-      setDraft(null);
+      if (command.action === 'apply') {
+        setSelected((current) => (current?.id === command.opportunityId ? null : current));
+        setConfirmed(false);
+      }
+      if (command.action === 'save' && draftSession.current === submittedDraftSession) {
+        if (JSON.stringify(opportunityDraft.current) === submittedDraft) {
+          setDraft(null);
+        } else {
+          // The save transaction increments the submitted revision exactly once.
+          // Keep newer input while advancing this editing session to the saved record.
+          const id = reply.id || command.opportunity.id;
+          if (id) {
+            setDraft((current) =>
+              current ? { ...current, id, revision: command.opportunity.revision + 1 } : current,
+            );
+          }
+        }
+      }
       setNotice(
         command.action === 'apply'
           ? '已送出申請，可在「我的申請」查看進度。'
@@ -300,6 +328,7 @@ function Workspace({
   });
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   function edit(opportunity: CareerOpportunity) {
+    draftSession.current++;
     setDraft({ ...opportunity });
     setSlotsText(opportunity.slots.map((s) => `${s.day} ${s.start} ${s.end}`).join('\n'));
     setDeadline(

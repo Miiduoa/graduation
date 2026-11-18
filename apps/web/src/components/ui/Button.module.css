@@ -17,7 +17,7 @@
   color: var(--button-foreground);
   box-shadow: none;
   font-family: inherit;
-  font-size: 0.9375rem;
+  font-size: var(--font-body-size, 0.9375rem);
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: -0.01em;
@@ -67,13 +67,13 @@
 
 .button.sm {
   padding-inline: 14px;
-  font-size: 0.875rem;
+  font-size: calc(var(--font-body-size, 0.9375rem) - 0.0625rem);
 }
 
 .button.lg {
   min-height: 52px;
   padding-inline: 24px;
-  font-size: 1.0625rem;
+  font-size: var(--font-h3-size, 1.0625rem);
 }
 
 .button.fullWidth {

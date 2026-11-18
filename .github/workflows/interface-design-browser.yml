@@ -63,7 +63,7 @@ jobs:
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
       - name: Bundle real interface with explicit synthetic data boundaries
         run: node scripts/qa/interface-design/build.mjs
-      - name: Verify six interface and accessibility scenarios
+      - name: Verify interface, forms and accessibility scenarios
         run: python scripts/qa/interface-design/check.py
       - name: Upload rendered evidence and source hashes
         if: always()
