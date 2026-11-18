@@ -324,18 +324,35 @@ Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟�
 
 使用專案支援的 Node 22，先執行 `node scripts/build-functions-shared.cjs`。Web 測試在 `apps/web` 執行 `vitest run`，包含 binding、auth、reader、route、submission source／service、Agent grants／意圖／工具／下載、client、TronClassWorkspace 與既有 Assistant／NuniApp 回歸；另外驗證 Mobile 五個舊 writer 沒有任何網路送出。HAR 測試使用 `node --test scripts/tronclass/analyze-har.test.mjs`，已加入既有 CI。
 
-### 2026-11-18 本機整合驗證
+### 2026-11-18 本輪工作區與附件下載驗證
 
-這輪先合入 `main` 的 `d4bc4cbf`，再完成上述接線。完整 Web 測試執行於開發收尾期間；其後變更另跑最新 TronClass／instrumentation 範圍，兩者有重疊，不能相加。正式 GitHub 結果以 PR 最新提交上的 Actions 為準。
+本輪已合入 `main` 的 `6b0dbe30` 及前輪公開 v2 service，完成 Web／Mobile 作業待辦、本人歷史附件下載、登入 Cookie 輪替及同步／下載期限取消。以下為這一輪實際執行的本機驗證；最新提交的 GitHub CI 已觸發，結果仍須以該提交的 Actions 為準，不沿用先前 head 的 CI 綠燈。
+
+| 範圍 | 實際結果 |
+| --- | --- |
+| Web TronClass 整合回歸 | 使用 `maxWorkers: 4`；56 個檔案通過、4 個略過，1,790 項通過、33 項略過、0 失敗 |
+| 原生 Mobile／transport／session 回歸 | 8 suites、174 / 174 通過，包含歷史附件分享與作業待辦流程 |
+| 底層 scraper 回歸 | 122 / 122 通過 |
+| 最後教材下載與底層取消回歸 | 52 / 52 通過；涵蓋下載期限內的 metadata 讀取取消，與上述回歸有重疊，不重複加總 |
+| 受影響範圍 ESLint／TypeScript | 通過；既有 lint warnings 保留，未降低規則 |
+| 完整 Web Next build | 使用 CI 規定的 public 合成設定、Node 22.23.5 與本機 4 GiB heap，編譯、完整 TypeScript、靜態頁面及產物整理均完成；TypeScript 階段約 65 秒，未略過型別檢查 |
+
+先前一次本機 build 在預設約 2 GiB heap 下於 TypeScript 階段耗盡記憶體；提高該次程序的 heap 上限後完整完成，未因此變更 repository 建置規則。CI 合成 public 設定的 build 不等同正式環境設定驗收；本輪未重新執行原生商店 build、真人裝置或校方登入／收件驗收。33 項 skipped 不計為通過，前輪完整 Web、資料庫與原生 export 結果分開保留於下方。
+
+`main` 的 `6b0dbe30` 已包含 `picomatch` 公告 `GHSA-fc5q-39xc-vjpf` 的既有、具期限風險接受紀錄。本輪隨主線合入該紀錄，沒有另增例外、修改版本號或放寬安全 gate；因此下方前輪「audit 被阻擋」是當時觀察，不能直接當作目前新 head 的檢查結果。新的 CI／security gate 狀態仍須依最新 Actions 核對。
+
+### 2026-11-18 前輪整合證據（截至 `0a4b7db8`）
+
+前輪先合入 `main` 的 `d4bc4cbf`，再接上公開 v2 service。以下保留截至 `0a4b7db8` 的驗證紀錄：完整 Web 測試執行於該輪開發收尾期間；其後變更另跑當時的 TronClass／instrumentation 範圍，兩者有重疊，不能相加，也不代表目前新 head 已重跑全部項目。
 
 | 範圍 | 實際結果 |
 | --- | --- |
 | 完整 Web Vitest | 770 個檔案通過、16 個略過；16,641 項通過、141 項略過、0 失敗 |
-| 最後 TronClass、relay 與 instrumentation 回歸 | 53 個檔案通過、4 個略過；1,574 項通過、33 項略過、0 失敗；包含公開 v2 adapter、default factory 禁寫、HTTP route 整合與底層取消接線後的回歸 |
+| 前輪最後 TronClass、relay 與 instrumentation 回歸 | 53 個檔案通過、4 個略過；1,574 項通過、33 項略過、0 失敗；包含公開 v2 adapter、default factory 禁寫、HTTP route 整合與底層取消接線後的回歸 |
 | 底層 scraper／relay／PU pause 回歸 | 3 suites、152 項通過、0 略過；涵蓋 direct socket 及 relay body 取消、內部分頁／fallback deadline、舊呼叫相容性 |
 | 真 Firestore Emulator | controlled journal 8 項與 retention 6 項，合計 14 / 14 通過 |
 | 真 PostgreSQL 17.12 | 關帳 outbox、角色權限、lease、rollback 與實際 SQL 逾時，16 / 16 通過 |
-| 最新原生 Mobile／transport／session 測試 | 9 suites、149 / 149 通過 |
+| 前輪原生 Mobile／transport／session 測試 | 9 suites、149 / 149 通過 |
 | Mobile 受影響導覽回歸 | 4 suites、140 / 140 通過；與上列分開列示，不加總 |
 | 完整 Web 與 Mobile TypeScript | Node 22.23.5，均 exit 0 |
 | 完整 monorepo ESLint | `pnpm lint` exit 0；既有 warnings 保留，沒有降低規則 |
@@ -345,7 +362,7 @@ Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟�
 
 普通 Vitest 未啟動 PostgreSQL／Firestore Emulator 時會略過相應檔案；上表真資料庫結果來自另外實際啟動的隔離 runtime，不把 skipped 計作通過。學校登入回應與作業內容均為合成資料，沒有將其他學生的真實課務資料轉為 fixture，也沒有真人作業送交。
 
-這輪新提交仍須面對 11/17 更新的 `picomatch` advisory `GHSA-fc5q-39xc-vjpf`；當時沒有可用已發布修正版，實際 `workspace-prod`／`workspace-all` audit 都被既有 high gate 阻擋。未修改例外名單、改版本號假裝修補，或放寬安全 gate。先前提交的 CI 綠燈不能代替本輪提交的結果。
+在前輪尚未合入 `main` 的 `6b0dbe30` 時，11/17 更新的 `picomatch` advisory `GHSA-fc5q-39xc-vjpf` 沒有可用已發布修正版，當時的 `workspace-prod`／`workspace-all` audit 都被既有 high gate 阻擋。該輪沒有修改例外名單、改版本號假裝修補，或放寬安全 gate。此處僅保留歷史觀察；本輪合入主線既有風險接受紀錄的狀態與最新驗證見上一節。
 
 ### 先前開發回合
 
