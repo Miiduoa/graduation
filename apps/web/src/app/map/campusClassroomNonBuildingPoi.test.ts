@@ -247,6 +247,7 @@ describe('published stop identity survives missing imported metadata', () => {
     // This simulates an incomplete server row replacing the bundled stop by
     // the exact published ID. Name/category/building edits are synthetic.
     const { transitStopIds: _omitted, ...withoutOptionalMarker } = stop!;
+    expect(_omitted?.length).toBeGreaterThan(0);
     const incompleteServerStop = {
       ...withoutOptionalMarker,
       name: '主顧樓',
