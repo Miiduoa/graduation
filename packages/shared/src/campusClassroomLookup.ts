@@ -69,10 +69,6 @@ const NON_CLASSROOM_POI_CATEGORIES = new Set([
   'shop', 'store', 'convenience store', 'convenience_store', 'atm',
 ]);
 
-/** Firestore category labels may append a campus/terminal qualifier in parentheses.
- * Compare only exact known non-building categories, never a substring of a
- * legitimate teaching-building label such as "交通工程學院".
- */
 /** A published transit-stop ID is not a building, even if a later catalog
  * edit labels the stop "教學" or copies a building name into its fields.
  * Use only the explicitly supplied stop IDs; never infer one from a name.
@@ -84,6 +80,10 @@ function hasTransitStopIdentity(location: CampusMapPlaceLike): boolean {
   );
 }
 
+/** Firestore category labels may append a campus/terminal qualifier in parentheses.
+ * Compare only exact known non-building categories, never a substring of a
+ * legitimate teaching-building label such as "交通工程學院".
+ */
 function isExplicitNonClassroomCategory(value: unknown): boolean {
   const category = comparisonText(value);
   // Firestore may append multiple short parenthetical qualifiers, e.g.
