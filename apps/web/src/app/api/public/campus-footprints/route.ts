@@ -280,7 +280,22 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  const raw = await readBoundedResponse(response, signal);
+  let raw: string;
+  try {
+    raw = await readBoundedResponse(response, signal);
+  } catch (error) {
+    // Overpass or an intermediary can return HTTP 200 with unusable framing
+    // (empty/oversized/invalid stream) and still request a longer cooldown.
+    // Reject the geometry as before, but respect that explicit retry window
+    // rather than sending another request after our default ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (!signal.aborted && retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(raw) as unknown;
