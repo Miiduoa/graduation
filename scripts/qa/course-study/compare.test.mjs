@@ -357,6 +357,9 @@ test('verifies local course/question bytes without exposing private content or p
     const tampered = structuredClone(input);
     writeFileSync(join(directory, 'lesson.txt'), '資料遭到修改');
     assert.throws(() => verifyLocalStudyFixtures(tampered, manifestPath), /SHA-256 mismatch/);
+    // Reset the intentionally corrupted lesson before checking the next,
+    // independent validation boundary.
+    writeFileSync(join(directory, 'lesson.txt'), source);
     const outside = structuredClone(input);
     outside.trials[0].sourceFile = '../outside.txt';
     assert.throws(() => verifyLocalStudyFixtures(outside, manifestPath),
