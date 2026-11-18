@@ -5,6 +5,7 @@ import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
+import { assistantRoleToolAllowed, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -761,6 +762,7 @@ export function createTools(
   reorder = false,
   question = '',
   exactEventArguments = false,
+  taskProfile?: AssistantRoleProfileId,
 ) {
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
@@ -1211,6 +1213,10 @@ export function createTools(
         return propose(a);
       case 'propose_open_page': {
         if (a.entityId) {
+          // A page proposal must not indirectly read student courses or buyer
+          // orders while the active task context excludes those sources.
+          if (taskProfile && taskProfile !== 'student' && ['classroom', 'orders'].includes(String(a.page)))
+            return fail('TASK_CONTEXT_MISMATCH', 409);
           const entity = String(a.entityId);
           const observedOrders = a.page === 'orders'
             ? [...orders].filter((key) => key.endsWith(':' + entity))
@@ -1273,6 +1279,8 @@ export function createTools(
     return fail('UNKNOWN_TOOL');
   }
   function context() {
+    if (taskProfile && !assistantRoleToolAllowed(taskProfile, 'get_today_context'))
+      return fail('TASK_CONTEXT_MISMATCH', 409);
     return (contextCache ||= buildContext());
   }
   async function buildContext() {
@@ -1401,6 +1409,10 @@ export function createTools(
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
+      // Context selection can narrow tool use, never authorize a new resource.
+      // Check before argument repair, pre-reads, permissions or cache access.
+      if (taskProfile && !assistantRoleToolAllowed(taskProfile, name))
+        return fail('TASK_CONTEXT_MISMATCH', 409);
       const permission = proposalPermission(name);
       if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };

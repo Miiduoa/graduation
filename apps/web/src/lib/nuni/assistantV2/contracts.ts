@@ -136,6 +136,8 @@ export type Card = {
   mutationId: string;
   schoolId: string;
   destination: string;
+  /** Presentation hint only; the signed source guard is the execution authority. */
+  sourceBound?: 'food-pickup';
 };
 export type Step = { name: string; status: 'ok' | 'error' | 'cached'; summary: string };
 export type Message = {
@@ -190,6 +192,12 @@ export type CourseworkStudyGuard = {
   kind: 'assignment' | 'quiz';
   fingerprint: string;
   policy: 'coursework-gap' | 'study';
+};
+export type FoodPickupGuard = {
+  tenantId: string;
+  orderId: string;
+  fingerprint: string;
+  durationMinutes: number;
 };
 export type Adapter = {
   simulation: boolean;

@@ -2,6 +2,7 @@ const nodeCrypto = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { Timestamp } = require('firebase-admin/firestore');
 const { assertOnlineOrderingEnabled } = require('./lib/onlineOrdering');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 function identifier(value, name, max = 160) {
   if (
@@ -119,6 +120,8 @@ function notCreated(message) {
   return new HttpsError('failed-precondition', message, { orderOutcome: 'not_created' });
 }
 function receipt(payload, orderId, reused) {
+  const queueNumber = payload.status !== 'cancelled' &&
+    typeof payload.queueNumber === 'number' && payload.queueNumber > 0 ? payload.queueNumber : null;
   return {
     success: true,
     reused,
@@ -140,12 +143,10 @@ function receipt(payload, orderId, reused) {
     status: payload.status,
     createdAt:
       typeof payload.createdAt?.toDate === 'function' ? payload.createdAt.toDate().toISOString() : null,
-    queueNumber:
-      typeof payload.queueNumber === 'number' && payload.queueNumber > 0 ? payload.queueNumber : null,
-    queueStatus:
-      typeof payload.queueNumber === 'number' && payload.queueNumber > 0
-        ? 'assigned'
-        : 'pending_confirmation',
+    queueNumber,
+    queueStatus: payload.status === 'cancelled' ? 'cancelled'
+      : queueNumber != null ? 'assigned'
+        : payload.status === 'completed' ? 'completed' : 'pending_confirmation',
   };
 }
 
@@ -178,12 +179,18 @@ function createOrderHandler({ db }) {
       .doc(orderId);
     const keyRef = db.collection('_orderRequests').doc(orderId);
     const result = await db.runTransaction(async (transaction) => {
-      const [keyDoc, memberDoc, orderDoc, mirrorDoc] = await transaction.getAll(
+      const [keyDoc, memberDoc, orderDoc, mirrorDoc, accountDoc] = await transaction.getAll(
         keyRef,
         schoolRef.collection('members').doc(uid),
         orderRef,
         userOrderRef,
+        db.collection('users').doc(uid),
       );
+      if (isAccountUnavailable(accountDoc.exists ? accountDoc.data() : {})) {
+        throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+          reason: 'account-deletion',
+        });
+      }
       if (!memberDoc.exists || memberDoc.data().status !== 'active')
         throw new HttpsError('permission-denied', 'Active school membership required');
       if (keyDoc.exists) {
@@ -335,13 +342,20 @@ function createOrderHandler({ db }) {
       }
     });
     if (result.notCreatedMessage) throw notCreated(result.notCreatedMessage);
-    if (result.queueStatus === 'assigned') return result;
+    if (result.queueStatus === 'assigned' || ['cancelled', 'completed'].includes(result.status)) return result;
     // 訂單已經成立，號碼另外拿；拿不到不影響訂單，畫面顯示「號碼還沒拿到，請到櫃台確認。」
+    const { assignNumberForOrder, ClosedOrderError } = require('./ordering/queueNumber');
     try {
-      const { assignNumberForOrder } = require('./ordering/queueNumber');
       const assigned = await assignNumberForOrder(db, { schoolId, orderId, uid, actor: 'system' });
-      return { ...result, queueNumber: assigned.queueNumber, queueStatus: 'assigned' };
+      return { ...result, status: assigned.status, queueNumber: assigned.queueNumber, queueStatus: 'assigned' };
     } catch (error) {
+      // A later cancellation/completion is authoritative only when the queue
+      // transaction verified this same canonical order and its acting account.
+      const state = error instanceof ClosedOrderError ? error.orderState : null;
+      if (state?.schoolId === schoolId && state.orderId === orderId && state.userId === uid &&
+        ['cancelled', 'completed'].includes(state.status)) {
+        return { ...result, status: state.status, queueNumber: null, queueStatus: state.status };
+      }
       require('firebase-functions/logger').warn('Order created; queue number pending confirmation', {
         schoolId,
         orderId,
