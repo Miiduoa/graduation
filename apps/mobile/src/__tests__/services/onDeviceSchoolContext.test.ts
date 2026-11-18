@@ -857,6 +857,83 @@ test('restored record getters cannot swap task, announcement, timetable or route
   expect(routeReads).toBe(0);
 });
 
+test('accessor-backed source envelopes cannot replace authorized student evidence after validation', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const sense: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: '已核對的作業', groupName: '資料庫', dueAt: null }],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const format = (campus: CampusSenseSnapshot, device: OnDeviceSchoolContext = local) =>
+    formatOnDeviceSchoolPrompt(device, campus, 'alice');
+  expect(format(sense)).toContain('已核對的作業');
+  expect(format(sense)).toContain('資料庫概論');
+
+  // The scope check used to read userId before checking any descriptors.
+  // It must never invoke a restored root accessor, even once.
+  const root = { ...sense };
+  let rootReads = 0;
+  Object.defineProperty(root, 'userId', {
+    configurable: true, enumerable: true,
+    get: () => { rootReads += 1; return 'alice'; },
+  });
+  expect(format(root)).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(rootReads).toBe(0);
+
+  // Previously the row array was re-read after validation; a parent getter
+  // could return trusted rows first and a different student's list later.
+  const assignments = { ...sense.assignments };
+  let listReads = 0;
+  Object.defineProperty(assignments, 'items', {
+    configurable: true, enumerable: true,
+    get: () => {
+      listReads += 1;
+      return listReads === 1 ? sense.assignments.items :
+        [{ title: '被掉包的作業', groupName: '資料庫', dueAt: null }];
+    },
+  });
+  const swapped = format({ ...sense, assignments });
+  expect(swapped).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(swapped).not.toContain('被掉包的作業');
+  expect(swapped).toContain('資料庫概論'); // Independent local source survives.
+  expect(listReads).toBe(0);
+
+  const coverage = { complete: true, reason: 'complete' as const, pages: 1 };
+  let coverageReads = 0;
+  Object.defineProperty(coverage, 'complete', {
+    configurable: true, enumerable: true,
+    get: () => { coverageReads += 1; return true; },
+  });
+  expect(format({
+    ...sense, assignments: { ...sense.assignments, coverage },
+  })).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(coverageReads).toBe(0);
+
+  // The timetable envelope is another authorization boundary: a getter
+  // cannot swap the already checked course array just before serialization.
+  const restored = { ...local.timetable };
+  let courseReads = 0;
+  Object.defineProperty(restored, 'courses', {
+    configurable: true, enumerable: true,
+    get: () => {
+      courseReads += 1;
+      return courseReads === 1 ? local.timetable.courses :
+        [{ name: '被掉包的課程', day: 1, start: 2, end: 3 }];
+    },
+  });
+  const badDevice = format(sense, { ...local, timetable: restored });
+  expect(badDevice).toContain('目前沒有可確認的本機個人課表');
+  expect(badDevice).not.toContain('被掉包的課程');
+  expect(badDevice).not.toContain('已核對的作業');
+  expect(courseReads).toBe(0);
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
