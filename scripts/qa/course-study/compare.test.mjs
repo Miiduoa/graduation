@@ -477,3 +477,35 @@ test('CLI refuses oversized and nonregular manifests without disclosing local pa
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('CLI rejects invalid UTF-8 comparison manifests instead of silently changing case IDs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nuni-study-manifest-utf8-'));
+  try {
+    const script = fileURLToPath(new URL('./compare.mjs', import.meta.url));
+    const path = join(directory, 'personal-observations.json');
+    const valid = fixture();
+    valid.trials[0].caseId = '教材題目一';
+    writeFileSync(path, JSON.stringify(valid));
+    const run = () => spawnSync(process.execPath, [script, path],
+      { encoding: 'utf8', timeout: 2500 });
+    const good = run();
+    assert.equal(good.status, 0);
+    assert.equal(JSON.parse(good.stdout).caseIds[0], '教材題目一');
+
+    // Replacing a raw byte within an ASCII case ID with invalid UTF-8
+    // previously created U+FFFD; JSON.parse then accepted that changed ID.
+    const raw = Buffer.from(JSON.stringify(fixture()), 'utf8');
+    const index = raw.indexOf(Buffer.from('pair-1'));
+    assert.notEqual(index, -1);
+    raw[index + 4] = 0xff;
+    writeFileSync(path, raw);
+    const invalid = run();
+    assert.notEqual(invalid.status, 0);
+    assert.equal(invalid.stdout, '');
+    assert.match(invalid.stderr, /manifest: invalid UTF-8/);
+    assert.equal(invalid.stderr.includes(directory), false);
+    assert.equal(invalid.stderr.includes('pair'), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

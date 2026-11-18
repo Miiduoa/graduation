@@ -323,7 +323,16 @@ function readLocalManifest(path) {
     if (after.size !== before.size || after.size !== BigInt(total) ||
         after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs)
       fail('manifest', 'JSON changed during read');
-    content = Buffer.concat(chunks, total).toString('utf8');
+    // Buffer.toString('utf8') silently replaces malformed bytes with U+FFFD.
+    // That would let a corrupted case ID or device label pass as a different
+    // observation, breaking reproducible same-question comparisons.
+    // Retain the previous BOM behavior (a BOM is not silently discarded).
+    try {
+      content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+        .decode(Buffer.concat(chunks, total));
+    } catch {
+      fail('manifest', 'invalid UTF-8');
+    }
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('manifest: ')) throw error;
     fail('manifest', 'file unreadable');

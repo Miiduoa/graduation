@@ -1,3 +1,8 @@
+## 2026-11-18：競品比較紀錄嚴格驗證 UTF-8，避免損壞教材識別碼成為有效證據
+
+- 本機比較 CLI 過去以 `Buffer.toString('utf8')` 讀入紀錄 JSON，遇到錯誤編碼位元組會靜默替換成 U+FFFD；即使 JSON 結構合法，`caseId`、裝置或版本資訊也可能被改寫後通過稽核。現在以嚴格 UTF-8 解碼拒絕資料損壞，回傳固定 `manifest: invalid UTF-8` 錯誤，且不把私人教材、路徑或內容寫到標準輸出。保留過去 BOM 不會被默默忽略的行為。
+- 新增 Node CLI 正反測試：正確繁體中文題目識別碼能完整通過、無效位元組在原本可解析的 JSON 字串中會被拒收。僅修改本機比較工具、回歸測試及文件，無新套件、外部教材傳輸或學生進度格式變更。此項驗證不等同真人同機比較、WebGPU 中文教學或 iOS／Android 真機驗收；未完成完整 gate／App 審查前 PR 保留 Draft、不合併、不部署。
+
 ## 2026-11-18：競品比較 CLI 的錯誤輸出不洩漏私人教材與本地檔案路徑
 
 - 修正 `compare.mjs` 在比較紀錄 JSON 格式損壞時直接輸出 `JSON.parse` 原生錯誤，以及讀取失敗時顯示檔案絕對路徑的問題。Node 的原始錯誤可能包含私人教材文字片段或使用者目錄；現在只回報 `manifest: invalid JSON`、`manifest: file unreadable` 或 `manifest: directory unavailable`，並維持非零結束碼與不產生成功報告。正確的比較／`--verify-fixtures` 流程不變。
