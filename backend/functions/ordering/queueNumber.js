@@ -19,7 +19,7 @@
  */
 
 const { onCall: firebaseOnCall, HttpsError } = require('firebase-functions/v2/https');
-const { createAccountGuardedOnCall } = require('../accountLifecycle');
+const { createAccountGuardedOnCall, isAccountUnavailable } = require('../accountLifecycle');
 const onCall = createAccountGuardedOnCall({
   onCall: firebaseOnCall,
   getDb: () => require('firebase-admin/firestore').getFirestore(),
@@ -160,6 +160,26 @@ async function assignNumberForOrder(
     else if (actor !== 'merchant' && uid && order.userId === uid) role = 'customer';
     else if (await isOperator()) role = 'merchant';
     else throw new HttpsError('permission-denied', 'Only the buyer or this store can get a number');
+    // Internal post-create numbering acts for the canonical buyer. Operators
+    // act for themselves and may still handle an existing disabled buyer's order.
+    let accountUid = uid;
+    if (role === 'system') {
+      try {
+        accountUid = identifier(order.userId, 'order owner');
+        if (accountUid !== order.userId) throw new Error('Noncanonical owner');
+      } catch {
+        throw new HttpsError('failed-precondition', 'Order owner requires review');
+      }
+    }
+    const account = await tx.get(db.collection('users').doc(accountUid));
+    if (isAccountUnavailable(account.exists ? account.data() : {})) {
+      throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+        reason: 'account-deletion',
+      });
+    }
+    // Legacy cancelled orders may retain a number; never revive their queue.
+    if (order.status === 'cancelled')
+      throw new HttpsError('failed-precondition', 'Order is already closed');
     if (typeof order.queueNumber === 'number' && order.queueNumber > 0) {
       // 已經有號碼：回同一個號碼。店家按「給號碼並接單」時，還沒接的單照樣接下來
       if (role === 'merchant' && order.status === 'pending') {

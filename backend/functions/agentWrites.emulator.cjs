@@ -329,9 +329,18 @@ async function runAfterCommittedClaim(action, change) {
   const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
   let changedAfterClaim = false;
   let failedAccountReads = 0;
+  let abortedServiceCommit = false;
   db.runTransaction = async function (callback, ...options) {
     const result = await originalRunTransaction.call(this, async (tx) => {
-      if (!changedAfterClaim || (!change.failAccountRead && !change.failPermissionsRead)) return callback(tx);
+      const execute = async () => {
+        const value = await callback(tx);
+        if (changedAfterClaim && change.abortServiceCommit && !abortedServiceCommit) {
+          abortedServiceCommit = true;
+          throw new HttpsError('unavailable', 'test abort before service transaction commit');
+        }
+        return value;
+      };
+      if (!changedAfterClaim || (!change.failAccountRead && !change.failPermissionsRead)) return execute();
       const sourcePath = change.failPermissionsRead
         ? 'users/alice/settings/assistantPermissions' : 'users/alice';
       const originalGet = tx.get;
@@ -351,7 +360,7 @@ async function runAfterCommittedClaim(action, change) {
         return originalGetAll.call(this, ...references);
       };
       try {
-        return await callback(tx);
+        return await execute();
       } finally {
         tx.get = originalGet;
         tx.getAll = originalGetAll;
@@ -373,6 +382,7 @@ async function runAfterCommittedClaim(action, change) {
     assert.equal(changedAfterClaim, true, 'the source change must occur after a committed claim');
     if (change.failAccountRead) assert.ok(failedAccountReads > 0, 'the service transaction must attempt the account read');
     if (change.failPermissionsRead) assert.ok(failedAccountReads > 0, 'the service transaction must read the tool permission after claim');
+    if (change.abortServiceCommit) assert.equal(abortedServiceCommit, true, 'the staged service transaction must abort');
   }
 }
 
@@ -645,6 +655,297 @@ test('a disabled account cannot replay an existing successful order to repair it
   assert.deepEqual(await collectionRecordSnapshot(orderCollections), before,
     'a rejected replay must not rewrite even an existing mirror or consume a queue number');
 });
+
+
+async function cancelProposal() {
+  const action = await orderProposal();
+  const created = await service.createOrder.run(request('alice', action.data.input));
+  assert.equal(created.success, true);
+  const input = { orderId: created.orderId, reason: 'Emulator-only cancellation' };
+  await db.doc('users/alice/settings/assistantPermissions').set({ cancelOrder: true });
+  await db.doc(`users/alice/agentRuns/${action.data.agentRunId}`).update({
+    actionProposals: [{ toolName: 'cancelOrder', input }],
+  });
+  action.data.toolName = 'cancelOrder';
+  action.data.input = input;
+  return action;
+}
+
+async function assertUnverifiedCancellation(action, before) {
+  assert.deepEqual(await collectionRecordSnapshot(orderCollections), before,
+    'a rejected cancellation must not change either order copy, counters, payment data or menu sources');
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'unverified');
+  assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+  assert.equal(run.steps.some((step) => step.output?.success === true), false);
+}
+
+for (const change of blockedAccountChanges) {
+  test(`an Agent cancelOrder stops when the account becomes ${change.label} after claim`, async () => {
+    const action = await cancelProposal();
+    const before = await collectionRecordSnapshot(orderCollections);
+
+    await assert.rejects(runAfterCommittedClaim(action, change), { code: change.code });
+
+    await assertUnverifiedCancellation(action, before);
+  });
+}
+
+for (const change of [
+  { label: 'active', apply: (account) => account.update({ status: 'active' }) },
+  { label: 'legacy', apply: (account) => account.set({ schoolId: 'pu' }) },
+  { label: 'missing profile', apply: (account) => account.delete() },
+]) {
+  test(`an Agent cancelOrder atomically preserves the complete receipt for a ${change.label} account`, async () => {
+    const action = await cancelProposal();
+    const sourcesBefore = await collectionRecordSnapshot([...orderSourceCollections, 'schools/pu/queueCounters', '_orderRequests']);
+
+    const receipt = await runAfterCommittedClaim(action, change);
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.orderId, action.data.input.orderId);
+    const canonical = await read(`schools/pu/orders/${receipt.orderId}`);
+    const mirror = await read(`users/alice/schools/pu/orders/${receipt.orderId}`);
+    assert.equal(canonical.status, 'cancelled');
+    assert.equal(canonical.cancelReason, action.data.input.reason);
+    assert.equal(canonical.queueNumber, null);
+    assert.equal(canonical.queueStatus, 'cancelled');
+    assert.equal(canonical.cancelledQueueNumber, 1);
+    assert.ok(canonical.cancelledAt instanceof Timestamp);
+    assert.deepEqual(mirror, canonical);
+    assert.deepEqual(await collectionRecordSnapshot([...orderSourceCollections, 'schools/pu/queueCounters', '_orderRequests']), sourcesBefore);
+    const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+    assert.equal(run.actionClaims['0'].status, 'completed');
+    const beforeReplay = await collectionRecordSnapshot(orderCollections);
+    await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), beforeReplay);
+  });
+}
+
+test('an already cancelled order keeps its original cancellation time and reason through an Agent confirmation', async () => {
+  const action = await cancelProposal();
+  await service.cancelOrder.run(request('alice', { orderId: action.data.input.orderId, reason: 'Original reason' }));
+  const orderRef = db.doc(`schools/pu/orders/${action.data.input.orderId}`);
+  const original = await orderRef.get();
+
+  const receipt = await executeAgentWrite.run(action);
+
+  assert.equal(receipt.success, true);
+  const after = await orderRef.get();
+  assert.deepEqual(after.data(), original.data());
+  assert.equal(after.updateTime.isEqual(original.updateTime), true);
+  assert.deepEqual(await read(`users/alice/schools/pu/orders/${action.data.input.orderId}`), original.data());
+});
+
+for (const source of [
+  { label: 'missing', code: 'not-found', apply: (ref) => ref.delete() },
+  { label: 'preparing', code: 'failed-precondition', apply: (ref) => ref.update({ status: 'preparing' }) },
+  { label: 'invalid status', code: 'failed-precondition', apply: (ref) => ref.update({ status: 'unrecognized' }) },
+]) {
+  test(`an Agent cancellation cannot mutate a ${source.label} order after claim`, async () => {
+    const action = await cancelProposal();
+    let afterSourceChange;
+    await assert.rejects(runAfterCommittedClaim(action, {
+      apply: async () => {
+        await source.apply(db.doc(`schools/pu/orders/${action.data.input.orderId}`));
+        afterSourceChange = await collectionRecordSnapshot(orderCollections);
+      },
+    }), { code: source.code });
+    await assertUnverifiedCancellation(action, afterSourceChange);
+  });
+}
+
+test('an Agent cancellation transaction abort leaves both order copies unchanged', async () => {
+  const action = await cancelProposal();
+  const before = await collectionRecordSnapshot(orderCollections);
+
+  await assert.rejects(runAfterCommittedClaim(action, {
+    apply: async () => {}, abortServiceCommit: true,
+  }), { code: 'unavailable' });
+
+  await assertUnverifiedCancellation(action, before);
+});
+
+// Fault injection is restricted to the local SDK transport. In ordinary callable
+// tests this begins after admission, before the first actual service transaction.
+async function withAccountReadFault(tx, uid, run, onFailure) {
+  const originalGet = tx.get;
+  const originalGetAll = tx.getAll;
+  const fails = (reference) => reference?.path === `users/${uid}`;
+  const error = () => {
+    onFailure();
+    return Promise.reject(new HttpsError('unavailable', 'test queue account source unavailable'));
+  };
+  tx.get = function (reference, ...args) {
+    return fails(reference) ? error() : originalGet.call(this, reference, ...args);
+  };
+  tx.getAll = function (...references) {
+    return references.some(fails) ? error() : originalGetAll.call(this, ...references);
+  };
+  try {
+    return await run();
+  } finally {
+    tx.get = originalGet;
+    tx.getAll = originalGetAll;
+  }
+}
+
+async function runBeforeQueueTransaction(run, uid, change) {
+  const originalRunTransaction = db.runTransaction;
+  let changed = false;
+  let failedReads = 0;
+  db.runTransaction = async function (callback, ...options) {
+    if (!changed) {
+      changed = true;
+      await change.apply(db.doc(`users/${uid}`));
+    }
+    return originalRunTransaction.call(this, (tx) => change.failAccountRead
+      ? withAccountReadFault(tx, uid, () => callback(tx), () => { failedReads += 1; })
+      : callback(tx), ...options);
+  };
+  try {
+    return await run();
+  } finally {
+    db.runTransaction = originalRunTransaction;
+    assert.equal(changed, true, 'the callable must reach its queue transaction');
+    if (change.failAccountRead) assert.ok(failedReads > 0, 'the queue transaction must read its actor account');
+  }
+}
+
+async function runAfterOrderCommit(action, change) {
+  const originalRunTransaction = db.runTransaction;
+  let committed;
+  let failedReads = 0;
+  db.runTransaction = async function (callback, ...options) {
+    const result = await originalRunTransaction.call(this, (tx) => committed && change.failAccountRead
+      ? withAccountReadFault(tx, 'alice', () => callback(tx), () => { failedReads += 1; })
+      : callback(tx), ...options);
+    if (!committed) {
+      const orders = await db.collection('schools/pu/orders').get();
+      assert.equal(orders.size, 1, 'the first transaction must commit the canonical order');
+      assert.equal(orders.docs[0].data().queueNumber, null);
+      committed = await collectionRecordSnapshot(orderCollections);
+      await change.apply(db.doc('users/alice'));
+    }
+    return result;
+  };
+  try {
+    const receipt = await service.createOrder.run(request('alice', action.data.input));
+    return { receipt, committed };
+  } finally {
+    db.runTransaction = originalRunTransaction;
+    assert.ok(committed, 'the account change must occur after the order commit');
+    if (change.failAccountRead) assert.ok(failedReads > 0, 'system queue assignment must read the buyer account');
+  }
+}
+
+for (const change of blockedAccountChanges) {
+  test(`a committed order stays pending without queue writes when its buyer becomes ${change.label}`, async () => {
+    const action = await orderProposal();
+
+    const { receipt, committed } = await runAfterOrderCommit(action, change);
+
+    assert.equal(receipt.success, true, 'the already committed order must not be reported as nonexistent');
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.equal(receipt.status, 'pending');
+    assert.equal(receipt.queueNumber, null);
+    assert.equal(receipt.queueStatus, 'pending_confirmation');
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), committed,
+      'failed post-commit numbering must not consume counters or partially update order copies or payments');
+  });
+}
+
+for (const change of [
+  { label: 'active', apply: (account) => account.update({ status: 'active' }) },
+  { label: 'legacy', apply: (account) => account.set({ schoolId: 'pu' }) },
+  { label: 'missing profile', apply: (account) => account.delete() },
+]) {
+  test(`post-commit system numbering preserves a ${change.label} buyer`, async () => {
+    const action = await orderProposal();
+    const sources = await collectionRecordSnapshot(orderSourceCollections);
+
+    const { receipt } = await runAfterOrderCommit(action, change);
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.queueStatus, 'assigned');
+    assert.equal(receipt.queueNumber, 1);
+    const canonical = await read(`schools/pu/orders/${receipt.orderId}`);
+    assert.equal(canonical.queueAssignedBy, 'system');
+    assert.deepEqual(await read(`users/alice/schools/pu/orders/${receipt.orderId}`), canonical);
+    assert.deepEqual(await collectionRecordSnapshot(orderSourceCollections), sources);
+  });
+}
+
+async function manualQueueFixture(role, hasNumber = false) {
+  await orderProposal();
+  const uid = role === 'merchant' ? 'bob' : 'alice';
+  await db.doc('schools/pu/cafeterias/cafe/operators/bob').set({ status: 'active' });
+  const orderId = 'manual-queue-fixture';
+  const order = {
+    orderId, requestId: 'manual-queue-request', userId: 'alice', schoolId: 'pu',
+    cafeteriaId: 'cafe', merchantId: 'emulator-merchant', status: 'pending',
+    paymentMethod: 'onsite', paymentStatus: 'pending', total: 105,
+    items: [{ menuItemId: 'rice', name: 'Test meal', price: 100, quantity: 1 }],
+    queueNumber: hasNumber ? 7 : null, queueStatus: 'pending_confirmation',
+  };
+  await seed([
+    [`schools/pu/orders/${orderId}`, order],
+    [`users/alice/schools/pu/orders/${orderId}`, { ...order, fixtureMarker: 'stale mirror' }],
+  ]);
+  return { uid, orderId, run: () => service.assignQueueNumber.run(request(uid, {
+    orderId, ...(role === 'merchant' ? { as: 'merchant' } : {}),
+  })) };
+}
+
+for (const role of ['customer', 'merchant']) {
+  for (const change of blockedAccountChanges.filter((row) => ['suspended', 'deletion marker', 'account read failure'].includes(row.label))) {
+    test(`manual ${role} numbering stops when its actor becomes ${change.label} after admission`, async () => {
+      const fixture = await manualQueueFixture(role);
+      const before = await collectionRecordSnapshot(orderCollections);
+
+      await assert.rejects(runBeforeQueueTransaction(fixture.run, fixture.uid, change), { code: change.code });
+
+      assert.deepEqual(await collectionRecordSnapshot(orderCollections), before);
+    });
+  }
+  test(`a disabled ${role} cannot use an existing number to rewrite a stale receipt`, async () => {
+    const fixture = await manualQueueFixture(role, true);
+    const before = await collectionRecordSnapshot(orderCollections);
+
+    await assert.rejects(runBeforeQueueTransaction(fixture.run, fixture.uid, blockedAccountChanges[0]), { code: 'failed-precondition' });
+
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), before);
+  });
+  test(`a ${role} cannot revive a cancelled order with a leftover queue number`, async () => {
+    const fixture = await manualQueueFixture(role, true);
+    const cancelled = { status: 'cancelled', queueStatus: role === 'customer' ? 'cancelled' : 'assigned' };
+    await db.doc(`schools/pu/orders/${fixture.orderId}`).update(cancelled);
+    await db.doc(`users/alice/schools/pu/orders/${fixture.orderId}`).update(cancelled);
+    await db.doc('schools/pu/queueCounters/cancelled-order-fixture').set({ nextSerial: 7 });
+    const before = await collectionRecordSnapshot(orderCollections);
+
+    await assert.rejects(fixture.run(), { code: 'failed-precondition' });
+
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), before,
+      'a cancelled order must retain both receipts and all counter data without rewriting updateTime');
+  });
+  test(`manual ${role} numbering preserves legacy actor profiles`, async () => {
+    const fixture = await manualQueueFixture(role);
+    const sources = await collectionRecordSnapshot(orderSourceCollections);
+
+    const result = await runBeforeQueueTransaction(fixture.run, fixture.uid, {
+      apply: (account) => account.set({ schoolId: 'pu' }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.queueNumber, 1);
+    const canonical = await read(`schools/pu/orders/${fixture.orderId}`);
+    assert.equal(canonical.queueAssignedBy, role);
+    assert.equal(canonical.status, role === 'merchant' ? 'confirmed' : 'pending');
+    assert.deepEqual(await read(`users/alice/schools/pu/orders/${fixture.orderId}`), canonical);
+    assert.deepEqual(await collectionRecordSnapshot(orderSourceCollections), sources);
+  });
+}
 
 for (const toolName of ['renewBook', 'returnBook']) {
   test(`an Agent ${toolName} rejects a changed canonical book after preview without rewriting service data`, async () => {
