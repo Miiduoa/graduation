@@ -152,6 +152,22 @@ function allOwnArrayItems<T>(items: readonly T[], isValid: (item: T) => boolean)
   return true;
 }
 
+// A dense array can still contain accessor-backed records. Never invoke a
+// caller-supplied title/ID getter that could change between validation and
+// prompt serialization; live API and JSON-restored records use data fields.
+function hasOwnEvidenceFields(value: unknown, required: readonly string[], optional: readonly string[] = []): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const key of required) {
+    const own = Object.getOwnPropertyDescriptor(value, key);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value')) return false;
+  }
+  for (const key of optional) {
+    const own = Object.getOwnPropertyDescriptor(value, key);
+    if (own && !Object.prototype.hasOwnProperty.call(own, 'value')) return false;
+  }
+  return true;
+}
+
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
@@ -209,10 +225,12 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
   // the same original assignment ID are not two separate student tasks.
   const seenAssignmentSources = new Set<string>();
   const assignmentsValid = allOwnArrayItems(assignments.items, (item) => {
-    if (!item || !safePromptEvidenceText(item.title, 140) ||
+    if (!hasOwnEvidenceFields(item, ['title', 'groupName', 'dueAt'], ['source']) ||
+        !safePromptEvidenceText(item.title, 140) ||
         !safePromptEvidenceText(item.groupName, 100, true) ||
         !(item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48))) return false;
     if (item.source !== undefined) {
+      if (!hasOwnEvidenceFields(item.source, ['kind', 'groupId', 'assignmentId'])) return false;
       const source = parseCampusAssignmentSource(item.source);
       if (!source) return false;
       const identity = JSON.stringify([source.groupId, source.assignmentId]);
@@ -221,7 +239,8 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
     }
     return true;
   });
-  return assignmentsValid && allOwnArrayItems(announcements.items, (item) => !!item &&
+  return assignmentsValid && allOwnArrayItems(announcements.items, (item) =>
+    hasOwnEvidenceFields(item, ['title', 'publishedAt'], ['source']) &&
     safePromptEvidenceText(item.title, 140) &&
     (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
@@ -291,7 +310,8 @@ export function formatOnDeviceSchoolPrompt(
     // A restored contradiction must not authorize unrelated private summaries.
     (timetable.source === 'saved-device-copy' ||
       (timetable.updatedAt === null && timetable.courses.length === 0)) &&
-    allOwnArrayItems(timetable.courses, (course) => !!course &&
+    allOwnArrayItems(timetable.courses, (course) =>
+      hasOwnEvidenceFields(course, ['name', 'day', 'start', 'end'], ['room']) &&
       // The offline copy may bypass the regular title parser. Newline or
       // line-separator controls in a course name can masquerade as model instructions.
       safePromptEvidenceText(course.name, 48) &&
