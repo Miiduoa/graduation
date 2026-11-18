@@ -558,6 +558,9 @@ it('工單區分載入、失敗、重試與空白結果', async () => {
   render(<DormWorkflow schoolId="pu" uid="student" />);
   expect(await screen.findByText('正在讀取工單…')).toBeTruthy();
   expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith(expect.objectContaining({ action: 'mine', schoolId: 'pu' })),
+  );
   await act(async () => rejectRows(new Error('offline')));
   expect(await screen.findByText('工單讀取失敗，請重試。')).toBeTruthy();
   expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
