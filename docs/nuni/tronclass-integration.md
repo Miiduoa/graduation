@@ -42,6 +42,8 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 隨時調整／撤銷 Agent 權限 | 已實作，綁定 revision 與權限版本雙重檢查；換綁後重新授權 |
 | 作業文字、附件選擇、預覽、複製內容 | 已實作；Web 草稿及檔案只留在目前頁面記憶體，Mobile 文字留在記憶體、附件使用有清理機制的受控 cache 副本 |
 | 依已確認的作業規則編輯與預覽 | 已實作；保留零附件額度，送出前先核對全部文字、檔案與總量，規則未知時只標示本頁整理上限 |
+| 作業要求變更後重新確認 | Web／Mobile 在送出前核對使用者確認的題目、說明、期限、次數與附件規則；實質變更保留稿件並要求重新預覽 |
+| 上傳中斷後停止準備 | Web／Mobile 可明確停止尚無 final claim 的操作；伺服器先以交易保存停止紀錄，再回到編輯，已開始送出的操作維持查證 |
 | 上傳 → 最終送出 → 本人版本確認 | 公開 API、v2 service、持久化 journal 及 Web／Mobile UI 已接線，以注入的合成校方來源驗證；正式 writer 仍停用 |
 | 官方送出協定與受控文字候選實作 | 已實作 request builder、acknowledgment parser 及單次 POST；公開 service 的 server gates 通過後才會呼叫，正式 provider 尚未通過校方驗收 |
 | 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回；公開 API 已接上 v2 prepare／upload／submit／reconcile 與新確認結果，正式寫入仍未啟用 |
@@ -148,6 +150,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 | `prepare` | `courseId`, `homeworkId` | 讀取作業資訊、可送出條件及獨立的本人歷史 `history`；歷史不構成 `receipt` |
 | `submit` | `courseId`, `homeworkId`, `revision`, `operationId`, `content`, `attachments`, `confirmed: true` | 最終送出；attachments 為本次已驗證的 fileId，非來源 upload key |
 | `reconcile` | `operationId`, `revision` | 只查證原操作，不重新送出 |
+| `cancel-preparation` | `courseId`, `homeworkId`, `operationId`, `revision` | 原子停止尚未取得 final claim 的本次準備；不撤回校方作業、不刪除提交鎖 |
 
 `PUT /api/tronclass` 接收單一附件原始 bytes。query 為 `courseId`, `homeworkId`, `revision`, `operationId`, `fileId`, `name`；Content-Type 為檔案 MIME。單檔最多 10 MiB、每份最多 4 個檔案、總附件最多 20 MiB、文字最多 20,000 字元；校方規則若更嚴格，採更嚴格者。這是應用程式上限，不是校方的通用額度。
 
@@ -181,6 +184,37 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 權限管理與 Agent 一般請求每 owner 每程序每分鐘 30 次；昂貴的 ask／prepare 每分鐘 6 次。下載沿用既有大小、時間與並行上限。這些限制不是跨程序全域配額。
 
 ## 送出與失敗恢復
+
+### 2026-11-18：中斷後恢復、確認範圍與分頁完整性
+
+**停止準備。** Web 與 Mobile 都在第一次附件上傳或 final 請求之前保存不透明 operation ID。本機儲存失敗時不開始上傳；一旦保存後的請求失敗，就保留同一 ID 與稿件，不直接建立另一筆送出。使用者可在待確認畫面明確選擇「停止準備並返回編輯」。
+
+新 `cancel-preparation` 與唯讀 `reconcile` 是不同操作。伺服器在同一個 Firestore transaction 核對有效綁定、學生身分、課程／作業、原 operation 及共享作業鎖；只有 preparing 且沒有 final lock 時，才把 operation 改為 `cancelled`。手機可能已保存 ID 但第一個請求尚未抵達，所以不存在的 operation 也必須先建立持久的取消紀錄，才可回覆停止成功。此紀錄保留 `purgeAt: null`；延遲的上傳結果與 final claim 不能重新建立或恢復原操作。
+
+已存在 final claim、acknowledgment 或共享作業鎖時，回覆 `unknown`，不更動 operation／lock、不呼叫校方，不把「尚未收到回覆」當成「沒有送出」。同一已驗證學生重新連線後可停止原準備，仍保留原 revision 與檔案紀錄；換成另一學生、錯課／錯作業及舊格式操作都不能覆寫。停止準備不會撤回校方作業，已在途的附件傳輸也可能留下未關聯檔案。
+
+回應獨立為 `{ status: "cancelled" | "unknown", operationId, courseId, homeworkId }`，沒有收據或繳交成功語意。兩端都嚴格核對這四個欄位及原操作範圍；只有 `cancelled` 且本機 pending 清除成功，才解除編輯鎖、保留文字與附件、取消原確認。Mobile 也清除預覽固定的 bytes，要求再次預覽才使用新 operation。錯誤回應、換帳號／換連線、離頁及本機儲存失敗均保留待確認；停止準備不自動重試，Agent 的 prepare-only 畫面沒有此權限。
+
+所有送出、查證及停止準備的回覆均綁定原 client、owner、revision、課程、作業與 operation；只有本機仍保存相同 operation 才清除 pending。另一個畫面已建立新操作時，舊回覆保留新紀錄與稿件，不更新作業為已繳交，改為提示重新開啟核對。Mobile 對同一個 pending key 的 read／save／條件清除使用程序內序列佇列，避免非同步 AsyncStorage 在讀取與刪除之間插入另一個 save；不同 key 不互相阻塞，save 也拒絕覆蓋不同 operation。這是同一程序的本機儲存協調，校方最終送出的跨 client 防重仍由伺服器 Firestore 交易負責。
+
+**重新確認作業要求。** Web 在實際勾選確認時記錄當下要求，送出前 fresh prepare 的題目、說明、截止、作業設定、次數、文字／附件規則或上限改變時，先停止上傳、回到編輯並保留稿件。只有 `details.fetchedAt` 更新不要求重複確認；初次 prepare 尚未完成時不能先勾選未知要求。此修正讓 Web 與既有 Mobile 的條件比對一致。
+
+**分頁完整性。** `tcFetchHomeworkActivitiesPage()` 不再用 `Number()` 把 false、陣列或空字串轉成總數，也不將錯誤 total 降成未知。total、page、page_size 若有值，必須是非負安全整數或標準十進位字串；明示頁碼／頁量須符合本次請求，回應筆數不能超過頁量／總數。錯誤來源會走讀取不完整流程，避免空頁或短頁被誤當成全部作業。缺欄、null 與真正 total 0 保留既有相容性。
+
+取消交易已透過真正 Firestore emulator 與兩個獨立 Admin SDK client 驗證：13 項通過，包括取消與 final 同時競速、兩種先後提交順序、已在途上傳、同學生重連及關帳。測試不包含真實校方寫入，正式 writer 仍維持停用。
+
+本輪先保留同期 head `8b38ca81` 的登入期限、教材一般檔案與純文字能力更新及 main `0bc54fde`，再整合停止準備與 pending 保護。使用 Node 22.23.5 完成下列驗證；重疊的局部測試不重複加總：
+
+| 檢查 | 結果與範圍 |
+| --- | --- |
+| Web TronClass／登入／relay／instrumentation | 65 檔、1,973 項通過，0 失敗；單 worker，59.51 秒 |
+| 需要外部資料庫的 Web 測試 | 一般命令略過 4 檔、38 項；其中本輪修改的 controlled journal 另以真正 emulator 執行 13／13 通過，不把其餘略過項目算成通過 |
+| Mobile TronClass 完整指定範圍 | 14 suites、258／258 通過，16.159 秒，無略過 |
+| 作業分頁 scraper | 154／154 通過，包含錯誤 total／page／page_size 的失敗回歸 |
+| Mobile 完整 TypeScript | exit 0 |
+| Web production build | exit 0，包含完整 TypeScript、standalone 輸出與靜態頁面生成；使用 CI 的 mock public Firebase 設定，沒有略過型別檢查 |
+
+前版 `be3d2276` 的真正 GitHub Build Web 已完成 Next 與 Docker standalone runtime，但在安裝瀏覽器驗證工具時失敗：`ubuntu-latest` 已分配 Ubuntu 26.04，而固定 Playwright 1.57.0 不支援該 OS。本輪保留同期 `85896f92` 已將 Build Web runner 固定為既有瀏覽器 workflows 使用的 `ubuntu-24.04`，保留 browser 安裝、16 情境 smoke、bundle 掃描及 Docker runtime 檢查。本機 Chromium 啟動仍因 `socket() failed: Operation not permitted` 失敗，沒有宣稱本機瀏覽器驗收通過；最新提交的實際 Chromium 與 Docker 結果需查看相同 head 的 CI，不能沿用前一版本或將略過視為成功。
 
 ### 2026-11-18：公開查證、原生 Mobile 與實際資料庫驗證
 
@@ -248,7 +282,7 @@ Node **22.23.5** 的整合回歸：37 個測試檔通過、1 個環境相關檔�
 
 HTTP 200、附件上傳完成或 writer 沒有拋例外，都不構成正式繳交成功。結果不明會保留 `unknown`，相同或其他操作不得盲目重送。
 
-只有能確定尚未開始呼叫來源 submit 的失敗，才可以交易式釋放該操作的 claim。純附件上傳失敗時，UI 建立新 operation、將全部附件恢復待上傳；校方可能留下未關聯的上傳物件，清除方式須等正式上傳契約驗證後補齊。
+v2 一旦取得 final claim 就不會釋放原鎖。純附件上傳失敗時，UI 保留原 operation，只有明確停止準備成功後才恢復編輯；重新預覽與確認後建立新 operation。校方可能留下未關聯的上傳物件，清除方式須等正式上傳契約驗證後補齊。
 
 UI 的 sessionStorage 只保存 owner＋課程＋作業對應的 operation ID，供重開頁面後查證；沒有保存作業文字、附件或密碼。伺服器 ledger 會保存上傳 metadata、內容 digest，以及確認成功後的收據（含收據文字），不可宣稱後端完全不保存作業內容。
 

@@ -987,6 +987,16 @@ function httpError(status) {
   return error;
 }
 
+function homeworkPaginationNumber(value) {
+  if (value === undefined || value === null) return null;
+  const parsed = typeof value === 'number' ? value
+    : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+  }
+  return parsed;
+}
+
 /** @param {TronClassReadOptions} readOptions */
 async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50, readOptions = {}) {
   const data = await tcFetchJson(
@@ -995,14 +1005,24 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
     { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 },
   );
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
-    throw httpError(200);
+    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
-  const total = data.total === undefined || data.total === null ? null : Number(data.total);
+  // Invalid metadata is not an absent total: treating it as null can make a
+  // short or empty response appear complete and hide remaining assignments.
+  const total = homeworkPaginationNumber(data.total);
+  const sourcePage = homeworkPaginationNumber(data.page);
+  const sourcePageSize = homeworkPaginationNumber(data.page_size);
+  if ((sourcePage !== null && sourcePage !== page) ||
+    (sourcePageSize !== null && sourcePageSize !== pageSize) ||
+    data.homework_activities.length > pageSize ||
+    (total !== null && data.homework_activities.length > total)) {
+    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+  }
   return {
     homework_activities: data.homework_activities,
-    total: total !== null && Number.isSafeInteger(total) && total >= 0 ? total : null,
-    page: data.page ?? page,
-    page_size: data.page_size ?? pageSize,
+    total,
+    page: sourcePage ?? page,
+    page_size: sourcePageSize ?? pageSize,
   };
 }
 

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TronClassClient } from '@/lib/tronClassIntegrationClient';
-import type { TronClassPreparation, TronClassSubmissionRules } from '@/lib/tronClassIntegrationTypes';
+import type { TronClassAssignmentDetails, TronClassPreparation, TronClassSubmissionRules } from '@/lib/tronClassIntegrationTypes';
 import { TronClassAssignment } from './TronClassAssignment';
 
 const revision = 'a'.repeat(32);
@@ -17,9 +17,16 @@ const preparation: TronClassPreparation = {
   canSubmit: true, blockedReason: null, maxFiles: 4, maxFileBytes: 10 * 1024 * 1024,
   allowedContentTypes: ['application/pdf', 'text/plain'], rules: confirmed, receipt: null,
 };
+const details: Extract<TronClassAssignmentDetails, { status: 'available' }> = {
+  status: 'available', fetchedAt: '2026-11-18T07:00:00.000Z',
+  submissionType: 'individual', mode: 'normal', opensAt: '2026-11-17T00:00:00.000Z',
+  deadline: '2026-11-19T15:59:00.000Z', isInProgress: true, isClosed: false,
+  attempts: { unlimited: false, limit: 3, used: 0, remaining: 3 },
+  resubmissionOpen: false, retractAllowed: false,
+};
 type Client = Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'>;
 
-function fixture(value: TronClassPreparation = preparation) {
+function fixture(value: TronClassPreparation | Promise<TronClassPreparation> = preparation) {
   const uploaded: { name: string; size: number }[] = [];
   const client = {
     prepare: vi.fn<Client['prepare']>(async () => value),
@@ -194,5 +201,100 @@ describe('TronClass full payload recheck before uploading', () => {
     expect(screen.getByText('report.pdf')).toBeTruthy();
     expect(client.upload).not.toHaveBeenCalled();
     expect(client.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe('TronClass confirmation of the latest school requirements', () => {
+  const initial = { ...preparation, details };
+  const changes: { name: string; change: Partial<TronClassPreparation> }[] = [
+    { name: 'title', change: { title: '老師更新的報告題目' } },
+    { name: 'description', change: { description: '新增比較兩種演算法的要求。' } },
+    { name: 'cleared description', change: { description: '' } },
+    { name: 'deadline', change: { deadline: '2026-11-20T15:59:00.000Z' } },
+    { name: 'submission mode', change: { details: { ...details, mode: 'multiple' } } },
+    { name: 'remaining attempts', change: { details: { ...details,
+      attempts: { unlimited: false, limit: 3, used: 1, remaining: 2 } } } },
+    { name: 'retraction setting', change: { details: { ...details, retractAllowed: true } } },
+    { name: 'unavailable details', change: { details: { status: 'unavailable' } } },
+    { name: 'new total limit still fitting the payload', change: { rules: { ...confirmed, maxTotalBytes: 12 } } },
+    { name: 'new file count still fitting the payload', change: { maxFiles: 3 } },
+    { name: 'new per-file limit still fitting the payload', change: { maxFileBytes: 8 } },
+    { name: 'new accepted formats still fitting the payload', change: {
+      allowedContentTypes: ['application/pdf', 'text/plain', 'image/png'] } },
+  ];
+  it.each(changes)('preserves the draft and requires a new preview when $name changes', async ({ change }) => {
+    const client = fixture(initial);
+    await ready();
+    fill();
+    preview();
+    client.prepare.mockResolvedValueOnce({ ...initial, ...change });
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent)
+      .toContain('校方作業條件已變更，請查看最新要求並重新預覽。'));
+    expect(client.upload).not.toHaveBeenCalled();
+    expect(client.submit).not.toHaveBeenCalled();
+    expect(sessionStorage.length).toBe(0);
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('我的心得');
+    expect(screen.getByText('report.pdf')).toBeTruthy();
+    expect(screen.getByText('notes.txt')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: change.title ?? initial.title })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '確認送出到 TronClass' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
+    expect((screen.getByLabelText('我已確認課程、作業內容與附件正確') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('button', { name: '確認送出到 TronClass' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('allows submission after the student previews and confirms the changed requirements', async () => {
+    const client = fixture(initial);
+    await ready();
+    fill();
+    preview();
+    client.prepare.mockResolvedValue({ ...initial, title: '最新報告題目', description: '請比較執行時間。' });
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('heading', { name: '最新報告題目' })).toBeTruthy();
+    expect(screen.getByText('請比較執行時間。')).toBeTruthy();
+    expect(client.upload).not.toHaveBeenCalled();
+    preview();
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByText('TronClass 已確認收到');
+    expect(client.upload).toHaveBeenCalledTimes(2);
+    expect(client.submit).toHaveBeenCalledTimes(1);
+    expect(client.submit.mock.calls[0][0].content).toBe('我的心得');
+  });
+
+  it('does not invalidate confirmation when only the read time changes', async () => {
+    const client = fixture(initial);
+    await ready();
+    fill();
+    preview();
+    client.prepare.mockResolvedValueOnce({ ...initial, details: {
+      ...details, fetchedAt: '2026-11-18T07:01:00.000Z' } });
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByText('TronClass 已確認收到');
+    expect(client.upload).toHaveBeenCalledTimes(2);
+    expect(client.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not accept confirmation of the old summary while the first preparation is pending', async () => {
+    let resolve!: (value: TronClassPreparation) => void;
+    const pending = new Promise<TronClassPreparation>(done => { resolve = done; });
+    const client = fixture(pending);
+    fill();
+    fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
+    const checkbox = screen.getByLabelText('我已確認課程、作業內容與附件正確') as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+    fireEvent.click(checkbox);
+    await act(async () => resolve({ ...initial, title: '來源詳頁的最新題目' }));
+    await ready();
+    expect(screen.getByRole('heading', { name: '來源詳頁的最新題目' })).toBeTruthy();
+    expect((screen.getByLabelText('我已確認課程、作業內容與附件正確') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('button', { name: '確認送出到 TronClass' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(client.upload).not.toHaveBeenCalled();
+    expect(client.submit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('我已確認課程、作業內容與附件正確'));
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByText('TronClass 已確認收到');
+    expect(client.submit).toHaveBeenCalledTimes(1);
   });
 });

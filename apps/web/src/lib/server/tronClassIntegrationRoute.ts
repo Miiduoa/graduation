@@ -188,6 +188,13 @@ export async function handleTronClassIntegration(
             operationId: operationId(input.operationId), revision: revision(input.revision),
           });
           break;
+        case 'cancel-preparation':
+          only(input, ['action', 'courseId', 'homeworkId', 'operationId', 'revision']);
+          result = await (await getSubmissions()).cancelPreparation(actor.ownerKey, {
+            courseId: id(input.courseId), homeworkId: id(input.homeworkId),
+            operationId: operationId(input.operationId), revision: revision(input.revision),
+          });
+          break;
         default:
           throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       }

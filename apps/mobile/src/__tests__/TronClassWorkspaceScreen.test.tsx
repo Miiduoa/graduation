@@ -6,6 +6,7 @@ import { TronClassWorkspaceScreen } from '../screens/TronClassWorkspaceScreen';
 import {
   saveNativeTronClassPending,
   readNativeTronClassPending,
+  clearNativeTronClassPending,
 } from '../services/tronClassNativeDraft';
 import {
   acknowledged,
@@ -152,6 +153,9 @@ async function defaultRequest(_path: string, _context: string, input: Record<str
       return acknowledged(String(input.operationId));
     case 'reconcile':
       return { status: 'unknown', operationId: input.operationId, receipt: null };
+    case 'cancel-preparation':
+      return { status: 'unknown', operationId: input.operationId,
+        courseId: input.courseId, homeworkId: input.homeworkId };
     default:
       throw new Error('unexpected action');
   }
@@ -465,6 +469,147 @@ it('unlocks editing only after the server explicitly proves that the final submi
   expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
   expect(actions('submit')).toHaveLength(0);
 });
+it('explicitly stops a failed upload preparation, keeps text and files, and requires a fresh preview before a new operation', async () => {
+  mockPreparation = { ...preparation, canSubmit: true, blockedReason: null };
+  mockDocument.mockResolvedValue({ canceled: false, assets: [{
+    name: '答案.pdf', uri: 'file:///cache/picked-answer.pdf', size: 3, mimeType: 'application/pdf',
+  }] });
+  mockUpload.mockRejectedValueOnce(new NuniError(0, 'NETWORK_ERROR'));
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
+    ? Promise.resolve({ status: 'cancelled', operationId: input.operationId,
+      courseId: input.courseId, homeworkId: input.homeworkId })
+    : defaultRequest(path, context, input));
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇作業附件' }));
+  await view.findByText('答案.pdf · 3 B');
+  await previewDraft(view, '保留原本整理的答案');
+  await confirmAndSend(view);
+  await view.findByText('前次送出結果待確認');
+  const firstOperation = mockUpload.mock.calls[0][4].operationId;
+  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(firstOperation);
+  expect(actions('cancel-preparation')).toHaveLength(0);
+  expect(actions('submit')).toHaveLength(0);
+  fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+  await view.findByText('已停止尚未送出的準備，文字與附件已保留。請重新預覽與確認後再繳交。');
+  expect(actions('cancel-preparation')).toEqual([{ action: 'cancel-preparation',
+    courseId: 10, homeworkId: 20, revision, operationId: firstOperation }]);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(view.getByLabelText('作業內容').props.value).toBe('保留原本整理的答案');
+  expect(view.getByText('答案.pdf · 3 B')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '確認並繳交至 TronClass' })).toBeNull();
+  for (const uri of fileBytes.keys())
+    if (uri.endsWith('.draft')) fileBytes.set(uri, new Uint8Array([9, 8, 7]));
+  fireEvent.press(view.getByRole('button', { name: '預覽並重新核對' }));
+  await view.findByText('確認這次作業內容');
+  await waitFor(() => expect(view.queryByLabelText('正在準備預覽並重新核對作業…')).toBeNull());
+  expect(view.getByRole('button', { name: '確認並繳交至 TronClass' })).toBeDisabled();
+  await confirmAndSend(view);
+  await view.findByText('已確認校方版本');
+  expect(mockUpload).toHaveBeenCalledTimes(2);
+  expect(Array.from(mockUpload.mock.calls[1][2])).toEqual([9, 8, 7]);
+  expect(actions('submit')).toHaveLength(1);
+  expect(actions('submit')[0].operationId).not.toBe(firstOperation);
+});
+it.each(['unknown', 'malformed', 'network'])(
+  'keeps the pending operation and disables editing after a %s cancellation outcome', async (outcome) => {
+    await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    mockBffRequest.mockImplementation((path, context, input) => {
+      if (input.action !== 'cancel-preparation') return defaultRequest(path, context, input);
+      if (outcome === 'network') return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+      return Promise.resolve({ status: outcome === 'malformed' ? ['cancelled'] : 'unknown',
+        operationId, courseId: 10, homeworkId: 20 });
+    });
+    const view = render(<TronClassWorkspaceScreen />);
+    fireEvent.press(await view.findByRole('button', { name: homework.title }));
+    await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
+    fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+    await waitFor(() => expect(actions('cancel-preparation')).toHaveLength(1));
+    await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
+    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+    expect(view.getByText('前次送出結果待確認')).toBeTruthy();
+    expect(view.queryByLabelText('作業內容')).toBeNull();
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    expect(actions('submit')).toHaveLength(0);
+    expect(mockUpload).not.toHaveBeenCalled();
+  },
+);
+it('keeps a cancelled operation pending when device storage removal fails and allows explicit retry', async () => {
+  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
+    ? Promise.resolve({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 })
+    : defaultRequest(path, context, input));
+  const view = render(<TronClassWorkspaceScreen />);
+  fireEvent.press(await view.findByRole('button', { name: homework.title }));
+  await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
+  jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('storage unavailable'));
+  fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+  await view.findByText('已停止準備，但無法更新裝置紀錄。請再次停止準備後再編輯。');
+  expect(view.queryByLabelText('作業內容')).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+  fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+  await view.findByLabelText('作業內容');
+  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(actions('cancel-preparation')).toHaveLength(2);
+  expect(actions('submit')).toHaveLength(0);
+});
+it('preserves a newer same-owner pending operation when an earlier cancellation response arrives', async () => {
+  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  let finish: (value: unknown) => void = () => undefined;
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
+    ? new Promise(resolve => { finish = resolve; })
+    : defaultRequest(path, context, input));
+  const view = render(<TronClassWorkspaceScreen />);
+  fireEvent.press(await view.findByRole('button', { name: homework.title }));
+  await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
+  fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+  await waitFor(() => expect(actions('cancel-preparation')).toHaveLength(1));
+  // Another screen has independently resolved the old operation and started a
+  // new one while this screen is still waiting for its original cancellation.
+  const newer = '22222222-2222-4222-8222-222222222222';
+  await clearNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, newer);
+  const removals = jest.mocked(AsyncStorage.removeItem).mock.calls.length;
+  await act(async () => { finish({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 }); });
+  await view.findByText('裝置已有另一筆待查操作，請返回作業清單再開啟，先查證該筆紀錄。');
+  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(newer);
+  expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(removals);
+  expect(view.getByText('前次送出結果待確認')).toBeTruthy();
+  expect(view.queryByLabelText('作業內容')).toBeNull();
+  expect(actions('submit')).toHaveLength(0);
+  expect(mockUpload).not.toHaveBeenCalled();
+});
+it.each(['owner', 'session', 'unmount', 'expired-binding'])(
+  'does not clear a pending operation for a delayed cancellation after %s changes', async (change) => {
+    await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    let finish: (value: unknown) => void = () => undefined;
+    mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
+      ? new Promise(resolve => { finish = resolve; })
+      : defaultRequest(path, context, input));
+    const view = render(<TronClassWorkspaceScreen />);
+    fireEvent.press(await view.findByRole('button', { name: homework.title }));
+    await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
+    fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+    fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
+    await waitFor(() => expect(actions('cancel-preparation')).toHaveLength(1));
+    expect(view.getByRole('button', { name: '查詢原送出結果' })).toBeDisabled();
+    if (change === 'unmount') view.unmount();
+    else if (change === 'expired-binding')
+      jest.mocked(Date.now).mockReturnValue(Date.parse(connection.expiresAt!) + 1);
+    else {
+      mockAuth = { ...mockAuth, session: {
+        platformAccountId: change === 'owner' ? accountB : accountA, context: 'context-next',
+      } };
+      mockConnection = { ...disconnected };
+      view.rerender(<TronClassWorkspaceScreen />);
+    }
+    await act(async () => { finish({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 }); });
+    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+    expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+    expect(actions('submit')).toHaveLength(0);
+    if (change !== 'unmount') expect(view.queryByLabelText('作業內容')).toBeNull();
+  },
+);
 it('blocks a send if the operation journal cannot be read', async () => {
   jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage unavailable'));
   const view = render(<TronClassWorkspaceScreen />);

@@ -1,5 +1,9 @@
 import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import { decodeTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+import {
+  decodeTronClassPreparationCancellation,
+  type TronClassPreparationCancellation,
+} from '@campus/shared/src/tronClassSubmissionCancellation';
 import { isTronClassAssignmentDetails } from './tronClassAssignmentDetails';
 import type {
   TronClassConnection,
@@ -283,6 +287,14 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       (value.receipt.courseId !== input.courseId || value.receipt.homeworkId !== input.homeworkId)
     )
       return invalidResponse();
+  } else if (action === 'cancel-preparation') {
+    if (!isOperationId(input.operationId) || !isId(input.courseId) || !isId(input.homeworkId) ||
+      !isRevision(input.revision)) return invalidResponse();
+    const result = decodeTronClassPreparationCancellation(value, {
+      operationId: input.operationId, courseId: input.courseId, homeworkId: input.homeworkId,
+    });
+    if (!result) return invalidResponse();
+    return result;
   } else if (action === 'submit' || action === 'reconcile') {
     if (value.status === 'confirmed') {
       if (!isOperationId(input.operationId) ||
@@ -453,6 +465,21 @@ export function createTronClassClient(identity: TronClassIdentity) {
     }) => request<TronClassSubmissionResult>('submit', input),
     reconcile: (operationId: string, revision: string) =>
       request<TronClassSubmissionResult>('reconcile', { operationId, revision }),
+    async cancelPreparation(input: {
+      courseId: number;
+      homeworkId: number;
+      revision: string;
+      operationId: string;
+    }): Promise<TronClassPreparationCancellation> {
+      if (!isRecord(input)) return invalidResponse();
+      // The auth token and network response may arrive after the caller changes
+      // its selection. Both the request and decoder use this one captured scope.
+      const expected = Object.freeze({ ...input });
+      if (Object.keys(expected).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key)) ||
+        !isId(expected.courseId) || !isId(expected.homeworkId) ||
+        !isRevision(expected.revision) || !isOperationId(expected.operationId)) return invalidResponse();
+      return request<TronClassPreparationCancellation>('cancel-preparation', expected);
+    },
     async upload(input: {
       courseId: number;
       homeworkId: number;

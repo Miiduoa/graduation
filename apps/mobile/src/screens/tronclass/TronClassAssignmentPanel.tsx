@@ -149,7 +149,7 @@ export function TronClassAssignmentPanel({
     callbacks.current.onSubmitted();
     setError('');
     try {
-      await clearNativeTronClassPending(client.owner, homework.courseId, homework.id);
+      await clearNativeTronClassPending(client.owner, homework.courseId, homework.id, value.operationId);
     } catch {
       if (current())
         setNotice('校方結果已確認；裝置上的操作編號尚未清除，再次開啟時仍會核對原紀錄。');
@@ -168,9 +168,9 @@ export function TronClassAssignmentPanel({
     } catch (failure) {
       if (!current()) return;
       if (failure instanceof NuniError && failure.code === 'TRONCLASS_SUBMISSION_NOT_STARTED') {
-        // This explicit server verdict is the only path from uncertain back to editable.
+        // Only an explicit server verdict can release an uncertain operation.
         try {
-          await clearNativeTronClassPending(client.owner, homework.courseId, homework.id);
+          await clearNativeTronClassPending(client.owner, homework.courseId, homework.id, operationId);
         } catch {
           setError('已確認未送出，但無法更新裝置紀錄。請再次查詢後再編輯。');
           return;
@@ -445,6 +445,65 @@ export function TronClassAssignmentPanel({
       if (current()) setWorking('');
     }
   }
+  async function cancelPreparation() {
+    if (lock.current || !current() || phase !== 'unknown' || !operation.current) return;
+    const operationId = operation.current;
+    const matches = () => current() && operation.current === operationId &&
+      callbacks.current.isBindingCurrent();
+    const expireIfNeeded = () => {
+      if (current() && !callbacks.current.isBindingCurrent())
+        callbacks.current.onConnectionLost(new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED'));
+    };
+    if (!matches()) {
+      expireIfNeeded();
+      return;
+    }
+    lock.current = true;
+    setWorking('正在停止尚未送出的準備…');
+    setError('');
+    setNotice('');
+    try {
+      const cancellation = await client.cancelPreparation({
+        courseId: homework.courseId,
+        homeworkId: homework.id,
+        revision,
+        operationId,
+      });
+      if (!matches()) {
+        expireIfNeeded();
+        return;
+      }
+      if (cancellation.status !== 'cancelled') {
+        setNotice('這次操作可能已進入正式送出，請繼續查詢原送出結果。');
+        return;
+      }
+      try {
+        await clearNativeTronClassPending(client.owner, homework.courseId, homework.id, operationId);
+      } catch (failure) {
+        if (matches()) setError(failure instanceof Error && failure.message === 'PENDING_OPERATION_CONFLICT'
+          ? '裝置已有另一筆待查操作，請返回作業清單再開啟，先查證該筆紀錄。'
+          : '已停止準備，但無法更新裝置紀錄。請再次停止準備後再編輯。');
+        else expireIfNeeded();
+        return;
+      }
+      if (!matches()) {
+        expireIfNeeded();
+        return;
+      }
+      operation.current = null;
+      frozen.current.clear();
+      setConfirmed(false);
+      setResult(null);
+      setPhase('editing');
+      setNotice('已停止尚未送出的準備，文字與附件已保留。請重新預覽與確認後再繳交。');
+    } catch (failure) {
+      if (matches()) failed(failure);
+      else expireIfNeeded();
+    } finally {
+      lock.current = false;
+      if (current()) setWorking('');
+    }
+  }
   async function downloadHistoryAttachment(
     entry: TronClassSubmissionHistoryEntry,
     file: TronClassSubmissionHistoryEntry['attachments'][number],
@@ -580,6 +639,9 @@ export function TronClassAssignmentPanel({
             操作編號：{operation.current}
           </Text>
           <AIButton label="查詢原送出結果" disabled={!!busy} onPress={() => void check()} />
+          <Text style={body}>只有尚未正式送出的準備可以停止；已進入送出的操作仍會保留查證。</Text>
+          <AIButton label="停止準備並返回編輯" variant="ghost" disabled={!!busy}
+            onPress={() => void cancelPreparation()} />
         </AICard>
       ) : null}
       {phase === 'finished' && result && result.status !== 'unknown' ? (

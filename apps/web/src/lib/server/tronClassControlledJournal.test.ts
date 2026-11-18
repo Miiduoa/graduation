@@ -117,6 +117,7 @@ function finalAttempt(overrides: Partial<TronClassFinalCandidateClaim> = {}): Tr
   return value;
 }
 const uploadInput = () => ({ courseId: 10, homeworkId: 20, revision: REVISION, operationId: OPERATION, fileIds: [FILE] });
+const cancelInput = () => ({ courseId: 10, homeworkId: 20, revision: REVISION, operationId: OPERATION });
 const ack = (): NonNullable<TronClassFinalCandidateAttempt['acknowledgment']> =>
   ({ state: 'acknowledged', submissionId: 90, courseId: 10, activityId: 20, studentId: 30 });
 async function transferred(s: ReturnType<typeof setup>, value = claim(), uploadId = 40) {
@@ -125,6 +126,175 @@ async function transferred(s: ReturnType<typeof setup>, value = claim(), uploadI
 }
 
 describe('controlled Firestore journal', () => {
+  describe('cancelling preparation before the final claim', () => {
+    it('persists an absent-operation tombstone before allowing the client to edit again', async () => {
+      const s = setup();
+      expect(await s.journal.cancelPreparation(OWNER, cancelInput())).toEqual({
+        status: 'cancelled', operationId: OPERATION, courseId: 10, homeworkId: 20,
+      });
+      const cancelled = structuredClone(s.rows.get(operationPath()));
+      expect(cancelled).toMatchObject({ version: 2, ownerKey: OWNER, studentId: 30, revision: REVISION,
+        state: 'cancelled', files: [], attempt: null, acknowledgment: null, purgeAt: null });
+      expect(cancelled).not.toHaveProperty('expiresAt');
+      expect(s.rows.has(lockPath())).toBe(false);
+
+      const restarted = createTronClassControlledJournal(s.dependencies);
+      expect(await restarted.claimAttachment(claim())).toBe(false);
+      expect(await restarted.claimFinal(finalAttempt({ uploads: [] }))).toBe(false);
+      await expect(restarted.storeTransferredFile(transfer())).rejects.toMatchObject({ code: 'TRONCLASS_OPERATION_CONFLICT' });
+      await expect(restarted.readUploadedFiles(OWNER, { ...uploadInput(), fileIds: [] }))
+        .rejects.toMatchObject({ code: 'TRONCLASS_OPERATION_CONFLICT' });
+      expect(await restarted.readAttempt(OWNER, OPERATION)).toBeNull();
+      expect(s.rows.get(operationPath())).toEqual(cancelled);
+      expect(s.rows.has(lockPath())).toBe(false);
+    });
+
+    it.each(['claimed', 'transferred'] as const)('stops a %s attachment operation and rejects every late completion', async phase => {
+      const s = setup();
+      await s.journal.claimAttachment(claim());
+      if (phase === 'transferred') await s.journal.storeTransferredFile(transfer());
+      const files = structuredClone(s.rows.get(operationPath())?.files);
+      expect((await s.journal.cancelPreparation(OWNER, cancelInput())).status).toBe('cancelled');
+      const stopped = structuredClone(s.rows.get(operationPath()));
+      expect(stopped).toMatchObject({ state: 'cancelled', files, purgeAt: null });
+      await expect(s.journal.storeTransferredFile(transfer())).rejects.toMatchObject({ code: 'TRONCLASS_OPERATION_CONFLICT' });
+      expect(await s.journal.claimAttachment(claim({ fileId: 'attachment_delayed_002' }))).toBe(false);
+      expect(await s.journal.claimFinal(finalAttempt())).toBe(false);
+      await expect(s.journal.rememberAcknowledgment(finalAttempt(), ack()))
+        .rejects.toMatchObject({ code: 'TRONCLASS_OPERATION_CONFLICT' });
+      expect(s.rows.get(operationPath())).toEqual(stopped);
+      expect(s.rows.has(lockPath())).toBe(false);
+    });
+
+    it.each(['cancel-first', 'final-first'] as const)('serializes concurrent cancellation and final claim: %s', async order => {
+      const s = setup();
+      await transferred(s);
+      const other = createTronClassControlledJournal(s.dependencies);
+      const cancel = () => s.journal.cancelPreparation(OWNER, cancelInput());
+      const final = () => other.claimFinal(finalAttempt());
+      const [first, second] = order === 'cancel-first'
+        ? await Promise.all([cancel(), final()]) : await Promise.all([final(), cancel()]);
+      if (order === 'cancel-first') {
+        expect(first).toMatchObject({ status: 'cancelled' });
+        expect(second).toBe(false);
+        expect(s.rows.get(operationPath())).toMatchObject({ state: 'cancelled', attempt: null, purgeAt: null });
+        expect(s.rows.has(lockPath())).toBe(false);
+      } else {
+        expect(first).toBe(true);
+        expect(second).toMatchObject({ status: 'unknown' });
+        expect(s.rows.get(operationPath())).toMatchObject({ state: 'final-claimed', attempt: finalAttempt(), purgeAt: null });
+        expect(s.rows.get(lockPath())).toMatchObject({ state: 'submitting', operationId: OPERATION, purgeAt: null });
+      }
+    });
+
+    it.each(['final-claimed', 'acknowledged'] as const)('never cancels or modifies a %s operation or its lock', async state => {
+      const s = setup();
+      const value = finalAttempt({ uploads: [] });
+      await s.journal.claimFinal(value);
+      if (state === 'acknowledged') await s.journal.rememberAcknowledgment(value, ack());
+      const before = structuredClone([...s.rows]);
+      const transactions = s.transactions.length;
+      expect((await s.journal.cancelPreparation(OWNER, cancelInput())).status).toBe('unknown');
+      expect([...s.rows]).toEqual(before);
+      expect(s.transactions.slice(transactions).flatMap(tx => tx.writes)).toEqual([]);
+    });
+
+    it('keeps repeated cancellation idempotent across a restart and a same-student reconnect', async () => {
+      const s = setup();
+      await transferred(s);
+      const nextRevision = 'c'.repeat(32);
+      s.rows.set(bindingPath(), bindingRow(OWNER, 30, nextRevision));
+      const input = { ...cancelInput(), revision: nextRevision };
+      const result = await s.journal.cancelPreparation(OWNER, input);
+      const before = structuredClone(s.rows.get(operationPath()));
+      expect(result.status).toBe('cancelled');
+      expect(before).toMatchObject({ revision: REVISION, state: 'cancelled', purgeAt: null });
+      s.advance(500);
+      const restarted = createTronClassControlledJournal(s.dependencies);
+      expect(await restarted.cancelPreparation(OWNER, input)).toEqual(result);
+      expect(s.rows.get(operationPath())).toEqual(before);
+      expect(await restarted.claimFinal(finalAttempt({ revision: nextRevision, uploads: [], operationId: 'new_operation_after_cancel' }))).toBe(true);
+      expect(s.rows.get(operationPath())).toEqual(before);
+    });
+
+    it.each(['student', 'course', 'homework'] as const)('rejects a cancellation with a different %s and leaves original evidence intact', async changed => {
+      const s = setup();
+      await transferred(s);
+      const before = structuredClone(s.rows.get(operationPath()));
+      const input = cancelInput();
+      if (changed === 'student') s.rows.set(bindingPath(), bindingRow(OWNER, 31));
+      if (changed === 'course') input.courseId = 11;
+      if (changed === 'homework') input.homeworkId = 21;
+      await expect(s.journal.cancelPreparation(OWNER, input)).rejects.toMatchObject({ code: 'TRONCLASS_OPERATION_CONFLICT' });
+      expect(s.rows.get(operationPath())).toEqual(before);
+      expect(s.rows.has(lockPath())).toBe(false);
+    });
+
+    it('does not read or cancel another owner operation when the opaque operation ID is the same', async () => {
+      const s = setup();
+      await transferred(s);
+      s.rows.set(bindingPath(OTHER), bindingRow(OTHER));
+      const before = structuredClone(s.rows.get(operationPath()));
+      const transactions = s.transactions.length;
+      expect((await s.journal.cancelPreparation(OTHER, cancelInput())).status).toBe('cancelled');
+      expect(s.rows.get(operationPath())).toEqual(before);
+      expect(s.rows.get(operationPath(OTHER))).toMatchObject({ ownerKey: OTHER, state: 'cancelled', files: [] });
+      expect(s.transactions.slice(transactions).flatMap(tx => tx.reads)).not.toContain(operationPath());
+      expect(s.transactions.slice(transactions).flatMap(tx => tx.writes)).not.toContain(operationPath());
+    });
+
+    it.each(['closed', 'disconnected', 'revision-changed', 'student-changed', 'expired'] as const)(
+      'rechecks the current binding in the cancellation transaction: %s', async state => {
+        const s = setup();
+        await transferred(s);
+        const before = structuredClone(s.rows.get(operationPath()));
+        s.beforeNext(() => {
+          if (state === 'closed' || state === 'disconnected') s.rows.set(bindingPath(), { ...bindingRow(), state });
+          if (state === 'revision-changed') s.rows.set(bindingPath(), bindingRow(OWNER, 30, 'c'.repeat(32)));
+          if (state === 'student-changed') s.rows.set(bindingPath(), bindingRow(OWNER, 31));
+          if (state === 'expired') s.advance(3600_001);
+        });
+        await expect(s.journal.cancelPreparation(OWNER, cancelInput())).rejects.toMatchObject({ code:
+          ['closed', 'disconnected', 'expired'].includes(state) ? 'TRONCLASS_RECONNECT_REQUIRED' : 'TRONCLASS_BINDING_CHANGED' });
+        expect(s.rows.get(operationPath())).toEqual(before);
+        expect(s.rows.has(lockPath())).toBe(false);
+      },
+    );
+
+    it.each([1, 2])('refuses legacy or unknown version %s without rewriting it', async version => {
+      const s = setup();
+      const unknown = { version, ownerKey: OWNER, operationId: OPERATION, state: 'unknown', privateReceipt: 'private-legacy', purgeAt: null };
+      s.rows.set(operationPath(), unknown);
+      await expect(s.journal.cancelPreparation(OWNER, cancelInput())).rejects.toMatchObject({
+        code: 'TRONCLASS_OPERATION_CONFLICT', message: 'TRONCLASS_OPERATION_CONFLICT',
+      });
+      expect(s.rows.get(operationPath())).toEqual(unknown);
+    });
+
+    it.each(['submitting', 'unknown', 'submitted', 'owner-deleted', 'not-sent'])('does not modify a pre-existing %s school-task lock', async state => {
+      const s = setup();
+      const lock = { version: 1, state, ownerKey: OTHER, privateReceipt: 'private-lock', purgeAt: null };
+      s.rows.set(lockPath(), lock);
+      expect(await s.journal.cancelPreparation(OWNER, cancelInput())).toEqual({
+        status: 'unknown', operationId: OPERATION, courseId: 10, homeworkId: 20,
+      });
+      expect(s.rows.get(lockPath())).toEqual(lock);
+      expect(s.rows.has(operationPath())).toBe(false);
+    });
+
+    it.each(['absent', 'preparing'] as const)('does not report successful cancellation when persistence fails for an %s operation', async state => {
+      const s = setup();
+      if (state === 'preparing') await transferred(s);
+      const before = structuredClone([...s.rows]);
+      s.failWrite(1);
+      await expect(s.journal.cancelPreparation(OWNER, cancelInput())).rejects.toMatchObject({
+        code: 'TRONCLASS_JOURNAL_UNAVAILABLE', message: 'TRONCLASS_JOURNAL_UNAVAILABLE',
+      });
+      expect([...s.rows]).toEqual(before);
+      expect((await s.journal.cancelPreparation(OWNER, cancelInput())).status).toBe('cancelled');
+    });
+  });
+
   it('stores a durable claim before transfer, then exposes only the exact transferred set', async () => {
     const s = setup();
     expect(s.journal.contractVerified).toBe(false);

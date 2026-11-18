@@ -136,6 +136,47 @@ function environment() {
 }
 
 describe('public HTTP to durable v2 school workflow', () => {
+  const cancelInput = { action: 'cancel-preparation', ...SCOPE, revision: REVISION, operationId: OPERATION };
+
+  it('stops an upload-only preparation and blocks delayed final and upload calls without school writes', async () => {
+    const s = environment();
+    expect((await s.upload()).status).toBe(200);
+    const calls = vi.mocked(s.fetchSchool).mock.calls.length;
+    const stopped = await s.post(cancelInput);
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toEqual({ status: 'cancelled', operationId: OPERATION, ...SCOPE });
+    expect((await s.submit()).status).toBe(409);
+    expect((await s.upload()).status).toBe(409);
+    expect(s.fetchSchool).toHaveBeenCalledTimes(calls);
+    expect(s.finalPosts()).toBe(0);
+    expect([...s.rows.values()].find(row => row.operationId === OPERATION)).toMatchObject({ state: 'cancelled', purgeAt: null });
+    expect([...s.rows.keys()].some(path => path.startsWith('_tronClassSubmissionLocks/'))).toBe(false);
+  });
+
+  it('cancels a locally saved ID before its first upload, including while school writes are disabled', async () => {
+    const s = environment();
+    s.disable();
+    expect(await (await s.post(cancelInput)).json()).toEqual({ status: 'cancelled', operationId: OPERATION, ...SCOPE });
+    expect(await (await s.post(cancelInput)).json()).toEqual({ status: 'cancelled', operationId: OPERATION, ...SCOPE });
+    expect(s.fetchSchool).not.toHaveBeenCalled();
+    expect(s.fetchStorage).not.toHaveBeenCalled();
+    expect([...s.rows.values()].filter(row => row.operationId === OPERATION)).toHaveLength(1);
+  });
+
+  it('cannot turn an already attempted final into editable work or release its persistent lock', async () => {
+    const s = environment();
+    s.setMissingReadback(true);
+    expect((await s.upload()).status).toBe(200);
+    expect(await (await s.submit()).json()).toMatchObject({ status: 'unknown' });
+    const before = structuredClone([...s.rows]);
+    const calls = vi.mocked(s.fetchSchool).mock.calls.length;
+    s.disable();
+    expect(await (await s.post(cancelInput)).json()).toEqual({ status: 'unknown', operationId: OPERATION, ...SCOPE });
+    expect([...s.rows]).toEqual(before);
+    expect(s.fetchSchool).toHaveBeenCalledTimes(calls);
+    expect(s.finalPosts()).toBe(1);
+  });
+
   it('prepares, transfers one attachment, submits and exposes only a scoped acknowledged confirmation', async () => {
     const s = environment();
     const prepare = await s.post({ action: 'prepare', ...SCOPE });

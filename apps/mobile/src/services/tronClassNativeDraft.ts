@@ -109,15 +109,32 @@ export async function readNativeTronClassFile(
 function pendingKey(owner: string, courseId: number, homeworkId: number) {
   return `nuni.tronclass.pending.v1:${encodeURIComponent(owner)}:${courseId}:${homeworkId}`;
 }
+// Screens for the same owner/homework share one local journal. Serialize the
+// read/check/write interval so another mounted screen cannot replace an ID
+// between a conditional clear's read and remove. Other keys remain independent.
+const pendingQueues = new Map<string, Promise<void>>();
+function withPendingKey<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const result = (pendingQueues.get(key) ?? Promise.resolve()).then(work);
+  const settled = result.then(() => undefined, () => undefined);
+  pendingQueues.set(key, settled);
+  void settled.then(() => {
+    if (pendingQueues.get(key) === settled) pendingQueues.delete(key);
+  });
+  return result;
+}
+async function readPendingValue(key: string): Promise<string | null> {
+  const value = await AsyncStorage.getItem(key);
+  if (value !== null && !isTronClassOperationId(value))
+    throw new Error('INVALID_PENDING_OPERATION');
+  return value;
+}
 export async function readNativeTronClassPending(
   owner: string,
   courseId: number,
   homeworkId: number,
 ): Promise<string | null> {
-  const value = await AsyncStorage.getItem(pendingKey(owner, courseId, homeworkId));
-  if (value !== null && !isTronClassOperationId(value))
-    throw new Error('INVALID_PENDING_OPERATION');
-  return value;
+  const key = pendingKey(owner, courseId, homeworkId);
+  return withPendingKey(key, () => readPendingValue(key));
 }
 export async function saveNativeTronClassPending(
   owner: string,
@@ -126,12 +143,25 @@ export async function saveNativeTronClassPending(
   operationId: string,
 ): Promise<void> {
   if (!isTronClassOperationId(operationId)) throw new Error('INVALID_PENDING_OPERATION');
-  await AsyncStorage.setItem(pendingKey(owner, courseId, homeworkId), operationId);
+  const key = pendingKey(owner, courseId, homeworkId);
+  await withPendingKey(key, async () => {
+    const saved = await readPendingValue(key);
+    if (saved !== null && saved !== operationId) throw new Error('PENDING_OPERATION_CONFLICT');
+    if (saved !== operationId) await AsyncStorage.setItem(key, operationId);
+  });
 }
 export async function clearNativeTronClassPending(
   owner: string,
   courseId: number,
   homeworkId: number,
+  expectedOperationId: string,
 ): Promise<void> {
-  await AsyncStorage.removeItem(pendingKey(owner, courseId, homeworkId));
+  if (!isTronClassOperationId(expectedOperationId)) throw new Error('INVALID_PENDING_OPERATION');
+  const key = pendingKey(owner, courseId, homeworkId);
+  await withPendingKey(key, async () => {
+    const saved = await readPendingValue(key);
+    if (saved === null) return;
+    if (saved !== expectedOperationId) throw new Error('PENDING_OPERATION_CONFLICT');
+    await AsyncStorage.removeItem(key);
+  });
 }

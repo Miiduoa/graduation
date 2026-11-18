@@ -165,6 +165,8 @@ async function defaultResponse(
   if (value.action === 'disconnect') return json({ ...unconnected, revision: 'b'.repeat(32) });
   if (value.action === 'sync') return json(snapshot);
   if (value.action === 'prepare') return json(prepareValue);
+  if (value.action === 'cancel-preparation') return json({ status: 'cancelled',
+    operationId: value.operationId, courseId: value.courseId, homeworkId: value.homeworkId });
   if (value.action === 'submit' || value.action === 'reconcile')
     return json({ status: 'submitted', operationId: value.operationId, receipt });
   throw new Error(`Unexpected request: ${String(value.action)}`);
@@ -554,7 +556,7 @@ describe('TronClass submission confirmation', () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
   });
 
-  it('stops after an expired upload without advancing to final submission', async () => {
+  it('keeps the recovery operation after an expired upload without advancing to final submission', async () => {
     fetchMock.mockImplementation((url, init) => init?.method === 'PUT'
       ? Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401))
       : defaultResponse(url, init));
@@ -563,7 +565,7 @@ describe('TronClass submission confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
     await screen.findByLabelText('學校密碼');
     expect(calls('submit')).toHaveLength(0);
-    expect(sessionStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(1);
     expect((screen.getByRole('button', { name: '連接 TronClass' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -794,7 +796,7 @@ describe('TronClass submission confirmation', () => {
   });
 
   it.each([false, true])(
-    'starts a fresh operation after partial upload failure; remove failed file: %s',
+    'cancels the retained preparation before a fresh operation after partial upload failure; remove failed file: %s',
     async (removeFailed) => {
       let uploadCount = 0;
       const operations: string[] = [];
@@ -817,6 +819,15 @@ describe('TronClass submission confirmation', () => {
       fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
       expect(await screen.findByRole('alert')).toBeTruthy();
       expect(calls('submit')).toHaveLength(0);
+      expect(sessionStorage.length).toBe(1);
+      expect(screen.getByRole('heading', { name: '繳交結果待確認' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '預覽繳交內容' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '停止準備並返回編輯' }));
+      await screen.findByText('已停止這次準備。內容與附件已保留，請重新預覽後再繳交。');
+      expect(body(calls('cancel-preparation')[0][1])).toEqual({ action: 'cancel-preparation',
+        operationId: operations[0], revision, courseId: 12, homeworkId: 51 });
+      expect(sessionStorage.length).toBe(0);
+      expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('我的心得');
       if (removeFailed) fireEvent.click(screen.getByRole('button', { name: '移除 answer.txt' }));
       fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
       fireEvent.click(screen.getByLabelText('我已確認課程、作業內容與附件正確'));
@@ -828,6 +839,19 @@ describe('TronClass submission confirmation', () => {
       expect(body(calls('submit')[0][1]).attachments).toHaveLength(removeFailed ? 1 : 2);
     },
   );
+
+  it('does not start the first upload when its recovery operation cannot be saved', async () => {
+    render(<TronClassWorkspace />);
+    await previewAnswer([new File(['report'], 'report.pdf', { type: 'application/pdf' })]);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => { throw new Error('storage unavailable'); });
+    fireEvent.click(screen.getByRole('button', { name: '確認送出到 TronClass' }));
+    await screen.findByText('此瀏覽器無法保留繳交查證紀錄，請允許網站儲存空間後重試，或開啟原作業。');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+    expect(calls('submit')).toHaveLength(0);
+    expect(sessionStorage.length).toBe(0);
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('我的心得');
+    expect(screen.getByText('report.pdf')).toBeTruthy();
+  });
 
   it('does not continue an in-flight upload into submission after the owner changes', async () => {
     const upload = deferred<Response>();

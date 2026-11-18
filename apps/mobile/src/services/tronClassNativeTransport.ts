@@ -105,7 +105,7 @@ export async function nativeTronClassFirebaseRequest(
   const action = 'action' in input ? String(input.action) : 'upload';
   if (
     !upload &&
-    !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile'].includes(action)
+    !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(action)
   )
     throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
   const endpoint = upload

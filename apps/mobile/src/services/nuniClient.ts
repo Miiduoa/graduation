@@ -168,7 +168,7 @@ export async function nuniBffRequest(
   const tronClass = path === 'tronclass';
   if (
     tronClass &&
-    (!input || !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile'].includes(String(input.action)))
+    (!input || !['status', 'connect', 'disconnect', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(String(input.action)))
   )
     throw new NuniError(400, 'INVALID_REQUEST');
   if (signal?.aborted) throw new NuniError(0, 'REQUEST_CANCELLED');

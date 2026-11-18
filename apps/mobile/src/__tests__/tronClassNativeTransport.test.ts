@@ -45,7 +45,7 @@ it('uses POST at the fixed TronClass BFF with Platform authorization, without a 
     code: 'INVALID_REQUEST',
   });
 });
-it.each(['connect', 'disconnect', 'submit'])(
+it.each(['connect', 'disconnect', 'submit', 'cancel-preparation'])(
   'never retries a %s whose reply was lost',
   async (action) => {
     const fetchMock = jest.fn().mockRejectedValue(new Error('lost reply'));
@@ -124,6 +124,19 @@ it('sanitizes Firebase error messages and does not replay school writes', async 
     message: 'TRONCLASS_WRITES_DISABLED',
   });
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('sends preparation cancellation through Firebase once and never retries a lost result', async () => {
+  const input = { action: 'cancel-preparation', operationId, revision, courseId: 10, homeworkId: 20 };
+  const fetchMock = jest.fn().mockRejectedValue(new Error('lost cancellation reply'));
+  global.fetch = fetchMock;
+  await expect(nativeTronClassFirebaseRequest('school-a', () => true, input))
+    .rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith('https://nuni.tw/api/tronclass', expect.objectContaining({
+    method: 'POST', body: JSON.stringify(input),
+    headers: expect.objectContaining({ Authorization: 'Bearer fresh-token' }),
+  }));
 });
 
 it('binds submission attachment downloads to the same Firebase owner and copies input before obtaining its token', async () => {

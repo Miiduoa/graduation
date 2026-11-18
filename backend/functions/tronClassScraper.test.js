@@ -237,6 +237,57 @@ describe('tronClassScraper', () => {
     expect(https.request.mock.calls[0][0].path).toBe('/api/courses/10001/homework-activities?page=1&page_size=50');
   });
 
+  test.each([false, true, [], [1], {}, '', ' ', '1e2', '0x10', '-1', '1.5', 'invalid', -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects malformed homework totals instead of converting a short page into a complete list: %p', async total => {
+      mockHttpsResponse({ body: JSON.stringify({ homework_activities: [], total }) });
+      await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+        code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+      });
+      expect(https.request).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test.each([
+    { page: 2 }, { page: '2' }, { page: 0 }, { page: [1] }, { page: true },
+    { page_size: 20 }, { page_size: '20' }, { page_size: false }, { page_size: [50] },
+  ])('rejects mismatched homework page metadata before returning its rows: %p', async metadata => {
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: 1, ...metadata }) });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+    expect(https.request).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    { homework_activities: [{ id: 20001 }], total: 0 },
+    { homework_activities: Array.from({ length: 51 }, (_, index) => ({ id: 20001 + index })), total: 51 },
+  ])('rejects contradictory or oversized homework pages: %p', async response => {
+    mockHttpsResponse({ body: JSON.stringify(response) });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test.each([
+    [{ total: '1', page: '1', page_size: '50' }, 1],
+    [{ total: 1, page: 1, page_size: 50 }, 1],
+    [{}, null],
+    [{ total: null, page: null, page_size: null }, null],
+  ])('preserves supported numeric and absent homework pagination metadata: %p', async (metadata, total) => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, ...metadata }) });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).resolves.toEqual({
+      homework_activities: homework, total, page: 1, page_size: 50,
+    });
+  });
+
+  test.each([0, '0'])('preserves an explicit empty homework list with total %p', async total => {
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: [], total }) });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).resolves.toMatchObject({
+      homework_activities: [], total: 0,
+    });
+  });
+
   test('keeps school 500 on homework instead of returning an empty list', async () => {
     mockHttpsResponse({ status: 500, body: '{}' });
     await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).rejects.toMatchObject({

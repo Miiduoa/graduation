@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { isTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+import { decodeTronClassPreparationCancellation } from '@campus/shared/src/tronClassSubmissionCancellation';
 import {
   tronClassErrorMessage,
   TronClassRequestError,
@@ -22,6 +23,17 @@ import styles from './tronclass.module.css';
 
 type Attachment = { id: string; file: File; status: 'ready' | 'uploading' | 'uploaded' | 'failed' };
 type Phase = 'editing' | 'preview' | 'uploading' | 'submitting' | 'unknown' | 'submitted' | 'confirmed';
+type AssignmentClient = Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'> &
+  Partial<Pick<TronClassClient, 'downloadSubmissionAttachment' | 'cancelPreparation'>>;
+type OperationScope = {
+  client: AssignmentClient;
+  owner: string;
+  revision: string;
+  courseId: number;
+  homeworkId: number;
+  operationId: string;
+};
+const PENDING_CHANGED = '瀏覽器的操作紀錄已變更，請重新開啟作業後核對。';
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 4;
@@ -59,6 +71,28 @@ function preparationLimits(preparation: TronClassPreparation | null) {
   };
 }
 
+function confirmationScope(preparation: TronClassPreparation) {
+  // Match the native editor: refreshing a read timestamp does not change the
+  // assignment, but school requirements must still match what the student saw.
+  const details = preparation.details?.status === 'available'
+    ? { ...preparation.details, fetchedAt: undefined }
+    : preparation.details;
+  return JSON.stringify([
+    preparation.revision,
+    preparation.courseId,
+    preparation.homeworkId,
+    preparation.title,
+    preparation.description,
+    preparation.deadline,
+    preparation.canSubmit,
+    preparation.rules,
+    preparation.maxFiles,
+    preparation.maxFileBytes,
+    preparation.allowedContentTypes,
+    details,
+  ]);
+}
+
 function pendingKey(owner: string, courseId: number, homeworkId: number): string {
   // The server verifies the remote student before reconciling an operation after reconnecting.
   return `nuni.tronclass.pending:${owner}:${courseId}:${homeworkId}`;
@@ -77,8 +111,7 @@ export function TronClassAssignment({
   initialDraft,
   onDraftChange,
 }: {
-  client: Pick<TronClassClient, 'prepare' | 'upload' | 'submit' | 'reconcile'> &
-    Partial<Pick<TronClassClient, 'downloadSubmissionAttachment'>>;
+  client: AssignmentClient;
   revision: string;
   owner: string;
   homework: TronClassHomeworkItem;
@@ -102,10 +135,12 @@ export function TronClassAssignment({
   const [files, setFiles] = useState<Attachment[]>([]);
   const [phase, setPhase] = useState<Phase>('editing');
   const [confirmed, setConfirmed] = useState(false);
+  const confirmedScope = useRef<string | null>(null);
   const [receipt, setReceipt] = useState<TronClassSubmissionReceipt | null>(null);
   const [readbackConfirmation, setReadbackConfirmation] = useState<TronClassAcknowledgedReadbackConfirmation | null>(null);
   const [restored, setRestored] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [copyMessage, setCopyMessage] = useState('');
   const [draftRecovered, setDraftRecovered] = useState(false);
   const draftToRestore = useRef(!prepareOnly && initialDraft &&
@@ -115,18 +150,55 @@ export function TronClassAssignment({
   const alive = useRef(true);
   const lock = useRef(false);
   const operation = useRef<string | null>(null);
+  const activeScope = useRef({ client, owner, revision, courseId: homework.courseId, homeworkId: homework.id });
+  activeScope.current = { client, owner, revision, courseId: homework.courseId, homeworkId: homework.id };
   const title = useRef<HTMLHeadingElement>(null);
   const callbacks = useRef({ onConnectionChanged, onBusy, onSubmitted, onDraftChange });
   useEffect(() => {
     callbacks.current = { onConnectionChanged, onBusy, onSubmitted, onDraftChange };
   }, [onConnectionChanged, onBusy, onSubmitted, onDraftChange]);
   const storageKey = pendingKey(owner, homework.courseId, homework.id);
-  const working = phase === 'uploading' || phase === 'submitting' || checking;
+  const working = phase === 'uploading' || phase === 'submitting' || checking || cancelling;
   const completed = phase === 'submitted' || phase === 'confirmed';
   const limits = preparationLimits(preparation);
   const canAddAttachments = limits.allowsAttachments && limits.maxFiles > 0 &&
     limits.maxFileBytes > 0 && limits.maxTotalBytes > 0;
   const submissionAllowed = preparation?.canSubmit === true && limits.confirmed && !prepareError;
+
+  function captureOperation(operationId: string): Readonly<OperationScope> {
+    return Object.freeze({ client, owner, revision, courseId: homework.courseId, homeworkId: homework.id, operationId });
+  }
+
+  function operationCurrent(expected: Readonly<OperationScope>) {
+    const current = activeScope.current;
+    return alive.current && current.client === expected.client && current.owner === expected.owner &&
+      current.revision === expected.revision && current.courseId === expected.courseId &&
+      current.homeworkId === expected.homeworkId && operation.current === expected.operationId;
+  }
+
+  function clearPending(expected: Readonly<OperationScope>): 'cleared' | 'changed' | 'unavailable' | 'stale' {
+    if (!operationCurrent(expected)) return 'stale';
+    const key = pendingKey(expected.owner, expected.courseId, expected.homeworkId);
+    try {
+      const saved = sessionStorage.getItem(key);
+      if (saved !== null && saved !== expected.operationId) return 'changed';
+      if (!operationCurrent(expected)) return 'stale';
+      sessionStorage.removeItem(key);
+      return sessionStorage.getItem(key) === null ? 'cleared' : 'changed';
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  function finishPending(expected: Readonly<OperationScope>, failureMessage: string): boolean {
+    const cleared = clearPending(expected);
+    if (cleared === 'cleared') return operationCurrent(expected);
+    if (cleared !== 'stale' && operationCurrent(expected)) {
+      setPhase('unknown');
+      setError(cleared === 'changed' ? PENDING_CHANGED : failureMessage);
+    }
+    return false;
+  }
 
   useEffect(() => {
     // A recovered draft stays hidden until a fresh prepare confirms its scope.
@@ -287,14 +359,18 @@ export function TronClassAssignment({
     setPhase('preview');
   }
 
-  function acceptResult(value: TronClassSubmissionResult, operationId: string) {
+  function acceptResult(value: TronClassSubmissionResult, expected: Readonly<OperationScope>) {
+    if (!operationCurrent(expected)) return;
+    const { operationId, courseId, homeworkId } = expected;
     if (value.status === 'confirmed') {
       if (!isTronClassAcknowledgedReadbackResult(value, {
-        operationId, courseId: homework.courseId, homeworkId: homework.id,
+        operationId, courseId, homeworkId,
       })) {
         setPhase('unknown');
         return;
       }
+      if (!finishPending(expected, '原操作已確認，但瀏覽器紀錄尚未更新。請再次查證原操作。')) return;
+      operation.current = null;
       draftToRestore.current = null;
       setAwaitingDraftRecovery(false);
       callbacks.current.onDraftChange?.(null);
@@ -302,11 +378,6 @@ export function TronClassAssignment({
       setReadbackConfirmation(value.confirmation);
       setPhase('confirmed');
       setError('');
-      try {
-        sessionStorage.removeItem(storageKey);
-      } catch {
-        /* The acknowledged version has still been independently matched. */
-      }
       callbacks.current.onSubmitted();
       return;
     }
@@ -316,11 +387,13 @@ export function TronClassAssignment({
       value.status === 'submitted' &&
       result?.status === 'submitted' &&
       result.source === 'tronclass' &&
-      result.courseId === homework.courseId &&
-      result.homeworkId === homework.id &&
+      result.courseId === courseId &&
+      result.homeworkId === homeworkId &&
       !!result.id &&
       Number.isFinite(Date.parse(result.submittedAt));
     if (verified && result) {
+      if (!finishPending(expected, '原操作已確認，但瀏覽器紀錄尚未更新。請再次查證原操作。')) return;
+      operation.current = null;
       draftToRestore.current = null;
       setAwaitingDraftRecovery(false);
       callbacks.current.onDraftChange?.(null);
@@ -328,11 +401,6 @@ export function TronClassAssignment({
       setReceipt(result);
       setPhase('submitted');
       setError('');
-      try {
-        sessionStorage.removeItem(storageKey);
-      } catch {
-        /* The server receipt still confirms success. */
-      }
       callbacks.current.onSubmitted();
     } else {
       setPhase('unknown');
@@ -348,11 +416,13 @@ export function TronClassAssignment({
     setPhase('uploading');
     const operationId = operation.current ?? crypto.randomUUID();
     operation.current = operationId;
+    const expected = captureOperation(operationId);
     let dispatched = false;
     let prepared = false;
+    let journalSaved = false;
     try {
       const latest = await client.prepare(homework.courseId, homework.id);
-      if (!alive.current) return;
+      if (!operationCurrent(expected)) return;
       if (
         latest.revision !== revision ||
         latest.courseId !== homework.courseId ||
@@ -376,8 +446,31 @@ export function TronClassAssignment({
         setError(issue);
         return;
       }
+      if (confirmationScope(latest) !== confirmedScope.current) {
+        setPhase('editing');
+        setConfirmed(false);
+        setError('校方作業條件已變更，請查看最新要求並重新預覽。');
+        return;
+      }
+      try {
+        const saved = sessionStorage.getItem(storageKey);
+        if (saved !== null && saved !== expected.operationId) {
+          setConfirmed(false);
+          setPhase('unknown');
+          setError(PENDING_CHANGED);
+          return;
+        }
+        sessionStorage.setItem(storageKey, operationId);
+      } catch {
+        operation.current = null;
+        setPhase('editing');
+        setConfirmed(false);
+        setError('此瀏覽器無法保留繳交查證紀錄，請允許網站儲存空間後重試，或開啟原作業。');
+        return;
+      }
+      journalSaved = true;
       for (const attachment of files) {
-        if (!alive.current) return;
+        if (!operationCurrent(expected)) return;
         if (attachment.status === 'uploaded') continue;
         setFiles((items) =>
           items.map((item) =>
@@ -393,7 +486,7 @@ export function TronClassAssignment({
             fileId: attachment.id,
             file: attachment.file,
           });
-          if (!alive.current) return;
+          if (!operationCurrent(expected)) return;
           if (
             uploaded.status !== 'uploaded' ||
             uploaded.fileId !== attachment.id ||
@@ -406,7 +499,7 @@ export function TronClassAssignment({
             ),
           );
         } catch (reason) {
-          if (alive.current)
+          if (operationCurrent(expected))
             setFiles((items) =>
               items.map((item) =>
                 item.id === attachment.id ? { ...item, status: 'failed' } : item,
@@ -415,14 +508,7 @@ export function TronClassAssignment({
           throw reason;
         }
       }
-      if (!alive.current) return;
-      try {
-        sessionStorage.setItem(storageKey, operationId);
-      } catch {
-        setPhase('editing');
-        setError('此瀏覽器無法保留繳交查證紀錄，請允許網站儲存空間後重試，或開啟原作業。');
-        return;
-      }
+      if (!operationCurrent(expected)) return;
       setPhase('submitting');
       dispatched = true;
       const result = await client.submit({
@@ -434,18 +520,18 @@ export function TronClassAssignment({
         attachments: files.map((file) => file.id),
         confirmed: true,
       });
-      if (!alive.current) return;
-      acceptResult(result, operationId);
+      if (!operationCurrent(expected)) return;
+      acceptResult(result, expected);
     } catch (reason) {
-      if (!alive.current) return;
-      if (!dispatched) {
-        // An uncertain final submission keeps its ID; a failed upload needs a fresh draft ledger.
+      if (!operationCurrent(expected)) return;
+      if (!journalSaved) {
+        // Nothing was dispatched before the recovery ID could be retained.
         operation.current = null;
         setFiles((items) => items.map((item) => ({ ...item, status: 'ready' })));
       }
       if (connectionChanged(reason)) {
-        // A dispatched operation keeps its ID for read-only reconciliation
-        // after reconnecting; a session error never proves it was not sent.
+        // A recorded operation survives reconnecting for read-only checks or
+        // explicit preparation cancellation; a session error cannot clear it.
         callbacks.current.onConnectionChanged(reason);
         return;
       }
@@ -453,28 +539,37 @@ export function TronClassAssignment({
         setPreparation(null);
         setPrepareError(tronClassErrorMessage(reason));
       }
-      setPhase(dispatched ? 'unknown' : 'editing');
+      setPhase(journalSaved ? 'unknown' : 'editing');
       setError(
-        dispatched ? '尚未收到可核對的繳交結果，請先查證這次送出。' : prepared ? tronClassErrorMessage(reason) : '',
+        dispatched ? '尚未收到可核對的繳交結果，請先查證這次送出。'
+          : journalSaved ? '附件準備中斷，請先停止這次準備，再重新預覽送出。'
+          : prepared ? tronClassErrorMessage(reason) : '',
       );
     } finally {
       lock.current = false;
-      if (alive.current) callbacks.current.onBusy(false);
+      if (alive.current) {
+        if (!operationCurrent(expected)) {
+          setPhase(value => value === 'uploading' || value === 'submitting'
+            ? journalSaved ? 'unknown' : 'editing' : value);
+        }
+        callbacks.current.onBusy(false);
+      }
     }
   }
 
   async function reconcile() {
     if (lock.current || !operation.current || phase !== 'unknown') return;
+    const expected = captureOperation(operation.current);
     lock.current = true;
     callbacks.current.onBusy(true);
     setChecking(true);
     setError('');
     try {
-      const result = await client.reconcile(operation.current, revision);
-      if (!alive.current) return;
-      acceptResult(result, operation.current);
+      const result = await expected.client.reconcile(expected.operationId, expected.revision);
+      if (!operationCurrent(expected)) return;
+      acceptResult(result, expected);
     } catch (reason) {
-      if (!alive.current) return;
+      if (!operationCurrent(expected)) return;
       if (connectionChanged(reason)) {
         callbacks.current.onConnectionChanged(reason);
         return;
@@ -484,12 +579,9 @@ export function TronClassAssignment({
         reason.code === 'TRONCLASS_SUBMISSION_NOT_STARTED'
       ) {
         // Only this explicit server verdict proves the final write was never dispatched.
-        try {
-          sessionStorage.removeItem(storageKey);
-        } catch {
-          /* The next send replaces this metadata. */
-        }
+        if (!finishPending(expected, '已確認未送出，但瀏覽器紀錄尚未更新。請再次查證後再編輯。')) return;
         operation.current = null;
+        confirmedScope.current = null;
         setFiles((items) => items.map((item) => ({ ...item, status: 'ready' })));
         setConfirmed(false);
         setPhase('editing');
@@ -499,6 +591,46 @@ export function TronClassAssignment({
       lock.current = false;
       if (alive.current) {
         setChecking(false);
+        callbacks.current.onBusy(false);
+      }
+    }
+  }
+
+  async function cancelPreparation() {
+    if (prepareOnly || !client.cancelPreparation || lock.current || !alive.current ||
+      !operation.current || phase !== 'unknown') return;
+    const expected = captureOperation(operation.current);
+    lock.current = true;
+    callbacks.current.onBusy(true);
+    setCancelling(true);
+    setError('');
+    try {
+      const value = await client.cancelPreparation({ operationId: expected.operationId, revision: expected.revision,
+        courseId: expected.courseId, homeworkId: expected.homeworkId });
+      if (!operationCurrent(expected)) return;
+      const result = decodeTronClassPreparationCancellation(value, expected);
+      if (!result) throw new TronClassRequestError('INVALID_RESPONSE', '尚未收到可確認的回覆，請稍後重新查詢。');
+      if (result.status !== 'cancelled') {
+        setError('這次送出尚未確認可停止，請繼續查證原操作。');
+        return;
+      }
+      if (!finishPending(expected, '已停止準備，但瀏覽器紀錄尚未更新。請再次停止準備，清除紀錄後再編輯。')) return;
+      operation.current = null;
+      confirmedScope.current = null;
+      setFiles((items) => items.map((item) => ({ ...item, status: 'ready' })));
+      setConfirmed(false);
+      setPhase('editing');
+      setError('已停止這次準備。內容與附件已保留，請重新預覽後再繳交。');
+    } catch (reason) {
+      if (!operationCurrent(expected)) return;
+      if (connectionChanged(reason)) callbacks.current.onConnectionChanged(reason);
+      else setError(tronClassErrorMessage(reason));
+    } finally {
+      lock.current = false;
+      // A refreshed client can keep this component mounted. Release only this
+      // request's UI lock; the stale result never clears or edits its operation.
+      if (alive.current) {
+        setCancelling(false);
         callbacks.current.onBusy(false);
       }
     }
@@ -643,9 +775,14 @@ export function TronClassAssignment({
             </details>
           )}
           <div className={styles.actions}>
-            <button className="btn primary" disabled={checking} onClick={() => void reconcile()}>
+            <button className="btn primary" disabled={checking || cancelling} onClick={() => void reconcile()}>
               {checking ? '正在查證…' : '查證繳交結果'}
             </button>
+            {!prepareOnly && client.cancelPreparation && (
+              <button className="btn" disabled={checking || cancelling} onClick={() => void cancelPreparation()}>
+                {cancelling ? '正在停止準備…' : '停止準備並返回編輯'}
+              </button>
+            )}
             <SourceLink href={homework.href}>到 TronClass 核對</SourceLink>
           </div>
           {checking && <p role="status">正在核對學校的繳交紀錄…</p>}
@@ -758,7 +895,12 @@ export function TronClassAssignment({
               <input
                 type="checkbox"
                 checked={confirmed}
-                onChange={(event) => setConfirmed(event.target.checked)}
+                disabled={preparing || !preparation}
+                onChange={(event) => {
+                  if (preparing || !preparation) return;
+                  confirmedScope.current = event.target.checked ? confirmationScope(preparation) : null;
+                  setConfirmed(event.target.checked);
+                }}
               />
               我已確認課程、作業內容與附件正確
             </label>

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
+import type { TronClassPreparationCancellation } from '@campus/shared/src/tronClassSubmissionCancellation';
 import {
   TRONCLASS_MAX_FILES, TRONCLASS_MAX_TOTAL_BYTES, TRONCLASS_SUBMISSION_COLLECTION,
   TRONCLASS_SUBMISSION_LOCK_COLLECTION, type TronClassSubmissionBindings,
@@ -29,7 +30,7 @@ type JournalFile = {
 };
 type Operation = Scope & {
   version: 2; candidate: typeof CANDIDATE; schoolId: 'pu';
-  state: 'preparing' | 'final-claimed' | 'acknowledged';
+  state: 'preparing' | 'cancelled' | 'final-claimed' | 'acknowledged';
   files: JournalFile[]; attempt: TronClassFinalCandidateClaim | null; acknowledgment: Acknowledgment | null;
   createdAt: number; updatedAt: number; purgeAt: null;
 };
@@ -124,7 +125,7 @@ function readOperation(snapshot: Snapshot, ownerKey: string, id: string): Operat
   // migrate, reset or overwrite one of its uncertain attempts implicitly.
   if (!object(row) || row.version !== VERSION || row.candidate !== CANDIDATE || row.schoolId !== 'pu' ||
     row.ownerKey !== ownerKey || row.operationId !== id || row.purgeAt !== null ||
-    !['preparing', 'final-claimed', 'acknowledged'].includes(String(row.state)) ||
+    typeof row.state !== 'string' || !['preparing', 'cancelled', 'final-claimed', 'acknowledged'].includes(row.state) ||
     !Number.isSafeInteger(row.createdAt) || !Number.isSafeInteger(row.updatedAt) ||
     Number(row.createdAt) < 0 || Number(row.updatedAt) < Number(row.createdAt) ||
     !Array.isArray(row.files) || row.files.length > TRONCLASS_MAX_FILES) conflict();
@@ -142,7 +143,7 @@ function readOperation(snapshot: Snapshot, ownerKey: string, id: string): Operat
       new Set(operation.files.filter(file => file.state === 'transferred').map(file => file.uploadId)).size !==
         operation.files.filter(file => file.state === 'transferred').length ||
       operation.files.reduce((sum, file) => sum + file.size, 0) > TRONCLASS_MAX_TOTAL_BYTES) conflict();
-    if (operation.state === 'preparing') {
+    if (operation.state === 'preparing' || operation.state === 'cancelled') {
       if (operation.attempt !== null || operation.acknowledgment !== null) conflict();
     } else {
       const attempt = finalClaim(operation.attempt!);
@@ -235,6 +236,39 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
 
   return Object.freeze({
     contractVerified: false as const,
+    async cancelPreparation(ownerKey: string, value: {
+      operationId: string; revision: string; courseId: number; homeworkId: number;
+    }): Promise<TronClassPreparationCancellation> {
+      owner(ownerKey);
+      if (!object(value) || Object.keys(value).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key)) ||
+        !positiveId(value.courseId) || !positiveId(value.homeworkId) ||
+        typeof value.revision !== 'string' || !REVISION.test(value.revision)) invalid();
+      operationId(value.operationId);
+      const input = structuredClone(value);
+      return current(ownerKey, input.revision, async (tx, binding, at) => {
+        const ref = operationRef(ownerKey, input.operationId);
+        const saved = await tx.get(ref);
+        const operation = readOperation(saved, ownerKey, input.operationId);
+        const expected = { ...input, ownerKey, studentId: binding.userId };
+        const lock = await tx.get(lockRef(expected));
+        if (operation && (operation.studentId !== binding.userId || operation.courseId !== input.courseId ||
+          operation.homeworkId !== input.homeworkId)) conflict();
+        const result = (status: TronClassPreparationCancellation['status']): TronClassPreparationCancellation => ({
+          status, operationId: input.operationId, courseId: input.courseId, homeworkId: input.homeworkId,
+        });
+        // A claimed final may already be in flight even when no acknowledgment
+        // is stored. Never release its school-task lock or promise cancellation.
+        if (lock.exists) return result('unknown');
+        if (operation?.state === 'cancelled') return result('cancelled');
+        if (operation && operation.state !== 'preparing') return result('unknown');
+        // The phone saves an ID before its first upload. A durable tombstone is
+        // also required for a missing record: a delayed upload/final must not
+        // create that operation after the UI has been told it can edit again.
+        const stopped = operation ?? newOperation(expected, at);
+        tx.set(ref, { ...stopped, state: 'cancelled', updatedAt: Math.max(stopped.updatedAt, at) });
+        return result('cancelled');
+      });
+    },
     async claimAttachment(value: TronClassAttachmentClaim): Promise<boolean> {
       const input = attachmentClaim(value);
       return current(input.ownerKey, input.revision, async (tx, binding, at) => {
@@ -288,6 +322,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
       const input = structuredClone(value);
       return current(ownerKey, input.revision, async (tx, binding) => {
         const operation = readOperation(await tx.get(operationRef(ownerKey, input.operationId)), ownerKey, input.operationId);
+        if (operation?.state === 'cancelled') conflict();
         if (!operation && input.fileIds.length === 0) return [];
         if (!operation || !sameScope(operation, { ...input, ownerKey, studentId: binding.userId }) ||
           operation.files.length !== input.fileIds.length || operation.files.some(file => file.state !== 'transferred' || !input.fileIds.includes(file.fileId))) {
@@ -305,6 +340,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
         const lock = lockRef(attempt);
         const previousLock = await tx.get(lock);
         if (!sameScope(operation, attempt)) conflict();
+        if (operation.state === 'cancelled') return false;
         if (operation.state !== 'preparing') {
           if (operation.attempt?.payloadDigest !== attempt.payloadDigest) conflict();
           return false;

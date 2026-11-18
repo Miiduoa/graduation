@@ -109,6 +109,7 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
   const acknowledgment = (): NonNullable<TronClassFinalCandidateAttempt['acknowledgment']> => ({
     state: 'acknowledged', submissionId: 90, studentId: STUDENT, courseId: 101, activityId: 202,
   });
+  const cancelInput = () => ({ courseId: 101, homeworkId: 202, revision, operationId: OPERATION });
   const document = async (path: string) => (await db.doc(path).get()).data();
 
   beforeAll(() => {
@@ -138,6 +139,102 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
     await Promise.all([db.terminate(), otherDb.terminate()]);
     await Promise.all([deleteApp(app), deleteApp(otherApp)]);
   });
+
+  it.each(['absent', 'preparing'] as const)(
+    'atomically resolves concurrent cancellation and final claim for an %s operation across clients', async state => {
+      if (state === 'preparing') {
+        await journal.claimAttachment(claim());
+        await journal.storeTransferredFile(transfer());
+      }
+      const value = state === 'preparing' ? attempt({ uploads: [{ id: 40, name: '合成附件.txt', size: 12 }] }) : attempt();
+      const other = createJournal(otherDb, otherBindings);
+      const [cancellation, finalClaimed] = await Promise.all([
+        journal.cancelPreparation(OWNER, cancelInput()), other.claimFinal(value),
+      ]);
+      const operation = await document(operationPath());
+      const lock = await document(lockPath());
+      if (cancellation.status === 'cancelled') {
+        expect(finalClaimed).toBe(false);
+        expect(operation).toMatchObject({ state: 'cancelled', attempt: null, acknowledgment: null, purgeAt: null });
+        expect(lock).toBeUndefined();
+      } else {
+        expect(cancellation.status).toBe('unknown');
+        expect(finalClaimed).toBe(true);
+        expect(operation).toMatchObject({ state: 'final-claimed', attempt: value, purgeAt: null });
+        expect(lock).toMatchObject({ state: 'submitting', operationId: OPERATION, payloadDigest: value.payloadDigest, purgeAt: null });
+      }
+      const before = await db.doc(operationPath()).get();
+      expect(await createJournal().cancelPreparation(OWNER, cancelInput())).toEqual(cancellation);
+      const after = await db.doc(operationPath()).get();
+      expect(after.data()).toEqual(before.data());
+      expect(after.updateTime).toEqual(before.updateTime);
+      expect(await other.claimFinal(value)).toBe(false);
+    }, 20_000,
+  );
+
+  it('committed cancellation blocks a delayed final claim after its binding precheck', async () => {
+    await journal.claimAttachment(claim());
+    await journal.storeTransferredFile(transfer());
+    const paused = pausePrecheck(otherBindings);
+    const value = attempt({ uploads: [{ id: 40, name: '合成附件.txt', size: 12 }] });
+    const pending = createJournal(otherDb, paused.bindings).claimFinal(value);
+    await paused.entered;
+    try {
+      expect((await journal.cancelPreparation(OWNER, cancelInput())).status).toBe('cancelled');
+    } finally { paused.resume(); }
+    expect(await pending).toBe(false);
+    expect(await document(operationPath())).toMatchObject({ state: 'cancelled', attempt: null, acknowledgment: null, purgeAt: null });
+    expect(await document(lockPath())).toBeUndefined();
+    expect(await createJournal().claimAttachment(claim())).toBe(false);
+  }, 20_000);
+
+  it('a final claim committed first remains unknown to delayed cancellation and keeps its lock untouched', async () => {
+    const paused = pausePrecheck(otherBindings);
+    const pending = createJournal(otherDb, paused.bindings).cancelPreparation(OWNER, cancelInput());
+    await paused.entered;
+    let before: Awaited<ReturnType<Firestore['getAll']>>;
+    try {
+      expect(await journal.claimFinal(attempt())).toBe(true);
+      before = await db.getAll(db.doc(operationPath()), db.doc(lockPath()));
+    } finally { paused.resume(); }
+    expect((await pending).status).toBe('unknown');
+    const after = await db.getAll(db.doc(operationPath()), db.doc(lockPath()));
+    for (const [index, snapshot] of after.entries()) {
+      expect(snapshot.data()).toEqual(before![index].data());
+      expect(snapshot.updateTime).toEqual(before![index].updateTime);
+    }
+    await journal.rememberAcknowledgment(attempt(), acknowledgment());
+    const acknowledged = await db.getAll(db.doc(operationPath()), db.doc(lockPath()));
+    expect((await createJournal(otherDb, otherBindings).cancelPreparation(OWNER, cancelInput())).status).toBe('unknown');
+    const final = await db.getAll(db.doc(operationPath()), db.doc(lockPath()));
+    for (const [index, snapshot] of final.entries()) {
+      expect(snapshot.data()).toEqual(acknowledged[index].data());
+      expect(snapshot.updateTime).toEqual(acknowledged[index].updateTime);
+    }
+  }, 20_000);
+
+  it('a cancelled preparation survives a same-student reconnect and rejects an already-running transfer completion', async () => {
+    await journal.claimAttachment(claim());
+    const paused = pausePrecheck(otherBindings);
+    const pending = createJournal(otherDb, paused.bindings).storeTransferredFile(transfer());
+    const outcome = pending.then(() => null, (error: unknown) => error);
+    await paused.entered;
+    try {
+      expect((await journal.cancelPreparation(OWNER, cancelInput())).status).toBe('cancelled');
+    } finally { paused.resume(); }
+    expect(await outcome).toMatchObject({ code: 'TRONCLASS_OPERATION_CONFLICT' });
+    const before = await db.doc(operationPath()).get();
+    expect(before.data()).toMatchObject({ state: 'cancelled', revision, files: [{ state: 'claimed', uploadId: null }], purgeAt: null });
+    const connected = await otherBindings.connect(OWNER, connectInput(revision));
+    const replay = await createJournal(otherDb, otherBindings).cancelPreparation(OWNER, {
+      ...cancelInput(), revision: connected.revision!,
+    });
+    expect(replay.status).toBe('cancelled');
+    const after = await db.doc(operationPath()).get();
+    expect(after.data()).toEqual(before.data());
+    expect(after.updateTime).toEqual(before.updateTime);
+    expect(await document(lockPath())).toBeUndefined();
+  }, 20_000);
 
   it('commits each file and final operation once across independent clients and reconstructed journals', async () => {
     const other = createJournal(otherDb, otherBindings);

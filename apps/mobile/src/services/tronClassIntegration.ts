@@ -5,6 +5,10 @@ import {
 } from '@campus/shared/src/tronClassSubmissionHistory';
 import { isTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import {
+  decodeTronClassPreparationCancellation,
+  type TronClassPreparationCancellation,
+} from '@campus/shared/src/tronClassSubmissionCancellation';
+import {
   validNativeTronClassDownload,
   validNativeTronClassSubmissionDownload,
   type NativeTronClassDownloadInput,
@@ -299,6 +303,17 @@ export function parseNativeTronClassResult(
   return value as TronClassResult;
 }
 
+export function parseNativeTronClassPreparationCancellation(
+  value: unknown,
+  scope: { operationId: string; courseId: number; homeworkId: number },
+): TronClassPreparationCancellation {
+  return decodeTronClassPreparationCancellation(value, {
+    operationId: scope.operationId,
+    courseId: scope.courseId,
+    homeworkId: scope.homeworkId,
+  }) ?? invalid();
+}
+
 export function createNativeTronClassClient(access: TronClassAccess) {
   const assertCurrent = () => {
     if (!access.isCurrent()) throw new NuniError(409, 'SESSION_CHANGED');
@@ -446,6 +461,34 @@ export function createNativeTronClassClient(access: TronClassAccess) {
       return parseNativeTronClassResult(
         await request('reconcile', { operationId: scope.operationId, revision: scope.revision }),
         scope,
+      );
+    },
+    async cancelPreparation(scope: {
+      operationId: string;
+      revision: string;
+      courseId: number;
+      homeworkId: number;
+    }): Promise<TronClassPreparationCancellation> {
+      if (
+        !record(scope) ||
+        !only(scope, ['operationId', 'revision', 'courseId', 'homeworkId']) ||
+        !isTronClassOperationId(scope.operationId) ||
+        !revision(scope.revision) ||
+        !id(scope.courseId) ||
+        !id(scope.homeworkId)
+      )
+        throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+      // Preserve this exact operation while the native transport obtains a token.
+      // A caller mutation cannot change either the destination or response scope.
+      const target = Object.freeze({
+        operationId: scope.operationId,
+        revision: scope.revision,
+        courseId: scope.courseId,
+        homeworkId: scope.homeworkId,
+      });
+      return parseNativeTronClassPreparationCancellation(
+        await request('cancel-preparation', target),
+        target,
       );
     },
     async upload(

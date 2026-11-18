@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+import type { TronClassPreparationCancellation } from '@campus/shared/src/tronClassSubmissionCancellation';
 import { isTronClassAssignmentDetails } from '../tronClassAssignmentDetails';
 import { createTronClassControlledSubmission, type TronClassControlledSubmissionDependencies } from './tronClassControlledSubmission';
 import { createTronClassControlledJournal } from './tronClassControlledJournal';
@@ -30,6 +31,7 @@ export type TronClassPublicSubmissionService = {
   upload(ownerKey: string, input: TronClassPublicUploadInput, signal?: AbortSignal): Promise<TronClassUploadedAttachment>;
   submit(ownerKey: string, input: TronClassPublicSubmitInput, signal?: AbortSignal): Promise<TronClassPublicSubmissionResult>;
   reconcile(ownerKey: string, input: { operationId: string; revision: string }): Promise<TronClassPublicSubmissionResult>;
+  cancelPreparation(ownerKey: string, input: OperationInput): Promise<TronClassPreparationCancellation>;
 };
 
 export type TronClassPublicSubmissionDependencies = {
@@ -155,6 +157,13 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
     if (tronClassFinalCandidateDigest(payload) !== attempt.payloadDigest) conflict();
   }
   return {
+    async cancelPreparation(ownerKey, input) {
+      operation(ownerKey, input);
+      if (Object.keys(input).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key))) invalid();
+      // Stopping an unclaimed preparation remains available when writes are off.
+      // The journal transaction, never a client phase or absent response, decides.
+      return journal.cancelPreparation(ownerKey, input);
+    },
     async prepare(ownerKey, input) {
       ownerAndScope(ownerKey, input);
       if (Object.keys(input).some(key => !['courseId', 'homeworkId'].includes(key))) invalid();

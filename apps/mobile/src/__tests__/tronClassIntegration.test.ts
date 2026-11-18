@@ -4,6 +4,7 @@ import {
   createNativeTronClassClient,
   parseNativeTronClassConnection,
   parseNativeTronClassPreparation,
+  parseNativeTronClassPreparationCancellation,
   parseNativeTronClassResult,
   parseNativeTronClassSnapshot,
   nativeTronClassSubmissionDownloadTarget,
@@ -293,4 +294,74 @@ it('freezes the history selector and rejects cancellation, extra routing fields,
   current = false;
   finish({ bytes: new Uint8Array([1]), filename: '先前答案.pdf', contentType: 'application/pdf' });
   await expect(pending).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+});
+
+describe('preparation cancellation', () => {
+  const cancelled = { status: 'cancelled', ...scope };
+
+  it.each(['cancelled', 'unknown'])('accepts only the scoped %s cancellation outcome', (status) => {
+    expect(parseNativeTronClassPreparationCancellation({ ...cancelled, status }, scope))
+      .toEqual({ ...cancelled, status });
+  });
+
+  it.each([
+    { status: ['cancelled'] },
+    { status: 'submitted' },
+    { operationId: '22222222-2222-4222-8222-222222222222' },
+    { courseId: 11 },
+    { homeworkId: 21 },
+    { homeworkId: undefined },
+    { receipt: null },
+    { revision },
+  ])('rejects a mismatched or non-cancellation reply: %j', (change) => {
+    expect(() => parseNativeTronClassPreparationCancellation({ ...cancelled, ...change }, scope))
+      .toThrow('INVALID_RESPONSE');
+  });
+
+  it('freezes the exact target before waiting and never submits while cancelling', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    const request = jest.fn((_input: Record<string, unknown>) => new Promise(resolve => { finish = resolve; }));
+    const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true,
+      request, upload: jest.fn() });
+    const target = { ...scope, revision };
+    const pending = client.cancelPreparation(target);
+    target.operationId = '22222222-2222-4222-8222-222222222222';
+    target.courseId = 99;
+    target.revision = 'b'.repeat(32);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith({ action: 'cancel-preparation', ...scope, revision });
+    finish(cancelled);
+    await expect(pending).resolves.toEqual(cancelled);
+  });
+
+  it.each([
+    { url: 'https://example.test' },
+    { confirmed: true },
+    { courseId: 0 },
+    { homeworkId: '20' },
+    { revision: 'wrong' },
+    { operationId: 'short' },
+  ])('rejects invalid cancellation input before transport: %j', async (change) => {
+    const request = jest.fn();
+    const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true,
+      request, upload: jest.fn() });
+    await expect(client.cancelPreparation({ ...scope, revision, ...change } as Parameters<typeof client.cancelPreparation>[0]))
+      .rejects.toMatchObject({ code: 'TRONCLASS_INVALID_INPUT' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale owners before dispatch and after a cancellation response', async () => {
+    let current = false;
+    const request = jest.fn(async () => {
+      current = false;
+      return cancelled;
+    });
+    const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => current,
+      request, upload: jest.fn() });
+    await expect(client.cancelPreparation({ ...scope, revision })).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    expect(request).not.toHaveBeenCalled();
+    current = true;
+    await expect(client.cancelPreparation({ ...scope, revision })).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 });

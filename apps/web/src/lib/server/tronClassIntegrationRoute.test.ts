@@ -20,7 +20,7 @@ function setup() {
     disconnect: vi.fn().mockResolvedValue({ ...disconnected, revision }),
     requireBinding: vi.fn(), assertCurrent: vi.fn().mockResolvedValue(undefined),
   };
-  const submissions = { prepare: vi.fn(), upload: vi.fn(), submit: vi.fn(), reconcile: vi.fn() };
+  const submissions = { prepare: vi.fn(), upload: vi.fn(), submit: vi.fn(), reconcile: vi.fn(), cancelPreparation: vi.fn() };
   const authenticate = vi.fn().mockResolvedValue({ ownerKey, provider: 'platform' });
   const read = vi.fn().mockResolvedValue({ revision, fetchedAt: '2026-11-13T00:00:00.000Z', courses: [], homework: [], errors: [], partial: false });
   const getSubmissions = vi.fn().mockResolvedValue(submissions);
@@ -127,6 +127,42 @@ it('reconciliation uses only the recorded operation, never a new payload', async
   expect((await request({ action: 'reconcile', operationId, revision })).status).toBe(200);
   expect(submissions.reconcile).toHaveBeenCalledWith(ownerKey, { operationId, revision });
   expect(submissions.submit).not.toHaveBeenCalled();
+});
+
+it('stops only the authenticated owner preparation through a separate scoped action', async () => {
+  const { request, submissions } = setup();
+  const scope = { courseId: 101, homeworkId: 201, operationId, revision };
+  const expected = { status: 'cancelled', operationId, courseId: 101, homeworkId: 201 };
+  submissions.cancelPreparation.mockResolvedValue(expected);
+  const response = await request({ action: 'cancel-preparation', ...scope });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(expected);
+  expect(submissions.cancelPreparation).toHaveBeenCalledExactlyOnceWith(ownerKey, scope);
+  expect(submissions.submit).not.toHaveBeenCalled();
+  expect(submissions.upload).not.toHaveBeenCalled();
+  expect(submissions.reconcile).not.toHaveBeenCalled();
+  expect(response.headers.get('cache-control')).toBe('no-store, private');
+});
+
+it.each([
+  { courseId: '101' }, { homeworkId: 0 }, { operationId: 'short' }, { revision: null },
+  { ownerKey: 'firebase:other' }, { studentId: 999 }, { content: 'replacement' },
+  { action: ['cancel-preparation'] },
+])('rejects malformed or broadened cancellation scope: %j', async change => {
+  const { request, submissions } = setup();
+  const response = await request({ action: 'cancel-preparation', courseId: 101, homeworkId: 201, operationId, revision, ...change });
+  expect(response.status).toBe(422);
+  expect(submissions.cancelPreparation).not.toHaveBeenCalled();
+});
+
+it('does not return a cancellation after the nuni session changes', async () => {
+  const { request, submissions, authenticate } = setup();
+  submissions.cancelPreparation.mockResolvedValue({ status: 'cancelled', courseId: 101, homeworkId: 201, operationId });
+  authenticate.mockResolvedValueOnce({ ownerKey, provider: 'platform' })
+    .mockResolvedValueOnce({ ownerKey: 'platform:pa_other', provider: 'platform' });
+  const response = await request({ action: 'cancel-preparation', courseId: 101, homeworkId: 201, operationId, revision });
+  expect(response.status).toBe(409);
+  expect(await response.text()).not.toContain('cancelled');
 });
 
 it('returns an acknowledged version confirmation without inventing a legacy submitted-at receipt', async () => {

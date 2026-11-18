@@ -7,6 +7,13 @@ import {
 } from '../services/tronClassNativeDraft';
 import { operationId, preparation } from './fixtures/tronClassIntegration';
 
+const otherOperation = '22222222-2222-4222-8222-222222222222';
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 jest.mock('expo-file-system', () => ({ File: jest.fn() }));
 const file = {
   key: 'local-file',
@@ -29,7 +36,7 @@ it('keeps uncertain operation IDs scoped by owner and homework, without persisti
     expect.stringContaining('pending.v1:'),
     operationId,
   );
-  await clearNativeTronClassPending('platform:a', 10, 20);
+  await clearNativeTronClassPending('platform:a', 10, 20, operationId);
   expect(await readNativeTronClassPending('platform:a', 10, 20)).toBeNull();
 });
 it('blocks ambiguous or corrupted journal values', async () => {
@@ -40,6 +47,103 @@ it('blocks ambiguous or corrupted journal values', async () => {
   await expect(readNativeTronClassPending('owner', 10, 20)).rejects.toThrow(
     'INVALID_PENDING_OPERATION',
   );
+});
+it('permits an idempotent save but never replaces a different pending operation', async () => {
+  await saveNativeTronClassPending('platform:a', 10, 20, operationId);
+  await saveNativeTronClassPending('platform:a', 10, 20, operationId);
+  await expect(saveNativeTronClassPending('platform:a', 10, 20, otherOperation))
+    .rejects.toThrow('PENDING_OPERATION_CONFLICT');
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBe(operationId);
+  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+});
+it('only clears the expected operation and leaves the queue usable after a mismatch', async () => {
+  await saveNativeTronClassPending('platform:a', 10, 20, operationId);
+  await expect(clearNativeTronClassPending('platform:a', 10, 20, otherOperation))
+    .rejects.toThrow('PENDING_OPERATION_CONFLICT');
+  expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBe(operationId);
+  await clearNativeTronClassPending('platform:a', 10, 20, operationId);
+  await clearNativeTronClassPending('platform:a', 10, 20, operationId);
+  await saveNativeTronClassPending('platform:a', 10, 20, otherOperation);
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBe(otherOperation);
+  expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1);
+});
+it('rejects malformed expected IDs and corrupted stored IDs without clearing or replacing them', async () => {
+  await expect(clearNativeTronClassPending('platform:a', 10, 20, '{}'))
+    .rejects.toThrow('INVALID_PENDING_OPERATION');
+  jest.mocked(AsyncStorage.getItem).mockResolvedValueOnce('{"draft":"secret"}');
+  await expect(clearNativeTronClassPending('platform:a', 10, 20, operationId))
+    .rejects.toThrow('INVALID_PENDING_OPERATION');
+  jest.mocked(AsyncStorage.getItem).mockResolvedValueOnce('{"draft":"secret"}');
+  await expect(saveNativeTronClassPending('platform:a', 10, 20, operationId))
+    .rejects.toThrow('INVALID_PENDING_OPERATION');
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
+});
+it('serializes concurrent saves so only one operation can acquire an empty local journal', async () => {
+  const started = deferred<void>();
+  const read = deferred<string | null>();
+  jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => {
+    started.resolve();
+    return read.promise;
+  });
+  const first = saveNativeTronClassPending('platform:a', 10, 20, operationId);
+  await started.promise;
+  const second = saveNativeTronClassPending('platform:a', 10, 20, otherOperation);
+  const rejected = expect(second).rejects.toThrow('PENDING_OPERATION_CONFLICT');
+  read.resolve(null);
+  await first;
+  await rejected;
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBe(operationId);
+  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+});
+it('queues a save until a conditional clear finishes its read/remove interval without blocking other keys', async () => {
+  await saveNativeTronClassPending('platform:a', 10, 20, operationId);
+  const readStarted = deferred<void>();
+  const read = deferred<string | null>();
+  const removeStarted = deferred<void>();
+  const releaseRemove = deferred<void>();
+  const remove = jest.mocked(AsyncStorage.removeItem).getMockImplementation()!;
+  jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => {
+    readStarted.resolve();
+    return read.promise;
+  });
+  jest.mocked(AsyncStorage.removeItem).mockImplementationOnce(async (key) => {
+    removeStarted.resolve();
+    await releaseRemove.promise;
+    return remove(key);
+  });
+  const clearing = clearNativeTronClassPending('platform:a', 10, 20, operationId);
+  await readStarted.promise;
+  const saving = saveNativeTronClassPending('platform:a', 10, 20, otherOperation);
+  let saved = false;
+  void saving.then(() => { saved = true; });
+  // A different owner and a different homework must not queue behind this key.
+  await saveNativeTronClassPending('platform:b', 10, 20, otherOperation);
+  await saveNativeTronClassPending('platform:a', 10, 21, otherOperation);
+  expect(saved).toBe(false);
+  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(3);
+  read.resolve(operationId);
+  await removeStarted.promise;
+  expect(saved).toBe(false);
+  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(3);
+  releaseRemove.resolve();
+  await clearing;
+  await saving;
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBe(otherOperation);
+  expect(await readNativeTronClassPending('platform:b', 10, 20)).toBe(otherOperation);
+  expect(await readNativeTronClassPending('platform:a', 10, 21)).toBe(otherOperation);
+});
+it('retains the old operation after removal failure and rejects a queued replacement', async () => {
+  await saveNativeTronClassPending('platform:a', 10, 20, operationId);
+  jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('storage unavailable'));
+  const clearing = clearNativeTronClassPending('platform:a', 10, 20, operationId);
+  const saving = saveNativeTronClassPending('platform:a', 10, 20, otherOperation);
+  await expect(clearing).rejects.toThrow('storage unavailable');
+  await expect(saving).rejects.toThrow('PENDING_OPERATION_CONFLICT');
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBe(operationId);
+  await clearNativeTronClassPending('platform:a', 10, 20, operationId);
+  expect(await readNativeTronClassPending('platform:a', 10, 20)).toBeNull();
 });
 it('allows local preparation with unknown rules but never grants confirmed submission', () => {
   const unknown = { ...preparation, rules: { status: 'unknown' as const } };
