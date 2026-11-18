@@ -19,6 +19,10 @@ const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 // Respect its Retry-After while bounding malformed or extreme upstream values.
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+// A misbehaving upstream can emit unlimited empty/tiny ReadableStream chunks.
+// Cap the number of reads as well as bytes so microtasks cannot indefinitely
+// starve the 12-second deadline timer or monopolize the Node event loop.
+const MAX_RESPONSE_STREAM_CHUNKS = 8_192;
 // AbortSignal is advisory: intermediaries and stream mocks may never settle.
 // Bound the entire upstream operation so global pending requests can recover.
 const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
@@ -175,6 +179,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const segments: string[] = [];
   let size = 0;
+  let chunks = 0;
   let completed = false;
   try {
     while (true) {
@@ -183,6 +188,11 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       // truncated stream into an apparently complete Overpass snapshot.
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
+      // Count empty chunks too: the byte cap alone cannot stop a zero-byte
+      // stream from spinning through unbounded already-resolved reads.
+      if (++chunks > MAX_RESPONSE_STREAM_CHUNKS) {
+        throw new Error('OSM response exceeded chunk limit');
+      }
       size += value.byteLength;
       // On identity responses, the first byte beyond Content-Length already
       // proves truncation/overdelivery. Do not wait for EOF from an upstream
