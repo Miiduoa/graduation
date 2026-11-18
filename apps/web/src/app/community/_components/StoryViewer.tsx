@@ -344,7 +344,11 @@ export function StoryViewer({
               type="button"
               aria-pressed={auto}
               disabled={failedVideo}
-              onClick={() => setAuto((v) => !v)}
+              onClick={() => {
+                // Stopping continuous playback while reading must cancel a saved resume.
+                if (auto && beforePanel.current) beforePanel.current.playing = false;
+                setAuto((v) => !v);
+              }}
             >
               {video ? (auto ? '停止連播' : '連續播放') : auto ? '暫停' : '自動播放'}
             </button>
