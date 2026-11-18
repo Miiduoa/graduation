@@ -318,3 +318,42 @@ describe('published building identity cannot drift into a classroom destination'
     }).matches).toEqual([relabelled]);
   });
 });
+
+describe('published Providence service identity is not a classroom building', () => {
+  it('rejects a sourced dining POI relabelled as teaching while keeping its original name and coordinates', () => {
+    const sourcedDining = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-jingyuan');
+    expect(sourcedDining?.category).toBe('餐飲');
+    // The original ID/name/coordinates are unchanged, so the existing
+    // provenance identity check alone cannot detect this category edit.
+    // This Firestore import corruption is synthetic, not a campus observation.
+    const relabelledDining = {
+      ...sourcedDining!,
+      category: '教學',
+      building: '主顧樓',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [relabelledDining],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [relabelledDining, hall],
+    }).matches).toEqual([hall]);
+  });
+
+  it('preserves a sourced real teaching building and isolation for another school', () => {
+    const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+    expect(sourcedHall?.category).toBe('教學');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [sourcedHall!],
+    }).matches).toEqual([sourcedHall]);
+
+    // An identical ID at another school does not inherit Providence labels.
+    const otherSchoolHall = {
+      ...PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-jingyuan')!,
+      category: '教學',
+      building: '主顧樓',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: '主顧樓 PH303', locations: [otherSchoolHall],
+    }).matches).toEqual([otherSchoolHall]);
+  });
+});
