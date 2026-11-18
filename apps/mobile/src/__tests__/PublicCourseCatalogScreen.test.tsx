@@ -245,6 +245,9 @@ test('a pending catalog response times out and allows retry with the same keywor
 test.each([
   { reason: 'HTTP 503', overrides: { ok: false } },
   { reason: 'oversized Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? String(512 * 1024 + 1) : null } } },
+  { reason: 'negative Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? '-1' : null } } },
+  { reason: 'non-decimal Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? '5e2' : null } } },
+  { reason: 'non-JSON Content-Type', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-type' ? 'text/plain; charset=utf-8' : null } } },
   { reason: 'off-campus response URL', overrides: { url: 'https://other.test/api/public-course-catalog?schoolId=nthu&q=AES' } },
 ])('mobile rejects $reason before reading its body and cancels the pending fetch', async ({ overrides }) => {
   setBrowsingSchoolId('nthu');
@@ -258,6 +261,27 @@ test.each([
     expect(body).not.toHaveBeenCalled();
     expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
     expect(view.queryByText('分析化學專題')).toBeNull();
+    view.unmount();
+  } finally { globalThis.fetch = original; }
+});
+
+test('mobile accepts a correctly typed JSON response with a valid declared byte length', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  try {
+    const valid = nthuJson();
+    const body = await valid.text();
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ...valid,
+      headers: { get: (name: string) => {
+        if (name.toLowerCase() === 'content-type') return 'application/json; charset=utf-8';
+        if (name.toLowerCase() === 'content-length') return String(Buffer.byteLength(body, 'utf8'));
+        return null;
+      } },
+      text: async () => body,
+    });
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
     view.unmount();
   } finally { globalThis.fetch = original; }
 });
