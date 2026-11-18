@@ -5,10 +5,11 @@ import { authenticateTronClassActor } from './tronClassIntegrationAuth';
 import { createTronClassBindingService } from './tronClassBinding';
 import { createTronClassIntegrationReader } from './tronClassIntegrationSource';
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
+import type { TronClassPublicSubmissionService } from './tronClassPublicSubmissionService';
 import { createUidRateLimiter } from './uidRateLimit';
 
 type Bindings = ReturnType<typeof createTronClassBindingService>;
-type Submissions = Awaited<ReturnType<typeof getDefaultTronClassSubmissionService>>;
+type Submissions = TronClassPublicSubmissionService;
 
 export type TronClassRouteDependencies = {
   authenticate?: typeof authenticateTronClassActor;
@@ -134,7 +135,7 @@ export async function handleTronClassIntegration(
       await bindings.assertCurrent(actor.ownerKey, scope.revision);
       const bytes = await boundedBytes(request, MAX_FILE_BYTES);
       if (bytes.byteLength === 0) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
-      result = await (await getSubmissions()).upload(actor.ownerKey, { ...scope, bytes });
+      result = await (await getSubmissions()).upload(actor.ownerKey, { ...scope, bytes }, request.signal);
     } else {
       if (request.nextUrl.search) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
@@ -179,7 +180,7 @@ export async function handleTronClassIntegration(
             courseId: id(input.courseId), homeworkId: id(input.homeworkId), revision: revision(input.revision),
             operationId: operationId(input.operationId), content: input.content,
             attachments: input.attachments.map(operationId), confirmed: true,
-          });
+          }, request.signal);
           break;
         case 'reconcile':
           only(input, ['action', 'operationId', 'revision']);

@@ -155,7 +155,8 @@ function checkedFiles(raw: TronClassCandidateUploadedFile[], ownerKey: string, i
 
 /**
  * Executable controlled flow: persisted upload handles -> one final POST ->
- * exact student readback. Production routes never construct this candidate.
+ * exact student readback. The public adapter constructs this only after its
+ * server gates pass; the default production writer remains disabled.
  * The required journal is server-only; an in-memory claim is insufficient for
  * real requests. A failed final call is never automatically retried.
  */

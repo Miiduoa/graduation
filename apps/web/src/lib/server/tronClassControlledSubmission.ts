@@ -24,8 +24,9 @@ export type TronClassControlledSubmissionDependencies = {
 
 /**
  * Server-only wiring for a controlled verification session. There is no default
- * source permission reader, storage allowlist, public HTTP route or environment
- * toggle that can enable production writes. The journal uses the existing
+ * source permission reader, storage allowlist or environment toggle that can
+ * enable production writes. The public DTO adapter delegates only after its
+ * independent server gates pass. The journal uses the existing
  * server-only Firestore collections and account-closure barrier.
  */
 export function createTronClassControlledSubmission(dependencies: TronClassControlledSubmissionDependencies) {

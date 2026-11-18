@@ -22,9 +22,9 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 隨時調整／撤銷 Agent 權限 | 已實作，綁定 revision 與權限版本雙重檢查；換綁後重新授權 |
 | 作業文字、附件選擇、預覽、複製內容 | 已實作；Web 草稿及檔案只留在目前頁面記憶體，Mobile 文字留在記憶體、附件使用有清理機制的受控 cache 副本 |
 | 依已確認的作業規則編輯與預覽 | 已實作；保留零附件額度，送出前先核對全部文字、檔案與總量，規則未知時只標示本頁整理上限 |
-| 上傳 → 最終送出 → 讀回收據 | 服務及 UI 已實作，以注入測試來源驗證 |
-| 官方送出協定與受控文字候選實作 | 已實作 request builder、acknowledgment parser 及預設停用的單次 POST；尚未接入公開路由或正式 provider |
-| 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回；公開 API 已接上 v2 唯讀查證及新的確認結果，寫入候選仍未啟用 |
+| 上傳 → 最終送出 → 本人版本確認 | 公開 API、v2 service、持久化 journal 及 Web／Mobile UI 已接線，以注入的合成校方來源驗證；正式 writer 仍停用 |
+| 官方送出協定與受控文字候選實作 | 已實作 request builder、acknowledgment parser 及單次 POST；公開 service 的 server gates 通過後才會呼叫，正式 provider 尚未通過校方驗收 |
+| 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回；公開 API 已接上 v2 prepare／upload／submit／reconcile 與新確認結果，正式寫入仍未啟用 |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
 | 重交、撤回、小組繳交、代替其他人繳交 | 未實作；小組歷史也回傳 `group-unsupported`，引導至原作業查看 |
 | 原生 Mobile 的新綁定／作業畫面 | 已實作獨立綁定、選課讀取、作業詳情、文字／選檔／預覽／再次確認、條件式送出與唯讀查證，使用相同 BFF；正式 writer 的停用條件相同 |
@@ -146,7 +146,13 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 ### 2026-11-18：公開查證、原生 Mobile 與實際資料庫驗證
 
-`getDefaultTronClassSubmissionService()` 的 `reconcile` 已按持久化版本分流。v1 沿用既有正式收據與時間檢查；v2 只讀取受控 journal 保存的原 attempt 與 acknowledgment，再使用目前綁定重新讀取本人校方歷史。未知版本一律拒絕，不能以 v1 parser 處理 v2 記錄。這條路徑沒有附件上傳或作業寫入依賴，也不會釋放作業鎖、重寫原 revision 或把紀錄改成可重送。校方既有課程查詢使用唯讀用途的 `/api/my-courses` POST，不能把 HTTP 方法本身當作作業寫入證據。
+`getDefaultTronClassSubmissionService()` 現在回傳 `tronClassPublicSubmissionService.ts`：公開 prepare／upload／submit 均使用 v2 adapter，僅保留舊 service 的唯讀 prepare 與 v1 reconcile，不再讓新的公開寫入建立 v1 ledger。這層可獨立完成的程式接線不列為校方外部 blocker。production factory 明確傳入 `contractVerified: false`，沒有注入 tenant authorization／storage policy，也沒有新增能以環境變數解鎖的設定；實際學校送交仍關閉。
+
+公開 prepare 重用本人詳情與歷史，只有明確受控的 server authorization、CSRF、完整空歷史、一般期間、個人首次作業及兩個 server gates 都通過，才投影最新規則與 `canSubmit`。公開 upload 必須完成 metadata／binary／callback 且 journal 已持久化，才回傳不透明 fileId、名稱、MIME、大小與 hash；不公開校方 uploadId、owner、studentId、cookie 或儲存 URL。submit 將已確認的 attachments 映射為本次 v2 manifest，使用單次 final claim／POST；新 confirmation 不硬塞進需要 `submittedAt` 的舊收據型別。HTTP request 的 abort signal 會傳至 upload／submit。
+
+送出回應遺失或 acknowledgment 儲存失敗時，原 attempt 與鎖保留；可確認存在原 claim 的暫時錯誤只回 `unknown`，不重送。若後續權限改變，仍會用原 manifest 與同一本文轉換規則核對 digest；更改本文、附件清單或 fileId 不會被誤認為原操作，會回 conflict。這些公開路由整合測試使用真正的 handler／adapter／journal 程式、原子記憶體 DB 與合成校方 fetch，不是校方真人或外部網路驗收；真正 Firestore 交易另有 emulator 測試。
+
+`reconcile` 按持久化版本分流。v1 沿用既有正式收據與時間檢查；v2 只讀取受控 journal 保存的原 attempt 與 acknowledgment，再使用目前綁定重新讀取本人校方歷史。未知版本一律拒絕，不能以 v1 parser 處理 v2 記錄。這條路徑沒有附件上傳或作業寫入依賴，也不會釋放作業鎖、重寫原 revision 或把紀錄改成可重送。校方既有課程查詢使用唯讀用途的 `/api/my-courses` POST，不能把 HTTP 方法本身當作作業寫入證據。
 
 新增 `tronClassRawSubmissionHistory.ts` 在讀取前後核對當下綁定、課程完整清單、作業活動與個人繳交模式，並驗證歷史的完整性、重複 ID 與本人範圍。401／403／隱藏／404／410 不能退回舊內容；外層 15 秒期限的 abort signal 會一路傳入 scraper 的 HTTPS／relay、內部課程分頁與 fallback，每頁亦有 deadline guard，逾時會取消進行中的來源請求且不再啟動下一頁。作業分頁另有預設傳輸時間與回應大小上限。原始 HTML 與附件 ID 只用於伺服器內部精確比對，不回傳給公開介面。
 
@@ -162,7 +168,7 @@ Firestore journal 已用真正的 Java 21／Firestore Emulator 1.22.0／Admin SD
 
 ### 2026-11-17：受控附件與版本確認
 
-下段保留 11/17 的設計與當日測試紀錄；11/18 的公開唯讀查證及真實資料庫驗證更新見上節。新增 `tronClassAttachmentCandidate.ts`、`tronClassFinalSubmissionCandidate.ts`、`tronClassSubmissionReadback.ts` 三個協定模組，並以 `tronClassControlledSubmission.ts` 與 `tronClassControlledJournal.ts` 完成服務及 Firestore 交易接線。執行候選與工廠預設停用，`contractVerified` 固定為 `false`，不會由環境變數自行成為正式 provider。公開 route／Agent 寫入限制不變。
+下段保留 11/17 的設計與當日測試紀錄；11/18 的公開 v2 全流程及真實資料庫驗證更新見上節。新增 `tronClassAttachmentCandidate.ts`、`tronClassFinalSubmissionCandidate.ts`、`tronClassSubmissionReadback.ts` 三個協定模組，並以 `tronClassControlledSubmission.ts` 與 `tronClassControlledJournal.ts` 完成服務及 Firestore 交易接線。執行候選與工廠預設停用，`contractVerified` 固定為 `false`，不會由環境變數自行成為正式 provider。公開 route／Agent 寫入限制不變。
 
 **附件傳輸。** 先以 server-only 授權讀取器確認本人作業與限制，再要求原子且持久化的檔案 claim，才建立 metadata。S3／WRPC 分支以原始 bytes PUT，成功後呼叫官方 callback；MEDIA 分支以包含 `file` 的 multipart PUT。multipart 先產生完整 bytes 及相同 boundary 的 Content-Type，避免既有底層把 FormData 轉成字串或遺失 boundary。QINIU、CHINAMCLOUD、未知模式與尚未驗證的 S3 分支拒絕。
 
@@ -305,7 +311,7 @@ Firebase TTL deletion 需要已啟用計費。預設 `firebase.json` 沒有啟�
 | 範圍 | 實際結果 |
 | --- | --- |
 | 完整 Web Vitest | 770 個檔案通過、16 個略過；16,641 項通過、141 項略過、0 失敗 |
-| 最後 TronClass、relay 與 instrumentation 回歸 | 50 個檔案通過、4 個略過；1,527 項通過、33 項略過、0 失敗；包含底層取消接線後的回歸 |
+| 最後 TronClass、relay 與 instrumentation 回歸 | 53 個檔案通過、4 個略過；1,574 項通過、33 項略過、0 失敗；包含公開 v2 adapter、default factory 禁寫、HTTP route 整合與底層取消接線後的回歸 |
 | 底層 scraper／relay／PU pause 回歸 | 3 suites、152 項通過、0 略過；涵蓋 direct socket 及 relay body 取消、內部分頁／fallback deadline、舊呼叫相容性 |
 | 真 Firestore Emulator | controlled journal 8 項與 retention 6 項，合計 14 / 14 通過 |
 | 真 PostgreSQL 17.12 | 關帳 outbox、角色權限、lease、rollback 與實際 SQL 逾時，16 / 16 通過 |

@@ -91,6 +91,22 @@ it('returns verification pending as unknown and never resends a submission autom
   expect(submissions.submit).toHaveBeenCalledTimes(1);
 });
 
+it('forwards the actual request cancellation signal to final submission', async () => {
+  const { dependencies, submissions } = setup();
+  const controller = new AbortController();
+  submissions.submit.mockResolvedValue({ status: 'unknown', operationId, receipt: null });
+  const request = new NextRequest('https://nuni.tw/api/tronclass', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+    body: JSON.stringify({ action: 'submit', courseId: 101, homeworkId: 201, revision, operationId,
+      content: '作業', attachments: [], confirmed: true }),
+  });
+  expect((await handleTronClassIntegration(request, dependencies)).status).toBe(200);
+  const actualSignal = submissions.submit.mock.calls[0][2];
+  expect(actualSignal).toBe(request.signal);
+  controller.abort();
+  expect(actualSignal.aborted).toBe(true);
+});
+
 it('reconciliation uses only the recorded operation, never a new payload', async () => {
   const { request, submissions } = setup();
   submissions.reconcile.mockResolvedValue({ status: 'unknown', operationId, receipt: null });
@@ -154,7 +170,7 @@ it('accepts an authenticated bounded raw upload with a checked binding version',
   }), dependencies);
   expect(response.status).toBe(200);
   expect(bindings.assertCurrent).toHaveBeenCalledWith(ownerKey, revision);
-  expect(submissions.upload).toHaveBeenCalledWith(ownerKey, expect.objectContaining({ name: '報告.pdf', courseId: 101, homeworkId: 201, fileId }));
+  expect(submissions.upload).toHaveBeenCalledWith(ownerKey, expect.objectContaining({ name: '報告.pdf', courseId: 101, homeworkId: 201, fileId }), expect.any(AbortSignal));
 });
 
 it('rejects an oversized upload before calling the provider', async () => {
