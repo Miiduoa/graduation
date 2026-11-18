@@ -25,6 +25,30 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+async def font_evidence(context, page):
+    await page.evaluate('document.fonts.ready.then(() => true)')
+    session = await context.new_cdp_session(page)
+    try:
+        await session.send('DOM.enable')
+        await session.send('CSS.enable')
+        document = await session.send('DOM.getDocument')
+        evidence = {}
+        for selector in ('body', 'h1', 'time'):
+            node = await session.send('DOM.querySelector', {
+                'nodeId': document['root']['nodeId'], 'selector': selector})
+            if not node['nodeId']:
+                continue
+            computed = await page.locator(selector).first.evaluate('''node => {
+              const style=getComputedStyle(node);
+              return {fontFamily:style.fontFamily, font:style.font, fontWeight:style.fontWeight};
+            }''')
+            platform = await session.send('CSS.getPlatformFontsForNode', {'nodeId': node['nodeId']})
+            evidence[selector] = {'computed': computed, 'platformFonts': platform['fonts']}
+        return evidence
+    finally:
+        await session.detach()
+
+
 async def scenario(browser, origin, config, reports):
     context = await browser.new_context(
         viewport={'width': config['width'], 'height': config['height']},
@@ -72,6 +96,11 @@ async def scenario(browser, origin, config, reports):
         params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion')}
         await page.goto(origin + '/?' + urlencode(params))
         await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
+        try:
+            report['fontEvidence'] = await font_evidence(context, page)
+        except Exception as error:
+            # Font provenance is diagnostic; the existing interaction gates remain unchanged.
+            report['fontEvidence'] = {'error': repr(error)}
         await layout('today')
         await capture('today')
         if config['role'] == 'guest':
@@ -95,12 +124,20 @@ async def scenario(browser, origin, config, reports):
             await capture('account')
         await voice.click()
         await expect_one_popover(voice=True)
+        if config['width'] <= 760:
+            assert await page.get_by_role('dialog', name='校園語音與 AI 快速操作').evaluate('''panel => {
+              const bounds=panel.getBoundingClientRect();
+              const header=document.querySelector('header[data-campus-navigation]').getBoundingClientRect();
+              const nav=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();
+              return bounds.top >= header.bottom && bounds.bottom <= nav.top;
+            }'''), 'Nonmodal voice panel obscured the header destinations or bottom navigation'
+        await capture('voice', full_page=False)
         await school.click()
         await expect_one_popover()
         await expect(page.get_by_role('heading', name='瀏覽校園', exact=True)).to_be_visible()
         await services.click()
         await expect_one_popover()
-        await expect(page.get_by_role('heading', name='校園服務', exact=True)).to_be_visible()
+        await expect(page.locator('header details[name="campus-navigation-popover"][open]').get_by_role('heading', name='校園服務', exact=True)).to_be_visible()
         await layout('services')
         await capture('services')
         await page.keyboard.press('Escape')

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useId, useRef, useState } from 'react';
+import { Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { CampusIcon } from './CampusIcon';
@@ -114,6 +114,27 @@ function Header({ onOpenVoice }: HeaderProps) {
   }, [quickOpen]);
   useEffect(() => {
     if (quickOpen) quickPanel.current?.focus({ preventScroll: true });
+  }, [quickOpen]);
+  useLayoutEffect(() => {
+    const navigation = header.current;
+    const panel = quickPanel.current;
+    if (!quickOpen || !navigation || !panel) return;
+    const updateHeaderInset = () => {
+      // A nonmodal panel must leave the other header destinations reachable.
+      const bottom = Math.max(0, navigation.getBoundingClientRect().bottom);
+      panel.style.setProperty('--voice-header-bottom', `${bottom}px`);
+    };
+    updateHeaderInset();
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateHeaderInset);
+    observer?.observe(navigation);
+    window.addEventListener('resize', updateHeaderInset);
+    window.addEventListener('scroll', updateHeaderInset, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateHeaderInset);
+      window.removeEventListener('scroll', updateHeaderInset);
+    };
   }, [quickOpen]);
   const activeSection = primaryNavigationSection(pathname);
   const href = (path: string) => campusServiceHref(path, context);

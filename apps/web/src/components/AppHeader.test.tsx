@@ -183,6 +183,60 @@ it('dismisses voice on outside pointer or keyboard focus without moving focus ba
   expect(document.activeElement).toBe(outside);
 });
 
+it('reserves the actual header while voice is open and releases its resize observation on close', () => {
+  let onResize: (() => void) | undefined;
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        onResize = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    },
+  );
+  const view = render(<AppHeader />);
+  const navigation = screen.getByRole('banner');
+  let bottom = 68;
+  const geometry = vi
+    .spyOn(navigation, 'getBoundingClientRect')
+    .mockImplementation(() => ({ bottom }) as DOMRect);
+  try {
+    const { panel } = openVoice();
+    expect(observe).toHaveBeenCalledWith(navigation);
+    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('68px');
+    const input = screen.getByLabelText('想做什麼？');
+    act(() => input.focus());
+
+    bottom = 112;
+    act(() => onResize?.());
+    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('112px');
+    expect(document.activeElement).toBe(input);
+
+    bottom = 88;
+    fireEvent(window, new Event('resize'));
+    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('88px');
+    bottom = -32;
+    fireEvent(window, new Event('scroll'));
+    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('0px');
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(disconnect).toHaveBeenCalledOnce();
+    bottom = 96;
+    fireEvent(window, new Event('resize'));
+    fireEvent(window, new Event('scroll'));
+    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('0px');
+  } finally {
+    view.unmount();
+    geometry.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
 it.each(['pathname', 'search', 'hash', 'campus'] as const)(
   'closes voice when %s changes and does not reopen it when returning',
   (key) => {

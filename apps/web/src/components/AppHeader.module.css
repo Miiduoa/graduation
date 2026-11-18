@@ -340,12 +340,13 @@
 }
 
 .voicePanel {
+  --voice-header-bottom: calc(84px + env(safe-area-inset-top, 0px));
   position: fixed;
   z-index: 90;
-  top: calc(84px + env(safe-area-inset-top, 0px));
+  top: calc(var(--voice-header-bottom) + 8px);
   right: max(16px, env(safe-area-inset-right, 0px));
   width: min(460px, calc(100vw - 32px));
-  max-height: min(660px, calc(100dvh - 108px - env(safe-area-inset-top, 0px)));
+  max-height: min(660px, calc(100dvh - var(--voice-header-bottom) - 24px));
   padding: 10px;
   overflow-y: auto;
   scroll-padding-block: 12px;
@@ -551,14 +552,13 @@
   }
 
   .voicePanel {
+    --voice-header-bottom: calc(68px + env(safe-area-inset-top, 0px));
     top: auto;
     bottom: calc(var(--mobile-nav-offset, 72px) + 10px);
     right: max(12px, env(safe-area-inset-right, 0px));
     left: max(12px, env(safe-area-inset-left, 0px));
     width: auto;
-    max-height: calc(
-      100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 32px
-    );
+    max-height: calc(100dvh - var(--mobile-nav-offset, 72px) - var(--voice-header-bottom) - 18px);
     animation-name: panelEnterFromBottom;
   }
 }
