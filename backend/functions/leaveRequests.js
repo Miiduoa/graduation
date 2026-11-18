@@ -2,6 +2,7 @@
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 const LEAVE_KINDS = new Set([
   'sick', 'personal', 'family', 'official', 'menstrual', 'mental', 'bereavement', 'other',
@@ -64,7 +65,7 @@ function activeMember(member, account) {
     fail('permission-denied', '請使用目前學校的有效學校帳號。');
   }
   const profile = account.exists ? account.data() : {};
-  if (profile.accountDeletionInProgress === true || profile.status === 'deleted') {
+  if (isAccountUnavailable(profile)) {
     fail('failed-precondition', '帳號正在刪除或已停用。');
   }
   return member.data();

@@ -76,12 +76,48 @@ it('沒拿到號碼：寫「號碼還沒拿到，請到櫃台確認。」和台�
 });
 
 it('伺服器已發號：直接顯示取餐號碼', async () => {
-  mocks.confirm.mockResolvedValue({ success: true, orderId: 'co_2', total: 95, queueNumber: 3, queueStatus: 'assigned' });
-  render(<AgentCardList cards={[draft]} schoolId="pu" />);
+  const onOrderConfirmed = vi.fn();
+  mocks.confirm.mockResolvedValue({ success: true, orderId: 'co_2', status: 'confirmed', total: 95, queueNumber: 3, queueStatus: 'assigned' });
+  render(<AgentCardList cards={[draft]} schoolId="pu" onOrderConfirmed={onOrderConfirmed} />);
   await act(async () => fireEvent.click(screen.getByText('確認下單')));
   expect(screen.getByText('取餐號碼 3')).toBeTruthy();
   expect(mocks.watch).not.toHaveBeenCalled();
+  expect(onOrderConfirmed).toHaveBeenCalledWith({ orderId: 'co_2', cafeteria: '校園餐廳', total: 95, status: 'confirmed' });
 });
+
+it.each([
+  ['cancelled', null, '訂單已取消'],
+  ['cancelled', 7, '訂單已取消'],
+  ['completed', null, '訂單已完成'],
+  ['completed', 7, '訂單已完成'],
+])('成功回執的終態 %s（號碼 %s）不顯示待取餐或要求重下', async (status, queueNumber, text) => {
+  const onOrderConfirmed = vi.fn();
+  mocks.confirm.mockResolvedValue({ success: true, orderId: 'co_terminal', status, queueNumber, total: 95 });
+  render(<AgentCardList cards={[draft]} schoolId="pu" onOrderConfirmed={onOrderConfirmed} />);
+
+  await act(async () => fireEvent.click(screen.getByText('確認下單')));
+
+  expect(screen.getByText(`${text}，訂單號 co_terminal`)).toBeTruthy();
+  expect(screen.queryByText(/訂單已建立|取餐號碼|待給號碼|請到櫃台確認|沒送出去|操作失敗/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認下單' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '再試一次' })).toBeNull();
+  expect(mocks.confirm).toHaveBeenCalledTimes(1);
+  expect(mocks.watch).not.toHaveBeenCalled();
+  expect(onOrderConfirmed).toHaveBeenCalledWith({ orderId: 'co_terminal', cafeteria: '校園餐廳', total: 95, status });
+});
+
+it.each([['cancelled', '訂單已取消'], ['completed', '訂單已完成']])(
+  '已保存的 %s 回執卡照實呈現終態',
+  (status, text) => {
+    render(<AgentCardList cards={[{
+      kind: 'order_submitted',
+      payload: { orderId: 'co_terminal', cafeteria: '校園餐廳', total: 95, itemCount: 1, status },
+    } as never]} schoolId="pu" />);
+
+    expect(screen.getByText(`${text}：校園餐廳`)).toBeTruthy();
+    expect(screen.queryByText(/訂單已建立|取餐號碼|待給號碼|操作失敗/)).toBeNull();
+  },
+);
 
 it('連點確認下單、失敗後再連點：同時只會有一個請求，全部同一個送出編號', async () => {
   let finishFirstAttempt: (value: unknown) => void = () => undefined;

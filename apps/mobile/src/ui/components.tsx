@@ -373,6 +373,8 @@ export function Pill(props: {
 export function Button(props: {
   text: string;
   onPress?: () => void | Promise<void>;
+  /** Distinguishes otherwise identical action buttons for screen readers. */
+  accessibilityLabel?: string;
   disabled?: boolean;
   loading?: boolean;
   kind?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent-ghost' | 'outline';
@@ -448,7 +450,7 @@ export function Button(props: {
       onPress={props.onPress}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
-      accessibilityLabel={props.text}
+      accessibilityLabel={props.accessibilityLabel ?? props.text}
       style={({ pressed }) => [
         {
           paddingVertical: s.paddingVertical,

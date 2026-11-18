@@ -104,7 +104,7 @@ export async function prepareCourseworkRecoveryRequest(input: {
       await requireAssistantPermission(input.adapter, 'createPersonalEvent');
       signal.throwIfAborted();
       const card = signCard(input.binding, 'propose_personal_event', event, ledger.revision,
-        input.secret, currentTime(), undefined, undefined, study, undefined, guard);
+        input.secret, currentTime(), undefined, undefined, study, undefined, undefined, guard);
       return { answer: `已重新找到準備時段：\n${event.date} ${event.startTime}–${event.endTime}｜${task.title}\n原行程保留。按下確認後會再次核對來源與行事曆，儲存並讀回確認；目前尚未新增，也不代表已繳交作業。`,
         cards: [card], steps: [...steps, { name: 'propose_personal_event', status: 'ok' as const, summary: '已準備新的 30 分鐘行程，等待確認' }],
         stopReason: '', dataRead: true as const };

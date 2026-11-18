@@ -53,7 +53,7 @@ export async function prepareCampusEventRequest(input: {
       // The endpoint issues a separate event-preview conversation. Its proposal
       // generation never replaces a pending chat or coursework plan.
       const card = signCard(input.binding, 'propose_personal_event', event, ledger.revision,
-        input.secret, currentTime(), undefined, undefined, undefined,
+        input.secret, currentTime(), undefined, undefined, undefined, undefined,
         { target, fingerprint: source.fingerprint });
       steps.push({ name: 'propose_personal_event', status: 'ok', summary: '已備妥活動行程，等待逐項確認' });
       return { answer: `${source.item.title}\n${time}\n已核對目前已同步的課表與個人行程。確認時會再次查核原活動與行程，保存後讀回驗證。\n這張卡只保存活動標題與時間；地點請依原活動查看。加入個人行事曆不會報名活動。\n來源：${source.item.href}`,

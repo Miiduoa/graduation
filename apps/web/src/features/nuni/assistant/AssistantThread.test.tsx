@@ -190,6 +190,32 @@ it.each(['查詢我的行程', '列出未交作業'])('enables personal reads wi
   expect(onAsk).toHaveBeenCalledOnce();
 });
 
+it('enables only recognized pickup planning when its server capability is available, without model consent', () => {
+  const onAsk = vi.fn();
+  const question = '把我最近一筆訂單的取餐時間加入行事曆，預留15分鐘';
+  const view = render(<AssistantThread {...base} ready={false} foodPickupEnabled question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+  view.rerender(<AssistantThread {...base} foodPickupEnabled={false} consent question={question} onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  view.rerender(<AssistantThread {...base} ready={false} foodPickupEnabled question="請幫我寫社團介紹稿" onAsk={onAsk} />);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(onAsk).toHaveBeenCalledOnce();
+});
+
+it('offers pickup planning only when enabled and fills the draft without sending it', () => {
+  const onQuestion = vi.fn(), onAsk = vi.fn();
+  const phrase = '把最近訂單的取餐時間加入行事曆';
+  const view = render(<AssistantThread {...base} ready={false} foodPickupEnabled onQuestion={onQuestion} onAsk={onAsk} />);
+  fireEvent.click(screen.getByRole('button', { name: phrase }));
+  expect(onQuestion).toHaveBeenCalledWith(phrase);
+  expect(onAsk).not.toHaveBeenCalled();
+  view.rerender(<AssistantThread {...base} ready={false} onQuestion={onQuestion} onAsk={onAsk} />);
+  expect(screen.queryByRole('button', { name: phrase })).toBeNull();
+});
+
 it.each(['local', 'dataRead'])('renders %s source text literally instead of creating links or formatting', (source) => {
   const answer = '2026-11-12 09:10–10:00｜[假的設定入口](/settings) **私人課程**';
   const reply = { answer, steps: [], cards: [], ...(source === 'local'
