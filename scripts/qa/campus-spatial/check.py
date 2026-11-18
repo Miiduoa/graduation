@@ -772,6 +772,19 @@ async def sourced_building_volumes(page, _requests, _resources):
     assert before != after, "A source-checked building did not alter the real WebGL pixels"
     assert len(requests_seen) == 1, requests_seen
     await expect(dialog_for(page).get_by_text(f"資料讀取：{fixture['fetchedAt'][:10]}", exact=False)).to_be_visible()
+    source_link = dialog_for(page).get_by_role(
+        "link", name="查看此棟建築的 OpenStreetMap 原始輪廓", exact=True
+    )
+    await expect(source_link).to_have_attribute("href", fixture["buildings"][0]["sourceUrl"])
+    await expect(source_link).to_have_attribute("target", "_blank")
+    await expect(source_link).to_have_attribute("rel", "noopener noreferrer")
+    touch_target = await source_link.evaluate("""el => ({
+      width: el.getBoundingClientRect().width,
+      height: el.getBoundingClientRect().height,
+    })""")
+    assert touch_target["width"] >= 43.5 and touch_target["height"] >= 43.5, (
+        f"OSM source link touch target must be at least 44 CSS px: {touch_target}"
+    )
     await assert_layout(page)
     await page.screenshot(path=str(OUT / "sourced-building-volume.png"))
     return {
@@ -781,6 +794,46 @@ async def sourced_building_volumes(page, _requests, _resources):
         "source": LIBRARY["source"],
         "webgl": await assert_webgl(page),
     }
+
+
+async def official_hall_floors(page, _requests, _resources):
+    """Verify public university unit locations on a 320px device without OSM.
+
+    This only checks the UI and the primary university source URL. It does not
+    imply verified entrances, classroom positions or indoor walking routes.
+    """
+    async def unavailable(route):
+        await route.fulfill(status=503, headers={"Retry-After": "60"},
+                            content_type="application/json", body='{"error":"unavailable"}')
+
+    await page.route("**/api/public/campus-footprints", unavailable)
+    await open_explorer(page)
+    await selector_for(page).select_option(ZHUGU["id"])
+    dialog = dialog_for(page)
+    await expect(dialog.get_by_role("heading", name=ZHUGU["name"], exact=True)).to_be_visible()
+    for label in [
+        "4 樓：資訊管理學系、人工智慧應用學系。",
+        "5 樓：資訊工程學系。",
+        "6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。",
+        "7 樓：會計室、校友聯絡暨就業輔導室、國際暨兩岸事務處。",
+        "8 樓：校長室、副校長室、秘書室、研發處、人事室。",
+    ]:
+        await expect(dialog.get_by_text(label, exact=True)).to_be_visible()
+
+    official = dialog.get_by_role("link", name="查看校史資料室主顧樓單位清單", exact=True)
+    await expect(official).to_have_attribute("href", "https://c067.pu.edu.tw/p/412-1121-4218.php")
+    await expect(official).to_have_attribute("target", "_blank")
+    await expect(official).to_have_attribute("rel", "noopener noreferrer")
+    await expect(dialog.get_by_text("此地點僅有單一資料來源，位置待再次確認。")).to_have_count(0)
+    await expect(dialog.get_by_text("公開建築輪廓目前無法取得", exact=False)).to_be_visible()
+    await assert_walking_link(dialog.get_by_role("link", name="開啟步行導航", exact=True), ZHUGU)
+    layout = await assert_layout(page)
+    await official.scroll_into_view_if_needed()
+    await expect(official).to_be_in_viewport()
+    await page.screenshot(path=str(OUT / "official-hall-floors-320.png"))
+    return {"building": ZHUGU["name"], "officialFloors": [4, 5, 6, 7, 8],
+            "source": "https://c067.pu.edu.tw/p/412-1121-4218.php",
+            "offlineOverpass": True, "layout": layout}
 
 
 async def mobile(page, _requests, _resources):
@@ -1008,6 +1061,7 @@ async def main():
                     ("camera-controls", {"width": 1440, "height": 1000}, camera_controls),
                     ("camera-touch", {"width": 390, "height": 844}, touch_camera),
                     ("sourced-building-volumes", {"width": 390, "height": 844}, sourced_building_volumes),
+                    ("official-hall-floors-320", {"width": 320, "height": 568}, official_hall_floors),
                     ("mobile-320", {"width": 320, "height": 568}, mobile),
                     ("mobile-390", {"width": 390, "height": 844}, mobile),
                     ("dark-large-text", {"width": 390, "height": 844}, dark_large_text),
