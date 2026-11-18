@@ -70,7 +70,7 @@ const NON_CLASSROOM_POI_CATEGORIES = new Set([
  */
 function isExplicitNonClassroomCategory(value: unknown): boolean {
   const category = comparisonText(value);
-  const unqualified = category.replace(/\\s*\\([^()]{1,32}\\)\\s*$/u, '').trim();
+  const unqualified = category.replace(/\s*\([^()]{1,32}\)\s*$/u, '').trim();
   return NON_CLASSROOM_POI_CATEGORIES.has(category) || NON_CLASSROOM_POI_CATEGORIES.has(unqualified);
 }
 
