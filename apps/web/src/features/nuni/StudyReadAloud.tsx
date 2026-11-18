@@ -22,9 +22,10 @@ function isStudySpeechContinuation(current: string, previous: string, regionalRu
   if (!previous || previous === '\r' || previous === '\n') return false;
   const point = current.codePointAt(0) ?? 0;
   const prior = previous.codePointAt(0) ?? 0;
-  // Combining accents, variation selectors, emoji modifiers/tags and ZWJ
-  // sequences should not begin a new mobile utterance.
-  if (/^\p{Mark}$/u.test(current) || current === '\u200d' || previous === '\u200d' ||
+  // Combining accents, variation selectors, ZWNJ/ZWJ, emoji modifiers/tags
+  // and joined sequences should not begin a new mobile utterance.
+  if (/^\p{Mark}$/u.test(current) || current === '\u200c' || previous === '\u200c' ||
+      current === '\u200d' || previous === '\u200d' ||
       (point >= 0x1f3fb && point <= 0x1f3ff) ||
       (point >= 0xe0020 && point <= 0xe007f)) return true;
   // Pairs of regional indicators form one flag; the next pair is independent.

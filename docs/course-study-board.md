@@ -1628,3 +1628,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 在 `scripts/qa/course-study/compare.mjs` 新增 `pairedVerifiedCounts`，將每組同教材、同題目、同裝置的人工觀察分成「兩方均通過」、「只有 nuni 通過」、「只有 Ahaboard 通過」、「兩方均未通過」。通過條件必須同時具備該次任務完成、人工判定答案正確、人工核對來源引句；沒有來源核對的答案、失敗或未完成案例皆不會被當成通過。
 - 四類計數總和必須等於 `trialCount`；失敗與缺少來源證據的案例仍納入全部分母，避免各自平均值掩蓋同題差異。新增 Node 正反回歸，保留既有成本未知、冷暖啟、記憶體、離線與步數稽核。這是本地報告邏輯，**未新增真人競品測量、未自動評分、未宣稱優於 Ahaboard**。
 - 精確新 head 需重新查 GitHub CI／CodeQL、指定 App 5504170 APPROVED、Maestro 與 iOS／Android 真機；既有 `picomatch` 高風險 Security Gates 失敗不得掩蓋或放行。維持 Draft，不合併、不部署；不新增套件／付費 API／私人教材傳輸，不修改閱讀或練習 checkpoint 格式。
+
+
+### 2026-11-18：朗讀兼容舊 WebView 的印度語文 ZWNJ 組字
+
+- `StudyReadAloud` 在 `Intl.Segmenter` 不存在或回傳錯誤邊界時，原本可合併組合音標、ZWJ、韓文 Jamo 與 emoji，卻可能將印度語文的 virama + ZWNJ 組字拆在 160 UTF-16 單位上限兩邊，讓手機中文語音朗讀外語專有名詞／引用文字時出現不自然的中斷。回退分段器現在把 U+200C（ZWNJ）也視為延續邊界；完整原文與每個 chunk 上限不變。
+- 增加 Devānāgarī 組字 `क\u094d\u200c` 在正常瀏覽器分段與「WebView 假稱各 code point 為完整 grapheme」兩種模擬情境的回歸測試。僅改動本機朗讀的分段與測試，不修改教材、JSON checkpoint、權限、模型或外部傳輸；這不是 iOS／Android 真機驗收，仍需按新 SHA 驗證全部 CI、CodeQL、App 5504170、Maestro 與同題同機 Ahaboard 比較，PR 保留 Draft。

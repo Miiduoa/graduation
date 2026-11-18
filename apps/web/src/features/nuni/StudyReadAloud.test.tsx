@@ -506,6 +506,7 @@ it.each([
   { label: 'emoji skin modifier', prefixLength: 158, cluster: '👍🏽' },
   { label: 'regional flag pair', prefixLength: 158, cluster: '🇹🇼' },
   { label: 'Hangul Jamo syllable', prefixLength: 159, cluster: '각' },
+  { label: 'Devanagari virama with ZWNJ', prefixLength: 158, cluster: 'क\u094d\u200c' },
 ])('reads a $label intact at a mobile utterance boundary', ({ prefixLength, cluster }) => {
   const prefix = '甲'.repeat(prefixLength);
   const original = prefix + cluster + '乙'.repeat(180);
@@ -683,6 +684,7 @@ it.each([
   { label: 'an emoji skin-tone modifier', cluster: '👍🏽' },
   { label: 'a regional-indicator flag', cluster: '🇹🇼' },
   { label: 'a decomposed Hangul syllable', cluster: '각' },
+  { label: 'a Devanagari virama and ZWNJ', cluster: 'क\u094d\u200c' },
 ])('keeps $label together even when a WebView silently returns code points', ({ cluster }) => {
   const nativeIntl = Intl;
   vi.stubGlobal('Intl', Object.assign(Object.create(nativeIntl), {
