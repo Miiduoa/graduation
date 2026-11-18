@@ -72,6 +72,34 @@ test('preserves exact case and environment labels, rejecting hidden or ambiguous
   assert.equal(report.caseProvenance[0].versions.nuni, 'nuni 測試 v1');
 });
 
+test('rejects invisible Unicode and line separators in comparison evidence labels', () => {
+  const cases = [
+    { field: 'caseId', value: 'pair-\u200b1' }, // Zero-width space makes a different-looking ID.
+    { field: 'device', value: 'iPhone\u206016' }, // Word joiner hides device differences.
+    { field: 'browser', value: 'Safari\u2028Chrome' }, // Unicode line separator.
+    { field: 'network', value: 'Wi\u00adFi' }, // Soft hyphen.
+    { field: 'version', value: 'nuni\ufeff2026' }, // Invisible BOM.
+    { field: 'caseId', value: 'pair-\u034f1' }, // Combining grapheme joiner.
+  ];
+  for (const { field, value } of cases) {
+    const input = fixture();
+    if (field === 'caseId') input.trials[0].caseId = value;
+    else if (field === 'version') input.trials[0].results[0].version = value;
+    else input.trials[0].environment[field] = value;
+    assert.throws(() => auditStudyComparisons(input),
+      /unambiguous single-line evidence label/, field);
+  }
+
+  // Keep meaningful Unicode intact; this is not an ASCII-only filter.
+  const visible = fixture();
+  visible.trials[0].caseId = '題目-e\u0301';
+  visible.trials[0].environment.device = 'iPhone 👩‍💻';
+  visible.trials[0].results[0].version = 'nuni 中文版';
+  const report = auditStudyComparisons(visible);
+  assert.equal(report.caseIds[0], '題目-e\u0301');
+  assert.equal(report.caseProvenance[0].environment.device, 'iPhone 👩‍💻');
+});
+
 test('rejects false success for failures and non-finite values', () => {
   const bad = fixture(); bad.trials[0].results[1].correct = true;
   assert.throws(() => auditStudyComparisons(bad), /failed attempt/);

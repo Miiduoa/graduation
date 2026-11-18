@@ -15,11 +15,12 @@ function text(value, where) {
   return value.trim();
 }
 // Evidence labels must remain identical to the human-entered manifest.
-// Trimming or silently accepting control/bidi formatting characters can
-// make two case IDs or recorded device/version names appear identical.
+// Trimming, Unicode line separators, format controls and invisible separators
+// can make two case IDs or recorded device/version names look identical.
+// Preserve ZWJ/ZWNJ for legitimate joined scripts and emoji descriptions.
 function evidenceLabel(value, where) {
   const label = text(value, where);
-  if (label !== value || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value))
+  if (label !== value || /[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u206f\ufeff]/u.test(value))
     fail(where, 'unambiguous single-line evidence label required');
   return value;
 }

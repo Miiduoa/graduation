@@ -1740,3 +1740,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 依 head `eedac5352849bca6598991e9e93c8cf52b7d646c` 的 [Web Tests run #44337157755](https://github.com/Miiduoa/graduation/actions/runs/44337157755/job/134917104270) 實際日誌，17,087 項測試中 16,971 通過、115 跳過、1 失敗；唯一失敗位於 `CourseStudyPanel.test.tsx` 的偽造／截短跨 Realm buffer 測試，錯誤為 `TypeError: Cannot redefine property: arrayBuffer`，不是正式產品讀取失敗。
 - 測試原先對同一個 `File` 物件先以不可配置的 `Object.defineProperty` 設定假 `arrayBuffer`，再嘗試重定義它，導致截短檔案案例根本沒執行。現在以**另一個真實 File 實例**模擬截短的跨 Realm buffer，讓兩個獨立案例都必須經由實際本地 `FileReader` 備援恢復完全一致的繁體中文位元組，不放寬品牌與長度驗證。
 - 改動僅包含此 Vitest 案例和本文件；未改產品程式、學生閱讀與逐題練習 checkpoint、私有教材傳輸、依賴或權限。程式修改不等於通過新版 CI，須以新 head 再核對完整 CI／CodeQL、GitHub App 5504170 審查、Maestro、真機及 Ahaboard 同教材同題同機實測；PR 保持 Draft，不合併、不部署。
+
+### 2026-11-19：避免隱形 Unicode 標籤污染 Ahaboard 同題比較證據
+
+- 比較紀錄的 caseId、裝置、瀏覽器、網路與產品版本欄位，新增拒收 Unicode 行分隔符、軟連字號、零寬空格、word joiner、BOM、部分不可見格式控制字元，避免肉眼相同的測試條件或題號在報告中變成不同值；保留原始文字及 NFC 去重、不改真正教材／題目。
+- Node 正反回歸涵蓋各欄位的不可見字元，並確認繁體中文、組合重音與含 ZWJ 的表情符號仍能正常紀錄。這是比較工具的資料完整性修補，不代表完成任何實機或競品優勢驗證。
+- 僅更新比較腳本、測試與本文件；不改白板學生 checkpoint、不新增依賴、不傳送私人教材。新 head 的 CI／CodeQL／App 5504170、Maestro、手機真機及 Ahaboard 實測仍需逐一查核，PR 維持 Draft，不合併、不部署。
