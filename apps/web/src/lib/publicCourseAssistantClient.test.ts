@@ -128,6 +128,34 @@ describe('public course transport', () => {
     expect(result?.content).not.toContain('0 筆');
   });
 
+  it.each([
+    ['HTTP 503', { status: 503, headers: { 'content-type': 'application/json' } }, undefined],
+    ['non-JSON media type', { headers: { 'content-type': 'text/html' } }, undefined],
+    ['unexpected mobile final URL', { headers: { 'content-type': 'application/json' } }, 'https://untrusted.example/courses'],
+  ] as Array<[string, ResponseInit, string | undefined]>)(
+    'cancels an unread streaming body for %s instead of relying on fetch abort',
+    async (_reason, init, redirectedUrl) => {
+      let cancelled = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          // An adapter may deliver headers and an open body, but ignore AbortSignal.
+          controller.enqueue(new Uint8Array([123]));
+        },
+        cancel() { cancelled = true; },
+      });
+      const response = new Response(stream, init);
+      if (redirectedUrl) Object.defineProperty(response, 'url', { value: redirectedUrl });
+      const result = await answer({
+        ...options,
+        origin: redirectedUrl ? 'mobile' : 'web',
+        fetcher: vi.fn<typeof fetch>().mockResolvedValue(response),
+      });
+      expect(result?.read?.status).toBe('unavailable');
+      expect(result?.content).toContain('暫時無法取得');
+      expect(cancelled).toBe(true);
+    },
+  );
+
   it('stops an unbounded chunked course reply before buffering the full body', async () => {
     let pulls = 0;
     let cancelled = false;
