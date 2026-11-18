@@ -44,6 +44,11 @@ function publicCourseCardKey(course: PublicCatalogCourse, index: number): string
 
 type ClipboardFeedback = { csv: string; cardId: string; status: 'copied' | 'manual' };
 
+// Draft read/check/write spans multiple awaits. A per-card busy ref does not
+// protect another row (or a remounted list) from observing the same empty draft
+// and overwriting it. Lock the exact owner/school draft until the write settles.
+const activeCatalogDraftReviews = new Set<string>();
+
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   initialQuery?: string;
@@ -75,10 +80,15 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       setNotice('請先確認目前帳號與所選校園，再帶入課表核對。');
       return;
     }
+    const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
+    if (activeCatalogDraftReviews.has(key)) {
+      setNotice('另一門課正在建立匯入草稿，請稍後再試。');
+      return;
+    }
     const current = () => mounted.current && scopeRef.current?.owner === scope.owner && scopeRef.current?.schoolId === scope.schoolId;
     busy.current = true;
+    activeCatalogDraftReviews.add(key);
     try {
-      const key = `${personalImportStorageKey(scope)}:grid-draft:v1`;
       const existing = await readImportReviewDraft(key);
       const aiDraft = await hasPersonalImportDraft(scope);
       if (!current()) return;
@@ -104,6 +114,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
     } catch {
       if (current()) setNotice('無法安全讀寫匯入草稿，請稍後重試。');
     } finally {
+      activeCatalogDraftReviews.delete(key);
       busy.current = false;
     }
   }
@@ -229,8 +240,17 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       // Native fetch may already have followed a redirect. Validate the reported
       // final resource before accepting its body; this is not a transport guard.
       if (!current()) return;
-      if (!response.ok || (response.url && !isPublicCourseResponseUrl(response.url, { schoolId, query: term, filters })) ||
-          Number(response.headers.get('content-length')) > maxBytes) throw new Error();
+      const lengthHeader = response.headers.get('content-length');
+      const declaredBytes = lengthHeader === null ? 0 : Number(lengthHeader);
+      const contentType = response.headers.get('content-type');
+      if (!response.ok ||
+          (response.url && !isPublicCourseResponseUrl(response.url, { schoolId, query: term, filters })) ||
+          // A malformed/negative length is not evidence that the body is small.
+          (lengthHeader !== null && (!/^\d+$/.test(lengthHeader.trim()) ||
+            !Number.isSafeInteger(declaredBytes) || declaredBytes > maxBytes)) ||
+          // Native fetch may omit this header, but an explicitly non-JSON response
+          // must never be passed to the course catalog importer.
+          (contentType !== null && !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) throw new Error();
       const text = await response.text();
       if (!current()) return;
       if (exceedsPublicCourseResponseByteLimit(text)) throw new Error();
@@ -238,7 +258,12 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       if (!isPublicCourseCatalog(data, schoolId, filters)) throw new Error();
       if (current()) setResult({ status: 'ready', query: term, filters, data });
     } catch {
-      if (current()) setResult({ status: 'error', query: term, filters });
+      if (current()) {
+        // Fetch can resolve headers while the response body is still downloading.
+        // Stop rejected/oversized/invalid responses instead of leaving that body open.
+        controller.abort();
+        setResult({ status: 'error', query: term, filters });
+      }
     } finally {
       clearTimeout(timer);
       if (pending.current?.controller === controller) pending.current = null;

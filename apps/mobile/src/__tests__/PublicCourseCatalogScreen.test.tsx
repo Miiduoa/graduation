@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { FlatList, Linking } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
 import { queryCatalog } from '../services/courseCatalogClient';
 
@@ -87,6 +88,48 @@ test('cross-listed mobile catalog cards have unique keys and only the latest tap
     await waitFor(() => expect(view.getAllByText('已複製，請到匯入頁貼上並核對上課時間。')).toHaveLength(1));
     expect(jest.mocked(Clipboard.setStringAsync).mock.calls[0][0])
       .toBe(jest.mocked(Clipboard.setStringAsync).mock.calls[1][0]);
+  } finally { globalThis.fetch = original; }
+});
+
+test('overlapping review taps on different course cards cannot overwrite the first owner-scoped import draft', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const secondCourse = {
+    ...nthuCourse, code: '11510AES 520401', section: '01', title: '第二門課',
+    time: 'T3T4', room: '第二教室',
+    meetings: [{ time: 'T3T4', room: '第二教室' }],
+  };
+  let finishFirstRead: ((value: string | null) => void) | undefined;
+  const getItem = jest.spyOn(AsyncStorage, 'getItem').mockImplementation((key) => {
+    if (key.endsWith(':grid-draft:v1') && !finishFirstRead) {
+      return new Promise<string | null>((resolve) => { finishFirstRead = resolve; });
+    }
+    return Promise.resolve(null);
+  });
+  const setItem = jest.spyOn(AsyncStorage, 'setItem').mockResolvedValue(undefined);
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalImport'] }) };
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson([nthuCourse, secondCourse]));
+    const view = render(<CourseCatalogScreen navigation={navigation} route={{ params: { filter: { keyword: 'AES' } } }} />);
+    await view.findByText('第二門課');
+    const buttons = view.getAllByText('帶入課表核對');
+    expect(buttons).toHaveLength(2);
+    fireEvent.press(buttons[0]);
+    await waitFor(() => expect(finishFirstRead).toBeDefined());
+    const reviewReads = () => getItem.mock.calls.filter(([key]) => key.endsWith(':grid-draft:v1'));
+    expect(reviewReads()).toHaveLength(1);
+    fireEvent.press(buttons[1]);
+    expect(view.getByText('另一門課正在建立匯入草稿，請稍後再試。')).toBeTruthy();
+    // Both cards used to read the empty draft and race to overwrite it.
+    expect(reviewReads()).toHaveLength(1);
+    expect(setItem).not.toHaveBeenCalled();
+
+    await act(async () => { finishFirstRead!(null); });
+    await waitFor(() => expect(setItem).toHaveBeenCalledTimes(1));
+    expect(setItem.mock.calls[0][1]).toContain('11510AES 520300');
+    expect(setItem.mock.calls[0][1]).not.toContain('11510AES 520401');
+    await waitFor(() => expect(navigation.navigate).toHaveBeenCalledTimes(1));
+    view.unmount();
   } finally { globalThis.fetch = original; }
 });
 
@@ -197,6 +240,50 @@ test('a pending catalog response times out and allows retry with the same keywor
     expect(view.getByText('分析化學專題')).toBeTruthy();
     view.unmount();
   } finally { globalThis.fetch = original; jest.useRealTimers(); }
+});
+
+test.each([
+  { reason: 'HTTP 503', overrides: { ok: false } },
+  { reason: 'oversized Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? String(512 * 1024 + 1) : null } } },
+  { reason: 'negative Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? '-1' : null } } },
+  { reason: 'non-decimal Content-Length', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? '5e2' : null } } },
+  { reason: 'non-JSON Content-Type', overrides: { headers: { get: (name: string) => name.toLowerCase() === 'content-type' ? 'text/plain; charset=utf-8' : null } } },
+  { reason: 'off-campus response URL', overrides: { url: 'https://other.test/api/public-course-catalog?schoolId=nthu&q=AES' } },
+])('mobile rejects $reason before reading its body and cancels the pending fetch', async ({ overrides }) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const body = jest.fn(nthuJson().text);
+  const fetchSource = jest.fn().mockResolvedValue({ ...nthuJson(), ...overrides, text: body });
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('暫時無法讀取清大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+    expect(body).not.toHaveBeenCalled();
+    expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(view.queryByText('分析化學專題')).toBeNull();
+    view.unmount();
+  } finally { globalThis.fetch = original; }
+});
+
+test('mobile accepts a correctly typed JSON response with a valid declared byte length', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  try {
+    const valid = nthuJson();
+    const body = await valid.text();
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ...valid,
+      headers: { get: (name: string) => {
+        if (name.toLowerCase() === 'content-type') return 'application/json; charset=utf-8';
+        if (name.toLowerCase() === 'content-length') return String(Buffer.byteLength(body, 'utf8'));
+        return null;
+      } },
+      text: async () => body,
+    });
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
+    view.unmount();
+  } finally { globalThis.fetch = original; }
 });
 
 test('NCNU guest catalog opens directly and supports code search, empty results and the official guest link', async () => {

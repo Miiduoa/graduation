@@ -45,6 +45,12 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 
 ## 工具
 
+### 從既有訂單準備取餐行程
+
+`foodPickupRequest.ts` 在模型循環前處理完整的「把最近一筆訂單的取餐時間加入行事曆」需求。來源查詢、課表衝突檢查、簽章預覽、原訂單重讀與行程回執直接串接；確認前零寫入。`pickupGuard` 固定原訂單、地點與時間，不能經一般改期流程移除。這條路徑不需模型外送同意，但沿用所有原帳號／session／校園及助理權限檢查。
+
+可用範圍、失敗恢復與驗證見 [訂單取餐時間串接個人行事曆](../../../../../docs/assistant/2026-11-18-order-pickup-calendar.md)。
+
 所有 schema 都禁止額外欄位；dispatcher 剝除未知欄位並附 note，其餘參數仍須合法。日期／時間／ID 有界；workspace/order/community/location/entity ID 必須先由本題可信結果取得。標題只在本題已取得清單唯一且完全相符時對應 ID，否則回錯誤與可用 ID。
 模型不能提供帳號、session、任意 URL、SQL 或 confirm；學校固定於本題 scope。
 
