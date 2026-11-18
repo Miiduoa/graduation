@@ -2,6 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { EventDetail } from './EventDetail';
 import type { CampusEvent } from '@/lib/campusEvents';
+import { buildCampusEventCalendar } from '@/lib/campusEventCalendar';
+
+vi.mock('@/lib/campusEventCalendar', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/campusEventCalendar')>();
+  return { ...actual, buildCampusEventCalendar: vi.fn(actual.buildCampusEventCalendar) };
+});
 
 const loadCampusEvent = vi.hoisted(() => vi.fn());
 
@@ -162,6 +168,36 @@ it('copies a share URL that keeps school and source', async () => {
   fireEvent.click(screen.getByRole('button', { name: '複製連結' }));
   await waitFor(() => expect(writeText).toHaveBeenCalled());
   expect(String(writeText.mock.calls[0]?.[0])).toContain(
-    '/events/talk?schoolId=nthu&campus=nthu&source=school-club-events',
+    '/events/talk?schoolId=nthu&source=school-club-events',
   );
 });
+
+it.each(['school-club-events', 'school-events', 'legacy-events'] as const)(
+  '%s calendar and copied links return to the same activity without list filters', async (source) => {
+    const activity = event({ id: '迎新 & 說明會', title: '迎新說明會', source });
+    loadCampusEvent.mockResolvedValue(activity);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const createUrl = vi.fn(() => 'blob:calendar');
+    Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      render(<EventDetail schoolId="nthu" schoolSearch="?school=nthu&campus=nthu"
+        eventId={activity.id} sourceParam={source} listFilters={{ q: '搜尋', view: 'upcoming' }} />);
+      await screen.findByRole('heading', { name: activity.title });
+      fireEvent.click(screen.getByRole('button', { name: '複製連結' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalled());
+      const detailUrl = new URL(`/events/${encodeURIComponent(activity.id)}?schoolId=nthu&source=${source}`, window.location.origin).href;
+      expect(writeText).toHaveBeenCalledWith(detailUrl);
+      fireEvent.click(screen.getByRole('button', { name: '加入行事曆' }));
+      expect(buildCampusEventCalendar).toHaveBeenLastCalledWith(activity, detailUrl);
+      const calendar = vi.mocked(buildCampusEventCalendar).mock.results.at(-1)?.value;
+      expect(calendar.content.replace(/\r\n /g, '')).toContain(`URL:${detailUrl}`);
+      expect(calendar.content.replace(/\r\n /g, '')).toContain('報名與時間異動請回到活動頁確認');
+      expect(createUrl).toHaveBeenCalled();
+      expect(click).toHaveBeenCalled();
+    } finally {
+      click.mockRestore();
+    }
+  },
+);

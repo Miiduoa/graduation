@@ -32,12 +32,17 @@ const baseData = () => ({
 
 function memoryDb(data = baseData()) {
   const records = { ...data };
+  const transactionReads = [];
+  const writes = [];
   const document = (path) => ({ path, id: path.split('/').pop(), get: async () => snap(document(path)) });
-  const snap = (reference) => ({
-    id: reference.id,
-    exists: Object.prototype.hasOwnProperty.call(records, reference.path),
-    data: () => records[reference.path],
-  });
+  const snap = (reference) => {
+    if (records[reference.path] instanceof Error) throw records[reference.path];
+    return {
+      id: reference.id,
+      exists: Object.prototype.hasOwnProperty.call(records, reference.path),
+      data: () => records[reference.path],
+    };
+  };
   const makeQuery = (path, predicates = []) => ({
     where(field, op, value) { return makeQuery(path, [...predicates, [field, op, value]]); },
     orderBy() { return this; },
@@ -56,19 +61,25 @@ function memoryDb(data = baseData()) {
   });
   return {
     records,
+    transactionReads,
+    writes,
     db: {
       doc: document,
       collection: (path) => makeQuery(path),
       async runTransaction(callback) {
         const changes = [];
         const tx = {
-          get: async (reference) => snap(reference),
+          get: async (reference) => {
+            transactionReads.push(reference.path);
+            return snap(reference);
+          },
           create: (reference, value) => changes.push({ reference, value, type: 'create' }),
           update: (reference, value) => changes.push({ reference, value, type: 'update' }),
         };
         const output = await callback(tx);
         changes.forEach(({ reference, value, type }) => {
           if (type === 'create' && records[reference.path]) throw new Error('exists');
+          writes.push(reference.path);
           records[reference.path] = type === 'update'
             ? { ...records[reference.path], ...value }
             : value;
@@ -217,4 +228,82 @@ test('account deletion blocks submission and teacher review', async () => {
   await expect(createReviewLeaveHandler({ db, clock: time })({
     auth: { uid: 't1' }, data: { requestId: REQUEST_ID, courseId: 'c1', decision: 'approved' },
   })).rejects.toMatchObject({ code: 'failed-precondition' });
+});
+
+async function accountStateWrite(operation) {
+  const memory = memoryDb();
+  const { db } = memory;
+  if (operation !== 'submit') await createSubmitLeaveHandler({ db, clock: time })(request());
+  const uid = operation === 'review' ? teacher : student;
+  memory.records[`users/${uid}`] = { displayName: uid, status: 'active' };
+  const execute = operation === 'submit'
+    ? () => createSubmitLeaveHandler({ db, clock: time })(request())
+    : operation === 'withdraw'
+      ? () => createWithdrawLeaveHandler({ db, clock: time })({ auth: { uid }, data: { requestId: REQUEST_ID } })
+      : () => createReviewLeaveHandler({ db, clock: time })({
+        auth: { uid }, data: { requestId: REQUEST_ID, courseId: 'c1', decision: 'approved' },
+      });
+  memory.writes.length = 0;
+  memory.transactionReads.length = 0;
+  return { ...memory, execute, uid };
+}
+
+describe.each(['submit', 'withdraw', 'review'])('%s account state at transaction time', (operation) => {
+  test.each(['disabled', 'suspended', 'inactive'])('rejects %s that appears after the operation was prepared', async (status) => {
+    const { db, records, writes, transactionReads, execute, uid } = await accountStateWrite(operation);
+    const path = `users/${uid}`;
+    const before = structuredClone(records);
+    const closedProfile = { ...records[path], status };
+    const transact = db.runTransaction.bind(db);
+    db.runTransaction = (callback) => {
+      records[path] = closedProfile;
+      return transact(callback);
+    };
+
+    await expect(execute()).rejects.toMatchObject({ code: 'failed-precondition' });
+
+    expect(transactionReads).toContain(path);
+    expect(writes).toEqual([]);
+    expect(records).toEqual({ ...before, [path]: closedProfile });
+  });
+
+  test.each(['active', 'legacy', 'missing'])('preserves the existing %s profile behavior', async (state) => {
+    const { records, writes, transactionReads, execute, uid } = await accountStateWrite(operation);
+    const path = `users/${uid}`;
+    if (state === 'legacy') records[path] = { displayName: uid };
+    if (state === 'missing') delete records[path];
+
+    await expect(execute()).resolves.toMatchObject({ id: REQUEST_ID });
+
+    expect(transactionReads).toContain(path);
+    expect(writes).toEqual([`leaveRequests/${REQUEST_ID}`]);
+  });
+
+  test('an unavailable account read fails without partially changing the request', async () => {
+    const { records, writes, transactionReads, execute, uid } = await accountStateWrite(operation);
+    const path = `users/${uid}`;
+    const error = new Error('account-source-unavailable');
+    records[path] = error;
+    const before = structuredClone(records);
+
+    await expect(execute()).rejects.toBe(error);
+
+    expect(transactionReads).toContain(path);
+    expect(writes).toEqual([]);
+    expect(records).toEqual(before);
+  });
+});
+
+test.each(['disabled', 'suspended', 'inactive'])('a %s reviewer cannot read the review list', async (status) => {
+  const { db, records, writes } = memoryDb();
+  await createSubmitLeaveHandler({ db, clock: time })(request());
+  records[`users/${teacher}`] = { status };
+  writes.length = 0;
+  const before = structuredClone(records);
+
+  await expect(createListReviewLeavesHandler({ db })({ auth: { uid: teacher }, data: { schoolId: school } }))
+    .rejects.toMatchObject({ code: 'failed-precondition' });
+
+  expect(writes).toEqual([]);
+  expect(records).toEqual(before);
 });

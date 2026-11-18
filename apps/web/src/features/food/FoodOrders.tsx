@@ -30,18 +30,21 @@ import {
   type FoodDraftCache,
 } from './foodState';
 import { FoodOrderReceipt } from './FoodOrderReceipt';
+import { FoodPickupAgent } from './FoodPickupAgent';
 import styles from './Food.module.css';
 
 export function FoodOrders({
   client,
   cache,
   accountId,
+  context,
   tenantId,
   initialOrder,
 }: {
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
+  context?: string;
   tenantId: string;
   initialOrder: string;
 }) {
@@ -112,6 +115,7 @@ export function FoodOrders({
           client={client}
           cache={cache}
           accountId={accountId}
+          context={context}
           tenantId={tenantId}
           orderId={selected}
           onChange={orders.reload}
@@ -246,6 +250,7 @@ export function FoodOrderDetail({
   client,
   cache,
   accountId,
+  context,
   tenantId,
   orderId,
   onChange,
@@ -254,6 +259,7 @@ export function FoodOrderDetail({
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
+  context?: string;
   tenantId: string;
   orderId: string;
   onChange(): Promise<unknown>;
@@ -362,6 +368,9 @@ export function FoodOrderDetail({
               預計取餐 {foodTime(receipt.requestedPickupAt)} · 取餐號碼 {receipt.pickup.displayCode}
             </p>
           </div>
+          {context && <FoodPickupAgent context={context} accountId={accountId} tenantId={tenantId} orderId={receipt.id}
+            available={['paid', 'accepted', 'preparing', 'ready'].includes(receipt.state) &&
+              Date.parse(receipt.requestedPickupAt) > now} />}
           <p className={styles.amount}>訂單總額 {foodMoney(receipt.total)}</p>
           {receipt.state === 'payment-pending' &&
             !(

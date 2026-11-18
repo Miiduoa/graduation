@@ -242,15 +242,29 @@ async def assert_navigation(page):
     return href
 
 
+def camera_status(dialog):
+    """The accessible readout combines bearing and zoom in one live region."""
+    return dialog.get_by_role("group", name="調整空間視角", exact=True).get_by_role("status")
+
+
+async def expect_zoom_status(dialog, zoom_percent):
+    # Test the same accessible element users see, not a removed zoom-only node.
+    await expect(camera_status(dialog)).to_have_text(
+        re.compile(rf"^視角方位 (?:0|[1-9][0-9]{{0,2}})° · 縮放 {zoom_percent}%$")
+    )
+
+
 async def camera_readout(page):
-    """Read the visible compass and zoom, without exposing renderer internals."""
+    """Read the visible compass and accessible camera status, not renderer internals."""
     dialog = dialog_for(page)
     await expect(dialog.get_by_text("畫面北向", exact=True)).to_be_visible()
     transform = await dialog.get_by_role("group", name="調整空間視角", exact=True).locator("svg g").get_attribute("transform")
     match = re.fullmatch(r"rotate\(([-+\d.eE]+) 20 20\)", transform or "")
     assert match, f"Compass does not expose a rendered rotation: {transform}"
-    zoom_text = await dialog.get_by_text(re.compile(r"^縮放 \d+%$")).inner_text()
-    return {"northDegrees": float(match[1]), "zoomPercent": int(re.search(r"\d+", zoom_text)[0])}
+    status_text = (await camera_status(dialog).inner_text()).strip()
+    readout = re.fullmatch(r"視角方位 (\d{1,3})° · 縮放 (\d+)%", status_text)
+    assert readout and 0 <= int(readout[1]) < 360, f"Invalid camera status: {status_text}"
+    return {"northDegrees": float(match[1]), "zoomPercent": int(readout[2])}
 
 
 async def assert_same_scene(page, canvas, context, selected):
@@ -324,7 +338,7 @@ async def camera_controls(page, _requests, _resources):
     await expect(host).to_be_focused()
     # A keyboard event activates the visible-focus treatment on the scene.
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 100)
     await page.wait_for_timeout(100)
     assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
     focus = await host.evaluate("""el => ({
@@ -348,49 +362,63 @@ async def camera_controls(page, _requests, _resources):
         await assert_same_scene(page, canvas, context, selected)
         states[key] = state
 
-    # Check the actual displayed bounds and disabled controls, including a key
-    # that attempts to exceed each bound while the scene itself is focused.
-    for name, bound, key in [("放大空間圖", 250, "Shift+Equal"), ("縮小空間圖", 65, "Minus")]:
+    # Native disabled buttons leave the tab order. Verify both the displayed
+    # zoom bounds and the actual focus order, not stale aria-disabled semantics.
+    for name, bound, key, before_name, after_name in [
+        ("放大空間圖", 250, "Shift+Equal", "縮小空間圖", "回到北向"),
+        ("縮小空間圖", 65, "Minus", "向右旋轉", "放大空間圖"),
+    ]:
         button = dialog.get_by_role("button", name=name, exact=True)
         for _ in range(12):
-            if await button.get_attribute("aria-disabled") == "true":
+            if await button.is_disabled():
                 break
             await button.click()
-        await expect(button).to_have_attribute("aria-disabled", "true")
         await expect(button).to_be_disabled()
-        await expect(dialog.get_by_text(f"縮放 {bound}%", exact=True)).to_be_visible()
-        await expect(button).to_be_focused()
-        await page.keyboard.press("Enter")
+        await expect(button).not_to_have_attribute("aria-disabled", "true")
+        await expect_zoom_status(dialog, bound)
+        await dialog.get_by_role("button", name=before_name, exact=True).focus()
+        await page.keyboard.press("Tab")
+        await expect(dialog.get_by_role("button", name=after_name, exact=True)).to_be_focused()
         assert (await camera_readout(page))["zoomPercent"] == bound
-        await expect(button).to_be_focused()
-        states[f"limit{bound}"] = {"zoomPercent": bound, "focusRetainedAfterEnter": True}
+        states[f"limit{bound}"] = {"zoomPercent": bound, "disabledSkippedByTab": True}
         await host.focus()
         await page.keyboard.press(key)
         assert (await camera_readout(page))["zoomPercent"] == bound
         await assert_same_scene(page, canvas, context, selected)
 
-    # Home resets both a rotated view and a non-default zoom.
+    # Home restores north without losing the current (minimum) zoom.
     await page.keyboard.press("ArrowLeft")
     await page.keyboard.press("Home")
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 65)
     assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
     rotated = await click_camera("向右旋轉")
     await click_camera("放大空間圖")
     await selector_for(page).select_option(LIBRARY["id"])
     selected = LIBRARY["id"]
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 100)
     assert abs((await camera_readout(page))["northDegrees"] - rotated["northDegrees"]) < 1e-7
     await assert_same_scene(page, canvas, context, selected)
     await assert_idle_renderer(page)
     await click_camera("放大空間圖")
     await dialog.get_by_role("button", name="看全部地點", exact=True).click()
-    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await expect_zoom_status(dialog, 100)
     assert abs((await camera_readout(page))["northDegrees"] - rotated["northDegrees"]) < 1e-7
     await assert_same_scene(page, canvas, context, selected)
     await assert_idle_renderer(page)
     await click_camera("放大空間圖")
     states["northReset"] = await click_camera("回到北向")
-    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 100}
+    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 125}
+    states["restoreZoomButton"] = await click_camera("還原 100% 縮放")
+    assert states["restoreZoomButton"] == {"northDegrees": 0, "zoomPercent": 100}
+    await expect(dialog.get_by_role("button", name="還原 100% 縮放", exact=True)).to_be_disabled()
+    await click_camera("放大空間圖")
+    await host.focus()
+    before = await clears(page)
+    await page.keyboard.press("0")
+    await wait_for_repaint(page, before)
+    states["restoreZoomKey"] = await camera_readout(page)
+    assert states["restoreZoomKey"] == {"northDegrees": 0, "zoomPercent": 100}
+    await assert_same_scene(page, canvas, context, selected)
     idle = await assert_idle_renderer(page)
     await page.screenshot(path=str(OUT / "camera-controls.png"))
     await context.dispose()
@@ -744,6 +772,19 @@ async def sourced_building_volumes(page, _requests, _resources):
     assert before != after, "A source-checked building did not alter the real WebGL pixels"
     assert len(requests_seen) == 1, requests_seen
     await expect(dialog_for(page).get_by_text(f"資料讀取：{fixture['fetchedAt'][:10]}", exact=False)).to_be_visible()
+    source_link = dialog_for(page).get_by_role(
+        "link", name="查看此棟建築的 OpenStreetMap 原始輪廓", exact=True
+    )
+    await expect(source_link).to_have_attribute("href", fixture["buildings"][0]["sourceUrl"])
+    await expect(source_link).to_have_attribute("target", "_blank")
+    await expect(source_link).to_have_attribute("rel", "noopener noreferrer")
+    touch_target = await source_link.evaluate("""el => ({
+      width: el.getBoundingClientRect().width,
+      height: el.getBoundingClientRect().height,
+    })""")
+    assert touch_target["width"] >= 43.5 and touch_target["height"] >= 43.5, (
+        f"OSM source link touch target must be at least 44 CSS px: {touch_target}"
+    )
     await assert_layout(page)
     await page.screenshot(path=str(OUT / "sourced-building-volume.png"))
     return {
@@ -753,6 +794,46 @@ async def sourced_building_volumes(page, _requests, _resources):
         "source": LIBRARY["source"],
         "webgl": await assert_webgl(page),
     }
+
+
+async def official_hall_floors(page, _requests, _resources):
+    """Verify public university unit locations on a 320px device without OSM.
+
+    This only checks the UI and the primary university source URL. It does not
+    imply verified entrances, classroom positions or indoor walking routes.
+    """
+    async def unavailable(route):
+        await route.fulfill(status=503, headers={"Retry-After": "60"},
+                            content_type="application/json", body='{"error":"unavailable"}')
+
+    await page.route("**/api/public/campus-footprints", unavailable)
+    await open_explorer(page)
+    await selector_for(page).select_option(ZHUGU["id"])
+    dialog = dialog_for(page)
+    await expect(dialog.get_by_role("heading", name=ZHUGU["name"], exact=True)).to_be_visible()
+    for label in [
+        "4 樓：資訊管理學系、人工智慧應用學系。",
+        "5 樓：資訊工程學系。",
+        "6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。",
+        "7 樓：會計室、校友聯絡暨就業輔導室、國際暨兩岸事務處。",
+        "8 樓：校長室、副校長室、秘書室、研發處、人事室。",
+    ]:
+        await expect(dialog.get_by_text(label, exact=True)).to_be_visible()
+
+    official = dialog.get_by_role("link", name="查看校史資料室主顧樓單位清單", exact=True)
+    await expect(official).to_have_attribute("href", "https://c067.pu.edu.tw/p/412-1121-4218.php")
+    await expect(official).to_have_attribute("target", "_blank")
+    await expect(official).to_have_attribute("rel", "noopener noreferrer")
+    await expect(dialog.get_by_text("此地點僅有單一資料來源，位置待再次確認。")).to_have_count(0)
+    await expect(dialog.get_by_text("公開建築輪廓目前無法取得", exact=False)).to_be_visible()
+    await assert_walking_link(dialog.get_by_role("link", name="開啟步行導航", exact=True), ZHUGU)
+    layout = await assert_layout(page)
+    await official.scroll_into_view_if_needed()
+    await expect(official).to_be_in_viewport()
+    await page.screenshot(path=str(OUT / "official-hall-floors-320.png"))
+    return {"building": ZHUGU["name"], "officialFloors": [4, 5, 6, 7, 8],
+            "source": "https://c067.pu.edu.tw/p/412-1121-4218.php",
+            "offlineOverpass": True, "layout": layout}
 
 
 async def mobile(page, _requests, _resources):
@@ -980,6 +1061,7 @@ async def main():
                     ("camera-controls", {"width": 1440, "height": 1000}, camera_controls),
                     ("camera-touch", {"width": 390, "height": 844}, touch_camera),
                     ("sourced-building-volumes", {"width": 390, "height": 844}, sourced_building_volumes),
+                    ("official-hall-floors-320", {"width": 320, "height": 568}, official_hall_floors),
                     ("mobile-320", {"width": 320, "height": 568}, mobile),
                     ("mobile-390", {"width": 390, "height": 844}, mobile),
                     ("dark-large-text", {"width": 390, "height": 844}, dark_large_text),

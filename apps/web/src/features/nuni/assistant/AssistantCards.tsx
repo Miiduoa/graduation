@@ -144,6 +144,7 @@ export function AssistantCard({
   cards,
   states,
   pending,
+  confirmationDisabled = false,
   onConfirm,
   onCancel,
   onReconcile,
@@ -153,6 +154,8 @@ export function AssistantCard({
   cards: V2Card[];
   states: V2ActionStates;
   pending: boolean;
+  /** Keep read-only reconciliation and cancellation usable when new writes are unavailable. */
+  confirmationDisabled?: boolean;
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
   onReconcile?: (card: V2Card) => void;
@@ -205,7 +208,7 @@ export function AssistantCard({
             type="button"
             className={styles.primary}
             disabled={
-              pending ||
+              pending || confirmationDisabled ||
               !priorCalendarActionsVerified(cards, index, states)
             }
             onClick={() => onConfirm([card])}

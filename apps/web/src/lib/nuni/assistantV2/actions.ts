@@ -1,6 +1,7 @@
 import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
 import { courseworkStudyGuard, verifyCourseworkStudyGuard } from './courseworkStudy';
+import { foodPickupGuard, verifyFoodPickupGuard } from './foodPickup';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
@@ -23,6 +24,7 @@ import {
   type Card,
   type CourseworkStudyGuard,
   type EventArgs,
+  type FoodPickupGuard,
   type Ledger,
   type Obj,
 } from './contracts';
@@ -132,8 +134,11 @@ export function signCard(
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
   studyGuard?: CourseworkStudyGuard,
+  pickupGuard?: FoodPickupGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
+  if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     tool === 'propose_food_order'
       ? foodCardArgs(raw)
@@ -151,6 +156,7 @@ export function signCard(
     tool,
     argsHash: hash(args),
     ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
+    ...(pickupGuard ? { pickupGuard: foodPickupGuard(pickupGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -168,6 +174,7 @@ export function signCard(
     token: body + '.' + mac(secret, body),
     mutationId,
     schoolId: binding.schoolId,
+    ...(pickupGuard ? { sourceBound: 'food-pickup' as const } : {}),
     destination:
       tool === 'propose_food_order'
         ? String(args.reason)
@@ -233,6 +240,9 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   if (p.issuer !== undefined) machineId(p.issuer);
   const studyGuard = p.studyGuard === undefined ? undefined : courseworkStudyGuard(p.studyGuard);
   if (studyGuard && p.tool !== 'propose_personal_event') return fail('CONFIRMATION_INVALID', 409);
+  const pickupGuard = p.pickupGuard === undefined ? undefined : foodPickupGuard(p.pickupGuard);
+  if (pickupGuard && (p.tool !== 'propose_personal_event' || studyGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -251,6 +261,7 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
       tool: p.tool as Card['tool'],
       args,
       ...(studyGuard ? { studyGuard } : {}),
+      ...(pickupGuard ? { pickupGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -261,6 +272,18 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
 type AuthenticatedCard = ReturnType<typeof authenticatedCard>;
 type VerifiedCard = AuthenticatedCard['card'];
 
+/**
+ * Authenticate only provenance for a read. Expiry, issuer restart and a new
+ * login never turn this proof into permission to confirm, revoke or revise.
+ * Callers derive account/school from the current authenticated principal.
+ */
+export function authenticateCourseworkFollowup(binding: Binding, raw: unknown, secret: string, now: number) {
+  const { card } = authenticatedCard(binding, raw, secret, now);
+  if (card.tool !== 'propose_personal_event' || card.pickupGuard) return fail('INVALID_INPUT', 422);
+  return { mutationId: card.mutationId, iat: card.iat, event: eventArgs(card.args),
+    studyGuard: card.studyGuard ? { ...card.studyGuard } : null };
+}
+
 function liveAuthorization(binding: Binding, p: Obj, now: number, allowRevoked = false) {
   if (p.issuer !== undefined && p.issuer !== process.env.FLY_MACHINE_ID)
     return fail('CONFIRMATION_REVOKED', 409);
@@ -270,6 +293,32 @@ function liveAuthorization(binding: Binding, p: Obj, now: number, allowRevoked =
     return fail('CONFIRMATION_REVOKED', 409);
   if (p.epoch !== routeEpoch || Number(p.exp) <= now)
     return fail('CONFIRMATION_INVALID', 409);
+  return current;
+}
+
+/**
+ * Expiry removes write authority, but this process can still retire a preview
+ * it knows it issued and never dispatched. The caller holds the operation
+ * queue and has just established that the exact record is absent.
+ */
+function expiredRevocationAuthorization(
+  binding: Binding,
+  authenticated: AuthenticatedCard,
+  state: CalendarOperation,
+) {
+  const { payload, card } = authenticated;
+  const bindingKey = hash(binding);
+  const current = proposals.get(bindingKey);
+  if (
+    payload.epoch !== routeEpoch ||
+    (payload.issuer ?? 'local') !== (process.env.FLY_MACHINE_ID || 'local') ||
+    !current || current.seq !== payload.proposalSeq ||
+    state.bindingKey !== bindingKey || state.proposalSeq !== payload.proposalSeq ||
+    !current.issued.includes(card.mutationId)
+  )
+    return fail('CONFIRMATION_REVOKED', 409);
+  if (state.uncertain || current.dispatched.has(card.mutationId))
+    return fail('EXECUTION_UNKNOWN', 503);
   return current;
 }
 
@@ -463,9 +512,11 @@ export async function revoke(
     }
     if (match.conflict) return calendarCheck(binding, p, ledger, checkedAt, 'conflict',
       hasAuthorization(binding, raw, secret, checkedAt), false);
-    // Repeated cancellation may acknowledge this registry's revocation. Expired
-    // or old-process authorization is never used to assert that work was stopped.
-    const current = liveAuthorization(binding, authenticated.payload, checkedAt, true);
+    // Only the still-present issuer registry can retire an expired preview that
+    // never reached write dispatch. Absence alone cannot cancel uncertain work.
+    const current = Number(authenticated.payload.exp) <= checkedAt
+      ? expiredRevocationAuthorization(binding, authenticated, state)
+      : liveAuthorization(binding, authenticated.payload, checkedAt, true);
     const alreadyRevoked = current.revoked.has(p.mutationId);
     current.revoked.add(p.mutationId);
     if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
@@ -548,10 +599,13 @@ export async function confirm(
     const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
     if (p.studyGuard)
       await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
+    if (p.pickupGuard)
+      await verifyFoodPickupGuard(adapter, binding, p.pickupGuard, event, currentTime());
     await requireAssistantPermission(adapter, 'createPersonalEvent');
     const writeTime = currentTime();
     verifyCard(binding, raw, secret, writeTime);
     const [start] = eventInterval(event);
+    if (p.pickupGuard && start <= writeTime) return fail('FOOD_PICKUP_PASSED', 409);
     if (p.studyGuard?.policy === 'coursework-gap' && start <= writeTime)
       return fail('STUDY_SLOT_CHANGED', 409);
     // An explicitly backdated entry can still be recorded. Recheck a prospective

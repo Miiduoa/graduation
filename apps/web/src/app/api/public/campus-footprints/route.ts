@@ -19,6 +19,10 @@ const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 // Respect its Retry-After while bounding malformed or extreme upstream values.
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+// A misbehaving upstream can emit unlimited empty/tiny ReadableStream chunks.
+// Cap the number of reads as well as bytes so microtasks cannot indefinitely
+// starve the 12-second deadline timer or monopolize the Node event loop.
+const MAX_RESPONSE_STREAM_CHUNKS = 8_192;
 // AbortSignal is advisory: intermediaries and stream mocks may never settle.
 // Bound the entire upstream operation so global pending requests can recover.
 const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
@@ -59,15 +63,28 @@ class OverpassRateLimitError extends Error {
   }
 }
 
-function overpassRetryAfterMs(header: string | null, now: number): number {
+function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
   if (!header) return ERROR_COOLDOWN_MS;
   const value = header.trim();
   let requestedMs: number;
   if (/^\d+$/.test(value)) {
-    requestedMs = Number(value) * 1000;
+    // HTTP delta-seconds may be arbitrarily long. Number(value) * 1000 can
+    // overflow to Infinity, which previously fell back to just ten minutes
+    // instead of respecting a public Overpass operator's longer pause.
+    // Strip leading zeros, then cap *before* numeric conversion.
+    const digits = value.replace(/^0+/, '') || '0';
+    requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
+      ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
     const dateMs = Date.parse(value);
-    requestedMs = Number.isFinite(dateMs) ? dateMs - now : NaN;
+    // HTTP-date Retry-After and the upstream Date share the same server clock.
+    // If our host is ahead, local subtraction alone can shorten a one-hour
+    // pause to the ten-minute default and repeatedly overload public Overpass.
+    // Keep the more conservative of the local and server-relative durations.
+    const originMs = serverDate === null ? NaN : Date.parse(serverDate);
+    requestedMs = Number.isFinite(dateMs)
+      ? Math.max(dateMs - now, Number.isFinite(originMs) ? dateMs - originMs : -Infinity)
+      : NaN;
   }
   if (!Number.isFinite(requestedMs) || requestedMs <= 0) return ERROR_COOLDOWN_MS;
   return Math.max(ERROR_COOLDOWN_MS, Math.min(MAX_RETRY_AFTER_MS, requestedMs));
@@ -83,7 +100,9 @@ function freshCacheControl(validUntil: number): string {
   const secondsRemaining = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
   return `public, max-age=0, s-maxage=${Math.min(3600, secondsRemaining)}`;
 }
-const query = '[out:json][timeout:12];way(id:' +
+// Keep Overpass's own 8-second execution budget below our 12-second network
+// deadline, leaving transport headroom; bound its server-side memory to 64 MiB.
+const query = '[out:json][timeout:8][maxsize:67108864];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
 type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; osmBaseAt: string | null; validUntil: number; discardAfter: number };
@@ -107,14 +126,37 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // length header, so comparing those lengths would reject valid compressed
   // responses. Keep the decoded 500 KB cap for every encoding.
   const contentEncoding = response.headers.get('content-encoding');
-  const verifyIdentityLength = lengthHeader !== null &&
-    (contentEncoding === null || contentEncoding.trim().toLowerCase() === 'identity');
-  if (!Number.isSafeInteger(declared) || declared > MAX_RESPONSE_BYTES) {
+  const coding = contentEncoding?.trim().toLowerCase() ?? 'identity';
+  // Node Fetch transparently decodes these single HTTP content codings.
+  // A blank, unknown or stacked/mixed coding cannot safely tell us whether
+  // Content-Length measures the decoded bytes. Do not silently classify an
+  // ambiguous identity response as compressed and skip its length check.
+  if (!['identity', 'gzip', 'br', 'deflate'].includes(coding)) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('Unsupported OSM content encoding');
+  }
+  const identityEncoded = coding === 'identity';
+  const verifyIdentityLength = lengthHeader !== null && identityEncoded;
+  // Fetch delivers decoded bytes, while Content-Length for gzip/br describes
+  // compressed wire bytes. A valid compressed response can exceed the decoded
+  // cap on the wire (compression adds framing overhead), so do not reject it
+  // as if the header measured the decoded body. Still bound both the declared
+  // encoded transport (2x) and the streamed decoded payload (500 KB).
+  const declaredLimit = identityEncoded ? MAX_RESPONSE_BYTES : MAX_RESPONSE_BYTES * 2;
+  if (!Number.isSafeInteger(declared) || declared > declaredLimit) {
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
     if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response too large');
+  }
+  // Any HTTP 200 Overpass JSON snapshot requires a non-empty body. A declared
+  // zero-byte identity *or* compressed response cannot contain verified map
+  // data. Reject it before reading: even a stalled stream must not consume the
+  // full 12-second deadline when its header already contradicts the payload.
+  if (lengthHeader !== null && declared === 0) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new Error('OSM response declares an empty body');
   }
   if (!response.body) {
     // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
@@ -137,6 +179,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const segments: string[] = [];
   let size = 0;
+  let chunks = 0;
   let completed = false;
   try {
     while (true) {
@@ -145,9 +188,27 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       // truncated stream into an apparently complete Overpass snapshot.
       if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
+      // Count empty chunks too: the byte cap alone cannot stop a zero-byte
+      // stream from spinning through unbounded already-resolved reads.
+      if (++chunks > MAX_RESPONSE_STREAM_CHUNKS) {
+        throw new Error('OSM response exceeded chunk limit');
+      }
       size += value.byteLength;
+      // On identity responses, the first byte beyond Content-Length already
+      // proves truncation/overdelivery. Do not wait for EOF from an upstream
+      // stream that could stall indefinitely after sending too many bytes.
+      if (verifyIdentityLength && size > declared) {
+        throw new Error('OSM response length mismatch');
+      }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
+      // A long sequence of already-resolved reads can starve timers even
+      // before reaching the absolute chunk cap. Give Node's event loop a
+      // chance to run the deadline and other requests every 128 chunks.
+      if (chunks % 128 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (signal.aborted) throw new Error('OSM response aborted');
+      }
     }
     if (verifyIdentityLength && size !== declared) {
       throw new Error('OSM response length mismatch');
@@ -190,17 +251,20 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // We only need status/Retry-After. Release the unused body immediately,
     // without awaiting cancellation from an uncooperative upstream.
     if (response.body) void response.body.cancel().catch(() => {});
-    // HTTP 406 may mean the public Overpass server has blocked this client.
-    // Repeating the same request every ten minutes can prolong that block.
-    // Pause for a full day rather than treating access denial as congestion.
-    if (response.status === 406) {
+    // A malformed fixed query (400) or blocked/forbidden client (403/406)
+    // cannot recover by hammering public Overpass every ten minutes.
+    // Allow a full-day cooldown; do not treat these as transient congestion.
+    if (response.status === 400 || response.status === 403 || response.status === 406) {
       throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
     }
-    // 429 and 503 can contain a server-provided cooldown. Do not retry against
-    // the public endpoint every ten minutes when it explicitly requests longer.
-    if (response.status === 429 || response.status === 503) {
+    // Public Overpass and intermediaries may request an extended cooldown for
+    // partial replies, request timeouts and gateway/server failures as well as
+    // ordinary 429 limits. All these responses are rejected without reading a
+    // body, but their Retry-After must still protect the upstream service.
+    if (response.status === 206 || response.status === 408 ||
+        response.status === 429 || response.status >= 500) {
       throw new OverpassRateLimitError(overpassRetryAfterMs(
-        response.headers.get('retry-after'), Date.now(),
+        response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
       ));
     }
     throw new Error('OSM service unavailable');
@@ -210,27 +274,84 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // even when the returned fragment happens to be syntactically valid JSON.
   if (response.headers.get('content-range') !== null) {
     if (response.body) void response.body.cancel().catch(() => {});
-    throw new Error('OSM response advertised partial content');
+    // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
+    // Retain any upstream cooldown instead of retrying a partial response at 10m.
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
   }
-  const raw = await readBoundedResponse(response, signal);
-  const payload = JSON.parse(raw) as unknown;
-  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
-  // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
-  // on timeout or memory exhaustion. Never promote that partial result to a
-  // fresh 24-hour snapshot or replace a previously verified fallback.
+  let raw: string;
+  try {
+    raw = await readBoundedResponse(response, signal);
+  } catch (error) {
+    // Overpass or an intermediary can return HTTP 200 with unusable framing
+    // (empty/oversized/invalid stream) and still request a longer cooldown.
+    // Reject the geometry as before, but respect that explicit retry window
+    // rather than sending another request after our default ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (!signal.aborted && retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw) as unknown;
+  } catch {
+    // Some overloaded public proxies return an incomplete HTTP 200 body
+    // with Retry-After. Never cache truncated JSON or shorten their pause.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(retryAfter, Date.now(), response.headers.get('date')));
+    }
+    throw new Error('Invalid Overpass JSON');
+  }
+  // Check a partial-result remark before replication metadata, since an
+  // incomplete OSM response may also have an incomplete osm3s header.
   if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
-    throw new Error('Overpass returned an incomplete result');
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
   }
   const now = Date.now();
-  // A way's edit timestamp cannot be newer than the Overpass replication
-  // snapshot that contains it. Preserve checked geometry, but drop any
-  // contradictory revision label rather than advertising false provenance.
-  // Legacy replies without osm3s are bounded by their HTTP fetch time.
-  const buildings = stripOsmRevisionsAfter(
-    parseProvidenceOsmFootprints(payload),
-    osmBaseAt ? Date.parse(osmBaseAt) : now,
-  );
-  if (!buildings.length) throw new Error('No verified building outlines in response');
+  let osmBaseAt: string | null;
+  let buildings: ProvidenceFootprint[];
+  try {
+    osmBaseAt = verifyOverpassReplicationTime(payload, now);
+    // A way's edit timestamp cannot be newer than the Overpass replication
+    // snapshot that contains it. Preserve checked geometry, but drop any
+    // contradictory revision label rather than advertising false provenance.
+    // Legacy replies without osm3s are bounded by their HTTP fetch time.
+    buildings = stripOsmRevisionsAfter(
+      parseProvidenceOsmFootprints(payload),
+      osmBaseAt ? Date.parse(osmBaseAt) : now,
+    );
+  } catch (error) {
+    // Even syntactically valid JSON can carry invalid replication metadata or
+    // unusable geometry. Never cache that snapshot; also do not ignore an
+    // explicit upstream Retry-After and retry a known-bad source after 10m.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw error;
+  }
+  if (!buildings.length) {
+    // A valid JSON object can still contain no verified outlines during an
+    // upstream partial/outage response. Never cache it as a fresh map. If the
+    // origin explicitly asks us to pause, do not retry after only ten minutes.
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter !== null) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        retryAfter, Date.now(), response.headers.get('date'),
+      ));
+    }
+    throw new Error('No verified building outlines in response');
+  }
   // The 48-hour replication-age check must remain true for the *entire* time
   // this snapshot is presented as fresh, not only when Overpass was fetched.
   // Otherwise a 47-hour-old OSM database could be marked fresh for another

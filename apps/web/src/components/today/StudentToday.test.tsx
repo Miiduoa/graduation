@@ -101,6 +101,16 @@ it('keeps the assistant mounted after the planner while the day finishes loading
   expect((draft as HTMLInputElement).value).toBe('下一堂課在哪裡？');
 });
 
+it('keeps the task agent visible before the timetable and preserves it while home data refreshes', () => {
+  const agent = <button type="button">首頁代辦測試</button>;
+  const result = view({ skeleton: true, agent });
+  const button = screen.getByRole('button', { name: '首頁代辦測試' });
+  result.rerender(todayElement({ classes: [klass()], agent }));
+  expect(screen.getByRole('button', { name: '首頁代辦測試' })).toBe(button);
+  const planner = screen.getByTestId('today-unified-flow');
+  expect(button.compareDocumentPosition(planner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
 it('keeps immediate coursework before personalized suggestions and preserves the assistant draft', () => {
   const assistant = <input aria-label="助理草稿測試" defaultValue="請幫我安排今天" />;
   const personalization = <section aria-label="個人化安排">依年級與生活需求安排</section>;

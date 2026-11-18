@@ -1,6 +1,9 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { doc, getDoc } from 'firebase/firestore';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import { getDb } from '@/lib/firebase';
 import { nuniRecord } from '@campus/shared/src/nuni';
 import { NuniSessionProvider, useNuniSession } from '@/features/nuni/Session';
 import { useAuth } from './AuthGuard';
@@ -14,6 +17,7 @@ import { PersonalImportSyncBridge } from './imports/PersonalImportSync';
 
 type Catalog = { schools: BrowseSchool[]; status: 'loading' | 'ready' | 'error' };
 const CATALOG_RETRY_DELAY_MS = 4_000;
+const ACCOUNT_SCHOOL_TIMEOUT_MS = 6_000;
 
 function catalogRetryDelayMs(retryAfter: string | null) {
   if (!retryAfter) return CATALOG_RETRY_DELAY_MS;
@@ -65,6 +69,45 @@ async function loadCatalog(): Promise<BrowseSchool[]> {
 function SchoolPreferences({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const nuni = useNuniSession();
+  const uid = auth.user?.uid;
+  const accountScope = useMemo(() => ({ uid, loading: auth.loading }), [uid, auth.loading]);
+  const [accountSchool, setAccountSchool] = useState<{
+    scope: typeof accountScope;
+    schoolId: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (auth.loading || !uid) return;
+    let active = true;
+    const timeout = setTimeout(() => {
+      if (!active) return;
+      active = false;
+      setAccountSchool({ scope: accountScope, schoolId: null });
+    }, ACCOUNT_SCHOOL_TIMEOUT_MS);
+    // 只取既有所屬學校作為瀏覽預設，不作為入學或授權證明。
+    void (async () => {
+      let schoolId: string | null = null;
+      try {
+        const profile = await getDoc(doc(getDb(), 'users', uid));
+        for (const field of ['schoolId', 'primarySchoolId']) {
+          const value: unknown = profile.get(field);
+          const publicId = typeof value === 'string' ? toPublicSchoolId(value) : null;
+          if (publicId && /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(publicId)) {
+            schoolId = publicId;
+            break;
+          }
+        }
+      } catch {
+        // 讀取失敗仍可手動選擇瀏覽校園。
+      }
+      clearTimeout(timeout);
+      if (active) setAccountSchool({ scope: accountScope, schoolId });
+    })();
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [auth.loading, uid, accountScope]);
+  const accountSchoolReady = !uid || accountSchool?.scope === accountScope;
   const [catalog, setCatalog] = useState<Catalog>({ schools: [], status: 'loading' });
   const generation = useRef(0);
   const refresh = useCallback(async () => {
@@ -103,7 +146,9 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
   return (
     <SelectedSchoolProvider
       ownerKey={owner}
+      accountSchoolId={uid && accountSchool?.scope === accountScope ? accountSchool.schoolId : null}
       loading={auth.loading || nuni.loading}
+      accountSchoolPending={!accountSchoolReady}
       identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
       schools={catalog.schools}
       catalogStatus={catalog.status}

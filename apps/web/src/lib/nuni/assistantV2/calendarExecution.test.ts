@@ -145,11 +145,16 @@ it('cancellation reports a previously created exact event and never deletes it',
   expect(f.writes).toHaveLength(1);
 });
 
-it('never claims revocation for an expired, superseded or unreadable absent execution', async () => {
+it('never claims revocation for a lost-registry, superseded or unreadable absent execution', async () => {
   const f = fixtureAdapter(), card = sign();
+  // Starting a later proposal purges expired issuance evidence. An absent
+  // ledger cannot replace that lost evidence, even if this card was not sent.
+  signCard({ ...binding, conversationId: 'other-conversation' },
+    'propose_personal_event', event, 1, secret, now + 300001);
   await expect(revoke(binding, raw(card), secret, now + 300001, f.adapter)).rejects.toThrow();
+  const replaced = sign();
   sign();
-  await expect(revoke(binding, raw(card), secret, now, f.adapter)).rejects.toThrow();
+  await expect(revoke(binding, raw(replaced), secret, now, f.adapter)).rejects.toThrow();
   const fresh = sign();
   vi.spyOn(f.adapter, 'ledger').mockRejectedValueOnce(new Error('read disconnected'));
   await expect(revoke(binding, raw(fresh), secret, now, f.adapter)).rejects.toThrow('read disconnected');
