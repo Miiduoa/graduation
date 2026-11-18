@@ -357,3 +357,43 @@ describe('published Providence service identity is not a classroom building', ()
     }).matches).toEqual([otherSchoolHall]);
   });
 });
+
+
+describe('published POI classroom routing never trusts an unrelated Firestore building alias', () => {
+  it('does not redirect a sourced clinic or chapel to PH303 after synthetic building/category corruption', () => {
+    const hallFromCatalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+    expect(hallFromCatalog).toBeDefined();
+    for (const id of ['pu-health', 'pu-chapel']) {
+      const sourced = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === id);
+      expect(sourced, id).toBeDefined();
+      // The original sourced POI name/coordinates are unchanged. The imported
+      // category and unrelated building label are synthetic corruptions,
+      // not observed facts about campus rooms or entrances.
+      const altered = { ...sourced!, category: '教學', building: '主顧樓' };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [altered],
+      }).status, id).toBe('unmatched');
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [altered, hallFromCatalog!],
+      }).matches, id).toEqual([hallFromCatalog]);
+    }
+  });
+
+  it('keeps the sourced building name and verified English alias without restricting other schools', () => {
+    const hallFromCatalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+    expect(hallFromCatalog).toBeDefined();
+    const withOfficialAlias = { ...hallFromCatalog!, building: 'Providence Hall' };
+    for (const query of ['PH303', 'Providence Hall 303', '主顧樓 PH303']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [withOfficialAlias],
+      }).matches, query).toEqual([withOfficialAlias]);
+    }
+    const otherSchool = {
+      ...PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-health')!,
+      name: '不同名稱的教學樓', category: '教學', building: '主顧樓',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'other-school', query: '主顧樓 PH303', locations: [otherSchool],
+    }).matches).toEqual([otherSchool]);
+  });
+});
