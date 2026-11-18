@@ -68,4 +68,41 @@ describe('classroom map destination classification', () => {
       expect(result.matches, category).toEqual([building]);
     }
   });
+
+  it('rejects common parking, shuttle and gate aliases without selecting a wrong classroom destination', () => {
+    for (const category of [
+      '停車場', '校車站', '接駁站', '巴士站', '校門', '出入口',
+      'bus station', 'bus_station', 'shuttle stop', 'shuttle_stop',
+      'car park', 'car_park', 'gate', 'entrance',
+    ]) {
+      const unrelatedPOI = {
+        ...hall, id: `synthetic-${category}`, name: '服務設施',
+        building: '主顧樓', category,
+      };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [unrelatedPOI, hall],
+      });
+      expect(result.status, category).toBe('matched');
+      expect(result.matches, category).toEqual([hall]);
+    }
+  });
+
+  it('rejects qualified stop labels but preserves exact building-category boundaries', () => {
+    for (const category of ['公車站（校內）', 'Bus Stop (Campus)', '停車場 (P1)']) {
+      const stop = {
+        ...hall, id: 'synthetic-qualified-stop', category, building: '主顧樓',
+      };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [stop],
+      }).status, category).toBe('unmatched');
+    }
+    for (const category of ['教學 (校內)', '圖書館（主校區）', '交通工程學院']) {
+      const building = { ...hall, category };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [building],
+      });
+      expect(result.status, category).toBe('matched');
+      expect(result.matches, category).toEqual([building]);
+    }
+  });
 });
