@@ -1569,4 +1569,51 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each([
+    { emptyChunks: 8191, expectedStatus: 200 },
+    { emptyChunks: 8192, expectedStatus: 503 },
+  ])('bounds a synthetic Overpass stream with $emptyChunks empty chunks', async ({ emptyChunks, expectedStatus }) => {
+    // A stream that resolves thousands of zero-byte reads can monopolize the
+    // microtask queue without hitting the 500 KB byte ceiling. Use a scripted
+    // reader to verify both sides of the 8,192-chunk boundary deterministically.
+    // No public Overpass request or real building measurement is involved.
+    let reads = 0;
+    const reader = {
+      read: vi.fn(async () => {
+        const index = reads++;
+        if (index < emptyChunks) return { done: false, value: new Uint8Array(0) };
+        if (index === emptyChunks) {
+          return { done: false, value: new TextEncoder().encode(osmPayload) };
+        }
+        return { done: true, value: undefined };
+      }),
+      cancel: vi.fn(async () => {}),
+      releaseLock: vi.fn(),
+    };
+    const upstream = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      body: { getReader: () => reader },
+    });
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const first = await GET();
+    expect(first.status).toBe(expectedStatus);
+    expect(reads).toBe(8193);
+    expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+    if (expectedStatus === 200) {
+      expect((await first.json()).buildings).toHaveLength(1);
+      expect(reader.cancel).not.toHaveBeenCalled();
+    } else {
+      expect(first.headers.get('Cache-Control')).toBe('no-store');
+      expect((await first.json()).error).toMatch(/temporarily unavailable/);
+      expect(reader.cancel).toHaveBeenCalledTimes(1);
+    }
+    // Valid snapshots are reused and rejected streams remain in cooldown.
+    // Neither case is allowed to trigger a second upstream query.
+    expect((await GET()).status).toBe(expectedStatus);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
 });
