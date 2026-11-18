@@ -423,6 +423,8 @@ it('retries only cards not marked understood in source order with fresh drafts a
   revealAnswer();
   skip();
   fireEvent.click(screen.getByRole('button', { name: '重練待加強題（2 題）' }));
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認重練待加強題' }));
   expect(screen.getByRole('status').textContent).toBe('第 1 題／共 2 題');
   expect(screen.getByText(cards[1].question)).toBeTruthy();
   expect(screen.queryByText(cards[0].question)).toBeNull();
@@ -442,11 +444,15 @@ it('can restart the original full deck after a pending-only retry using the visi
   decide('again');
   skip();
   fireEvent.click(screen.getByRole('button', { name: '重練待加強題（2 題）' }));
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認重練待加強題' }));
   expect(screen.getByText(cards[1].question)).toBeTruthy();
   decide('understood');
   skip();
   expect(screen.getByRole('status').textContent).toBe('本輪結束，共 2 題');
   fireEvent.click(screen.getByRole('button', { name: '重練本輪全部' }));
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認重練本輪全部' }));
   expect(screen.getByRole('status').textContent).toBe('第 1 題／共 3 題');
   expect(screen.getByText(cards[0].question)).toBeTruthy();
   expect(answerInput().value).toBe('');
@@ -459,6 +465,8 @@ it('can restart the entire current round and disables pending retry when every c
   decide('understood');
   expect(screen.getByRole('button', { name: '重練待加強題（0 題）' }).hasAttribute('disabled')).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '重練本輪全部' }));
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認重練本輪全部' }));
   expect(screen.getByRole('status').textContent).toBe('第 1 題／共 2 題');
   expect(answerInput().value).toBe('');
   expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
