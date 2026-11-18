@@ -58,7 +58,7 @@ function isRoomSuffix(value: string): boolean {
   // this still identifies a building POI, never a surveyed floor or indoor route.
   const adjoiningRoom = '\\d{1,5}[a-z]?(?:\\s*(?:教室|室))?';
   // A floor marker alone is not a classroom; require an explicit room number.
-  return new RegExp(`^${floor}(?:[\\s,，:：·/\\-]+${room}|${adjoiningRoom})  return new RegExp(`^${floor}(?:[\\s,，:：·/\\-]+${room}|${adjoiningRoom}, 'u').test(suffix);
+  return new RegExp(`^${floor}(?:[\\s,，:：·/\\-]+${room}|${adjoiningRoom})$`, 'u').test(suffix);
 }
 
 /** Classrooms belong to buildings, not a stop, car park, road or gateway
