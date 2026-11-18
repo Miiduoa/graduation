@@ -6,6 +6,7 @@ import { createTronClassBindingService } from './tronClassBinding';
 import { createPuRelayFetch } from './puEdgeRelay';
 import { tronClassLmsReadonlySource, type LmsReadonlySource } from './tronClassLmsSource';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
+import { isTronClassMaterialDownloadAllowed, tronClassMaterialUploadKey } from './tronClassMaterialFile';
 
 export const TRONCLASS_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 export const TRONCLASS_DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -226,40 +227,50 @@ export function createTronClassMaterialDownloader(dependencies: {
       const binding = await bindings.requireBinding(ownerKey);
       if (binding.revision !== input.revision) fail(409, 'TRONCLASS_BINDING_CHANGED');
       await check();
-      const lists = await Promise.all(['ongoing', 'upcoming'].map((status) =>
-        source.fetchCourses(binding.cookies, { userId: binding.userId, status: status as 'ongoing' | 'upcoming' }, readOptions())));
-      await check();
-      if (lists.some((list) => !Array.isArray(list) || list.length > 1000)) unavailable();
-      if (!(lists as unknown[][]).flat().some((row) => positiveId(record(row).id) === input.courseId)) {
-        fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
-      }
-      const activities = await Promise.all([
-        source.fetchActivities(binding.cookies, input.courseId, '', readOptions()),
-        source.fetchActivities(binding.cookies, input.courseId, 'type=courseware_activity', readOptions()),
-      ]);
-      await check();
-      for (let i = 0; i < activities.length; i++) {
-        const response = activities[i];
-        if (!response.ok) {
-          if (response.status === 401) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
-          if (!(i === 1 && response.status === 404)) unavailable();
-        } else if (!Array.isArray(response.value) || response.value.length > 5000) unavailable();
-      }
-      const matches = activities.flatMap((response) => response.ok ? response.value : [])
-        .map(record).filter((row) => positiveId(row.id) === input.activityId);
-      if (!matches.length) fail(404, 'TRONCLASS_MATERIAL_NOT_FOUND');
-      const names = matches.map((row) => {
-        if ((row.course_id !== undefined && positiveId(row.course_id) !== input.courseId) ||
-          typeof row.type !== 'string' || !row.type || !isMaterialActivityType(row.type) ||
-          !isTronClassSourceVisible(row)) fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
-        const uploads = Array.isArray(row.uploads) ? row.uploads : Array.isArray(row.attachments) ? row.attachments : [];
-        const files = uploads.slice(0, 30).map(record).filter((file) => (file.key || file.file_key || file.upload_id) === input.uploadKey);
-        if (files.length !== 1 || !isTronClassSourceVisible(files[0]) || files[0].allow_download !== true) {
+      const authorizedFile = async () => {
+        await check();
+        const lists = await Promise.all(['ongoing', 'upcoming'].map((status) =>
+          source.fetchCourses(binding.cookies, { userId: binding.userId, status: status as 'ongoing' | 'upcoming' }, readOptions())));
+        await check();
+        if (lists.some((list) => !Array.isArray(list) || list.length > 1000)) unavailable();
+        if (!(lists as unknown[][]).flat().some((row) => positiveId(record(row).id) === input.courseId)) {
           fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
         }
-        return safeFilename(files[0].name || files[0].filename);
-      });
-      if (new Set(names).size !== 1) unavailable();
+        const activities = await Promise.all([
+          source.fetchActivities(binding.cookies, input.courseId, '', readOptions()),
+          source.fetchActivities(binding.cookies, input.courseId, 'type=courseware_activity', readOptions()),
+        ]);
+        await check();
+        for (let i = 0; i < activities.length; i++) {
+          const response = activities[i];
+          if (!response.ok) {
+            if (response.status === 401) fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
+            if (!(i === 1 && response.status === 404)) unavailable();
+          } else if (!Array.isArray(response.value) || response.value.length > 5000) unavailable();
+        }
+        const matches = activities.flatMap((response) => response.ok ? response.value : [])
+          .map(record).filter((row) => positiveId(row.id) === input.activityId);
+        if (!matches.length) fail(404, 'TRONCLASS_MATERIAL_NOT_FOUND');
+        const files = matches.map((row) => {
+          if ((row.course_id !== undefined && positiveId(row.course_id) !== input.courseId) ||
+            typeof row.type !== 'string' || !row.type || !isMaterialActivityType(row.type) ||
+            !isTronClassSourceVisible(row)) fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
+          const uploads = Array.isArray(row.uploads) ? row.uploads : Array.isArray(row.attachments) ? row.attachments : [];
+          const files = uploads.slice(0, 30).map(record).filter((file) => tronClassMaterialUploadKey(file) === input.uploadKey);
+          if (files.length !== 1 || !isTronClassMaterialDownloadAllowed(files[0])) {
+            fail(403, 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED');
+          }
+          const name = files[0].name || files[0].filename;
+          const size = files[0].size;
+          if (size !== undefined && size !== null &&
+            (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0)) unavailable();
+          if (typeof size === 'number' && size > TRONCLASS_DOWNLOAD_MAX_BYTES) fail(413, 'TRONCLASS_DOWNLOAD_TOO_LARGE');
+          return { name: safeFilename(name), sourceName: name, size: typeof size === 'number' ? size : null };
+        });
+        if (new Set(files.map(file => JSON.stringify([file.sourceName, file.size]))).size !== 1) unavailable();
+        return files[0];
+      };
+      const metadata = await authorizedFile();
       const cookie = Object.entries(binding.cookies).map(([key, value]) => {
         if (!key || /[\s;=]/.test(key) || typeof value !== 'string' || /[;\r\n]/.test(value)) unavailable();
         return `${key}=${value}`;
@@ -271,7 +282,14 @@ export function createTronClassMaterialDownloader(dependencies: {
         headers: { Cookie: cookie, Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
       });
       const file = await readTronClassDownloadResponse(response, controller.signal, check);
-      return { ...file, name: names[0] };
+      if (metadata.size !== null && metadata.size !== file.bytes.byteLength) unavailable();
+      // The teacher can withdraw a file or change download permissions while
+      // its bytes are in flight. Recheck the same course/activity/file before
+      // any bytes leave the server, using the original total deadline.
+      const latest = await authorizedFile();
+      if (latest.sourceName !== metadata.sourceName || latest.size !== metadata.size) unavailable();
+      await check();
+      return { ...file, name: metadata.name };
     };
     try { return await Promise.race([operation(), deadline]); }
     catch (error) {

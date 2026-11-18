@@ -146,7 +146,8 @@ describe('public v2 submission adapter gates and preparation', () => {
   it.each([
     ['default enabled', { enabled: undefined }], ['default attestation', { contractVerified: undefined }],
     ['unverified contract', { contractVerified: false }], ['no tenant authorizer', { authorization: undefined }],
-    ['no independent storage policy', { resolveStorageTarget: undefined }],
+    ['unverified text-only provider', { contractVerified: false, resolveStorageTarget: undefined }],
+    ['text-only provider without authorizer', { authorization: undefined, resolveStorageTarget: undefined }],
   ] as const)('stays disabled with %s despite other supplied dependencies', async (_name, overrides) => {
     const f = fixture(overrides);
     const prepared = await f.service.prepare(OWNER, SCOPE);
@@ -170,6 +171,51 @@ describe('public v2 submission adapter gates and preparation', () => {
     expect(f.rows.has(operationPath)).toBe(false);
   });
 
+  it.each([
+    [true, true, true], [true, true, false], [true, false, true], [true, false, false],
+    [false, true, true], [false, true, false], [false, false, true], [false, false, false],
+  ] as const)('prepares effective capabilities with storage=%s, text=%s and source attachments=%s', async (storage, text, attachments) => {
+    const f = fixture(storage ? {} : { resolveStorageTarget: undefined });
+    f.granted.assignment.allowsText = text;
+    f.granted.assignment.allowsAttachments = attachments;
+    const prepared = await f.service.prepare(OWNER, SCOPE);
+    const canAttach = storage && attachments;
+    expect(prepared).toMatchObject({
+      canSubmit: text || canAttach,
+      maxFiles: canAttach ? 4 : 0,
+      maxFileBytes: canAttach ? 10 * 1024 * 1024 : 0,
+      allowedContentTypes: canAttach ? ['application/pdf'] : [],
+      rules: { status: 'confirmed', allowsText: text, allowsAttachments: canAttach,
+        maxTotalBytes: canAttach ? 20 * 1024 * 1024 : 0 },
+    });
+    expect(prepared.blockedReason === null).toBe(text || canAttach);
+    expect(prepared.history).toEqual(f.base.history);
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+    expect(f.fetchStorage).not.toHaveBeenCalled();
+    expect(f.rows.has(operationPath)).toBe(false);
+  });
+
+  it('rejects attachment operations without storage policy before authorization, claims or network work', async () => {
+    const f = fixture({ resolveStorageTarget: undefined });
+    await expect(f.service.upload(OWNER, upload())).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    await expect(f.service.submit(OWNER, submit([FILE_ID]))).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(f.authorization).not.toHaveBeenCalled();
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+    expect(f.fetchStorage).not.toHaveBeenCalled();
+    expect(f.rows.has(operationPath)).toBe(false);
+    expect(f.rows.has(lockPath)).toBe(false);
+  });
+
+  it('cannot turn an attachment-only assignment into text submission when storage policy is absent', async () => {
+    const f = fixture({ resolveStorageTarget: undefined });
+    f.granted.assignment.allowsText = false;
+    expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ canSubmit: false, maxFiles: 0,
+      rules: { status: 'confirmed', allowsText: false, allowsAttachments: false } });
+    await expect(f.service.submit(OWNER, submit())).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_BLOCKED' });
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+    expect(f.rows.has(operationPath)).toBe(false);
+  });
+
   it('does not retain old details when the fresh authorization has no detail snapshot', async () => {
     const f = fixture();
     f.base.details = { status: 'available', fetchedAt: new Date(NOW - 60_000).toISOString(), submissionType: 'individual',
@@ -188,10 +234,12 @@ describe('public v2 submission adapter gates and preparation', () => {
       expect(f.fetchSchool).not.toHaveBeenCalled();
     });
 
-  it('does not use activity flags alone when CSRF evidence is absent', async () => {
-    const f = fixture();
+  it.each([true, false])('does not use activity flags alone when CSRF evidence is absent (storage=%s)', async storage => {
+    const f = fixture(storage ? {} : { resolveStorageTarget: undefined });
     delete f.granted.binding.cookies['XSRF-TOKEN'];
     expect((await f.service.prepare(OWNER, SCOPE)).canSubmit).toBe(false);
+    await expect(f.service.submit(OWNER, submit())).rejects.toMatchObject({ code: 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED' });
+    expect(f.fetchSchool).not.toHaveBeenCalled();
   });
 
   it('rejects a mismatched authorization scope before projecting its content', async () => {
@@ -294,16 +342,16 @@ describe('public v2 upload and final mapping', () => {
     expect(f.legacyReconcile).not.toHaveBeenCalled();
   });
 
-  it('supports pure text without creating a v1 operation or uploading files', async () => {
-    const f = fixture();
+  it.each([true, false])('supports pure text without creating a v1 operation or uploading files (storage=%s)', async storage => {
+    const f = fixture(storage ? {} : { resolveStorageTarget: undefined });
     expect((await f.service.submit(OWNER, submit())).status).toBe('confirmed');
     expect(f.rows.get(operationPath)?.version).toBe(2);
     expect(f.fetchStorage).not.toHaveBeenCalled();
     expect(finalCalls(f)).toHaveLength(1);
   });
 
-  it('keeps a lost final response unknown and cannot dispatch again across service instances', async () => {
-    const f = fixture();
+  it.each([true, false])('keeps a lost final response unknown and cannot dispatch again across service instances (storage=%s)', async storage => {
+    const f = fixture(storage ? {} : { resolveStorageTarget: undefined });
     f.loseFinalResponse();
     expect(await f.service.submit(OWNER, submit())).toEqual({ status: 'unknown', operationId: OPERATION, receipt: null });
     const saved = structuredClone(f.rows.get(operationPath));
@@ -349,6 +397,23 @@ describe('public v2 upload and final mapping', () => {
     expect(f.rows.get(operationPath)).toEqual(before);
     expect(f.rows.has(lockPath)).toBe(true);
     expect(finalCalls(f)).toHaveLength(1);
+  });
+
+  it('keeps an existing attachment operation read-only when its storage policy is removed', async () => {
+    const f = fixture();
+    await f.service.upload(OWNER, upload());
+    f.loseHistory();
+    expect((await f.service.submit(OWNER, submit([FILE_ID]))).status).toBe('unknown');
+    const before = structuredClone(f.rows.get(operationPath));
+    const textOnly = createTronClassPublicSubmissionService({ ...f.dependencies, resolveStorageTarget: undefined });
+    await expect(textOnly.submit(OWNER, submit([FILE_ID]))).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    f.loseHistory(false);
+    f.setEnabled(false);
+    expect((await textOnly.reconcile(OWNER, { operationId: OPERATION, revision: REVISION })).status).toBe('confirmed');
+    expect(f.rows.get(operationPath)).toEqual(before);
+    expect(f.rows.has(lockPath)).toBe(true);
+    expect(finalCalls(f)).toHaveLength(1);
+    expect(f.fetchStorage).toHaveBeenCalledOnce();
   });
 
   it('uses the original v1 reconciler only for v1 ledger records', async () => {

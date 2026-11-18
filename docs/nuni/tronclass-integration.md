@@ -2,6 +2,24 @@
 
 更新日期：2026-11-18。此文件描述本分支的實作與驗證範圍，不代表已部署或已完成校方真人帳號驗收。
 
+## 2026-11-18：登入期限、一般教材與純文字繳交
+
+本輪接續 `be3d2276`，整合 main `0bc54fde` 與同期的 CI 修正 `85896f92`，修正三項會妨礙實際使用的流程：
+
+- **整段登入共用期限。** 原生登入、CAS 入口、GET／307／308 轉址、ticket 與 profile 共用呼叫方指定的總預算。每一跳使用剩餘時間，期限耗盡後不再送下一個請求，也不接受取消後才抵達的成功回應，避免畫面已逾時、伺服器卻稍後完成綁定。正常登入仍保存 profile 輪替後的 cookie。
+- **一般教材支援官方數字檔案 ID。** 同步與下載共用識別規則；有 `upload.id` 時使用正整數 ID，沒有 ID 才保留舊 key-only adapter 相容性。無效 ID 不改取另一個 storage key。reference、外部來源、隱藏、刪除、未通過審核及上傳／裁切中或失敗的附件不走一般 blob 路徑。下載前後重查本人課程、活動、同一附件與綁定，並核對來源大小及實際 bytes；途中撤權或來源變動時不回傳檔案。
+- **純文字與附件能力分開。** 已驗證的 tenant provider 可以獨立處理純文字，不再強制先配置附件 storage resolver。文字仍需 server 開關、契約確認、可信 authorizer、本人／作業歸屬、CSRF、單次 final claim 與精確讀回。未配置 storage policy 時，prepare 的附件數量／大小／類型歸零，upload 或帶附件的 final 在任何來源寫入前拒絕。只允許附件的作業不會因此變成文字作業；原附件操作仍可唯讀查證，不能重送。
+
+Production default 仍未注入經實測驗證的 tenant provider，`contractVerified: false` 保持不變。以上能力分離不把環境變數或合成回應當成校方寫入授權。
+
+### 本輪驗證
+
+使用 Node **22.23.5**，整合後 TronClass server／Web client／工作區及校方登入回歸：**55 個測試檔通過、1,694 項通過、33 項環境相關測試略過、0 失敗**。各修正的局部測試與此範圍重疊，不相加。完整 Web TypeScript 與全部修改 TypeScript 檔案 ESLint 通過；TypeScript 使用 6 GiB heap 完成，未關閉型別檢查或修改 tsconfig。
+
+前版 `be3d2276` 的 [Build Web 原始紀錄](https://github.com/Miiduoa/graduation/actions/runs/44254641067/job/134638176962) 顯示 Next build、真正 Docker 建置及非 root runtime 均成功，但 Playwright 1.57 安裝在已切換至 Ubuntu 26.04 的 `ubuntu-latest` 上失敗，瀏覽器案例未執行。已整合同期 `85896f92` 的修正，將該 job 固定於專案其他瀏覽器工作流已使用的 `ubuntu-24.04`，保留全部建置與瀏覽器驗證步驟；YAML 結構已核對。新版本的實際 Chromium、Docker 與完整 CI 結果仍以該版本的 GitHub Actions 為準。
+
+本輪尚未完成本人校方登入、真實下載與真實收件驗收；未將其他帳號的私人課務資料放入 repository、fixture 或測試紀錄。
+
 ## 功能狀態
 
 Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。原生 Mobile 入口為 `TronClassWorkspace`，學習首頁與 nuni 課程工作區均有入口；深連結路徑為 `/tronclass`。目前只支援靜宜大學 `https://tronclass.pu.edu.tw`。
@@ -141,11 +159,11 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 ### 教材附件下載
 
-`POST /api/tronclass/material-download` 接收 `courseId`、`activityId`、`uploadKey`、`revision`。伺服器先確認目前校方學生的課程清單，再從該課程的一般／courseware 活動核對附件與 `allow_download: true`，只讀取固定校方 `/api/uploads/{key}/blob`。前端傳入任意網址、其他活動的 key、隱藏活動或不允許下載的檔案都不能下載。
+`POST /api/tronclass/material-download` 接收 `courseId`、`activityId`、`uploadKey`、`revision`。伺服器先確認目前校方學生的課程清單，再從該課程的一般／courseware 活動核對附件與 `allow_download: true`，只讀取固定校方 `/api/uploads/{id}/blob`。公開欄位 `uploadKey` 保持相容，但官方一般附件採數字 `upload.id` 的字串表示；只有來源沒有 ID 時才支援既有 key-only adapter。前端傳入任意網址、其他活動的 ID／key、隱藏活動或不允許下載的檔案都不能下載。
 
 回傳 attachment 與經過清理的檔名；不把校方 cookie 帶到瀏覽器。支援一般文件、壓縮檔、圖片、音訊與影片 MIME，拒絕 HTML／JSON 登入回應與未知格式；不跟隨來源 redirect。單檔上限 25 MiB、讀取校方來源最多 30 秒，回傳使用 64 KiB 區塊串流、傳送最多 60 秒。每程序最多同時處理 2 個下載，完成、取消或逾時才釋放名額，超過時回傳 429。檔案僅在這次請求記憶體中處理。超過限制或需跳轉到儲存服務的教材保留原始教材入口，不擴大校方網址白名單。
 
-下載完成前再確認綁定與 nuni 身分；前端也會丟棄舊 owner／revision／課程的晚到結果。下載 bytes、檔名與權限不是由前端原始連結直接採信。
+下載完成前再確認綁定、nuni 身分、本人課程、教材活動與同一附件的權限；附件被撤回、改名或大小改變時不回傳已取得的 bytes。前端也會丟棄舊 owner／revision／課程的晚到結果。下載 bytes、檔名與權限不是由前端原始連結直接採信。
 
 ### Agent 介面
 

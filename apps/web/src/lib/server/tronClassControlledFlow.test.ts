@@ -74,7 +74,7 @@ function memoryDb() {
     beforeNextTransaction: (callback: () => void) => { nextTransaction = callback; } };
 }
 
-function controlledEnvironment(options: { fail?: FailureStage; failFile?: number } = {}) {
+function controlledEnvironment(options: { fail?: FailureStage; failFile?: number; withoutStoragePolicy?: boolean } = {}) {
   const trace: string[] = [];
   const store = memoryDb();
   const ownerHash = createHash('sha256').update(OWNER).digest('hex');
@@ -192,7 +192,7 @@ function controlledEnvironment(options: { fail?: FailureStage; failFile?: number
         priorSubmissionIds: history.list.map(row => row.id), userSubmitCount: history.list.length,
         ordinaryWindowConfirmed: true, prerequisitesConfirmed: true };
     },
-    resolveStorageTarget: async evidence => {
+    resolveStorageTarget: options.withoutStoragePolicy ? undefined : async evidence => {
       const target = targets.get(evidence.uploadId);
       return target && target.url === evidence.url && target.mode === evidence.mode ? { ...target } : null;
     },
@@ -218,6 +218,18 @@ function controlledEnvironment(options: { fail?: FailureStage; failFile?: number
 }
 
 describe('controlled attachment-to-final school protocol flow', () => {
+  it('verifies text without a storage policy and rejects attachment calls before any source access', async () => {
+    const test = controlledEnvironment({ withoutStoragePolicy: true });
+    const flow = test.factories();
+    await expect(flow.upload(OWNER, uploadInput())).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    await expect(flow.dispatch(OWNER, finalInput())).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(test.trace).toEqual([]);
+    expect(test.operationRows()).toEqual([]);
+    expect(await flow.dispatch(OWNER, finalInput([]))).toMatchObject({ state: 'verified-new-version', submissionId: 501 });
+    expect(test.trace.filter(stage => stage === 'POST final')).toHaveLength(1);
+    expect(test.trace.some(stage => /metadata|binary|callback/.test(stage))).toBe(false);
+  });
+
   it('transfers PDF and ZIP bytes before final POST and verifies the exact student version', async () => {
     const test = controlledEnvironment();
     await test.uploadFiles();

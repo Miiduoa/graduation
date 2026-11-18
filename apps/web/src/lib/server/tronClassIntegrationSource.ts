@@ -24,6 +24,7 @@ import type { LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronCla
 import { tronClassLmsReadonlySource } from './tronClassLmsSource';
 import { createTronClassBindingService } from './tronClassBinding';
 import { isTronClassSourceVisible } from './tronClassSourceVisibility';
+import { isTronClassMaterialDownloadAllowed, tronClassMaterialUploadKey } from './tronClassMaterialFile';
 
 const MAX_OVERVIEW_COURSES = 40;
 const READ_BUDGET_MS = 50_000;
@@ -182,7 +183,7 @@ function material(raw: unknown, course: TronClassCourseSummary) {
     if (!isTronClassSourceVisible(file)) return [];
     const name = text(file.name || file.filename, 200);
     if (!name) return [];
-    const key = text(file.key || file.file_key || file.upload_id, 200);
+    const key = isTronClassMaterialDownloadAllowed(file) ? tronClassMaterialUploadKey(file) : null;
     const allowDownload = file.allow_download === true;
     return [{ name, allowDownload, downloadHref: allowDownload && key ? tronClassUploadHref(key) : null }];
   });

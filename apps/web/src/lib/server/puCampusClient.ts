@@ -535,6 +535,7 @@ export function createPuCampusGateway(
     init: RequestInit & {
       cookies?: CookieJar;
       timeoutMs?: number;
+      deadline?: number;
       context?: CampusErrorDetails;
       confineOrigin?: string;
       confineOrigins?: readonly string[];
@@ -549,10 +550,17 @@ export function createPuCampusGateway(
         code: PU_ECAMPUS_DATA_PAUSED_CODE,
       });
     }
-    const waitMs = init.timeoutMs ?? timeoutMs;
+    const context = init.context || {};
+    const assertDeadline = () => {
+      if (init.deadline !== undefined && Date.now() >= init.deadline) {
+        throw new PuCampusError('timeout', '學校系統無回應', { ...context, code: 'DEADLINE' });
+      }
+    };
+    assertDeadline();
+    const waitMs = Math.min(init.timeoutMs ?? timeoutMs,
+      init.deadline === undefined ? Infinity : init.deadline - Date.now());
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), waitMs);
-    const context = init.context || {};
     try {
       const headers = new Headers(init.headers);
       headers.set('User-Agent', USER_AGENT);
@@ -568,6 +576,9 @@ export function createPuCampusGateway(
         signal: controller.signal,
       });
       const html = await response.text();
+      // A transport can resolve just after its abort. Do not continue a CAS
+      // redirect chain or accept a session after the shared login deadline.
+      assertDeadline();
       const locationHeader = response.headers.get('location');
       const allowedOrigins = init.confineOrigins || (init.confineOrigin ? [init.confineOrigin] : null);
       const location = allowedOrigins
@@ -625,6 +636,7 @@ export function createPuCampusGateway(
       headers?: HeadersInit;
       hops?: number;
       timeoutMs?: number;
+      deadline?: number;
       context?: CampusErrorDetails;
     } = {},
   ): Promise<SentPage> {
@@ -639,6 +651,7 @@ export function createPuCampusGateway(
       headers: init.headers,
       cookies: jar,
       timeoutMs: init.timeoutMs,
+      deadline: init.deadline,
       context: init.context,
       confineOrigins: lmsAllowedOrigins,
     });
@@ -655,6 +668,7 @@ export function createPuCampusGateway(
         headers: init.headers,
         cookies: jar,
         timeoutMs: init.timeoutMs,
+        deadline: init.deadline,
         context: init.context,
         confineOrigins: lmsAllowedOrigins,
       });
@@ -671,6 +685,7 @@ export function createPuCampusGateway(
       headers?: HeadersInit;
       hops?: number;
       timeoutMs?: number;
+      deadline?: number;
       context?: CampusErrorDetails;
     },
   ): Promise<SentPage> {
@@ -694,6 +709,7 @@ export function createPuCampusGateway(
       headers: init.headers,
       cookies: jar,
       timeoutMs: init.timeoutMs,
+      deadline: init.deadline,
       context: init.context,
       confineOrigins: lmsAllowedOrigins,
     });
@@ -719,6 +735,7 @@ export function createPuCampusGateway(
           headers: init.headers,
           cookies: jar,
           timeoutMs: init.timeoutMs,
+          deadline: init.deadline,
           context: init.context,
           confineOrigins: lmsAllowedOrigins,
         });
@@ -734,6 +751,7 @@ export function createPuCampusGateway(
         headers: init.headers,
         cookies: jar,
         timeoutMs: init.timeoutMs,
+        deadline: init.deadline,
         context: init.context,
         confineOrigins: lmsAllowedOrigins,
       });
@@ -749,6 +767,7 @@ export function createPuCampusGateway(
     route: CampusLoginRoute,
     timeoutMsRemaining: number,
     unauthorized: 'credentials' | 'missing' = 'missing',
+    deadline?: number,
   ): Promise<TronClassSession | null> {
     const profilePage = await send(`${lmsOrigin}/api/profile`, {
       cookies,
@@ -758,6 +777,7 @@ export function createPuCampusGateway(
         Referer: `${lmsOrigin}/user/index`,
       },
       timeoutMs: timeoutMsRemaining,
+      deadline,
       context: { route, stage: 'verify' },
     });
     if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
@@ -944,16 +964,24 @@ export function createPuCampusGateway(
     async loginTronClass(account, password, options = {}) {
       const started = Date.now();
       const budget = options.timeoutMs;
+      const deadline = budget === undefined ? undefined : started + budget;
       const hopCap = options.hopTimeoutMs ?? timeoutMs;
       const leftover = () => (budget == null ? hopCap : budget - (Date.now() - started));
-      const remaining = () => Math.max(1, Math.min(hopCap, leftover()));
       const route = options.route || 'teacher';
+      const remaining = (stage: CampusLoginStage) => {
+        const available = leftover();
+        if (available <= 0) {
+          throw new PuCampusError('timeout', '學校系統無回應', { route, stage, code: 'DEADLINE' });
+        }
+        return Math.min(hopCap, available);
+      };
       try {
         const posted = await send(`${lmsOrigin}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ user_name: account, password }),
-          timeoutMs: remaining(),
+          timeoutMs: remaining('submit'),
+          deadline,
           context: { route, stage: 'submit' },
         });
         if (posted.status === 200 && isCredentialPage(posted.html)) {
@@ -966,8 +994,9 @@ export function createPuCampusGateway(
             account,
             loginData,
             route,
-            remaining(),
+            remaining('verify'),
             'credentials',
+            deadline,
           );
           if (session) return session;
           throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
@@ -985,7 +1014,8 @@ export function createPuCampusGateway(
         const loginPage = await followLms(`${lmsOrigin}/login?next=/user/index`, {
           headers: { Accept: 'text/html' },
           hops: 5,
-          timeoutMs: remaining(),
+          timeoutMs: remaining('redirect'),
+          deadline,
           context: { route, stage: 'redirect' },
         });
         if (loginPage.status !== 200) {
@@ -1017,7 +1047,8 @@ export function createPuCampusGateway(
             Referer: `${identityOrigin}/`,
           },
           hops: 8,
-          timeoutMs: remaining(),
+          timeoutMs: remaining('submit'),
+          deadline,
           context: { route, stage: 'submit' },
         });
         if (isCredentialPage(postedCas.html)) {
@@ -1030,7 +1061,8 @@ export function createPuCampusGateway(
                 cookies: postedCas.cookies,
                 headers: { Accept: 'text/html' },
                 hops: 3,
-                timeoutMs: remaining(),
+                timeoutMs: remaining('verify'),
+                deadline,
                 context: { route, stage: 'verify' },
               });
         if (isCredentialPage(indexPage.html)) {
@@ -1057,6 +1089,8 @@ export function createPuCampusGateway(
               {},
               route,
               Math.min(LMS_PROFILE_TIMEOUT_MS, profileWait),
+              'missing',
+              deadline,
             );
             if (verified) return verified;
           } catch (error) {
@@ -1064,7 +1098,10 @@ export function createPuCampusGateway(
             if (!timedOut || !casSession) throw error;
           }
         }
-        if (casSession) return casSession;
+        if (casSession) {
+          remaining('verify');
+          return casSession;
+        }
         throw new PuCampusError('unverified', '暫時無法驗證老師身分', { route, stage: 'verify' });
       } catch (error) {
         throw classifyCampusFailure(error, { route });

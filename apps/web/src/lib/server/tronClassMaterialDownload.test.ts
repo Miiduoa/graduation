@@ -52,6 +52,79 @@ describe('authorized material download', () => {
     expect(f.fetch).not.toHaveBeenCalled();
   });
 
+  it('downloads an official ID-only file and revalidates the same metadata after receiving bytes', async () => {
+    const f = fixture();
+    const row = { ...material, uploads: [{ id: 741, key: 'storage-key', name: '官方講義.pdf',
+      size: fixtureBytes.length, allow_download: true }] };
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [row] });
+    const result = await f.download(owner, { ...input, uploadKey: '741' });
+    expect(result).toEqual({ bytes: fixtureBytes, name: '官方講義.pdf', contentType: 'application/pdf' });
+    expect(f.fetch).toHaveBeenCalledOnce();
+    expect(f.fetch).toHaveBeenCalledWith('https://tronclass.pu.edu.tw/api/uploads/741/blob', expect.anything());
+    expect(f.source.fetchCourses).toHaveBeenCalledTimes(4);
+    expect(f.source.fetchActivities).toHaveBeenCalledTimes(4);
+    const denied = fixture();
+    vi.mocked(denied.source.fetchActivities).mockResolvedValue({ ok: true, value: [row] });
+    await expect(denied.download(owner, { ...input, uploadKey: 'storage-key' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(denied.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { reference_id: 91 }, { source: 'LARK' }, { source: 'auto-generated-pdf' },
+    { audit_status: 'pending' }, { deleted: true }, { from_project: true },
+    { type: 'link' }, { status: 'uploading' },
+  ])('does not fetch bytes for an unsupported numeric upload: %j', async (flags) => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+      uploads: [{ id: 741, name: 'resource.pdf', allow_download: true, ...flags }],
+    }] });
+    await expect(f.download(owner, { ...input, uploadKey: '741' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a duplicate numeric ID even when only one copy permits download', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+      uploads: [{ id: 741, name: 'resource.pdf', allow_download: true },
+        { id: 741, name: 'resource.pdf', allow_download: false }],
+    }] });
+    await expect(f.download(owner, { ...input, uploadKey: '741' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
+    expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['permission', 'course', 'filename', 'size'] as const)(
+    'discards received file bytes if the school changes %s during download', async (change) => {
+      const f = fixture();
+      const file = { id: 741, name: 'notes.pdf', size: fixtureBytes.length, allow_download: true };
+      vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material, uploads: [file] }] });
+      f.fetch.mockImplementation(async () => {
+        if (change === 'course') vi.mocked(f.source.fetchCourses).mockResolvedValue([]);
+        else vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+          uploads: [{ ...file, ...(change === 'permission' ? { allow_download: false }
+            : change === 'filename' ? { name: 'different.pdf' } : { size: fixtureBytes.length + 1 }) }],
+        }] });
+        return new Response(fixtureBytes, { headers: { 'Content-Type': 'application/pdf' } });
+      });
+      await expect(f.download(owner, { ...input, uploadKey: '741' })).rejects.toMatchObject({
+        code: ['course', 'permission'].includes(change) ? 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' : 'TRONCLASS_DOWNLOAD_UNAVAILABLE',
+      });
+      expect(f.fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('rejects bytes that disagree with the school file size before releasing the download', async () => {
+    const f = fixture();
+    vi.mocked(f.source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...material,
+      uploads: [{ id: 741, name: 'notes.pdf', size: fixtureBytes.length + 1, allow_download: true }],
+    }] });
+    await expect(f.download(owner, { ...input, uploadKey: '741' }))
+      .rejects.toMatchObject({ code: 'TRONCLASS_DOWNLOAD_UNAVAILABLE' });
+    expect(f.fetch).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { ...material, course_id: 999 },
     { ...material, type: 'homework' },

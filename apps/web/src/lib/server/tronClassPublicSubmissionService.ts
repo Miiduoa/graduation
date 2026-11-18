@@ -41,6 +41,7 @@ export type TronClassPublicSubmissionDependencies = {
   contractVerified?: boolean;
   enabled?: () => boolean;
   authorization?: TronClassControlledSubmissionDependencies['authorize'];
+  /** Independently verified attachment destination policy; not needed for text-only writes. */
   resolveStorageTarget?: TronClassControlledSubmissionDependencies['resolveStorageTarget'];
   /** Owner is explicit. Each controlled candidate closes over this request's owner. */
   readHistory?: ReturnType<typeof createTronClassRawSubmissionHistoryReader>;
@@ -98,16 +99,21 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
   const { db, bindings, readonlyPrepare, legacyReconcile, now = Date.now } = dependencies;
   const authorization = dependencies.authorization;
   const resolveStorageTarget = dependencies.resolveStorageTarget;
+  const attachmentsConfigured = typeof resolveStorageTarget === 'function';
   const contractVerified = dependencies.contractVerified === true;
   const runtimeEnabled = dependencies.enabled ?? (() => false);
   const readHistory = dependencies.readHistory ?? createTronClassRawSubmissionHistoryReader({ bindings, now });
   const journal = createTronClassControlledJournal({ db, bindings, now });
   const reconcile = createTronClassOperationReconciler({ db, bindings, legacyReconcile, readHistory, now });
   const enabled = () => runtimeEnabled() === true && contractVerified &&
-    typeof authorization === 'function' && typeof resolveStorageTarget === 'function';
+    typeof authorization === 'function';
   const guardWrites = () => {
     if (runtimeEnabled() !== true) fail(503, 'TRONCLASS_WRITES_DISABLED');
-    if (!contractVerified || typeof authorization !== 'function' || typeof resolveStorageTarget !== 'function') unavailable();
+    if (!contractVerified || typeof authorization !== 'function') unavailable();
+  };
+  const guardAttachmentWrites = () => {
+    guardWrites();
+    if (!attachmentsConfigured) unavailable();
   };
   async function current(ownerKey: string, revision: string, studentId?: number): Promise<TronClassSubmissionBinding> {
     const binding = await bindings.requireBinding(ownerKey);
@@ -121,7 +127,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
   function controlled(ownerKey: string) {
     guardWrites();
     return createTronClassControlledSubmission({
-      db, bindings, enabled, authorize: authorization!, resolveStorageTarget: resolveStorageTarget!,
+      db, bindings, enabled, authorize: authorization!, resolveStorageTarget,
       readHistory: (binding, scope, signal) => readHistory(ownerKey, binding, scope, signal),
       fetchSchool: dependencies.fetchSchool, fetchStorage: dependencies.fetchStorage, now,
     });
@@ -173,12 +179,13 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
       if (!granted.assignment || granted.assignment.courseId !== scope.courseId || granted.assignment.homeworkId !== scope.homeworkId ||
         granted.assignment.studentId !== binding.userId) conflict();
       assignmentShape(granted.assignment);
+      const allowsAttachments = attachmentsConfigured && granted.assignment.allowsAttachments;
       let reason = blockedReason();
       if (!reason) {
         try {
           assertTronClassCandidateAuthorization(granted, scope, now(), false);
           tronClassCandidateHeaders(granted.binding);
-          if (!granted.assignment.allowsText && (!granted.assignment.allowsAttachments || granted.assignment.maxFiles === 0 ||
+          if (!granted.assignment.allowsText && (!allowsAttachments || granted.assignment.maxFiles === 0 ||
             granted.assignment.maxFileBytes === 0 || granted.assignment.maxTotalBytes === 0)) fail(409, 'TRONCLASS_SUBMISSION_BLOCKED');
         } catch (error) {
           if (error instanceof NuniError && error.code === 'TRONCLASS_SUBMISSION_BLOCKED') {
@@ -194,10 +201,11 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
       return {
         ...preparation, title: assignment.title, description: assignment.description, deadline: assignment.deadline,
         canSubmit: reason === null, blockedReason: reason, receipt: null,
-        maxFiles: Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES), maxFileBytes: Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES),
-        allowedContentTypes: [...assignment.allowedContentTypes],
+        maxFiles: allowsAttachments ? Math.min(assignment.maxFiles, TRONCLASS_MAX_FILES) : 0,
+        maxFileBytes: allowsAttachments ? Math.min(assignment.maxFileBytes, TRONCLASS_MAX_FILE_BYTES) : 0,
+        allowedContentTypes: allowsAttachments ? [...assignment.allowedContentTypes] : [],
         rules: assignment.permissionKnown ? { status: 'confirmed', allowsText: assignment.allowsText,
-          allowsAttachments: assignment.allowsAttachments, maxTotalBytes: Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES) } : { status: 'unknown' },
+          allowsAttachments, maxTotalBytes: allowsAttachments ? Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES) : 0 } : { status: 'unknown' },
         // An authorizer can observe newer rules than the earlier read-only call.
         // Missing fresh observations must not revive that earlier detail snapshot.
         details: assignment.details === undefined ? { status: 'unavailable' } : structuredClone(assignment.details),
@@ -210,6 +218,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
         rawInput.name.length > 200 || /[\u0000-\u001f\u007f\\/]/.test(rawInput.name) ||
         typeof rawInput.contentType !== 'string' || rawInput.contentType.length > 100 || !MIME.test(rawInput.contentType) ||
         !(rawInput.bytes instanceof Uint8Array) || !rawInput.bytes.byteLength || rawInput.bytes.byteLength > TRONCLASS_MAX_FILE_BYTES) invalid();
+      guardAttachmentWrites();
       const input = { ...rawInput, bytes: Uint8Array.from(rawInput.bytes) };
       const digest = createHash('sha256').update(input.bytes).digest('hex');
       const transfer = await controlled(ownerKey).upload(ownerKey, input, signal);
@@ -230,6 +239,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
         !Array.isArray(rawInput.attachments) || rawInput.attachments.length > TRONCLASS_MAX_FILES ||
         !Array.from(rawInput.attachments).every(value => typeof value === 'string' && TOKEN.test(value)) ||
         new Set(rawInput.attachments).size !== rawInput.attachments.length || (!rawInput.content.trim() && rawInput.attachments.length === 0)) invalid();
+      if (rawInput.attachments.length > 0) guardAttachmentWrites();
       const input = { courseId: rawInput.courseId, homeworkId: rawInput.homeworkId, revision: rawInput.revision,
         operationId: rawInput.operationId, content: rawInput.content, fileIds: [...rawInput.attachments] };
       const candidate = controlled(ownerKey);

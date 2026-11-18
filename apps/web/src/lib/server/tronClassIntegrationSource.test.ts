@@ -68,6 +68,27 @@ describe('independent TronClass source', () => {
     expect(JSON.stringify(result)).not.toContain('hidden-key');
   });
 
+  it('projects official ID-only material files to the numeric blob route without exposing storage keys', async () => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchActivities).mockResolvedValue({ ok: true, value: [{
+      id: 301, course_id: 101, title: '課堂講義', type: 'material', uploads: [
+        { id: 741, name: 'notes.pdf', allow_download: true },
+        { id: 742, key: 'private-storage-key', name: 'slides.pdf', allow_download: true },
+        { id: 743, name: 'reference.pdf', allow_download: true, reference_id: 91 },
+        { id: 744, name: 'external.pdf', allow_download: true, source: 'LARK' },
+        { id: 745, name: 'pending.pdf', allow_download: true, audit_status: 'pending' },
+        { id: 746, name: 'restricted.pdf', allow_download: false },
+      ],
+    }] });
+    const result = await reader('platform:pa_fixture', { courseId: 101 });
+    expect(result.materials[0].files.map(file => file.downloadHref)).toEqual([
+      'https://tronclass.pu.edu.tw/api/uploads/741/blob',
+      'https://tronclass.pu.edu.tw/api/uploads/742/blob',
+      null, null, null, null,
+    ]);
+    expect(JSON.stringify(result)).not.toContain('private-storage-key');
+  });
+
   it('omits hidden and unpublished work, announcements, and materials from the returned snapshot', async () => {
     const { reader, source } = setup();
     const deniedFlags = [

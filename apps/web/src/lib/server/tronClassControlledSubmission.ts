@@ -8,6 +8,7 @@ import type { TronClassCandidateAuthorization } from './tronClassSubmissionCandi
 import type { TronClassSubmissionBindings, TronClassSubmissionFirestore } from './tronClassSubmission';
 import type { TronClassHomeworkScope, TronClassSubmissionBinding } from './tronClassSubmissionSource';
 import type { FetchLike } from './puEdgeRelay';
+import { NuniError } from '@campus/shared/src/nuni';
 
 export type TronClassControlledSubmissionDependencies = {
   db: TronClassSubmissionFirestore;
@@ -15,7 +16,8 @@ export type TronClassControlledSubmissionDependencies = {
   /** Source-confirmed authorization, never browser-supplied permissions. */
   authorize(ownerKey: string, scope: TronClassHomeworkScope): Promise<TronClassCandidateAuthorization>;
   readHistory(binding: TronClassSubmissionBinding, scope: TronClassHomeworkScope, signal: AbortSignal): Promise<unknown>;
-  resolveStorageTarget: TronClassAttachmentCandidateDependencies['resolveStorageTarget'];
+  /** Required only for attachment writes; text still needs the verified authorizer. */
+  resolveStorageTarget?: TronClassAttachmentCandidateDependencies['resolveStorageTarget'];
   enabled?: () => boolean;
   fetchSchool?: FetchLike;
   fetchStorage?: FetchLike;
@@ -32,7 +34,7 @@ export type TronClassControlledSubmissionDependencies = {
 export function createTronClassControlledSubmission(dependencies: TronClassControlledSubmissionDependencies) {
   const journal = createTronClassControlledJournal({ db: dependencies.db, bindings: dependencies.bindings, now: dependencies.now });
   const assertCurrent = (ownerKey: string, revision: string) => dependencies.bindings.assertCurrent(ownerKey, revision);
-  const attachments = createTronClassAttachmentUploadCandidate({
+  const attachments = typeof dependencies.resolveStorageTarget === 'function' ? createTronClassAttachmentUploadCandidate({
     enabled: dependencies.enabled,
     authorize: dependencies.authorize,
     assertCurrent,
@@ -41,7 +43,7 @@ export function createTronClassControlledSubmission(dependencies: TronClassContr
     fetchSchool: dependencies.fetchSchool,
     fetchStorage: dependencies.fetchStorage,
     now: dependencies.now,
-  });
+  }) : null;
   const final = createTronClassFinalSubmissionCandidate({
     enabled: dependencies.enabled,
     authorize: dependencies.authorize,
@@ -58,6 +60,8 @@ export function createTronClassControlledSubmission(dependencies: TronClassContr
   return Object.freeze({
     contractVerified: false as const,
     async upload(ownerKey: string, input: TronClassAttachmentCandidateInput, signal?: AbortSignal) {
+      // Reject before metadata creation, authorization or durable file claims.
+      if (!attachments) throw new NuniError(503, 'TRONCLASS_SUBMISSION_UNAVAILABLE');
       const transferred = await attachments.dispatch(ownerKey, input, signal);
       // A response is usable by final only after its exact claim has been
       // updated durably. A failed save leaves the original non-repeatable claim.
@@ -65,7 +69,10 @@ export function createTronClassControlledSubmission(dependencies: TronClassContr
       await assertCurrent(ownerKey, transferred.revision);
       return transferred;
     },
-    dispatch(ownerKey: string, input: TronClassFinalCandidateInput, signal?: AbortSignal) {
+    async dispatch(ownerKey: string, input: TronClassFinalCandidateInput, signal?: AbortSignal) {
+      if (!attachments && Array.isArray(input?.fileIds) && input.fileIds.length > 0) {
+        throw new NuniError(503, 'TRONCLASS_SUBMISSION_UNAVAILABLE');
+      }
       return final.dispatch(ownerKey, input, signal);
     },
     reconcile(ownerKey: string, operationId: string, signal?: AbortSignal) {
