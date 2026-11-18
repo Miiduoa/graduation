@@ -202,6 +202,13 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       }
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
+      // A long sequence of already-resolved reads can starve timers even
+      // before reaching the absolute chunk cap. Give Node's event loop a
+      // chance to run the deadline and other requests every 128 chunks.
+      if (chunks % 128 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (signal.aborted) throw new Error('OSM response aborted');
+      }
     }
     if (verifyIdentityLength && size !== declared) {
       throw new Error('OSM response length mismatch');
