@@ -12,7 +12,9 @@
 
 ### 本輪驗證與範圍
 
-使用 Node **22.23.5**，整合後 Web TronClass 回歸 **63 個測試檔通過、2,187 項通過**，另有 **4 檔／38 項環境相關測試略過**；Mobile TronClass 回歸 **14 個測試檔、266 項通過**，兩者均為零失敗。完整 Web TypeScript 增量檢查、修改 TypeScript 檔案的 ESLint，以及瀏覽器驗收腳本的 Python 語法檢查通過。各局部測試與上述數量重疊，不相加；略過項目不計為通過。
+使用 Node **22.23.5**，整合後 Web TronClass 回歸 **63 個測試檔通過、2,187 項通過**，另有 **4 檔／38 項環境相關測試略過**；Mobile TronClass 回歸 **14 個測試檔、266 項通過**，兩者均為零失敗。完整 Web TypeScript 增量檢查與完整 Mobile 型別檢查、修改 TypeScript 檔案的 ESLint，以及瀏覽器驗收腳本的 Python 語法檢查通過。各局部測試與上述數量重疊，不相加；略過項目不計為通過。
+
+首輪遠端 Mobile 檢查指出共用 decoder 的 `semester` 在 Web／Mobile 不同 null-check 設定下有不同的型別縮窄結果。已改用明確 `typeof` 分支，保留相同 runtime 驗證，不加型別斷言或放寬編譯設定；兩端 compiler 設定及完整 Mobile 型別檢查均通過。修正後 client decoder 回歸為 Web **58／58**、Mobile **55／55**，是上述測試的子集合。
 
 另以真正的 Web 工作區元件及合成、隔離的資料端點，在瀏覽器確認「全量同步失敗後仍可選課」及「文字／附件返回清單再恢復」。畫面明示合成驗證，沒有連線校方或送出作業。CI 的既有實際 Next／Docker 瀏覽器驗收腳本同步新增這兩條路徑；本輪沒有把元件預覽當成 Next production build、nuni 真人綁定或已部署證據。
 

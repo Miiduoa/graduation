@@ -57,7 +57,7 @@ export function decodeTronClassCourseIndex(value: unknown): TronClassCourseIndex
     }
     seen.add(row.id);
     courses.push({ id: row.id, name: row.name, code: row.code, teachers,
-      semester: row.semester, status: row.status, href: row.href });
+      semester: typeof row.semester === 'string' ? row.semester : null, status: row.status, href: row.href });
   }
   const errors: TronClassCourseIndexError[] = [];
   for (const error of value.errors) {
