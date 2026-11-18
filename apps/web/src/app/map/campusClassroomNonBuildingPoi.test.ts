@@ -282,3 +282,39 @@ describe('published stop identity survives missing imported metadata', () => {
     }).matches).toEqual([otherSchoolBuilding]);
   });
 });
+
+
+describe('published building identity cannot drift into a classroom destination', () => {
+  const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+
+  it('rejects a moved known building ID rather than routing PH303 to a different point', () => {
+    expect(sourcedHall?.sourceUrl).toBe('https://www.openstreetmap.org/way/255784268');
+    // Only the changed coordinate is synthetic; it is NOT a surveyed location.
+    const displaced = { ...sourcedHall!, lat: sourcedHall!.lat + 0.007 };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [displaced],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [displaced, sourcedHall!],
+    }).matches).toEqual([]); // The same published ID is duplicated: fail closed.
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [sourcedHall!],
+    }).matches).toEqual([sourcedHall]);
+  });
+
+  it('rejects a relabelled known ID but permits small coordinate refinements and other schools', () => {
+    expect(sourcedHall).toBeDefined();
+    const relabelled = { ...sourcedHall!, name: '合成錯誤名稱', building: '主顧樓' };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [relabelled],
+    }).status).toBe('unmatched');
+    const refined = { ...sourcedHall!, lat: sourcedHall!.lat + 0.0001, lng: sourcedHall!.lng - 0.0001 };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [refined],
+    }).matches).toEqual([refined]);
+    // Other schools do not inherit Providence's identity catalog.
+    expect(resolveCampusClassroom({
+      schoolId: 'other-school', query: '主顧樓 PH303', locations: [relabelled],
+    }).matches).toEqual([relabelled]);
+  });
+});
