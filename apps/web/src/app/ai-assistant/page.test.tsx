@@ -490,7 +490,8 @@ it('opens scoped career information without submitting a work-study application'
   ask('開啟職涯');
   const career = await screen.findByRole('link', { name: /開啟職涯/ });
   expect(career.getAttribute('href')).toBe('/career?schoolId=nthu');
-  expect(career.textContent).toContain('申請請依原始公告另行辦理');
+  expect(career.textContent).toContain('送出需在頁面確認');
+  expect(career.textContent).toContain('外部申請依原始公告另行辦理');
   expect(screen.queryByText(/已(?:完成|申請|送出).*工讀|工讀申請成功/)).toBeNull();
   expect(callCampusAssistant).not.toHaveBeenCalled();
   expect(executeCampusAgentWrite).not.toHaveBeenCalled();
