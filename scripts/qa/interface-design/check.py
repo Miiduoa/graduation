@@ -294,7 +294,9 @@ async def scenario(browser, origin, config, reports):
 
     async def capture(name, full_page=True):
         filename = config['name'] + '-' + name + '.png'
-        await page.screenshot(path=str(OUTPUT / filename), full_page=full_page)
+        # Pixel evidence records the settled interface, not a random reveal
+        # frame. Motion behavior is asserted separately before capture.
+        await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
         report['screenshots'].append(filename)
 
     async def layout(name):
