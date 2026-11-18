@@ -29,10 +29,12 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
 async def assert_modal_tab_boundary(page, key, expected, report):
     # Native dialog traversal may visit browser chrome at a document boundary.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
-    # Accept this only when BODY is active and the document actually lost focus;
-    # the next key must return to the exact dialog control. Background page
-    # controls and unexpected controls inside the dialog always fail.
-    for step in (1, 2):
+    # A native scrollable region can also be a focusable area whose DOM anchor
+    # is its element: https://html.spec.whatwg.org/multipage/interaction.html#focusable-area
+    # Each exact intermediate state is allowed only once. Background page
+    # controls, unrelated dialog controls and repeated boundaries always fail.
+    seen = set()
+    for step in (1, 2, 3):
         await page.keyboard.press(key)
         state = await expected.evaluate('''expected => {
           const active = document.activeElement;
@@ -44,6 +46,11 @@ async def assert_modal_tab_boundary(page, key, expected, report):
             insideDialog: Boolean(dialog?.contains(active)),
             expectedActive: active === expected,
             nativeModal: Boolean(dialog?.matches(':modal')),
+            dialogActive: active === dialog,
+            dialogTabIndex: dialog?.getAttribute('tabindex'),
+            dialogOverflowY: dialog ? getComputedStyle(dialog).overflowY : null,
+            dialogScrollHeight: dialog?.scrollHeight,
+            dialogClientHeight: dialog?.clientHeight,
           };
         }''')
         state.update({'key': key, 'step': step})
@@ -51,8 +58,18 @@ async def assert_modal_tab_boundary(page, key, expected, report):
         assert state['nativeModal'], f'Modal state lost at keyboard boundary: {state}'
         if state['documentFocused'] and state['expectedActive'] and state['insideDialog']:
             return
-        assert step == 1 and not state['documentFocused'] and state['activeTag'] == 'BODY', (
-            f'Focus escaped to page content or missed the dialog boundary: {state}')
+        kind = None
+        if not state['documentFocused'] and state['activeTag'] == 'BODY':
+            kind = 'browser-ui'
+        elif (state['documentFocused'] and state['dialogActive'] and state['insideDialog']
+              and state['dialogTabIndex'] is None
+              and state['dialogOverflowY'] in ('auto', 'scroll')
+              and state['dialogClientHeight'] > 0
+              and state['dialogScrollHeight'] > state['dialogClientHeight'] + 1):
+            kind = 'dialog-scroller'
+        assert step < 3 and kind is not None and kind not in seen, (
+            f'Focus escaped, repeated a boundary, or missed the expected control: {state}')
+        seen.add(kind)
 
 
 async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
@@ -429,12 +446,29 @@ async def scenario(browser, origin, config, reports):
         await expect(notification).to_have_count(0, timeout=5000)
         report['checks'].append('Pressed feedback respects motion preferences; completion toast fits, announces status, pauses during focus and resumes afterward')
 
-        await check_dialogs_and_fields(page, config, report, capture)
+        # Collect the independent new form/short-window checks even if one
+        # fails. A failure stays a failure; reset the synthetic page afterward
+        # so a stuck dialog cannot hide defects in the next viewport.
+        section_failures = []
+
+        async def check_section(name, operation):
+            try:
+                await operation()
+            except Exception as failure:
+                section_failures.append({'section': name, 'error': repr(failure)})
+                report['sectionFailures'] = section_failures
+                await capture(name + '-failure', full_page=False)
+                (OUTPUT / (config['name'] + '-' + name + '-failure.html')).write_text(await page.content(), encoding='utf-8')
+                report.setdefault('sectionLedgers', []).append(await page.evaluate('window.__interfaceQA.snapshot()'))
+                await page.goto(origin + '/?' + urlencode(params))
+                await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
+
+        await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
-            await check_short_service_menu(page, report, capture)
+            await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
             # The same real modal must remain operable in a short window, too.
             await page.set_viewport_size({'width': config['width'] if config['width'] < 400 else 390, 'height': 360})
-            await check_dialogs_and_fields(page, config, report, capture, '-short')
+            await check_section('short-forms', lambda: check_dialogs_and_fields(page, config, report, capture, '-short'))
             await page.set_viewport_size({'width': config['width'], 'height': config['height']})
 
         ledger = await page.evaluate('window.__interfaceQA.snapshot()')
@@ -443,6 +477,7 @@ async def scenario(browser, origin, config, reports):
         assert ledger['logouts'] == 0, ledger
         assert not errors, errors
         assert not external, external
+        assert not section_failures, section_failures
         report['checks'].append('No application HTTP calls, real logouts, external requests or browser errors')
         report['status'] = 'passed'
     except Exception as failure:
