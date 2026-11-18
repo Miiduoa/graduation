@@ -57,9 +57,22 @@ function isRoomSuffix(value: string): boolean {
  * No room number, floor or entrance is inferred from the excluded POIs.
  */
 const NON_CLASSROOM_POI_CATEGORIES = new Set([
-  '公車站', '公車站牌', '公車', '停車', '交通', '道路',
-  'bus', 'bus stop', 'bus_stop', 'transit', 'parking', 'road',
+  '公車站', '公車站牌', '公車', '停車', '停車場', '交通', '道路',
+  '校車站', '接駁站', '巴士站', '校門', '出入口',
+  'bus', 'bus stop', 'bus_stop', 'bus station', 'bus_station',
+  'shuttle stop', 'shuttle_stop', 'transit', 'parking', 'car park', 'car_park',
+  'road', 'gate', 'entrance',
 ]);
+
+/** Firestore category labels may append a campus/terminal qualifier in parentheses.
+ * Compare only exact known non-building categories, never a substring of a
+ * legitimate teaching-building label such as "交通工程學院".
+ */
+function isExplicitNonClassroomCategory(value: unknown): boolean {
+  const category = comparisonText(value);
+  const unqualified = category.replace(/\\s*\\([^()]{1,32}\\)\\s*$/u, '').trim();
+  return NON_CLASSROOM_POI_CATEGORIES.has(category) || NON_CLASSROOM_POI_CATEGORIES.has(unqualified);
+}
 
 function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
   const name = comparisonText(suppliedName);
@@ -138,7 +151,7 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     if ('schoolId' in location && location.schoolId !== school) return false;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
-    if (NON_CLASSROOM_POI_CATEGORIES.has(comparisonText(location.category))) return false;
+    if (isExplicitNonClassroomCategory(location.category)) return false;
     return (
       nameMatchesRoom(comparable, location.name) ||
       nameMatchesRoom(comparable, location.building) ||
