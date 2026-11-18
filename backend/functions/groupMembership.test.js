@@ -456,9 +456,14 @@ describe('transferGroupOwnership', () => {
     ['alice', 'bob'].flatMap((uid) => [
       [uid, { status: 'deleted' }],
       [uid, { accountDeletionInProgress: true }],
+      [uid, { status: 'disabled' }],
+      [uid, { status: 'suspended' }],
+      [uid, { status: 'inactive' }],
+      [uid, null],
     ]),
-  )('the transaction rejects deleted or deleting account %s with %j without changing any document', async (uid, profile) => {
-    store.docs.set(`users/${uid}`, profile);
+  )('the transaction rejects unavailable account %s with %j without changing any document', async (uid, profile) => {
+    if (profile === null) store.docs.delete(`users/${uid}`);
+    else store.docs.set(`users/${uid}`, profile);
     const before = completeState();
     await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
     expect(completeState()).toBe(before);
@@ -466,31 +471,29 @@ describe('transferGroupOwnership', () => {
 
   test.each([
     { role: 'student' }, { role: 'student', status: 'active' }, { role: 'teacher' }, {},
-    { status: 'disabled' }, { status: 'suspended' }, { status: 'inactive' }, null,
     { role: 'student', schoolId: 'other-school' },
   ])('legacy profiles %j still transfer and recover the same immutable receipt', async (profile) => {
     for (const uid of ['alice', 'bob']) {
-      if (profile === null) store.docs.delete(`users/${uid}`);
-      else store.docs.set(`users/${uid}`, { ...profile });
+      store.docs.set(`users/${uid}`, { ...profile });
     }
     const first = await transfer();
     expect(first).toMatchObject({ success: true, reused: false, fromUid: 'alice', toUid: 'bob' });
     expect(store.docs.get('groups/one/members/alice').role).toBe('member');
     expect(store.docs.get('groups/one/members/bob').role).toBe('owner');
     for (const uid of ['alice', 'bob']) {
-      expect(store.docs.get(`users/${uid}`)).toEqual(profile === null ? undefined : profile);
+      expect(store.docs.get(`users/${uid}`)).toEqual(profile);
     }
     const beforeReplay = completeState();
     expect(await transfer()).toEqual({ ...first, reused: true });
     expect(completeState()).toBe(beforeReplay);
   });
 
-  test.each(['disabled', 'suspended', 'inactive', 'missing'])('receipt recovery preserves main behavior when the original actor becomes %s', async (status) => {
-    const first = await transfer();
+  test.each(['disabled', 'suspended', 'inactive', 'missing'])('receipt recovery rejects an original actor who becomes %s without changing any document', async (status) => {
+    await transfer();
     if (status === 'missing') store.docs.delete('users/alice');
     else store.docs.set('users/alice', { status });
     const before = completeState();
-    expect(await transfer()).toEqual({ ...first, reused: true });
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
     expect(completeState()).toBe(before);
   });
 
