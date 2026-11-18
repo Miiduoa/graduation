@@ -552,3 +552,38 @@ describe('classroom duplicate IDs are scoped to the selected school', () => {
     }
   });
 });
+
+describe('explicitly joined floor and room classroom labels', () => {
+  it('finds the existing building for compact floor-room input without asserting a room coordinate', () => {
+    // Synthetic room strings describe the user's query, not surveyed indoor floors.
+    // Only the existing building POI can be returned as an outdoor destination.
+    for (const query of [
+      '主顧樓3F303', '主顧樓３Ｆ３０３', '主顧樓3樓303',
+      '主顧樓3F303室', '主顧樓B1F12', '主顧樓 3F 303',
+    ]) {
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [hall],
+      });
+      expect(result.status, query).toBe('matched');
+      expect(result.matches, query).toEqual([hall]);
+    }
+  });
+
+  it('rejects malformed joined room suffixes and keeps transit POIs excluded', () => {
+    for (const query of ['主顧樓3Froom303', '主顧樓3Fabc303', '主顧樓3F999999']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [hall],
+      }).status, query).toBe('unmatched');
+    }
+    const relabelledTransit = {
+      ...hall, id: 'synthetic-joined-transit',
+      category: '公車站', building: '主顧樓',
+    };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: '主顧樓3F303',
+      locations: [relabelledTransit, hall],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([hall]);
+  });
+});
