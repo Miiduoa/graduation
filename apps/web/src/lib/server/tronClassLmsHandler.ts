@@ -311,9 +311,10 @@ async function loadCourseContents(
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
-  // Preserve main's session checks on the original feeds. The supplementary
-  // endpoint can be denied independently; report it without hiding readable data.
+  // A supplementary courseware feed may be absent (404), but an HTTP 401
+  // still invalidates the session. Never return or cache a partial success.
   if (!activitiesResult.ok) requireAuthorizedSchoolRead(activitiesResult.status);
+  if (!coursewareResult.ok) requireAuthorizedSchoolRead(coursewareResult.status);
   if (!announcementResult.ok) requireAuthorizedSchoolRead(announcementResult.status);
 
   const materials: LmsMaterialItem[] = [];
