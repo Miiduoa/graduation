@@ -81,6 +81,8 @@ it('disposes the previous account and school subscription and ignores its late r
   expect(state.listeners[0].unsubscribe).toHaveBeenCalledOnce();
   expect(result.current).toBeNull();
   expect(state.listeners[1].path).toEqual(['schools', 'school-b', 'members', 'account-b']);
+  act(() => state.listeners[1].next(snapshot({ role: 'admin', status: 'active' }, true)));
+  expect(result.current).toBeNull();
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
   expect(result.current).toBeNull();
   act(() => state.listeners[1].next(snapshot({ role: 'student', status: 'active' })));
@@ -122,6 +124,51 @@ it('distinguishes server-confirmed non-membership from an unconfirmed cached mem
     role: 'admin',
     memberStatus: 'inactive',
   });
+});
+
+it.each(['admin', 'editor', 'teacher'])(
+  'keeps the confirmed %s role and legacy status when going offline until the server updates it',
+  (role) => {
+    const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+    act(() => state.listeners[0].next(snapshot({ role })));
+    expect(result.current).toMatchObject({ status: 'ready', role, memberStatus: undefined });
+
+    for (const entry of [
+      snapshot({ role }, true),
+      snapshot(null, true),
+      snapshot({ role: 'student', status: 'inactive' }, true),
+      snapshot({ role: 'student', status: 'inactive' }, false, true),
+    ]) {
+      act(() => state.listeners[0].next(entry));
+      expect(result.current).toMatchObject({ status: 'ready', role, memberStatus: undefined });
+    }
+
+    act(() => state.listeners[0].next(snapshot({ role: 'student', status: 'active' })));
+    expect(result.current).toMatchObject({
+      status: 'ready',
+      role: 'student',
+      memberStatus: 'active',
+    });
+    act(() => state.listeners[0].next(snapshot(null)));
+    act(() => state.listeners[0].next(snapshot({ role }, true)));
+    expect(result.current).toMatchObject({ status: 'ready', role: null });
+  },
+);
+
+it('does not replace a confirmed inactive membership with an active cached or pending status', () => {
+  const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'inactive' })));
+  for (const entry of [
+    snapshot({ role: 'admin', status: 'active' }, true),
+    snapshot({ role: 'admin', status: 'active' }, false, true),
+  ]) {
+    act(() => state.listeners[0].next(entry));
+    expect(result.current).toMatchObject({
+      status: 'ready',
+      role: 'admin',
+      memberStatus: 'inactive',
+    });
+  }
 });
 
 it('retries a failed listener without accepting late callbacks or retries from its previous attempt', () => {

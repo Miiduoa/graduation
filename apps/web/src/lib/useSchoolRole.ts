@@ -57,7 +57,9 @@ export function useSchoolRoleState(
         { includeMetadataChanges: true },
         (snapshot) => {
           if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
-            update({ status: 'loading', role: null });
+            // Keep this scope's last server-confirmed membership for display.
+            // Cache metadata and local edits cannot confirm a role change or
+            // revocation. Writes still use the existing backend authorization.
             return;
           }
           const member = snapshot.exists() ? snapshot.data() : null;
@@ -86,7 +88,7 @@ export function useSchoolRoleState(
     : { status: state.status, role: null, retry };
 }
 
-/** Display only the current account's server-confirmed school role. */
+/** Display the current scope's last server-confirmed school role, including offline. */
 export function useSchoolRole(
   uid: string | null | undefined,
   schoolId: string | null | undefined,
