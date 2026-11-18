@@ -1,4 +1,5 @@
 import { NuniError } from '@campus/shared/src/nuni';
+import type { TronClassCourseIndex, TronClassCourseIndexError } from '@campus/shared/src/tronClassCourseIndex';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import {
   HOMEWORK_MAX_PAGES,
@@ -248,16 +249,26 @@ async function readContents(
   return { announcements, materials, errors };
 }
 
-export function createTronClassIntegrationReader(dependencies: {
+export type TronClassReaderDependencies = {
   bindings?: BindingReader; source?: Source; now?: () => number; budgetMs?: number;
-} = {}) {
+};
+
+type CourseReadContext = {
+  binding: Awaited<ReturnType<BindingReader['requireBinding']>>;
+  courses: TronClassCourseSummary[];
+  errors: TronClassCourseIndexError[];
+  check: () => Promise<void>;
+  read: ReadStep;
+  source: Source;
+  now: () => number;
+};
+
+/** Shared identity, course-list and cancellation boundary for both read shapes. */
+function createTronClassCourseOperation(dependencies: TronClassReaderDependencies) {
   const bindings = dependencies.bindings ?? createTronClassBindingService();
   const source = dependencies.source ?? tronClassLmsReadonlySource;
   const now = dependencies.now ?? Date.now;
-  return async (ownerKey: string, options: { courseId?: number } = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
-    if (options.courseId !== undefined && positiveId(options.courseId) !== options.courseId) {
-      throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
-    }
+  return async <T>(ownerKey: string, readResult: (context: CourseReadContext) => Promise<T>, signal?: AbortSignal): Promise<T> => {
     const deadline = now() + (dependencies.budgetMs ?? READ_BUDGET_MS);
     const controller = new AbortController();
     let failure: NuniError | undefined;
@@ -290,7 +301,7 @@ export function createTronClassIntegrationReader(dependencies: {
         throw error;
       }
     };
-    const operation = async (): Promise<TronClassSnapshot> => {
+    const operation = async (): Promise<T> => {
       try {
         active();
         const binding = await bindings.requireBinding(ownerKey);
@@ -301,7 +312,7 @@ export function createTronClassIntegrationReader(dependencies: {
         };
         await check();
         const courses = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'ongoing' }, readOptions)));
-        const errors: TronClassSyncError[] = [];
+        const errors: TronClassCourseIndexError[] = [];
         await check();
         try {
           const upcoming = parseCourses(await read(readOptions => source.fetchCourses(binding.cookies, { userId: binding.userId, status: 'upcoming' }, readOptions)));
@@ -311,38 +322,9 @@ export function createTronClassIntegrationReader(dependencies: {
           rethrowSession(error);
           errors.push({ courseId: null, area: 'courses', message: '尚未完整讀取即將開始的課程，請稍後重新整理。' });
         }
-        if (options.courseId && !courses.some((course) => course.id === options.courseId)) {
-          throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
-        }
-        const selected = options.courseId
-          ? courses.filter((course) => course.id === options.courseId) : courses.slice(0, MAX_OVERVIEW_COURSES);
-        if (!options.courseId && courses.length > MAX_OVERVIEW_COURSES) {
-          errors.push({ courseId: null, area: 'homework', message: `這次整理前 ${MAX_OVERVIEW_COURSES} 門課的作業；選擇個別課程可讀取該課完整清單。` });
-        }
-        const homework: TronClassHomeworkItem[] = [];
-        let cursor = 0;
-        let stopped = false;
-        const worker = async () => {
-          try {
-            while (!stopped && cursor < selected.length) {
-              const course = selected[cursor++];
-              const result = await readHomework(source, binding.cookies, course, check, read);
-              homework.push(...result.homework);
-              errors.push(...result.errors);
-            }
-          } catch (error) { stopped = true; throw error; }
-        };
-        await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
-        const contents = options.courseId ? await readContents(source, binding.cookies, selected[0], check, read)
-          : { announcements: [], materials: [], errors: [] };
-        errors.push(...contents.errors);
+        const result = await readResult({ binding, courses, errors, check, read, source, now });
         await check();
-        return {
-          revision: binding.revision, fetchedAt: new Date(now()).toISOString(), courses,
-          homework: homework.sort((a, b) => a.courseId - b.courseId || a.id - b.id),
-          announcements: contents.announcements, materials: contents.materials,
-          errors, partial: errors.length > 0,
-        };
+        return result;
       } catch (error) {
         let reason = error;
         try { rethrowSession(error); }
@@ -350,7 +332,7 @@ export function createTronClassIntegrationReader(dependencies: {
         throw stop(reason instanceof NuniError ? reason : new NuniError(503, 'TRONCLASS_SOURCE_UNAVAILABLE'));
       }
     };
-    // One deadline covers binding checks, all course workers and content reads.
+    // One deadline covers identity checks and all reads for the selected operation.
     // Racing the cancellation also bounds providers that ignore AbortSignal.
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
@@ -362,5 +344,58 @@ export function createTronClassIntegrationReader(dependencies: {
       signal?.removeEventListener('abort', abort);
       controller.abort();
     }
+  };
+}
+
+/** Read only the verified owner's course picker; never starts a homework request. */
+export function createTronClassCourseIndexReader(dependencies: TronClassReaderDependencies = {}) {
+  const operation = createTronClassCourseOperation(dependencies);
+  return (ownerKey: string, signal?: AbortSignal): Promise<TronClassCourseIndex> =>
+    operation(ownerKey, async ({ binding, courses, errors, now }) => ({
+      kind: 'course-index' as const, revision: binding.revision,
+      fetchedAt: new Date(now()).toISOString(), courses, errors, partial: errors.length > 0,
+    }), signal);
+}
+
+export function createTronClassIntegrationReader(dependencies: TronClassReaderDependencies = {}) {
+  const operation = createTronClassCourseOperation(dependencies);
+  return async (ownerKey: string, options: { courseId?: number } = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
+    if (options.courseId !== undefined && positiveId(options.courseId) !== options.courseId) {
+      throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+    }
+    return operation(ownerKey, async ({ binding, courses, errors: courseErrors, check, read, source, now }) => {
+      const errors: TronClassSyncError[] = [...courseErrors];
+      if (options.courseId && !courses.some((course) => course.id === options.courseId)) {
+        throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
+      }
+      const selected = options.courseId
+        ? courses.filter((course) => course.id === options.courseId) : courses.slice(0, MAX_OVERVIEW_COURSES);
+      if (!options.courseId && courses.length > MAX_OVERVIEW_COURSES) {
+        errors.push({ courseId: null, area: 'homework', message: `這次整理前 ${MAX_OVERVIEW_COURSES} 門課的作業；選擇個別課程可讀取該課完整清單。` });
+      }
+      const homework: TronClassHomeworkItem[] = [];
+      let cursor = 0;
+      let stopped = false;
+      const worker = async () => {
+        try {
+          while (!stopped && cursor < selected.length) {
+            const course = selected[cursor++];
+            const result = await readHomework(source, binding.cookies, course, check, read);
+            homework.push(...result.homework);
+            errors.push(...result.errors);
+          }
+        } catch (error) { stopped = true; throw error; }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
+      const contents = options.courseId ? await readContents(source, binding.cookies, selected[0], check, read)
+        : { announcements: [], materials: [], errors: [] };
+      errors.push(...contents.errors);
+      return {
+        revision: binding.revision, fetchedAt: new Date(now()).toISOString(), courses,
+        homework: homework.sort((a, b) => a.courseId - b.courseId || a.id - b.id),
+        announcements: contents.announcements, materials: contents.materials,
+        errors, partial: errors.length > 0,
+      };
+    }, signal);
   };
 }

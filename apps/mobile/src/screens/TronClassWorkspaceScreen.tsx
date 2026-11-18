@@ -22,6 +22,7 @@ import {
 } from '../services/tronClassNativeTransport';
 import type {
   TronClassConnection,
+  TronClassCourseIndex,
   TronClassHomework,
   TronClassLocalDraft,
   TronClassSnapshot,
@@ -47,6 +48,7 @@ const field = {
   marginBottom: 12,
 };
 
+const MAX_LOCAL_DRAFTS = 5;
 type HomeworkFilter = 'all' | 'pending' | 'unknown' | 'submitted';
 const homeworkFilters: { value: HomeworkFilter; label: string }[] = [
   { value: 'all', label: '全部作業' },
@@ -211,6 +213,9 @@ export function TronClassWorkspaceScreen() {
 function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient }) {
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
+  const [courseIndex, setCourseIndex] = useState<TronClassCourseIndex | null>(null);
+  const [indexError, setIndexError] = useState('');
+  const [indexLoading, setIndexLoading] = useState(false);
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState('正在讀取連接狀態…');
@@ -223,10 +228,14 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<TronClassHomework | null>(null);
   const [assignmentBusy, setAssignmentBusy] = useState(false);
-  const [draft, setDraft] = useState<TronClassLocalDraft | null>(null);
+  const [drafts, setDrafts] = useState<TronClassLocalDraft[]>([]);
+  const retainedDrafts = useRef<TronClassLocalDraft[]>([]);
   const [courseLoading, setCourseLoading] = useState(false);
   const [fileCache] = useState(() => new NativeTronClassFileCache());
   const courseRequest = useRef(0);
+  const indexRequest = useRef(0);
+  const directorySequence = useRef(0);
+  const acceptedDirectorySequence = useRef(0);
   const latestConnection = useRef(connection);
   latestConnection.current = connection;
   const draftIdentity = useRef<string | null>(null);
@@ -234,17 +243,31 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const mounted = useRef(false);
   const lock = useRef(false);
   const current = () => mounted.current && client.isCurrent();
-  const clearDraft = () => {
+  const clearDrafts = () => {
+    retainedDrafts.current = [];
     fileCache.clear();
-    setDraft(null);
+    setDrafts([]);
     draftIdentity.current = null;
   };
+  function rememberDraft(value: TronClassLocalDraft | null, course: number, homeworkId: number) {
+    if (!current()) return;
+    const key = rememberedKey.current;
+    if (!key) { clearDrafts(); return; }
+    const otherDrafts = retainedDrafts.current.filter((item) => item.courseId !== course || item.homeworkId !== homeworkId);
+    // Opening a sixth new editor is blocked; never silently replace prior work.
+    if (value && otherDrafts.length >= MAX_LOCAL_DRAFTS) return;
+    const next = value ? [...otherDrafts, value] : otherDrafts;
+    retainedDrafts.current = next;
+    draftIdentity.current = next.length ? key : null;
+    fileCache.retain(next.flatMap((item) => item.files));
+    setDrafts(next);
+  }
   function acceptConnection(value: TronClassConnection) {
     const key =
       value.connected && /^[a-f0-9]{64}$/.test(value.studentKey ?? '') ? value.studentKey! : null;
     if (value.connected && (!key || (draftIdentity.current && draftIdentity.current !== key)))
-      clearDraft();
-    if (!value.connected && value.revision === null) clearDraft();
+      clearDrafts();
+    if (!value.connected && value.revision === null) clearDrafts();
     rememberedKey.current = key;
     latestConnection.current = value;
     setConnection(value);
@@ -252,16 +275,68 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setAccount(value.account || '');
     setReconnecting(!value.connected);
   }
-  async function synchronize(value: TronClassConnection) {
+  async function loadCourseIndex(value: TronClassConnection) {
     if (!value.connected || !value.revision) return;
+    const run = ++indexRequest.current;
+    const directoryOrder = ++directorySequence.current;
+    const matches = () => current() && run === indexRequest.current && latestConnection.current?.revision === value.revision;
+    setIndexLoading(true);
+    setIndexError('');
+    try {
+      const data = await client.courses(value.revision);
+      if (matches() && directoryOrder >= acceptedDirectorySequence.current) {
+        acceptedDirectorySequence.current = directoryOrder;
+        setCourseIndex(data);
+      }
+    } catch (failure) {
+      if (!matches()) return;
+      if (tronClassConnectionLost(failure)) lost(failure);
+      else if (directoryOrder >= acceptedDirectorySequence.current) setIndexError(nativeTronClassError(failure));
+    } finally { if (matches()) setIndexLoading(false); }
+  }
+  function synchronize(value: TronClassConnection) {
+    if (!value.connected || !value.revision) return;
+    // The small directory remains usable while a full coursework read is pending.
+    void loadCourseIndex(value);
+    void readCourseData(value, null);
+  }
+  async function readCourseData(connectionValue: TronClassConnection, target: number | null) {
+    if (!connectionValue.connected || !connectionValue.revision) return;
+    const expectedRevision = connectionValue.revision;
     const run = ++courseRequest.current;
-    setBusy('正在讀取課程、作業與教材…');
-    const data = await client.sync(value.revision);
-    if (current() && run === courseRequest.current && latestConnection.current?.revision === value.revision)
-      setSnapshot(data);
+    const directoryOrder = ++directorySequence.current;
+    setCourseId(target);
+    setSelected(null);
+    setCourseLoading(true);
+    setError('');
+    setSnapshot(null);
+    const matches = () => current() && courseRequest.current === run &&
+      latestConnection.current?.revision === expectedRevision;
+    try {
+      const value = await client.sync(expectedRevision, target ?? undefined);
+      if (matches()) {
+        setSnapshot(value);
+        if (directoryOrder >= acceptedDirectorySequence.current) {
+          acceptedDirectorySequence.current = directoryOrder;
+          const errors = value.errors.filter((issue) => issue.area === 'courses' && issue.courseId === null)
+            .map((issue) => ({ courseId: null, area: 'courses' as const, message: issue.message }));
+          setCourseIndex({ kind: 'course-index', revision: value.revision, fetchedAt: value.fetchedAt,
+            courses: value.courses, errors, partial: errors.length > 0 });
+          setIndexError('');
+        }
+      }
+    } catch (failure) {
+      if (!matches()) return;
+      if (tronClassConnectionLost(failure)) lost(failure);
+      else setError(nativeTronClassError(failure));
+    } finally { if (matches()) setCourseLoading(false); }
   }
   function lost(failure: unknown) {
     ++courseRequest.current;
+    ++indexRequest.current;
+    setCourseIndex(null);
+    setIndexError('');
+    setIndexLoading(false);
     setCourseLoading(false);
     setPassword('');
     setSelected(null);
@@ -271,7 +346,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setStatusKnown(false);
     setReconnecting(true);
     setError(nativeTronClassError(failure));
-    if (!rememberedKey.current && !draftIdentity.current) clearDraft();
+    if (!rememberedKey.current && !draftIdentity.current) clearDrafts();
     // Keep only local text and URI handles. Revisions, preparations and confirmations are discarded.
     rememberedKey.current = null;
     latestConnection.current = null;
@@ -281,8 +356,12 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     if (lock.current || assignmentBusy || !current()) return;
     lock.current = true;
     ++courseRequest.current;
+    ++indexRequest.current;
+    setCourseIndex(null);
+    setIndexError('');
+    setIndexLoading(false);
     setCourseLoading(false);
-    if (!rememberedKey.current && !draftIdentity.current) clearDraft();
+    if (!rememberedKey.current && !draftIdentity.current) clearDrafts();
     setBusy('正在讀取連接狀態…');
     setError('');
     setStatusKnown(false);
@@ -294,7 +373,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       const value = await client.status();
       if (!current()) return;
       acceptConnection(value);
-      await synchronize(value);
+      synchronize(value);
     } catch (failure) {
       if (current()) {
         if (tronClassConnectionLost(failure)) lost(failure);
@@ -336,6 +415,10 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setPassword('');
     lock.current = true;
     ++courseRequest.current;
+    ++indexRequest.current;
+    setCourseIndex(null);
+    setIndexError('');
+    setIndexLoading(false);
     setCourseLoading(false);
     setBusy('正在驗證校方帳號…');
     setError('');
@@ -347,7 +430,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       if (!current()) return;
       acceptConnection(value);
       setReconnecting(false);
-      await synchronize(value);
+      synchronize(value);
     } catch (failure) {
       if (!current()) return;
       // A lost reply may have changed the binding. A status read must precede another attempt.
@@ -365,10 +448,14 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     if (lock.current || assignmentBusy || !current() || !statusKnown || !connection) return;
     lock.current = true;
     ++courseRequest.current;
+    ++indexRequest.current;
+    setCourseIndex(null);
+    setIndexError('');
+    setIndexLoading(false);
     setCourseLoading(false);
     setBusy('正在解除連接…');
     setError('');
-    clearDraft();
+    clearDrafts();
     setSelected(null);
     setSnapshot(null);
     setCourseId(null);
@@ -390,57 +477,10 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     }
   }
   async function selectCourse(target: number | null) {
-    if (
-      !current() ||
-      lock.current ||
-      assignmentBusy ||
-      !connection?.connected ||
-      !connection.revision ||
-      !snapshot
-    )
-      return;
-    if (target !== null && !snapshot.courses.some((course) => course.id === target)) return;
-    const expectedRevision = connection.revision;
-    const run = ++courseRequest.current;
-    setCourseId(target);
-    setSelected(null);
-    setCourseLoading(true);
-    setError('');
-    // Keep the same owner's course directory, but never show the previous course's content while loading.
-    setSnapshot({
-      ...snapshot,
-      homework: [],
-      announcements: [],
-      materials: [],
-      errors: [],
-      partial: false,
-    });
-    const matches = () =>
-      current() &&
-      courseRequest.current === run &&
-      latestConnection.current?.revision === expectedRevision;
-    try {
-      const value = await client.sync(expectedRevision, target ?? undefined);
-      if (matches()) setSnapshot(value);
-    } catch (failure) {
-      if (!matches()) return;
-      if (tronClassConnectionLost(failure)) lost(failure);
-      else {
-        const message = nativeTronClassError(failure);
-        setError(message);
-        setSnapshot((previous) =>
-          previous
-            ? {
-                ...previous,
-                partial: true,
-                errors: [{ courseId: target, area: 'courses', message }],
-              }
-            : null,
-        );
-      }
-    } finally {
-      if (matches()) setCourseLoading(false);
-    }
+    if (!current() || lock.current || assignmentBusy || !connection?.connected || !connection.revision) return;
+    const directory = courseIndex?.courses ?? snapshot?.courses;
+    if (!directory || (target !== null && !directory.some((course) => course.id === target))) return;
+    await readCourseData(connection, target);
   }
   async function downloadMaterial(
     material: TronClassSnapshot['materials'][number],
@@ -495,7 +535,8 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   }
   const catalogReady = !!connection?.connected && !!snapshot && !busy && statusKnown;
   const ready = catalogReady && !courseLoading;
-  const courses = snapshot?.courses ?? [];
+  const directoryReady = !!connection?.connected && !!(courseIndex || snapshot) && !busy && statusKnown;
+  const courses = courseIndex?.courses ?? snapshot?.courses ?? [];
   const matchingHomework = snapshot?.homework.filter((row) =>
     (courseId === null || row.courseId === courseId) &&
     `${row.title} ${row.courseName}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
@@ -507,7 +548,12 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     .sort(homeworkOrder);
   const chooseAssignment = (row: TronClassHomework) => {
     if (!ready || assignmentBusy || !current()) return;
-    if (draft && (draft.courseId !== row.courseId || draft.homeworkId !== row.id)) clearDraft();
+    const draft = drafts.find((item) => item.courseId === row.courseId && item.homeworkId === row.id);
+    if (!draft && drafts.length >= MAX_LOCAL_DRAFTS) {
+      setError(`本頁已保留 ${MAX_LOCAL_DRAFTS} 份草稿。請先繼續或丟棄其中一份，再開啟其他作業。`);
+      return;
+    }
+    setError('');
     setSelected(row);
   };
   return (
@@ -629,12 +675,12 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           </Text>
         </AICard>
       ) : null}
-      {draft && !ready ? (
+      {drafts.length > 0 && !ready ? (
         <AICard title="本頁草稿等待恢復">
           <Text style={copy}>
             重新連接經校方驗證的同一帳號後，可在同一份作業恢復文字與附件；送出權限會重新確認。
           </Text>
-          <AIButton label="丟棄保留的草稿" variant="ghost" disabled={!!busy} onPress={clearDraft} />
+          <AIButton label="丟棄保留的草稿" variant="ghost" disabled={!!busy} onPress={clearDrafts} />
         </AICard>
       ) : null}
       {ready && selected ? (
@@ -644,25 +690,10 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           fileCache={fileCache}
           revision={connection.revision!}
           homework={selected}
-          initialDraft={
-            draftIdentity.current === connection.studentKey &&
-            draft?.courseId === selected.courseId &&
-            draft.homeworkId === selected.id
-              ? draft
-              : undefined
-          }
-          onDraftChange={(value) => {
-            if (!current()) return;
-            fileCache.retain(value?.files ?? []);
-            const key = rememberedKey.current;
-            if (!key) {
-              setDraft(null);
-              draftIdentity.current = null;
-              return;
-            }
-            draftIdentity.current = key;
-            setDraft(value);
-          }}
+          initialDraft={draftIdentity.current === connection.studentKey
+            ? drafts.find((item) => item.courseId === selected.courseId && item.homeworkId === selected.id)
+            : undefined}
+          onDraftChange={(value) => rememberDraft(value, selected.courseId, selected.id)}
           onBusy={setAssignmentBusy}
           isBindingCurrent={() => {
             const binding = latestConnection.current;
@@ -687,16 +718,18 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
             setSelected((value) => value?.courseId === selected.courseId && value.id === selected.id
               ? { ...value, submitted: true } : value);
           }}
-          onClose={() => {
-            setSelected(null);
-            clearDraft();
-          }}
+          onClose={() => setSelected(null)}
         />
       ) : null}
-      {catalogReady && !selected ? (
-        <>
+      {indexError && !selected ? <AICard title="課程清單尚未讀取完成">
+        <Text accessibilityRole="alert" style={copy}>{indexError}</Text>
+        <AIButton label="重新讀取課程清單" disabled={indexLoading || !!busy || assignmentBusy}
+          onPress={() => { if (connection) void loadCourseIndex(connection); }} />
+      </AICard> : null}
+      {directoryReady && !selected ? (
           <AICard title="我的校方課程">
-            <Text style={copy}>更新時間：{tronClassNativeTime(snapshot.fetchedAt)}</Text>
+            <Text style={copy}>清單更新時間：{tronClassNativeTime(courseIndex?.fetchedAt ?? snapshot!.fetchedAt)}</Text>
+            {courseIndex?.partial ? <Text style={copy}>部分課程清單尚未取得，可先選擇已顯示的課程。</Text> : null}
             <AIButton
               label="顯示全部課程作業"
               variant="ghost"
@@ -718,12 +751,17 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
               </Text>
             ) : null}
           </AICard>
-          {courseLoading ? (
-            <AICard>
-              <ActivityIndicator accessibilityLabel="正在讀取所選課程" />
-              <Text style={copy}>正在讀取所選課程的完整作業、公告與教材…</Text>
-            </AICard>
-          ) : null}
+      ) : null}
+      {courseLoading && !selected ? <AICard>
+        <ActivityIndicator accessibilityLabel="正在讀取所選課程" />
+        <Text style={copy}>正在讀取作業、公告與教材…{directoryReady ? '可先選擇一門課，不必等候全部同步。' : ''}</Text>
+      </AICard> : null}
+      {directoryReady && !snapshot && !courseLoading && !selected ? <AICard>
+        <Text style={copy}>課程清單已載入。請選一門課讀取作業、公告與教材，或重新整理。</Text>
+        <AIButton label="重試讀取課務" variant="ghost" onPress={() => void selectCourse(courseId)} />
+      </AICard> : null}
+      {catalogReady && !selected && snapshot ? (
+        <>
           {snapshot.partial ? (
             <AICard title="部分資料尚未讀取完成">
               <Text accessibilityRole="alert" style={copy}>
@@ -784,18 +822,25 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
                   : '目前沒有符合條件的作業。'}
               </Text>
             ) : null}
-            {draft ? (
-              <AIButton
-                label="恢復本頁作業草稿"
-                onPress={() => {
-                  const target = snapshot.homework.find(
-                    (row) => row.courseId === draft.courseId && row.id === draft.homeworkId,
-                  );
-                  if (target) chooseAssignment(target);
-                  else setError('最新清單未找到原作業，請重新整理或到校方確認。');
-                }}
-              />
-            ) : null}
+            {drafts.length > 0 ? <View>
+              <Text style={copy}>本頁保留 {drafts.length} 份作業草稿；繳交結果請開啟作業查證。最多保留 {MAX_LOCAL_DRAFTS} 份。</Text>
+              {drafts.map((draft) => {
+                const target = snapshot.homework.find((row) => row.courseId === draft.courseId && row.id === draft.homeworkId);
+                return <View key={`${draft.courseId}:${draft.homeworkId}`}>
+                  <Text style={copy}>{target?.title ?? '待重新確認的作業'}</Text>
+                  <AIButton
+                    label={drafts.length === 1 ? '恢復本頁作業草稿' : `繼續編輯 ${target?.title ?? '待確認的作業'}`}
+                    disabled={!target || !ready}
+                    onPress={() => { if (target) chooseAssignment(target); }}
+                  />
+                  <AIButton
+                    label={drafts.length === 1 ? '丟棄保留的草稿' : `丟棄 ${target?.title ?? '待確認的作業'} 的草稿`}
+                    variant="ghost"
+                    onPress={() => rememberDraft(null, draft.courseId, draft.homeworkId)}
+                  />
+                </View>;
+              })}
+            </View> : null}
           </AICard>
           {snapshot.announcements.filter((row) => courseId === null || row.courseId === courseId)
             .length ? (

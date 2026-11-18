@@ -2,11 +2,11 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { classifySchoolReadError, tronClassUploadHref } from '@campus/shared/src/puLmsReadonly';
 import { createTronClassBindingService } from './tronClassBinding';
 import type { LmsReadonlySource } from './tronClassLmsSource';
-import { createPuRelayFetch } from './puEdgeRelay';
+import { createTronClassDownloadFetch } from './tronClassDownloadTransport';
 import { createTronClassRawSubmissionHistoryReader } from './tronClassRawSubmissionHistory';
 import { normalizeTronClassSubmissionHistory } from './tronClassSubmissionHistory';
 import {
-  createTronClassBoundedBinaryFetch, readTronClassDownloadResponse,
+  readTronClassDownloadResponse,
   TRONCLASS_DOWNLOAD_MAX_BYTES, TRONCLASS_DOWNLOAD_TIMEOUT_MS,
 } from './tronClassMaterialDownload';
 
@@ -42,6 +42,7 @@ export function createTronClassSubmissionAttachmentDownloader(dependencies: {
   bindings?: Bindings;
   source?: LmsReadonlySource;
   fetch?: FetchLike;
+  mediaFetch?: FetchLike;
   now?: () => number;
   timeoutMs?: number;
 } = {}) {
@@ -54,7 +55,7 @@ export function createTronClassSubmissionAttachmentDownloader(dependencies: {
   const readHistory = createTronClassRawSubmissionHistoryReader({
     bindings, source: dependencies.source, now, timeoutMs: Math.min(timeoutMs, 15_000),
   });
-  const fetchFile = dependencies.fetch ?? createPuRelayFetch({ directFetch: createTronClassBoundedBinaryFetch() });
+  const fetchFile = createTronClassDownloadFetch({ schoolFetch: dependencies.fetch, mediaFetch: dependencies.mediaFetch });
 
   return async (ownerKey: string, value: TronClassSubmissionAttachmentDownloadInput, signal?: AbortSignal): Promise<{
     bytes: Uint8Array; name: string; contentType: string;
@@ -107,7 +108,7 @@ export function createTronClassSubmissionAttachmentDownloader(dependencies: {
       const response = await fetchFile(tronClassUploadHref(String(input.uploadId)), {
         method: 'GET', redirect: 'manual', cache: 'no-store', signal: controller.signal,
         headers: { Cookie: cookie, Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
-      });
+      }, check);
       const downloaded = await readTronClassDownloadResponse(response, controller.signal, check);
       if (file.size !== null && file.size !== downloaded.bytes.byteLength) fail(503, 'TRONCLASS_DOWNLOAD_UNAVAILABLE');
       // No file bytes leave this process after the school removes the version,

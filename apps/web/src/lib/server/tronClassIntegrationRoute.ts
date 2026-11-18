@@ -3,7 +3,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { boundedBytes, boundedJson } from '../nuni/server';
 import { authenticateTronClassActor } from './tronClassIntegrationAuth';
 import { createTronClassBindingService } from './tronClassBinding';
-import { createTronClassIntegrationReader } from './tronClassIntegrationSource';
+import { createTronClassCourseIndexReader, createTronClassIntegrationReader } from './tronClassIntegrationSource';
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
 import type { TronClassPublicSubmissionService } from './tronClassPublicSubmissionService';
 import { createUidRateLimiter } from './uidRateLimit';
@@ -15,6 +15,7 @@ export type TronClassRouteDependencies = {
   authenticate?: typeof authenticateTronClassActor;
   bindings?: Bindings;
   read?: ReturnType<typeof createTronClassIntegrationReader>;
+  courses?: ReturnType<typeof createTronClassCourseIndexReader>;
   submissions?: () => Promise<Submissions>;
   rateLimit?: (ownerKey: string) => void;
 };
@@ -25,6 +26,9 @@ const ID = /^[A-Za-z0-9_-]{16,80}$/;
 // School login has its own durable owner/account limit in the binding service.
 const requestLimiter = createUidRateLimiter({ requestsPerMinute: 60 });
 const syncLimiter = createUidRateLimiter({ requestsPerMinute: 6 });
+// The lightweight picker must not consume a full coursework sync. Both stay
+// independently bounded and continue to count against the overall owner limit.
+const courseIndexLimiter = createUidRateLimiter({ requestsPerMinute: 6 });
 const ERROR_MESSAGES: Record<string, string> = {
   SIGN_IN_REQUIRED: '請先登入 nuni，再連接你的 TronClass 帳號。',
   SESSION_CHANGED: '登入帳號已變更，請重新開啟此頁。',
@@ -166,6 +170,11 @@ export async function handleTronClassIntegration(
           if (!dependencies.rateLimit) syncLimiter.check(actor.ownerKey);
           result = await (dependencies.read ?? createTronClassIntegrationReader({ bindings }))(actor.ownerKey,
             input.courseId === undefined ? {} : { courseId: id(input.courseId) }, request.signal);
+          break;
+        case 'courses':
+          only(input, ['action']);
+          if (!dependencies.rateLimit) courseIndexLimiter.check(actor.ownerKey);
+          result = await (dependencies.courses ?? createTronClassCourseIndexReader({ bindings }))(actor.ownerKey, request.signal);
           break;
         case 'prepare':
           only(input, ['action', 'courseId', 'homeworkId']);

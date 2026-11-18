@@ -1,4 +1,5 @@
 import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { decodeTronClassCourseIndex, type TronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
 import { decodeTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import {
   decodeTronClassPreparationCancellation,
@@ -158,6 +159,7 @@ function isReceipt(value: unknown): boolean {
 }
 
 export function parseTronClassResult(action: string, value: unknown, input: Record<string, unknown>): unknown {
+  if (action === 'courses') return decodeTronClassCourseIndex(value) ?? invalidResponse();
   if (!isRecord(value)) return invalidResponse();
   if (['status', 'connect', 'disconnect'].includes(action)) {
     if (
@@ -369,18 +371,21 @@ export function createTronClassClient(identity: TronClassIdentity) {
     return value as T;
   }
 
-  async function request<T>(action: string, input: Record<string, unknown> = {}): Promise<T> {
+  async function request<T>(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
     const authHeaders = await headers();
+    signal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(action === 'connect' || action === 'disconnect' ? 90000 : 60000);
     const response = await fetch('/api/tronclass', {
       method: 'POST',
       cache: 'no-store',
       credentials: 'same-origin',
       redirect: 'error',
-      signal: AbortSignal.timeout(action === 'connect' || action === 'disconnect' ? 90000 : 60000),
+      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
       headers: { ...authHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...input, action }),
     });
     const value = await responseValue<unknown>(response);
+    signal?.throwIfAborted();
     return parseTronClassResult(action, value, input) as T;
   }
 
@@ -419,8 +424,9 @@ export function createTronClassClient(identity: TronClassIdentity) {
       }),
     disconnect: (expectedRevision: string | null) =>
       request<TronClassConnection>('disconnect', { expectedRevision }),
-    sync: (courseId?: number) =>
-      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId }),
+    courses: (signal?: AbortSignal) => request<TronClassCourseIndex>('courses', {}, signal),
+    sync: (courseId?: number, signal?: AbortSignal) =>
+      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId }, signal),
     async downloadMaterial(input: {
       courseId: number;
       activityId: number;

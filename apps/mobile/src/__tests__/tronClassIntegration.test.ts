@@ -23,6 +23,27 @@ import {
 } from './fixtures/tronClassIntegration';
 
 const scope = { courseId: homework.courseId, homeworkId: homework.id, operationId };
+it('loads an independently typed course picker using the same verified native identity', async () => {
+  const index = { kind: 'course-index', revision, fetchedAt: stamp,
+    courses: snapshot.courses.map(course => ({ ...course, href: `https://tronclass.pu.edu.tw/course/${course.id}/content` })),
+    errors: [], partial: false };
+  const request = jest.fn(async () => index);
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
+  expect(await client.courses(revision)).toEqual(index);
+  expect(request).toHaveBeenCalledWith({ action: 'courses' });
+  await expect(client.courses('b'.repeat(32))).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  request.mockResolvedValueOnce({ ...index, kind: 'snapshot' });
+  await expect(client.courses(revision)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+});
+
+it('does not return course choices after the native owner changes during the read', async () => {
+  let current = true;
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => current,
+    request: async () => { current = false; return { kind: 'course-index', revision, fetchedAt: stamp, courses: [], errors: [], partial: false }; },
+    upload: jest.fn() });
+  await expect(client.courses(revision)).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+});
+
 it('parses partial school observations without changing an unknown submission into false', () => {
   const parsed = parseNativeTronClassSnapshot({
     ...snapshot,

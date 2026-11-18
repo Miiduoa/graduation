@@ -2,6 +2,22 @@
 
 更新日期：2026-11-18。此文件描述本分支的實作與驗證範圍；已完成指定真人帳號的校方唯讀抽樣，尚未完成 nuni 綁定、正式繳交及 Web 部署驗收。
 
+## 2026-11-18：獨立課程清單、多份頁內草稿與校方媒體下載
+
+本輪接續 `1a1eb8db`，合併 main `dcb1b9af`，修正三個會中斷工作區操作的問題：
+
+- **課程清單不再等全部作業同步完成。** 新增 `courses` action，只讀本人 ongoing／upcoming 課程。Web／Mobile 可先選課；全量同步逾時時，已取得的清單仍可用。選課會讀取該課程作業、公告與教材，較晚回傳的舊結果不會蓋掉新選擇或新課程清單。清單與完整同步各有獨立的 6 次／分鐘配額，總請求仍受既有 60 次／分鐘限制。
+- **返回清單或切換作業保留文字與附件。** 同一個已驗證學生最多保留 5 份目前工作區草稿；滿額時先要求繼續或清除，不會默默淘汰舊稿。恢復前重新讀取作業條件，重新預覽及確認；不沿用舊上傳 ID 或送出權限。Mobile 附件清理會合併所有草稿的引用，避免在另一份作業選錯檔案時誤刪原稿附件。離開／重整工作區仍會清除，這不是持久化雲端草稿。
+- **支援校方已查明的媒體下載轉址。** 教材與本人繳交附件允許校方 blob 回應一次嚴格受限的 302，目的地只接受已實測的 `media.pu.edu.tw` 簽名下載形狀。第二跳不帶校方 Cookie、平台 Authorization、CSRF 或 Referer，仍保留下載前後授權、整段期限及完整 bytes 核對。公開來源與傳輸驗證見 [媒體下載查核](tronclass-media-download-verification-2026-11-18.md)。
+
+### 本輪驗證與範圍
+
+使用 Node **22.23.5**，整合後 Web TronClass 回歸 **63 個測試檔通過、2,187 項通過**，另有 **4 檔／38 項環境相關測試略過**；Mobile TronClass 回歸 **14 個測試檔、266 項通過**，兩者均為零失敗。完整 Web TypeScript 增量檢查、修改 TypeScript 檔案的 ESLint，以及瀏覽器驗收腳本的 Python 語法檢查通過。各局部測試與上述數量重疊，不相加；略過項目不計為通過。
+
+另以真正的 Web 工作區元件及合成、隔離的資料端點，在瀏覽器確認「全量同步失敗後仍可選課」及「文字／附件返回清單再恢復」。畫面明示合成驗證，沒有連線校方或送出作業。CI 的既有實際 Next／Docker 瀏覽器驗收腳本同步新增這兩條路徑；本輪沒有把元件預覽當成 Next production build、nuni 真人綁定或已部署證據。
+
+真人校方帳號只再次抽樣讀取本人課程、作業與已交版本，未送出或改動原作業。公開圖片則以實際新增下載 parser 與完整 bytes reader 取得同樣 **27,422 bytes**，這不等於私人附件的 nuni BFF 端對端驗收。Production `contractVerified: false` 保持；真人 nuni 綁定、CSRF／final POST acknowledgment、附件 storage／callback、正式收件與 Web 部署仍待完成。新版本 CI 與 PR 狀態以該版本完整 SHA 的 GitHub 結果為準。
+
 ## 2026-11-18：以課程頁確認學生身分
 
 接續 `8a8d7315` 的 PU 授權 reader，補上正面的選課角色證據。課程清單會將缺少的 role 預設為 `student`，這個展示預設不能用來授權繳交。現在每輪授權都必須以目前綁定的 session 讀取固定 `/course/{id}`，核對唯一且有效的 hidden `courseId` 和 `enrollment-is-student: "True"`，再檢查活動資格與本人完整歷史。
@@ -53,9 +69,10 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 使用 nuni 平台登入或 Firebase 登入綁定 TronClass | 已實作；不依賴 E-campus session |
 | 重新連接、換綁、解除連接 | 已實作，使用 revision 防止舊請求覆蓋新綁定；校方 session 失效時在原頁開啟重新連接表單 |
 | 本人 ongoing / upcoming 課程、作業與截止時間 | 已實作，分頁不完整會顯示部分失敗 |
+| 獨立課程清單與單課恢復 | 已實作 Web／Mobile；不等待全量作業同步，逾時後仍可選課重讀，舊回應不覆蓋新結果 |
 | Web／Mobile 待辦工作區 | 支援作業／課程搜尋、待繳／未知／已繳篩選與期限排序；送出及查證期間避免切換作業，可信成功結果不被較早同步覆寫 |
 | 校方作業詳情與設定 | 已實作本人活動 GET；顯示個人／小組、形式、開放／截止、已用與剩餘次數、重交及撤回設定，不推論寫入權限 |
-| 連接中斷後繼續編輯 | 已實作同一已驗證學生的頁內記憶體恢復；重新同步、重新讀取作業後才恢復文字與 File，不沿用舊上傳狀態 |
+| 返回清單、切換作業或連接中斷後繼續編輯 | 同一已驗證學生最多保留 5 份工作區草稿；重新讀取作業後才恢復文字與 File，不沿用舊上傳狀態 |
 | 本人個人作業的歷次繳交內容 | 已實作官方 GET 來源，顯示本文、附件名稱／大小、來源紀錄時間及五種狀態；與本系統新送出的收據分開 |
 | 本人歷次繳交的一般附件下載 | Web 下載及 Mobile 分享已接上相同本人 BFF；來源明確允許的一般附件才提供入口，下載前後重新核對同一版本、身分及權限 |
 | 選定課程的公告與教材 | 已實作，包含一般活動與 courseware 活動 |
@@ -89,7 +106,7 @@ TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的�
 
 作業文字與選取的 `File` 只保留在這個頁面的記憶體。連接失效時先撤下資料，重新連接後，比對伺服器產生的 `studentKey`；同一 nuni owner、校方與已驗證的校方使用者才會相同。該值使用既有伺服器密鑰的 HMAC-SHA256，輸入包含用途標記及上述範圍，不公開校方數字 ID，也不是可用來授權 API 的憑證。過期、解除、密文失效時回傳 `null`；舊版回應沒有此欄位可照常連接，但不恢復草稿。
 
-新的同步結果找到原作業後，使用者可按「繼續編輯保留的草稿」；再通過新 revision 的 `prepare`，才顯示文字與附件。重新產生附件本地 ID，狀態回到 `ready`，不保留 revision、上傳 ID、來源權限或收據。若原操作結果不明，仍以原 pending operation ID 查證，不能重新送出。換 nuni owner／平台 session、換校方已驗證使用者、解除連接、明確清除或關閉／重整頁面，都會丟棄草稿。本次沒有建立多份草稿資料庫。
+新的同步結果找到原作業後，使用者可按「繼續編輯保留的草稿」；再通過目前 revision 的新 `prepare`，才顯示文字與附件。重新產生附件本地 ID，狀態回到 `ready`，不保留上傳 ID、來源權限或收據。若原操作結果不明，仍以原 pending operation ID 查證，不能重新送出。同一已驗證學生最多保留 5 份工作區記憶體草稿，返回清單或切換作業不丟棄；滿額時阻止開啟第六份新稿，必須明確清除其中一份。換 nuni owner／平台 session、換校方已驗證使用者、解除連接、明確清除或關閉／重整頁面，都會丟棄草稿；沒有建立持久化草稿資料庫。
 
 ## 本人歷次作業紀錄
 
@@ -117,7 +134,7 @@ TronClass 與 nuni 自有課程是兩個不同的來源。nuni 自有課程的�
 
 `POST /api/tronclass/submission-attachment` 只接受 `courseId`、`homeworkId`、`submissionId`、`uploadId`、`revision` 五欄；本人學生 ID 與 Cookie 由目前伺服器綁定取得。下載前完整核對本人課程、作業清單、可見個人活動及本人全部歷史，精確選擇指定版本的附件。只有明確 `allow_download: true`、非教師／不明狀態、一般 upload 且未被隱藏、刪除或審核拒絕時才開放。參照附件、外部 source、批改 PDF、專案／知識圖譜與上傳失敗等不同契約不走這個入口。
 
-後端使用固定靜宜 origin 的數字 upload ID blob 路徑，不接受前端網址、storage key 或他人學生 ID，不跟隨 redirect。完整 bytes 受 25 MiB 與 30 秒總預算限制，核對 HTTP 長度、來源大小、MIME 及偽裝登入頁。讀完檔案後再讀取本人歷史與活動權限；版本被刪除、撤權、換綁或附件 metadata 變更時，已讀 bytes 不送給使用者。教材與歷史附件共用每程序兩個下載名額及每帳號速率限制，私有回應不快取。
+後端使用固定靜宜 origin 的數字 upload ID blob 路徑，不接受前端網址、storage key 或他人學生 ID。只允許一次符合 [已查明媒體契約](tronclass-media-download-verification-2026-11-18.md) 的校方 302；媒體第二跳不帶登入憑證，也不跟隨後續轉址。完整 bytes 受 25 MiB 與 30 秒總預算限制，核對 HTTP 長度、來源大小、MIME 及偽裝登入頁。讀完檔案後再讀取本人歷史與活動權限；版本被刪除、撤權、換綁或附件 metadata 變更時，已讀 bytes 不送給使用者。教材與歷史附件共用每程序兩個下載名額及每帳號速率限制，私有回應不快取。
 
 Web 從目前作業的歷史紀錄直接下載。Mobile 使用相同固定 BFF、目前 Platform／Firebase 身分及受控 cache 分享；下載、等待分享能力及分享前後核對 owner、revision、到期時間，離頁時取消傳輸，完成後清理暫存。兩端遇到較晚回傳的舊連線結果都不啟動下載／分享。下載不更動作業狀態，也不建立、清除或重送 pending operation。
 
@@ -170,6 +187,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 | `status` | 無 | 目前綁定狀態，不包含 cookie |
 | `connect` | `schoolId: "pu"`, `account`, `password`, `expectedRevision` | 驗證校方身分後綁定；初次 revision 為 null |
 | `disconnect` | `expectedRevision` | 解除目前綁定 |
+| `courses` | 無 | 僅讀取本人課程清單，回傳 `kind: "course-index"`；不讀作業、公告或教材 |
 | `sync` | 無；可加 `courseId` | 讀取全部本人課程與作業；選定課程時讀公告、教材 |
 | `prepare` | `courseId`, `homeworkId` | 讀取作業資訊、可送出條件及獨立的本人歷史 `history`；歷史不構成 `receipt` |
 | `submit` | `courseId`, `homeworkId`, `revision`, `operationId`, `content`, `attachments`, `confirmed: true` | 最終送出；attachments 為本次已驗證的 fileId，非來源 upload key |
@@ -182,13 +200,13 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 使用者確認送出後，UI 先重新取得完整規則，再一次核對文字、所有附件、檔名、空檔、個別大小、合計大小及 MIME。任何一項不合格，都在第一個 upload 前停止並保留草稿。重新讀取失敗會移除舊的送出資格，不讓先前的 `canSubmit` 繼續生效。後端原有規則檢查仍保留。
 
-回應使用 `Cache-Control: no-store, private`，不快取私人校方資料。一般請求每 owner 每程序每分鐘 60 次，同步每分鐘 6 次；另有 Firestore 持久化登入嘗試限制（15 分鐘：owner 6 次、同校方帳號 5 次）。一般請求限制不是跨程序全域配額。
+回應使用 `Cache-Control: no-store, private`，不快取私人校方資料。一般請求每 owner 每程序每分鐘 60 次，課程清單及完整同步各自每分鐘 6 次；另有 Firestore 持久化登入嘗試限制（15 分鐘：owner 6 次、同校方帳號 5 次）。一般請求限制不是跨程序全域配額。
 
 ### 教材附件下載
 
 `POST /api/tronclass/material-download` 接收 `courseId`、`activityId`、`uploadKey`、`revision`。伺服器先確認目前校方學生的課程清單，再從該課程的一般／courseware 活動核對附件與 `allow_download: true`，只讀取固定校方 `/api/uploads/{id}/blob`。公開欄位 `uploadKey` 保持相容，但官方一般附件採數字 `upload.id` 的字串表示；只有來源沒有 ID 時才支援既有 key-only adapter。前端傳入任意網址、其他活動的 ID／key、隱藏活動或不允許下載的檔案都不能下載。
 
-回傳 attachment 與經過清理的檔名；不把校方 cookie 帶到瀏覽器。支援一般文件、壓縮檔、圖片、音訊與影片 MIME，拒絕 HTML／JSON 登入回應與未知格式；不跟隨來源 redirect。單檔上限 25 MiB、讀取校方來源最多 30 秒，回傳使用 64 KiB 區塊串流、傳送最多 60 秒。每程序最多同時處理 2 個下載，完成、取消或逾時才釋放名額，超過時回傳 429。檔案僅在這次請求記憶體中處理。超過限制或需跳轉到儲存服務的教材保留原始教材入口，不擴大校方網址白名單。
+回傳 attachment 與經過清理的檔名；不把校方 cookie 帶到瀏覽器。支援一般文件、壓縮檔、圖片、音訊與影片 MIME，拒絕 HTML／JSON 登入回應與未知格式；來源 302 只支援與本人歷史附件相同的單次受限媒體下載。單檔上限 25 MiB、讀取校方來源最多 30 秒，回傳使用 64 KiB 區塊串流、傳送最多 60 秒。每程序最多同時處理 2 個下載，完成、取消或逾時才釋放名額，超過時回傳 429。檔案僅在這次請求記憶體中處理。超過限制或指向未查明儲存目的地的教材保留原始教材入口，不開放任意來源網址。
 
 下載完成前再確認綁定、nuni 身分、本人課程、教材活動與同一附件的權限；附件被撤回、改名或大小改變時不回傳已取得的 bytes。前端也會丟棄舊 owner／revision／課程的晚到結果。下載 bytes、檔名與權限不是由前端原始連結直接採信。
 

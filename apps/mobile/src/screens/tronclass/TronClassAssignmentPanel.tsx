@@ -270,7 +270,8 @@ export function TronClassAssignmentPanel({
       const next = [...files, ...selected];
       const issue = nativeTronClassPayloadIssue(content, next, preparation);
       if (issue) {
-        fileCache.retain(files);
+        // The workspace retains attachments from every draft, not only this panel.
+        remember(content, files);
         setError(issue);
         return;
       }
@@ -678,8 +679,8 @@ export function TronClassAssignmentPanel({
           ) : null}
           <Text style={body}>
             {limits.confirmed
-              ? `校方已確認：${limits.allowsText ? '接受文字' : '不接受文字'}，${limits.allowsAttachments ? '接受附件' : '不接受附件'}。`
-              : '尚未確認校方格式要求；以下僅是本機草稿。'}
+              ? `目前 nuni 支援：${limits.allowsText ? '文字繳交' : '尚未開放文字繳交'}，${limits.allowsAttachments ? '附件繳交' : '尚未開放附件繳交'}。`
+              : '尚未確認站內繳交方式；以下僅是本機草稿。'}
           </Text>
           <Text style={body}>
             附件最多 {limits.maxFiles} 個、每個 {nativeTronClassSize(limits.maxFileBytes)}、合計{' '}
@@ -816,8 +817,7 @@ export function TronClassAssignmentPanel({
             </>
           )}
           <Text style={{ ...body, marginTop: 12 }}>
-            文字草稿只保留在本頁；附件使用 App 暫存副本，移除、丟棄、完成繳交或離頁時會清除。關閉
-            App 後草稿不會恢復。
+            返回作業清單會保留文字與附件。附件使用 App 暫存副本；移除、丟棄、完成繳交或離開此工作區時會清除。關閉 App 後草稿不會恢復。
           </Text>
           {content ? (
             <AIButton

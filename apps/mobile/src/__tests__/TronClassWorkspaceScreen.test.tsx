@@ -145,6 +145,10 @@ async function defaultRequest(_path: string, _context: string, input: Record<str
       return mockConnection;
     case 'disconnect':
       return disconnected;
+    case 'courses':
+      return { kind: 'course-index', revision: mockConnection.revision, fetchedAt: mockSnapshot.fetchedAt,
+        courses: mockSnapshot.courses.map((course) => ({ ...course, href: `https://tronclass.pu.edu.tw/course/${course.id}/content` })),
+        errors: [], partial: false };
     case 'sync':
       return mockSnapshot;
     case 'prepare':
@@ -1043,4 +1047,147 @@ it('removes picked cache copies on removal and never leaves a late picker result
     resolvePicker({ canceled: false, assets: [asset] });
   });
   expect(fileBytes.has(asset.uri)).toBe(false);
+});
+
+it('keeps text and attachment copies when returning to the list and revalidates before restoring them', async () => {
+  mockPreparation = { ...preparation, canSubmit: true, blockedReason: null };
+  mockDocument.mockResolvedValue({ canceled: false, assets: [{ name: '保留的作業.pdf',
+    uri: 'file:///cache/picked-answer.pdf', size: 3, mimeType: 'application/pdf' }] });
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇作業附件' }));
+  await view.findByText('保留的作業.pdf · 3 B');
+  await previewDraft(view, '稍後繼續的文字');
+  fireEvent(view.getByLabelText('我已確認要把這份作業送至校方'), 'valueChange', true);
+  fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+  expect(view.queryByText('稍後繼續的文字')).toBeNull();
+  expect([...fileBytes.keys()].filter((uri) => uri.endsWith('.draft'))).toHaveLength(1);
+  let resolvePrepare!: (value: unknown) => void;
+  const pendingPrepare = new Promise((resolve) => { resolvePrepare = resolve; });
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'prepare'
+    ? pendingPrepare : defaultRequest(path, context, input));
+  fireEvent.press(view.getByRole('button', { name: '恢復本頁作業草稿' }));
+  expect(view.queryByDisplayValue('稍後繼續的文字')).toBeNull();
+  expect(view.queryByText('保留的作業.pdf · 3 B')).toBeNull();
+  await act(async () => resolvePrepare(mockPreparation));
+  await view.findByDisplayValue('稍後繼續的文字');
+  expect(view.getByText('保留的作業.pdf · 3 B')).toBeTruthy();
+  mockBffRequest.mockImplementation(defaultRequest);
+  fireEvent.press(view.getByRole('button', { name: '預覽並重新核對' }));
+  await view.findByText('確認這次作業內容');
+  expect(view.getByLabelText('我已確認要把這份作業送至校方').props.value).toBe(false);
+  expect(actions('submit')).toHaveLength(0);
+  expect(mockUpload).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+it('preserves another assignment draft and its files when the current draft is discarded', async () => {
+  const second = { ...homework, id: 21, title: '第二份作業' };
+  mockSnapshot = { ...snapshot, homework: [homework, second] };
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'prepare'
+    ? Promise.resolve({ ...mockPreparation, homeworkId: input.homeworkId, title: input.homeworkId === second.id ? second.title : homework.title })
+    : defaultRequest(path, context, input));
+  mockDocument.mockResolvedValue({ canceled: false, assets: [{ name: '第一份的附件.pdf',
+    uri: 'file:///cache/picked-answer.pdf', size: 3, mimeType: 'application/pdf' }] });
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.changeText(view.getByLabelText('作業內容'), '第一份文字');
+  fireEvent.press(view.getByRole('button', { name: '選擇作業附件' }));
+  await view.findByText('第一份的附件.pdf · 3 B');
+  fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+  fireEvent.press(view.getByRole('button', { name: second.title }));
+  await waitFor(() => expect(view.getByRole('button', { name: '預覽並重新核對' })).not.toBeDisabled());
+  fireEvent.changeText(view.getByLabelText('作業內容'), '第二份文字');
+  fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+  expect(view.getByRole('button', { name: '繼續編輯 期中作業' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '繼續編輯 第二份作業' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '丟棄 第二份作業 的草稿' }));
+  expect([...fileBytes.keys()].filter((uri) => uri.endsWith('.draft'))).toHaveLength(1);
+  fireEvent.press(view.getByRole('button', { name: '恢復本頁作業草稿' }));
+  await view.findByDisplayValue('第一份文字');
+  expect(view.getByText('第一份的附件.pdf · 3 B')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '丟棄本頁草稿' }));
+  expect([...fileBytes.keys()].filter((uri) => uri.endsWith('.draft'))).toHaveLength(0);
+  fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+  expect(view.queryByRole('button', { name: '恢復本頁作業草稿' })).toBeNull();
+});
+
+it('allows a single-course read from the directory before the full coursework request finishes', async () => {
+  let resolveFull!: (value: unknown) => void;
+  const pendingFull = new Promise((resolve) => { resolveFull = resolve; });
+  mockBffRequest.mockImplementation((path, context, input) => {
+    if (input.action === 'sync' && input.courseId === undefined) return pendingFull;
+    if (input.action === 'sync' && input.courseId === 10) return Promise.resolve({ ...snapshot,
+      homework: [{ ...homework, title: '單課先讀到的作業' }] });
+    return defaultRequest(path, context, input);
+  });
+  const view = render(<TronClassWorkspaceScreen />);
+  fireEvent.press(await view.findByRole('button', { name: '程式設計' }));
+  await view.findByRole('button', { name: '單課先讀到的作業' });
+  await act(async () => resolveFull({ ...snapshot, homework: [{ ...homework, title: '晚到的全量結果' }] }));
+  expect(view.queryByRole('button', { name: '晚到的全量結果' })).toBeNull();
+  expect(actions('sync').map((value) => value.courseId)).toEqual([undefined, 10]);
+});
+
+it('keeps the course picker after the first full sync fails without reporting an empty assignment list', async () => {
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'sync' && input.courseId === undefined
+    ? Promise.reject(new NuniError(504, 'TRONCLASS_TIMEOUT')) : defaultRequest(path, context, input));
+  const view = render(<TronClassWorkspaceScreen />);
+  await view.findByText('課程清單已載入。請選一門課讀取作業、公告與教材，或重新整理。');
+  expect(view.queryByText('目前沒有符合條件的作業。')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '程式設計' }));
+  await view.findByRole('button', { name: homework.title });
+  expect(actions('sync').map((value) => value.courseId)).toEqual([undefined, 10]);
+});
+
+it('refreshes changed course choices from a newer sync without letting a late initial index restore removed courses', async () => {
+  const initialSnapshot = { ...snapshot, courses: [snapshot.courses[0], { ...snapshot.courses[0], id: 11, name: '即將移除的課程' }] };
+  mockSnapshot = initialSnapshot;
+  let resolveIndex!: (value: unknown) => void;
+  const oldIndex = new Promise((resolve) => { resolveIndex = resolve; });
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'courses'
+    ? oldIndex : defaultRequest(path, context, input));
+  const view = render(<TronClassWorkspaceScreen />);
+  await view.findByRole('button', { name: '即將移除的課程' });
+  mockSnapshot = { ...snapshot, courses: [snapshot.courses[0], { ...snapshot.courses[0], id: 12, name: '新增課程' }] };
+  fireEvent.press(view.getByRole('button', { name: '程式設計' }));
+  await view.findByRole('button', { name: '新增課程' });
+  expect(view.queryByRole('button', { name: '即將移除的課程' })).toBeNull();
+  await act(async () => resolveIndex({ kind: 'course-index', revision, fetchedAt: snapshot.fetchedAt,
+    courses: initialSnapshot.courses.map((course) => ({ ...course, href: `https://tronclass.pu.edu.tw/course/${course.id}/content` })),
+    errors: [], partial: false }));
+  expect(view.getByRole('button', { name: '新增課程' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '即將移除的課程' })).toBeNull();
+});
+
+it('rejects a file selection in a second draft without deleting the first draft attachment', async () => {
+  const second = { ...homework, id: 21, title: '第二份作業' };
+  mockSnapshot = { ...snapshot, homework: [homework, second] };
+  mockPreparation = { ...preparation, allowedContentTypes: ['application/pdf'] };
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'prepare'
+    ? Promise.resolve({ ...mockPreparation, homeworkId: input.homeworkId, title: input.homeworkId === second.id ? second.title : homework.title })
+    : defaultRequest(path, context, input));
+  mockDocument.mockResolvedValueOnce({ canceled: false, assets: [{ name: '不能丟失的附件.pdf',
+    uri: 'file:///cache/picked-answer.pdf', size: 3, mimeType: 'application/pdf' }] });
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇作業附件' }));
+  await view.findByText('不能丟失的附件.pdf · 3 B');
+  const firstCopy = [...fileBytes.keys()].find((uri) => uri.endsWith('.draft'))!;
+  fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+  fireEvent.press(view.getByRole('button', { name: second.title }));
+  await waitFor(() => expect(view.getByRole('button', { name: '預覽並重新核對' })).not.toBeDisabled());
+  fileBytes.set('file:///cache/not-accepted.txt', new Uint8Array([4, 5]));
+  mockDocument.mockResolvedValueOnce({ canceled: false, assets: [{ name: '不支援.txt',
+    uri: 'file:///cache/not-accepted.txt', size: 2, mimeType: 'text/plain' }] });
+  fireEvent.press(view.getByRole('button', { name: '選擇作業附件' }));
+  await view.findByText('其中有目前無法在 nuni 繳交的附件格式，請重新選檔或至 TronClass 處理。');
+  expect(fileBytes.has(firstCopy)).toBe(true);
+  expect([...fileBytes.keys()].filter((uri) => uri.endsWith('.draft'))).toEqual([firstCopy]);
+  fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
+  fireEvent.press(view.getByRole('button', { name: '恢復本頁作業草稿' }));
+  await view.findByText('不能丟失的附件.pdf · 3 B');
+  fireEvent.press(view.getByRole('button', { name: '預覽並重新核對' }));
+  await view.findByText('確認這次作業內容');
+  expect(mockUpload).not.toHaveBeenCalled();
 });

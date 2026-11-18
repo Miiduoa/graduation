@@ -1,5 +1,8 @@
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+import type { TronClassCourseSummary } from '@campus/shared/src/tronClassCourseIndex';
+
+export type { TronClassCourseIndex, TronClassCourseSummary } from '@campus/shared/src/tronClassCourseIndex';
 
 export type {
   TronClassAcknowledgedReadbackConfirmation,
@@ -15,16 +18,6 @@ export type TronClassConnection = {
   expiresAt: string | null;
   /** Opaque fingerprint for restoring drafts only after the same school identity reconnects. */
   studentKey?: string | null;
-};
-
-export type TronClassCourseSummary = {
-  id: number;
-  name: string;
-  code: string;
-  teachers: string[];
-  semester: string | null;
-  status: string;
-  href: string;
 };
 
 export type TronClassHomeworkItem = {

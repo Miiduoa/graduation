@@ -161,13 +161,13 @@ it('enforces text/attachment rules, exact MIME, local file URI and size limits',
         maxTotalBytes: 100,
       },
     }),
-  ).toMatch('不接受文字');
+  ).toMatch('nuni 目前未開放這份作業的文字繳交');
   expect(
     nativeTronClassPayloadIssue('', [file], {
       ...preparation,
       allowedContentTypes: ['text/plain'],
     }),
-  ).toMatch('不接受');
+  ).toMatch('目前無法在 nuni 繳交的附件格式');
   expect(
     nativeTronClassPayloadIssue(
       '',
@@ -186,5 +186,5 @@ it('enforces text/attachment rules, exact MIME, local file URI and size limits',
         maxTotalBytes: 100,
       },
     }),
-  ).toMatch('不接受附件');
+  ).toMatch('nuni 目前未開放這份作業的附件繳交');
 });

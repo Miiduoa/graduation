@@ -10,6 +10,71 @@ import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tro
 afterEach(() => vi.unstubAllGlobals());
 
 describe('TronClass client response boundary', () => {
+  const courseIndex = { kind: 'course-index', revision: 'a'.repeat(32), fetchedAt: '2026-11-18T00:00:00.000Z',
+    courses: [{ id: 101, name: '程式設計', code: 'CS01', teachers: ['王老師'], semester: '115-1',
+      status: 'ongoing', href: 'https://tronclass.pu.edu.tw/course/101/content' }], errors: [], partial: false };
+
+  it('requests only the course picker and does not invent empty homework results', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify(courseIndex), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const result = await createTronClassClient({ kind: 'platform', context: 'context-a' }).courses();
+    expect(result).toEqual(courseIndex);
+    expect(result).not.toHaveProperty('homework');
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/tronclass');
+    expect(JSON.parse(String(init.body))).toEqual({ action: 'courses' });
+    expect(new Headers(init.headers).get('X-Campus-Session')).toBe('context-a');
+  });
+
+  it.each([
+    { ...courseIndex, kind: undefined },
+    { ...courseIndex, homework: [] },
+    { ...courseIndex, courses: [...courseIndex.courses, ...courseIndex.courses] },
+    { ...courseIndex, courses: [{ ...courseIndex.courses[0], href: 'https://other.test/course/101' }] },
+    { ...courseIndex, partial: true },
+    { ...courseIndex, partial: true, errors: [{ courseId: 101, area: 'homework', message: '未完成' }] },
+  ])('rejects a mislabeled or inconsistent course index: %j', value => {
+    expect(() => parseTronClassResult('courses', value, {})).toThrowError('尚未收到可確認的回覆');
+  });
+
+  it('keeps partial course coverage explicit and returns a detached public projection', () => {
+    const value = { ...courseIndex, partial: true,
+      errors: [{ courseId: null, area: 'courses', message: '即將開始的課程尚未取得。' }] };
+    const result = parseTronClassResult('courses', value, {}) as typeof value;
+    expect(result).toEqual(value);
+    expect(result.courses).not.toBe(value.courses);
+    expect(result.courses[0].teachers).not.toBe(value.courses[0].teachers);
+  });
+
+  it('does not start a cancelled course read after waiting for a Firebase token', async () => {
+    let finish!: (value: string) => void;
+    const token = new Promise<string>(resolve => { finish = resolve; });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    const result = createTronClassClient({ kind: 'firebase', getIdToken: () => token }).courses(controller.signal);
+    controller.abort();
+    finish('synthetic-token');
+    await expect(result).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels an obsolete overview request when the course picker starts another read', async () => {
+    let dispatched!: (signal: AbortSignal) => void;
+    const started = new Promise<AbortSignal>(resolve => { dispatched = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const signal = init.signal!;
+      dispatched(signal);
+      return new Promise<Response>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }));
+    }));
+    const controller = new AbortController();
+    const pending = createTronClassClient({ kind: 'platform', context: 'context-a' }).sync(undefined, controller.signal);
+    const signal = await started;
+    controller.abort();
+    await expect(pending).rejects.toThrow('cancelled');
+    expect(signal.aborted).toBe(true);
+  });
+
   const history = {
     source: 'tronclass', courseId: 1, homeworkId: 2, fetchedAt: '2026-11-16T08:00:00.000Z',
     state: 'available', latestId: '7', entries: [{ id: '7', state: 'returned', isLatest: true,

@@ -39,8 +39,8 @@ export function nativeTronClassPayloadIssue(
   if (requireConfirmed && !limits.confirmed) return '尚未確認校方繳交規則，請重新讀取。';
   if (!content.trim() && !files.length) return '請先輸入作業內容或選擇附件。';
   if (content.length > 20000) return '作業文字最多 20,000 字。';
-  if (content.trim() && !limits.allowsText) return '這份作業不接受文字內容，請依校方要求改用附件。';
-  if (files.length && !limits.allowsAttachments) return '這份作業不接受附件，請先移除附件。';
+  if (content.trim() && !limits.allowsText) return 'nuni 目前未開放這份作業的文字繳交，請改用附件或至 TronClass 完成繳交。';
+  if (files.length && !limits.allowsAttachments) return 'nuni 目前未開放這份作業的附件繳交，請先移除附件或至 TronClass 完成繳交。';
   if (files.length > limits.maxFiles) return `最多可選擇 ${limits.maxFiles} 個附件。`;
   if (
     files.some(
@@ -75,7 +75,7 @@ export function nativeTronClassPayloadIssue(
     limits.contentTypes.length &&
     files.some((file) => !limits.contentTypes.includes(file.contentType))
   )
-    return '其中有校方不接受的附件格式，請依要求重新選檔。';
+    return '其中有目前無法在 nuni 繳交的附件格式，請重新選檔或至 TronClass 處理。';
   return null;
 }
 export function nativeTronClassSize(bytes: number): string {

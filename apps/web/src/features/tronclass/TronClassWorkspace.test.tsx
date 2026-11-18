@@ -117,6 +117,11 @@ const receipt = {
   content: '我的心得',
   attachments: [],
 };
+function courseIndex(value = snapshot) {
+  return { kind: 'course-index', revision: value.revision, fetchedAt: value.fetchedAt,
+    courses: value.courses.map((course) => ({ ...course, href: `https://tronclass.pu.edu.tw/course/${course.id}/content` })),
+    errors: [], partial: false };
+}
 const fetchMock = vi.fn<typeof fetch>();
 let prepareValue = preparation;
 function json(value: unknown, status = 200) {
@@ -163,6 +168,7 @@ async function defaultResponse(
   if (value.action === 'status') return json(connection);
   if (value.action === 'connect') return json(connection);
   if (value.action === 'disconnect') return json({ ...unconnected, revision: 'b'.repeat(32) });
+  if (value.action === 'courses') return json(courseIndex(snapshot));
   if (value.action === 'sync') return json(snapshot);
   if (value.action === 'prepare') return json(prepareValue);
   if (value.action === 'cancel-preparation') return json({ status: 'cancelled',
@@ -341,6 +347,7 @@ describe('TronClass account isolation and course reads', () => {
         reconnected = true;
         return Promise.resolve(json({ ...connection, revision: nextRevision }));
       }
+      if (input.action === 'courses' && reconnected) return Promise.resolve(json(courseIndex({ ...snapshot, revision: nextRevision })));
       if (input.action === 'sync' && expired) return Promise.resolve(reconnected
         ? json({ ...snapshot, revision: nextRevision, homework: [{ ...homework, title: '重連後的新作業' }] })
         : json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401));
@@ -386,6 +393,7 @@ describe('TronClass account isolation and course reads', () => {
         reconnected = true;
         return Promise.resolve(json({ ...connection, revision: nextRevision }));
       }
+      if (input.action === 'courses' && reconnected) return Promise.resolve(json(courseIndex({ ...snapshot, revision: nextRevision })));
       if (input.action === 'sync') {
         if (reconnected) return Promise.resolve(json({ ...snapshot, revision: nextRevision,
           homework: [{ ...homework, title: '目前連線的作業' }] }));
@@ -586,6 +594,7 @@ describe('TronClass submission confirmation', () => {
         if (input.action === failureAction && !reconnected)
           return Promise.resolve(json({ error: 'TRONCLASS_RECONNECT_REQUIRED', message: '學校登入已到期。' }, 401));
         if (input.action === 'submit') return Promise.resolve(json({ status: 'unknown', operationId: input.operationId, receipt: null }));
+        if (reconnected && input.action === 'courses') return Promise.resolve(json(courseIndex({ ...snapshot, revision: nextRevision })));
         if (reconnected && input.action === 'sync') return Promise.resolve(json({ ...snapshot, revision: nextRevision }));
         if (reconnected && input.action === 'prepare') return Promise.resolve(json({ ...preparation, revision: nextRevision }));
         return defaultResponse(url, init);
@@ -767,6 +776,7 @@ describe('TronClass submission confirmation', () => {
       const action = body(init).action;
       if (action === 'status')
         return Promise.resolve(json({ ...connection, revision: nextRevision }));
+      if (action === 'courses') return Promise.resolve(json(courseIndex({ ...snapshot, revision: nextRevision })));
       if (action === 'sync') return Promise.resolve(json({ ...snapshot, revision: nextRevision }));
       if (action === 'prepare')
         return Promise.resolve(json({ ...preparation, revision: nextRevision }));
@@ -1022,6 +1032,7 @@ describe('TronClass page-memory draft recovery', () => {
         flags.disconnected = false;
         return Promise.resolve(json({ ...connection, revision: nextRevision, studentKey: nextKey }));
       }
+      if (input.action === 'courses') return Promise.resolve(json(courseIndex({ ...snapshot, revision: flags.reconnected ? nextRevision : revision })));
       if (input.action === 'sync') {
         if (flags.reconnected) return Promise.resolve(json({ ...snapshot, revision: nextRevision,
           homework: options.missingHomework ? [] : snapshot.homework }));
@@ -1234,4 +1245,143 @@ describe('TronClass page-memory draft recovery', () => {
     expect(calls('submit')).toHaveLength(1);
     expect(sessionStorage.length).toBe(0);
   });
+});
+
+describe('TronClass coursework continuity', () => {
+  it('preserves a returned text and file draft, hides it until a fresh read, and requires confirmation again', async () => {
+    render(<TronClassWorkspace />);
+    await previewAnswer([new File(['report'], '繼續編輯.pdf', { type: 'application/pdf' })]);
+    fireEvent.click(screen.getByRole('button', { name: '返回作業清單' }));
+    expect(screen.queryByText('我的心得')).toBeNull();
+    expect(screen.getByRole('button', { name: '繼續編輯保留的草稿' })).toBeTruthy();
+    const freshRead = deferred<Response>();
+    fetchMock.mockImplementation((url, init) => body(init).action === 'prepare' ? freshRead.promise : defaultResponse(url, init));
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯保留的草稿' }));
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.queryByText('繼續編輯.pdf')).toBeNull();
+    await act(async () => freshRead.resolve(json(preparation)));
+    expect((await screen.findByDisplayValue('我的心得') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.getByText('繼續編輯.pdf')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
+    expect((screen.getByLabelText('我已確認課程、作業內容與附件正確') as HTMLInputElement).checked).toBe(false);
+    expect(calls('prepare')).toHaveLength(2);
+    expect(calls('submit')).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('keeps separate assignment drafts and discards only the selected one', async () => {
+    const items = [homework, { ...homework, id: 52, title: '第二份作業' }];
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (input.action === 'sync') return Promise.resolve(json({ ...snapshot, homework: items }));
+      if (input.action === 'prepare') return Promise.resolve(json({ ...preparation, homeworkId: input.homeworkId,
+        title: items.find((item) => item.id === input.homeworkId)!.title }));
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await screen.findByRole('heading', { name: '第二份作業' });
+    const open = (index: number) => fireEvent.click(within(screen.getByRole('list', { name: '作業清單' })).getAllByRole('button')[index]);
+    open(0);
+    await waitFor(() => expect(screen.queryByText('正在確認繳交條件與既有紀錄…')).toBeNull());
+    fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '第一份的內容' } });
+    fireEvent.change(screen.getByLabelText('作業附件'), { target: { files: [new File(['a'], '第一份.pdf', { type: 'application/pdf' })] } });
+    open(1);
+    await waitFor(() => expect(screen.queryByText('正在確認繳交條件與既有紀錄…')).toBeNull());
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '第二份的內容' } });
+    fireEvent.click(screen.getByRole('button', { name: '返回作業清單' }));
+    expect(screen.getByRole('button', { name: '繼續編輯 期中報告' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '繼續編輯 第二份作業' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '清除 第二份作業 的草稿' }));
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯保留的草稿' }));
+    await screen.findByDisplayValue('第一份的內容');
+    expect(screen.getByText('第一份.pdf')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '丟棄本頁草稿' }));
+    expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('');
+    expect(screen.queryByText('第一份.pdf')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '返回作業清單' }));
+    expect(screen.queryByRole('button', { name: '繼續編輯保留的草稿' })).toBeNull();
+  });
+
+  it('never evicts an older draft when the page reaches its five-assignment limit', async () => {
+    const items = Array.from({ length: 6 }, (_, index) => ({ ...homework, id: 51 + index, title: `作業 ${index + 1}` }));
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (input.action === 'sync') return Promise.resolve(json({ ...snapshot, homework: items }));
+      if (input.action === 'prepare') return Promise.resolve(json({ ...preparation, homeworkId: input.homeworkId }));
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await screen.findByRole('heading', { name: '作業 6' });
+    for (let index = 0; index < 5; index += 1) {
+      fireEvent.click(within(screen.getByRole('list', { name: '作業清單' })).getAllByRole('button')[index]);
+      await waitFor(() => expect(screen.queryByText('正在確認繳交條件與既有紀錄…')).toBeNull());
+      fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: `內容 ${index + 1}` } });
+      fireEvent.click(screen.getByRole('button', { name: '返回作業清單' }));
+    }
+    fireEvent.click(within(screen.getByRole('list', { name: '作業清單' })).getAllByRole('button')[5]);
+    expect(screen.getByRole('alert').textContent).toContain('已保留 5 份草稿');
+    expect(calls('prepare')).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯 作業 1' }));
+    await screen.findByDisplayValue('內容 1');
+  });
+
+  it('opens one course from the independent directory while the full sync is still pending and ignores late results', async () => {
+    const fullRead = deferred<Response>();
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (input.action === 'sync' && input.courseId === undefined) return fullRead.promise;
+      if (input.action === 'sync' && input.courseId === 12) return Promise.resolve(json({ ...snapshot,
+        homework: [{ ...homework, title: '單課讀取成功' }] }));
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    const select = await screen.findByLabelText('課程');
+    expect(screen.queryByText('目前沒有符合條件的資料。')).toBeNull();
+    expect(screen.getByText(/可以先選一門課查看/)).toBeTruthy();
+    const oldSignal = calls('sync')[0][1]?.signal;
+    fireEvent.change(select, { target: { value: '12' } });
+    await screen.findByRole('heading', { name: '單課讀取成功' });
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => fullRead.resolve(json({ ...snapshot, homework: [{ ...homework, title: '過時全量結果' }] })));
+    expect(screen.queryByText('過時全量結果')).toBeNull();
+    expect((screen.getByLabelText('課程') as HTMLSelectElement).value).toBe('12');
+  });
+
+  it('keeps the course directory after full sync fails so the student can retry a single course', async () => {
+    fetchMock.mockImplementation((url, init) => {
+      const input = body(init);
+      if (input.action === 'sync' && input.courseId === undefined) return Promise.resolve(json({ error: 'TRONCLASS_TIMEOUT' }, 504));
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    await screen.findByText('課程清單已載入。請選一門課讀取作業、公告與教材，或重新同步。');
+    fireEvent.change(screen.getByLabelText('課程'), { target: { value: '12' } });
+    await screen.findByRole('heading', { name: homework.title });
+    expect(calls('sync').map(([, init]) => body(init).courseId)).toEqual([undefined, 12]);
+  });
+});
+
+it('refreshes added and removed course options from a newer sync and rejects a late initial directory', async () => {
+  const oldIndex = deferred<Response>();
+  let currentSnapshot = snapshot;
+  fetchMock.mockImplementation((url, init) => {
+    const input = body(init);
+    if (input.action === 'courses') return oldIndex.promise;
+    if (input.action === 'sync') return Promise.resolve(json(currentSnapshot));
+    return defaultResponse(url, init);
+  });
+  render(<TronClassWorkspace />);
+  await screen.findByRole('heading', { name: homework.title });
+  expect(screen.getByRole('option', { name: '資料庫' })).toBeTruthy();
+  currentSnapshot = { ...snapshot, courses: [snapshot.courses[0], { ...snapshot.courses[1], id: 14, name: '新增課程' }] };
+  fireEvent.click(screen.getByRole('button', { name: '同步最新資料' }));
+  await screen.findByRole('option', { name: '新增課程' });
+  expect(screen.queryByRole('option', { name: '資料庫' })).toBeNull();
+  await act(async () => oldIndex.resolve(json(courseIndex(snapshot))));
+  expect(screen.getByRole('option', { name: '新增課程' })).toBeTruthy();
+  expect(screen.queryByRole('option', { name: '資料庫' })).toBeNull();
 });

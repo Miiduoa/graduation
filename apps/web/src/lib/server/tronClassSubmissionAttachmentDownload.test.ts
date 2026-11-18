@@ -22,7 +22,7 @@ const submission = {
   comment: '<p>合成學生資料</p>', uploads: [attachment], created_at: '2026-11-18T05:00:00.000Z',
 };
 
-function fixture(timeoutMs?: number) {
+function fixture(timeoutMs?: number, mediaFetch?: (url: string, init?: RequestInit) => Promise<Response>) {
   const state: { activity: Record<string, unknown>; history: { list: Record<string, unknown>[]; [key: string]: unknown } } = {
     activity: { id: 202, course_id: 101, title: '合成作業', type: 'homework', submit_by_group: false,
       data: { description: '請上傳報告', mode: 'normal' } },
@@ -42,7 +42,7 @@ function fixture(timeoutMs?: number) {
   const fetch = vi.fn<(url: string, options?: RequestInit) => Promise<Response>>(async () => new Response(bytes, {
     headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(bytes.byteLength) },
   }));
-  const download = createTronClassSubmissionAttachmentDownloader({ bindings, source, fetch, now: () => now, timeoutMs });
+  const download = createTronClassSubmissionAttachmentDownloader({ bindings, source, fetch, mediaFetch, now: () => now, timeoutMs });
   return { state, bindings, source, fetch, download };
 }
 
@@ -80,6 +80,36 @@ describe('own historical submission attachment download', () => {
     await expect(f.download(owner, { ...input, submissionId: '402' }))
       .rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_ATTACHMENT_DENIED' });
     expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('downloads a historical attachment through PU media and still revalidates the exact version afterward', async () => {
+    const mediaUrl = `https://media.pu.edu.tw/download/file/${'a'.repeat(40)}?timestamp=1795000000&token=${'b'.repeat(32)}&name=report.pdf`;
+    const mediaFetch = vi.fn(async () => new Response(bytes, { headers: {
+      'Content-Type': 'application/pdf', 'Content-Length': String(bytes.length),
+    } }));
+    const f = fixture(undefined, mediaFetch);
+    f.fetch.mockResolvedValue(new Response(null, { status: 302, headers: { Location: mediaUrl } }));
+    expect(await f.download(owner, input)).toEqual({ bytes, name: attachment.name, contentType: 'application/pdf' });
+    expect(mediaFetch).toHaveBeenCalledExactlyOnceWith(mediaUrl, expect.objectContaining({
+      headers: { Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
+      redirect: 'manual', credentials: 'omit',
+    }));
+    expect(f.source.fetchStudentSubmissionList).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(f.source.fetchStudentSubmissionList!).mock.invocationCallOrder.at(-1))
+      .toBeGreaterThan(mediaFetch.mock.invocationCallOrder[0]);
+    expect(f.bindings.assertCurrent).toHaveBeenLastCalledWith(owner, input.revision);
+  });
+
+  it('discards media bytes if the school removes the historical version during download', async () => {
+    const mediaUrl = `https://media.pu.edu.tw/download/file/${'a'.repeat(40)}?timestamp=1795000000&token=${'b'.repeat(32)}&name=report.pdf`;
+    const mediaFetch = vi.fn(async () => {
+      f.state.history.list = [];
+      return new Response(bytes, { headers: { 'Content-Type': 'application/pdf' } });
+    });
+    const f = fixture(undefined, mediaFetch);
+    f.fetch.mockResolvedValue(new Response(null, { status: 302, headers: { Location: mediaUrl } }));
+    await expect(f.download(owner, input)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_ATTACHMENT_DENIED' });
+    expect(mediaFetch).toHaveBeenCalledOnce();
   });
 
   it.each([

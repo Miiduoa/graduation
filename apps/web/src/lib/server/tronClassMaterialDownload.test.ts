@@ -17,7 +17,7 @@ const material = { id: 202, course_id: 101, type: 'material', title: '課堂講�
 const fixtureBytes = Buffer.from('%PDF-test');
 afterEach(() => vi.useRealTimers());
 
-function fixture(timeoutMs?: number) {
+function fixture(timeoutMs?: number, mediaFetch?: (url: string, init?: RequestInit) => Promise<Response>) {
   const bindings = { requireBinding: vi.fn(async () => binding), assertCurrent: vi.fn(async () => {}) };
   const source: LmsReadonlySource = {
     fetchCourses: vi.fn(async (_cookies, options) => options.status === 'ongoing' ? [{ id: 101 }] : []),
@@ -25,7 +25,7 @@ function fixture(timeoutMs?: number) {
     fetchHomeworkPage: vi.fn(), fetchCourseAnnouncements: vi.fn(), fetchSiteAnnouncements: vi.fn(),
   };
   const fetch = vi.fn(async () => new Response(fixtureBytes, { headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(fixtureBytes.length) } }));
-  const download = createTronClassMaterialDownloader({ bindings, source, fetch, timeoutMs });
+  const download = createTronClassMaterialDownloader({ bindings, source, fetch, mediaFetch, timeoutMs });
   return { bindings, source, fetch, download };
 }
 
@@ -50,6 +50,25 @@ describe('authorized material download', () => {
     await expect(f.download(owner, { ...input, courseId: 999 })).rejects.toMatchObject({ status: 403, code: 'TRONCLASS_MATERIAL_DOWNLOAD_DENIED' });
     expect(f.source.fetchActivities).not.toHaveBeenCalled();
     expect(f.fetch).not.toHaveBeenCalled();
+  });
+
+  it('completes an owned material download through the verified PU media route and rechecks its source', async () => {
+    const mediaUrl = `https://media.pu.edu.tw/download/file/${'a'.repeat(40)}?timestamp=1795000000&token=${'b'.repeat(32)}&name=notes.pdf`;
+    const mediaFetch = vi.fn(async () => new Response(fixtureBytes, {
+      headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(fixtureBytes.length) },
+    }));
+    const f = fixture(undefined, mediaFetch);
+    f.fetch.mockResolvedValue(new Response(null, { status: 302, headers: { Location: mediaUrl } }));
+    expect(await f.download(owner, input)).toEqual({ bytes: fixtureBytes, name: '第一週講義.pdf', contentType: 'application/pdf' });
+    expect(f.fetch).toHaveBeenCalledOnce();
+    expect(mediaFetch).toHaveBeenCalledExactlyOnceWith(mediaUrl, expect.objectContaining({
+      headers: { Accept: 'application/octet-stream, */*', 'Accept-Encoding': 'identity' },
+      signal: expect.any(AbortSignal), redirect: 'manual', credentials: 'omit',
+    }));
+    expect(f.source.fetchCourses).toHaveBeenCalledTimes(4);
+    expect(f.source.fetchActivities).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(f.source.fetchActivities).mock.invocationCallOrder.at(-1))
+      .toBeGreaterThan(mediaFetch.mock.invocationCallOrder[0]);
   });
 
   it('downloads an official ID-only file and revalidates the same metadata after receiving bytes', async () => {

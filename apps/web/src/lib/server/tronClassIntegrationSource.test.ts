@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
-import { createTronClassIntegrationReader } from './tronClassIntegrationSource';
-import type { LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
+import { createTronClassCourseIndexReader, createTronClassIntegrationReader } from './tronClassIntegrationSource';
+import type { LmsHomeworkPage, LmsReadOptions, LmsReadResult, LmsReadonlySource } from './tronClassLmsSource';
 
 vi.mock('./tronClassLmsSource', () => ({ tronClassLmsReadonlySource: {} }));
 
@@ -27,6 +27,56 @@ beforeEach(() => vi.restoreAllMocks());
 afterEach(() => vi.useRealTimers());
 
 describe('independent TronClass source', () => {
+  it('returns a separate course index while an overview homework request is still waiting', async () => {
+    const { reader, source, bindings } = setup();
+    let finish!: (value: LmsReadResult<LmsHomeworkPage>) => void;
+    vi.mocked(source.fetchHomeworkPage).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const overview = reader('platform:pa_fixture');
+    await vi.waitFor(() => expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1));
+    const index = await createTronClassCourseIndexReader({ source, bindings })('platform:pa_fixture');
+    expect(index).toMatchObject({ kind: 'course-index', revision: binding.revision,
+      courses: [{ id: 101, name: course.name }], errors: [], partial: false });
+    expect(Object.keys(index).sort()).toEqual(['courses', 'errors', 'fetchedAt', 'kind', 'partial', 'revision']);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(JSON.stringify(index)).not.toMatch(/private-cookie|homework|materials|announcements/);
+    finish({ ok: true, value: { homework_activities: [assignment], total: 1 } });
+    expect((await overview).homework).toHaveLength(1);
+  });
+
+  it('keeps course-index coverage separate from homework coverage when upcoming courses fail', async () => {
+    const { source, bindings } = setup();
+    vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, query) => {
+      if (query.status === 'upcoming') throw new Error('temporary school failure');
+      return [course];
+    });
+    const index = await createTronClassCourseIndexReader({ source, bindings })('platform:pa_fixture');
+    expect(index).toMatchObject({ kind: 'course-index', partial: true, courses: [{ id: 101 }],
+      errors: [{ courseId: null, area: 'courses' }] });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a course index if the school binding changes during its course reads', async () => {
+    const { source, bindings } = setup();
+    bindings.assertCurrent.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new NuniError(409, 'TRONCLASS_BINDING_CHANGED'));
+    await expect(createTronClassCourseIndexReader({ source, bindings })('platform:pa_fixture'))
+      .rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  });
+
+  it('cancels a stalled course-index read and does not dispatch homework after its deadline', async () => {
+    vi.useFakeTimers();
+    const { source, bindings } = setup();
+    vi.mocked(source.fetchCourses).mockImplementationOnce(() => new Promise(() => undefined));
+    const result = expect(createTronClassCourseIndexReader({ source, bindings, budgetMs: 100 })('platform:pa_fixture'))
+      .rejects.toMatchObject({ code: 'TRONCLASS_READ_TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(100);
+    await result;
+    expect(vi.mocked(source.fetchCourses).mock.calls[0][2]?.signal?.aborted).toBe(true);
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  });
+
   it('uses the verified binding without a school portal and never exposes its cookies', async () => {
     const { reader, bindings, source } = setup();
     const result = await reader('platform:pa_fixture');

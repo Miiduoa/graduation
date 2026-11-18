@@ -315,7 +315,7 @@ export function TronClassAssignment({
     const rules = preparationLimits(preparationValue);
     if (values.length > 0 && (!rules.allowsAttachments || rules.maxFiles === 0 ||
       rules.maxFileBytes === 0 || rules.maxTotalBytes === 0)) {
-      return '這份作業目前不接受附件，請移除已選取的附件。';
+      return 'nuni 目前未開放這份作業的附件繳交，請移除附件，或到 TronClass 完成繳交。';
     }
     if (values.length > rules.maxFiles) return `一次最多可加入 ${rules.maxFiles} 個附件。`;
     if (values.some(({ file }) => !file.name || file.name.length > 200 || /[\\/\u0000-\u001f\u007f]/.test(file.name)))
@@ -332,7 +332,7 @@ export function TronClassAssignment({
       rules.contentTypes.length &&
       values.some((item) => !rules.contentTypes.includes(item.file.type || 'application/octet-stream'))
     )
-      return '其中有此作業不接受的檔案格式，請依作業要求調整附件。';
+      return '其中有目前無法在 nuni 繳交的檔案格式，請調整附件或至 TronClass 處理。';
     return null;
   }
 
@@ -343,7 +343,7 @@ export function TronClassAssignment({
     if (!content.trim() && files.length === 0) return '請先輸入作業內容或加入附件。';
     if (content.length > 20000) return '作業文字最多 20,000 字，較長內容請改用附件。';
     if (content.trim() && !rules.allowsText)
-      return '這份作業只接受附件，請將文字整理在附件內，並清空本頁的作業內容後再送出。';
+      return '目前可在 nuni 以附件繳交，請將文字整理在附件內，並清空本頁的作業內容後再送出。';
     return validateFiles(files, preparationValue);
   }
 
@@ -672,10 +672,7 @@ export function TronClassAssignment({
             {displayTitle}
           </h2>
         </div>
-        <button className={styles.textButton} disabled={working} onClick={() => {
-          callbacks.current.onDraftChange?.(null);
-          onClose();
-        }}>
+        <button className={styles.textButton} disabled={working} onClick={onClose}>
           {prepareOnly ? '關閉作業準備' : '返回作業清單'}
         </button>
       </div>
@@ -793,8 +790,8 @@ export function TronClassAssignment({
             <div className={styles.form}>
               {limits.confirmed && <p className={styles.muted}>
                 {limits.allowsText
-                  ? canAddAttachments ? '這份作業接受文字與附件。' : '這份作業只接受文字。'
-                  : canAddAttachments ? '這份作業只接受附件，請將作業文字整理在附件內。' : '這份作業目前未開放可用的繳交方式。'}
+                  ? canAddAttachments ? '目前可在 nuni 以文字與附件繳交。' : '目前可在 nuni 以文字繳交，附件請至 TronClass 處理。'
+                  : canAddAttachments ? '目前可在 nuni 以附件繳交，請將作業文字整理在附件內。' : 'nuni 目前未開放這份作業的繳交方式。'}
               </p>}
               <label htmlFor={`${fieldId}-answer`}>
                 作業內容
@@ -830,7 +827,7 @@ export function TronClassAssignment({
               <p className={styles.muted}>
                 {canAddAttachments
                   ? `${limits.confirmed ? '本次附件上限' : '本頁整理上限'}：最多 ${limits.maxFiles} 個附件，每個 ${sizeLabel(limits.maxFileBytes)}，合計 ${sizeLabel(limits.maxTotalBytes)}。`
-                  : '這份作業目前不接受附件。'}
+                  : 'nuni 目前未開放這份作業的附件繳交。'}
               </p>
             </div>
           ) : (
@@ -905,7 +902,21 @@ export function TronClassAssignment({
               我已確認課程、作業內容與附件正確
             </label>
           )}
+          {!prepareOnly && <p className={styles.muted}>
+            返回作業清單會保留本頁的文字與附件。離開或重新整理本頁會清除草稿。
+          </p>}
           <div className={styles.actions}>
+            {phase === 'editing' && !prepareOnly && <button className="btn"
+              disabled={working || awaitingDraftRecovery || (!content && !files.length)}
+              onClick={() => {
+                setContent('');
+                setFiles([]);
+                setConfirmed(false);
+                confirmedScope.current = null;
+                rememberLocalDraft('', []);
+                setError('');
+                setCopyMessage('已清除本頁草稿。');
+              }}>丟棄本頁草稿</button>}
             {phase === 'editing' ? (
               <button className="btn primary" disabled={!restored || awaitingDraftRecovery} onClick={preview}>
                 預覽繳交內容

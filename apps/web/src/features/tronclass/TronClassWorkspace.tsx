@@ -16,6 +16,7 @@ import {
 } from '@/lib/tronClassIntegrationClient';
 import type {
   TronClassConnection,
+  TronClassCourseIndex,
   TronClassHomeworkItem,
   TronClassSnapshot,
 } from '@/lib/tronClassIntegrationTypes';
@@ -28,6 +29,7 @@ import { sameTronClassDraftScope, type TronClassLocalDraft } from './tronClassLo
 import styles from './tronclass.module.css';
 
 type SchoolDraft = { studentKey: string; draft: TronClassLocalDraft };
+const MAX_LOCAL_DRAFTS = 5;
 type HomeworkFilter = 'all' | 'pending' | 'unknown' | 'submitted';
 const homeworkFilters: { value: HomeworkFilter; label: string }[] = [
   { value: 'all', label: '全部作業' },
@@ -142,8 +144,7 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
   const [disconnecting, setDisconnecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submissionBusy, setSubmissionBusy] = useState(false);
-  const [recoveryDraft, setRecoveryDraft] = useState<SchoolDraft | null>(null);
-  const activeDraft = useRef<SchoolDraft | null>(null);
+  const [recoveryDrafts, setRecoveryDrafts] = useState<SchoolDraft[]>([]);
   const draftScope = useRef<{ studentKey: string; revision: string } | null>(null);
   const alive = useRef(true);
   const lock = useRef(false);
@@ -152,7 +153,6 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     alive.current = true;
     return () => {
       alive.current = false;
-      activeDraft.current = null;
       draftScope.current = null;
     };
   }, []);
@@ -183,14 +183,13 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     const studentKey = verifiedStudentKey(value);
     draftScope.current = studentKey && value.revision ? { studentKey, revision: value.revision } : null;
     if (value.connected || !value.account) {
-      setRecoveryDraft((draft) => studentKey && draft?.studentKey === studentKey ? draft : null);
+      setRecoveryDrafts((drafts) => studentKey ? drafts.filter((draft) => draft.studentKey === studentKey) : []);
     }
     setConnection(value);
   }
 
   function suspendDraft() {
-    if (activeDraft.current) setRecoveryDraft(activeDraft.current);
-    activeDraft.current = null;
+    // Keep page-memory drafts sealed until the same school identity is verified.
     draftScope.current = null;
   }
 
@@ -199,11 +198,14 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     const current = draftScope.current;
     if (!alive.current || !studentKey || !current ||
       current.revision !== revision || current.studentKey !== studentKey) return;
-    activeDraft.current = draft ? { studentKey, draft } : null;
-    // Once the new editor has read its assignment, its local state owns the
-    // recovered text. A close also discards a not-yet-restored backup.
-    setRecoveryDraft((value) => value?.studentKey === studentKey &&
-      sameTronClassDraftScope(value.draft, courseId, homeworkId) ? null : value);
+    setRecoveryDrafts((values) => {
+      const otherDrafts = values.filter((value) => value.studentKey === studentKey &&
+        !sameTronClassDraftScope(value.draft, courseId, homeworkId));
+      if (!draft) return otherDrafts;
+      // The list stops opening a sixth new editor; never evict an existing draft.
+      if (otherDrafts.length >= MAX_LOCAL_DRAFTS) return values;
+      return [...otherDrafts, { studentKey, draft }];
+    });
   }
 
   function reloadStatus(reason?: unknown) {
@@ -263,9 +265,8 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     setBusy(true);
     setError('');
     // Explicit unlink also discards local work even if the request later fails.
-    activeDraft.current = null;
     draftScope.current = null;
-    setRecoveryDraft(null);
+    setRecoveryDrafts([]);
     setConnection({ ...connection, connected: false });
     try {
       const value = await client.disconnect(connection.revision);
@@ -308,10 +309,10 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
             {error}
           </p>
         )}
-        {recoveryDraft && !connection?.connected && <div className={styles.notice} role="status">
+        {recoveryDrafts.length > 0 && !connection?.connected && <div className={styles.notice} role="status">
           <p>本頁暫時保留了作業文字與附件。重新連接同一個學校帳號後，可以回到剛才的作業。</p>
-          <p>關閉或重新整理頁面會清除這份草稿。</p>
-          <button className={styles.textButton} onClick={() => setRecoveryDraft(null)}>
+          <p>關閉或重新整理頁面會清除保留的草稿。</p>
+          <button className={styles.textButton} onClick={() => setRecoveryDrafts([])}>
             清除保留的草稿
           </button>
         </div>}
@@ -431,8 +432,10 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
           owner={owner}
           onConnectionChanged={reloadStatus}
           onSubmissionBusy={setSubmissionBusy}
-          recoveryDraft={recoveryDraft?.studentKey === verifiedStudentKey(connection) ? recoveryDraft.draft : null}
-          onDiscardDraft={() => setRecoveryDraft(null)}
+          recoveryDrafts={recoveryDrafts.filter((value) => value.studentKey === verifiedStudentKey(connection))
+            .map((value) => value.draft)}
+          onDiscardDraft={(courseId, homeworkId) =>
+            retainDraft(connection.revision!, verifiedStudentKey(connection), null, courseId, homeworkId)}
           onDraftChange={(draft, courseId, homeworkId) =>
             retainDraft(connection.revision!, verifiedStudentKey(connection), draft, courseId, homeworkId)}
         />
@@ -447,7 +450,7 @@ function ConnectedWorkspace({
   owner,
   onConnectionChanged,
   onSubmissionBusy,
-  recoveryDraft,
+  recoveryDrafts,
   onDiscardDraft,
   onDraftChange,
 }: {
@@ -456,11 +459,14 @@ function ConnectedWorkspace({
   owner: string;
   onConnectionChanged: (reason?: unknown) => void;
   onSubmissionBusy: (busy: boolean) => void;
-  recoveryDraft: TronClassLocalDraft | null;
-  onDiscardDraft: () => void;
+  recoveryDrafts: TronClassLocalDraft[];
+  onDiscardDraft: (courseId: number, homeworkId: number) => void;
   onDraftChange: (draft: TronClassLocalDraft | null, courseId: number, homeworkId: number) => void;
 }) {
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
+  const [courseIndex, setCourseIndex] = useState<TronClassCourseIndex | null>(null);
+  const [indexError, setIndexError] = useState('');
+  const [indexLoading, setIndexLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [course, setCourse] = useState('all');
@@ -472,6 +478,11 @@ function ConnectedWorkspace({
   const [selectedDraft, setSelectedDraft] = useState<TronClassLocalDraft | undefined>();
   const alive = useRef(true);
   const generation = useRef(0);
+  const indexGeneration = useRef(0);
+  const directorySequence = useRef(0);
+  const acceptedDirectorySequence = useRef(0);
+  const syncController = useRef<AbortController | null>(null);
+  const indexController = useRef<AbortController | null>(null);
   const currentConnectionChanged = useRef(onConnectionChanged);
   useEffect(() => {
     currentConnectionChanged.current = onConnectionChanged;
@@ -479,16 +490,15 @@ function ConnectedWorkspace({
 
   async function sync(scope = course, replace = false) {
     const request = ++generation.current;
+    const directoryOrder = ++directorySequence.current;
+    syncController.current?.abort();
+    const controller = new AbortController();
+    syncController.current = controller;
     setLoading(true);
     setError('');
-    if (replace)
-      setSnapshot((value) =>
-        value
-          ? { ...value, homework: [], announcements: [], materials: [], errors: [], partial: false }
-          : value,
-      );
+    if (replace) setSnapshot(null);
     try {
-      const value = await client.sync(scope === 'all' ? undefined : Number(scope));
+      const value = await client.sync(scope === 'all' ? undefined : Number(scope), controller.signal);
       if (!alive.current || request !== generation.current) return;
       if (value.revision !== revision) {
         ++generation.current;
@@ -497,6 +507,14 @@ function ConnectedWorkspace({
         return;
       }
       setSnapshot(value);
+      if (directoryOrder >= acceptedDirectorySequence.current) {
+        acceptedDirectorySequence.current = directoryOrder;
+        const errors = value.errors.filter((issue) => issue.area === 'courses' && issue.courseId === null)
+          .map((issue) => ({ courseId: null, area: 'courses' as const, message: issue.message }));
+        setCourseIndex({ kind: 'course-index', revision: value.revision, fetchedAt: value.fetchedAt,
+          courses: value.courses, errors, partial: errors.length > 0 });
+        setIndexError('');
+      }
     } catch (reason) {
       if (!alive.current || request !== generation.current) return;
       if (reason instanceof TronClassRequestError &&
@@ -510,17 +528,48 @@ function ConnectedWorkspace({
     }
   }
 
+  async function loadCourseIndex() {
+    const request = ++indexGeneration.current;
+    const directoryOrder = ++directorySequence.current;
+    indexController.current?.abort();
+    const controller = new AbortController();
+    indexController.current = controller;
+    setIndexLoading(true);
+    setIndexError('');
+    try {
+      const value = await client.courses(controller.signal);
+      if (!alive.current || request !== indexGeneration.current) return;
+      if (value.revision !== revision) { currentConnectionChanged.current(); return; }
+      if (directoryOrder >= acceptedDirectorySequence.current) {
+        acceptedDirectorySequence.current = directoryOrder;
+        setCourseIndex(value);
+      }
+    } catch (reason) {
+      if (!alive.current || request !== indexGeneration.current) return;
+      if (reason instanceof TronClassRequestError &&
+        ['TRONCLASS_BINDING_CHANGED', 'TRONCLASS_RECONNECT_REQUIRED'].includes(reason.code)) {
+        currentConnectionChanged.current(reason);
+      } else if (directoryOrder >= acceptedDirectorySequence.current) setIndexError(tronClassErrorMessage(reason));
+    } finally {
+      if (alive.current && request === indexGeneration.current) setIndexLoading(false);
+    }
+  }
+
   useEffect(() => {
     alive.current = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- a new account/binding starts its first external read
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a new account/binding starts independent external reads
+    void loadCourseIndex();
     void sync('all');
     return () => {
       alive.current = false;
+      syncController.current?.abort();
+      indexController.current?.abort();
     };
     // The enclosing key is the verified account/binding revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, revision]);
 
+  const courses = courseIndex?.courses ?? snapshot?.courses ?? [];
   const includes = (item: { courseId: number | null; title: string; courseName: string }) =>
     (course === 'all' || String(item.courseId) === course) &&
     `${item.title} ${item.courseName}`
@@ -540,9 +589,17 @@ function ConnectedWorkspace({
       : tab === 'announcements'
         ? announcements.length
         : materials.length;
-  const recoveryHomework = recoveryDraft && snapshot?.revision === revision
-    ? snapshot.homework.find((item) => sameTronClassDraftScope(recoveryDraft, item.courseId, item.id))
-    : undefined;
+  function openHomework(item: TronClassHomeworkItem) {
+    if (submissionBusy) return;
+    const draft = recoveryDrafts.find((value) => sameTronClassDraftScope(value, item.courseId, item.id));
+    if (!draft && recoveryDrafts.length >= MAX_LOCAL_DRAFTS) {
+      setError(`本頁已保留 ${MAX_LOCAL_DRAFTS} 份草稿。請先繼續或清除其中一份，再開啟其他作業。`);
+      return;
+    }
+    setError('');
+    setSelectedDraft(draft);
+    setSelected(item);
+  }
 
   return (
     <>
@@ -551,12 +608,12 @@ function ConnectedWorkspace({
           <div>
             <h2 id="tronclass-courses-heading" tabIndex={-1}>我的課程</h2>
             <p className={styles.muted}>
-              {snapshot
-                ? `更新於 ${tronClassTime(snapshot.fetchedAt)} · ${snapshot.courses.length} 門課程`
+              {courseIndex || snapshot
+                ? `${courses.length} 門課程 · 清單更新於 ${tronClassTime(courseIndex?.fetchedAt ?? snapshot!.fetchedAt)}`
                 : '載入學校目前提供的課程與學習資料。'}
             </p>
           </div>
-          <button className="btn" disabled={loading} onClick={() => void sync()}>
+          <button className="btn" disabled={loading || submissionBusy} onClick={() => void sync()}>
             {loading ? '同步中…' : '同步最新資料'}
           </button>
         </div>
@@ -565,11 +622,21 @@ function ConnectedWorkspace({
             {error}
           </p>
         )}
-        {loading && (
-          <p role="status" className={styles.muted}>
-            正在同步課程、作業、公告與教材…
-          </p>
-        )}
+        {indexError && <div className={styles.notice}>
+          <p role="alert">課程清單：{indexError}</p>
+          <button className="btn" disabled={indexLoading || submissionBusy} onClick={() => void loadCourseIndex()}>
+            重新讀取課程清單
+          </button>
+        </div>}
+        {courseIndex?.partial && <p className={styles.notice} role="status">
+          部分課程清單尚未取得，可先選擇已顯示的課程。
+        </p>}
+        {loading && <p role="status" className={styles.muted}>
+          正在同步課程、作業、公告與教材…{courses.length > 0 ? '可以先選一門課查看，不必等候全部同步。' : ''}
+        </p>}
+        {!snapshot && !loading && courses.length > 0 && <p className={styles.notice}>
+          課程清單已載入。請選一門課讀取作業、公告與教材，或重新同步。
+        </p>}
         {snapshot?.partial && (
           <div className={styles.notice} role="status">
             <p>部分資料尚未更新，已取得的內容仍可查看。</p>
@@ -580,21 +647,29 @@ function ConnectedWorkspace({
             </ul>
           </div>
         )}
-        {recoveryDraft && !selected && <div className={styles.notice}>
-          <h3>回到剛才的作業</h3>
-          <p>{recoveryHomework
-            ? `已重新取得「${recoveryHomework.title}」，可以取回本頁保留的文字與附件。`
-            : '正在等候重新取得原作業；取得後才能恢復草稿。可同步最新資料或清除草稿。'}</p>
-          <div className={styles.actions}>
-            <button className="btn" disabled={loading || !recoveryHomework} onClick={() => {
-              if (!recoveryHomework) return;
-              setSelectedDraft(recoveryDraft);
-              setSelected(recoveryHomework);
-            }}>繼續編輯保留的草稿</button>
-            <button className={styles.textButton} onClick={onDiscardDraft}>清除保留的草稿</button>
-          </div>
+        {recoveryDrafts.length > 0 && !selected && <div className={styles.notice}>
+          <h3>本頁保留的作業草稿</h3>
+          <p>文字與附件會保留到離開或重新整理本頁；繳交結果請開啟作業查證。最多保留 {MAX_LOCAL_DRAFTS} 份。</p>
+          {recoveryDrafts.map((draft) => {
+            const recoveryHomework = snapshot?.revision === revision
+              ? snapshot.homework.find((item) => sameTronClassDraftScope(draft, item.courseId, item.id)) : undefined;
+            return <div key={`${draft.courseId}:${draft.homeworkId}`}>
+              <p>{recoveryHomework
+                ? `「${recoveryHomework.title}」的文字與附件已保留。`
+                : '正在等候重新取得原作業；取得後才能恢復草稿。可同步最新資料或清除草稿。'}</p>
+              <div className={styles.actions}>
+                <button className="btn" disabled={loading || !recoveryHomework}
+                  onClick={() => { if (recoveryHomework) openHomework(recoveryHomework); }}>
+                  {recoveryDrafts.length === 1 ? '繼續編輯保留的草稿' : `繼續編輯 ${recoveryHomework?.title ?? '待確認的作業'}`}
+                </button>
+                <button className={styles.textButton} onClick={() => onDiscardDraft(draft.courseId, draft.homeworkId)}>
+                  {recoveryDrafts.length === 1 ? '清除保留的草稿' : `清除 ${recoveryHomework?.title ?? '待確認的作業'} 的草稿`}
+                </button>
+              </div>
+            </div>;
+          })}
         </div>}
-        {snapshot && (
+        {(courseIndex || snapshot) && (
           <>
             <div className={styles.filters}>
               <label htmlFor="tronclass-course">
@@ -602,6 +677,7 @@ function ConnectedWorkspace({
                 <select
                   id="tronclass-course"
                   value={course}
+                  disabled={submissionBusy}
                   onChange={(event) => {
                     const value = event.target.value;
                     setCourse(value);
@@ -609,7 +685,7 @@ function ConnectedWorkspace({
                   }}
                 >
                   <option value="all">所有課程</option>
-                  {snapshot.courses.map((item) => (
+                  {courses.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
                     </option>
@@ -639,6 +715,10 @@ function ConnectedWorkspace({
                 </button>
               ))}
             </div>
+          </>
+        )}
+        {snapshot && (
+          <>
             {tab === 'homework' && <>
               <div className={styles.homeworkFilters} role="group" aria-label="作業繳交狀態">
                 {homeworkFilters.map(({ value, label }) => (
@@ -694,12 +774,7 @@ function ConnectedWorkspace({
                         id={`tronclass-homework-${item.courseId}-${item.id}`}
                         className="btn"
                         disabled={submissionBusy}
-                        onClick={() => {
-                          if (submissionBusy) return;
-                          setSelectedDraft(recoveryDraft && sameTronClassDraftScope(recoveryDraft, item.courseId, item.id)
-                            ? recoveryDraft : undefined);
-                          setSelected(item);
-                        }}
+                        onClick={() => openHomework(item)}
                       >
                         {item.submitted ? '查看作業' : '準備作業'}
                       </button>

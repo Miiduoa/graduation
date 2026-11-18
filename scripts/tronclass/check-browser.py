@@ -28,9 +28,9 @@ CONNECTION = dict(schoolId='pu', connected=True, revision=REVISION, account='vis
                   userName='合成驗收同學', expiresAt='2026-11-18T18:30:00.000Z', studentKey='d' * 64)
 EMPTY = dict(schoolId='pu', connected=False, revision=None, account=None, userName=None, expiresAt=None)
 COURSES = [dict(id=12, name='資訊管理專題：校園資料整合與服務設計', code='IM101', teachers=['合成教師'], semester='115-1',
-                status='ongoing', href='https://tronclass.pu.edu.tw/course/12'),
+                status='ongoing', href='https://tronclass.pu.edu.tw/course/12/content'),
            dict(id=13, name='資料庫系統', code='DB101', teachers=['合成教師'], semester='115-1',
-                status='ongoing', href='https://tronclass.pu.edu.tw/course/13')]
+                status='ongoing', href='https://tronclass.pu.edu.tw/course/13/content')]
 HOMEWORK = [dict(id=51, courseId=12, courseName=COURSES[0]['name'], title='期末專題報告與設計反思',
                  deadline='2026-12-15T15:59:00.000Z', deadlineLabel='12/15 截止', submitted=False,
                  description='請提交專題報告，說明資料來源、使用流程與實作反思。這是合成介面驗收資料。',
@@ -49,6 +49,7 @@ class Fixture:
         self.blocked_external = []
         self.unhandled = []
         self.last_operation = None
+        self.first_overview = True
 
     async def handle(self, route):
         req = route.request
@@ -90,8 +91,16 @@ class Fixture:
             elif action == 'disconnect':
                 self.connected = False
                 result = EMPTY
+            elif action == 'courses':
+                result = dict(kind='course-index', revision=REVISION, fetchedAt=STAMP,
+                    courses=COURSES, errors=[], partial=False)
             elif action == 'sync':
                 course = body.get('courseId')
+                if self.mode == 'blocked' and course is None and self.first_overview:
+                    self.first_overview = False
+                    await route.fulfill(status=504, json=dict(error='TRONCLASS_SOURCE_TIMEOUT',
+                        message='全部課程同步逾時，請選一門課程重試。'))
+                    return
                 result = dict(revision=REVISION, fetchedAt=STAMP, courses=COURSES,
                     homework=[row for row in HOMEWORK if course is None or row['courseId'] == course],
                     announcements=[] if course != 12 else [dict(id=61, courseId=12, courseName=COURSES[0]['name'],
@@ -200,6 +209,11 @@ async def run_browser(origin):
                         await expect(page.get_by_label('作業內容', exact=True)).to_be_visible()
                         await page.get_by_label('作業內容', exact=True).fill('合成介面驗收：校園課程整合與個人學習反思。')
                         await page.get_by_label('作業附件', exact=True).set_input_files(dict(name='synthetic-report.txt', mimeType='text/plain', buffer=b'synthetic visual verification only'))
+                        await page.get_by_role('button', name='返回作業清單', exact=True).click()
+                        await expect(page.get_by_role('heading', name='本頁保留的作業草稿')).to_be_visible()
+                        await page.get_by_role('button', name='繼續編輯保留的草稿', exact=True).click()
+                        await expect(page.get_by_label('作業內容', exact=True)).to_have_value('合成介面驗收：校園課程整合與個人學習反思。')
+                        await expect(page.get_by_text('synthetic-report.txt', exact=True)).to_be_visible()
                         await capture(page, prefix+'-editing', report, theme)
                         await page.get_by_role('button', name='預覽繳交內容', exact=True).click()
                         await expect(page.get_by_role('heading', name='確認繳交內容', exact=True)).to_be_visible()

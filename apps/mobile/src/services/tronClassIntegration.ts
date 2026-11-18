@@ -1,4 +1,5 @@
 import { NuniError } from '@campus/shared/src/nuni';
+import { decodeTronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
 import {
   isTronClassSubmissionHistory,
   type TronClassSubmissionHistoryEntry,
@@ -389,6 +390,10 @@ export function createNativeTronClassClient(access: TronClassAccess) {
       );
       if (result.connected) return invalid();
       return result;
+    },
+    async courses(expectedRevision: string) {
+      if (!revision(expectedRevision)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+      return sameRevision(decodeTronClassCourseIndex(await request('courses')) ?? invalid(), expectedRevision);
     },
     async sync(expectedRevision: string, courseId?: number) {
       if (courseId !== undefined && !id(courseId))

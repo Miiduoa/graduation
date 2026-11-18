@@ -70,7 +70,7 @@ describe('TronClass confirmed rules in the editor', () => {
       maxFiles: 0, maxFileBytes: 0, allowedContentTypes: [] });
     await ready();
     expect(screen.getByText('本頁整理上限：', { exact: false }).textContent).toContain('最多 4 個附件');
-    expect(screen.queryByText('這份作業只接受文字。')).toBeNull();
+    expect(screen.queryByText('目前可在 nuni 以文字繳交，附件請至 TronClass 處理。')).toBeNull();
     fill();
     preview();
     expect((screen.getByRole('button', { name: '確認送出到 TronClass' }) as HTMLButtonElement).disabled).toBe(true);
@@ -87,9 +87,9 @@ describe('TronClass confirmed rules in the editor', () => {
     fixture({ ...preparation, ...change });
     await ready();
     expect((screen.getByLabelText('作業附件') as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText('這份作業目前不接受附件。')).toBeTruthy();
+    expect(screen.getByText('nuni 目前未開放這份作業的附件繳交。')).toBeTruthy();
     expect(screen.queryByText(/最多 4 個附件/)).toBeNull();
-    expect(screen.getByText('這份作業只接受文字。')).toBeTruthy();
+    expect(screen.getByText('目前可在 nuni 以文字繳交，附件請至 TronClass 處理。')).toBeTruthy();
   });
 
   it('asks the student to move text into an attachment instead of silently discarding it', async () => {
@@ -128,13 +128,13 @@ describe('TronClass confirmed rules in the editor', () => {
 
 describe('TronClass full payload recheck before uploading', () => {
   const changes: { name: string; change: Partial<TronClassPreparation>; message: string }[] = [
-    { name: 'text permission', change: { rules: { ...confirmed, allowsText: false } }, message: '這份作業只接受附件' },
-    { name: 'attachment permission', change: { rules: { ...confirmed, allowsAttachments: false } }, message: '這份作業目前不接受附件' },
-    { name: 'zero attachment count', change: { maxFiles: 0 }, message: '這份作業目前不接受附件' },
+    { name: 'text permission', change: { rules: { ...confirmed, allowsText: false } }, message: '目前可在 nuni 以附件繳交' },
+    { name: 'attachment permission', change: { rules: { ...confirmed, allowsAttachments: false } }, message: 'nuni 目前未開放這份作業的附件繳交' },
+    { name: 'zero attachment count', change: { maxFiles: 0 }, message: 'nuni 目前未開放這份作業的附件繳交' },
     { name: 'attachment count', change: { maxFiles: 1 }, message: '一次最多可加入 1 個附件' },
     { name: 'second file size', change: { maxFileBytes: 3 }, message: '單一附件不可超過 3 B' },
     { name: 'combined size', change: { rules: { ...confirmed, maxTotalBytes: 5 } }, message: '附件合計不可超過 5 B' },
-    { name: 'second MIME type', change: { allowedContentTypes: ['application/pdf'] }, message: '其中有此作業不接受的檔案格式' },
+    { name: 'second MIME type', change: { allowedContentTypes: ['application/pdf'] }, message: '其中有目前無法在 nuni 繳交的檔案格式' },
     { name: 'missing rules from an older response', change: { rules: undefined }, message: '尚未確認這份作業的繳交規則' },
   ];
   it.each(changes)('checks $name before starting even the first upload', async ({ change, message }) => {

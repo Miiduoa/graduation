@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handleTronClassIntegration, type TronClassRouteDependencies } from './tronClassIntegrationRoute';
 
-vi.mock('./tronClassIntegrationSource', () => ({ createTronClassIntegrationReader: vi.fn() }));
+vi.mock('./tronClassIntegrationSource', () => ({ createTronClassIntegrationReader: vi.fn(), createTronClassCourseIndexReader: vi.fn() }));
 vi.mock('./tronClassSubmission', () => ({ getDefaultTronClassSubmissionService: vi.fn() }));
 
 const revision = 'a'.repeat(32);
@@ -23,12 +23,13 @@ function setup() {
   const submissions = { prepare: vi.fn(), upload: vi.fn(), submit: vi.fn(), reconcile: vi.fn(), cancelPreparation: vi.fn() };
   const authenticate = vi.fn().mockResolvedValue({ ownerKey, provider: 'platform' });
   const read = vi.fn().mockResolvedValue({ revision, fetchedAt: '2026-11-13T00:00:00.000Z', courses: [], homework: [], errors: [], partial: false });
+  const courses = vi.fn().mockResolvedValue({ kind: 'course-index', revision, fetchedAt: '2026-11-18T00:00:00.000Z', courses: [], errors: [], partial: false });
   const getSubmissions = vi.fn().mockResolvedValue(submissions);
-  const dependencies = { bindings, authenticate, read, submissions: getSubmissions, rateLimit: vi.fn() } as unknown as TronClassRouteDependencies;
+  const dependencies = { bindings, authenticate, read, courses, submissions: getSubmissions, rateLimit: vi.fn() } as unknown as TronClassRouteDependencies;
   const request = (input: unknown, headers: Record<string, string> = {}) => handleTronClassIntegration(new NextRequest('https://nuni.tw/api/tronclass', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw', ...headers }, body: JSON.stringify(input),
   }), dependencies);
-  return { request, dependencies, authenticate, bindings, submissions, getSubmissions, read };
+  return { request, dependencies, authenticate, bindings, submissions, getSubmissions, read, courses };
 }
 
 beforeEach(() => vi.stubEnv('TRONCLASS_INTEGRATION_ENABLED', 'true'));
@@ -66,6 +67,57 @@ it('passes request cancellation to the sync reader separately from caller-suppli
   expect(read.mock.calls[0][2].aborted).toBe(true);
 });
 
+it('loads only the authenticated course index and forwards cancellation without creating a submission service', async () => {
+  const { dependencies, courses, read, getSubmissions, authenticate } = setup();
+  const controller = new AbortController();
+  const request = new NextRequest('https://nuni.tw/api/tronclass', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw' },
+    body: JSON.stringify({ action: 'courses' }), signal: controller.signal,
+  });
+  const response = await handleTronClassIntegration(request, dependencies);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ kind: 'course-index', courses: [], partial: false });
+  expect(courses).toHaveBeenCalledExactlyOnceWith(ownerKey, request.signal);
+  expect(authenticate).toHaveBeenCalledTimes(2);
+  expect(read).not.toHaveBeenCalled();
+  expect(getSubmissions).not.toHaveBeenCalled();
+  controller.abort();
+  expect(courses.mock.calls[0][1].aborted).toBe(true);
+});
+
+it('requires authentication before loading a course index', async () => {
+  const { request, authenticate, courses } = setup();
+  authenticate.mockRejectedValue(new NuniError(401, 'SIGN_IN_REQUIRED'));
+  expect((await request({ action: 'courses' })).status).toBe(401);
+  expect(courses).not.toHaveBeenCalled();
+});
+
+it('keeps course-picker reads separate from the six-sync budget while limiting both and total requests', async () => {
+  const { request, dependencies, authenticate, read, courses } = setup();
+  delete dependencies.rateLimit;
+  authenticate.mockResolvedValue({ ownerKey: 'platform:pa_course_index_quota_fixture', provider: 'platform' });
+  // Opening the workspace reads the directory and overview; five subsequent
+  // course choices must retain the same full-sync allowance as before.
+  expect((await request({ action: 'courses' })).status).toBe(200);
+  expect((await request({ action: 'sync' })).status).toBe(200);
+  for (const courseId of [101, 102, 103, 104, 105]) {
+    expect((await request({ action: 'sync', courseId })).status).toBe(200);
+  }
+  expect((await request({ action: 'sync', courseId: 106 })).status).toBe(429);
+  expect(read).toHaveBeenCalledTimes(6);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    expect((await request({ action: 'courses' })).status).toBe(200);
+  }
+  expect((await request({ action: 'courses' })).status).toBe(429);
+  expect(courses).toHaveBeenCalledTimes(6);
+  // Both buckets still consume the overall owner budget, including rejected
+  // attempts. Fourteen requests above leave forty-six ordinary status reads.
+  for (let attempt = 0; attempt < 46; attempt++) {
+    expect((await request({ action: 'status' })).status).toBe(200);
+  }
+  expect((await request({ action: 'status' })).status).toBe(429);
+});
+
 it('preserves passwords exactly for the login adapter and omits them from its response', async () => {
   const { request, bindings } = setup();
   const response = await request({ action: 'connect', schoolId: 'pu', account: '410000001', password: ' password with spaces ', expectedRevision: null });
@@ -75,6 +127,8 @@ it('preserves passwords exactly for the login adapter and omits them from its re
 
 it.each([
   { action: 'status', ownerKey: 'other-account' },
+  { action: 'courses', ownerKey: 'other-account' },
+  { action: 'courses', courseId: 101 },
   { action: 'sync', schoolId: 'attacker' },
   { action: 'sync', courseId: '101' },
   { action: 'sync', courseId: 1.5 },

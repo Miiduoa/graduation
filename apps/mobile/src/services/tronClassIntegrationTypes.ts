@@ -1,18 +1,13 @@
 import type { TronClassBindingStatus } from '@campus/shared/src/tronClassIntegration';
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+import type { TronClassCourseSummary } from '@campus/shared/src/tronClassCourseIndex';
+
+export type { TronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
 
 // The native boundary consumes the public BFF contract, never school cookies or raw school rows.
 export type TronClassConnection = TronClassBindingStatus;
-export type TronClassCourse = {
-  id: number;
-  name: string;
-  code: string;
-  teachers: string[];
-  semester: string | null;
-  status: string;
-  href: string;
-};
+export type TronClassCourse = TronClassCourseSummary;
 export type TronClassHomework = {
   id: number;
   courseId: number;
