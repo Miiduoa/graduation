@@ -51,8 +51,11 @@ function comparisonText(value: unknown): string {
 function isRoomSuffix(value: string): boolean {
   const suffix = value.replace(/^[\s:：,，·#/–—-]+/, '').trim();
   const room = '(?:(?:room|教室|室)\\s*)?[a-z]{0,8}\\s*-?\\s*\\d{1,5}[a-z]?(?:\\s*(?:教室|室))?';
-  if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
+  // Bare 3F / B1F is a floor designation, even if the generic room
+  // pattern could interpret its final F as an alphabetic room suffix.
+  if (new RegExp(`^${floor}$`, 'u').test(suffix)) return false;
+  if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   // A timetable may explicitly write floor and room together (3F303 / 3樓303).
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
   // this still identifies a building POI, never a surveyed floor or indoor route.
