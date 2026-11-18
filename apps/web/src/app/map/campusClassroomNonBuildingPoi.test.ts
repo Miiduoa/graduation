@@ -513,3 +513,42 @@ describe('malformed import rows never crash classroom lookup', () => {
     expect(result.matches).toEqual([]);
   });
 });
+
+
+describe('classroom duplicate IDs are scoped to the selected school', () => {
+  const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+
+  it('keeps a valid hall selectable despite another school reusing its ID', () => {
+    expect(sourcedHall).toBeDefined();
+    // An imported cross-campus collision is synthetic. Its coordinates and
+    // school marker do not establish a real building or destination.
+    const foreign = {
+      ...sourcedHall!,
+      schoolId: 'other-school',
+      name: 'Synthetic foreign campus place',
+    };
+    for (const locations of [[foreign, sourcedHall!], [sourcedHall!, foreign]]) {
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations,
+      });
+      expect(result.status).toBe('matched');
+      expect(result.matches).toEqual([sourcedHall]);
+    }
+  });
+
+  it('still fails closed on same-school and unscoped duplicate IDs', () => {
+    expect(sourcedHall).toBeDefined();
+    const duplicate = { ...sourcedHall!, schoolId: 'pu' };
+    const missingScope = { ...sourcedHall!, name: 'Corrupted duplicate source label' };
+    // An explicitly scoped second copy and a legacy unscoped copy are
+    // both potentially selectable by the map using the same location ID.
+    for (const collision of [duplicate, missingScope]) {
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303',
+        locations: [sourcedHall!, collision],
+      });
+      expect(result.status).toBe('unmatched');
+      expect(result.matches).toEqual([]);
+    }
+  });
+});
