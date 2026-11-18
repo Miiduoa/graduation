@@ -588,6 +588,10 @@ it('requires explicit confirmation before replacing the whole round, and cancel 
   // Cancelled confirmations must not silently remove the first answer.
   selectQuestion(1);
   expect(answerInput().value).toBe('先保留的第一題草稿');
+  // The first card is intentionally skipped; revisit the final skipped card
+  // to return to the summary without discarding any previous draft.
+  selectQuestion(3);
+  fireEvent.click(screen.getByRole('button', { name: '取消略過，繼續作答' }));
   skip();
   expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重練本輪全部' }));

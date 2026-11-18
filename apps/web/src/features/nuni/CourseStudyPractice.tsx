@@ -80,6 +80,7 @@ function PracticeRestartControls({ pending, onAction }: {
       <button ref={confirmButton} type="button" className={`${styles.button} ${styles.primary}`}
         aria-describedby={warningId} onClick={() => {
           const selected = scope;
+          if (!selected) return;
           setScope(null);
           onAction({ type: 'restart', scope: selected });
         }}>確認重練{scope === 'pending' ? '待加強題' : '本輪全部'}</button>
