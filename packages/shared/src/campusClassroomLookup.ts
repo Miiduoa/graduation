@@ -51,6 +51,16 @@ function isRoomSuffix(value: string): boolean {
   return new RegExp(`^${floor}(?:[\\s,，:：·/\\-]+${room})?$`, 'u').test(suffix);
 }
 
+/** Classrooms belong to buildings, not a stop, car park, road or gateway
+ * with the same name. This is a narrow denylist, not a school-specific
+ * building whitelist: libraries, dormitories and teaching halls remain valid.
+ * No room number, floor or entrance is inferred from the excluded POIs.
+ */
+const NON_CLASSROOM_POI_CATEGORIES = new Set([
+  '公車站', '公車站牌', '公車', '停車', '交通', '道路',
+  'bus', 'bus stop', 'bus_stop', 'transit', 'parking', 'road',
+]);
+
 function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
   const name = comparisonText(suppliedName);
   if (!name) return false;
@@ -126,6 +136,9 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     )
       return false;
     if ('schoolId' in location && location.schoolId !== school) return false;
+    // A nearby transit stop can be named after a hall or carry its building
+    // field in Firestore. Never promote that stop into a classroom destination.
+    if (NON_CLASSROOM_POI_CATEGORIES.has(comparisonText(location.category))) return false;
     return (
       nameMatchesRoom(comparable, location.name) ||
       nameMatchesRoom(comparable, location.building) ||
