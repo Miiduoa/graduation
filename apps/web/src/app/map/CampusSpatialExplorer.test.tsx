@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
 import type { MapLocation } from './mapService';
-import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
+import { PROVIDENCE_BUS_STOPS, PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { parseProvidenceOsmFootprints } from './providenceFootprints';
 import { DEFAULT_SPATIAL_BEARING, MAX_SPATIAL_ZOOM, MIN_SPATIAL_ZOOM } from './campusSpatialCamera';
 
@@ -2533,5 +2533,60 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
   })).toBeNull();
   expect(within(dialog).getByRole('heading', { name: zhugu.name })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+
+// The filtered spatial overlay cannot display a sourced 3D volume if its
+// entire view is transit stops. Do not spend OSM/Overpass bandwidth on it.
+it('skips public footprint fetch for a bus-stop-only Providence tour, then loads when a building enters the view', async () => {
+  const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-main-a')!;
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: false, status: 503, headers: { get: () => null }, body: null,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const onSelect = vi.fn();
+  const view = render(<CampusSpatialExplorer school="pu" locations={[stop]} selected={stop} onSelect={onSelect} />);
+  const dialog = await open();
+  expect(within(dialog).getByText(/目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).queryByRole('button', { name: '重新讀取建築輪廓' })).toBeNull();
+  expect(within(dialog).getByRole('heading', { name: stop.name })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
+
+  // The same open dialog receives a new map filter. Only now is requesting
+  // building outlines useful; a 503 still retains the normal marker fallback.
+  view.rerender(<CampusSpatialExplorer school="pu" locations={[stop, library]} selected={library} onSelect={onSelect} />);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).queryByText(/沒有已核對的 OSM 建築輪廓候選來源/)).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('aborts an in-flight OSM download when a Providence filter changes to transit stops only', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const stop = PROVIDENCE_BUS_STOPS.find((place) => place.id === 'pu-bus-main-a')!;
+  let requestSignal: AbortSignal | undefined;
+  const fetchMock = vi.fn((_url: string, options: { signal: AbortSignal }) => {
+    requestSignal = options.signal;
+    return new Promise<Response>(() => {});
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const onSelect = vi.fn();
+  const view = render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={onSelect} />);
+  const dialog = await open();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(requestSignal?.aborted).toBe(false);
+
+  // A mobile map filter may be changed before the public API replies. The
+  // no-candidate path must cancel that request and never show old geometry.
+  view.rerender(<CampusSpatialExplorer school="pu" locations={[stop]} selected={stop} onSelect={onSelect} />);
+  await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+  expect(within(dialog).getByText(/沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  fireEvent(window, new Event('pageshow'));
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
