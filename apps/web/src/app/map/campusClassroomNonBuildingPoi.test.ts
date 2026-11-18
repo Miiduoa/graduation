@@ -4,6 +4,7 @@ import {
 } from '@campus/shared/src/campusClassroomLookup';
 import {
   PROVIDENCE_BUS_STOPS,
+  PROVIDENCE_CAMPUS_PLACES,
   type CampusMapPlaceLike,
 } from '@campus/shared/src/providenceCampus';
 
@@ -103,6 +104,51 @@ describe('classroom map destination classification', () => {
       });
       expect(result.status, category).toBe('matched');
       expect(result.matches, category).toEqual([building]);
+    }
+  });
+
+  it('does not navigate to a restaurant or retail point that merely references the classroom building', () => {
+    const realDiningPoint = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-jingyuan');
+    expect(realDiningPoint?.category).toBe('餐飲');
+    const foodPoint = { ...realDiningPoint!, id: 'synthetic-food-with-building-field', building: '主顧樓' };
+    for (const category of [
+      '餐飲', '餐廳', '咖啡廳', '商店', '販賣部',
+      'restaurant', 'cafe', 'cafeteria', 'food court', 'food_court',
+      'shop', 'store', 'convenience store', 'convenience_store', 'atm',
+    ]) {
+      const point = { ...foodPoint, category, name: '主顧樓' };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [point, hall],
+      });
+      expect(result.status, category).toBe('matched');
+      expect(result.matches, category).toEqual([hall]);
+    }
+    // The published dining POI is sourced, but the additional building field is
+    // synthetic; no physical classroom/entrance assignment is inferred here.
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [foodPoint],
+    }).status).toBe('unmatched');
+  });
+
+  it('rejects stacked short transit/retail category qualifiers without rejecting teaching buildings', () => {
+    for (const category of [
+      'Bus Stop (Campus) (Inbound)',
+      '公車站（校內）（往返）',
+      '餐飲 [校內] [B1]',
+      'Restaurant (Main) (Open)',
+    ]) {
+      const point = { ...hall, id: 'synthetic-nonbuilding', category, building: '主顧樓' };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [point, hall],
+      });
+      expect(result.status, category).toBe('matched');
+      expect(result.matches, category).toEqual([hall]);
+    }
+    for (const category of ['教學 (主校區) (大樓)', '交通工程學院 (公車站)']) {
+      const building = { ...hall, category };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [building],
+      }).status, category).toBe('matched');
     }
   });
 });
