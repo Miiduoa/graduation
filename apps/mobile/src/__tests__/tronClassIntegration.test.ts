@@ -12,6 +12,7 @@ import {
 } from '../services/tronClassIntegration';
 import {
   acknowledged,
+  availability,
   connection,
   homework,
   operationId,
@@ -23,6 +24,20 @@ import {
 } from './fixtures/tronClassIntegration';
 
 const scope = { courseId: homework.courseId, homeworkId: homework.id, operationId };
+it('keeps availability separate from nuni write permission and accepts older preparations without it', () => {
+  expect(parseNativeTronClassPreparation({ ...preparation, availability }, scope))
+    .toMatchObject({ availability, canSubmit: false });
+  expect(parseNativeTronClassPreparation(preparation, scope)).not.toHaveProperty('availability');
+});
+it.each([
+  { ...availability, courseId: 999 }, { ...availability, homeworkId: 999 },
+  { ...availability, revision: 'b'.repeat(32) }, { ...availability, state: ['available'] },
+  { ...availability, ordinary: { state: 'open', kind: 'first', remainingAttempts: 0 } },
+  { ...availability, draft: { state: 'available', submissionId: '32', count: 2 } },
+  { ...availability, upload_url: 'private-source-value' },
+])('rejects malformed or crossed availability at the native preparation boundary', value => {
+  expect(() => parseNativeTronClassPreparation({ ...preparation, availability: value }, scope)).toThrow('INVALID_RESPONSE');
+});
 it('loads an independently typed course picker using the same verified native identity', async () => {
   const index = { kind: 'course-index', revision, fetchedAt: stamp,
     courses: snapshot.courses.map(course => ({ ...course, href: `https://tronclass.pu.edu.tw/course/${course.id}/content` })),

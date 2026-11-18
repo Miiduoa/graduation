@@ -5,6 +5,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { normalizeTronClassAssignmentDetails } from './tronClassAssignmentDetails';
 import { createTronClassSubmissionSource } from './tronClassSubmissionSource';
 import type { LmsReadonlySource } from './tronClassLmsSource';
+import type { TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 import {
   createTronClassSubmissionService,
   TRONCLASS_MAX_FILE_BYTES,
@@ -23,6 +24,12 @@ const OPERATION = 'operation-000000001';
 const FILE_A = 'attachment-00000001';
 const FILE_B = 'attachment-00000002';
 const SCOPE = { courseId: 101, homeworkId: 202 };
+const availability: TronClassSubmissionAvailability = {
+  source: 'tronclass', ...SCOPE, revision: REVISION, fetchedAt: new Date(NOW).toISOString(), state: 'available',
+  ordinary: { state: 'open', kind: 'first', remainingAttempts: 1 },
+  makeUp: { state: 'none', updatedAt: null }, resubmit: { state: 'none', updatedAt: null },
+  draft: { state: 'none', submissionId: null, count: 0 },
+};
 const INPUT = { ...SCOPE, revision: REVISION, operationId: OPERATION, content: '我的作業', attachments: [] as string[], confirmed: true as const };
 
 function deferred<T>() {
@@ -103,7 +110,8 @@ function fixture() {
     }),
     listSubmissions: vi.fn(async () => structuredClone(receipts)),
   };
-  const create = () => createTronClassSubmissionService({ db: store.db, bindings, source, now: () => NOW, writeEnabled: () => enabled });
+  const create = (overrides: Partial<Parameters<typeof createTronClassSubmissionService>[0]> = {}) =>
+    createTronClassSubmissionService({ db: store.db, bindings, source, now: () => NOW, writeEnabled: () => enabled, ...overrides });
   const service = create();
   const upload = (fileId = FILE_A) => service.upload(OWNER, { ...SCOPE, revision: REVISION, operationId: OPERATION,
     fileId, name: `${fileId}.pdf`, contentType: 'application/pdf', bytes: new Uint8Array([1, 2, 3]) });
@@ -126,6 +134,79 @@ function closeOwner(rows: Map<string, Record<string, unknown>>) {
 }
 
 describe('TronClass submission orchestration (injected verified source only)', () => {
+  it('keeps the optional availability reader absent from existing injected providers', async () => {
+    const f = fixture();
+    expect(await f.service.prepare(OWNER, SCOPE)).not.toHaveProperty('availability');
+  });
+
+  it('reads the same bound availability while writes are disabled without turning observations into a write grant', async () => {
+    const f = fixture();
+    f.disable();
+    f.source.contractVerified = false;
+    const readAvailability = vi.fn(async () => structuredClone(availability));
+    const result = await f.create({ readAvailability }).prepare(OWNER, SCOPE);
+    expect(readAvailability).toHaveBeenCalledExactlyOnceWith(OWNER, SCOPE, REVISION);
+    expect(result).toMatchObject({ availability, canSubmit: false, receipt: null });
+    expect(f.source.uploadFile).not.toHaveBeenCalled();
+    expect(f.source.submit).not.toHaveBeenCalled();
+    expect(result.availability).not.toBe(availability);
+  });
+
+  it('keeps confirmed detail and history when the optional availability read times out', async () => {
+    const f = fixture();
+    f.source.contractVerified = false;
+    const history = { source: 'tronclass' as const, ...SCOPE, fetchedAt: new Date(NOW).toISOString(),
+      state: 'available' as const, latestId: null, entries: [] };
+    const details = normalizeTronClassAssignmentDetails({ id: SCOPE.homeworkId, course_id: SCOPE.courseId,
+      type: 'homework', submit_by_group: false, is_in_progress: true, is_closed: false,
+      non_submit_times: false, submit_times: 2, user_submit_count: 0, data: { mode: 'normal' },
+    }, SCOPE, NOW).details;
+    f.assignment.details = details;
+    f.source.readSubmissionHistory = vi.fn(async () => history);
+    const service = f.create({ readAvailability: async () => { throw new NuniError(504, 'TRONCLASS_READ_TIMEOUT'); } });
+    expect(await service.prepare(OWNER, SCOPE)).toMatchObject({ details, history, canSubmit: false,
+      availability: { ...SCOPE, revision: REVISION, state: 'unavailable',
+        ordinary: { state: 'unknown', kind: 'unknown', remainingAttempts: null },
+        makeUp: { state: 'unknown' }, resubmit: { state: 'unknown' }, draft: { state: 'unknown' } } });
+  });
+
+  it.each([
+    { ...availability, courseId: 999 }, { ...availability, homeworkId: 999 },
+    { ...availability, revision: 'b'.repeat(32) },
+    { ...availability, cookie: 'private-provider-value' },
+  ])('does not project mismatched or unfiltered availability data', async malformed => {
+    const f = fixture();
+    const service = f.create({ readAvailability: async () => malformed });
+    const result = await service.prepare(OWNER, SCOPE);
+    expect(result.availability).toMatchObject({ ...SCOPE, revision: REVISION, state: 'unavailable' });
+    expect(JSON.stringify(result)).not.toContain('private-provider-value');
+  });
+
+  it.each([
+    [401, 'TRONCLASS_RECONNECT_REQUIRED'], [403, 'TRONCLASS_COURSE_ACCESS_DENIED'],
+    [404, 'TRONCLASS_HOMEWORK_NOT_FOUND'], [409, 'TRONCLASS_BINDING_CHANGED'],
+  ] as const)('discards the earlier preparation after availability discovers %s %s', async (status, code) => {
+    const f = fixture();
+    const service = f.create({ readAvailability: async () => { throw new NuniError(status, code); } });
+    await expect(service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ status, code });
+  });
+
+  it('drops a late availability result after the student account is rebound', async () => {
+    const f = fixture();
+    const service = f.create({ readAvailability: async () => { f.rebind(); return availability; } });
+    await expect(service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+  });
+
+  it.each([
+    [new Error('HTTP 401'), 'TRONCLASS_RECONNECT_REQUIRED'],
+    [Object.assign(new Error('private upstream denial'), { status: 403 }), 'TRONCLASS_COURSE_ACCESS_DENIED'],
+    [new Error('session 已失效'), 'TRONCLASS_RECONNECT_REQUIRED'],
+  ])('does not downgrade a raw authentication/access failure from an injected reader', async (failure, code) => {
+    const f = fixture();
+    const service = f.create({ readAvailability: async () => { throw failure; } });
+    await expect(service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ code });
+  });
+
   it('returns source details independently of write rules without granting a production writer', async () => {
     const f = fixture();
     const details = normalizeTronClassAssignmentDetails({ id: SCOPE.homeworkId, course_id: SCOPE.courseId,

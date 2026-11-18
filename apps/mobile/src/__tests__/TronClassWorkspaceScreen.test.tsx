@@ -10,6 +10,7 @@ import {
 } from '../services/tronClassNativeDraft';
 import {
   acknowledged,
+  availability,
   connection,
   disconnected,
   homework,
@@ -227,6 +228,43 @@ async function confirmAndSend(view: ReturnType<typeof render>) {
   fireEvent(view.getByLabelText('我已確認要把這份作業送至校方'), 'valueChange', true);
   fireEvent.press(view.getByRole('button', { name: '確認並繳交至 TronClass' }));
 }
+
+it('shows personal school windows and drafts without enabling the native writer', async () => {
+  mockPreparation = { ...preparation, availability };
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  expect(view.getByText('一般再次繳交：一般繳交次數已用完，剩餘 0 次')).toBeTruthy();
+  expect(view.getByText('個人補交：個人補交已開放')).toBeTruthy();
+  expect(view.getByText('個人重繳：作業目前未開放重繳')).toBeTruthy();
+  expect(view.getByText('校方草稿：校方有 1 份草稿，請至 TronClass 接續')).toBeTruthy();
+  expect(view.getByText(/nuni 可送出的方式仍以本頁繳交區為準/)).toBeTruthy();
+  expect(view.getByText('目前可在本頁整理與預覽；正式繳交請使用 TronClass 原頁。')).toBeTruthy();
+  await previewDraft(view);
+  fireEvent(view.getByLabelText('我已確認要把這份作業送至校方'), 'valueChange', true);
+  expect(view.getByRole('button', { name: '確認並繳交至 TronClass' })).toBeDisabled();
+  expect(actions('submit')).toHaveLength(0);
+  expect(mockUpload).not.toHaveBeenCalled();
+});
+
+it('retries an unavailable personal status without removing the native answer or existing school history', async () => {
+  mockPreparation = { ...preparation, history: submissionHistory, availability: { ...availability, state: 'unavailable',
+    ordinary: { state: 'unknown', kind: 'unknown', remainingAttempts: null },
+    makeUp: { state: 'unknown', updatedAt: null }, resubmit: { state: 'unknown', updatedAt: null },
+    draft: { state: 'unknown', submissionId: null, count: null } } };
+  const view = render(<TronClassWorkspaceScreen />);
+  await openAssignment(view);
+  expect(view.getByText(/暫時無法確認你的校方繳交狀態/)).toBeTruthy();
+  expect(view.getByText('先前版本的答案')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('作業內容'), '繼續整理中的答案');
+  mockPreparation = { ...mockPreparation, availability: { ...availability,
+    ordinary: { state: 'open', kind: 'first', remainingAttempts: null } } };
+  fireEvent.press(view.getByRole('button', { name: '重新讀取繳交狀態' }));
+  await view.findByText('一般初繳：校方目前開放');
+  expect(view.getByLabelText('作業內容').props.value).toBe('繼續整理中的答案');
+  expect(view.getByText('先前版本的答案')).toBeTruthy();
+  expect(actions('prepare')).toHaveLength(2);
+  expect(actions('submit')).toHaveLength(0);
+});
 
 it('filters school submission states and orders unfinished work by deadline without hiding unknown status', async () => {
   const items = [

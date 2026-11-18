@@ -106,6 +106,23 @@ describe('controlled final POST and exact student readback', () => {
     await expect(s.candidate.dispatch(OWNER, { ...INPUT, content: '' })).resolves.toMatchObject({ state: 'verified-new-version' });
   });
 
+  it.each([true, false])('requires an exact readback after a course-less POST acknowledgment (matching=%s)', async matching => {
+    const s = setup();
+    const sourceRow = row();
+    Reflect.deleteProperty(sourceRow, 'course_id');
+    s.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ student: { id: 30 }, submission: sourceRow }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    s.readHistory.mockResolvedValueOnce({ list: [{ ...sourceRow, comment: matching ? COMMENT : 'different content' }] });
+    await expect(s.candidate.dispatch(OWNER, INPUT)).resolves.toMatchObject({
+      state: matching ? 'verified-new-version' : 'awaiting-confirmation', operationId: INPUT.operationId,
+    });
+    expect(s.rememberAcknowledgment).toHaveBeenCalledTimes(1);
+    expect(s.readHistory).toHaveBeenCalledTimes(1);
+    expect(s.fetch).toHaveBeenCalledTimes(1);
+    expect(s.candidate.contractVerified).toBe(false);
+  });
+
   it.each([
     ['wrong owner', (file: TronClassCandidateUploadedFile) => { file.ownerKey = 'firebase:other'; }],
     ['wrong student', (file: TronClassCandidateUploadedFile) => { file.studentId += 1; }],

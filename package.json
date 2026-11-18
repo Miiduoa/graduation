@@ -113,6 +113,7 @@
     "dev:web": "pnpm --filter web dev",
     "dev:functions": "pnpm --filter functions serve",
     "test-env:start": "bash ./scripts/test-env/start.sh",
+    "test-env:tronclass": "bash ./scripts/test-env/tronclass.sh",
     "test-env:seed": "bash -c \"source scripts/test-env/env.sh && node scripts/test-env/seed.cjs\"",
     "dev:ai": "cd backend/ai-server && ./run.sh",
     "ai:prepare": "cd backend/ai-server && ./run.sh --prepare",

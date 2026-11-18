@@ -104,9 +104,19 @@ describe('controlled text submission candidate', () => {
     expect(s.fetch).not.toHaveBeenCalled();
   });
 
-  it.each(['missing', 'newline', 'malformed', 'cookie-injection'])('refuses %s CSRF/cookie material without issuing a request', async kind => {
+  it('matches the official optional XSRF header behavior without treating it as tenant verification', async () => {
     const value = authorization();
-    if (kind === 'missing') delete value.binding.cookies['XSRF-TOKEN'];
+    delete value.binding.cookies['XSRF-TOKEN'];
+    const s = setup(value);
+    await expect(s.candidate.dispatch('firebase:fixture', input)).resolves.toMatchObject({ state: 'acknowledged' });
+    const [, request] = s.fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new Headers(request.headers).has('X-XSRF-TOKEN')).toBe(false);
+    expect(new Headers(request.headers).get('Cookie')).toBe('session=synthetic-session');
+    expect(s.candidate.contractVerified).toBe(false);
+  });
+
+  it.each(['newline', 'malformed', 'cookie-injection'])('refuses %s CSRF/cookie material without issuing a request', async kind => {
+    const value = authorization();
     if (kind === 'newline') value.binding.cookies['XSRF-TOKEN'] = 'bad%0Atoken';
     if (kind === 'malformed') value.binding.cookies['XSRF-TOKEN'] = '%xx';
     if (kind === 'cookie-injection') value.binding.cookies.session = 'value; other=account';

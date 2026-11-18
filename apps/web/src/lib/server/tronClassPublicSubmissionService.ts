@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import type { TronClassPreparationCancellation } from '@campus/shared/src/tronClassSubmissionCancellation';
+import { isTronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 import { isTronClassAssignmentDetails } from '../tronClassAssignmentDetails';
 import { createTronClassControlledSubmission, type TronClassControlledSubmissionDependencies } from './tronClassControlledSubmission';
 import { createTronClassControlledJournal } from './tronClassControlledJournal';
@@ -171,7 +172,8 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
       const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
       const base = structuredClone(await readonlyPrepare(ownerKey, scope));
       if (!base || base.source !== 'tronclass' || base.schoolId !== 'pu' || base.courseId !== scope.courseId ||
-        base.homeworkId !== scope.homeworkId || typeof base.revision !== 'string' || !REVISION.test(base.revision)) unavailable();
+        base.homeworkId !== scope.homeworkId || typeof base.revision !== 'string' || !REVISION.test(base.revision) ||
+        (base.availability !== undefined && !isTronClassSubmissionAvailability(base.availability, scope, base.revision))) unavailable();
       const binding = await current(ownerKey, base.revision);
       // Project the existing read-only DTO explicitly; do not spread provider data.
       const preparation: TronClassPreparedSubmission = {
@@ -180,6 +182,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
         canSubmit: false, blockedReason: blockedReason(), maxFiles: base.maxFiles, maxFileBytes: base.maxFileBytes,
         allowedContentTypes: [...base.allowedContentTypes], rules: base.rules, receipt: base.receipt,
         ...(base.details === undefined ? {} : { details: base.details }), ...(base.history === undefined ? {} : { history: base.history }),
+        ...(base.availability === undefined ? {} : { availability: base.availability }),
       };
       if (preparation.blockedReason) return preparation;
       const granted: TronClassCandidateAuthorization = structuredClone(await authorization!(ownerKey, scope));

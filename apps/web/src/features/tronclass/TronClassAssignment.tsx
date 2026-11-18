@@ -18,6 +18,7 @@ import type {
 import { SourceLink, tronClassTime } from './TronClassSource';
 import { TronClassSubmissionHistory } from './TronClassSubmissionHistory';
 import { TronClassAssignmentDetails } from './TronClassAssignmentDetails';
+import { TronClassSubmissionAvailability } from './TronClassSubmissionAvailability';
 import { sameTronClassDraftScope, type TronClassLocalDraft } from './tronClassLocalDraft';
 import styles from './tronclass.module.css';
 
@@ -715,6 +716,13 @@ export function TronClassAssignment({
           retryDisabled={working}
         />
       )}
+      {!preparing && !prepareError && preparation?.availability && !completed && phase !== 'unknown' && (
+        <TronClassSubmissionAvailability
+          availability={preparation.availability}
+          onRetry={retryPreparation}
+          retryDisabled={working}
+        />
+      )}
       {!preparing && !working && !prepareError && preparation?.history && !completed && phase !== 'unknown' && (
         <TronClassSubmissionHistory
           history={preparation.history}
@@ -789,7 +797,7 @@ export function TronClassAssignment({
           {phase === 'editing' ? (
             <div className={styles.form}>
               {limits.confirmed && <p className={styles.muted}>
-                {limits.allowsText
+                {!submissionAllowed ? '目前可在本頁整理與預覽；正式繳交請使用 TronClass 原頁。' : limits.allowsText
                   ? canAddAttachments ? '目前可在 nuni 以文字與附件繳交。' : '目前可在 nuni 以文字繳交，附件請至 TronClass 處理。'
                   : canAddAttachments ? '目前可在 nuni 以附件繳交，請將作業文字整理在附件內。' : 'nuni 目前未開放這份作業的繳交方式。'}
               </p>}

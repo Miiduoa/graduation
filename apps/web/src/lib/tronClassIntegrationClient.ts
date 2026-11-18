@@ -1,4 +1,5 @@
 import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { isTronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 import { decodeTronClassCourseIndex, type TronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
 import { decodeTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import {
@@ -284,6 +285,9 @@ export function parseTronClassResult(action: string, value: unknown, input: Reco
       courseId: input.courseId as number, homeworkId: input.homeworkId as number,
     })) return invalidResponse();
     if (value.details !== undefined && !isTronClassAssignmentDetails(value.details)) return invalidResponse();
+    if (value.availability !== undefined && !isTronClassSubmissionAvailability(value.availability, {
+      courseId: input.courseId as number, homeworkId: input.homeworkId as number,
+    }, value.revision)) return invalidResponse();
     if (
       isRecord(value.receipt) &&
       (value.receipt.courseId !== input.courseId || value.receipt.homeworkId !== input.homeworkId)

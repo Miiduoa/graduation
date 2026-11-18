@@ -84,6 +84,29 @@ describe('TronClass client response boundary', () => {
   const preparation = { source: 'tronclass', schoolId: 'pu', courseId: 1, homeworkId: 2,
     revision: 'a'.repeat(32), title: '作業', description: '', deadline: null, canSubmit: false,
     blockedReason: '尚未開放', maxFiles: 0, maxFileBytes: 0, allowedContentTypes: [], receipt: null, history };
+  const availability = { source: 'tronclass', courseId: 1, homeworkId: 2, revision: preparation.revision,
+    fetchedAt: '2026-11-18T08:00:00.000Z', state: 'available',
+    ordinary: { state: 'attempts-exhausted', kind: 'repeat', remainingAttempts: 0 },
+    makeUp: { state: 'open', updatedAt: null }, resubmit: { state: 'disabled', updatedAt: null },
+    draft: { state: 'available', submissionId: '8', count: 1 } };
+
+  it('accepts independently scoped availability without enabling writes and keeps older responses valid', () => {
+    const value = { ...preparation, availability };
+    expect(parseTronClassResult('prepare', value, { courseId: 1, homeworkId: 2 })).toEqual(value);
+    expect(value.canSubmit).toBe(false);
+    expect(parseTronClassResult('prepare', preparation, { courseId: 1, homeworkId: 2 })).not.toHaveProperty('availability');
+  });
+
+  it.each([
+    { ...availability, courseId: 999 }, { ...availability, homeworkId: 999 },
+    { ...availability, revision: 'b'.repeat(32) }, { ...availability, state: ['available'] },
+    { ...availability, ordinary: { state: 'open', kind: 'first', remainingAttempts: 0 } },
+    { ...availability, draft: { state: 'available', submissionId: '8', count: 2 } },
+    { ...availability, cookies: { session: 'private-source-value' } },
+  ])('rejects crossed or unprojected availability at the web preparation boundary', value => {
+    expect(() => parseTronClassResult('prepare', { ...preparation, availability: value }, { courseId: 1, homeworkId: 2 }))
+      .toThrow(TronClassRequestError);
+  });
   const details = { status: 'available', fetchedAt: '2026-11-16T08:00:00.000Z',
     submissionType: 'individual', mode: 'normal', opensAt: null, deadline: null,
     isInProgress: true, isClosed: false,

@@ -33,6 +33,7 @@ import type {
   TronClassPreparation,
   TronClassResult,
 } from '../../services/tronClassIntegrationTypes';
+import { TronClassSubmissionAvailabilityCard } from './TronClassSubmissionAvailabilityCard';
 
 type Phase = 'editing' | 'preview' | 'sending' | 'unknown' | 'finished';
 const body = { color: aiTokens.text, lineHeight: 23, marginBottom: 10 };
@@ -604,6 +605,10 @@ export function TronClassAssignmentPanel({
         )}
         <AIButton label="返回作業清單" variant="ghost" disabled={!!busy} onPress={onClose} />
       </AICard>
+      {preparation?.availability && !prepareError && phase !== 'unknown' && phase !== 'finished' ? (
+        <TronClassSubmissionAvailabilityCard availability={preparation.availability}
+          retryDisabled={!!busy} onRetry={() => void load()} />
+      ) : null}
       {busy ? (
         <AICard>
           <ActivityIndicator accessibilityLabel={busy} />
@@ -674,11 +679,11 @@ export function TronClassAssignmentPanel({
         <AICard title={phase === 'preview' ? '確認這次作業內容' : '整理作業'}>
           {!canSubmit ? (
             <Text style={body}>
-              {preparation?.blockedReason || '目前可在 App 整理與預覽，校方可繳交狀態尚未確認。'}
+              {preparation?.blockedReason || '目前可在 App 整理與預覽，這份作業尚未開放從 nuni 送出。'}
             </Text>
           ) : null}
           <Text style={body}>
-            {limits.confirmed
+            {limits.confirmed && !canSubmit ? '目前可在本頁整理與預覽；正式繳交請使用 TronClass 原頁。' : limits.confirmed
               ? `目前 nuni 支援：${limits.allowsText ? '文字繳交' : '尚未開放文字繳交'}，${limits.allowsAttachments ? '附件繳交' : '尚未開放附件繳交'}。`
               : '尚未確認站內繳交方式；以下僅是本機草稿。'}
           </Text>

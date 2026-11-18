@@ -26,6 +26,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     selectedSchoolId: null as string | null,
     schoolDirectoryLoading: false,
     requestedUnavailable: false,
+    emulator: false,
     selectSchool: vi.fn(),
   },
 }));
@@ -59,6 +60,7 @@ vi.mock('@/components/AuthGuard', () => ({
 }));
 vi.mock('@/features/auth/client', () => ({
   isFirebaseConfigured: () => true,
+  isEmulatorTestEnv: () => state.emulator,
   signInWithPuStudentId: signIn,
 }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
@@ -93,12 +95,56 @@ beforeEach(() => {
   state.selectedSchoolId = null;
   state.schoolDirectoryLoading = false;
   state.requestedUnavailable = false;
+  state.emulator = false;
   signIn.mockResolvedValue({ uid: 'one' });
   vi.stubGlobal('location', { ...window.location, replace });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.useRealTimers();
+});
+it('signs in the development emulator fixture through the normal SDK path without prefilling school fields', async () => {
+  vi.stubEnv('NODE_ENV', 'development');
+  state.emulator = true;
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  state.params = new URLSearchParams({ returnUrl: '/tronclass' });
+  render(<LoginPage />);
+  expect((screen.getByLabelText('學號') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '使用本機測試學生甲' }));
+  await waitFor(() => expect(signIn).toHaveBeenCalledExactlyOnceWith(
+    'S0000001', 'campus-test-1234', expect.any(AbortSignal), 'pu',
+  ));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/tronclass'));
+});
+it.each<[string, boolean]>([
+  ['production', true],
+  ['development', false],
+  ['test', true],
+])('does not render a local test login in %s with emulator=%s', (environment, emulator) => {
+  vi.stubEnv('NODE_ENV', environment);
+  state.emulator = emulator;
+  render(<LoginPage />);
+  expect(screen.queryByRole('button', { name: '使用本機測試學生甲' })).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
+});
+it('shows a retryable emulator login error without navigating or filling school credentials', async () => {
+  vi.stubEnv('NODE_ENV', 'development');
+  state.emulator = true;
+  state.user = null;
+  state.studentId = true;
+  state.params = new URLSearchParams({ returnUrl: '/tronclass' });
+  signIn.mockRejectedValueOnce(new Error('local-auth-unavailable'));
+  render(<LoginPage />);
+  fireEvent.click(screen.getByRole('button', { name: '使用本機測試學生甲' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(SCHOOL_LOGIN_GENERIC_ERROR));
+  expect(replace).not.toHaveBeenCalled();
+  expect((screen.getByRole('button', { name: '使用本機測試學生甲' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByLabelText('學號') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
 });
 it('states student-id login is not open and never claims direct school-id connection', () => {
   state.user = null;

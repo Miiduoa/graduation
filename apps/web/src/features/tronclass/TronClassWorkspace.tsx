@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
@@ -82,6 +82,11 @@ export function TronClassWorkspace() {
   const workspaceKey = platformSession ? `${owner}:${platformSession.context}` : owner;
   const ready =
     !!identity && !!owner && !platformBlocked && !loading && (platformSession || !firebase.error);
+  // A platform refresh retains its previously verified account/context while
+  // loading. Keep only that identity's page-memory drafts, not the private UI or
+  // its active requests. Error, logout or a different key destroys the boundary.
+  const retainDuringPlatformRefresh = !!platformSession && platform?.loading &&
+    !platform.error && !platform.pendingLogout;
 
   return (
     <SiteShell
@@ -93,7 +98,7 @@ export function TronClassWorkspace() {
         <Link className={styles.back} href="/classroom">
           返回課程空間
         </Link>
-        {!ready ? (
+        {!ready && (
           <section className={styles.panel}>
             {loading ? (
               <p role="status">正在確認登入狀態…</p>
@@ -123,15 +128,32 @@ export function TronClassWorkspace() {
               </>
             )}
           </section>
-        ) : (
-          <AccountWorkspace key={workspaceKey} identity={identity!} owner={owner!} />
+        )}
+        {(ready || retainDuringPlatformRefresh) && (
+          <AccountDraftRetention key={workspaceKey} identity={identity!} owner={owner!} active={!!ready} />
         )}
       </div>
     </SiteShell>
   );
 }
 
-function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; owner: string }) {
+function AccountDraftRetention({ identity, owner, active }: {
+  identity: TronClassIdentity; owner: string; active: boolean;
+}) {
+  const [recoveryDrafts, setRecoveryDrafts] = useState<SchoolDraft[]>([]);
+  // No hidden editor/DOM remains during verification. Remounting the account
+  // requires a fresh school status; recovery still requires the same studentKey
+  // and a fresh prepare before the retained text or File handles become visible.
+  return active ? <AccountWorkspace identity={identity} owner={owner}
+    recoveryDrafts={recoveryDrafts} setRecoveryDrafts={setRecoveryDrafts} /> : null;
+}
+
+function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }: {
+  identity: TronClassIdentity;
+  owner: string;
+  recoveryDrafts: SchoolDraft[];
+  setRecoveryDrafts: Dispatch<SetStateAction<SchoolDraft[]>>;
+}) {
   const client = useMemo(() => createTronClassClient(identity), [identity]);
   const agentClient = useMemo(() => createTronClassAgentClient(identity), [identity]);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
@@ -144,11 +166,18 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
   const [disconnecting, setDisconnecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submissionBusy, setSubmissionBusy] = useState(false);
-  const [recoveryDrafts, setRecoveryDrafts] = useState<SchoolDraft[]>([]);
   const draftScope = useRef<{ studentKey: string; revision: string } | null>(null);
   const alive = useRef(true);
   const lock = useRef(false);
   const connectionRequest = useRef(0);
+  const acceptConnection = useCallback((value: TronClassConnection) => {
+    const studentKey = verifiedStudentKey(value);
+    draftScope.current = studentKey && value.revision ? { studentKey, revision: value.revision } : null;
+    if (value.connected || !value.account) {
+      setRecoveryDrafts((drafts) => studentKey ? drafts.filter((draft) => draft.studentKey === studentKey) : []);
+    }
+    setConnection(value);
+  }, [setRecoveryDrafts]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -177,16 +206,7 @@ function AccountWorkspace({ identity, owner }: { identity: TronClassIdentity; ow
     return () => {
       current = false;
     };
-  }, [client, epoch]);
-
-  function acceptConnection(value: TronClassConnection) {
-    const studentKey = verifiedStudentKey(value);
-    draftScope.current = studentKey && value.revision ? { studentKey, revision: value.revision } : null;
-    if (value.connected || !value.account) {
-      setRecoveryDrafts((drafts) => studentKey ? drafts.filter((draft) => draft.studentKey === studentKey) : []);
-    }
-    setConnection(value);
-  }
+  }, [client, epoch, acceptConnection]);
 
   function suspendDraft() {
     // Keep page-memory drafts sealed until the same school identity is verified.

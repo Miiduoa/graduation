@@ -2,8 +2,10 @@ import type { TronClassBindingStatus } from '@campus/shared/src/tronClassIntegra
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import type { TronClassCourseSummary } from '@campus/shared/src/tronClassCourseIndex';
+import type { TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 
 export type { TronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
+export type { TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 
 // The native boundary consumes the public BFF contract, never school cookies or raw school rows.
 export type TronClassConnection = TronClassBindingStatus;
@@ -101,6 +103,8 @@ export type TronClassPreparation = {
   details?: TronClassDetails;
   receipt: TronClassReceipt | null;
   history?: TronClassSubmissionHistory;
+  /** Optional for older BFFs; observations do not grant nuni write permission. */
+  availability?: TronClassSubmissionAvailability;
 };
 export type TronClassResult =
   | { status: 'submitted' | 'unknown'; operationId: string; receipt: TronClassReceipt | null }

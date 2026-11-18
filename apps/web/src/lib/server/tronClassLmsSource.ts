@@ -53,6 +53,19 @@ export type LmsReadonlySource = {
     studentId: number,
     readOptions?: LmsReadOptions,
   ) => Promise<LmsReadResult<unknown>>;
+  /** Individual student permission records, read only from the bound identity. */
+  fetchStudentMakeUpRecord?: (
+    cookies: Record<string, string>,
+    activityId: number,
+    studentId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<unknown>>;
+  fetchStudentResubmitRecord?: (
+    cookies: Record<string, string>,
+    activityId: number,
+    studentId: number,
+    readOptions?: LmsReadOptions,
+  ) => Promise<LmsReadResult<unknown>>;
   fetchActivities: (
     cookies: Record<string, string>,
     courseId: number,
@@ -94,6 +107,10 @@ export const tronClassLmsReadonlySource: LmsReadonlySource = {
     wrapRead(() => tronClassScraper.tcFetchCoursePageForAuthorization(cookies, courseId, readOptions)),
   fetchStudentSubmissionList: (cookies, activityId, studentId, readOptions) =>
     wrapRead(() => tronClassScraper.tcFetchStudentHomeworkSubmissionList(cookies, activityId, studentId, readOptions)),
+  fetchStudentMakeUpRecord: (cookies, activityId, studentId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchStudentMakeUpHomeworkRecord(cookies, activityId, studentId, readOptions)),
+  fetchStudentResubmitRecord: (cookies, activityId, studentId, readOptions) =>
+    wrapRead(() => tronClassScraper.tcFetchStudentResubmitHomeworkRecord(cookies, activityId, studentId, readOptions)),
   fetchActivities: (cookies, courseId, query, readOptions) =>
     wrapRead(() => tronClassScraper.tcFetchActivitiesRaw(cookies, courseId, query, readOptions)),
   fetchCourseAnnouncements: (cookies, courseId, readOptions) =>

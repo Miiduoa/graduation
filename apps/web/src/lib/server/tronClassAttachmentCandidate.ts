@@ -7,6 +7,7 @@ import {
   TRONCLASS_PROTOCOL_MAX_FILE_BYTES,
 } from './tronClassSubmissionProtocol';
 import type { TronClassAssignment, TronClassHomeworkScope, TronClassSubmissionBinding } from './tronClassSubmissionSource';
+import { tronClassSchoolWriteHeaders } from './tronClassWriteHeaders';
 
 const SCHOOL_ORIGIN = 'https://tronclass.pu.edu.tw';
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -153,24 +154,6 @@ function checkedAuthorization(value: TronClassAttachmentCandidateAuthorization, 
       fail(409, 'TRONCLASS_SUBMISSION_BLOCKED');
     }
   }
-}
-
-function schoolHeaders(binding: TronClassSubmissionBinding): Headers {
-  const pairs = Object.entries(binding.cookies ?? {});
-  if (!pairs.length || pairs.length > 64) invalid();
-  const cookie = pairs.map(([key, value]) => {
-    if (!/^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$/.test(key) || typeof value !== 'string' ||
-      !/^[\x21-\x7e]*$/.test(value) || /[;\\",]/.test(value)) invalid();
-    return `${key}=${value}`;
-  }).join('; ');
-  if (cookie.length > 32 * 1024) invalid();
-  const raw = binding.cookies['XSRF-TOKEN'];
-  if (!raw) fail(503, 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED');
-  let token: string;
-  try { token = decodeURIComponent(raw); } catch { return invalid(); }
-  if (!token || token.length > 4096 || !/^[\x21-\x7e]+$/.test(token)) invalid();
-  return new Headers({ Cookie: cookie, 'X-XSRF-TOKEN': token, Accept: 'application/json',
-    'Content-Type': 'application/json', 'Accept-Encoding': 'identity', Origin: SCHOOL_ORIGIN, Referer: `${SCHOOL_ORIGIN}/` });
 }
 
 function storageUrl(raw: unknown): string {
@@ -320,7 +303,7 @@ export function createTronClassAttachmentUploadCandidate(dependencies: TronClass
         // Snapshot all identity/rule values before another async dependency runs.
         authorization = { ...granted, binding: { ...granted.binding, cookies: { ...granted.binding.cookies } },
           assignment: { ...granted.assignment, allowedContentTypes: [...granted.assignment.allowedContentTypes] } };
-        const headers = schoolHeaders(authorization.binding);
+        const headers = tronClassSchoolWriteHeaders(authorization.binding);
         const claim: TronClassAttachmentClaim = Object.freeze({ ...scope, ownerKey, schoolId: 'pu',
           studentId: authorization.binding.userId, revision: input.revision,
           operationId: input.operationId, fileId: input.fileId, name: input.name,

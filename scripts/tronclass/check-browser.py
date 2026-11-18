@@ -50,6 +50,7 @@ class Fixture:
         self.unhandled = []
         self.last_operation = None
         self.first_overview = True
+        self.session_reads = []
 
     async def handle(self, route):
         req = route.request
@@ -59,6 +60,7 @@ class Fixture:
             await route.abort()
             return
         if url.path == '/api/nuni/session':
+            self.session_reads.append(dict(at=time.monotonic(), method=req.method))
             await route.fulfill(json=dict(authenticated=self.mode != 'guest',
                 **({} if self.mode == 'guest' else dict(platformAccountId='pa_00000000-0000-4000-8000-000000000001',
                     isPlatformOperator=False, context='b' * 43))))
@@ -156,13 +158,31 @@ async def capture(page, name, report, theme):
     assert not metrics['overflowingElements'], f'{name}: clipped controls {metrics}'
 
 
+async def expect_recovered_draft(page, prefix, report):
+    try:
+        await expect(page.get_by_label('作業內容', exact=True)).to_have_value(
+            '合成介面驗收：校園課程整合與個人學習反思。')
+    except Exception:
+        # These pages and API responses are entirely synthetic. Preserve the
+        # failing state before Playwright closes the context, so a remount is
+        # distinguishable from a slow or rejected assignment read.
+        report['failedDraftRecovery'] = dict(
+            scenario=prefix,
+            url=page.url,
+            visibleText=await page.locator('body').inner_text(),
+            lifecycle=await page.evaluate('window.__tronclassFixtureLifecycle || []'),
+        )
+        await page.screenshot(path=str(OUT / f'{prefix}-failed-draft.png'), full_page=True)
+        raise
+
+
 async def run_browser(origin):
     report = dict(sourceHead=subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip(),
         sourceTree=subprocess.check_output(['git','rev-parse','HEAD^{tree}'], cwd=ROOT, text=True).strip(),
         sourceParents=subprocess.check_output(['git','show','-s','--format=%P','HEAD'], cwd=ROOT, text=True).strip().split(),
         prHead=os.environ.get('TRONCLASS_PR_HEAD_SHA'),
         buildId=(ROOT/'apps/web/.next/BUILD_ID').read_text().strip(), kind='actual Next standalone; synthetic intercepted API responses',
-        realSchoolRequests=False, captures=[], scenarios=[], pageErrors=[], passed=False)
+        realSchoolRequests=False, captures=[], scenarios=[], pageErrors=[], consoleErrors=[], passed=False)
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(**({'executable_path': os.environ['TRONCLASS_BROWSER_CHROMIUM']}
@@ -173,12 +193,26 @@ async def run_browser(origin):
                     context = await browser.new_context(viewport=dict(width=width, height=1000 if width>500 else 844),
                         color_scheme=theme, reduced_motion='reduce', service_workers='block', locale='zh-TW', timezone_id='Asia/Taipei')
                     await context.add_init_script('localStorage.setItem("campus-web-preferences", JSON.stringify({appearance:{theme:'+json.dumps(theme)+',animations:false}}));')
+                    await context.add_init_script('''(() => {
+                        const events = [];
+                        window.__tronclassFixtureLifecycle = events;
+                        const record = event => events.push({type:event.type,
+                            at:performance.now(), visibility:document.visibilityState,
+                            persisted:event.persisted === true});
+                        window.addEventListener('pageshow', record);
+                        window.addEventListener('pagehide', record);
+                        document.addEventListener('visibilitychange', record);
+                    })();''')
                     fixture = Fixture(mode, origin)
                     await context.route('**/*', fixture.handle)
                     page = await context.new_page()
                     page.on('pageerror', lambda error: report['pageErrors'].append(str(error)))
+                    page.on('console', lambda message: report['consoleErrors'].append(message.text)
+                        if message.type == 'error' else None)
                     await page.goto(origin+'/tronclass', wait_until='networkidle')
                     prefix = f'{width}-{theme}-{mode}'
+                    report['activeScenario'] = dict(name=prefix, actions=fixture.actions,
+                        sessionReads=fixture.session_reads, unhandled=fixture.unhandled)
                     if mode == 'guest':
                         await expect(page.get_by_role('heading', name='連接你的學校課程')).to_be_visible()
                         await capture(page, prefix, report, theme)
@@ -212,7 +246,7 @@ async def run_browser(origin):
                         await page.get_by_role('button', name='返回作業清單', exact=True).click()
                         await expect(page.get_by_role('heading', name='本頁保留的作業草稿')).to_be_visible()
                         await page.get_by_role('button', name='繼續編輯保留的草稿', exact=True).click()
-                        await expect(page.get_by_label('作業內容', exact=True)).to_have_value('合成介面驗收：校園課程整合與個人學習反思。')
+                        await expect_recovered_draft(page, prefix, report)
                         await expect(page.get_by_text('synthetic-report.txt', exact=True)).to_be_visible()
                         await capture(page, prefix+'-editing', report, theme)
                         await page.get_by_role('button', name='預覽繳交內容', exact=True).click()
@@ -237,8 +271,10 @@ async def run_browser(origin):
                             assert not await page.evaluate('Object.keys(sessionStorage).some(key=>key.startsWith("nuni.tronclass.pending:"))')
                     assert not fixture.unhandled, fixture.unhandled
                     report['scenarios'].append(dict(name=prefix, actions=fixture.actions,
+                        sessionReads=fixture.session_reads,
                         externalRequestAttemptsBlocked=sorted(set(fixture.blocked_external)), passed=True))
                     await context.close()
+                    report.pop('activeScenario', None)
             await browser.close()
         assert not report['pageErrors'], report['pageErrors']
         report['passed'] = True

@@ -1123,6 +1123,31 @@ async function tcFetchStudentHomeworkSubmissionList(cookies, activityId, student
   return data;
 }
 
+// Official student homeworkRepository / homeworkApi in 55200.e380810d.js.
+// A missing record is an explicit null, never an HTTP failure or absent key.
+// These read-only envelopes do not authorize a write by themselves.
+async function readStudentHomeworkPermissionRecord(cookies, activityId, studentId, kind, readOptions) {
+  requireHomeworkReadId(activityId);
+  requireHomeworkReadId(studentId);
+  const key = kind === 'make-up' ? 'make_up_record' : 'resubmit_record';
+  const data = await readHomeworkJson(`${TC_BASE}/api/homework/${activityId}/students/${studentId}/${kind}-record`, cookies, readOptions);
+  if (!isHomeworkResponseObject(data) || !Object.prototype.hasOwnProperty.call(data, key) ||
+    !(data[key] === null || isHomeworkResponseObject(data[key]))) {
+    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+  }
+  return data;
+}
+
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchStudentMakeUpHomeworkRecord(cookies, activityId, studentId, readOptions = {}) {
+  return readStudentHomeworkPermissionRecord(cookies, activityId, studentId, 'make-up', readOptions);
+}
+
+/** @param {TronClassReadOptions} readOptions */
+async function tcFetchStudentResubmitHomeworkRecord(cookies, activityId, studentId, readOptions = {}) {
+  return readStudentHomeworkPermissionRecord(cookies, activityId, studentId, 'resubmit', readOptions);
+}
+
 async function tcFetchHomeworkStatus(cookies, courseId) {
   try {
     const data = await tcFetchJson(
@@ -1568,6 +1593,8 @@ module.exports = {
   tcFetchHomeworkActivityStrict,
   tcFetchCoursePageForAuthorization,
   tcFetchStudentHomeworkSubmissionList,
+  tcFetchStudentMakeUpHomeworkRecord,
+  tcFetchStudentResubmitHomeworkRecord,
   tcFetchHomeworkScores,
   tcFetchExamStatus,
   tcFetchAnnouncements,

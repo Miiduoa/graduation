@@ -140,6 +140,17 @@ describe('synthetic final acknowledgment, never a receipt', () => {
     expect(result).not.toHaveProperty('status');
   });
 
+  it('uses the authorized request scope when a submission omits redundant course_id', () => {
+    const raw = syntheticEnvelope();
+    Reflect.deleteProperty(raw.submission, 'course_id');
+    expect(parseTronClassSubmissionAcknowledgment(raw, syntheticContext)).toEqual({
+      state: 'acknowledged', submissionId: 501, courseId: 101, activityId: 202, studentId: 303,
+    });
+    expect(parseTronClassSubmissionAcknowledgment({ ...raw, course_id: 999 }, syntheticContext)).toEqual({ state: 'unconfirmed' });
+    Object.assign(raw.submission, { course: { id: 999 } });
+    expect(parseTronClassSubmissionAcknowledgment(raw, syntheticContext)).toEqual({ state: 'unconfirmed' });
+  });
+
   it.each([
     { id: 500 }, { id: '501' }, { id: 0 }, { id: Number.MAX_SAFE_INTEGER + 1 },
     { course_id: 999 }, { course_id: undefined }, { course_id: '101' },

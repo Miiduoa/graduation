@@ -1,4 +1,5 @@
 import { NuniError } from '@campus/shared/src/nuni';
+import { isTronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 import { decodeTronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
 import {
   isTronClassSubmissionHistory,
@@ -49,7 +50,7 @@ const time = (value: unknown) =>
   value.length === 24 &&
   Number.isFinite(Date.parse(value)) &&
   new Date(value).toISOString() === value;
-const revision = (value: unknown) => text(value) && /^[a-f0-9]{32}$/.test(value);
+const revision = (value: unknown): value is string => text(value) && /^[a-f0-9]{32}$/.test(value);
 const array = (value: unknown, check: (row: unknown) => boolean, max = 5000): value is unknown[] =>
   Array.isArray(value) && value.length <= max && value.every(check);
 const only = (value: Record<string, unknown>, keys: string[]) =>
@@ -282,6 +283,8 @@ export function parseNativeTronClassPreparation(
   }
   if (value.details !== undefined && !isDetails(value.details)) return invalid();
   if (value.history !== undefined && !isTronClassSubmissionHistory(value.history, scope))
+    return invalid();
+  if (value.availability !== undefined && !isTronClassSubmissionAvailability(value.availability, scope, value.revision))
     return invalid();
   return value as TronClassPreparation;
 }

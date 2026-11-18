@@ -208,6 +208,33 @@ describe('source-backed text authorization through the public v2 service', () =>
 });
 
 describe('public v2 submission adapter gates and preparation', () => {
+  it.each([true, false])('preserves scoped read-only availability through the public projection (verified=%s)', async verified => {
+    const f = fixture({ contractVerified: verified });
+    const availability = { source: 'tronclass' as const, ...SCOPE, revision: REVISION,
+      fetchedAt: new Date(NOW).toISOString(), state: 'available' as const,
+      ordinary: { state: 'open' as const, kind: 'first' as const, remainingAttempts: 1 },
+      makeUp: { state: 'none' as const, updatedAt: null }, resubmit: { state: 'none' as const, updatedAt: null },
+      draft: { state: 'none' as const, submissionId: null, count: 0 } };
+    f.base.availability = availability;
+    expect(await f.service.prepare(OWNER, SCOPE)).toMatchObject({ availability, canSubmit: verified });
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+  });
+
+  it.each(['course', 'revision', 'private-field'])('rejects %s availability at the public adapter boundary', async kind => {
+    const f = fixture({ contractVerified: false });
+    f.base.availability = { source: 'tronclass', ...SCOPE, revision: REVISION,
+      fetchedAt: new Date(NOW).toISOString(), state: 'unavailable',
+      ordinary: { state: 'unknown', kind: 'unknown', remainingAttempts: null },
+      makeUp: { state: 'unknown', updatedAt: null }, resubmit: { state: 'unknown', updatedAt: null },
+      draft: { state: 'unknown', submissionId: null, count: null } };
+    if (kind === 'course') f.base.availability.courseId = 999;
+    if (kind === 'revision') f.base.availability.revision = 'b'.repeat(32);
+    if (kind === 'private-field') Object.assign(f.base.availability, { upload_url: 'private-source-url' });
+    await expect(f.service.prepare(OWNER, SCOPE)).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
+    expect(f.authorization).not.toHaveBeenCalled();
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['default enabled', { enabled: undefined }], ['default attestation', { contractVerified: undefined }],
     ['unverified contract', { contractVerified: false }], ['no tenant authorizer', { authorization: undefined }],
@@ -299,11 +326,22 @@ describe('public v2 submission adapter gates and preparation', () => {
       expect(f.fetchSchool).not.toHaveBeenCalled();
     });
 
-  it.each([true, false])('does not use activity flags alone when CSRF evidence is absent (storage=%s)', async storage => {
+  it.each([true, false])('serializes the verified client contract when the optional XSRF cookie is absent (storage=%s)', async storage => {
     const f = fixture(storage ? {} : { resolveStorageTarget: undefined });
     delete f.granted.binding.cookies['XSRF-TOKEN'];
+    expect((await f.service.prepare(OWNER, SCOPE)).canSubmit).toBe(true);
+    expect(f.fetchSchool).not.toHaveBeenCalled();
+    await expect(f.service.submit(OWNER, submit())).resolves.toMatchObject({ status: 'confirmed',
+      confirmation: { kind: 'acknowledged-readback', submissionId: 501, ...SCOPE } });
+    expect(finalCalls(f)).toHaveLength(1);
+    expect(new Headers(finalCalls(f)[0][1]?.headers).has('X-XSRF-TOKEN')).toBe(false);
+  });
+
+  it.each([true, false])('never substitutes token presence for the separate production contract gate (token=%s)', async token => {
+    const f = fixture({ contractVerified: false });
+    if (!token) delete f.granted.binding.cookies['XSRF-TOKEN'];
     expect((await f.service.prepare(OWNER, SCOPE)).canSubmit).toBe(false);
-    await expect(f.service.submit(OWNER, submit())).rejects.toMatchObject({ code: 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED' });
+    await expect(f.service.submit(OWNER, submit())).rejects.toMatchObject({ code: 'TRONCLASS_SUBMISSION_UNAVAILABLE' });
     expect(f.fetchSchool).not.toHaveBeenCalled();
   });
 

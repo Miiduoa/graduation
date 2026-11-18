@@ -4,6 +4,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { createPuRelayFetch, type FetchLike } from './puEdgeRelay';
 import type { TronClassAssignment, TronClassHomeworkScope, TronClassSubmissionBinding } from './tronClassSubmissionSource';
 import { buildTronClassNewSubmission, parseTronClassSubmissionAcknowledgment } from './tronClassSubmissionProtocol';
+import { tronClassSchoolWriteHeaders } from './tronClassWriteHeaders';
 
 const ORIGIN = 'https://tronclass.pu.edu.tw';
 const MAX_REQUEST_BYTES = 128 * 1024;
@@ -137,27 +138,8 @@ export function createTronClassCandidateFetch(request: RequestFn = https.request
   });
 }
 
-export function tronClassCandidateHeaders(binding: TronClassSubmissionBinding): Headers {
-  const pairs = Object.entries(binding.cookies);
-  if (!pairs.length || pairs.length > 64) return invalid();
-  const cookie = pairs.map(([key, value]) => {
-    if (!/^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$/.test(key) || typeof value !== 'string' ||
-      !/^[\x21-\x7e]*$/.test(value) || /[;\\",]/.test(value)) return invalid();
-    return `${key}=${value}`;
-  }).join('; ');
-  if (cookie.length > 32 * 1024) return invalid();
-  const headers = new Headers({ Cookie: cookie, Accept: 'application/json', 'Content-Type': 'application/json',
-    'Accept-Encoding': 'identity', Origin: ORIGIN, Referer: `${ORIGIN}/` });
-  // Only the publicly documented Angular default is implemented. The caller
-  // must verify this policy on the controlled tenant; absence is not approval.
-  const rawToken = binding.cookies['XSRF-TOKEN'];
-  if (!rawToken) fail(503, 'TRONCLASS_CANDIDATE_CSRF_UNVERIFIED');
-  let token: string;
-  try { token = decodeURIComponent(rawToken); } catch { return invalid(); }
-  if (!token || token.length > 4096 || !/^[\x21-\x7e]+$/.test(token)) return invalid();
-  headers.set('X-XSRF-TOKEN', token);
-  return headers;
-}
+// Shared by the final POST, upload metadata and callback paths.
+export const tronClassCandidateHeaders = tronClassSchoolWriteHeaders;
 
 export function assertTronClassCandidateAuthorization(
   value: TronClassCandidateAuthorization, scope: TronClassHomeworkScope, now: number, requiresText = true,

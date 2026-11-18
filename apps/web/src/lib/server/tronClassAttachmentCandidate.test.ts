@@ -226,9 +226,23 @@ describe('controlled attachment transfer', () => {
     expect(s.authorize).not.toHaveBeenCalled();
   });
 
-  it.each(['missing-token', 'bad-percent-token', 'cookie-injection', 'token-newline'])('rejects %s before creating upload metadata', async kind => {
+  it('uses the same optional XSRF policy for metadata and callback, without sending school cookies to storage', async () => {
     const s = setup();
-    if (kind === 'missing-token') delete s.value.binding.cookies['XSRF-TOKEN'];
+    delete s.value.binding.cookies['XSRF-TOKEN'];
+    await expect(s.candidate.dispatch(OWNER, s.file)).resolves.toMatchObject({ state: 'transferred' });
+    expect(s.fetchSchool).toHaveBeenCalledTimes(2);
+    for (const [, request] of s.fetchSchool.mock.calls) {
+      const headers = new Headers(request?.headers);
+      expect(headers.has('X-XSRF-TOKEN')).toBe(false);
+      expect(headers.get('Cookie')).toBe('session=synthetic-private-cookie');
+    }
+    const [, request] = s.fetchStorage.mock.calls[0];
+    expect(new Headers(request?.headers).has('Cookie')).toBe(false);
+    expect(s.candidate.contractVerified).toBe(false);
+  });
+
+  it.each(['bad-percent-token', 'cookie-injection', 'token-newline'])('rejects %s before creating upload metadata', async kind => {
+    const s = setup();
     if (kind === 'bad-percent-token') s.value.binding.cookies['XSRF-TOKEN'] = '%xx';
     if (kind === 'cookie-injection') s.value.binding.cookies.session = 'value; another=session';
     if (kind === 'token-newline') s.value.binding.cookies['XSRF-TOKEN'] = 'bad%0atoken';

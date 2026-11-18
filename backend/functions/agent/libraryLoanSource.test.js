@@ -46,6 +46,7 @@ beforeEach(() => {
   mockStore = transactionStore([
     ['users/alice', { schoolId: 'pu' }],
     ['schools/pu/members/alice', { status: 'active' }],
+    ['users/alice/settings/assistantPermissions', { renewBook: true, returnBook: true }],
     [canonicalPath, row], [mirrorPath, { ...row }],
     [bookPath, { title: '資料結構', availableCopies: 0, available: 0 }],
     ['schools/pu/libraryBooks/book-2', { title: '演算法', availableCopies: 0, available: 0 }],

@@ -7,14 +7,17 @@ vi.mock('server-only', () => ({}));
 
 const runtime = vi.hoisted(() => ({
   getFirebaseAdmin: vi.fn(), createBinding: vi.fn(), createSource: vi.fn(), createAuthorization: vi.fn(),
+  createAvailability: vi.fn(),
 }));
 vi.mock('./firebaseAdmin', () => ({ getFirebaseAdmin: runtime.getFirebaseAdmin }));
 vi.mock('./tronClassBinding', () => ({ createTronClassBindingService: runtime.createBinding }));
 vi.mock('./tronClassSubmissionSource', () => ({ createTronClassSubmissionSource: runtime.createSource }));
 vi.mock('./tronClassPuAuthorization', () => ({ createTronClassPuAuthorizationReader: runtime.createAuthorization }));
+vi.mock('./tronClassSubmissionAvailability', () => ({ createTronClassSubmissionAvailabilityReader: runtime.createAvailability }));
 
 import { getDefaultTronClassSubmissionService } from './tronClassSubmission';
 import type { TronClassSubmissionBinding, TronClassSubmissionSource } from './tronClassSubmissionSource';
+import type { TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 
 const ownerKey = 'platform:pa_default_service_fixture';
 const scope = { courseId: 101, homeworkId: 202 };
@@ -49,7 +52,16 @@ function setup() {
   runtime.createSource.mockReturnValue(source);
   const authorization = vi.fn(async () => { throw new Error('unverified writer must not probe tenant authorization'); });
   runtime.createAuthorization.mockReturnValue(authorization);
-  return { binding, bindings, db, source, authorization };
+  const availability: TronClassSubmissionAvailability = {
+    source: 'tronclass', ...scope, revision, fetchedAt: '2026-11-18T00:00:00.000Z', state: 'available',
+    ordinary: { state: 'open', kind: 'first', remainingAttempts: 3 },
+    makeUp: { state: 'none', updatedAt: null },
+    resubmit: { state: 'none', updatedAt: null },
+    draft: { state: 'none', submissionId: null, count: 0 },
+  };
+  const readAvailability = vi.fn(async () => structuredClone(availability));
+  runtime.createAvailability.mockReturnValue(readAvailability);
+  return { binding, bindings, db, source, authorization, availability, readAvailability };
 }
 
 beforeEach(() => vi.resetAllMocks());
@@ -64,6 +76,11 @@ describe('production default public submission factory', () => {
     expect(prepared).toMatchObject({ ...scope, revision, title: '合成作業', description: '保留唯讀詳情', canSubmit: false });
     expect(prepared.rules.status).toBe('unknown');
     expect(prepared.receipt).toBeNull();
+    expect(runtime.createAvailability).toHaveBeenCalledExactlyOnceWith({ bindings: s.bindings });
+    expect(s.readAvailability).toHaveBeenCalledExactlyOnceWith(ownerKey, scope, revision);
+    expect(prepared.availability).toEqual(s.availability);
+    // A real reader is wired into the factory, but its available school window
+    // cannot grant nuni's still-unverified writer or trigger any school mutation.
     await expect(service.upload(ownerKey, { ...scope, revision, operationId, fileId, name: '作業.txt', contentType: 'text/plain',
       bytes: new TextEncoder().encode('合成內容') })).rejects.toMatchObject({ status: 503 });
     await expect(service.submit(ownerKey, { ...scope, revision, operationId, content: '合成內容', attachments: [], confirmed: true }))
@@ -83,5 +100,6 @@ describe('production default public submission factory', () => {
     expect(runtime.createBinding).not.toHaveBeenCalled();
     expect(runtime.createSource).not.toHaveBeenCalled();
     expect(runtime.createAuthorization).not.toHaveBeenCalled();
+    expect(runtime.createAvailability).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { NuniError } from '@campus/shared/src/nuni';
 import { isTronClassSubmissionHistory, type TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { isTronClassSubmissionAvailability, type TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
+import { classifySchoolReadError, schoolHttpStatus } from '@campus/shared/src/puLmsReadonly';
 import type { TronClassAssignmentDetails, TronClassSubmissionRules } from '../tronClassIntegrationTypes';
 import { isTronClassAssignmentDetails } from '../tronClassAssignmentDetails';
 import type { TronClassPublicSubmissionService } from './tronClassPublicSubmissionService';
@@ -38,6 +40,7 @@ export type TronClassPreparedSubmission = TronClassHomeworkScope & {
   details?: TronClassAssignmentDetails;
   receipt: TronClassSubmissionReceipt | null;
   history?: TronClassSubmissionHistory;
+  availability?: TronClassSubmissionAvailability;
 };
 
 export type TronClassUploadedAttachment = {
@@ -186,12 +189,14 @@ function assertPayloadAllowed(assignment: TronClassAssignment, content: string, 
   }
 }
 
-export function createTronClassSubmissionService({ db, bindings, source, now = Date.now,
+export function createTronClassSubmissionService({ db, bindings, source, readAvailability, now = Date.now,
   writeEnabled = () => process.env.TRONCLASS_HOMEWORK_WRITE_ENABLED === 'true',
 }: {
   db: TronClassSubmissionFirestore;
   bindings: TronClassSubmissionBindings;
   source: TronClassSubmissionSource;
+  /** Optional injection: only the production factory supplies the live reader. */
+  readAvailability?: (ownerKey: string, scope: TronClassHomeworkScope, expectedRevision: string) => Promise<TronClassSubmissionAvailability>;
   now?: () => number;
   writeEnabled?: () => boolean;
 }) {
@@ -308,8 +313,9 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
     return { status: 'submitted', operationId: operation.operationId, receipt };
   }
   return {
-    async prepare(ownerKey: string, scope: TronClassHomeworkScope): Promise<TronClassPreparedSubmission> {
-      validateScope(scope);
+    async prepare(ownerKey: string, input: TronClassHomeworkScope): Promise<TronClassPreparedSubmission> {
+      validateScope(input);
+      const scope = Object.freeze({ courseId: input.courseId, homeworkId: input.homeworkId });
       const binding = await bindingFor(ownerKey);
       const assignment = await assignmentFor(ownerKey, binding, scope);
       const details = assignment.details === undefined ? undefined : structuredClone(assignment.details);
@@ -349,6 +355,32 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
             state: 'unavailable', latestId: null, entries: [] };
         }
       }
+      let availability: TronClassSubmissionAvailability | undefined;
+      if (readAvailability) {
+        try {
+          const result = await readAvailability(ownerKey, scope, binding.revision);
+          await bindings.assertCurrent(ownerKey, binding.revision);
+          if (!isTronClassSubmissionAvailability(result, scope, binding.revision)) fail(502, 'TRONCLASS_AVAILABILITY_UNAVAILABLE');
+          availability = structuredClone(result);
+        } catch (error) {
+          await bindings.assertCurrent(ownerKey, binding.revision);
+          // A later school denial invalidates the earlier assignment/history too.
+          // Only an ordinary optional-read failure can become unknown here.
+          if (error instanceof NuniError && ([401, 403, 409].includes(error.status) ||
+            ['TRONCLASS_BINDING_CHANGED', 'SESSION_CHANGED', 'SIGN_IN_REQUIRED',
+              'TRONCLASS_HOMEWORK_NOT_FOUND', 'TRONCLASS_COURSE_ACCESS_DENIED'].includes(error.code))) throw error;
+          const status = schoolHttpStatus(error);
+          if (status === 401 || classifySchoolReadError(error) === 'session') fail(401, 'TRONCLASS_RECONNECT_REQUIRED');
+          if (status === 403) fail(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
+          if (status === 409) fail(409, 'TRONCLASS_BINDING_CHANGED');
+          availability = {
+            source: 'tronclass', ...scope, revision: binding.revision, fetchedAt: new Date(now()).toISOString(), state: 'unavailable',
+            ordinary: { state: 'unknown', kind: 'unknown', remainingAttempts: null },
+            makeUp: { state: 'unknown', updatedAt: null }, resubmit: { state: 'unknown', updatedAt: null },
+            draft: { state: 'unknown', submissionId: null, count: null },
+          };
+        }
+      }
       await bindings.assertCurrent(ownerKey, binding.revision);
       return { source: 'tronclass', schoolId: 'pu', courseId: scope.courseId, homeworkId: scope.homeworkId, revision: binding.revision,
         title: assignment.title, description: assignment.description, deadline: assignment.deadline,
@@ -361,7 +393,7 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
           maxTotalBytes: Math.min(assignment.maxTotalBytes, TRONCLASS_MAX_TOTAL_BYTES),
         } : { status: 'unknown' },
         allowedContentTypes: [...assignment.allowedContentTypes], receipt,
-        ...(history ? { history } : {}) };
+        ...(history ? { history } : {}), ...(availability ? { availability } : {}) };
     },
     async upload(ownerKey: string, input: ScopedOperationInput & {
       fileId: string; name: string; contentType: string; bytes: Uint8Array;
@@ -531,14 +563,16 @@ export function createTronClassSubmissionService({ db, bindings, source, now = D
 
 /** Request-local construction; credentials and sessions never enter a client bundle. */
 export async function getDefaultTronClassSubmissionService(): Promise<TronClassPublicSubmissionService> {
-  const [{ getFirebaseAdmin }, { createTronClassBindingService }, { createTronClassSubmissionSource }, { createTronClassPublicSubmissionService }, { createTronClassPuAuthorizationReader }] = await Promise.all([
+  const [{ getFirebaseAdmin }, { createTronClassBindingService }, { createTronClassSubmissionSource }, { createTronClassPublicSubmissionService }, { createTronClassPuAuthorizationReader }, { createTronClassSubmissionAvailabilityReader }] = await Promise.all([
     import('./firebaseAdmin'), import('./tronClassBinding'), import('./tronClassSubmissionSource'), import('./tronClassPublicSubmissionService'), import('./tronClassPuAuthorization'),
+    import('./tronClassSubmissionAvailability'),
   ]);
   const runtime = await getFirebaseAdmin();
   if (!runtime?.db) unavailable();
   const db = runtime.db as unknown as TronClassSubmissionFirestore;
   const bindings = createTronClassBindingService();
-  const legacy = createTronClassSubmissionService({ db, bindings, source: createTronClassSubmissionSource() });
+  const legacy = createTronClassSubmissionService({ db, bindings, source: createTronClassSubmissionSource(),
+    readAvailability: createTronClassSubmissionAvailabilityReader({ bindings }) });
   return createTronClassPublicSubmissionService({
     db, bindings, readonlyPrepare: legacy.prepare, legacyReconcile: legacy.reconcile,
     authorization: createTronClassPuAuthorizationReader({ bindings }),

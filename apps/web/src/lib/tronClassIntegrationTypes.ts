@@ -1,8 +1,10 @@
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
 import type { TronClassCourseSummary } from '@campus/shared/src/tronClassCourseIndex';
+import type { TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 
 export type { TronClassCourseIndex, TronClassCourseSummary } from '@campus/shared/src/tronClassCourseIndex';
+export type { TronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
 
 export type {
   TronClassAcknowledgedReadbackConfirmation,
@@ -127,6 +129,8 @@ export type TronClassPreparation = {
   details?: TronClassAssignmentDetails;
   receipt: TronClassSubmissionReceipt | null;
   history?: TronClassSubmissionHistory;
+  /** Optional for older BFFs; observations do not grant nuni write permission. */
+  availability?: TronClassSubmissionAvailability;
 };
 
 export type TronClassSubmissionResult = {

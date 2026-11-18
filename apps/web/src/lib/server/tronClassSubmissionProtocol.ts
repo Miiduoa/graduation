@@ -145,10 +145,12 @@ function identityMatches(row: Record<string, unknown>, context: TronClassAcknowl
 }
 
 /**
- * Conservative candidate schema, NOT a captured/verified production response.
- * Require explicit submission course_id/activity_id/created_by.id and student.id,
- * plus final, non-teacher, latest state flags. The public frontend does not prove
- * every server response includes these fields; missing proof stays unconfirmed.
+ * Request-scoped candidate identity, NOT a captured/verified production response.
+ * The official final handler reads submission/student, and the POST endpoint is
+ * scoped to the authorized activity. A submission row need not repeat course_id
+ * (the official student history also omits it). Any supplied course identity must
+ * still match. Keep explicit activity_id/created_by.id/student.id and final,
+ * non-teacher, latest flags; the separate exact student readback is mandatory.
  * This never returns a receipt, content, attachments, grades, or a submittedAt.
  * In particular, created_at is not evidence of the final submission's timestamp.
  */
@@ -163,7 +165,7 @@ export function parseTronClassSubmissionAcknowledgment(
     const row = object(envelope.submission);
     const student = object(envelope.student);
     if (!row || !student || !owns(student, 'id', context.studentId) || !has(row, 'id') || !id(row.id) ||
-      context.priorSubmissionIds.includes(row.id) || !owns(row, 'course_id', context.courseId) ||
+      context.priorSubmissionIds.includes(row.id) ||
       !owns(row, 'activity_id', context.activityId) || !has(row, 'created_by') ||
       !identityMatches(row, context) || !isTronClassSourceVisible(row) ||
       !owns(row, 'is_draft', false) || !owns(row, 'is_redo', false) ||

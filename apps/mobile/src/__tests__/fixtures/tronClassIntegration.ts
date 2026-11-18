@@ -3,6 +3,7 @@ import type {
   TronClassHomework,
   TronClassPreparation,
   TronClassSnapshot,
+  TronClassSubmissionAvailability,
 } from '../../services/tronClassIntegrationTypes';
 import type { TronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
 
@@ -81,6 +82,13 @@ export const preparation: TronClassPreparation = {
     maxTotalBytes: 20 * 1024 * 1024,
   },
   receipt: null,
+};
+export const availability: TronClassSubmissionAvailability = {
+  source: 'tronclass', courseId: homework.courseId, homeworkId: homework.id, revision,
+  fetchedAt: stamp, state: 'available',
+  ordinary: { state: 'attempts-exhausted', kind: 'repeat', remainingAttempts: 0 },
+  makeUp: { state: 'open', updatedAt: null }, resubmit: { state: 'disabled', updatedAt: null },
+  draft: { state: 'available', submissionId: '32', count: 1 },
 };
 export const submissionHistory: TronClassSubmissionHistory = {
   source: 'tronclass',
