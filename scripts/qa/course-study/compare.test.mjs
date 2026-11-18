@@ -35,6 +35,19 @@ test('rejects missing comparisons, unauthorized sources and duplicate cases', ()
   const duplicated = fixture(); duplicated.trials.push(structuredClone(duplicated.trials[0]));
   assert.throws(() => auditStudyComparisons(duplicated), /duplicate caseId/);
 });
+test('rejects array-typed product labels instead of coercing them to nuni or Ahaboard', () => {
+  const malformed = fixture();
+  malformed.trials[0].results[0].product = ['nuni'];
+  assert.throws(() => auditStudyComparisons(malformed), /unknown or repeated product/);
+
+  const duplicate = fixture();
+  duplicate.trials[0].results[1].product = ['nuni'];
+  assert.throws(() => auditStudyComparisons(duplicate), /unknown or repeated product/);
+
+  const valid = auditStudyComparisons(fixture());
+  assert.deepEqual(valid.caseProvenance[0].versions,
+    { nuni: '2026-11-17', Ahaboard: '2026-11-17' });
+});
 test('rejects canonically equivalent Unicode case IDs without rewriting labels', () => {
   const paired = fixture();
   paired.trials[0].caseId = '題目-é';

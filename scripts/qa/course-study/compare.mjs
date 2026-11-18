@@ -113,7 +113,7 @@ export function auditStudyComparisons(raw) {
     const seen = new Set(), pair = {}, versions = {};
     trial.results.forEach((item, n) => {
       const where = `${key}.results[${n}]`, run = object(item, where);
-      if (!Object.hasOwn(observations, run.product) || seen.has(run.product))
+      if ((run.product !== 'nuni' && run.product !== 'Ahaboard') || seen.has(run.product))
         fail(where, 'unknown or repeated product');
       seen.add(run.product);
       versions[run.product] = evidenceLabel(run.version, `${where}.version`);
