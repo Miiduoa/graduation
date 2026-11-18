@@ -317,6 +317,37 @@ it('lets students focus and read media captions without switching stories by arr
   expect(viewer.next).toHaveBeenCalledTimes(2);
 });
 
+it('keeps a gesture from navigating when it finishes on caption text or native video controls', () => {
+  const { viewer, video } = renderVideo();
+  const canvas = screen.getByRole('region', { name: '限時動態內容，左右方向鍵切換' });
+  const caption = screen.getByRole('region', { name: '限時動態說明文字' });
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100 } as DOMRect);
+  vi.spyOn(video, 'getBoundingClientRect').mockReturnValue({ bottom: 100 } as DOMRect);
+  const pointer = { pointerId: 1, isPrimary: true, button: 0, clientY: 50 };
+
+  // A release on selectable text is not a tap or swipe, even when the press began on empty canvas.
+  fireEvent.pointerDown(canvas, { ...pointer, clientX: 95 });
+  fireEvent.pointerUp(caption, { ...pointer, clientX: 95 });
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  fireEvent.pointerDown(canvas, { ...pointer, clientX: 5 });
+  fireEvent.pointerUp(caption, { ...pointer, clientX: 90 });
+  expect(viewer.switchAuthor).not.toHaveBeenCalled();
+
+  // Guard releases over the native seek area; do not block deliberate canvas gestures.
+  fireEvent.pointerDown(canvas, { ...pointer, clientX: 5, clientY: 95 });
+  fireEvent.pointerUp(video, { ...pointer, clientX: 90, clientY: 95 });
+  expect(viewer.switchAuthor).not.toHaveBeenCalled();
+
+  fireEvent.pointerDown(canvas, { ...pointer, clientX: 90 });
+  fireEvent.pointerUp(canvas, { ...pointer, clientX: 5 });
+  expect(viewer.switchAuthor).toHaveBeenCalledOnce();
+  expect(viewer.switchAuthor).toHaveBeenCalledWith(1);
+  fireEvent.pointerDown(canvas, { ...pointer, clientX: 95 });
+  fireEvent.pointerUp(canvas, { ...pointer, clientX: 95 });
+  expect(viewer.next).toHaveBeenCalledOnce();
+});
+
 it('pauses image-story auto-advance while the caption is focused and resumes the remaining time', async () => {
   vi.useFakeTimers();
   const viewer = {
