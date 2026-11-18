@@ -201,7 +201,7 @@ it('undoes a skipped outcome only on explicit action after a cancelled progress 
   expect(screen.getByRole('button', { name: /^第 1 題：.*，略過$/ })).toBeTruthy();
   expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
   fireEvent.click(screen.getByRole('button', { name: '取消略過，繼續作答' }));
-  expect(screen.getByRole('button', { name: /^第 1 題：.*，未完成$/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /^第 1 題：.*，草稿待自評$/ })).toBeTruthy();
   expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
   expect(screen.queryByText(explanations[0].answer)).toBeNull();
   expect((screen.getByRole('button', { name: '略過這題' }) as HTMLButtonElement).disabled).toBe(false);
