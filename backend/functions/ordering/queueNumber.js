@@ -199,6 +199,8 @@ async function assignNumberForOrder(
     // before a caller adopts this transaction's observed order status.
     validateOrder(order, schoolId, orderId);
     // Legacy cancelled orders may retain a number; never revive their queue.
+    // Prefer ClosedOrderError so callers receive the trusted terminal state
+    // instead of a generic failed-precondition.
     if (order.status === 'cancelled')
       throw new ClosedOrderError(order, schoolId, orderId);
     if (typeof order.queueNumber === 'number' && order.queueNumber > 0) {
