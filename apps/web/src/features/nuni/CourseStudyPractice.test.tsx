@@ -359,6 +359,7 @@ it('prioritizes an unassessed draft from the finished summary without treating i
   selectQuestion(2);
   writeAnswer('');
   selectQuestion(3);
+  fireEvent.click(screen.getByRole('button', { name: '取消略過，繼續作答' }));
   skip();
   expect(screen.queryByRole('button', { name: /先完成已寫草稿/ })).toBeNull();
   expect(summaryCount('未完成')).toBe('2 題');
