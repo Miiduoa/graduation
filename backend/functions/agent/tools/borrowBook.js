@@ -4,6 +4,7 @@ const { z } = require('zod');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { assertServiceScope, readServiceActor, userServiceGuard } = require('./serviceWriteGuard');
+const { readAgentWritePermission } = require('./agentWritePermissionGuard');
 
 const inputSchema = z.object({ bookId: z.string().min(1).max(128).refine((id) => !id.includes('/')) });
 
@@ -21,6 +22,7 @@ async function execute(ctx, rawInput) {
 
   return db.runTransaction(async (tx) => {
     await readServiceActor(tx, db, ctx);
+    await readAgentWritePermission(tx, db, ctx, 'borrowBook');
     const [bookDoc, userLoans] = await Promise.all([
       tx.get(bookRef),
       tx.get(loans.where('userId', '==', uid).where('status', 'in', ['borrowed', 'active'])),
