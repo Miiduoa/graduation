@@ -134,9 +134,10 @@ describe('public course transport', () => {
     const stream = new ReadableStream<Uint8Array>({
       pull(controller) {
         pulls += 1;
-        // Missing Content-Length: the old response.text() path would continue
-        // reading forever instead of rejecting after exceeding 512 KiB.
-        controller.enqueue(new Uint8Array(300_000).fill(65));
+        // Missing Content-Length: the previous response.text() path buffered
+        // all 1.8 MiB before rejecting, rather than stopping at the second chunk.
+        if (pulls <= 6) controller.enqueue(new Uint8Array(300_000).fill(65));
+        else controller.close();
       },
       cancel() { cancelled = true; },
     });
