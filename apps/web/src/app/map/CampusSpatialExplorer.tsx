@@ -409,8 +409,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 
 function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
+  // A matching ID alone is not an audited source: Firestore can reuse a POI
+  // ID at different coordinates, under a new name or with a new category.
+  // Skip the whole-campus download unless a *visible* marker still matches
+  // the bundled OSM provenance identity used by visibleFootprints below.
   const hasOutlineCandidate = school === 'pu' &&
-    model.points.some((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id));
+    model.points.some((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id) &&
+      providencePlaceSourceUrl(school, point.location) !== null);
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
