@@ -635,6 +635,8 @@ describe('classroom floor-only labels require a room number', () => {
       '主顧樓3F', '主顧樓３Ｆ', '主顧樓3樓',
       '主顧樓 B1F', '主顧樓3F室', '主顧樓3F教室',
       '主顧樓地下1樓', 'Providence Hall 3F',
+      'Providence Hall3F', 'Providence Hall B1F',
+      'Providence Hall 3F室',
     ]) {
       for (const schoolId of ['pu', 'another-school']) {
         const result = resolveCampusClassroom({
@@ -651,6 +653,7 @@ describe('classroom floor-only labels require a room number', () => {
     for (const query of [
       '主顧樓3F303', '主顧樓 3F 303', '主顧樓B1F12',
       '主顧樓3樓303', '主顧樓303', 'Providence Hall 3F 303',
+      'Providence Hall303', 'Providence 303', '主顧 303',
       '主顧樓',
     ]) {
       expect(resolveCampusClassroom({
