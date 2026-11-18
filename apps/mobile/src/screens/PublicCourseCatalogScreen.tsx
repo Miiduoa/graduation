@@ -241,16 +241,16 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
       // final resource before accepting its body; this is not a transport guard.
       if (!current()) return;
       const lengthHeader = response.headers.get('content-length');
-      const declaredBytes = lengthHeader === null ? null : Number(lengthHeader);
+      const declaredBytes = lengthHeader === null ? 0 : Number(lengthHeader);
       const contentType = response.headers.get('content-type');
       if (!response.ok ||
           (response.url && !isPublicCourseResponseUrl(response.url, { schoolId, query: term, filters })) ||
           // A malformed/negative length is not evidence that the body is small.
-          (lengthHeader !== null && (!/^\\d+$/.test(lengthHeader.trim()) ||
-            !Number.isSafeInteger(declaredBytes) || declaredBytes! > maxBytes)) ||
+          (lengthHeader !== null && (!/^\d+$/.test(lengthHeader.trim()) ||
+            !Number.isSafeInteger(declaredBytes) || declaredBytes > maxBytes)) ||
           // Native fetch may omit this header, but an explicitly non-JSON response
           // must never be passed to the course catalog importer.
-          (contentType !== null && !/^application\\/json(?:\\s*;|\\s*$)/i.test(contentType.trim()))) throw new Error();
+          (contentType !== null && !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) throw new Error();
       const text = await response.text();
       if (!current()) return;
       if (exceedsPublicCourseResponseByteLimit(text)) throw new Error();
