@@ -625,3 +625,44 @@ describe('verified PH code with explicit floor and room text', () => {
     }).status).toBe('unmatched');
   });
 });
+
+describe('classroom floor-only labels require a room number', () => {
+  it('does not turn bare floors into classroom destinations for either school', () => {
+    // Synthetic timetable strings; the building POI is NOT an indoor
+    // room or floor coordinate and a floor alone is not a classroom.
+    const labelled = { ...hall, building: 'Providence Hall' };
+    for (const query of [
+      '主顧樓3F', '主顧樓３Ｆ', '主顧樓3樓',
+      '主顧樓 B1F', '主顧樓3F室', '主顧樓3F教室',
+      '主顧樓地下1樓', 'Providence Hall 3F',
+    ]) {
+      for (const schoolId of ['pu', 'another-school']) {
+        const result = resolveCampusClassroom({
+          schoolId, query, locations: [labelled],
+        });
+        expect(result.status, `${schoolId}: ${query}`).toBe('unmatched');
+        expect(result.matches, `${schoolId}: ${query}`).toEqual([]);
+      }
+    }
+  });
+
+  it('preserves real room-suffixed searches and direct building-name lookup', () => {
+    const labelled = { ...hall, building: 'Providence Hall' };
+    for (const query of [
+      '主顧樓3F303', '主顧樓 3F 303', '主顧樓B1F12',
+      '主顧樓3樓303', '主顧樓303', 'Providence Hall 3F 303',
+      '主顧樓',
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [labelled],
+      }).matches, query).toEqual([labelled]);
+    }
+    // The University's PH building code is never inherited by another school.
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH3F303', locations: [labelled],
+    }).matches).toEqual([labelled]);
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: 'PH3F303', locations: [labelled],
+    }).status).toBe('unmatched');
+  });
+});
