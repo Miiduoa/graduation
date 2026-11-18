@@ -1734,3 +1734,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - 僅以 `Symbol.toStringTag` 與 `Uint8Array` 長度確認跨 Realm 結果，仍可能把惡意的偽裝 array-like 物件當成本機教材位元組。因此改用原生 `ArrayBuffer.prototype.byteLength` getter 對真正的 ArrayBuffer 內部槽位做跨 Realm 品牌驗證，再確認資料長度、複製位元組；偽造型別名稱、陣列索引及宣稱的長度皆不能通過。
 - 模擬回歸加強為「提供完整錯誤位元組、正確宣稱長度與偽裝 ArrayBuffer 標籤」的假物件，必須被拒收後從真正 FileReader 取得原教材。保留原本的短讀拒收、取消及 30 秒逾時。仍非真機驗收；此新增 commit 的 CI／CodeQL 需另核對。
+
+### 2026-11-19：修正跨 Realm 位元組測試的 File 重複定義失敗
+
+- 依 head `eedac5352849bca6598991e9e93c8cf52b7d646c` 的 [Web Tests run #44337157755](https://github.com/Miiduoa/graduation/actions/runs/44337157755/job/134917104270) 實際日誌，17,087 項測試中 16,971 通過、115 跳過、1 失敗；唯一失敗位於 `CourseStudyPanel.test.tsx` 的偽造／截短跨 Realm buffer 測試，錯誤為 `TypeError: Cannot redefine property: arrayBuffer`，不是正式產品讀取失敗。
+- 測試原先對同一個 `File` 物件先以不可配置的 `Object.defineProperty` 設定假 `arrayBuffer`，再嘗試重定義它，導致截短檔案案例根本沒執行。現在以**另一個真實 File 實例**模擬截短的跨 Realm buffer，讓兩個獨立案例都必須經由實際本地 `FileReader` 備援恢復完全一致的繁體中文位元組，不放寬品牌與長度驗證。
+- 改動僅包含此 Vitest 案例和本文件；未改產品程式、學生閱讀與逐題練習 checkpoint、私有教材傳輸、依賴或權限。程式修改不等於通過新版 CI，須以新 head 再核對完整 CI／CodeQL、GitHub App 5504170 審查、Maestro、真機及 Ahaboard 同教材同題同機實測；PR 保持 Draft，不合併、不部署。

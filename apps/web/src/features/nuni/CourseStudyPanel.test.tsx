@@ -647,9 +647,14 @@ it('rejects spoofed or truncated cross-realm buffers and reads the real local fi
   Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(fake) });
   const decoded = await readStudyFileBytes(file);
   expect(new TextDecoder('utf-8', { fatal: true }).decode(decoded)).toBe(content);
+  // Use a second actual File for the truncated result. The first File's
+  // mocked arrayBuffer method is intentionally non-configurable, like a
+  // native read-only bridge; redefining it caused Web Tests to fail before
+  // the truncated-byte fallback could be exercised.
   const truncated = runInNewContext('new ArrayBuffer(size)', { size: bytes.byteLength - 1 }) as ArrayBuffer;
-  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(truncated) });
-  const recovered = await readStudyFileBytes(file);
+  const truncatedFile = new File([bytes], '截短跨視窗講義.txt', { type: 'text/plain' });
+  Object.defineProperty(truncatedFile, 'arrayBuffer', { value: vi.fn().mockResolvedValue(truncated) });
+  const recovered = await readStudyFileBytes(truncatedFile);
   expect(new TextDecoder('utf-8', { fatal: true }).decode(recovered)).toBe(content);
 });
 
