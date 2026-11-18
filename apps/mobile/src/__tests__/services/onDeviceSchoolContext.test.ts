@@ -459,7 +459,7 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
     assignments: {
       status: 'available', count: 3,
       items: [{ title: '期中報告', groupName: '資料庫', dueAt: null }],
-      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
     },
     announcements: { status: 'available', items: [] },
   };
@@ -469,7 +469,7 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
   expect(result).toContain('期中報告');
   expect(result).toContain('未列出不代表沒有其他作業');
   expect(result).toContain('沒有繳交回條也不能斷言未交');
-  expect(result).toContain('請到原作業頁核對');
+  expect(result).toContain('請到原課程作業頁核對');
 
   // Legacy snapshots do not prove completeness, even if their item count matches.
   expect(format({
@@ -514,6 +514,104 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
     },
   });
   expect(unsupported).not.toContain('期中報告');
+});
+
+test('restored partial assignment metadata matches legacy or eight-page reader behavior', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  // These are authorized-reader shapes, not actual school records.
+  const rows = Array.from({ length: 400 }, (_, index) => ({
+    title: `作業清單項目 #${index + 1}`, groupName: '資料庫', dueAt: null,
+  }));
+  const base: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 401, items: rows,
+      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const format = (snapshot: CampusSenseSnapshot) => formatOnDeviceSchoolPrompt(local, snapshot, 'alice');
+  const budget = format(base);
+  expect(budget).toContain('來源總數：401；本次已取得：400；完整性：僅讀取部分資料');
+  expect(budget).toContain('作業清單項目 #1');
+  const legacy: CampusSenseSnapshot = {
+    ...base, assignments: {
+      ...base.assignments, items: rows.slice(0, 50),
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
+    },
+  };
+  expect(format(legacy)).toContain('來源總數：401；本次已取得：50；完整性：僅讀取部分資料');
+  // A genuinely empty older source remains usable, without a false
+  // assertion that missing coverage proves all historical work was read.
+  expect(format({ ...legacy, assignments: {
+    ...legacy.assignments, count: 0, items: [], coverage: undefined,
+  } })).toContain('來源總數：0；本次已取得：0；完整性：未能核對是否完整');
+
+  // The real reader cannot return 51 legacy rows or exhaust its eight-page
+  // budget with fewer than 400 rows. A saved JSON snapshot can forge either.
+  const forged: CampusSenseSnapshot[] = [
+    { ...base, assignments: {
+      ...base.assignments, coverage: { complete: false, reason: 'read-budget', pages: 1 },
+    } },
+    { ...base, assignments: {
+      ...base.assignments, coverage: { complete: false, reason: 'read-budget', pages: 7 },
+    } },
+    { ...base, assignments: {
+      ...base.assignments, items: rows.slice(0, 399),
+    } },
+    // The first (legacy) page cannot be empty if the source reports pending
+    // tasks. Do not mistake contradictory restored data for "no homework".
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: [],
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [],
+    } },
+    // Older JSON snapshots may lack coverage metadata entirely. This still
+    // cannot be the first page of a source reporting any pending assignments.
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [], coverage: undefined,
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, coverage: { complete: false, reason: 'legacy-partial', pages: 2 },
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: rows.slice(0, 51),
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    } },
+  ];
+  for (const restored of forged) {
+    const prompt = format(restored);
+    expect(prompt).toContain('此回合沒有主動同步且有效的校園資料');
+    expect(prompt).not.toContain('作業清單項目 #1');
+    expect(prompt).toContain('資料庫概論'); // Independent verified local timetable survives.
+  }
+});
+
+test('complete pending-only evidence never implies all assignments or submitted history', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const pendingOnly: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 0, items: [],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  // The server reader deliberately excludes submitted, closed and unpublished
+  // assignments; a complete pending list is not a complete student history.
+  const prompt = formatOnDeviceSchoolPrompt(local, pendingOnly, 'alice');
+  expect(prompt).toContain('已授權待處理作業來源：available；來源總數：0；本次已取得：0；完整性：來源已完整讀取');
+  expect(prompt).toContain('不包括已提交、草稿、關閉或無權存取的作業');
+  expect(prompt).toContain('不能當成全部作業或歷史繳交清單');
+  expect(prompt).toContain('若要核對全部作業與繳交狀態，請到原課程作業頁核對');
+  expect(prompt).toContain('沒有繳交回條也不能斷言未交');
 });
 
 test('complete assignment evidence must match the number of authorized 50-row pages', async () => {

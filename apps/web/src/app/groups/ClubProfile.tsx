@@ -1,4 +1,5 @@
 'use client';
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { clubEnabled } from './clubService';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -34,6 +35,8 @@ export function ClubProfile({
       generation.current++;
     };
   }, [uid, schoolId, groupId, revision]);
+  const meetingTime = normalizeClubProfileText(group?.meetingTime);
+  const description = normalizeClubProfileText(group?.description);
   return (
     <section className={styles.group} aria-label="社團頁">
       <Link href={`/clubs?schoolId=${encodeURIComponent(schoolId)}`}>回我的社團</Link>
@@ -46,17 +49,44 @@ export function ClubProfile({
           <h1 style={{ fontSize: 28 }}>{group.name}</h1>
           <p>
             類別未提供 ·{' '}
-            {group.memberCount === null ? '社員數未提供' : `${group.memberCount} 位社員`} ·
-            社課時間未提供
+            {group.memberCount === null ? '社員數未提供' : `${group.memberCount} 位社員`} ·{' '}
+            {meetingTime || '社課時間未提供'}
           </p>
+          {clubEnabled() && ['owner', 'admin'].includes(group.role) && !meetingTime && (
+            <Link
+              className="btn"
+              href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
+            >
+              填寫社課時間
+            </Link>
+          )}
           <button className="btn" style={{ minHeight: 44 }} disabled>
             已加入
           </button>
           <p>這是你已加入的社團群組；本頁不代表課外組已核可，也不提供入社或申請。</p>
           <section>
             <h2>近期活動</h2>
-            <p>目前沒有排定的活動。</p>
-            <p>此頁尚未接入社團內部活動，實際排程請向幹部確認。校園活動與社團內部活動分開管理。</p>
+            {!group.feed ? (
+              <>
+                <p role="alert">活動資料目前讀不到，請稍後再試。</p>
+                <button className="btn" onClick={() => setRevision((v) => v + 1)}>
+                  重試活動與官方連結
+                </button>
+              </>
+            ) : group.feed.events.length ? (
+              group.feed.events.map((event) => (
+                <article key={event.id}>
+                  <h3>{event.title}</h3>
+                  <p>
+                    {new Date(event.startsAt).toLocaleString('zh-TW')} ～{' '}
+                    {new Date(event.endsAt).toLocaleString('zh-TW')}
+                  </p>
+                  {event.location && <p>{event.location}</p>}
+                </article>
+              ))
+            ) : (
+              <p>目前沒有排定的活動。</p>
+            )}
           </section>
           <section>
             <h2>公告</h2>
@@ -80,8 +110,40 @@ export function ClubProfile({
           </section>
           <section>
             <h2>介紹</h2>
-            <p style={{ whiteSpace: 'pre-wrap' }}>{group.description || '社團尚未提供介紹。'}</p>
-            <p>僅供現有社員閱讀。IG、LINE 官方連結尚未提供。</p>
+            <p style={{ whiteSpace: 'pre-wrap' }}>{description || '社團尚未提供介紹。'}</p>
+            {clubEnabled() && ['owner', 'admin'].includes(group.role) && !description && (
+              <Link
+                className="btn"
+                href={`/groups/${encodeURIComponent(groupId)}/club?schoolId=${encodeURIComponent(schoolId)}`}
+              >
+                填寫社團介紹
+              </Link>
+            )}
+            <p>僅供現有社員閱讀。</p>
+            {!group.feed ? (
+              <p>官方連結目前讀不到，請稍後再試。</p>
+            ) : (
+              <>
+                {group.feed.instagram ? (
+                  <p>
+                    <a href={group.feed.instagram} target="_blank" rel="noopener noreferrer">
+                      IG
+                    </a>
+                  </p>
+                ) : (
+                  <p>社團尚未提供 IG 官方連結。</p>
+                )}
+                {group.feed.line ? (
+                  <p>
+                    <a href={group.feed.line} target="_blank" rel="noopener noreferrer">
+                      LINE
+                    </a>
+                  </p>
+                ) : (
+                  <p>社團尚未提供 LINE 官方連結。</p>
+                )}
+              </>
+            )}
           </section>
           {!clubEnabled() && ['owner', 'admin'].includes(group.role) && (
             <p>這所學校還沒開放社團管理。</p>

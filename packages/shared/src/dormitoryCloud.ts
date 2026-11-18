@@ -6,6 +6,7 @@ export type DormCloudParcel = {
   id: string;
   title: string;
   arrivedAt: number | null;
+  returnAt: number | null;
   location: string;
   status: 'waiting' | 'collected' | 'returned';
   postal: boolean;
@@ -35,7 +36,7 @@ export type DormCloudState = {
   repairsState: 'loading' | 'ready' | 'error' | 'guest';
   identity: { studentId: string; name: string } | null;
 };
-export const DORM_PACKAGES_EMPTY = '這所學校的宿舍還沒用 nuni 登錄包裹。';
+export const DORM_PACKAGES_EMPTY = '此處目前沒有顯示登錄給你的包裹；郵局包裹及掛號郵件請至櫃檯領取。';
 export function emptyDormCloud(guest = false): DormCloudState {
   return {
     packages: [],
@@ -67,6 +68,28 @@ export function dormCloudTime(value: unknown): number | null {
   }
   return null;
 }
+export function isDormPostalParcel(row: Record<string, unknown>): boolean {
+  return /郵局|掛號|收發室|中華郵政|post\s*office|registered\s*mail|chunghwa/i.test(
+    text(row.location) + ' ' + text(row.courier || row.carrier),
+  );
+}
+const PARCEL_RETURN_FIELDS = [
+  'returnAt',
+  'returnBy',
+  'returnDate',
+  'pickupDeadline',
+  'holdUntil',
+  'retainUntil',
+  'pickupBy',
+] as const;
+function parcelReturnAt(row: Record<string, unknown>): number | null {
+  // Explicit return/pickup deadline aliases only; returnedAt records an event.
+  return (
+    PARCEL_RETURN_FIELDS.map((field) => dormCloudTime(row[field])).find(
+      (at) => at !== null && Number.isFinite(at) && Number.isFinite(new Date(at).getTime()),
+    ) ?? null
+  );
+}
 export function projectDormParcel(id: string, row: Record<string, unknown>): DormCloudParcel {
   const location = text(row.location);
   const courier = text(row.courier || row.carrier);
@@ -77,15 +100,14 @@ export function projectDormParcel(id: string, row: Record<string, unknown>): Dor
       (courier !== 'unknown' ? courier : '') ||
       '包裹',
     arrivedAt: dormCloudTime(row.arrivedAt || row.createdAt),
+    returnAt: parcelReturnAt(row),
     location: location || '請向服務台確認',
     status: ['picked', 'picked_up'].includes(String(row.status))
       ? 'collected'
       : row.status === 'returned'
         ? 'returned'
         : 'waiting',
-    postal: /郵局|掛號|收發室|中華郵政|post\s*office|registered\s*mail|chunghwa/i.test(
-      location + ' ' + courier,
-    ),
+    postal: isDormPostalParcel(row),
   };
 }
 export function projectDormRepair(id: string, row: Record<string, unknown>): DormCloudRepair {
@@ -130,12 +152,18 @@ export function projectDormRepair(id: string, row: Record<string, unknown>): Dor
 export function dormCloudDate(value: number | null): string {
   return value === null ? '時間待確認' : new Date(value).toLocaleString('zh-TW', { hour12: false });
 }
-/** Arrival + three days is only an implied reminder, never an official school deadline. */
+/** Prefer a logged deadline; arrival + three days is only an estimated reminder. */
 export function dormParcelReturnNotice(parcel: DormCloudParcel, now = Date.now()): string {
-  if (parcel.status !== 'waiting' || parcel.arrivedAt === null) return '';
+  if (parcel.status !== 'waiting') return '';
+  if (parcel.returnAt != null)
+    return `登錄退件／領取期限：${new Date(parcel.returnAt).toLocaleString('zh-TW', {
+      timeZone: 'Asia/Taipei',
+      hour12: false,
+    })}（台灣時間）`;
+  if (parcel.arrivedAt === null) return '';
   const day = (time: number) => Math.floor((time + 8 * 3600000) / 86400000);
   const remainingDays = day(parcel.arrivedAt + 3 * 86400000) - day(now);
-  if (remainingDays === 1) return '明天起退件';
+  if (remainingDays === 1) return '預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）';
   if (remainingDays <= 0) return '已到件多日，請確認領取期限';
   return '';
 }
@@ -255,9 +283,25 @@ export function watchDormParcels(
   let cached: ParcelRows | undefined;
   let projection: ParcelRows | undefined;
   let stale = false;
+  let lastProjectionKey: string | undefined;
   // Remember aliases even after a legacy parcel is removed from the subscription.
   const legacyIds = new Set<string>();
   let stopPoll: (() => void) | undefined;
+  const publishProjection = () => {
+    const deadlines = new Map((cached ?? []).map((row) => [row.id, parcelReturnAt(row.data)]));
+    const next = (projection ?? []).map((row) => {
+      const returnAt = deadlines.get(row.id);
+      // The current endpoint omits deadlines. Preserve only the matching legacy
+      // deadline; endpoint membership/status and explicit deadline values still win.
+      return returnAt != null && !PARCEL_RETURN_FIELDS.some((field) => field in row.data)
+        ? { ...row, data: { ...row.data, returnAt } }
+        : row;
+    });
+    const key = JSON.stringify(next);
+    if (key === lastProjectionKey) return;
+    lastProjectionKey = key;
+    rows(next);
+  };
   const publishFallback = () => {
     if (projection) {
       const privateRows = projection.filter((row) => !legacyIds.has(row.id));
@@ -269,6 +313,7 @@ export function watchDormParcels(
   };
   const fallback = () => {
     stale = true;
+    lastProjectionKey = undefined;
     publishFallback();
   };
   const stopLegacy = legacy(
@@ -280,6 +325,7 @@ export function watchDormParcels(
         return { ...row, id };
       });
       if (stale || !projection) publishFallback();
+      else publishProjection();
     },
     () => {
       if (stale || !projection) error();
@@ -296,7 +342,7 @@ export function watchDormParcels(
         (value) => {
           projection = value;
           stale = false;
-          rows(value);
+          publishProjection();
         },
         fallback,
       );
