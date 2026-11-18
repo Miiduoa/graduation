@@ -1261,7 +1261,9 @@ describe('TronClass coursework continuity', () => {
     expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).disabled).toBe(true);
     expect(screen.queryByText('繼續編輯.pdf')).toBeNull();
     await act(async () => freshRead.resolve(json(preparation)));
-    expect((await screen.findByDisplayValue('我的心得') as HTMLTextAreaElement).disabled).toBe(false);
+    const restoredInput = await screen.findByDisplayValue('我的心得') as HTMLTextAreaElement;
+    expect(restoredInput.disabled).toBe(false);
+    expect(Array.from(restoredInput.labels ?? [], (label) => label.textContent?.trim())).toEqual(['作業內容']);
     expect(screen.getByText('繼續編輯.pdf')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '預覽繳交內容' }));
     expect((screen.getByLabelText('我已確認課程、作業內容與附件正確') as HTMLInputElement).checked).toBe(false);

@@ -801,8 +801,8 @@ export function TronClassAssignment({
                   ? canAddAttachments ? '目前可在 nuni 以文字與附件繳交。' : '目前可在 nuni 以文字繳交，附件請至 TronClass 處理。'
                   : canAddAttachments ? '目前可在 nuni 以附件繳交，請將作業文字整理在附件內。' : 'nuni 目前未開放這份作業的繳交方式。'}
               </p>}
-              <label htmlFor={`${fieldId}-answer`}>
-                作業內容
+              <div className={styles.textField}>
+                <label htmlFor={`${fieldId}-answer`}>作業內容</label>
                 <textarea
                   id={`${fieldId}-answer`}
                   value={content}
@@ -816,7 +816,7 @@ export function TronClassAssignment({
                     setCopyMessage('');
                   }}
                 />
-              </label>
+              </div>
               <p className={styles.characterCount}>{content.length.toLocaleString()} / 20,000 字</p>
               <label htmlFor={`${fieldId}-attachments`}>
                 作業附件

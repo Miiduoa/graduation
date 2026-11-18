@@ -18,7 +18,13 @@
 
 新增可實際執行的 [本機受控驗收入口](../../scripts/tronclass/ACCEPTANCE.md)：`preflight` 產生最長五分鐘、HMAC 簽署且綁定精確文字 digest 的計畫；`dispatch` 需要同一 operation、內容與明確確認，沿用持久化 final claim；`reconcile` 只查原 operation。只處理 PU 一般期間、首次個人純文字作業，拒絕附件及既有作業版本。私有輸入、固定 server runtime、一次執行標記與未知結果保留原鎖已實作；兩份不同文字的同 operation 計畫競爭時，輸家保留內容衝突，不能借用另一份結果。核心 **33／33**、真正 esbuild runtime CLI **6／6** 合成回歸通過；後者已加入 CI，沒有執行真人 preflight 或校方繳交。
 
-前一版 `a77a2410` 的實際 Next／Docker Chromium 驗收在返回清單後恢復草稿時失敗，見 [原始 CI](https://github.com/Miiduoa/graduation/actions/runs/44274879965)。背景 session refresh 的草稿缺陷已獨立重現，但不據此認定它就是該瀏覽器失敗的原因。瀏覽器腳本現會在失敗頁關閉前保存 actions、DOM、文字、console 與最後畫面，原斷言和期限不變；本版真實瀏覽器結果以新 commit 的 CI 為準。
+前一版 `a77a2410` 的實際 Next／Docker Chromium 驗收在返回清單後恢復草稿時失敗，見 [原始 CI](https://github.com/Miiduoa/graduation/actions/runs/44274879965)。後續 `b19dc420` 與 [`a7fe03f1` 的失敗 artifact](https://github.com/Miiduoa/graduation/actions/runs/44285530398/job/134740135047) 已保存當下畫面與 DOM，確認兩版草稿文字、附件都已恢復，且只有初始 session 讀取與 pageshow；不是背景 session refresh 的另一個資料損失案例。
+
+**已定位並修正恢復後的欄位標籤。** 原本 `<label>` 包住 `<textarea>`；React 回填文字後，textarea 的 `textContent` 也成為 label 的一部分，Playwright 的精確 `作業內容` 標籤便不再匹配。現在將標籤和輸入框分開，用原有 `htmlFor`／`id` 明確關聯，容器沿用原 grid／gap 樣式。既有恢復草稿回歸另檢查標籤文字固定不變。瀏覽器仍使用同一 `get_by_label(..., exact=True)`、原內容斷言與 5000ms；沒有改選擇器或放寬期限。原 DOM 與截圖來自真正 CI Chromium；本機 Chromium 啟動被 socket 權限限制，另做的 React／jsdom 重現不冒稱瀏覽器驗收。
+
+瀏覽器腳本會在失敗頁關閉前保存 actions、DOM、文字、console 與最後畫面；有期限的取證即使再次失敗，也保留原斷言錯誤。本版修補後的完整 Chromium 結果以新 commit 的 CI 為準。
+
+標籤回歸先在原碼重現「作業內容我的心得」不等於固定欄位名稱；修正後真正 Workspace 與 Session Provider **2 檔／65 項通過**，修改的 TSX lint 與 diff 檢查通過。沒有把這個局部結果當成新版本完整瀏覽器驗收。
 
 獨立固定快照 [#710 iOS 驗證](https://github.com/Miiduoa/graduation/actions/runs/44276403344) 已完成 Release 建置與兩條訪客 smoke，兩份 JUnit 各 1 項、0 失敗；測試涵蓋登入與校園地圖的明確不可用／重試狀態，並非校方登入或寫入。其 tree `57f102625d7a6ef4610526215ece72901737e15f` 只涵蓋 `a77a2410` 的固定 merge 快照，不能替代本輪 Mobile 修改的原生驗證。
 
