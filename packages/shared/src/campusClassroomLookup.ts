@@ -101,25 +101,40 @@ function hasTransitStopIdentity(location: CampusMapPlaceLike, school: string): b
   return hasMarker || (school === 'pu' && PUBLISHED_PROVIDENCE_BUS_STOP_IDS.has(location.id));
 }
 
-/** Firestore category labels may append a campus/terminal qualifier in parentheses.
- * Compare only exact known non-building categories, never a substring of a
- * legitimate teaching-building label such as "交通工程學院".
+/** Firestore may nest or chain campus/terminal annotations, such as
+ * "Bus Stop (Campus (Inbound))" or "餐飲 [North [B1]]". The old single-level
+ * 32-character suffix matcher missed those otherwise explicit stop categories.
+ * Unwind only complete, balanced trailing groups: never classify an unrelated
+ * building merely because its label contains the word "bus" or "交通".
+ * comparisonText already bounds the input to 120 Unicode code points.
+ */
+function stripTrailingCategoryQualifiers(value: string): string {
+  let unqualified = value;
+  while (unqualified.endsWith(')') || unqualified.endsWith(']')) {
+    const expectedOpeners: string[] = [];
+    let start = -1;
+    for (let index = unqualified.length - 1; index >= 0; index -= 1) {
+      const char = unqualified[index];
+      if (char === ')') expectedOpeners.push('(');
+      else if (char === ']') expectedOpeners.push('[');
+      else if (char === '(' || char === '[') {
+        if (expectedOpeners.pop() !== char) { start = -1; break; }
+        if (expectedOpeners.length === 0) { start = index; break; }
+      }
+    }
+    if (start <= 0) break;
+    unqualified = unqualified.slice(0, start).trim();
+  }
+  return unqualified;
+}
+
+/** Compare only exact non-building root categories, not substrings of
+ * legitimate teaching-building labels such as "交通工程學院".
  */
 function isExplicitNonClassroomCategory(value: unknown): boolean {
   const category = comparisonText(value);
-  // Firestore may append multiple short parenthetical qualifiers, e.g.
-  // "Bus Stop (Campus) (Inbound)". Strip only complete trailing qualifiers;
-  // unrelated building categories such as "交通工程學院" stay eligible.
-  let unqualified = category;
-  // The category is already bounded to MAX_CAMPUS_CLASSROOM_QUERY_LENGTH.
-  // Stop only when no complete qualifier remains: four or more qualifiers
-  // must not silently turn a known bus stop into a classroom destination.
-  while (true) {
-    const next = unqualified.replace(/\s*(?:\([^()]{1,32}\)|\[[^\[\]]{1,32}\])\s*$/u, '').trim();
-    if (next === unqualified) break;
-    unqualified = next;
-  }
-  return NON_CLASSROOM_POI_CATEGORIES.has(category) || NON_CLASSROOM_POI_CATEGORIES.has(unqualified);
+  return NON_CLASSROOM_POI_CATEGORIES.has(category) ||
+    NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(category));
 }
 
 function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
