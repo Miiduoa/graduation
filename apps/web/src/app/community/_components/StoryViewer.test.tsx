@@ -235,6 +235,34 @@ it('pauses a playing video while its caption is focused and resumes only playbac
   expect(play).toHaveBeenCalledTimes(priorPlayCount);
 });
 
+it('defers newly enabled continuous playback while the caption is focused', () => {
+  const { viewer, video } = renderVideo();
+  let paused = true;
+  Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
+    paused = false;
+    return Promise.resolve();
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {
+    paused = true;
+  });
+
+  // A keyboard reader is still on the caption; a touch/assistive activation need not blur it.
+  const caption = screen.getByRole('region', { name: '限時動態說明文字' });
+  act(() => caption.focus());
+  expect(paused).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  expect(screen.getByRole('button', { name: '停止連播' }).getAttribute('aria-pressed')).toBe('true');
+  expect(paused).toBe(true);
+  expect(play).not.toHaveBeenCalled();
+
+  // Starting continuous playback is an explicit new choice, but it must wait until reading ends.
+  act(() => screen.getByRole('button', { name: '停止連播' }).focus());
+  expect(paused).toBe(false);
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(viewer.next).not.toHaveBeenCalled();
+});
+
 it('keeps a video stopped when the student disables continuous playback while reading its caption', () => {
   const { video } = renderVideo();
   let paused = true;
