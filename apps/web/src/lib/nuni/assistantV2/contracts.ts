@@ -212,18 +212,6 @@ export type Adapter = {
   course?(courseId: string): Promise<Course | null>;
   work(courseId: string): Promise<Task[]>;
   materials(courseId: string, cursor?: string): Promise<unknown>;
-  /** Reviewed anonymous catalogs; this never changes the private school binding. */
-  publicCourses?(search: import('@campus/shared/src/publicCourseAssistant').PublicCourseAssistantSearch): Promise<unknown>;
-  /** Anonymous public content in this adapter's fixed school, never a private school login. */
-  publicCampus?(kind: import('./publicCampus').PublicCampusKind, limit: number): Promise<unknown>;
-  /** Public campus locations in this adapter's fixed school, with source coverage. */
-  campusMap?(args: import('./campusMap').CampusMapArguments): Promise<unknown>;
-  /** Re-read one selected public event in its exact, fixed-school source. */
-  publicEvent?(target: import('./publicEvent').PublicEventTarget): Promise<unknown>;
-  /** Platform-authenticated list summaries only; never contact details or publication. */
-  lostFound?(args: import('./lostFound').LostFoundArguments): Promise<unknown>;
-  /** Platform public feed for this fixed school; never private school conversations. */
-  publicSocial?(args: import('./publicSocial').PublicSocialArguments): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,

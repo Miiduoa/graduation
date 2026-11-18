@@ -1,19 +1,11 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
-import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
-import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
 import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
 import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
-import { AssistantTaskPlan } from './AssistantTaskPlan';
-import { AssistantCampusEvents } from './AssistantCampusEvents';
-import { parseCampusEventCommand, type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
-import { parseCampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
-import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
-import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
@@ -27,18 +19,9 @@ import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, rest
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
-  if (parseAssistantTaskPlan(reply.taskPlan))
-    return <p>已逐項整理這次任務，結果與尚待處理的項目如下。</p>;
-  if (reply.local || reply.dataRead || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined || reply.campusEventPreview)
+  if (reply.local || reply.dataRead)
     return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
   return <AssistantMarkdown text={reply.answer} />;
-}
-
-function PublicCourseResults({ results }: { results: unknown }) {
-  if (results === undefined) return null;
-  const reads = parseAssistantPublicCourseResults(results);
-  if (!reads) return <p className={styles.muted}>公開課程結果尚未通過核對，請重新查詢。</p>;
-  return reads.map((read, index) => <PublicCourseAssistantResult key={read.schoolId + ':' + index} read={read} />);
 }
 
 export function AssistantThread({
@@ -61,10 +44,6 @@ export function AssistantThread({
   onRecoverQuestion,
   onAsk,
   onStudyTarget,
-  onEventTarget,
-  eventBlockedReason,
-  onTaskRetry,
-  taskRetryForTurn,
   onStop,
   onConfirm,
   onCancel,
@@ -92,10 +71,6 @@ export function AssistantThread({
   onRecoverQuestion: () => void;
   onAsk: () => void;
   onStudyTarget?: (target: AssistantCourseworkTarget, date?: string) => void;
-  onEventTarget?: (turn: V2Turn, target: AssistantCampusEventTarget) => void;
-  eventBlockedReason?: string;
-  onTaskRetry?: (turn: V2Turn, stepIds: string[]) => void;
-  taskRetryForTurn?: (turn: V2Turn) => AssistantTaskRetry | null;
   onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
@@ -111,7 +86,6 @@ export function AssistantThread({
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
-  const revisionFocus = useRef(false);
   const [showJump, setShowJump] = useState(false);
   const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
   useEffect(() => {
@@ -146,26 +120,12 @@ export function AssistantThread({
   }, [inline, turns.length]);
   useEffect(() => {
     if (!followLatest.current || (!turns.length && !pending && !error)) return;
-    const active = document.activeElement;
-    // After a disabled-control blur, a later external focus does not bubble
-    // through this thread. Treat a real destination differently from body/html.
-    if (revisionFocus.current && active instanceof Element && active !== document.body &&
-      active !== document.documentElement && !shell.current?.contains(active)) revisionFocus.current = false;
-    if (revisionFocus.current) {
-      // Reply updates must not move the form while someone is editing a plan.
-      // The existing jump action or a new question explicitly resumes following.
-      followLatest.current = false;
-      setShowJump(true);
-      return;
-    }
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
-    // Automatic updates must finish before the next keyboard interaction. An
-    // in-flight smooth scroll can outlive a later focus({ preventScroll: true }).
-    // Only the explicit jump action below requests animated scrolling.
-    end.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
   }, [inline, turns, pending, error]);
   useEffect(() => {
     const node = field.current;
@@ -174,15 +134,13 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
-  const publicCompound = publicCourseCompoundRequest(question, schoolId);
-  const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
+  const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    ((consent && ready) || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (!publicCompound && (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
-      (onStudyTarget && courseworkStudyFollowup(question) !== null))));
+    (!!publicCourseIntent || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
+      (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
-    revisionFocus.current = false;
     followLatest.current = true;
     setShowJump(false);
     setDraft(sendComposerDraft(draft, question));
@@ -209,18 +167,7 @@ export function AssistantThread({
     </label>
   );
   return (
-    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2"
-      onFocusCapture={event => {
-        const target = event.target;
-        // Keep this intent if pending disables the editor and the browser blurs it.
-        // A deliberate focus elsewhere in this thread replaces the intent.
-        revisionFocus.current = target instanceof HTMLElement && !!log.current?.contains(target) &&
-          !!target.closest('[data-assistant-plan-revision="true"]');
-      }}
-      onBlurCapture={event => {
-        const next = event.relatedTarget;
-        if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
-      }}>
+    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
         <>
           <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
@@ -233,7 +180,7 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
+          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也可從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -287,17 +234,8 @@ export function AssistantThread({
                     ))}
                   </div>
                 ) : null}
-                <AssistantCampusEvents targets={turn.reply.eventTargets} schoolId={schoolId}
-                  pending={pending || !!onStop} blockedReason={eventBlockedReason}
-                  sourceOnly={turn.reply.campusEventPreview === true}
-                  onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
-                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
-                  retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
-                  pending={pending || !!onStop}
-                  onRetry={onTaskRetry ? stepIds => onTaskRetry(turn, stepIds) : undefined} />
-                <PublicCourseResults results={turn.reply.publicCourseResults} />
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
                     <summary>查了哪些資料</summary>
@@ -322,7 +260,7 @@ export function AssistantThread({
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
-            {!turn.reply.campusEventPreview && renderPlanRevision?.(turn)}
+            {renderPlanRevision?.(turn)}
           </article>
         ))}
         {pending ? (
@@ -365,7 +303,6 @@ export function AssistantThread({
             type="button"
             className={styles.jumpLatest}
             onClick={() => {
-              revisionFocus.current = false;
               followLatest.current = true;
               setShowJump(false);
               if (inline) {

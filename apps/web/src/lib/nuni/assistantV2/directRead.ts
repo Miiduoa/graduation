@@ -145,7 +145,7 @@ export function directReadAnswer(reads: DirectRead[], evidence: Evidence[], now:
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
       const selected = read.kind === 'next-class'
         ? classes.filter((entry) => Date.parse(entry.date + 'T' + entry.startTime + ':00+08:00') >
-          Math.max(now, Date.parse(read.args.from + 'T00:00:00+08:00') - 1)).slice(0, 1)
+          (read.args.from === taipeiDate(now) ? now : Date.parse(read.args.from + 'T00:00:00+08:00') - 1)).slice(0, 1)
         : classes.slice(0, 20);
       const lines = [read.kind === 'next-class' ? '已同步課表中的下一堂課：' : day + '的已同步課表：'];
       for (const entry of selected) lines.push('- ' + (read.kind === 'next-class' ? dayLabel(String(entry.date), now) + ' ' : '') +

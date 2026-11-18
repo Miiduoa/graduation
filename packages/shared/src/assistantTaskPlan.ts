@@ -1,24 +1,4 @@
-import {
-  ASSISTANT_SERVICES,
-  getAssistantService,
-  type AssistantServiceId,
-} from './assistantServices';
-
-export type AssistantTaskStatus = 'completed' | 'ready' | 'partial' | 'blocked' | 'handoff';
-
-/** Display evidence only. Neither a status nor a card ID grants permission to execute. */
-export type AssistantTaskStep = {
-  id: string;
-  label: string;
-  serviceId: AssistantServiceId;
-  dependsOn: string[];
-  status: AssistantTaskStatus;
-  summary: string;
-  cardIds?: string[];
-  href?: string;
-};
-
-export type AssistantTaskPlan = { version: 1; steps: AssistantTaskStep[] };
+import { ASSISTANT_SERVICES, type AssistantServiceId } from './assistantServices';
 
 export type AssistantServiceCapabilityMode = 'read' | 'prepare' | 'handoff';
 export type AssistantServiceCapability = {
@@ -72,39 +52,19 @@ const capabilityDescriptions = {
     summary: '可查已保存的匯入學業紀錄；新增或更改匯入資料需到匯入頁核對。',
     tools: ['get_imported_academics'],
   },
-  'school-courses': {
-    modes: ['read', 'handoff'],
-    summary: '可查清大、暨大的已接通公開開課資料，保留校名、關鍵字、星期與學分條件；其他校園保留入口，匯入課表與正式選課仍須在原流程核對。',
-    tools: ['get_public_courses', 'list_campus_services', 'propose_open_page'],
-  },
+  'school-courses': handoff('可開啟公開查課頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
   'school-lms': handoff('可開啟校方作業與教材入口；本助理尚未接通校方作業繳交。'),
   attendance: handoff('可開啟課程的點名與出席入口；本助理尚未代查或代送點名。'),
-  announcements: {
-    modes: ['read'],
-    summary: '可讀取所選校園目前公開學生公告牆的標題、摘要與原文來源；保留來源異常、缺漏與非完整歷史範圍。',
-    tools: ['get_campus_announcements'],
-  },
-  events: {
-    modes: ['read', 'prepare'],
-    summary: '可讀取所選校園公開活動；明確選取後重新核對完整且尚未開始的活動時間，準備待確認的個人行程卡。資料分頁或缺漏會標示，建立行程不代表活動報名。',
-    tools: ['get_campus_events', 'propose_personal_event'],
-  },
+  announcements: handoff('可開啟校園公告頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
+  events: handoff('可開啟校園活動頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
   library: handoff('可提供圖書館服務與官方來源入口；此工具不會查借閱紀錄、續借或預約座位。'),
-  map: {
-    modes: ['read'],
-    summary: '可查所選校園的地點、已有來源的樓層與設施，並由下一堂課的教室接續查位置；同名、缺漏及預載資料會分別標示，路線需在地圖核對。',
-    tools: ['get_campus_map'],
-  },
+  map: handoff('可開啟校園地圖頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
   bus: {
     modes: ['read'],
     summary: '可查所選校園的站點與到站資料；保留來源失敗、即時或表定狀態。',
     tools: ['get_transit'],
   },
-  'school-info': {
-    modes: ['read'],
-    summary: '可查所選學校的官方校名、地址、總機與網站，附教育部公開資料快照日期及來源；系所聯絡方式與即時服務狀態需另行核對。',
-    tools: ['get_school_info'],
-  },
+  'school-info': handoff('可開啟學校資訊頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
   career: handoff('可開啟職涯服務頁；本助理尚未代查工讀申請或實習學分進度，申請與承辦操作仍由原頁確認。'),
   'student-card': handoff('可開啟本人的學生證頁；本助理不會變更校籍、出示憑證或感應門禁。'),
   cafeteria: {
@@ -128,16 +88,8 @@ const capabilityDescriptions = {
   'leave-review': handoff('可開啟請假核閱；教師資格與每筆核閱仍由原頁確認。'),
   appeals: handoff('可開啟本人課程申訴；本助理尚未代查或代送申訴。'),
   teacher: handoff('可開啟課務申訴審核；教師資格與審核操作仍由原頁確認。'),
-  'lost-found': {
-    modes: ['read'],
-    summary: '可依關鍵字查所選校園的平台失物招領，或查本人發布的刊登摘要；保留分頁與來源不可用狀態，不讀聯絡方式、不發布或聯絡他人，也不混用學校帳號的舊刊登。',
-    tools: ['get_lost_found'],
-  },
-  'public-social': {
-    modes: ['read'],
-    summary: '可查所選校園的平台公開交流動態，顯示來源看板與摘要並保留分頁；不讀私人對話、不代發文，也不依貼文內容自動執行操作。',
-    tools: ['get_public_social'],
-  },
+  'lost-found': handoff('可開啟失物招領頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
+  'public-social': handoff('可開啟公開交流頁；本助理尚未接通此頁的資料查詢，請至原頁核對。'),
   community: handoff('可開啟校園社群；本助理尚未讀取貼文或代發內容。'),
   messages: handoff('可開啟私人訊息；本助理尚未讀取或傳送私人對話。'),
   notifications: handoff('可開啟通知中心；正式服務尚未接入本助理的通知查詢。'),
@@ -177,118 +129,4 @@ const capabilitiesById = new Map<string, AssistantServiceCapability>(
 
 export function getAssistantServiceCapability(serviceId: unknown): AssistantServiceCapability | null {
   return typeof serviceId === 'string' ? capabilitiesById.get(serviceId) ?? null : null;
-}
-
-const STATUSES: readonly AssistantTaskStatus[] = ['completed', 'ready', 'partial', 'blocked', 'handoff'];
-const STEP_FIELDS = ['id', 'label', 'serviceId', 'dependsOn', 'status', 'summary', 'cardIds', 'href'];
-const REQUIRED_STEP_FIELDS = ['id', 'label', 'serviceId', 'dependsOn', 'status', 'summary'];
-
-function record(raw: unknown, fields: readonly string[], required = fields): Record<string, unknown> | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const prototype = Object.getPrototypeOf(raw);
-  if (prototype !== null && prototype !== Object.prototype) return null;
-  const descriptors = Object.getOwnPropertyDescriptors(raw);
-  const keys = Reflect.ownKeys(descriptors);
-  if (keys.length > fields.length) return null;
-  const result: Record<string, unknown> = Object.create(null);
-  for (const key of keys) {
-    if (typeof key !== 'string' || !fields.includes(key)) return null;
-    const descriptor = descriptors[key];
-    if (!descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return null;
-    result[key] = descriptor.value;
-  }
-  return required.every((key) => Object.hasOwn(result, key)) ? result : null;
-}
-
-function array(raw: unknown, max: number, min = 0): unknown[] | null {
-  if (!Array.isArray(raw) || Object.getPrototypeOf(raw) !== Array.prototype || raw.length < min || raw.length > max)
-    return null;
-  const descriptors = Object.getOwnPropertyDescriptors(raw);
-  if (Reflect.ownKeys(descriptors).length !== raw.length + 1) return null;
-  const result: unknown[] = [];
-  for (let index = 0; index < raw.length; index++) {
-    const descriptor = descriptors[String(index)];
-    if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) return null;
-    result.push(descriptor.value);
-  }
-  return result;
-}
-
-function safeText(raw: unknown, max: number): raw is string {
-  if (typeof raw !== 'string' || !raw.trim() || raw !== raw.trim() || raw.length > max) return false;
-  for (const character of raw) {
-    const code = character.codePointAt(0)!;
-    if (code < 32 || code === 127 || code === 0x2028 || code === 0x2029) return false;
-  }
-  return true;
-}
-
-function safeId(raw: unknown): raw is string {
-  return typeof raw === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(raw);
-}
-
-function safeHref(raw: unknown, serviceId: AssistantServiceId): raw is string {
-  if (!safeText(raw, 512) || /\s|\\/.test(raw) || !raw.startsWith('/') || raw.startsWith('//')) return false;
-  const service = getAssistantService(serviceId)!;
-  const pathname = raw.split(/[?#]/, 1)[0];
-  const canonicalPath = service.href.split(/[?#]/, 1)[0];
-  if (pathname !== canonicalPath && !(serviceId === 'orders' && pathname === '/food')) return false;
-  // The literal allowlisted path cannot redirect through encoded slashes or dot
-  // segments. Also refuse control characters/backslashes hidden in parameters.
-  let decoded = raw;
-  for (let pass = 0; pass < 3; pass++) {
-    const next = decodeURIComponent(decoded);
-    if (!safeText(next, 512) || next.includes('\\')) return false;
-    if (next === decoded || !/%[0-9a-f]{2}/i.test(next)) return true;
-    decoded = next;
-  }
-  return !/%[0-9a-f]{2}/i.test(decoded);
-}
-
-/**
- * Validate a small, ordered dependency graph before rendering. The caller must
- * resolve cardIds against cards in this same reply and keep existing signed-card
- * confirmation/readback checks; this display contract does not replace them.
- */
-export function parseAssistantTaskPlan(raw: unknown): AssistantTaskPlan | null {
-  try {
-    const value = record(raw, ['version', 'steps']);
-    if (!value || value.version !== 1) return null;
-    const items = array(value.steps, 16, 1);
-    if (!items) return null;
-    const steps: AssistantTaskStep[] = [];
-    const seen = new Set<string>();
-    for (const rawStep of items) {
-      const step = record(rawStep, STEP_FIELDS, REQUIRED_STEP_FIELDS);
-      if (!step || !safeId(step.id) || seen.has(step.id) || !safeText(step.label, 120) ||
-          !safeText(step.summary, 1200) || !getAssistantService(step.serviceId) ||
-          !STATUSES.includes(step.status as AssistantTaskStatus)) return null;
-      const dependencies = array(step.dependsOn, 15);
-      if (!dependencies || dependencies.some((dependency) => !safeId(dependency) || !seen.has(dependency)) ||
-          new Set(dependencies).size !== dependencies.length) return null;
-      const parsed: AssistantTaskStep = {
-        id: step.id,
-        label: step.label,
-        serviceId: step.serviceId as AssistantServiceId,
-        dependsOn: dependencies as string[],
-        status: step.status as AssistantTaskStatus,
-        summary: step.summary,
-      };
-      if (Object.hasOwn(step, 'cardIds')) {
-        const cardIds = array(step.cardIds, 16, 1);
-        if (!cardIds || cardIds.some((cardId) => !safeId(cardId)) || new Set(cardIds).size !== cardIds.length)
-          return null;
-        parsed.cardIds = cardIds as string[];
-      }
-      if (Object.hasOwn(step, 'href')) {
-        if (!safeHref(step.href, parsed.serviceId)) return null;
-        parsed.href = step.href;
-      }
-      seen.add(parsed.id);
-      steps.push(parsed);
-    }
-    return { version: 1, steps };
-  } catch {
-    return null;
-  }
 }

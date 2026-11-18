@@ -10,9 +10,8 @@ import {
   startAfter,
   where,
 } from 'firebase/firestore';
-import { getDb, isFirebaseConfigured } from './firebase';
+import { isFirebaseConfigured } from './firebase';
 import { loadCampusEvent, loadCampusEventPage } from './campusEvents';
-import type { PublicCampusReadGuard } from './publicCampusReadGuard';
 
 vi.mock('firebase/firestore', () => ({
   collection: vi.fn((...args: unknown[]) => args),
@@ -163,47 +162,4 @@ it('paginates stably across tied dates and only uses legacy after both school co
   });
   expect(collection).toHaveBeenLastCalledWith('db', 'events');
   expect(where).toHaveBeenCalledWith('schoolId', '==', 'pu');
-});
-
-it('uses the supplied anonymous detail guard and requires one exact source without fallback', async () => {
-  const db = { mode: 'anonymous' } as unknown as NonNullable<PublicCampusReadGuard['db']>;
-  const guard = { db, beforeRead: vi.fn(), afterRead: vi.fn() };
-  vi.mocked(getDocFromServer).mockResolvedValueOnce({ exists: () => false } as never);
-  await expect(loadCampusEvent('pu', 'missing', 'school-events', guard)).resolves.toBeNull();
-  expect(doc).toHaveBeenCalledWith(db, 'schools', 'pu', 'events', 'missing');
-  expect(getDocFromServer).toHaveBeenCalledTimes(1);
-  expect(getDb).not.toHaveBeenCalled();
-  expect(guard.beforeRead).toHaveBeenCalledOnce();
-  expect(guard.afterRead).toHaveBeenCalledOnce();
-  await expect(loadCampusEvent('pu', 'missing', undefined, guard)).rejects.toThrow('Invalid event source');
-  expect(getDocFromServer).toHaveBeenCalledTimes(1);
-});
-
-it('preserves budget and late-cancellation errors around the single detail read', async () => {
-  const budget = new Error('budget'), aborted = new Error('aborted');
-  const guard = { beforeRead: vi.fn(() => { throw budget; }), afterRead: vi.fn() };
-  await expect(loadCampusEvent('pu', 'e1', 'school-events', guard)).rejects.toBe(budget);
-  expect(getDocFromServer).not.toHaveBeenCalled();
-
-  vi.mocked(getDocFromServer).mockResolvedValueOnce(eventDocument('e1', 'schools/pu/events') as never);
-  await expect(loadCampusEvent('pu', 'e1', 'school-events', {
-    beforeRead() {}, afterRead() { throw aborted; },
-  })).rejects.toBe(aborted);
-  expect(getDocFromServer).toHaveBeenCalledTimes(1);
-});
-
-it('rejects a mismatched detail document identity or collection before projecting it', async () => {
-  const guard = { beforeRead() {}, afterRead() {} };
-  vi.mocked(getDocFromServer).mockResolvedValueOnce(eventDocument('other', 'schools/pu/events') as never);
-  await expect(loadCampusEvent('pu', 'e1', 'school-events', guard)).rejects.toThrow('Invalid campus content');
-  vi.mocked(getDocFromServer).mockResolvedValueOnce(eventDocument('e1', 'schools/other/events') as never);
-  await expect(loadCampusEvent('pu', 'e1', 'school-events', guard)).rejects.toThrow('Invalid campus content');
-});
-
-it('rejects ambiguous source clocks for guarded actions while retaining ordinary detail display behavior', async () => {
-  const guard = { beforeRead() {}, afterRead() {} };
-  const ambiguous = eventDocument('e1', 'schools/pu/events', { startsAt: '2026-10-08', endsAt: '2026-10-08T11:00:00' });
-  vi.mocked(getDocFromServer).mockResolvedValue(ambiguous as never);
-  await expect(loadCampusEvent('pu', 'e1', 'school-events', guard)).resolves.toMatchObject({ startsAt: '', endsAt: undefined });
-  await expect(loadCampusEvent('pu', 'e1', 'school-events')).resolves.toMatchObject({ startsAt: '2026-10-08T00:00:00.000Z' });
 });

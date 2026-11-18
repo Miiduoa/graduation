@@ -4,8 +4,6 @@ import { V2Error, type Model } from './contracts';
 import { directReads, directReadCourseworkTargets } from './directRead';
 import { fixtureAdapter, fixtureBinding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
 import { run } from './runner';
-import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
-import { campusMapHref, campusMapSourcePath, type CampusMapArguments, type CampusMapRead } from './campusMap';
 
 const usage = { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60 };
 const vagueModel: Model = async () => ({
@@ -132,7 +130,7 @@ it('answers a combined timetable and pending-work question from both sources in 
 });
 
 it.each([
-  ['下一堂課在哪，幾點', ['get_schedule', 'get_campus_map'], ['資料結構｜資訊202']],
+  ['下一堂課在哪，幾點', ['get_schedule'], ['資料結構｜資訊202']],
   ['今天有什麼課，還有什麼作業沒交', ['get_schedule', 'get_due_work'], ['程式設計｜資訊101', '樹與圖作業']],
   ['今天的課表；行程與未繳作業', ['get_schedule', 'get_calendar', 'get_due_work'], ['程式設計｜資訊101', '讀書會', '樹與圖作業']],
 ] as const)('keeps complete supported read clauses deterministic despite punctuation: %s', async (question, expectedTools, facts) => {
@@ -143,47 +141,6 @@ it.each([
   expect(result.modelCalls).toBe(0);
   expect(model).not.toHaveBeenCalled();
   expect(result.cards).toEqual([]);
-});
-
-it.each(['unavailable', 'ready'] as const)('keeps the next-class clock factual and map source %s explicit', async status => {
-  const fixture = fixtureAdapter(), model = vi.fn(vagueModel);
-  const campusMap = vi.fn(async (args: CampusMapArguments): Promise<CampusMapRead> => {
-    const schoolId = fixtureBinding.schoolId, source = 'school-pois',
-      sourcePath = campusMapSourcePath(schoolId, source);
-    return { version: 1, kind: 'map', schoolId, query: args.query, limit: args.limit,
-      checkedAt: new Date(now).toISOString(), source, sourcePath, status: 'ready', partial: false,
-      resolution: 'matched', href: campusMapHref(schoolId, args.query), items: [{
-        id: 'fixture-classroom', schoolId, name: '資訊202', category: '教室', description: '',
-        lat: 24.2, lng: 120.58, facilities: ['電梯'], source, sourcePath,
-        href: campusMapHref(schoolId, args.query, 'fixture-classroom'), match: 'place', verification: 'published',
-      }] };
-  });
-  if (status === 'ready') fixture.adapter.campusMap = campusMap;
-  const result = await ask('下一堂課在哪，幾點', fixture, model);
-  const plan = parseAssistantTaskPlan('taskPlan' in result ? result.taskPlan : null);
-  expect(plan).not.toBeNull();
-  expect(plan!.steps[0]).toMatchObject({ serviceId: 'timetable', status: 'completed' });
-  expect(plan!.steps[1]).toMatchObject({ serviceId: 'map', dependsOn: [plan!.steps[0].id],
-    status: status === 'ready' ? 'completed' : 'blocked' });
-  expect(result.answer).toContain('13:00–15:00　資料結構｜資訊202');
-  expect(result.answer).not.toMatch(/程式設計|語文館/);
-  if (status === 'ready') {
-    expect(campusMap).toHaveBeenCalledExactlyOnceWith({ query: '資訊202', limit: 5 });
-    expect(result.answer).toContain('資料來自校園地圖');
-    expect(result.answer).toContain('校園：' + fixtureBinding.schoolId);
-    expect(result.answer).toContain('座標：24.2, 120.58');
-    expect(plan!.steps[1].href).toBe(campusMapHref(fixtureBinding.schoolId, '資訊202'));
-    expect(result.stopReason).toBe('');
-  } else {
-    expect(campusMap).not.toHaveBeenCalled();
-    expect(result.steps[1]).toMatchObject({ name: 'get_campus_map', status: 'error', summary: 'CAMPUS_MAP_UNAVAILABLE' });
-    expect(result.answer).not.toContain('座標：');
-    expect(result.stopReason).toBe('TASKS_INCOMPLETE');
-  }
-  expect(result.cards).toEqual([]);
-  expect(fixture.writes).toEqual([]);
-  expect(result.modelCalls).toBe(0);
-  expect(model).not.toHaveBeenCalled();
 });
 
 it('keeps factual queries independent of provider outages and model claims', async () => {

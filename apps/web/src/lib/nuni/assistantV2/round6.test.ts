@@ -27,8 +27,10 @@ const ACCEPTANCE_TOOLS: Record<string, string[]> = {
     'find_free_time',
   ],
   '下一堂課在哪，幾點': [
+    'get_today_context',
     'get_schedule',
-    'get_campus_map',
+    'get_calendar',
+    'find_free_time',
   ],
   '跟上次一樣再點一次，12:10 去拿': [
     'reorder_last_food_order',

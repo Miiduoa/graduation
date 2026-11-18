@@ -20,7 +20,6 @@ import {
   SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
 import { getAnnouncementVisibilityEnv } from '@/lib/runtime';
-import { guardedPublicCampusRead, type PublicCampusReadGuard } from '@/lib/publicCampusReadGuard';
 
 export type AnnouncementSourceHealth = {
   sourceId: string;
@@ -70,58 +69,45 @@ async function querySchoolAnnouncements(
   schoolId: string,
   extra: Array<ReturnType<typeof where> | ReturnType<typeof orderBy>>,
   maxItems: number,
-  guard?: PublicCampusReadGuard,
 ) {
-  const db = guard?.db ?? getDb();
-  const snapshot = await guardedPublicCampusRead(guard, () => getDocsFromServer(
+  const db = getDb();
+  const snapshot = await getDocsFromServer(
     query(collection(db, 'schools', schoolId, 'announcements'), ...extra, limit(maxItems)),
-  ));
-  if (snapshot.docs.length >= maxItems) guard?.onIncomplete?.();
+  );
   return snapshot.docs.flatMap((document) => {
     try {
-      const announcement = normalizeAnnouncement(document, schoolId);
-      // The student feed drops invalid dates later; the Agent must retain the
-      // incomplete-source evidence instead of treating that as a clean empty feed.
-      if (!announcement.publishedAt) guard?.onIncomplete?.();
-      return [announcement];
+      return [normalizeAnnouncement(document, schoolId)];
     } catch {
-      guard?.onIncomplete?.();
       return [];
     }
   });
 }
 
-export async function loadAnnouncementFeed(schoolId: string, guard?: PublicCampusReadGuard): Promise<AnnouncementFeed> {
+export async function loadAnnouncementFeed(schoolId: string): Promise<AnnouncementFeed> {
   if (!isAnnouncementSchoolVisibleToPublic({ schoolId }, getAnnouncementVisibilityEnv())) {
     return { announcements: [], officialAnnouncements: [], sources: [], allUnavailable: false };
   }
   if (!isFirebaseConfigured()) throw new Error('Announcement source unavailable');
-  const db = guard?.db ?? getDb();
+  const db = getDb();
   const recent = await querySchoolAnnouncements(
     schoolId,
     [orderBy('publishedAt', 'desc')],
     ANNOUNCEMENT_RECENT_LIMIT,
-    guard,
   );
-  const sourcesSnap = await guardedPublicCampusRead(guard, () => getDocsFromServer(
+  const sourcesSnap = await getDocsFromServer(
     collection(db, 'schools', schoolId, 'announcement-sources'),
-  ));
-  const sources: AnnouncementSourceHealth[] = sourcesSnap.docs.flatMap((document) => {
+  );
+  const sources: AnnouncementSourceHealth[] = sourcesSnap.docs.map((document) => {
     const data = document.data();
-    if (guard && data.schoolId != null && data.schoolId !== schoolId) {
-      guard.onIncomplete?.();
-      return [];
-    }
-    if (data.status !== 'healthy' && data.status !== 'unavailable') guard?.onIncomplete?.();
     const unavailable = data.status === 'unavailable';
-    return [{
+    return {
       sourceId: typeof data.sourceId === 'string' ? data.sourceId : document.id,
       office: typeof data.office === 'string' ? data.office : document.id,
       status: unavailable ? 'unavailable' : 'healthy',
       message: unavailable ? SOURCE_UNAVAILABLE_TEXT : '',
       listUrl: originalUrl(data.listUrl),
       lastSuccessAt: publishedDate(data.lastSuccessAt) || undefined,
-    }];
+    };
   });
   const present = new Set(
     recent.map((item) => item.sourceId).filter((value): value is string => Boolean(value)),
@@ -139,7 +125,6 @@ export async function loadAnnouncementFeed(schoolId: string, guard?: PublicCampu
               schoolId,
               [where('sourceId', '==', sourceId)],
               ANNOUNCEMENT_SOURCE_LIMIT,
-              guard,
             ),
           ),
         );
