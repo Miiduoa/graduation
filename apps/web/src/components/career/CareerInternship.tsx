@@ -680,20 +680,26 @@ function RecordCard({
   );
   if (p.verified < p.required) missing.push(`已確認時數 ${p.verified}／需要 ${p.required} 小時`);
   const owner = uid === r.uid;
-  const [entry, setEntry] = useState({ id: newId(), date: '', hours: '', note: '' });
+  const [entry, setEntry] = useState({
+    id: newId(),
+    date: '',
+    hours: '',
+    note: '',
+    revision: null as number | null,
+  });
   // Only edited fields override refreshed server values.
   type Draft = { value: string; revision: number };
   const [urlDrafts, setUrlDrafts] = useState<Record<number, Draft>>({});
   const [messageDrafts, setMessageDrafts] = useState<Record<number, Draft>>({});
-  const [entryRevision, setEntryRevision] = useState<number | null>(null);
   const draftChanged =
-    (entryRevision !== null && entryRevision !== r.revision) ||
+    (entry.revision !== null && entry.revision !== r.revision) ||
     [...Object.values(urlDrafts), ...Object.values(messageDrafts)].some(
       (d) => d.revision !== r.revision,
     );
   const urls = r.documents.map((d, i) => urlDrafts[i]?.value ?? d.url);
   const messages = r.documents.map((d, i) => messageDrafts[i]?.value ?? d.message);
-  const clearDraft = (drafts: Record<number, Draft>, index: number) => {
+  const clearDraft = (drafts: Record<number, Draft>, index: number, submitted: string) => {
+    if (drafts[index]?.value !== submitted) return drafts;
     const next = { ...drafts };
     delete next[index];
     return next;
@@ -807,7 +813,7 @@ function RecordCard({
                             url: urls[i],
                             submitted: true,
                           }).then((saved) => {
-                            if (saved) setUrlDrafts((drafts) => clearDraft(drafts, i));
+                            if (saved) setUrlDrafts((drafts) => clearDraft(drafts, i, urls[i]));
                           })
                         }
                       />
@@ -868,7 +874,8 @@ function RecordCard({
                             verified: false,
                             message: messages[i],
                           }).then((saved) => {
-                            if (saved) setMessageDrafts((drafts) => clearDraft(drafts, i));
+                            if (saved)
+                              setMessageDrafts((drafts) => clearDraft(drafts, i, messages[i]));
                           })
                         }
                       />
@@ -898,8 +905,11 @@ function RecordCard({
                       label={`更正${h.date}時數`}
                       actionId={`editHours:${h.id}`}
                       onPress={() => {
-                        setEntryRevision((revision) => revision ?? r.revision);
-                        setEntry({ ...h, hours: String(h.hours) });
+                        setEntry((current) => ({
+                          ...h,
+                          hours: String(h.hours),
+                          revision: current.revision ?? r.revision,
+                        }));
                       }}
                     />
                   </Box>
@@ -930,8 +940,11 @@ function RecordCard({
                 type={k === 'date' ? 'date' : undefined}
                 value={entry[k]}
                 onChange={(v) => {
-                  setEntryRevision((revision) => revision ?? r.revision);
-                  setEntry({ ...entry, [k]: v });
+                  setEntry((current) => ({
+                    ...current,
+                    [k]: v,
+                    revision: current.revision ?? r.revision,
+                  }));
                 }}
               />
             ))}
@@ -943,11 +956,23 @@ function RecordCard({
                 void execute({
                   ...base,
                   action: 'hours',
-                  entry: { ...entry, hours: Number(entry.hours) },
+                  entry: {
+                    id: entry.id,
+                    date: entry.date,
+                    hours: Number(entry.hours),
+                    note: entry.note,
+                  },
                 }).then((saved) => {
                   if (saved) {
-                    setEntry({ id: newId(), date: '', hours: '', note: '' });
-                    setEntryRevision(null);
+                    const blank = { id: newId(), date: '', hours: '', note: '', revision: null };
+                    setEntry((current) =>
+                      current.id === entry.id &&
+                      current.date === entry.date &&
+                      current.hours === entry.hours &&
+                      current.note === entry.note
+                        ? blank
+                        : current,
+                    );
                   }
                 })
               }
