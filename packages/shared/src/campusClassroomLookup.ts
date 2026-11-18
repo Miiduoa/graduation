@@ -189,17 +189,22 @@ function sourcedBuildingLabel(school: string, published: CampusMapPlaceLike | un
   return verifiedAlias ? building : undefined;
 }
 
+// A verified code may be followed by either a room (PH303) or an explicitly
+// written floor + room (PH3F303). This identifies the same existing building;
+// the digits do not verify an indoor floor, room position or walking route.
+const VERIFIED_CODE_ROOM_SUFFIX = /^[\s:：-]*\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
+const VERIFIED_CODE_FLOOR_ROOM_SUFFIX =
+  /^[\s:：-]*(?:b?\d{1,2}\s*f|(?:地下|地上)?(?:\d{1,2}|[一二三四五六七八九十]{1,3})樓)(?:[\s,，:：·/\-]+)?\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
+
 function nameMatchesVerifiedCode(school: string, query: string, suppliedName: unknown): boolean {
   const name = comparisonText(suppliedName);
   if (!name) return false;
-  return VERIFIED_CLASSROOM_BUILDING_CODES.some(
-    (entry) =>
-      entry.schoolId === school &&
-      query.startsWith(entry.code) &&
-      // The verified building code must be followed by a numeric room token, not arbitrary letters.
-      /^[\s:：-]*\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u.test(query.slice(entry.code.length)) &&
-      entry.buildingNames.some((building) => comparisonText(building) === name),
-  );
+  return VERIFIED_CLASSROOM_BUILDING_CODES.some((entry) => {
+    if (entry.schoolId !== school || !query.startsWith(entry.code)) return false;
+    const suffix = query.slice(entry.code.length);
+    return (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix)) &&
+      entry.buildingNames.some((building) => comparisonText(building) === name);
+  });
 }
 
 /**
