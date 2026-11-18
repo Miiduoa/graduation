@@ -26,6 +26,35 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+async def assert_modal_tab_boundary(page, key, expected, report):
+    # Native dialog traversal may visit browser chrome at a document boundary.
+    # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
+    # Accept this only when BODY is active and the document actually lost focus;
+    # the next key must return to the exact dialog control. Background page
+    # controls and unexpected controls inside the dialog always fail.
+    for step in (1, 2):
+        await page.keyboard.press(key)
+        state = await expected.evaluate('''expected => {
+          const active = document.activeElement;
+          const dialog = expected.closest('dialog');
+          return {
+            documentFocused: document.hasFocus(),
+            activeTag: active?.tagName ?? null,
+            activeName: active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 80),
+            insideDialog: Boolean(dialog?.contains(active)),
+            expectedActive: active === expected,
+            nativeModal: Boolean(dialog?.matches(':modal')),
+          };
+        }''')
+        state.update({'key': key, 'step': step})
+        report.setdefault('dialogFocusBoundaries', []).append(state)
+        assert state['nativeModal'], f'Modal state lost at keyboard boundary: {state}'
+        if state['documentFocused'] and state['expectedActive'] and state['insideDialog']:
+            return
+        assert step == 1 and not state['documentFocused'] and state['activeTag'] == 'BODY', (
+            f'Focus escaped to page content or missed the dialog boundary: {state}')
+
+
 async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
     opener = page.get_by_role('button', name='檢查輸入與對話視窗', exact=True)
     await opener.click()
@@ -60,8 +89,9 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
     assert abs(await title.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') - expected_title) < .1, 'Dialog heading lost the active text preference'
     await capture('form-start' + suffix, full_page=False)
 
-    # Exercise the native Tab order and scrolling, rather than scrolling elements
-    # into view in the test and hiding an unreachable control in the product.
+    # Exercise native Tab order and scrolling. Single-line fields and actions
+    # must be fully visible without test-driven scrolling. A textarea follows
+    # its caret; check the readable region before separately exercising scroll.
     for selector in ('#fixture-task-title', '#fixture-large-field', '#fixture-small-field', '#fixture-password'):
         await page.keyboard.press('Tab')
         target = dialog.locator(selector)
@@ -87,6 +117,30 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
         await page.keyboard.press('Tab')
         target = dialog.locator(selector)
         await expect(target).to_be_focused()
+        if selector == '#fixture-note':
+            visibility = await target.evaluate('''node => {
+              const field = node.getBoundingClientRect();
+              const dialog = node.closest('dialog');
+              const panel = dialog.getBoundingClientRect();
+              const style = getComputedStyle(node);
+              const top = Math.max(0, panel.top + dialog.clientTop);
+              const bottom = Math.min(innerHeight, panel.top + dialog.clientTop + dialog.clientHeight);
+              const left = Math.max(0, panel.left + dialog.clientLeft);
+              const right = Math.min(innerWidth, panel.left + dialog.clientLeft + dialog.clientWidth);
+              return {
+                height: field.height, availableHeight: bottom - top,
+                visibleHeight: Math.max(0, Math.min(field.bottom, bottom) - Math.max(field.top, top)),
+                requiredHeight: Math.min(field.height, 2 * parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)),
+                fullWidth: field.left >= left - 1 && field.right <= right + 1,
+              };
+            }''')
+            report.setdefault('textareaVisibility', []).append({'viewport': page.viewport_size, **visibility})
+            assert visibility['fullWidth'] and visibility['visibleHeight'] >= visibility['requiredHeight'] - 1, visibility
+            assert visibility['height'] <= visibility['availableHeight'] + 1, visibility
+            # Browser focus scrolls to the caret, not necessarily the whole
+            # multiline box. Verify that scrolling can reveal its full extent.
+            await target.scroll_into_view_if_needed()
+            await expect(target).to_be_focused()
         await expect(target).to_be_in_viewport(ratio=1)
     icons = await dialog.locator('#fixture-icon-field').evaluate('''node => {
       const style=getComputedStyle(node), field=node.getBoundingClientRect();
@@ -104,13 +158,17 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
     await expect(finish).to_be_in_viewport(ratio=1)
     assert abs(await finish.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') - expected_body) < .1, 'Shared button lost the active text preference'
     await capture('form-actions' + suffix, full_page=False)
-    await page.keyboard.press('Tab')
-    await expect(dialog.get_by_role('button', name='關閉視窗')).to_be_focused()
-    await expect(dialog.get_by_role('button', name='關閉視窗')).to_be_in_viewport(ratio=1)
+    close = dialog.get_by_role('button', name='關閉視窗')
+    await assert_modal_tab_boundary(page, 'Tab', close, report)
+    await expect(close).to_be_in_viewport(ratio=1)
+    await assert_modal_tab_boundary(page, 'Shift+Tab', finish, report)
+    await expect(finish).to_be_in_viewport(ratio=1)
+    await assert_modal_tab_boundary(page, 'Tab', close, report)
+    await expect(close).to_be_in_viewport(ratio=1)
     await page.keyboard.press('Escape')
     await expect(dialog).to_have_count(0)
     await expect(opener).to_be_focused()
-    report['checks'].append('Real dialog and Input/Select/Textarea respect text size; native Tab reaches every field and both footer actions, wraps inside the dialog and returns to its opener')
+    report['checks'].append('Real dialog and fields respect text size; native Tab reaches every field and footer action, document boundaries return to exact dialog controls without focusing background content, textarea is readable and fully scrollable, and Escape restores the opener')
 
     confirm_opener = page.get_by_role('button', name='檢查長篇確認內容', exact=True)
     await confirm_opener.click()
