@@ -15,6 +15,7 @@ import {
 } from '../server';
 import { beginProposal, cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
+import { directReads } from './directRead';
 import { directPlanRevision, selectPlanRevision, shiftPlanRevision } from './directPlanRevision';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
@@ -143,7 +144,9 @@ export async function handleV2(request: NextRequest, action: string) {
     const profile = action === 'ask' ? getAssistantRoleProfile(raw.taskProfile ?? 'student') : null;
     if (action === 'ask' && (!profile || (raw.taskProfile !== undefined && raw.taskProfile === null)))
       throw new V2Error(422, 'INVALID_INPUT');
-    const roleGuide = action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
+    const direct = action === 'ask' && typeof raw.question === 'string' ? directReads(raw.question, Date.now()) : [];
+    const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
+    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
       typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question) : null;
     const studyTarget = action === 'plan'
       ? courseworkStudyTarget(raw.task)

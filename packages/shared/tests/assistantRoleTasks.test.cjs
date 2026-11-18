@@ -44,12 +44,7 @@ test('student and buyer source questions cannot be reinterpreted as professional
   assert.equal(assistantRoleTaskGuide('student', '查最近一筆訂單', now), null);
 });
 
-test('complete personal timetable queries precede role keywords in every context', () => {
-  for (const { id } of ASSISTANT_ROLE_PROFILES) {
-    for (const question of ['今天有什麼課程', '下一堂課在哪裡', '查我的課表']) {
-      assert.equal(assistantRoleTaskGuide(id, question, now), null, `${id}: ${question}`);
-    }
-  }
+test('mixed timetable and professional requests retain role guidance', () => {
   for (const question of ['今天有什麼課程可以幫我備課', '下一堂課在哪裡，順便批改作業']) {
     assert.equal(assistantRoleTaskGuide('teacher', question, now)?.profileId, 'teacher');
   }

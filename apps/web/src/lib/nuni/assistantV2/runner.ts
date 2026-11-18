@@ -203,9 +203,11 @@ export async function run(input: RunInput) {
   const profile = getAssistantRoleProfile(input.taskProfile ?? 'student');
   if (!profile) throw new V2Error(422, 'INVALID_INPUT');
   const allowed = (name: string) => assistantRoleToolAllowed(profile.id, name);
-  const roleGuide = !input.planRevision && !input.studyTarget
+  const direct = input.planRevision ? [] : directReads(input.question, now);
+  const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
+  const roleGuide = !input.planRevision && !input.studyTarget && !personalTimetable
     ? assistantRoleTaskGuide(profile.id, input.question, now) : null;
-  const reads = input.planRevision ? [] : directReads(input.question, now).filter(read => allowed(read.tool));
+  const reads = direct.filter(read => allowed(read.tool));
   const selectedNames = selectTools(input.question, input.adapter.simulation).filter(allowed);
   const requiredReads = !input.planRevision && !reads.length && !writeIntent(input.question) && !personalSlotSelect(input.question)
     ? informationReads(input.question, now).filter(read => allowed(read.name)) : [];
