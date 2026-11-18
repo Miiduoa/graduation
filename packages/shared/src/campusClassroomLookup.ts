@@ -192,7 +192,8 @@ function sourcedBuildingLabel(school: string, published: CampusMapPlaceLike | un
 // A verified code may be followed by either a room (PH303) or an explicitly
 // written floor + room (PH3F303). This identifies the same existing building;
 // the digits do not verify an indoor floor, room position or walking route.
-const VERIFIED_CODE_ROOM_SUFFIX = /^[\s:：-]*\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
+// A bare 3F is a floor marker, not evidence of a classroom number.
+const VERIFIED_CODE_ROOM_SUFFIX = /^[\s:：-]*\d{1,5}(?!f(?:\s*(?:教室|室))?$)[a-z]?(?:\s*(?:教室|室))?$/u;
 const VERIFIED_CODE_FLOOR_ROOM_SUFFIX =
   /^[\s:：-]*(?:b?\d{1,2}\s*f|(?:地下|地上)?(?:\d{1,2}|[一二三四五六七八九十]{1,3})樓)(?:[\s,，:：·/\-]+)?\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
 
