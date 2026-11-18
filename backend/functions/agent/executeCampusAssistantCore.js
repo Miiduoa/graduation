@@ -952,8 +952,8 @@ async function executeCampusAssistantCore({
     const washInput = await resolveWashReserveInput(lastUserMessage, schoolId);
     if (!washInput) {
       response.content =
-        '我可以幫你預約洗衣機，但目前找不到可預約的機台或無法解析時間。請確認學校是否已建立 washingMachines 資料。';
-      response.suggestions = ['今晚八點洗衣', '今日公告', '查課表'];
+        '目前無法確認要預約的機台或時間。請提供此校園的單一機台編號與時間；指定機台不存在、無法使用或不明確時，請確認後再試。';
+      response.suggestions = ['提供機台編號與時間', '今日公告', '查課表'];
       return await finalizeResponse();
     }
     response.content = [
