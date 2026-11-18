@@ -5,6 +5,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { assertServiceScope, readServiceActor, userServiceGuard } = require('./serviceWriteGuard');
 const { assertLibraryLoanVersion } = require('../libraryLoanSource');
+const { readAgentWritePermission } = require('./agentWritePermissionGuard');
 
 const inputSchema = z.object({
   loanId: z.string().min(1).max(128).refine((id) => !id.includes('/')),
@@ -20,6 +21,7 @@ async function execute(ctx, rawInput) {
   const guardRef = userServiceGuard(db, ctx, 'library');
   return db.runTransaction(async (tx) => {
     await readServiceActor(tx, db, ctx);
+    await readAgentWritePermission(tx, db, ctx, 'returnBook');
     const [loanDoc] = await Promise.all([tx.get(loanRef), tx.get(guardRef)]);
     if (!loanDoc.exists) throw new HttpsError('not-found', '找不到此借閱紀錄。');
     const loan = loanDoc.data();

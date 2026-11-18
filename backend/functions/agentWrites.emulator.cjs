@@ -390,18 +390,20 @@ async function runAfterCommittedClaim(action, change) {
         }
         return value;
       };
-      if (!changedAfterClaim || !change.failAccountRead) return execute();
+      if (!changedAfterClaim || (!change.failAccountRead && !change.failPermissionsRead)) return execute();
+      const sourcePath = change.failPermissionsRead
+        ? 'users/alice/settings/assistantPermissions' : 'users/alice';
       const originalGet = tx.get;
       const originalGetAll = tx.getAll;
       tx.get = function (reference, ...args) {
-        if (reference.path === 'users/alice') {
+        if (reference.path === sourcePath) {
           failedAccountReads += 1;
           return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
         }
         return originalGet.call(this, reference, ...args);
       };
       tx.getAll = function (...references) {
-        if (references.some((reference) => reference?.path === 'users/alice')) {
+        if (references.some((reference) => reference?.path === sourcePath)) {
           failedAccountReads += 1;
           return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
         }
@@ -429,8 +431,102 @@ async function runAfterCommittedClaim(action, change) {
     db.runTransaction = originalRunTransaction;
     assert.equal(changedAfterClaim, true, 'the source change must occur after a committed claim');
     if (change.failAccountRead) assert.ok(failedAccountReads > 0, 'the service transaction must attempt the account read');
+    if (change.failPermissionsRead) assert.ok(failedAccountReads > 0, 'the service transaction must read the tool permission after claim');
     if (change.abortServiceCommit) assert.equal(abortedServiceCommit, true, 'the staged service transaction must abort');
   }
+}
+
+
+async function permissionBoundLibraryProposal(toolName) {
+  if (toolName !== 'borrowBook') {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    return libraryProposal(toolName, loan.loanId);
+  }
+  const input = { bookId: 'B1' };
+  await db.doc('users/alice/settings/assistantPermissions').set({ borrowBook: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+const libraryWriteTools = ['borrowBook', 'renewBook', 'returnBook'];
+for (const toolName of libraryWriteTools) {
+  for (const permissionState of ['revoked', 'deleted', 'unreadable']) {
+    test(`an Agent ${toolName} rejects ${permissionState} write permission after its committed claim`, async () => {
+      const action = await permissionBoundLibraryProposal(toolName);
+      const before = await serviceRecordSnapshot();
+      const settings = db.doc('users/alice/settings/assistantPermissions');
+      const change = {
+        failPermissionsRead: permissionState === 'unreadable',
+        apply: async () => {
+          if (permissionState === 'deleted') await settings.delete();
+          else if (permissionState === 'revoked') await settings.set({ [toolName]: false });
+        },
+      };
+
+      await assert.rejects(runAfterCommittedClaim(action, change), {
+        code: permissionState === 'unreadable' ? 'unavailable' : 'permission-denied',
+      });
+
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'revoked Agent permission must leave canonical loans, mirrors, inventory and service guards unchanged');
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'unverified');
+      assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+      assert.equal(run.steps.some((step) => step.output?.success === true), false);
+      await settings.set({ [toolName]: true });
+      await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'granting permission again must not replay the previously attempted confirmation');
+    });
+  }
+  for (const permissionState of ['retained grant', 'other tools revoked']) {
+    test(`an Agent ${toolName} preserves ${permissionState} at service transaction time`, async () => {
+      const action = await permissionBoundLibraryProposal(toolName);
+      const grants = Object.fromEntries(libraryWriteTools.map((name) => [
+        name, permissionState === 'retained grant' || name === toolName,
+      ]));
+
+      const receipt = await runAfterCommittedClaim(action, {
+        apply: () => db.doc('users/alice/settings/assistantPermissions').set(grants),
+      });
+
+      assert.equal(receipt.success, true);
+      assert.equal(receipt.toolName, toolName);
+      const loanId = toolName === 'borrowBook' ? receipt.loanId : action.data.input.loanId;
+      const canonical = await read(`schools/pu/libraryLoans/${loanId}`);
+      assert.equal(canonical.userId, 'alice');
+      assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${loanId}`), canonical);
+      assert.equal(canonical.status, toolName === 'returnBook' ? 'returned' : 'borrowed');
+      if (toolName === 'renewBook') assert.equal(canonical.renewCount, 1);
+      const book = await read('schools/pu/libraryBooks/B1');
+      assert.equal(book.availableCopies, toolName === 'returnBook' ? 1 : 0);
+      assert.equal(book.available, book.availableCopies);
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'completed');
+    });
+  }
+  test(`the direct ${toolName} callable remains usable with all Agent write permissions disabled`, async () => {
+    const input = toolName === 'borrowBook'
+      ? { bookId: 'B1' }
+      : { loanId: (await borrow.execute(scope(), { bookId: 'B1' })).loanId };
+    await db.doc('users/alice/settings/assistantPermissions').set(
+      Object.fromEntries(libraryWriteTools.map((name) => [name, false])),
+    );
+
+    const receipt = await service[toolName].run(request('alice', input));
+
+    const loanId = toolName === 'borrowBook' ? receipt.loanId : input.loanId;
+    const canonical = await read(`schools/pu/libraryLoans/${loanId}`);
+    assert.equal(canonical.status, toolName === 'returnBook' ? 'returned' : 'borrowed');
+    assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${loanId}`), canonical);
+    if (toolName === 'renewBook') assert.equal(canonical.renewCount, 1);
+    assert.equal((await read('schools/pu/libraryBooks/B1')).availableCopies, toolName === 'returnBook' ? 1 : 0);
+  });
 }
 
 const blockedAccountChanges = [
