@@ -8,6 +8,9 @@ import {
 // All records below are synthetic validator fixtures, NOT campus observations
 // or product rankings. The .invalid URLs cannot serve as field-test evidence.
 function fixture(trialId: string): CampusSpatialBenchmarkRow[] {
+  // Each synthetic repetition represents a separate capture time.
+  const trialOffset = [...trialId].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 3_600_000, 0);
+  const testedAt = new Date(Date.parse('2026-11-19T01:00:00.000Z') + trialOffset).toISOString();
   return CAMPUS_SPATIAL_PRODUCTS.map((product) => ({
     trialId, product, task: 'timetable-to-building',
     schoolId: 'pu', sceneId: 'synthetic-hall-case',
@@ -16,7 +19,7 @@ function fixture(trialId: string): CampusSpatialBenchmarkRow[] {
     textScale: '100%', startState: 'prepared',
     destinationId: 'synthetic-building', groundTruthLevel: 'building',
     groundTruthUrl: 'https://source.invalid/synthetic',
-    testedAt: '2026-11-19T01:00:00.000Z', appVersion: 'fixture-only',
+    testedAt, appVersion: 'fixture-only',
     evidenceUrl: `https://evidence.invalid/${trialId}/${product}`,
     outcome: 'correct', destinationLevel: 'building',
     buildingCorrect: true, entranceCorrect: null, floorCorrect: null,
@@ -127,6 +130,43 @@ describe('campus spatial benchmark evidence gate', () => {
       ...row, task: 'visual-performance' as const,
     }));
     expect(validateCampusSpatialBenchmarkRows(visual).issues.join(' ')).toContain('measured FPS');
+  });
+
+  it('does not count copied video links or timestamps as independent paired trials', () => {
+    const rows = [
+      ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
+    ];
+    // Only nuni is replayed; four other products have new captures each run.
+    const first = rows.find((row) => row.trialId === 'synthetic-1' && row.product === 'nuni')!;
+    for (const row of rows) {
+      if (row.product === 'nuni' && row.trialId !== 'synthetic-1') {
+        row.evidenceUrl = first.evidenceUrl;
+        row.testedAt = first.testedAt;
+      }
+    }
+    const replayed = validateCampusSpatialBenchmarkRows(rows);
+    expect(replayed.valid).toBe(false);
+    expect(replayed.issues.join(' ')).toContain('reused evidenceUrl');
+    expect(replayed.issues.join(' ')).toContain('reused testedAt');
+    expect(replayed.reviewableTasks).toEqual([]);
+
+    // A separate capture URL is insufficient when its recorded capture time is reused.
+    for (const row of rows) {
+      if (row.product === 'nuni' && row.trialId !== 'synthetic-1') {
+        row.evidenceUrl = `https://evidence.invalid/${row.trialId}/nuni`;
+      }
+    }
+    const reusedTime = validateCampusSpatialBenchmarkRows(rows);
+    expect(reusedTime.issues.join(' ')).toContain('reused testedAt');
+    expect(reusedTime.reviewableTasks).toEqual([]);
+  });
+
+  it('does not accept a correct result without a destination', () => {
+    const rows = fixture('synthetic-none');
+    rows[0] = { ...rows[0], destinationLevel: 'none' };
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.issues.join(' ')).toContain('no verified destination');
   });
 
   it('does not turn missing or unverified observations into a comparative claim', () => {
