@@ -125,7 +125,11 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(document.activeElement).toBe(manual);
 
   fireEvent.click(manual);
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  // The manually launched button disappears; focus must stay in the tour.
+  expect(document.activeElement).toBe(graphics);
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(graphics.getAttribute('tabindex')).toBe('0');
   expect(observerDisconnect).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
   fireEvent(window, new Event('pageshow'));
@@ -160,6 +164,36 @@ it('still defers manual 3D startup if the tab backgrounds before the WebView imp
     expect(scene.create).toHaveBeenCalledTimes(1);
   } finally {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
+it('fully tears down WebGL and page listeners if WebView observer disconnect throws', async () => {
+  const brokenDisconnect = vi.fn(() => { throw new Error('WebView disconnect failed'); });
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(private callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      this.callback([{ isIntersecting: true, target }] as IntersectionObserverEntry[],
+        this as unknown as IntersectionObserver);
+    }
+    disconnect = brokenDisconnect;
+  });
+  const windowRemove = vi.spyOn(window, 'removeEventListener');
+  const documentRemove = vi.spyOn(document, 'removeEventListener');
+  try {
+    const { unmount } = render(<CampusSpatialExplorer school="other-school"
+      locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    // The WebView's broken disconnect must not interrupt the rest of cleanup.
+    expect(() => unmount()).not.toThrow();
+    expect(brokenDisconnect).toHaveBeenCalledTimes(1);
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+    expect(windowRemove).toHaveBeenCalledWith('pagehide', expect.any(Function));
+    expect(windowRemove).toHaveBeenCalledWith('pageshow', expect.any(Function));
+    expect(documentRemove).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+  } finally {
+    windowRemove.mockRestore();
+    documentRemove.mockRestore();
   }
 });
 
