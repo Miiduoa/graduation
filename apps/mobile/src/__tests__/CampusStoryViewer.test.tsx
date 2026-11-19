@@ -172,6 +172,73 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+
+  test('pauses photo autoplay while a student reads its caption, then resumes the remaining time', () => {
+    const expiresAt = Date.now() + 100_000;
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'caption-photo',
+            kind: 'image',
+            createdAt: 1,
+            text: '社團集合說明與活動注意事項',
+            mediaUrl: 'https://example.com/notice.jpg',
+            expiresAt,
+          },
+          { ...common, id: 'caption-next', createdAt: 2, text: '下一則公告', expiresAt },
+        ]}
+      />,
+    );
+
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('自動播放'));
+    fireEvent(view.getByLabelText('限時動態照片'), 'load');
+    act(() => jest.advanceTimersByTime(3_000));
+    fireEvent.press(view.getByLabelText('閱讀說明並暫停播放'));
+    expect(view.getByLabelText('結束閱讀說明').props.accessibilityState.selected).toBe(true);
+    act(() => jest.advanceTimersByTime(20_000));
+    expect(view.getByText('社團集合說明與活動注意事項')).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText('結束閱讀說明'));
+    act(() => jest.advanceTimersByTime(3_999));
+    expect(view.getByText('社團集合說明與活動注意事項')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(1));
+    expect(view.getByText('下一則公告')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('reading a video caption does not override a student's manual playback choice', () => {
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'caption-video',
+            kind: 'video',
+            mediaUrl: 'https://example.com/activity.mp4',
+            text: '影片活動資訊',
+            expiresAt: Date.now() + 100_000,
+          },
+        ]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    const player = () => view.getByLabelText('限時動態影片');
+    fireEvent.press(view.getByLabelText('閱讀說明並暫停播放'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    expect(player().props.shouldPlay).toBe(false);
+    fireEvent.press(view.getByLabelText('結束閱讀說明'));
+    expect(player().props.shouldPlay).toBe(true);
+
+    fireEvent.press(view.getByLabelText('暫停播放'));
+    fireEvent.press(view.getByLabelText('閱讀說明並暫停播放'));
+    fireEvent.press(view.getByLabelText('結束閱讀說明'));
+    expect(player().props.shouldPlay).toBe(false);
+    view.unmount();
+  });
+
   test('a muted clip uses the native end event rather than the photo timer and keeps its caption', () => {
     const expiresAt = Date.now() + 100_000;
     const view = render(

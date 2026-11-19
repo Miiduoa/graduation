@@ -174,7 +174,11 @@ function StorySlide({
   if (panelFor !== null && panelFor !== scope) setPanelFor(null);
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
-  const playbackActive = playing && !inspecting && !replying;
+  // Reading a long caption is deliberate: do not replace the content underneath it.
+  // Scope the pause to the current story so the next story never inherits it.
+  const [readingCaptionFor, setReadingCaptionFor] = useState<string | null>(null);
+  const readingCaption = readingCaptionFor === story.id;
+  const playbackActive = playing && !inspecting && !replying && !readingCaption;
   const [loadedImage, setLoadedImage] = useState<object | null>(null);
   const [failedImage, setFailedImage] = useState<object | null>(null);
   const [imageRetry, setImageRetry] = useState(0);
@@ -199,6 +203,7 @@ function StorySlide({
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
   useEffect(() => {
     remaining.current = STORY_DURATION;
+    setReadingCaptionFor(null);
   }, [story.id]);
 
   useEffect(() => {
@@ -373,7 +378,19 @@ function StorySlide({
             contentContainerStyle={styles.detailContent}
           >
             {(hasImage || hasVideo) && !!story.text && (
-              <Text style={styles.caption}>{story.text}</Text>
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={readingCaption ? '結束閱讀說明' : '閱讀說明並暫停播放'}
+                  accessibilityHint="閱讀期間暫停自動切換；結束後依原本的播放狀態接續"
+                  accessibilityState={{ selected: readingCaption }}
+                  style={[styles.step, styles.captionRead]}
+                  onPress={() => setReadingCaptionFor(readingCaption ? null : story.id)}
+                >
+                  <Text style={styles.stepText}>{readingCaption ? '完成閱讀' : '閱讀說明'}</Text>
+                </Pressable>
+                <Text style={styles.caption}>{story.text}</Text>
+              </>
             )}
             {!!story.poiName && <Text style={styles.counter}>{story.poiName}</Text>}
           </ScrollView>
@@ -599,6 +616,7 @@ const styles = StyleSheet.create({
   clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
   photoRetry: { alignSelf: 'center', marginTop: 16 },
+  captionRead: { alignSelf: 'flex-start', marginBottom: 4 },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
     color: 'white',
