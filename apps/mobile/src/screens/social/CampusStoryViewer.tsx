@@ -40,6 +40,7 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
     () => ({ scope: viewerScope, ids: new Set() }),
   );
   const seen = seenState.scope === viewerScope ? seenState.ids : new Set<string>();
+  // Replace the receipt set on scope changes so older requests cannot mutate a new visit.
   const recorded = React.useRef(new Set<string>());
   const [selected, setSelected] = useState<{ scope: string; id: string } | null>(null);
   const selectedId = selected?.scope === viewerScope ? selected.id : null;
@@ -50,7 +51,7 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
   useEffect(() => {
     setSelected(null);
     setSeenState({ scope: viewerScope, ids: new Set() });
-    recorded.current.clear();
+    recorded.current = new Set<string>();
   }, [viewerScope]);
   const groups = useMemo(() => {
     const now = Math.max(clock, Date.now());
@@ -108,10 +109,12 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
     });
     const receiptKey = JSON.stringify([viewerScope, storyId]);
     if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(receiptKey)) return;
-    recorded.current.add(receiptKey);
+    const receiptSet = recorded.current;
+    receiptSet.add(receiptKey);
     void markStoryViewed({ id: storyId, schoolId, authorUid }, uid).catch(() => {
-      // Reopen to retry. A network failure should not reset the local reading position.
-      recorded.current.delete(receiptKey);
+      // An earlier visit may reject after switching away and back to the same scope.
+      // Only release its own receipt set, never a newer pending request's dedupe key.
+      receiptSet.delete(receiptKey);
     });
   }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId, viewerScope]);
 

@@ -90,6 +90,43 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('a late receipt failure from a prior visit cannot duplicate a newer pending view', async () => {
+    jest.mocked(markStoryViewed).mockClear();
+    let rejectFirst: ((reason?: Error) => void) | undefined;
+    jest.mocked(markStoryViewed).mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }),
+    );
+    jest.mocked(markStoryViewed).mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    const expiresAt = Date.now() + 100_000;
+    const rows: CampusStoryDoc[] = [
+      { ...common, id: 'shared', createdAt: 1, text: '社團通知', expiresAt },
+      { ...common, id: 'shared', schoolId: 'other', createdAt: 2, text: '乙校通知', expiresAt },
+    ];
+    const view = render(<ScopedShelf rows={rows} schoolId="pu" uid="alice" />);
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(markStoryViewed).toHaveBeenCalledTimes(1);
+
+    // Leave the campus while the first view receipt is still in flight.
+    view.rerender(<ScopedShelf rows={rows} schoolId="other" uid="alice" />);
+    expect(view.queryByText('社團通知')).toBeNull();
+    view.rerender(<ScopedShelf rows={rows} schoolId="pu" uid="alice" />);
+    expect(view.queryByText('社團通知')).toBeNull();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(markStoryViewed).toHaveBeenCalledTimes(2);
+
+    // The first request fails after the second has started with the same scoped ID.
+    await act(async () => {
+      rejectFirst?.(new Error('older campus visit failed'));
+      await Promise.resolve();
+    });
+    fireEvent.press(view.getByLabelText('關閉限時動態'));
+    fireEvent.press(view.getByText('開啟bob'));
+    // Reopening while the second receipt is pending must not send a duplicate.
+    expect(markStoryViewed).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
   beforeEach(() => {
     jest.useFakeTimers();
   });
