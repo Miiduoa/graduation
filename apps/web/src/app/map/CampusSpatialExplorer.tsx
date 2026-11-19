@@ -378,8 +378,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     let intersection: IntersectionObserver | null = null;
     if (!manualStart && typeof IntersectionObserver !== 'undefined') {
       try {
-        intersection = new IntersectionObserver(([entry]) => {
-          visible = entry?.isIntersecting ?? false;
+        intersection = new IntersectionObserver((entries) => {
+          // A fast scroll can queue multiple visibility transitions in one
+          // callback. The last observation is the current state; using the
+          // first can strand a visible map offscreen until another scroll.
+          // Empty callbacks should not erase a previously confirmed state.
+          const latest = entries[entries.length - 1];
+          if (!latest) return;
+          visible = latest.isIntersecting;
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
