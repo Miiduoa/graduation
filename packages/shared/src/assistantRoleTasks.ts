@@ -1,3 +1,4 @@
+import { connectedServiceClauses, parseTeachingRead, parseMerchantRead } from './assistantRoleReadIntent';
 import { parseAssistantCalendarIntent } from './assistantCalendarIntent';
 import { getAssistantRoleProfile, type AssistantRoleProfileId } from './assistantRoleProfiles';
 import { resolveAssistantServiceIntent, type AssistantServiceId } from './assistantServices';
@@ -30,11 +31,13 @@ const explanation: Record<Exclude<AssistantRoleProfileId, 'student'>, string> = 
   platform: '平台工作先確認處理範圍，再查看管理工作台的帳號、資格與待處理項目。權限與帳號異動目前在管理頁完成。',
 };
 
-/** Fixed task guidance only. A selected context never verifies or grants a role. */
+/** Fixed task guidance only. A selected context never verifies or grants a role.
+ * Unconnected adapters pass false to retain service guidance without private reads. */
 export function assistantRoleTaskGuide(
   profileValue: unknown,
   question: string,
   now = Date.now(),
+  workspaceReaderConnected = true,
 ): AssistantRoleTaskGuide | null {
   const profile = getAssistantRoleProfile(profileValue);
   if (!profile || profile.id === 'student' || typeof question !== 'string' ||
@@ -42,6 +45,7 @@ export function assistantRoleTaskGuide(
   // A complete, personal appointment retains the established signed planner.
   if (parseAssistantCalendarIntent(question, now)?.kind === 'draft') return null;
   if (resolveAssistantServiceIntent(question)?.kind === 'open') return null;
+  const workPattern = work[profile.id];
   const normalized = question.normalize('NFKC');
   // Callers give complete personal timetable reads priority using their existing
   // read-intent classifier; do not maintain a second query grammar here.
@@ -50,7 +54,18 @@ export function assistantRoleTaskGuide(
   const orientation = /(?:可以|能|會)幫我|能做什麼|可以做什麼|工作重點|我的工作|今天.*待辦|工作流程/.test(normalized);
   const incompatibleStudentRead = /作業|要交|待繳|測驗|教材|成績|學分|下一堂課/.test(normalized);
   const incompatibleBuyerRead = /訂單|取餐|再點|跟上次一樣/.test(normalized);
-  if (!orientation && !work[profile.id].test(normalized) &&
+  // A supported overview cannot hide an unsupported professional/buyer request
+  // in another clause (e.g. 門市訂單與營收). Complete personal plans may continue.
+  const clauses = connectedServiceClauses(question);
+  const workspaceRead = (clause: string) => {
+    const value = clause.replace(/^先(?=查|看|幫我)/, '');
+    return profile.id === 'teacher' ? parseTeachingRead(value) !== null
+      : profile.id === 'merchant' ? parseMerchantRead(value) !== null : false;
+  };
+  if (workspaceReaderConnected && clauses.some(workspaceRead) && clauses.every(clause =>
+    workspaceRead(clause) || parseAssistantCalendarIntent(clause, now)?.kind === 'draft' ||
+    !/作業|要交|待繳|測驗|教材|成績|學分|下一堂課|訂單|取餐|再點|跟上次一樣/.test(clause) && !workPattern.test(clause))) return null;
+  if (!orientation && !workPattern.test(normalized) &&
       !incompatibleStudentRead && !incompatibleBuyerRead) return null;
   return {
     profileId: profile.id,

@@ -6,6 +6,7 @@ import {
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
 } from '@campus/shared/src/campusMapLookup';
 import { partialAnswer, run } from './runner';
+import { campusMapHref, type CampusMapArguments, type CampusMapRead } from './campusMap';
 import {
   fakeModel, fixtureAdapter, fixtureBinding as binding,
   FIXTURE_NOW as now, FIXTURE_SECRET as secret,
@@ -50,7 +51,6 @@ describe('library service and physical directions preloads', () => {
     '去圖書館怎麼走，順便看公車',
     '圖書館怎麼走',
     '帶我去圖書館',
-    '圖書館在哪裡？',
   ])('keeps map and transit reads for an explicit physical route: %s', async (question) => {
     const { result, transit, writes } = await answer(question);
     expect(result.steps.map((step) => step.name)).toEqual(['get_campus_info', 'get_transit']);
@@ -59,6 +59,33 @@ describe('library service and physical directions preloads', () => {
     expect(result.answer).not.toContain(modelAnswer);
     expect(transit).toHaveBeenCalledTimes(1);
     expect(writes).toHaveLength(0);
+  });
+
+  it('answers a library location question from the map reader without an unrelated transit lookup', async () => {
+    const fixture = fixtureAdapter();
+    const transit = vi.spyOn(fixture.adapter, 'transit'), ledger = vi.spyOn(fixture.adapter, 'ledger');
+    const read = (args: CampusMapArguments): CampusMapRead => ({
+      version: 1, kind: 'map', schoolId: binding.schoolId, ...args, checkedAt: new Date(now).toISOString(),
+      source: 'school-pois', sourcePath: `schools/${binding.schoolId}/pois`, status: 'ready', partial: false,
+      resolution: 'matched', href: campusMapHref(binding.schoolId, args.query), items: [{
+        id: 'library', schoolId: binding.schoolId, name: '圖書館', category: '圖書館',
+        description: '公開地圖來源', lat: 24.22, lng: 120.58, facilities: ['電梯'],
+        source: 'school-pois', sourcePath: `schools/${binding.schoolId}/pois`, verification: 'published',
+        match: 'place', href: campusMapHref(binding.schoolId, args.query, 'library'),
+      }],
+    });
+    fixture.adapter.campusMap = vi.fn(async args => read(args));
+    const model = vi.fn().mockRejectedValue(new Error('Location lookup must not require a model'));
+    const result = await run({ question: '圖書館在哪裡？', history: [], binding, adapter: fixture.adapter,
+      secret, now, writes: false, signal: new AbortController().signal, log: () => {}, model });
+    expect(result.steps.map(step => step.name)).toEqual(['get_campus_map']);
+    expect(result.answer).toContain('電梯');
+    expect(result.answer).toContain('24.22, 120.58');
+    expect(result.answer).toContain('尚未建立導航路線');
+    expect(transit).not.toHaveBeenCalled();
+    expect(ledger).not.toHaveBeenCalled();
+    expect(model).not.toHaveBeenCalled();
+    expect(fixture.writes).toEqual([]);
   });
 
   it.each([
