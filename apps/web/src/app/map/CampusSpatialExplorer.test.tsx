@@ -161,6 +161,54 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('ignores foreign and older viewport callbacks without disabling walking navigation', async () => {
+  // Synthetic WebView race: a callback for an unrelated element must not
+  // allocate our scene, and a timestamp older than an already-processed
+  // callback must not wake GPU rendering after the map has moved offscreen.
+  let observedHost: Element | null = null;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) { observedHost = target; }
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  expect(observedHost).toBe(graphics);
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  const foreign = document.createElement('div');
+  act(() => intersection?.([{ isIntersecting: true, time: 900, target: foreign }]
+    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
+  act(() => intersection?.([{ isIntersecting: true, time: 100, target: graphics }]
+    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+  act(() => intersection?.([{ isIntersecting: false, time: 200, target: graphics }]
+    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  const countBeforeDelayedCallback = scene.setActive.mock.calls.length;
+  act(() => intersection?.([{ isIntersecting: true, time: 150, target: graphics }]
+    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive.mock.calls.length).toBe(countBeforeDelayedCallback);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+
+  act(() => intersection?.([
+    { isIntersecting: false, time: 225, target: foreign },
+    { isIntersecting: true, time: 250, target: graphics },
+  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('ignores a queued visibility callback after the spatial dialog releases WebGL', async () => {
   // Some embedded WebViews still deliver a queued IntersectionObserver callback
   // after disconnect(). It must not call setActive on the disposed renderer.
