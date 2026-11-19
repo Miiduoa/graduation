@@ -71,9 +71,9 @@ describe('NCNU public course to personal timetable credit handoff', () => {
   });
 
   it.each(['1ab1b', '3a3a', '1abc2def1c'])(
-    'refuses an overlapping %s period in both preview and import',
+    'shows overlapping %s periods for manual review but refuses import',
     (time) => {
-      expect(ncnuCourseMeetings(time, '1151')).toBeNull();
+      expect(ncnuCourseMeetings(time, '1151')).not.toBeNull();
       expect(ncnuTimetableImportCsv({ ...officialCourse, time })).toBeNull();
     },
   );
