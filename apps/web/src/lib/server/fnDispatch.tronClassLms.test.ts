@@ -1469,6 +1469,41 @@ it('preserves course contents cached by a faster request for the same session', 
   expect(source.fetchActivities).not.toHaveBeenCalled();
 });
 
+it('drops cached contents for courses absent from the linked session course list', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, {
+    materials: LmsReadonlySnapshot['materials'];
+    announcements: LmsReadonlySnapshot['announcements'];
+    errors: LmsReadonlySnapshot['courseErrors'];
+    fetchedAt: string;
+    expiresAt: string;
+  }>;
+  extras['10002'] = {
+    ...structuredClone(extras['10001']),
+    materials: [{
+      ...extras['10001'].materials[0],
+      courseId: 10002,
+      title: '不屬於目前課程的教材',
+    }],
+    announcements: [],
+  };
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.contentsLoadedFor).toEqual([10001]);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.materials).not.toEqual(expect.arrayContaining([
+    expect.objectContaining({ title: '不屬於目前課程的教材' }),
+  ]));
+  expect(store.docs.get(CACHE)!.extras).toHaveProperty('10001');
+  expect(store.docs.get(CACHE)!.extras).not.toHaveProperty('10002');
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
 it('does not prune course contents refreshed after the initial cache read', async () => {
   const { request, source, store } = setup();
   expect((await request({ courseId: 10001 })).status).toBe(200);
