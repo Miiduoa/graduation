@@ -2767,6 +2767,50 @@ describe('firestore security rules', () => {
   });
 
 
+  for (const [label, profile] of [
+    ['transfer', { status: 'active', primarySchoolId: 'pu', schoolId: 'ncku' }],
+    ['primary-only legacy', { primarySchoolId: 'pu' }],
+    ['school-only legacy', { schoolId: 'pu' }],
+    ['null primary legacy', { primarySchoolId: null, schoolId: 'pu' }],
+  ]) {
+    test(`lost-found preserves ${label} access with active membership`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('users/alice').set(profile);
+        for (const school of ['pu', 'ncku']) {
+          await db.doc(`schools/${school}/members/alice`).set({ status: 'active' });
+        }
+      });
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      for (const collection of ['schools/pu/lostFound', 'lostFoundItems']) {
+        const ref = alice.doc(`${collection}/compat`);
+        await assertSucceeds(ref.set({ schoolId: 'pu', userId: 'alice', title: '筆記本' }));
+        await assertSucceeds(ref.get());
+        await assertSucceeds(alice.collection(collection).where('schoolId', '==', 'pu').get());
+        await assertSucceeds(ref.update({ title: '已尋獲筆記本' }));
+        for (const status of ['disabled', 'deleted', 'suspended', 'inactive']) {
+          await seedFirestore(db => db.doc('users/alice').update({ status }));
+          await assertFails(ref.get());
+          await assertFails(ref.update({ title: '停權後修改' }));
+          await assertFails(ref.delete());
+        }
+        await seedFirestore(db => db.doc('users/alice').set(profile));
+        await seedFirestore(db => db.doc('users/alice').update({ accountDeletionInProgress: true }));
+        await assertFails(ref.get());
+        await seedFirestore(db => db.doc('users/alice').set(profile));
+        await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'revoked' }));
+        await assertFails(ref.get());
+        await assertFails(ref.delete());
+        await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+        await assertSucceeds(ref.delete());
+      }
+      // Even an active old-school membership cannot authorize a transfer back.
+      await assertFails(alice.doc('schools/ncku/lostFound/stale').set({ schoolId: 'ncku', userId: 'alice' }));
+      await assertFails(alice.doc('lostFoundItems/stale').set({ schoolId: 'ncku', userId: 'alice' }));
+      await seedFirestore(db => db.doc('users/alice').delete());
+      await assertFails(alice.doc('schools/pu/lostFound/missing-user').set({ schoolId: 'pu', userId: 'alice' }));
+    });
+  }
+
   test('lost-found contact reports reject cross-campus reads, forged owners and revoked access', async () => {
     await seedFirestore(async (db) => {
       for (const uid of ['alice', 'bob']) {

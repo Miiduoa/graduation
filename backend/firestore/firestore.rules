@@ -181,6 +181,17 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
     }
 
+    // Match the clients' trusted primary-school selection, falling back only
+    // when the legacy profile has no primary school. Stale memberships in the
+    // previous school must never override an explicit current primary school.
+    function isCurrentLostFoundMember(schoolId) {
+      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let primary = profile.get('primarySchoolId', null);
+      return schoolId is string && schoolId.size() > 0
+        && isSchoolMember(schoolId)
+        && (primary != null ? primary : profile.get('schoolId', '')) == schoolId;
+    }
+
     function isConversationMember(conversationId) {
       // get() on a missing conversation denies. Existing chats stay at
       // signed-in identity + membership, matching main.
@@ -845,18 +856,18 @@ service cloud.firestore {
 
       match /lostFound/{docId} {
         // Contact details must stay in the current school, not every signed-in account.
-        allow read: if isCurrentSchoolMember(schoolId);
-        allow create: if isCurrentSchoolMember(schoolId)
+        allow read: if isCurrentLostFoundMember(schoolId);
+        allow create: if isCurrentLostFoundMember(schoolId)
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.get('schoolId', schoolId) == schoolId
           && request.resource.data.get('reporterId', request.auth.uid) == request.auth.uid;
-        allow update: if isCurrentSchoolMember(schoolId)
+        allow update: if isCurrentLostFoundMember(schoolId)
           && resource.data.userId == request.auth.uid
           && request.resource.data.userId == resource.data.userId
           && request.resource.data.get('schoolId', schoolId) == resource.data.get('schoolId', schoolId)
           && request.resource.data.get('reporterId', request.auth.uid)
             == resource.data.get('reporterId', request.auth.uid);
-        allow delete: if isCurrentSchoolMember(schoolId)
+        allow delete: if isCurrentLostFoundMember(schoolId)
           && resource.data.userId == request.auth.uid;
       }
 
@@ -2426,17 +2437,17 @@ service cloud.firestore {
     match /lostFoundItems/{docId} {
       // Legacy Web/Mobile feeds query schoolId == current school.
       // Unscoped lists and missing schoolId are denied instead of exposing contact info.
-      allow read: if isCurrentSchoolMember(resource.data.schoolId);
-      allow create: if isCurrentSchoolMember(request.resource.data.schoolId)
+      allow read: if isCurrentLostFoundMember(resource.data.schoolId);
+      allow create: if isCurrentLostFoundMember(request.resource.data.schoolId)
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.get('reporterId', request.auth.uid) == request.auth.uid;
-      allow update: if isCurrentSchoolMember(resource.data.schoolId)
+      allow update: if isCurrentLostFoundMember(resource.data.schoolId)
         && resource.data.userId == request.auth.uid
         && request.resource.data.userId == resource.data.userId
         && request.resource.data.schoolId == resource.data.schoolId
         && request.resource.data.get('reporterId', request.auth.uid)
           == resource.data.get('reporterId', request.auth.uid);
-      allow delete: if isCurrentSchoolMember(resource.data.schoolId)
+      allow delete: if isCurrentLostFoundMember(resource.data.schoolId)
         && resource.data.userId == request.auth.uid;
     }
 
