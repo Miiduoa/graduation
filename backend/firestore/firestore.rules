@@ -1063,8 +1063,7 @@ service cloud.firestore {
         let changed = request.resource.data.diff(resource.data).affectedKeys();
         return !changed.hasAny(['onlineUsers', 'lastReadBy', 'typingUsers'])
           || (
-            changed.hasOnly(['onlineUsers', 'lastReadBy', 'typingUsers'])
-            && ownPresenceChange('onlineUsers')
+            ownPresenceChange('onlineUsers')
             && ownPresenceChange('lastReadBy')
             && ownPresenceChange('typingUsers')
           );
@@ -1165,9 +1164,8 @@ service cloud.firestore {
                 && request.resource.data.body.size() <= 8000));
         }
 
-        // Direct GET of ambiguous legacy posts is limited to the author or manager.
-        // LIST is stricter: Firestore rules are not filters, so readers must
-        // constrain queries to explicitly published, non-withdrawn records.
+        // LIST requires explicit publication constraints because rules are not filters.
+        // Exact reads retain legacy defaults while rejecting explicit hidden states.
         function isCanonicalVisiblePost() {
           return resource.data.get('published', false) == true
             && resource.data.get('status', '') == 'published'
@@ -1178,7 +1176,7 @@ service cloud.firestore {
         allow get: if isActiveGroupMember(groupId)
           && (canManageGroup(groupId)
             || resource.data.get('authorId', '') == request.auth.uid
-            || isCanonicalVisiblePost());
+            || isVisiblePostForReactions());
         allow list: if isActiveGroupMember(groupId)
           && (canManageGroup(groupId) || isCanonicalVisiblePost());
         // 助理回覆的狀態（assistantReply）只由伺服器寫
@@ -1252,8 +1250,8 @@ service cloud.firestore {
 
         match /comments/{commentId} {
           // Comments are a separate collection path: membership alone must not
-          // expose replies on hidden, withdrawn or unclassified legacy parents.
-          // Match the same four explicit visibility fields as parent GET/LIST.
+          // expose replies on explicitly hidden or withdrawn parents.
+          // Missing metadata retains the historical published-post behavior.
           // The parent lookup is fixed to this group/post, not client input.
           function canReadPostComments() {
             let postData = get(/databases/$(database)/documents/groups/$(groupId)/posts/$(postId)).data;
@@ -1262,12 +1260,13 @@ service cloud.firestore {
               && (
                 postData.get('authorId', null) == request.auth.uid
                 || (
-                  // A legacy row with missing visibility fields cannot be
-                  // assumed public after parent GET/LIST became fail-closed.
-                  postData.get('published', false) == true
-                  && postData.get('status', '') == 'published'
-                  && postData.get('deleted', true) == false
-                  && postData.get('deletedAt', 'missing') == null
+                  postData.get('published', true) != false
+                  && !(postData.get('status', '') in [
+                    'draft', 'scheduled', 'pending', 'unpublished',
+                    'archived', 'cancelled', 'canceled', 'deleted'
+                  ])
+                  && postData.get('deleted', false) != true
+                  && postData.get('deletedAt', null) == null
                 )
               );
           }

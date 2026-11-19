@@ -428,14 +428,41 @@ describe('firestore security rules', () => {
     await assertSucceeds(thread.update({ 'typingUsers.alice': deleteField() }));
     await assertSucceeds(thread.update({ lastMessageText: 'normal-message-preview' }));
 
+    for (const [index, typing] of [undefined, new Date(), null].entries()) {
+      await seedFirestore(db => db.doc(conversation).update({
+        typingUsers: typing === undefined ? { bob: 'bob-typing' } : { alice: typing, bob: 'bob-typing' },
+      }));
+      const message = alice.doc(`${conversation}/messages/mobile-${index}`);
+      const send = () => alice.runTransaction(async tx => {
+        const previous = await tx.get(message);
+        if (previous.exists) return;
+        const stamp = serverTimestamp();
+        const data = { conversationId: 'presence-pu', senderId: 'alice', content: '正常訊息',
+          type: 'text', readBy: ['alice'], createdAt: stamp };
+        tx.set(message, data);
+        tx.update(thread, {
+          lastMessage: { id: message.id, ...data }, lastMessageText: '正常訊息',
+          lastMessageAt: stamp, lastMessageSenderId: 'alice', updatedAt: stamp,
+          'typingUsers.alice': null,
+        });
+      });
+      await assertSucceeds(send());
+      await assertSucceeds(send());
+      assert.equal((await thread.get()).data().typingUsers.bob, 'bob-typing');
+      assert.equal((await message.get()).data().content, '正常訊息');
+    }
+
     // A member cannot mark another user as read/online/typing or clear them.
     await assertFails(thread.update({ 'onlineUsers.bob': 'forged' }));
     await assertFails(thread.update({ 'lastReadBy.bob': 'forged' }));
     await assertFails(thread.update({ 'typingUsers.bob': null }));
     await assertFails(thread.update({ onlineUsers: { alice: 'alice-online' } }));
     await assertFails(thread.update({ lastReadBy: { alice: 'alice-read' } }));
+    await assertSucceeds(thread.update({
+      'onlineUsers.alice': 'other-value', lastMessageText: 'normal combined update',
+    }));
     await assertFails(thread.update({
-      'onlineUsers.alice': 'other-value', lastMessageText: 'smuggled',
+      'typingUsers.bob': null, lastMessageText: 'forged combined update',
     }));
     await assertFails(mallory.doc(conversation).update({ 'typingUsers.mallory': 'fake' }));
 
@@ -1494,8 +1521,7 @@ describe('firestore security rules', () => {
           createdAt: new Date('2026-11-15T00:00:00Z'),
         });
       });
-      // Deliberately downgrade one parent to a legacy row to verify its
-      // direct GET remains private despite a known document path.
+      // Historical posts without visibility metadata remain readable by members.
       await seedFirestore((admin) => admin.doc(postPath).set({
         authorId: 'alice', kind: 'post', title: 'Legacy lecture notes',
       }));
@@ -1511,9 +1537,8 @@ describe('firestore security rules', () => {
       await assertFails(bob.collection(posts).where('published', '==', true).get());
       await assertSucceeds(teacher.collection(posts).get());
       await assertSucceeds(bob.doc(posts + '/visible').get({ source: 'server' }));
-      // Missing visibility fields are ambiguous: fail closed for everyone
-      // except the author and active managers, even with a known document ID.
-      await assertFails(bob.doc(postPath).get({ source: 'server' }));
+      // Missing fields retain the historical member read path.
+      await assertSucceeds(bob.doc(postPath).get({ source: 'server' }));
       await assertSucceeds(alice.doc(postPath).get({ source: 'server' }));
       await assertSucceeds(teacher.doc(postPath).get({ source: 'server' }));
 
@@ -1649,7 +1674,7 @@ describe('firestore security rules', () => {
       const manager = testEnv.authenticatedContext('teacher').firestore().doc(legacy);
       const crossSchool = testEnv.authenticatedContext('mallory').firestore().doc(legacy);
       await assertSucceeds(author.get({ source: 'server' }));
-      await assertFails(member.get({ source: 'server' }));
+      await assertSucceeds(member.get({ source: 'server' }));
       await assertFails(member.update({ likedBy: ['bob'], likes: 1 }));
       await assertFails(crossSchool.update({ likedBy: ['mallory'], likes: 1 }));
       // Previous default-value equality permitted this unauthorized
@@ -1742,16 +1767,14 @@ describe('firestore security rules', () => {
         await admin.doc('schools/pu/members/bob').set({ status: 'active' });
       });
 
-      // A known legacy parent path must not expose nested comments through
-      // direct GET or collection LIST to another group member. The post owner
-      // may still preview their own historical comments.
+      // Existing members retain GET and LIST access to historical comments.
       await seedFirestore((admin) => admin.doc(postPath).set({
-        authorId: 'alice', kind: 'post', title: 'Legacy draft',
+        authorId: 'alice', kind: 'post', title: 'Legacy published post',
       }));
-      await assertFails(teacher.doc(commentPath).get({ source: 'server' }));
-      await assertFails(teacher.collection(commentCollection).get());
-      await assertFails(bob.doc(commentPath).get({ source: 'server' }));
-      await assertFails(bob.collection(commentCollection).get());
+      await assertSucceeds(teacher.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(teacher.collection(commentCollection).get());
+      await assertSucceeds(bob.doc(commentPath).get({ source: 'server' }));
+      await assertSucceeds(bob.collection(commentCollection).get());
       await assertSucceeds(alice.doc(commentPath).get({ source: 'server' }));
       // Explicit server-reviewed publication restores normal member access.
       await seedFirestore((admin) => admin.doc(postPath).update({

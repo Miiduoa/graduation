@@ -555,3 +555,25 @@ it('matches the bucket migration MIME whitelist exactly', async () => {
     for (const mime of PRIVATE_DOCUMENT_TYPES) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(kind === 'assignment' || kind === 'group-post');
   }
 });
+
+
+it.each([
+  {},
+  { status: 'active', schoolId: 'pu' },
+  { status: 'active', schoolId: 'new-school', primarySchoolId: 'pu', bindingGeneration: 'generation-one' },
+])('preserves legitimate account compatibility for group files %j', async (profile) => {
+  const store = fileStore([['users/alice', profile]]);
+  if ('bindingGeneration' in profile) {
+    store.docs.set('schools/pu/members/alice', {
+      status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'generation-one',
+    });
+  }
+  await expect(authorize(store, COVER, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+});
+
+it.each(['deleted', 'disabled', 'suspended', 'inactive'])('keeps blocked account rejection for %s', async (status) => {
+  const store = fileStore([['users/alice', { status }]]);
+  await expect(authorize(store, COVER, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+});
