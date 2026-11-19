@@ -127,6 +127,34 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('ignores a stale video error after pause and resume on the same story', () => {
+    const view = render(
+      <Shelf
+        rows={[{
+          ...common,
+          id: 'video-restarted',
+          kind: 'video',
+          mediaUrl: 'https://example.com/campus-video.mp4',
+          expiresAt: Date.now() + 100_000,
+        }]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    const outdatedError = view.getByLabelText('限時動態影片').props.onError;
+
+    // Pausing and resuming creates a new playback session for the same clip.
+    fireEvent.press(view.getByLabelText('暫停播放'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(true);
+
+    // A native error queued by the older session cannot replace the new player.
+    act(() => outdatedError('stale decoder callback'));
+    expect(view.queryByText('影片暫時無法播放')).toBeNull();
+    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(true);
+    view.unmount();
+  });
+
   beforeEach(() => {
     jest.useFakeTimers();
   });
