@@ -695,6 +695,44 @@ it('still compares explicit numbers of software releases rather than hiding real
   }
 });
 
+it('keeps binary state, access and completion codes as categories, not proportional bars', () => {
+  for (const header of [
+    '是否完成', '是否通過', '啟用狀態', '有無繳交', '狀態', '狀況（0/1）',
+    '完成與否', '通過與否', '布林值', '真假值', '開關狀態',
+    'Status', 'Status (0/1)', 'Enrollment Status', 'Enabled',
+    'Is Active', 'Is Completed', 'Pass Flag', 'Boolean', 'Flag',
+    'Activation State', 'Has Access', 'State',
+  ]) {
+    const material = [
+      '| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 未啟用 | 0 |', '| 已啟用 | 1 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['0', '1']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('preserves actual counts even when a status-related word appears in the header', () => {
+  for (const header of [
+    '完成數量', '通過人數', '啟用數量', '狀態數量', '開關次數',
+    'Status Count', 'Number of Enabled Users', 'Completed Task Count',
+    'Boolean Count', 'State Population', 'Active Users',
+  ]) {
+    const material = [
+      '| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((meter) => meter.getAttribute('value'))).toEqual(['2', '4']);
+    unmount();
+  }
+});
+
 it('still compares actual amounts when an English header mentions a year or course', () => {
   for (const header of ['Annual Budget', 'Yearly Budget', 'Course Credits', '學期學分',
     '練習題數', 'Number of Questions']) {

@@ -14,6 +14,15 @@ const RELEASE_COUNT_COLUMN = /(?:版本(?:數量|總數|數)|修訂(?:次數|總
 const ENGLISH_RELEASE_COUNT_COLUMN =
   /\b(?:number\s+of\s+(?:versions|revisions|editions|releases)|(?:version|revision|edition|release)\s+(?:count|total))\b/iu;
 
+// Binary and categorical state codes are labels, not measurements:
+// a status code of 2 is not twice the status of 1. Only explicit counts
+// (e.g. 通過人數 / Status Count) may use a zero-based quantity chart.
+const NON_RATIO_STATUS_COLUMN = /(?:是否|有無|與否|狀態|狀況|標記|布林|真假|開關|啟用|停用|有效性)/u;
+const ENGLISH_NON_RATIO_STATUS_COLUMN =
+  /(?:\b(?:status|flag|boolean|bool)\b|\b(?:is|has)\s+(?:active|completed|enabled|present|passed|valid|access|permission)\b|\bstate(?:\s*\([^)]{1,40}\))?$|^(?:enabled|disabled|active|inactive|checked)(?:\s*\([^)]{1,40}\))?$)/iu;
+const STATUS_COUNT_COLUMN = /(?:人數|數量|總數|次數|筆數|件數|個數|數目)/u;
+const ENGLISH_STATUS_COUNT_COLUMN = /\b(?:count|total|number\s+of|quantity)\b/iu;
+
 type SourceValueRow = { label: string; original: string; amount: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
@@ -110,6 +119,10 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
       ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ((NON_RATIO_STATUS_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_STATUS_COLUMN.test(column)) &&
+       !STATUS_COUNT_COLUMN.test(column) &&
+       !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
        !SCORE_COUNT_COLUMN.test(column))) return null;

@@ -1,3 +1,9 @@
+## 2026-11-20：狀態與布林代碼不再被誤畫為數量比例
+
+- 「是否完成」「有無繳交」「啟用狀態」、`Status`、`Is Active`、`Flag` 等表格欄位中的 0／1 或狀態代碼是**類別**，不是可比較倍數；現在只保留原始可讀屏表格及原文選取／TXT，不顯示錯誤的零起點比例圖。
+- 真正計數的「通過人數」「完成數量」「狀態數量」與 `Status Count`、`Number of Enabled Users` 仍可產生數量圖。新增 23 個狀態欄位與 11 個計數欄位的模擬 DOM 正反回歸；本地規則煙測不代表正式 Vitest 或真機通過。
+- 前一精確 head `efdde0e22161b74908b1c0502c6b869374747c2e` 的 CI #44567174997（含 Web／Mobile Tests、Build、Lint/TypeCheck、Security）、CodeQL #44567175053 與 Course access review #44567175003 已完成成功，**不適用於本次新提交**。沒有新增套件、改動閱讀／練習 checkpoint、外傳教材或修改其他任務。指定 App 5504170 APPROVED、Maestro、iOS／Android 真機、WebGPU 教學品質與 Ahaboard 同條件驗收仍無證據；PR 繼續 Draft、不合併、不部署。
+
 ## 2026-11-20：軟體版本／修訂版／Build 識別值不可誤作數量圖
 
 - 電腦與資管課程常以純數字標示 Version、Revision、Edition、Release、Build Number，或「版本／版次／修訂號／編譯號」。這些是版本識別或順序，不能將第 4 版畫成第 2 版的兩倍；現在保留可讀屏表格與逐列原文複製／下載，但不顯示比例長條。
