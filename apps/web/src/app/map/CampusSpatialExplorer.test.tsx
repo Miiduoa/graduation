@@ -956,6 +956,99 @@ it.each([
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// Embedded WebViews without a readable Response stream used to call json()
+// directly, bypassing the decoded-byte limit. Both ASCII and multi-byte UTF-8
+// payloads must be rejected before parsing a spoofed, otherwise valid map.
+it.each(['ASCII', 'UTF-8'] as const)(
+  'rejects oversized non-streaming %s OSM responses without installing geometry',
+  async (encoding) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const buildings = parseProvidenceOsmFootprints({ elements: [{
+      type: 'way', id: 255784049, tags: { building: 'yes' },
+      geometry: [
+        { lat: 24.22624, lon: 120.58131 },
+        { lat: 24.22624, lon: 120.58143 },
+        { lat: 24.22634, lon: 120.58143 },
+        { lat: 24.22634, lon: 120.58131 },
+        { lat: 24.22624, lon: 120.58131 },
+      ],
+    }] });
+    expect(buildings).toHaveLength(1);
+    const raw = JSON.stringify({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+      extra: encoding === 'ASCII' ? 'x'.repeat(2_000_001) : '中'.repeat(700_000),
+    });
+    expect(raw.length > 2_000_000 || new TextEncoder().encode(raw).byteLength > 2_000_000).toBe(true);
+    const textBody = vi.fn().mockResolvedValue(raw);
+    const json = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, body: null,
+      headers: { get: () => null }, text: textBody, json,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(textBody).toHaveBeenCalledTimes(1);
+    expect(json).not.toHaveBeenCalled();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
+
+it('rejects oversized JSON-only WebView bridge payloads even without text()', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const json = vi.fn().mockResolvedValue({
+    schoolId: 'pu', source: 'OpenStreetMap', buildings: [],
+    fetchedAt: new Date().toISOString(), stale: false,
+    extra: 'x'.repeat(2_000_001),
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, body: null, headers: { get: () => null }, json,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(json).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('accepts a small, valid non-streaming text response for legacy WebViews', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const textBody = vi.fn().mockResolvedValue(JSON.stringify({
+    schoolId: 'pu', source: 'OpenStreetMap', buildings,
+    fetchedAt: new Date().toISOString(), stale: false,
+  }));
+  const json = vi.fn();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, body: null, headers: { get: () => null },
+    text: textBody, json,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(textBody).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('accepts a complete, correctly sized JSON snapshot with a valid Content-Length', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
