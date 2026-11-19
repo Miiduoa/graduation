@@ -8,6 +8,17 @@ import { loadClubProfile } from './clubProfileService';
 vi.mock('./clubProfileService', () => ({ loadClubProfile: vi.fn() }));
 vi.mock('./clubService', () => ({ clubEnabled: vi.fn() }));
 const profile = {
+  feed: {
+    instagram: '',
+    line: '',
+    events: [] as {
+      id: string;
+      title: string;
+      startsAt: number;
+      endsAt: number;
+      location: string;
+    }[],
+  },
   id: 'club',
   schoolId: 'pu',
   type: 'club' as const,
@@ -53,14 +64,16 @@ test.each([
   expect(normalizeClubProfileText(value)).toBe(expected);
 });
 
-test('依規格呈現唯讀社團、真實公告與活動尚未串接的界線', async () => {
+test('依規格呈現唯讀社團、真實公告與活動空態', async () => {
   render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
   await screen.findByRole('heading', { name: '攝影社' });
   expect(screen.getByRole('button', { name: '已加入' }).hasAttribute('disabled')).toBe(true);
   expect(screen.getByText('社課通知')).toBeTruthy();
   expect(screen.getByText('週三社課')).toBeTruthy();
   expect(screen.getByText('目前沒有排定的活動。')).toBeTruthy();
-  expect(screen.getByText(/此頁尚未接入社團內部活動/)).toBeTruthy();
+  expect(screen.queryByText(/此頁尚未接入社團內部活動/)).toBeNull();
+  expect(screen.getByText('社團尚未提供 IG 官方連結。')).toBeTruthy();
+  expect(screen.getByText('社團尚未提供 LINE 官方連結。')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '申請加入' })).toBeNull();
   expect(screen.getByRole('link', { name: '查看社團討論與更多公告' }).getAttribute('href')).toBe(
     '/groups/club?schoolId=pu',
@@ -127,41 +140,49 @@ test.each(['owner', 'admin', 'member'])(
   },
 );
 
-test.each([false, true])('補資料入口僅在管理開放、幹部且該欄位缺資料時顯示：%s', async (enabled) => {
-  vi.mocked(clubEnabled).mockReturnValue(enabled);
-  const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
-  for (const role of ['owner', 'admin', 'member']) {
-    for (const [meetingTime, description, missingTime, missingIntro] of [
-      ['  ', '  ', true, true],
-      ['週三 18:00', '  ', false, true],
-      ['  ', '新版介紹', true, false],
-      ['週三 18:00', '新版介紹', false, false],
-      ['社課時間未提供', '社團尚未提供介紹', true, true],
-      [' \t社課時間未提供\n', ' 社團尚未提供介紹。 ', true, true],
-      ['未提供', '未提供', true, true],
-      ['社課時間未提供', '新版介紹', true, false],
-      ['週三 18:00', '社團尚未提供介紹。', false, true],
-      ['社課時間未提供，請洽幹部', '社團尚未提供介紹，但歡迎來聊聊', false, false],
-    ] as const) {
-      vi.mocked(loadClubProfile).mockResolvedValue({ ...profile, role, meetingTime, description });
-      fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
-      await screen.findByText('攝影社');
-      for (const [name, missing] of [
-        ['填寫社課時間', missingTime],
-        ['填寫社團介紹', missingIntro],
+test.each([false, true])(
+  '補資料入口僅在管理開放、幹部且該欄位缺資料時顯示：%s',
+  async (enabled) => {
+    vi.mocked(clubEnabled).mockReturnValue(enabled);
+    const view = render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+    for (const role of ['owner', 'admin', 'member']) {
+      for (const [meetingTime, description, missingTime, missingIntro] of [
+        ['  ', '  ', true, true],
+        ['週三 18:00', '  ', false, true],
+        ['  ', '新版介紹', true, false],
+        ['週三 18:00', '新版介紹', false, false],
+        ['社課時間未提供', '社團尚未提供介紹', true, true],
+        [' \t社課時間未提供\n', ' 社團尚未提供介紹。 ', true, true],
+        ['未提供', '未提供', true, true],
+        ['社課時間未提供', '新版介紹', true, false],
+        ['週三 18:00', '社團尚未提供介紹。', false, true],
+        ['社課時間未提供，請洽幹部', '社團尚未提供介紹，但歡迎來聊聊', false, false],
       ] as const) {
-        const entry = screen.queryByRole('link', { name });
-        const show = enabled && role !== 'member' && missing;
-        expect(entry !== null).toBe(show);
+        vi.mocked(loadClubProfile).mockResolvedValue({
+          ...profile,
+          role,
+          meetingTime,
+          description,
+        });
+        fireEvent.click(screen.getByRole('button', { name: '重新讀取社團資料' }));
+        await screen.findByText('攝影社');
+        for (const [name, missing] of [
+          ['填寫社課時間', missingTime],
+          ['填寫社團介紹', missingIntro],
+        ] as const) {
+          const entry = screen.queryByRole('link', { name });
+          const show = enabled && role !== 'member' && missing;
+          expect(entry !== null).toBe(show);
+        }
+        expect(screen.queryByText(/社課時間未提供$/) !== null).toBe(missingTime);
+        expect(screen.queryByText('社團尚未提供介紹。') !== null).toBe(missingIntro);
+        if (!missingTime) expect(screen.getByText(new RegExp(meetingTime.trim()))).toBeTruthy();
+        if (!missingIntro) expect(screen.getByText(description.trim())).toBeTruthy();
       }
-      expect(screen.queryByText(/社課時間未提供$/) !== null).toBe(missingTime);
-      expect(screen.queryByText('社團尚未提供介紹。') !== null).toBe(missingIntro);
-      if (!missingTime) expect(screen.getByText(new RegExp(meetingTime.trim()))).toBeTruthy();
-      if (!missingIntro) expect(screen.getByText(description.trim())).toBeTruthy();
     }
-  }
-  view.unmount();
-});
+    view.unmount();
+  },
+);
 
 test('儲存後重新讀取或返回介紹頁會顯示最新資料並隱藏補資料入口', async () => {
   vi.mocked(clubEnabled).mockReturnValue(true);
@@ -184,4 +205,54 @@ test('儲存後重新讀取或返回介紹頁會顯示最新資料並隱藏補�
   expect(screen.getByText(/週三 18:00/)).toBeTruthy();
   expect(screen.queryByRole('link', { name: /填寫社/ })).toBeNull();
   expect(loadClubProfile).toHaveBeenCalledTimes(3);
+});
+
+test('呈現真實社內活動與 IG、LINE 官方連結', async () => {
+  vi.mocked(loadClubProfile).mockResolvedValue({
+    ...profile,
+    feed: {
+      instagram: 'https://www.instagram.com/photo_club',
+      line: 'https://line.me/R/club',
+      events: [
+        {
+          id: 'event',
+          title: '夜間攝影社課',
+          startsAt: 1795000000000,
+          endsAt: 1795007200000,
+          location: '社團教室',
+        },
+      ],
+    },
+  });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('夜間攝影社課');
+  expect(screen.getByText('社團教室')).toBeTruthy();
+  expect(
+    screen.getByText(
+      `${new Date(1795000000000).toLocaleString('zh-TW')} ～ ${new Date(1795007200000).toLocaleString('zh-TW')}`.replace(
+        /\s+/g,
+        ' ',
+      ),
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'IG' }).getAttribute('href')).toBe(
+    'https://www.instagram.com/photo_club',
+  );
+  expect(screen.getByRole('link', { name: 'LINE' }).getAttribute('href')).toBe(
+    'https://line.me/R/club',
+  );
+  expect(screen.queryByText('目前沒有排定的活動。')).toBeNull();
+});
+
+test('活動來源失敗保留公告、不冒充空態或未提供連結，重試可恢復', async () => {
+  vi.mocked(loadClubProfile).mockResolvedValueOnce({ ...profile, feed: null });
+  render(<ClubProfile uid="one" schoolId="pu" groupId="club" />);
+  await screen.findByText('活動資料目前讀不到，請稍後再試。');
+  expect(screen.getByText('社課通知')).toBeTruthy();
+  expect(screen.getByText('官方連結目前讀不到，請稍後再試。')).toBeTruthy();
+  expect(screen.queryByText('目前沒有排定的活動。')).toBeNull();
+  expect(screen.queryByText(/社團尚未提供 IG/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重試活動與官方連結' }));
+  await screen.findByText('目前沒有排定的活動。');
+  expect(loadClubProfile).toHaveBeenLastCalledWith('one', 'pu', 'club');
 });

@@ -5,13 +5,15 @@ Can be run as a standalone script or called periodically by the scheduler.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 
 from config import DATA_DIR, FIREBASE_CRED_PATH
 from rag.indexer import index_written_ids
-from rag.public_documents import PUBLIC_FIELDS, public_document
+from rag.public_documents import PUBLIC_FIELDS, public_document, public_school_id
 
 logger = logging.getLogger(__name__)
 
@@ -108,39 +110,119 @@ def sync_all(db=None) -> dict[str, int]:
     return results
 
 
+SNAPSHOT_FORMAT = "nuni-rag-firestore-snapshot-v1"
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON key in snapshot")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError("Non-finite JSON number in snapshot")
+
+
+def _finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Non-finite JSON number in snapshot")
+    return number
+
+
+def _snapshot_documents(raw: bytes, collection_name: str, trusted_sha256: str) -> list[dict]:
+    """Validate caller-approved bytes completely before touching the index."""
+    if hashlib.sha256(raw).hexdigest() != trusted_sha256:
+        raise ValueError("Snapshot does not match the caller's trusted SHA-256")
+    data = json.loads(
+        raw.decode("utf-8"), object_pairs_hook=_unique_json_object,
+        parse_constant=_reject_json_constant, parse_float=_finite_json_float,
+    )
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"format", "collection", "scope", "complete", "documents"}
+        or data["format"] != SNAPSHOT_FORMAT
+        or data["collection"] != collection_name
+        or data["scope"] != "all_schools"
+        or data["complete"] is not True
+        or not isinstance(data["documents"], list)
+    ):
+        raise ValueError("Expected a complete all-schools snapshot for this collection")
+
+    documents = []
+    seen_ids: set[str] = set()
+    for item in data["documents"]:
+        if not isinstance(item, dict) or set(item) != {"id", "data"}:
+            raise ValueError("Invalid snapshot document")
+        document_id, row = item["id"], item["data"]
+        if (
+            not isinstance(document_id, str) or not document_id.strip()
+            or document_id != document_id.strip() or "/" in document_id
+            or document_id in seen_ids or not isinstance(row, dict)
+        ):
+            raise ValueError("Snapshot requires unique, stable Firestore document IDs")
+        seen_ids.add(document_id)
+        if not public_school_id(row.get("schoolId")):
+            raise ValueError("Snapshot document lacks a valid school scope")
+        if row.get("visibility") not in (None, "public", "private", "school"):
+            raise ValueError("Unknown snapshot document visibility")
+        record = public_document(collection_name, row, document_id)
+        if record:
+            documents.append(record)
+        elif row.get("visibility") in (None, "public"):
+            raise ValueError("Public snapshot document has no display fields")
+    return documents
+
+
 def sync_from_json_dump(
     dump_dir: str | Path | None = None,
     collections: set[str] | None = None,
+    *,
+    trusted_snapshot_sha256: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    """Sync from local JSON dump files (for development without Firebase credentials)."""
+    """Replace sources only from explicitly trusted, complete JSON snapshots.
+
+    Plain development dumps and automatic startup fallback have no replacement
+    authority. The caller must independently verify completeness/freshness and
+    supply each file's SHA-256; a declaration inside a file cannot grant trust.
+    See rag/JSON_SNAPSHOTS.md for the all-schools snapshot contract.
+    """
     dump_path = Path(dump_dir) if dump_dir else DATA_DIR / "firestore_dump"
-    wanted = set(PUBLIC_FIELDS) if collections is None else set(collections) & set(PUBLIC_FIELDS)
-    if not dump_path.exists():
-        logger.warning("No dump directory at %s, skipping JSON sync", dump_path)
-        return {name: -1 for name in wanted}
+    wanted = set(PUBLIC_FIELDS) if collections is None else set(collections)
+    failed = {name: -1 for name in wanted}
+    if not wanted:
+        return {}
+    if (
+        not wanted <= set(PUBLIC_FIELDS)
+        or not isinstance(trusted_snapshot_sha256, dict)
+        or any(not isinstance(trusted_snapshot_sha256.get(name), str) for name in wanted)
+    ):
+        logger.warning("JSON sync requires trusted complete snapshots for all requested collections")
+        return failed
+
+    # Validate every requested file before any source is read, written or deleted.
+    # Read bytes once so the digest and parser operate on the same content.
+    prepared: dict[str, list[dict]] = {}
+    try:
+        for name in sorted(wanted):
+            prepared[name] = _snapshot_documents(
+                (dump_path / f"{name}.json").read_bytes(), name,
+                trusted_snapshot_sha256[name],
+            )
+    except (OSError, ValueError, RecursionError) as exc:
+        logger.error("JSON snapshot validation failed; index unchanged: %s", exc)
+        return failed
 
     results: dict[str, int] = {}
-    for json_file in dump_path.glob("*.json"):
-        collection_name = json_file.stem
-        if collection_name not in wanted:
-            continue
+    for name, documents in prepared.items():
         try:
-            data = json.loads(json_file.read_text(encoding="utf-8"))
-            if not isinstance(data, list):
-                data = [data]
-            documents = []
-            for idx, item in enumerate(data):
-                record = public_document(collection_name, item, str(idx))
-                if record:
-                    documents.append(record)
-            results[collection_name] = replace_source_documents(
-                f"firestore:{collection_name}", documents
-            )
-        except Exception as e:
-            logger.error("Failed to sync JSON dump %s: %s", json_file, e)
-            results[collection_name] = -1
-    for name in wanted:
-        results.setdefault(name, -1)
+            results[name] = replace_source_documents(f"firestore:{name}", documents)
+        except Exception as exc:
+            logger.error("Failed to sync JSON snapshot %s: %s", name, exc)
+            results[name] = -1
     return results
 
 
@@ -159,7 +241,13 @@ def legacy_unscoped_firestore_ids(collection_name: str = "campus") -> list[str]:
     return leftover
 
 
-def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, collection_name: str = "campus") -> dict:
+def migrate_legacy_firestore_index(
+    db=None,
+    dump_dir: str | Path | None = None,
+    collection_name: str = "campus",
+    *,
+    trusted_snapshot_sha256: dict[str, str] | None = None,
+) -> dict:
     """Rebuild unscoped Firestore RAG rows from source before school filters apply.
 
     Unscoped rows are never opened to every campus. If source data is unavailable,
@@ -177,7 +265,9 @@ def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, 
     leftover = legacy_unscoped_firestore_ids(collection_name)
     need = failed_collections(results.get("firestore"))
     if need:
-        results["json"] = sync_from_json_dump(dump_dir, collections=need)
+        results["json"] = sync_from_json_dump(
+            dump_dir, collections=need, trusted_snapshot_sha256=trusted_snapshot_sha256,
+        )
         leftover = legacy_unscoped_firestore_ids(collection_name)
     else:
         leftover = leftover or legacy_unscoped_firestore_ids(collection_name)
@@ -193,6 +283,6 @@ def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    print("Syncing from JSON dump (dev mode)...")
+    print("Checking JSON snapshots (no trusted digests configured; index will be preserved)...")
     r = sync_from_json_dump()
     print(f"Results: {r}")

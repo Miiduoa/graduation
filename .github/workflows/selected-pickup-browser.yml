@@ -1,0 +1,83 @@
+name: Selected Order Pickup Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/features/food/**'
+      - 'apps/web/src/features/nuni/assistant/AssistantCards*'
+      - 'apps/web/src/features/nuni/assistant/execution*'
+      - 'apps/web/src/features/nuni/assistant/types*'
+      - 'apps/web/src/lib/nuni/assistantV2/**'
+      - 'apps/web/src/lib/nuni/server.ts'
+      - 'apps/web/src/lib/assistantCalendarExecution*'
+      - 'apps/web/src/lib/assistantExecutionJournal*'
+      - 'apps/web/src/lib/personalImports*'
+      - 'apps/web/src/app/globals.css'
+      - 'packages/shared/src/assistantFoodPickup*'
+      - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/nuniFood*'
+      - 'packages/shared/src/imports/**'
+      - 'scripts/qa/selected-pickup/**'
+      - 'apps/web/tsconfig.json'
+      - 'apps/web/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/selected-pickup-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selected-pickup-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Selected pickup preview, receipt and reload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.5'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify selected source and HTTP contracts
+        run: |
+          mkdir -p artifacts/selected-pickup
+          node scripts/build-functions-shared.cjs
+          pnpm --filter web exec vitest run \
+            src/lib/nuni/assistantV2/foodPickupSelected.test.ts \
+            src/lib/nuni/assistantV2/foodPickupSelectedHandler.test.ts \
+            src/lib/nuni/assistantV2/foodPickupAdapter.test.ts \
+            --reporter=default --reporter=json \
+            --outputFile="$GITHUB_WORKSPACE/artifacts/selected-pickup/service-results.json"
+      - name: Install Chromium test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Bundle actual order UI and Agent service
+        run: node scripts/qa/selected-pickup/build.mjs
+      - name: Verify desktop, mobile and lost-response recovery
+        run: python scripts/qa/selected-pickup/check.py
+      - name: Upload source hashes, screenshots and transaction evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: selected-pickup-browser
+          path: artifacts/selected-pickup
+          retention-days: 7

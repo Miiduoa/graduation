@@ -61,6 +61,7 @@ const {
 } = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
 const { relevantItems } = require('../lib/assistantRelevance');
+const { resolveAssignmentPlanningTarget } = require('../lib/assignmentPlanningTarget');
 const { runTool } = require('./tools/registry');
 const {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
@@ -759,7 +760,7 @@ async function executeCampusAssistantCore({
 
   if (intent === 'reserve_seat') {
     if (!uid) {
-      response.content = '預約座位需要先登入。登入後再告訴我日期、時段與座位（或說「圖書館三樓隨便一席」）。';
+      response.content = '準備站內座位預約需要先登入。登入後請提供日期、開始與結束時間（或明確時長），以及確切座位編號。';
       response.suggestions = ['功能說明', '今日公告', '查課表'];
       return await finalizeResponse();
     }
@@ -770,15 +771,16 @@ async function executeCampusAssistantCore({
     const seatInput = resolveReserveSeatInput(lastUserMessage, timeZone);
     if (!seatInput) {
       response.content = [
-        '我可以幫你建立「圖書館／自習室」座位預約草稿，但目前無法從這句話辨識日期、時間或座位。',
+        '我可以整理站內管理的座位預約草稿，但還不能完整辨識這次要預約的日期、座位編號與起訖時間。',
         '',
-        '請補上例如：明天早上 9:00、圖書館三樓 A-15（或說隨便一席）。',
+        '請一次提供一個確切座位編號與同日完整時段，例如：明天 09:15 到 10:45，座位編號：你的座位ID；也可以提供開始時間與明確時長，例如 90 分鐘。',
+        '我不會自動挑選座位、預設兩小時或推測跨日時間。確認時才會核對站內座位與時段；這不是館方預約回執。',
       ].join('\n');
-      response.suggestions = ['明天 9:00 圖書館三樓隨便一席', '查課表', '今日公告'];
+      response.suggestions = ['補上確切座位與完整時段', '查課表', '今日公告'];
       return await finalizeResponse();
     }
     response.content = [
-      '我已整理座位預約內容，確認後才會寫入 seatReservations。',
+      '已整理站內管理的座位預約草稿；確認時才會核對座位與時段，目前尚未預約，這不是館方預約回執。',
       '',
       `座位：${seatInput.seatId}｜日期：${seatInput.date}｜${seatInput.startTime}–${seatInput.endTime}`,
     ].join('\n');
@@ -952,8 +954,8 @@ async function executeCampusAssistantCore({
     const washInput = await resolveWashReserveInput(lastUserMessage, schoolId);
     if (!washInput) {
       response.content =
-        '我可以幫你預約洗衣機，但目前找不到可預約的機台或無法解析時間。請確認學校是否已建立 washingMachines 資料。';
-      response.suggestions = ['今晚八點洗衣', '今日公告', '查課表'];
+        '目前無法確認要預約的機台或時間。請提供此校園的單一機台編號與時間；指定機台不存在、無法使用或不明確時，請確認後再試。';
+      response.suggestions = ['提供機台編號與時間', '今日公告', '查課表'];
       return await finalizeResponse();
     }
     response.content = [
@@ -1026,7 +1028,15 @@ async function executeCampusAssistantCore({
       ? prefetched.assignments
       : await fetchAssistantPendingAssignments(uid, schoolId, { preferredGroupId: context.groupId });
     response.debug.sourcesUsed = pendingAssignments.length;
-    const target = pendingAssignments[0];
+    const selection = resolveAssignmentPlanningTarget(lastUserMessage, pendingAssignments);
+    const target = selection.target;
+
+    if (selection.reason === 'clarify') {
+      response.content =
+        '我還不能唯一確認你要拆解哪一份作業。請提供完整作業名稱；若有同名作業，請一併指定課程，例如：拆解「課程名稱」的「作業名稱」。';
+      response.suggestions = ['查看作業', '今日摘要'];
+      return await finalizeResponse();
+    }
 
     if (!target) {
       response.content =

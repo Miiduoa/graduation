@@ -43,6 +43,7 @@ function result(title = '資料庫系統') {
         },
       ],
     }),
+    { headers: { 'content-type': 'application/json' } },
   );
 }
 const typeQuery = (value: string) =>

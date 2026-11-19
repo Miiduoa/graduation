@@ -16,7 +16,7 @@ import {
 import type { CampusSpatialScene } from './campusSpatialScene';
 import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
-import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
+import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
 import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
@@ -32,7 +32,126 @@ type Props = {
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
+// The 3D overlay is scoped to the *filtered* map. When the view contains
+// only transit stops (official transit feed), OSM nodes or other non-outline
+// POIs, downloading every campus building wastes bandwidth on mobile.
+// Include relation IDs for future reviewed relation support, without
+// claiming that each way/relation has passed the building geometry parser.
+const POTENTIAL_OUTLINE_POI_IDS = new Set(
+  PROVIDENCE_CAMPUS_PLACES
+    .filter((place) => place.verification === 'cross-checked' &&
+      /^https:\/\/www\.openstreetmap\.org\/(?:way|relation)\/[1-9]\d*$/.test(place.sourceUrl))
+    .map((place) => place.id),
+);
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
+// Link the original university building-unit listing, not the virtual tour.
+// No university photographs or floor plans are copied into nuni.
+const PROVIDENCE_OFFICIAL_BUILDING_UNITS_URL = 'https://c067.pu.edu.tw/p/412-1121-4218.php';
+// The API bounds decoded upstream Overpass to 500 KB. A very large or
+// ambiguous downstream Content-Length must not make mobile JSON parsing
+// allocate unbounded memory if an intermediary changes the response.
+// Keep the same cap for decoded response bytes. Content-Length alone is
+// advisory: a proxy may omit it or advertise a shorter body than it sends.
+const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
+// A hostile stream can emit unlimited zero-byte/tiny chunks without ever
+// reaching the byte cap, starving the browser's timeout and map controls.
+// The public endpoint's 500 KB ceiling makes this generous for real responses.
+const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
+
+// Response.json() buffers the entire document before our snapshot validator
+// runs. Bound the *actual decoded bytes* so untrusted downstream responses
+// cannot exhaust mobile memory even without a reliable Content-Length.
+// Fallback is only for non-streaming WebViews / synthetic fetch stubs.
+async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    return response.json() as Promise<unknown>;
+  }
+  const reader = response.body.getReader();
+  // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
+  // while response-body streaming is still pending. Abort the *reader* as well
+  // as fetch, so background tabs stop consuming OSM data on WebViews whose
+  // fetch signal does not automatically cancel a handed-off body.
+  const cancelReader = () => {
+    try {
+      void Promise.resolve(reader.cancel()).catch(() => {});
+    } catch {
+      // Cancellation is best effort; never delay UI cleanup.
+    }
+  };
+  signal?.addEventListener('abort', cancelReader, { once: true });
+  // Grow a single buffer rather than retaining an unbounded number of tiny
+  // ReadableStream chunks (whose per-object overhead is not byte-limited).
+  let bytes = new Uint8Array(16_384);
+  let total = 0;
+  let chunks = 0;
+  try {
+    if (signal?.aborted) {
+      cancelReader();
+      throw new Error('Building outline read aborted');
+    }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (signal?.aborted) throw new Error('Building outline read aborted');
+      if (done) break;
+      // Count even empty chunks: a stream can otherwise loop forever while
+      // retaining zero bytes, and microtasks can starve the 15s timeout.
+      if (++chunks > MAX_FOOTPRINT_STREAM_CHUNKS ||
+          value.byteLength > MAX_DECLARED_FOOTPRINT_BYTES - total) {
+        // Do not let a locked or unusual stream prevent the rejection path.
+        cancelReader();
+        throw new Error('Building outline response exceeded byte/chunk limit');
+      }
+      const end = total + value.byteLength;
+      if (end > bytes.byteLength) {
+        const larger = new Uint8Array(Math.min(MAX_DECLARED_FOOTPRINT_BYTES,
+          Math.max(bytes.byteLength * 2, end)));
+        larger.set(bytes.subarray(0, total));
+        bytes = larger;
+      }
+      bytes.set(value, total);
+      total = end;
+    }
+  } finally {
+    signal?.removeEventListener('abort', cancelReader);
+    reader.releaseLock();
+  }
+  if (signal?.aborted) throw new Error('Building outline read aborted');
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
+}
+const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
+
+// A modal-local Retry-After can be bypassed by closing and reopening the map.
+// Keep the deadline only in same-tab session storage; never store geometry,
+// student locations, or credentials. Private browsers may disable storage.
+function readStoredFootprintCooldown(): { until: number; minutes: number } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(OSM_COOLDOWN_STORAGE_KEY);
+    if (!raw || !/^\d{13}$/.test(raw)) {
+      if (raw) window.sessionStorage.removeItem(OSM_COOLDOWN_STORAGE_KEY);
+      return null;
+    }
+    const until = Number(raw);
+    const remaining = until - Date.now();
+    if (!Number.isSafeInteger(until) || remaining <= 0 || remaining > FOOTPRINT_DAY_MS) {
+      window.sessionStorage.removeItem(OSM_COOLDOWN_STORAGE_KEY);
+      return null;
+    }
+    return { until, minutes: Math.ceil(remaining / 60_000) };
+  } catch {
+    return null;
+  }
+}
+
+function storeFootprintCooldown(until: number | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (until === null) window.sessionStorage.removeItem(OSM_COOLDOWN_STORAGE_KEY);
+    else window.sessionStorage.setItem(OSM_COOLDOWN_STORAGE_KEY, String(until));
+  } catch {
+    // Keep the map usable in browsers that restrict session storage.
+  }
+}
 
 // Rate limits can carry Retry-After as delay-seconds or an HTTP-date.
 // Accept only a canonical IMF-fixdate, rejecting malformed/expired dates so a
@@ -40,12 +159,15 @@ const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 function footprintCooldownSeconds(response: Response): number | null {
   const raw = response.headers?.get('retry-after')?.trim();
   if (!raw) return null;
-  // RFC 9110 delay-seconds is 1*DIGIT: leading zeroes and long positive
-  // values are valid. Cap their effect at 24h, but bound header size before
-  // parsing so malformed or excessively long headers cannot lock controls.
-  if (/^\d{1,64}$/.test(raw)) {
-    const seconds = Number(raw);
-    return seconds > 0 ? Math.min(86_400, seconds) : null;
+  // RFC 9110 delay-seconds is 1*DIGIT, with no 64-digit upper bound.
+  // Cap a valid positive value *before* numeric conversion so an unusually
+  // long gateway header cannot accidentally shorten an OSM rate-limit pause.
+  // Leading zeroes do not change the requested delay.
+  if (/^\d+$/.test(raw)) {
+    const digits = raw.replace(/^0+/, '') || '0';
+    if (digits === '0') return null;
+    return digits.length > 5 || (digits.length === 5 && digits > '86400')
+      ? 86_400 : Number(digits);
   }
   const until = Date.parse(raw);
   if (!Number.isFinite(until) || new Date(until).toUTCString() !== raw) return null;
@@ -107,7 +229,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 }) {
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'deferred' | 'ready' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
@@ -130,10 +252,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     if (!host) return;
     let active = true;
     let visible = true;
+    let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
-    setStatus('loading');
+    // Safari can fire pagehide before visibilitychange when entering bfcache.
+    // Treat that window as suspended even if document.hidden stays false.
+    const isBackgrounded = () => pageSuspended || document.hidden;
+    setStatus(isBackgrounded() ? 'deferred' : 'loading');
 
-    const updateVisibility = () => scene?.setActive(visible && !document.hidden);
+    const updateVisibility = () => scene?.setActive(visible && !isBackgrounded());
     const fail = () => {
       if (!active) return;
       active = false;
@@ -142,23 +268,69 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       runtime.current = null;
       setStatus('error');
     };
-    const timeout = window.setTimeout(fail, 12000);
-    // Neither Three.js nor a graphics context is requested before the dialog opens.
-    void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
-      if (!active) return;
-      scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
-      if (!active) {
-        scene.dispose();
-        scene = null;
+    let timeout: number | null = null;
+    let started = false;
+    let pendingCreate: (() => void) | null = null;
+    // Mobile tabs can be suspended after the dynamic import starts but before
+    // it resolves. Pause the startup deadline and defer WebGL allocation until
+    // the tab is visible again. Resuming must not duplicate the context.
+    const syncPendingStartup = () => {
+      if (!active || !started || scene) return;
+      if (isBackgrounded()) {
+        if (timeout !== null) window.clearTimeout(timeout);
+        timeout = null;
+        setStatus('deferred');
         return;
       }
-      runtime.current = scene;
-      scene.setView(currentView.current);
-      if (!active) return;
+      if (timeout === null) timeout = window.setTimeout(fail, 12000);
+      setStatus('loading');
+      pendingCreate?.();
+    };
+    const startWhenVisible = () => {
+      if (!active || started || isBackgrounded()) return;
+      started = true;
+      syncPendingStartup();
+      void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
+        if (!active) return;
+        const finishStart = () => {
+          if (!active || isBackgrounded() || scene) return;
+          pendingCreate = null;
+          scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
+          if (!active) {
+            scene.dispose();
+            scene = null;
+            return;
+          }
+          runtime.current = scene;
+          scene.setView(currentView.current);
+          if (!active) return;
+          updateVisibility();
+          if (timeout !== null) window.clearTimeout(timeout);
+          timeout = null;
+          setStatus('ready');
+        };
+        pendingCreate = finishStart;
+        finishStart();
+        // If import resolved after backgrounding, keep the pending factory for
+        // the next visibilitychange/pageshow. Never allocate while hidden.
+      }).catch(fail);
+    };
+    const onVisibilityChange = () => {
       updateVisibility();
-      window.clearTimeout(timeout);
-      setStatus('ready');
-    }).catch(fail);
+      startWhenVisible();
+      syncPendingStartup();
+    };
+    const onPageHide = () => {
+      pageSuspended = true;
+      updateVisibility();
+      syncPendingStartup();
+    };
+    const onPageShow = () => {
+      pageSuspended = false;
+      updateVisibility();
+      startWhenVisible();
+      syncPendingStartup();
+    };
 
     const intersection = typeof IntersectionObserver === 'undefined' ? null :
       new IntersectionObserver(([entry]) => {
@@ -166,12 +338,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         updateVisibility();
       });
     intersection?.observe(host);
-    document.addEventListener('visibilitychange', updateVisibility);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    startWhenVisible();
     return () => {
       active = false;
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
       intersection?.disconnect();
-      document.removeEventListener('visibilitychange', updateVisibility);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+      pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
     };
@@ -190,7 +368,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       />
       {status !== 'ready' && (
         <div className={styles.sceneMessage} role="status">
-          {status === 'loading' ? <p>正在開啟空間導覽…</p> : <>
+          {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p> : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
             <button className="btn" type="button" onClick={() => setAttempt((value) => value + 1)}>
               重試立體畫面
@@ -231,6 +409,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 
 function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
+  // A matching ID alone is not an audited source: Firestore can reuse a POI
+  // ID at different coordinates, under a new name or with a new category.
+  // Skip the whole-campus download unless a *visible* marker still matches
+  // the bundled OSM provenance identity used by visibleFootprints below.
+  const hasOutlineCandidate = school === 'pu' &&
+    model.points.some((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id) &&
+      providencePlaceSourceUrl(school, point.location) !== null);
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
@@ -239,7 +424,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
   const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
   const [footprintAttempt, setFootprintAttempt] = useState(0);
-  const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable'>(
+  const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable' | 'deferred'>(
     school === 'pu' ? 'loading' : 'unavailable',
   );
   const [footprintDate, setFootprintDate] = useState<string | null>(null);
@@ -254,9 +439,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const footprintRequestActiveRef = useRef(false);
   // A hidden tab must evict expired geometry without fetching; retry when visible.
   const deferredExpiredRefreshRef = useRef(false);
+  // Safari may fire pagehide while document.hidden is still false. The public
+  // OSM source must share the same bfcache suspension boundary as WebGL.
+  const pageSuspendedRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
-  const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
+  const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(readStoredFootprintCooldown);
+  // Expiry enables a deliberate retry; it must not automatically poll Overpass.
+  const restoredCooldownRef = useRef(footprintRetryAfter !== null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
   const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
@@ -266,6 +456,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const selectId = useId();
   const progressId = useId();
   const directionsNoteId = useId();
+  const footprintCooldownNoteId = useId();
+  const footprintRefreshingNoteId = useId();
   const selectPlace = useCallback((id: string) => {
     setSelection(id);
     setOverview(false);
@@ -278,12 +470,33 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     if (school !== 'pu' || footprintStatus !== 'ready' || model.unavailableReason) {
       return NO_VISIBLE_FOOTPRINTS;
     }
-    const pointIds = new Set(model.points.map((point) => point.id));
-    const matching = footprints.filter((footprint) => pointIds.has(footprint.poiId));
+    // A source-checked OSM outline belongs to the bundled, audited POI
+    // identity, not merely an ID string. Firestore or filtered map data may
+    // reuse the same ID at a different name/position; never attach that real
+    // building geometry to a displaced marker or advertise the wrong source.
+    const verifiedPointIds = new Set(model.points
+      .filter((point) => providencePlaceSourceUrl(school, point.location) !== null)
+      .map((point) => point.id));
+    const matching = footprints.filter((footprint) => verifiedPointIds.has(footprint.poiId));
     return matching.length ? matching : NO_VISIBLE_FOOTPRINTS;
   }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
   const sourceFootprint = place
     ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
+
+  useEffect(() => {
+    const onPageHide = () => { pageSuspendedRef.current = true; };
+    const onPageShow = () => { pageSuspendedRef.current = false; };
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (school === 'pu') storeFootprintCooldown(footprintRetryAfter?.until ?? null);
+  }, [school, footprintRetryAfter?.until]);
 
   useEffect(() => {
     if (footprintRetryAfter === null) return;
@@ -297,6 +510,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           current?.until === footprintRetryAfter.until ? null : current);
         return;
       }
+      // A mobile clock correction can make the original timeout fire early.
+      // Rearm from the absolute deadline even if the rounded minute display
+      // did not change; background intervals may be heavily throttled.
+      window.clearTimeout(timer);
+      timer = window.setTimeout(synchronizeCooldown, Math.min(FOOTPRINT_DAY_MS, remaining));
       const minutes = Math.ceil(remaining / 60_000);
       setFootprintRetryAfter((current) =>
         current?.until === footprintRetryAfter.until && current.minutes !== minutes
@@ -305,8 +523,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     // Browser timers are monotonic, but the server cooldown deadline uses wall time.
     // If the user sets the clock backwards while a timer is pending, its old
     // timeout can fire before the absolute deadline. Recheck before unlocking.
-    const timer = window.setTimeout(synchronizeCooldown,
-      Math.max(0, footprintRetryAfter.until - Date.now()));
+    let timer = window.setTimeout(synchronizeCooldown,
+      Math.min(FOOTPRINT_DAY_MS, Math.max(0, footprintRetryAfter.until - Date.now())));
     const interval = window.setInterval(synchronizeCooldown, 60_000);
     document.addEventListener('visibilitychange', synchronizeCooldown);
     window.addEventListener('pageshow', synchronizeCooldown);
@@ -324,7 +542,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       return;
     }
     const resumeExpiredRefresh = () => {
-      if (!deferredExpiredRefreshRef.current || document.hidden ||
+      if (!deferredExpiredRefreshRef.current || document.hidden || pageSuspendedRef.current ||
           footprintRetryAfter !== null || footprintRequestActiveRef.current) return;
       deferredExpiredRefreshRef.current = false;
       setFootprintAttempt((value) => value + 1);
@@ -352,7 +570,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // The hidden soft-deadline event marks the snapshot stale and moves
       // nextDeadline to the seven-day hard expiry. A visible resume before
       // that hard deadline must still perform the deferred revalidation.
-      const softRefreshDeferredFromHiddenTab = !document.hidden && footprintStale &&
+      const softRefreshDeferredFromHiddenTab = !document.hidden && !pageSuspendedRef.current && footprintStale &&
         !staleSnapshotRef.current && now >= footprintClock.staleAt &&
         now < footprintClock.expiresAt;
       if (now < nextDeadline && !softRefreshDeferredFromHiddenTab) {
@@ -364,7 +582,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       // Keep public Overpass work out of background tabs while a dated volume
       // remains retainable. The next visible resume event checks this same
       // absolute deadline; hard expiry still evicts geometry even when hidden.
-      if (document.hidden && now < footprintClock.expiresAt) {
+      if ((document.hidden || pageSuspendedRef.current) && now < footprintClock.expiresAt) {
         // The soft deadline timer still has to arm the seven-day hard
         // deadline. Otherwise returning while hidden leaves no later timer
         // to evict old geometry until the user brings the tab back.
@@ -394,7 +612,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const refreshing = footprintRequestActiveRef.current;
         setFootprintStatus(refreshing ? 'loading' : 'unavailable');
         if (!refreshing) {
-          if (document.hidden || footprintRetryAfter !== null) {
+          if (document.hidden || pageSuspendedRef.current || footprintRetryAfter !== null) {
             // The hard deadline clears geometry even in the background, but
             // network revalidation waits for a visible tab and server cooldown.
             deferredExpiredRefreshRef.current = true;
@@ -433,11 +651,72 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       staleSnapshotRef.current = false;
       return;
     }
+    if (!hasOutlineCandidate) {
+      // With no audited outline candidate, do not contact Overpass and do not
+      // retain unused volumes in memory. An in-flight request is aborted by
+      // this effect's previous cleanup when the map filter changes.
+      deferredExpiredRefreshRef.current = false;
+      footprintExpiresAtRef.current = null;
+      staleSnapshotRef.current = false;
+      setFootprintClock(null);
+      setFootprints([]);
+      setFootprintDate(null);
+      setFootprintBaseDate(null);
+      setFootprintStale(false);
+      setFootprintRefreshing(false);
+      setFootprintRefreshFailed(false);
+      setFootprintStatus('unavailable');
+      return;
+    }
+    if (restoredCooldownRef.current) {
+      // A resumed or hidden dialog must not bypass the previous failed request.
+      if (footprintRetryAfter !== null || footprintAttempt === 0) {
+        setFootprintStatus('unavailable');
+        return;
+      }
+      restoredCooldownRef.current = false;
+    }
+    // The dialog can mount while a tab is suspended (e.g. restored from a
+    // mobile browser session). Do not start a fresh public OSM request until
+    // the user returns. The original POIs and walking link still work.
+    if (document.hidden || pageSuspendedRef.current) {
+      // Do not announce an active OSM fetch when mobile has suspended it.
+      // Keep POIs and navigation usable while waiting for a visible tab.
+      // Preserve previously verified, still-retainable outlines while a
+      // background refresh waits; only the pending fetch becomes deferred.
+      setFootprintStatus((current) => current === 'ready' ? current : 'deferred');
+      let resumed = false;
+      const fetchWhenVisible = () => {
+        if (resumed || document.hidden || pageSuspendedRef.current) return;
+        resumed = true;
+        document.removeEventListener('visibilitychange', fetchWhenVisible);
+        window.removeEventListener('pageshow', fetchWhenVisible);
+        setFootprintAttempt((attempt) => attempt + 1);
+      };
+      document.addEventListener('visibilitychange', fetchWhenVisible);
+      window.addEventListener('pageshow', fetchWhenVisible);
+      return () => {
+        document.removeEventListener('visibilitychange', fetchWhenVisible);
+        window.removeEventListener('pageshow', fetchWhenVisible);
+      };
+    }
     let active = true;
     let timedOut = false;
+    let requestPending = true;
+    let suspendedInBackground = false;
+    // Distinguish fetch-level network errors from a server response. Do not
+    // overwrite a valid Retry-After from an HTTP or JSON-contract failure.
+    let receivedResponse = false;
     // A freshness deadline may retain a dated snapshot; the seven-day hard
     // source expiry never may.
+    // Both originally stale snapshots and once-fresh snapshots crossing
+    // the 24-hour soft deadline can stay visible during revalidation.
+    // Their hard retention may end while mobile timers are suspended.
     const preserveStale = staleSnapshotRef.current;
+    // Never restore expired geometry after a failed or aborted refresh,
+    // even if the browser has not delivered its seven-day deadline timer.
+    const canRetainStale = () => preserveStale && footprintExpiresAtRef.current !== null &&
+      Date.now() < footprintExpiresAtRef.current;
     // A manual refresh or an already-triggered request supersedes deferral.
     deferredExpiredRefreshRef.current = false;
     footprintRequestActiveRef.current = true;
@@ -453,13 +732,40 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       footprintRequestActiveRef.current = false;
       controller.abort();
       setFootprintRefreshing(false);
-      const keepStale = preserveStale && staleSnapshotRef.current;
+      const keepStale = canRetainStale();
       if (keepStale) setFootprintRefreshFailed(true);
       setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       // A timed-out proxy is not proof that the public OSM source recovered.
       // Pause manual retries locally even when AbortSignal was ignored.
       setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
     }, 15_000);
+    // Ordinary mobile app/tab switches can fire visibilitychange without
+    // pagehide. Stop the pending public OSM response in either suspension
+    // path: AbortSignal is advisory, so quarantine late success as well.
+    // A successful/failed settled request must not refetch on resume.
+    const suspendForBackground = () => {
+      if (!document.hidden && !pageSuspendedRef.current) return;
+      if (!active || timedOut || !requestPending) return;
+      suspendedInBackground = true;
+      active = false;
+      footprintRequestActiveRef.current = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+      setFootprintRefreshing(false);
+      setFootprintStatus(canRetainStale() ? 'ready' : 'deferred');
+    };
+    const resumeAfterForeground = () => {
+      if (!suspendedInBackground || document.hidden || pageSuspendedRef.current) return;
+      suspendedInBackground = false;
+      setFootprintAttempt((value) => value + 1);
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) suspendForBackground();
+      else resumeAfterForeground();
+    };
+    window.addEventListener('pagehide', suspendForBackground);
+    window.addEventListener('pageshow', resumeAfterForeground);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     // A gateway can return HTTP 200 with truncated JSON or a payload that
     // fails our source/geometry contract. Treat that as a rejected source
     // response rather than letting repeated manual retries hammer Overpass.
@@ -471,26 +777,58 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     };
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
+        receivedResponse = true;
         // Fetch considers 203/206 successful, but the map API contract is a
         // complete 200 JSON document. A CDN/proxy must not turn a transformed
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
+        const contentLength = response.headers?.get('content-length') ?? null;
+        // RFC Content-Length is a decimal byte count, not a fraction, hex
+        // number or comma-separated value. Do not trust a 200 JSON body whose
+        // advertised size is invalid or implausibly large for this API.
+        const invalidContentLength = contentLength !== null &&
+          (!/^\d+$/.test(contentLength) ||
+            !Number.isSafeInteger(Number(contentLength)) ||
+            Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null) {
+            contentRange !== null || invalidContentLength) {
+          // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
+          // can still stream a large body; release it without awaiting an
+          // uncooperative proxy, rather than waste mobile bandwidth/memory.
+          // The status and Retry-After headers remain usable after cancellation.
+          if (response.body) {
+            try {
+              // A locked stream or some WebView implementations can throw
+              // synchronously rather than returning a rejected promise.
+              // Disposal is best-effort; never skip the status-derived
+              // Retry-After cooldown because cancellation itself failed.
+              void Promise.resolve(response.body.cancel()).catch(() => {});
+            } catch {
+              // Continue to evaluate the HTTP status and Retry-After below.
+            }
+          }
           // Match the API's fail-closed response policy: an upstream/proxy can
           // request a cooldown on 408, gateway failures, or partial content,
           // not only 429/503. Do not hammer a source that rejected a full map.
           const status = response.status;
-          const rateLimitedOrIncomplete = status === 206 || status === 408 ||
+          // 201/202/203/204/205/206 and other non-200 success statuses do
+          // not satisfy our complete JSON snapshot contract. In particular
+          // 204/205 have no body: repeated retries would only load the origin.
+          // A stray 304 without a conditional request is also not a snapshot.
+          const invalidSuccessStatus = typeof status === 'number' && status >= 200 &&
+            status < 300 && status !== 200;
+          const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null;
+            contentRange !== null || invalidContentLength;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
-          // Back off 60s alongside 429 and 502/503/504. Explicit valid
-          // Retry-After still wins; an ordinary 500 keeps its existing retry.
-          const fallbackBackoff = status === 206 || status === 408 || status === 429 ||
-            status === 502 || status === 503 || status === 504 || contentRange !== null;
+          // Back off 60s for non-200 2xx, unexpected 304, 408, 429 and
+          // gateway failures. Explicit valid Retry-After still wins; an
+          // ordinary 500 keeps its existing manual-retry behavior.
+          const fallbackBackoff = invalidSuccessStatus || status === 304 ||
+            status === 408 || status === 429 || status === 502 ||
+            status === 503 || status === 504 || contentRange !== null || invalidContentLength;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
@@ -502,7 +840,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const cooldownSeconds = response.status === 200 ? footprintCooldownSeconds(response) : null;
         let payload: unknown;
         try {
-          payload = await response.json() as unknown;
+          payload = await readBoundedFootprintJson(response, controller.signal);
         } catch {
           pauseForInvalidPayload(cooldownSeconds);
           throw new Error('Invalid building outline response body');
@@ -510,6 +848,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         return { payload, cooldownSeconds };
       })
       .then(({ payload, cooldownSeconds }) => {
+        requestPending = false;
         if (!active || timedOut) return;
         const snapshot = parseProvidenceFootprintSnapshot(payload);
         if (!snapshot) {
@@ -537,12 +876,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintRefreshFailed(false);
         setFootprintStatus('ready');
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        requestPending = false;
         if (!active || timedOut) return;
+        // WebView bridges can surface an offline fetch rejection as a normal
+        // Error named NetworkError (not always a DOMException). Do not let
+        // that representation bypass the same one-minute origin backoff.
+        // An AbortError or unrelated app error must not be rate-limited.
+        const networkFailure = error instanceof TypeError ||
+          (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'NetworkError') ||
+          (error instanceof Error && error.name === 'NetworkError');
+        if (!receivedResponse && networkFailure) {
+          setFootprintRetryAfter({ until: Date.now() + 60_000, minutes: 1 });
+        }
         // Preserve only a still-retainable dated snapshot on refresh failure.
         // Once source retention expires, all failures stay marker-only.
         setFootprintRefreshing(false);
-        const keepStale = preserveStale && staleSnapshotRef.current;
+        const keepStale = canRetainStale();
         if (keepStale) setFootprintRefreshFailed(true);
         setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
@@ -554,9 +904,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       active = false;
       footprintRequestActiveRef.current = false;
       window.clearTimeout(timeout);
+      window.removeEventListener('pagehide', suspendForBackground);
+      window.removeEventListener('pageshow', resumeAfterForeground);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       controller.abort();
     };
-  }, [school, model.unavailableReason, footprintAttempt]);
+  }, [school, model.unavailableReason, hasOutlineCandidate, footprintAttempt]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
@@ -612,19 +965,24 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             <p className={styles.note}>選擇地點或拖動導覽進度，讓視角跟著移動。步行路線請使用導航。</p>
             {school === 'pu' && (
               <div className={styles.footprintInfo}>
-                {footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
-                {footprintStatus === 'unavailable' && <>
+                {hasOutlineCandidate && footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
+                {hasOutlineCandidate && footprintStatus === 'deferred' && <span role="status">目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓；地點標記與導航仍可使用。</span>}
+                {!hasOutlineCandidate && <span role="status">
+                  目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源，不下載整座校園的建築資料；地點標記與步行導航仍可使用。
+                </span>}
+                {hasOutlineCandidate && footprintStatus === 'unavailable' && <>
                   <span role="status">公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
-                  {footprintRetryAfter !== null && <span>
+                  {footprintRetryAfter !== null && <span id={footprintCooldownNoteId} role="status">
                     為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                   </span>}
                   <button className={styles.retryFootprints} type="button"
+                    aria-describedby={footprintRetryAfter !== null ? footprintCooldownNoteId : undefined}
                     disabled={footprintRetryAfter !== null}
                     onClick={() => setFootprintAttempt((value) => value + 1)}>
                     重新讀取建築輪廓
                   </button>
                 </>}
-                {footprintStatus === 'ready' && (
+                {hasOutlineCandidate && footprintStatus === 'ready' && (
                   <>
                     <strong role="status">{visibleFootprints.length} 棟公開建築輪廓</strong>
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
@@ -632,12 +990,16 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
                     {footprintStale && <>
                       <span>目前使用有日期標註的舊輪廓，可手動檢查是否已有更新；原始地點與步行導航不受影響。</span>
-                      {footprintRetryAfter !== null && <span>
+                      {footprintRetryAfter !== null && <span id={footprintCooldownNoteId} role="status">
                         為避免頻繁請求，建築輪廓更新約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                       </span>}
-                      {footprintRefreshing && <span role="status">正在檢查更新，暫時保留舊輪廓。</span>}
+                      {footprintRefreshing && <span id={footprintRefreshingNoteId} role="status">正在檢查更新，暫時保留舊輪廓。</span>}
                       {footprintRefreshFailed && !footprintRefreshing && <span role="status">更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
                       <button className={styles.retryFootprints} type="button"
+                        aria-describedby={[
+                          footprintRetryAfter !== null ? footprintCooldownNoteId : '',
+                          footprintRefreshing ? footprintRefreshingNoteId : '',
+                        ].filter(Boolean).join(' ') || undefined}
                         disabled={footprintRetryAfter !== null || footprintRefreshing}
                         onClick={() => {
                           setFootprintRefreshFailed(false);
@@ -700,21 +1062,38 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     </> : '此地點沒有可用的已核對 OSM 建築外框；只顯示原有地點標記，不代表已驗證入口。'}
                   </p>
                 )}
+                {sourceFootprint && (
+                  <p className={styles.note}>
+                    <a href={sourceFootprint.sourceUrl} target="_blank" rel="noopener noreferrer">
+                      查看此棟建築的 OpenStreetMap 原始輪廓
+                    </a>
+                    {' '}（OSM 圖徵來源，非現地測繪；不代表已驗證入口）
+                  </p>
+                )}
                 {sourceFootprint?.osmVersion && sourceFootprint.osmEditedAt && (
                   <p className={styles.note}>
                     OSM way 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
                     此日期不代表現場查證，節點座標可能另有更新。
                   </p>
                 )}
-                {school === 'pu' && place.id === 'pu-zhugu' && (
+                {school === 'pu' && place.id === 'pu-zhugu' && source !== null && (
                   <div className={styles.officialFloors}>
                     <strong>主顧樓 · 校方公開樓層資訊</strong>
-                    <p>4 樓：資訊管理學系、資訊傳播工程學系。5 樓：資訊工程學系。6 樓：資訊學院。</p>
-                    <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
-                      查看官方建築資料
+                    <p>4 樓：資訊管理學系、人工智慧應用學系。</p>
+                    <p>5 樓：資訊工程學系。</p>
+                    <p>6 樓：資訊學院、台灣文學系、管理碩士在職專班（EMBA）。</p>
+                    <p>7 樓：會計室、校友聯絡暨就業輔導室、國際暨兩岸事務處。</p>
+                    <p>8 樓：校長室、副校長室、秘書室、研發處、人事室。</p>
+                    <a href={PROVIDENCE_OFFICIAL_BUILDING_UNITS_URL} target="_blank" rel="noopener noreferrer">
+                      查看校史資料室主顧樓單位清單
                     </a>
-                    <small>此處是樓層資訊，不代表教室入口或室內行走路線已驗證。</small>
+                    <small>依校方校史資料室公開的主顧樓樓層單位資訊整理；單位可能調整，請以校方最新公告為準。這不是教室座標，不代表建築入口或室內動線已查證。</small>
                   </div>
+                )}
+                {school === 'pu' && place.id === 'pu-zhugu' && source === null && (
+                  <p className={styles.pending} role="status">
+                    這筆主顧樓地點尚未與校園已核對資料對上，暫不顯示校方樓層單位，避免把單位誤掛到其他位置。
+                  </p>
                 )}
                 {isProvidencePendingVerification(school, place) && (
                   <p className={styles.pending} role="status">此地點僅有單一資料來源，位置待再次確認。</p>

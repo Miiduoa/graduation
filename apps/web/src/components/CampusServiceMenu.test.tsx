@@ -139,6 +139,7 @@ it('routes the Nuni account to its courses and hides operator links during reval
   auth.session = { platformAccountId: 'a', isPlatformOperator: true };
   const view = render(<AppHeader />);
   expect(screen.getByRole('link', { name: '課務' }).getAttribute('href')).toBe('/timetable');
+  fireEvent.click(screen.getByLabelText('帳號'));
   expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
   expect(screen.getByRole('link', { name: '平台管理' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
