@@ -53,6 +53,14 @@ describe('NCNU public course to personal timetable credit handoff', () => {
     expect(ncnuTimetableImportCsv({ ...officialCourse, time })).toBeNull();
   });
 
+  it.each([null, undefined, 3, { day: '1a' }])(
+    'refuses a malformed cached period value %s without crashing the student screen',
+    (time) => {
+      expect(ncnuCourseMeetings(time as string, '1151')).toBeNull();
+      expect(ncnuTimetableImportCsv({ ...officialCourse, time: time as string })).toBeNull();
+    },
+  );
+
   it('accepts a full week of distinct periods without cutting off a valid schedule', () => {
     const week = 'xyabcdzefghijklm';
     const time = '1234567'.split('').map(day => day + week).join('');
