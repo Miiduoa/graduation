@@ -1,4 +1,4 @@
-import { FieldPath, Timestamp, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { FieldPath, Timestamp, type Firestore, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import { isAccountUnavailable } from './dmConversationsHandler';
@@ -64,7 +64,6 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
       throw new HttpsError('permission-denied', '僅限有效群組成員讀取');
     }
     const postsRef = group.collection('posts');
-    const base = postsRef.orderBy('createdAt', 'desc');
     let boundary: { id: string; time: Timestamp } | null = null;
     if (input.cursor != null) {
       const cursor = input.cursor as {
@@ -87,99 +86,98 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
       boundary = { id: cursor.id, time: new Timestamp(time.seconds!, time.nanoseconds!) };
     }
     type PostDoc = QueryDocumentSnapshot;
-    async function readPage(globalDocs?: PostDoc[]) {
+    const maxRows = 5000;
+    const batchSize = 500;
+
+    function sortByCreatedAt(docs: PostDoc[]): PostDoc[] {
+      return [...docs].sort((a, b) => {
+        const left = createdAtTime(a.data().createdAt);
+        const right = createdAtTime(b.data().createdAt);
+        return (
+          right.seconds - left.seconds || right.nanoseconds - left.nanoseconds ||
+          Buffer.compare(Buffer.from(b.id), Buffer.from(a.id))
+        );
+      });
+    }
+
+    async function collectByDocumentId(base: Query) {
+      const docs: PostDoc[] = [];
+      let scan = base.orderBy(FieldPath.documentId());
+      while (docs.length < maxRows) {
+        const count = Math.min(batchSize, maxRows - docs.length);
+        const batch = await scan.limit(count).get();
+        docs.push(...batch.docs);
+        if (batch.docs.length < count) break;
+        scan = base.orderBy(FieldPath.documentId()).startAfter(batch.docs[batch.docs.length - 1]!);
+      }
+      return docs;
+    }
+
+    function readPage(docs: PostDoc[]) {
       const posts: Record<string, unknown>[] = [];
       let nextCursor: { id: string; createdAt: { seconds: number; nanoseconds: number } } | null =
         null;
-      const batchSize = Math.max(size + 1, 50);
-      // Apply the cursor only in process so ISO-string and Timestamp createdAt
-      // values stay in one order. startAt(Timestamp) would skip legacy string rows.
-      let scan = base;
-      while (true) {
-        const batch = globalDocs ? { docs: globalDocs } : await scan.limit(batchSize).get();
-        for (const doc of batch.docs) {
-          const data = doc.data();
-          // Legacy ISO/date strings and Timestamp values must sort and page the same way.
-          const time = createdAtTime(data.createdAt);
-          if (
-            boundary &&
-            (time.seconds > boundary.time.seconds ||
-              (time.seconds === boundary.time.seconds && time.nanoseconds > boundary.time.nanoseconds) ||
-              (time.isEqual(boundary.time) &&
-                Buffer.compare(Buffer.from(doc.id), Buffer.from(boundary.id)) >= 0))
-          )
-            continue;
-          if (
-            data.published === false ||
-            [
-              'draft', 'scheduled', 'pending', 'unpublished',
-              'archived', 'cancelled', 'canceled', 'deleted',
-            ].includes(data.status) ||
-            data.deleted === true ||
-            data.deletedAt != null
-          )
-            continue;
-          // Look ahead by one visible row, without advancing the returned cursor past it.
-          if (posts.length === size) return { posts, cursor: nextCursor, hasMore: true };
-          nextCursor = {
-            id: doc.id,
-            createdAt: { seconds: time.seconds, nanoseconds: time.nanoseconds },
-          };
-          posts.push({
-            ...data,
-            id: doc.id,
-            createdAt: nextCursor.createdAt,
-            ...(data.pinnedAt instanceof Timestamp
-              ? {
-                  pinnedAt: {
-                    seconds: data.pinnedAt.seconds,
-                    nanoseconds: data.pinnedAt.nanoseconds,
-                  },
-                }
-              : {}),
-          });
-        }
-        if (globalDocs || batch.docs.length < batchSize) {
-          return { posts, cursor: nextCursor, hasMore: false };
-        }
-        scan = base.startAfter(batch.docs[batch.docs.length - 1]!);
+      // Cursor and visibility run on the already parsed-time-sorted set, never
+      // on Firestore's createdAt type order (strings precede Timestamps in desc).
+      for (const doc of docs) {
+        const data = doc.data();
+        const time = createdAtTime(data.createdAt);
+        if (
+          boundary &&
+          (time.seconds > boundary.time.seconds ||
+            (time.seconds === boundary.time.seconds && time.nanoseconds > boundary.time.nanoseconds) ||
+            (time.isEqual(boundary.time) &&
+              Buffer.compare(Buffer.from(doc.id), Buffer.from(boundary.id)) >= 0))
+        )
+          continue;
+        if (
+          data.published === false ||
+          [
+            'draft', 'scheduled', 'pending', 'unpublished',
+            'archived', 'cancelled', 'canceled', 'deleted',
+          ].includes(data.status) ||
+          data.deleted === true ||
+          data.deletedAt != null
+        )
+          continue;
+        if (posts.length === size) return { posts, cursor: nextCursor, hasMore: true };
+        nextCursor = {
+          id: doc.id,
+          createdAt: { seconds: time.seconds, nanoseconds: time.nanoseconds },
+        };
+        posts.push({
+          ...data,
+          id: doc.id,
+          createdAt: nextCursor.createdAt,
+          ...(data.pinnedAt instanceof Timestamp
+            ? {
+                pinnedAt: {
+                  seconds: data.pinnedAt.seconds,
+                  nanoseconds: data.pinnedAt.nanoseconds,
+                },
+              }
+            : {}),
+        });
       }
+      return { posts, cursor: nextCursor, hasMore: false };
     }
+
     try {
       // Probe raw canonical rows independently of the cursor and visibility.
       // Hidden rows and exhausted pages must never activate the legacy fallback.
-      const canonical = await base.limit(1).get();
-      if (canonical.docs.length > 0) return await readPage();
+      const canonical = await postsRef.limit(1).get();
+      if (canonical.docs.length > 0) {
+        return readPage(sortByCreatedAt(await collectByDocumentId(postsRef)));
+      }
     } catch {
       // Match the legacy read path when the canonical read is unavailable.
     }
     // Equality plus document-ID ordering uses the automatic single-field index.
-    // Scan before sorting: document-ID batches do not represent the newest rows.
     // At the safety cap, paginate only the documents actually collected.
-    const maxLegacyRows = 5000;
-    const legacyBatchSize = 500;
-    const legacyBase = db.collection('groupPosts')
-      .where('groupId', '==', input.groupId)
-      .orderBy(FieldPath.documentId());
-    const legacyDocs: PostDoc[] = [];
-    let legacyScan = legacyBase;
-    while (legacyDocs.length < maxLegacyRows) {
-      const count = Math.min(legacyBatchSize, maxLegacyRows - legacyDocs.length);
-      const batch = await legacyScan.limit(count).get();
-      legacyDocs.push(...batch.docs);
-      if (batch.docs.length < count) break;
-      legacyScan = legacyBase.startAfter(batch.docs[batch.docs.length - 1]!);
+    return readPage(sortByCreatedAt(await collectByDocumentId(
+      db.collection('groupPosts').where('groupId', '==', input.groupId),
+    )));
     }
-    const timeOf = (doc: PostDoc): Timestamp => createdAtTime(doc.data().createdAt);
-    const sorted = legacyDocs.sort((a, b) => {
-      const left = timeOf(a);
-      const right = timeOf(b);
-      return (
-        right.seconds - left.seconds || right.nanoseconds - left.nanoseconds ||
-        Buffer.compare(Buffer.from(b.id), Buffer.from(a.id))
-      );
-    });
-    return readPage(sorted);
-  }
-  return { listGroupDiscussionPage };
+
+    return { listGroupDiscussionPage };
 }

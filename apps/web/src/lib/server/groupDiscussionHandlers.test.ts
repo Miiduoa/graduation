@@ -16,33 +16,40 @@ function setup(rows: Row[], status: string | null = 'active', options: { profile
   const reads = vi.fn();
   const globalReads = vi.fn();
   const membershipReads = vi.fn();
-  const ordered = [...rows].sort(
-    (a, b) => testTime(b.createdAt).toMillis() - testTime(a.createdAt).toMillis() || b.id.localeCompare(a.id),
-  );
-  function query(offset = 0, count = Infinity): any {
+  const isDocumentId = (field: unknown): field is FieldPath =>
+    typeof field === 'object' && !!field && 'isEqual' in field && (field as FieldPath).isEqual(FieldPath.documentId());
+  const typeRank = (value: Timestamp | string) => (typeof value === 'string' ? 4 : 3);
+  // Firestore descending createdAt: strings (type 4) precede Timestamps (type 3).
+  const byFirestoreCreatedAtDesc = [...rows].sort((a, b) => {
+    const rankDiff = typeRank(b.createdAt) - typeRank(a.createdAt);
+    if (rankDiff) return rankDiff;
+    if (typeof a.createdAt === 'string' && typeof b.createdAt === 'string') {
+      return b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id);
+    }
+    return testTime(b.createdAt).toMillis() - testTime(a.createdAt).toMillis() || b.id.localeCompare(a.id);
+  });
+  const byDocumentId = [...rows].sort((a, b) => Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
+  function query(source: Row[] = byDocumentId, offset = 0, count = Infinity): any {
     return {
-      orderBy: () => query(offset, count),
-      startAt: (time: Timestamp) => {
-        const next = ordered.findIndex((r) => testTime(r.createdAt).toMillis() <= time.toMillis());
-        return query(next < 0 ? rows.length : next, count);
+      orderBy: (field?: unknown, direction?: string) => {
+        if (isDocumentId(field)) return query(byDocumentId, offset, count);
+        if (field === 'createdAt') {
+          expect(direction).toBe('desc');
+          return query(byFirestoreCreatedAtDesc, offset, count);
+        }
+        return query(source, offset, count);
       },
-      startAfter: (timeOrDoc: Timestamp | { id: string }, ref?: { id: string }) => {
-        const id = ref?.id ?? (timeOrDoc as { id: string }).id;
-        const time = ref ? (timeOrDoc as Timestamp) : testTime(rows.find((r) => r.id === id)!.createdAt);
-        const next = ordered.findIndex(
-          (r) =>
-            testTime(r.createdAt).toMillis() < time.toMillis() ||
-            (testTime(r.createdAt).isEqual(time) && r.id.localeCompare(id) < 0),
-        );
-        return query(next < 0 ? rows.length : next, count);
+      startAfter: (doc: { id: string }) => {
+        const next = source.findIndex((row) => row.id === doc.id) + 1;
+        return query(source, next > 0 ? next : source.length, count);
       },
-      limit: (size: number) => query(offset, size),
+      limit: (size: number) => query(source, offset, size),
       doc: (id: string) => ({ id }),
       get: async () => {
         reads();
         if (options.canonicalError) throw new Error('canonical read failed');
         return {
-          docs: ordered
+          docs: source
             .slice(offset, offset + count)
             .map((row) => ({ id: row.id, data: () => row })),
         };
@@ -151,6 +158,23 @@ it('pages ISO-string createdAt posts in chronological order', async () => {
   expect(second.hasMore).toBe(true);
   const third = await list(request({ pageSize: 1, cursor: second.cursor }));
   expect(third.posts.map((p) => p.id)).toEqual(['a']);
+  expect(third.hasMore).toBe(false);
+});
+
+it('pages mixed ISO-string and Timestamp createdAt in parsed-time order', async () => {
+  const { list } = setup([
+    row('iso-0501', { createdAt: '2024-05-01T00:00:00.000Z', status: 'active' }),
+    row('ts-0503', { createdAt: Timestamp.fromDate(new Date('2024-05-03T00:00:00.000Z')), status: 'active' }),
+    row('ts-0430', { createdAt: Timestamp.fromDate(new Date('2024-04-30T00:00:00.000Z')), status: 'active' }),
+  ]);
+  const first = await list(request({ pageSize: 1 }));
+  expect(first.posts.map((p) => p.id)).toEqual(['ts-0503']);
+  expect(first.hasMore).toBe(true);
+  const second = await list(request({ pageSize: 1, cursor: first.cursor }));
+  expect(second.posts.map((p) => p.id)).toEqual(['iso-0501']);
+  expect(second.hasMore).toBe(true);
+  const third = await list(request({ pageSize: 1, cursor: second.cursor }));
+  expect(third.posts.map((p) => p.id)).toEqual(['ts-0430']);
   expect(third.hasMore).toBe(false);
 });
 
