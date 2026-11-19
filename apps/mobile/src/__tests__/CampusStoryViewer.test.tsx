@@ -209,7 +209,7 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
-  test('reading a video caption does not override a student's manual playback choice', () => {
+  test('reading a video caption preserves the manual playback choice', () => {
     const view = render(
       <Shelf
         rows={[
