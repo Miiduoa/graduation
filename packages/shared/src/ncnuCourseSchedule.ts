@@ -28,7 +28,8 @@ export function ncnuCourseMeetings(time: string, semester?: string): NcnuCourseM
   // two characters per slot. Reject overlong cached responses before expanding
   // them into unbounded timetable rows (the catalog validator checks types only).
   const maxWeeklyTimeLength = 7 * periodOrder.length * 2;
-  if (time.length > maxWeeklyTimeLength || !/^(?:[1-7][a-mxyz]+)+$/.test(time)) return null;
+  if (typeof time !== 'string' || time.length > maxWeeklyTimeLength ||
+      !/^(?:[1-7][a-mxyz]+)+$/.test(time)) return null;
   const verified = semester === '1142' || semester === '1151';
   return Array.from(time.matchAll(/([1-7])([a-mxyz]+)/g)).flatMap(([, day, periods]) => {
     const runs: string[] = [];
