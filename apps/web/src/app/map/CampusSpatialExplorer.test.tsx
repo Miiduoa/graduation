@@ -192,6 +192,11 @@ it('ignores foreign and older viewport callbacks without disabling walking navig
   act(() => intersection?.(([{ isIntersecting: false, time: 200, target: graphics }] as unknown as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   const countBeforeDelayedCallback = scene.setActive.mock.calls.length;
+  // Mobile WebViews may quantize observer timestamps. An equal-time callback
+  // delivered in another batch is not proof that the map is back onscreen.
+  const ambiguousTie = [{ isIntersecting: true, time: 200, target: graphics }] as unknown as IntersectionObserverEntry[];
+  act(() => intersection?.(ambiguousTie, {} as IntersectionObserver));
+  expect(scene.setActive.mock.calls.length).toBe(countBeforeDelayedCallback);
   act(() => intersection?.(([{ isIntersecting: true, time: 150, target: graphics }] as unknown as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.setActive.mock.calls.length).toBe(countBeforeDelayedCallback);
   expect(scene.create).toHaveBeenCalledTimes(1);
