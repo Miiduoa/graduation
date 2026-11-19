@@ -266,6 +266,10 @@ function allowedReturnPath(value: string | null | undefined): string | null {
   const context = new URLSearchParams();
   for (const [key, value] of parsed.searchParams) {
     if (journey) {
+      if (key === 'access') {
+        if (!context.has(key) && value === 'public') context.set(key, value);
+        continue;
+      }
       if (key === 'group') {
         if (!context.has(key) && SERVICE_JOURNEY_GROUPS[journey].some((group) => group.id === value)) {
           context.set(key, value);

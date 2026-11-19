@@ -61,10 +61,11 @@ export function useSchoolRoleState(
             return;
           }
           const member = snapshot.exists() ? snapshot.data() : null;
+          // Legacy memberships predate status; explicit non-active states remain blocked.
+          const active = member && (member.status === undefined || member.status === 'active');
           update({
             status: 'ready',
-            role:
-              member?.status === 'active' && typeof member.role === 'string' ? member.role : null,
+            role: active && typeof member.role === 'string' ? member.role : null,
           });
         },
         () => update({ status: 'error', role: null }),
