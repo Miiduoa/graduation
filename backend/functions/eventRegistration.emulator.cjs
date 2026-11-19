@@ -155,3 +155,125 @@ test('initial enabling checks real legacy queries and never imports unknown coun
   await db.doc('schools/pu/events/old/registrations/other').set({ userId: 'other' });
   await assert.rejects(run(), { code: 'failed-precondition' });
 });
+
+const { createAccountGuardedOnCall } = require('./accountLifecycle');
+const accountGuardedEventCall = createAccountGuardedOnCall({
+  onCall: (_options, handler) => handler,
+  getDb: () => db,
+});
+const accountRevocationActions = [
+  {
+    name: 'register',
+    prepare: async () => {},
+    invoke: (api, request) => api.registerCampusEvent(request),
+  },
+  {
+    name: 'cancel',
+    prepare: () => register(),
+    invoke: (api, request) => api.cancelCampusEventRegistration(request),
+  },
+  {
+    name: 'get',
+    prepare: () => register(),
+    invoke: (api, request) => api.getEventRegistrations({
+      ...request,
+      data: { schoolId: 'pu', eventIds: ['one'] },
+    }),
+  },
+];
+
+async function eventRegistrationSnapshot() {
+  const [event, registrations, receipts] = await Promise.all([
+    db.doc(path).get(),
+    db.collection(`${path}/registrations`).get(),
+    db.collection('eventRegistrationRequests').get(),
+  ]);
+  const row = (document) => ({
+    path: document.ref.path,
+    data: document.data(),
+    updateTime: document.updateTime,
+  });
+  return {
+    event: row(event),
+    registrations: registrations.docs.map(row),
+    receipts: receipts.docs.map(row),
+  };
+}
+
+for (const action of accountRevocationActions) {
+  test(`${action.name} rejects an account disabled after active admission without changing event, registration or receipts`, async () => {
+    await db.doc('users/alice').update({ status: 'active' });
+    await action.prepare();
+    const before = await eventRegistrationSnapshot();
+    let admitted = false;
+    const call = accountGuardedEventCall({}, async (request) => {
+      admitted = true;
+      await db.doc('users/alice').update({ status: 'disabled' });
+      return action.invoke(handlers(), request);
+    });
+    await assert.rejects(call(args('alice', 'post-admission-attempt-01')), {
+      code: 'permission-denied',
+    });
+    assert.equal(admitted, true);
+    assert.equal((await db.doc('users/alice').get()).data().status, 'disabled');
+    assert.deepEqual(await eventRegistrationSnapshot(), before);
+    await invariants();
+  });
+
+  for (const status of ['suspended', 'disabled']) {
+    test(`${action.name} rereads ${status} account status on an injected ABORTED retry without committing the first attempt`, async () => {
+      await db.doc('users/alice').update({ status: 'active' });
+      await action.prepare();
+      const before = await eventRegistrationSnapshot();
+      let attempts = 0;
+      const database = {
+        collection: db.collection.bind(db),
+        runTransaction: (callback) => db.runTransaction(async (transaction) => {
+          attempts++;
+          if (attempts === 2) await db.doc('users/alice').update({ status });
+          const result = await callback(transaction);
+          if (attempts === 1) {
+            // Deliberately inject ABORTED; this is retry coverage, not a real concurrency race.
+            const error = new Error('injected account-revocation retry');
+            error.code = 10;
+            throw error;
+          }
+          return result;
+        }),
+      };
+      const call = accountGuardedEventCall({}, (request) => action.invoke(handlers(database), request));
+      await assert.rejects(call(args('alice', 'account-retry-attempt-01')), {
+        code: 'permission-denied',
+      });
+      assert.equal(attempts, 2);
+      assert.equal((await db.doc('users/alice').get()).data().status, status);
+      assert.deepEqual(await eventRegistrationSnapshot(), before);
+      await invariants();
+    });
+  }
+}
+
+for (const action of ['register', 'cancel']) {
+  test(`a successful ${action} receipt cannot replay success after the admitted account is disabled`, async () => {
+    await db.doc('users/alice').update({ status: 'active' });
+    const registrationId = 'successful-register-receipt-01';
+    const cancellationId = 'successful-cancel-receipt-01';
+    const registration = await register('alice', registrationId);
+    assert.equal(registration.ok, true);
+    if (action === 'cancel') assert.equal((await cancel('alice', cancellationId)).ok, true);
+    const before = await eventRegistrationSnapshot();
+    let admitted = false;
+    const call = accountGuardedEventCall({}, async (request) => {
+      admitted = true;
+      await db.doc('users/alice').update({ status: 'disabled' });
+      return action === 'register'
+        ? handlers().registerCampusEvent(request)
+        : handlers().cancelCampusEventRegistration(request);
+    });
+    const requestId = action === 'register' ? registrationId : cancellationId;
+    await assert.rejects(call(args('alice', requestId)), { code: 'permission-denied' });
+    assert.equal(admitted, true);
+    assert.deepEqual(await eventRegistrationSnapshot(), before);
+    await invariants();
+  });
+}

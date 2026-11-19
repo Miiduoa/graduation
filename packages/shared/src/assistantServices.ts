@@ -81,6 +81,10 @@ const services = [
     summary: '查看館藏查詢與校方圖書館服務入口。', mobileRoute: 'Library',
   },
   {
+    id: 'career', label: '職涯', href: '/career', category: 'campus', access: 'public',
+    summary: '查看所選學校的公開職涯資訊；登入後依校方開放與授權使用工讀申請、實習學分進度及承辦功能，送出需在頁面確認；外部申請依原始公告另行辦理。', mobileRoute: 'Career',
+  },
+  {
     id: 'map', label: '校園地圖', href: '/map', category: 'campus', access: 'public',
     summary: '查看所選校園的地點與路線入口。', mobileRoute: 'MapV2',
   },
@@ -267,6 +271,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   announcements: ['公告', '校園公告', '學校公告', '公告總覽', 'announcements'],
   events: ['活動', '校園活動', '活動總覽', 'events', 'campus events'],
   library: ['圖書館', '圖書館服務', '館藏', '館藏查詢', 'library', 'library services'],
+  career: ['職涯', '職涯資訊', '職涯資源', '實習資訊', '校內工讀', '工讀資訊', '實習', '實習學分', '校園徵才', 'career', 'career services', 'internship', 'internships', 'work study'],
   map: ['地圖', '校園地圖', 'map', 'campus map'],
   bus: ['公車', '校車', '公車資訊', '公車動態', '交通資訊', 'bus', 'transit'],
   'school-info': ['學校資訊', '校園資訊', '學校聯絡資訊', 'school info'],

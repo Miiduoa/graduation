@@ -4,6 +4,7 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { useLayoutEffect, useRef } from 'react';
 import {
   ACADEMIC_LMS_SECTIONS,
   ACADEMIC_SECTIONS,
@@ -13,6 +14,28 @@ import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNaviga
 import { CampusIcon } from '@/components/CampusIcon';
 import styles from './AcademicNavigation.module.css';
 
+function revealSection(list: HTMLUListElement, link: HTMLElement | null) {
+  if (!link || !list.contains(link) || list.clientWidth === 0) return;
+  // Leave room for the focus ring. Adjust only this strip: scrollIntoView can
+  // also move the page and disturb a restored reading position.
+  const gutter = 6;
+  const listBounds = list.getBoundingClientRect();
+  const linkBounds = link.getBoundingClientRect();
+  const left = listBounds.left + list.clientLeft + gutter;
+  const right = listBounds.left + list.clientLeft + list.clientWidth - gutter;
+  const offset =
+    linkBounds.width > right - left || linkBounds.left < left
+      ? linkBounds.left - left
+      : linkBounds.right > right
+        ? linkBounds.right - right
+        : 0;
+  if (Math.abs(offset) < 1) return;
+  list.scrollLeft = Math.max(
+    0,
+    Math.min(list.scrollWidth - list.clientWidth, list.scrollLeft + offset),
+  );
+}
+
 function AcademicLinks({
   pathname,
   schoolLmsEnabled,
@@ -20,6 +43,7 @@ function AcademicLinks({
   pathname: string;
   schoolLmsEnabled: boolean;
 }) {
+  const sectionsRef = useRef<HTMLUListElement>(null);
   const params = useSearchParams();
   const campusSearch = useCampusNavigationSearch(params);
   const term = params?.get('term');
@@ -42,9 +66,43 @@ function AcademicLinks({
     ...(schoolLmsEnabled ? [ACADEMIC_LMS_SECTIONS[1]] : []),
   ];
 
+  useLayoutEffect(() => {
+    const list = sectionsRef.current;
+    if (!list) return;
+    const revealCurrent = () => {
+      const focused = document.activeElement;
+      revealSection(
+        list,
+        focused instanceof HTMLAnchorElement && list.contains(focused)
+          ? focused
+          : list.querySelector<HTMLAnchorElement>('[aria-current="page"]'),
+      );
+    };
+    revealSection(list, list.querySelector<HTMLAnchorElement>('[aria-current="page"]'));
+    // Observing the links also catches larger text and font changes that move
+    // a later section without changing the strip's own width.
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(revealCurrent);
+    observer?.observe(list);
+    list.querySelectorAll('a').forEach((link) => observer?.observe(link));
+    window.addEventListener('resize', revealCurrent);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', revealCurrent);
+    };
+  }, [pathname, schoolLmsEnabled]);
+
   return (
     <nav className={styles.navigation} aria-label="課務導覽">
-      <ul className={styles.sections}>
+      <ul
+        ref={sectionsRef}
+        className={styles.sections}
+        onFocusCapture={(event) => {
+          if (event.target instanceof HTMLAnchorElement) {
+            revealSection(event.currentTarget, event.target);
+          }
+        }}
+      >
         {sections.map(({ path, label }) => (
           <li key={path}>
             <Link

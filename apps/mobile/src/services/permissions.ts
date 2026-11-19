@@ -320,6 +320,7 @@ export function hasAllPermissions(role: AppRole, permissions: Permission[]): boo
   return permissions.every((p) => userPerms.includes(p));
 }
 
+import { PRIMARY_DESTINATIONS } from '@campus/shared/src/primaryDestinations';
 import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 
 // Tab configuration per role group
@@ -331,15 +332,25 @@ export type TabConfig = {
 };
 
 /**
- * 學生四個入口：今天 | 課務 | 生活 | 我
- * 訊息仍在導覽堆疊裡，從「我」進入。
+ * 共用入口；交流由 tabsWithMessages 插入，保留各角色既有可見範圍。
  */
-export const UNIFIED_TABS: TabConfig[] = [
-  { key: 'Today', label: '今天', icon: 'ic_tab_today' },
-  { key: '學習', label: '課務', icon: 'ic_tab_study' },
-  { key: '校園', label: '生活', icon: 'ic_tab_campus' },
-  { key: '我的', label: '我', icon: 'ic_profile' },
-];
+const PRIMARY_TAB_ICONS: Record<
+  (typeof PRIMARY_DESTINATIONS)[number]['id'],
+  GeneratedButtonIconId
+> = {
+  today: 'ic_tab_today',
+  study: 'ic_tab_study',
+  life: 'ic_tab_campus',
+  connect: 'ic_tab_messages',
+  me: 'ic_profile',
+};
+export const UNIFIED_TABS: TabConfig[] = PRIMARY_DESTINATIONS.filter(
+  (destination) => destination.id !== 'connect',
+).map((destination) => ({
+  key: destination.mobileTab,
+  label: destination.label,
+  icon: PRIMARY_TAB_ICONS[destination.id],
+}));
 
 export function getTabsForRole(role: AppRole): TabConfig[] {
   // 四個入口一樣，角色差異在 Tab 內部處理；店家的第二格是店務，不叫課務
