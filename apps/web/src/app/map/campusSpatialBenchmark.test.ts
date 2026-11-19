@@ -43,6 +43,34 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(result.reviewableTasks).toEqual(['timetable-to-building']);
   });
 
+  it('never pools different app versions as three comparable repetitions', () => {
+    const rows = [
+      ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
+    ];
+    // Every trial has five complete, otherwise identical measurements.
+    // A changed nuni build makes the second trial a separate cohort, even
+    // though the task, device, destination and evidence are all valid.
+    const secondNuni = rows.find((row) =>
+      row.trialId === 'synthetic-2' && row.product === 'nuni')!;
+    secondNuni.appVersion = 'nuni-next-release';
+    const mixedVersions = validateCampusSpatialBenchmarkRows(rows);
+    expect(mixedVersions.valid).toBe(true);
+    expect(mixedVersions.completeTrials).toBe(3);
+    expect(mixedVersions.reviewableTasks).toEqual([]);
+
+    // It matters for each competitor too, not only for our own app.
+    secondNuni.appVersion = 'fixture-only';
+    const thirdApple = rows.find((row) =>
+      row.trialId === 'synthetic-3' && row.product === 'apple-maps')!;
+    thirdApple.appVersion = 'apple-maps-next-release';
+    expect(validateCampusSpatialBenchmarkRows(rows).reviewableTasks).toEqual([]);
+
+    thirdApple.appVersion = 'fixture-only';
+    expect(validateCampusSpatialBenchmarkRows(rows).reviewableTasks).toEqual([
+      'timetable-to-building',
+    ]);
+  });
+
   it('does not pool different destinations or devices to manufacture three repetitions', () => {
     const rows = [
       ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
