@@ -187,20 +187,25 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     }
   });
   let completeTrials = 0;
-  const countsByTask = new Map<Task, number>();
+  // Repetitions must use one exact scenario. Three unrelated destinations or
+  // devices under the same task name are not a paired benchmark.
+  const countsByScenario = new Map<string, { task: Task; count: number }>();
   for (const [id, trial] of trials) {
     const missing = CAMPUS_SPATIAL_PRODUCTS.filter((product) => !trial.products.has(product));
     if (missing.length) issues.push(`trial ${id}: missing comparisons: ${missing.join(', ')}`);
     else if (trial.verified) {
       completeTrials += 1;
-      const task = trial.baseline.task as Task;
-      countsByTask.set(task, (countsByTask.get(task) ?? 0) + 1);
+      const key = JSON.stringify(CONDITIONS.map((field) => trial.baseline[field]));
+      const scenario = countsByScenario.get(key);
+      if (scenario) scenario.count += 1;
+      else countsByScenario.set(key, { task: trial.baseline.task as Task, count: 1 });
     }
   }
   return {
     valid: issues.length === 0, issues, completeTrials,
     reviewableTasks: issues.length === 0
-      ? CAMPUS_SPATIAL_TASKS.filter((task) => (countsByTask.get(task) ?? 0) >= 3)
+      ? CAMPUS_SPATIAL_TASKS.filter((task) =>
+          [...countsByScenario.values()].some((scenario) => scenario.task === task && scenario.count >= 3))
       : [],
   };
 }
