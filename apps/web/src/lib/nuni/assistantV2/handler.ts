@@ -23,13 +23,33 @@ import { run, safeCode } from './runner';
 import { courseworkStudyTarget } from './courseworkStudy';
 import { COURSEWORK_STUDY_MESSAGES, prepareCourseworkStudyRequest } from './courseworkStudyRequest';
 import { readCourseworkFollowup } from './courseworkFollowup';
+import { courseworkRecoveryProof, prepareCourseworkRecoveryRequest } from './courseworkRecovery';
+import { retryTaskReads } from './taskRetry';
+import { parsePublicEventTarget } from './publicEvent';
+import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventRequest';
+import { parseCampusEventDiscovery, prepareCampusEventDiscovery } from './campusEventDiscovery';
+import { parseCampusMapReadTask, readCampusMapRequest } from './campusMapReadRequest';
 import { FOOD_PICKUP_MESSAGES, prepareSelectedFoodPickupRequest, selectedFoodPickupTarget } from './foodPickupRequest';
-const ACTIONS = ['capability', 'ask', 'plan', 'pickup-plan', 'followup', 'revise', 'confirm', 'cancel', 'reconcile'];
+const ACTIONS = ['capability', 'ask', 'plan', 'pickup-plan', 'event-preview', 'map-read', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 const followupHits = new Map<string, number[]>();
 const planHits = new Map<string, number[]>();
 const followupActive = new Map<string, number>();
+const retryHits = new Map<string, number[]>();
+const retryActive = new Set<string>();
+function claimTaskRetry(account: string, now: number) {
+  const key = hash(account);
+  for (const [owner, times] of retryHits)
+    if (!times.some(time => time > now - 3600000)) retryHits.delete(owner);
+  const recent = (retryHits.get(key) || []).filter(time => time > now - 3600000);
+  if (recent.length >= 10 || recent.filter(time => time > now - 60000).length >= 3)
+    throw new V2Error(429, 'TASK_RETRY_LIMIT', 60);
+  if (retryActive.has(key)) throw new V2Error(429, 'TASK_RETRY_BUSY', 5);
+  retryHits.set(key, [...recent, now]);
+  retryActive.add(key);
+  return () => { retryActive.delete(key); };
+}
 /** Read-only followups never consume a chat/model or planning allowance. */
 function claimFollowupRead(account: string, now: number) {
   const key = hash(account);
@@ -122,6 +142,7 @@ export async function handleV2(request: NextRequest, action: string) {
         version: 2,
         ready: Boolean(process.env.GROQ_API_KEY || fallbackReady()),
         planning: true,
+        eventPreview: true,
         writesEnabled: process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true',
         fallback: fallbackReady(),
         simulation: false,
@@ -132,11 +153,17 @@ export async function handleV2(request: NextRequest, action: string) {
       action === 'ask'
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection', 'studyTarget', 'taskProfile']
         : action === 'plan'
-          ? ['schoolId', 'conversationId', 'routeToken', 'task']
+          ? ['schoolId', 'conversationId', 'routeToken', 'task', 'recovery']
+          : action === 'event-preview'
+            ? ['schoolId', 'conversationId', 'routeToken', 'event', 'discovery']
+          : action === 'map-read'
+            ? ['schoolId', 'conversationId', 'task']
           : action === 'pickup-plan'
             ? ['schoolId', 'conversationId', 'routeToken', 'target']
           : action === 'followup'
             ? ['schoolId', 'conversationId', 'issuedContext', 'token', 'args']
+            : action === 'retry'
+              ? ['schoolId', 'conversationId', 'token', 'stepIds']
             : action === 'revise'
               ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
               : ['schoolId', 'conversationId', 'token', 'args'],
@@ -146,12 +173,11 @@ export async function handleV2(request: NextRequest, action: string) {
       throw new V2Error(422, 'INVALID_INPUT');
     const direct = action === 'ask' && typeof raw.question === 'string' ? directReads(raw.question, Date.now()) : [];
     const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
-    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
-      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question) : null;
     const studyTarget = action === 'plan'
       ? courseworkStudyTarget(raw.task)
       : action === 'ask' && raw.studyTarget !== undefined
         ? courseworkStudyTarget(raw.studyTarget) : undefined;
+    const recovery = action === 'plan' && raw.recovery !== undefined ? courseworkRecoveryProof(raw.recovery) : undefined;
     const pickupTarget = action === 'pickup-plan' ? selectedFoodPickupTarget(raw.target) : undefined;
     // This whole-question parser also returns bounded, local guidance for an
     // unsupported pickup request. Both paths are intercepted before the model.
@@ -161,12 +187,20 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
+    if (action === 'event-preview' && Number(Object.hasOwn(raw, 'event')) + Number(Object.hasOwn(raw, 'discovery')) !== 1)
+      throw new V2Error(422, 'INVALID_INPUT');
+    const selectedEvent = action === 'event-preview' && Object.hasOwn(raw, 'event') ? parsePublicEventTarget(raw.event) : undefined;
+    const eventDiscovery = action === 'event-preview' && Object.hasOwn(raw, 'discovery')
+      ? parseCampusEventDiscovery(raw.discovery) : undefined;
+    const mapTask = action === 'map-read' ? parseCampusMapReadTask(raw.task) : undefined;
+    if (selectedEvent && selectedEvent.schoolId !== schoolId) throw new V2Error(403, 'FORBIDDEN_SCOPE');
     if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
         !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const preparing = action === 'ask' || action === 'plan' || action === 'pickup-plan';
-    const target = action === 'reconcile' || action === 'followup' ? undefined : preparing || action === 'revise'
-      ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
+    const preparing = action === 'ask' || action === 'plan' || action === 'event-preview' || action === 'pickup-plan';
+    const routePurpose = action === 'event-preview' ? 'event-preview' : 'chat';
+    const target = action === 'reconcile' || action === 'followup' || action === 'retry' || action === 'map-read' ? undefined : preparing || action === 'revise'
+      ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret, routePurpose)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
       if (request.headers.has('fly-replay-failed')) throw new V2Error(409, 'CONFIRMATION_REVOKED');
@@ -176,12 +210,29 @@ export async function handleV2(request: NextRequest, action: string) {
     }
     const source = createAdapter(session, schoolId, signal),
       principal = await source.principal();
+    // Unconnected adapters retain the existing service-only path, including its
+    // zero-model consent boundary. A task context never manufactures a source.
+    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
+      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question, Date.now(),
+        profile!.id === 'teacher' ? typeof source.adapter.teachingOverview === 'function'
+          : profile!.id === 'merchant' ? typeof source.adapter.merchantOverview === 'function' : false) : null;
     const binding = {
       account: principal.platformAccountId,
       session: sessionContext(session),
       conversationId,
       schoolId,
     };
+    if (action === 'map-read') {
+      const release = claimFollowupRead(principal.platformAccountId, Date.now());
+      try {
+        return jsonResponse(await readCampusMapRequest({ task: mapTask, binding, secret,
+          now: Date.now(), adapter: source.adapter, signal }));
+      } catch (error) {
+        if (request.signal.aborted) throw new V2Error(499, 'ABORTED');
+        if (signal.aborted) throw new V2Error(504, 'DEADLINE_EXCEEDED');
+        throw error;
+      } finally { release(); }
+    }
     if (action === 'followup') {
       const release = claimFollowupRead(principal.platformAccountId, Date.now());
       try {
@@ -191,10 +242,21 @@ export async function handleV2(request: NextRequest, action: string) {
         })), signal, 12000));
       } finally { release(); }
     }
+    if (action === 'retry') {
+      const release = claimTaskRetry(principal.platformAccountId, Date.now());
+      try {
+        return jsonResponse(await retryTaskReads({ token: raw.token, stepIds: raw.stepIds,
+          binding, secret, now: Date.now(), adapter: source.adapter, signal }));
+      } catch (error) {
+        if (request.signal.aborted) throw new V2Error(499, 'ABORTED');
+        if (signal.aborted) throw new V2Error(504, 'DEADLINE_EXCEEDED');
+        throw error;
+      } finally { release(); }
+    }
     if (action === 'revise') routeOwner(raw.routeToken, binding, secret);
     let protection: PlanProtection | undefined;
     if (preparing) {
-      if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret);
+      if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret, routePurpose);
       if (raw.planProtection !== undefined) {
         try {
           const input = object(raw.planProtection, ['originalEvents', 'protectedIndices']);
@@ -214,7 +276,7 @@ export async function handleV2(request: NextRequest, action: string) {
           history(raw.history);
         }
         const fresh = { ...binding, conversationId: randomUUID() };
-        return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret) });
+        return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret, routePurpose) });
       }
     }
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
@@ -260,7 +322,7 @@ export async function handleV2(request: NextRequest, action: string) {
       sessionKey = hash(session.sessionHandle);
     const now = Date.now();
     // Structured previews have their own allowance; chat quota belongs to chat.
-    const allowance = action === 'plan' || action === 'pickup-plan' || pickupRequest ? planHits : hits;
+    const allowance = action === 'plan' || action === 'event-preview' || action === 'pickup-plan' || pickupRequest ? planHits : hits;
     for (const [k, times] of allowance) {
       if (!times.some((t) => t > now - 3600000)) allowance.delete(k);
     }
@@ -271,10 +333,13 @@ export async function handleV2(request: NextRequest, action: string) {
     allowance.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
-      if (action === 'pickup-plan') {
-        const result = await prepareSelectedFoodPickupRequest({
-          target: pickupTarget!, adapter: source.adapter, binding, secret, writes, now, signal,
-        });
+      if (action === 'event-preview' || action === 'pickup-plan') {
+        const options = { adapter: source.adapter, binding, secret, writes, now, signal };
+        const result = action === 'pickup-plan'
+          ? await prepareSelectedFoodPickupRequest({ target: pickupTarget!, adapter: source.adapter, binding, secret, writes, now, signal })
+          : eventDiscovery
+          ? await prepareCampusEventDiscovery({ ...options, discovery: eventDiscovery })
+          : { ...await prepareCampusEventRequest({ ...options, target: selectedEvent! }), campusEventPreview: true };
         signal.throwIfAborted();
         return jsonResponse({
           version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,
@@ -285,9 +350,10 @@ export async function handleV2(request: NextRequest, action: string) {
       if (action === 'plan') {
         // An in-app task selection is a source hint, never a chat prompt or
         // execution authority. Re-read it through the existing guarded planner.
-        const result = await prepareCourseworkStudyRequest({
-          target: studyTarget!, adapter: source.adapter, binding, secret, writes, now, signal,
-        });
+        const options = { target: studyTarget!, adapter: source.adapter, binding, secret, writes, now, signal };
+        const result = recovery
+          ? await prepareCourseworkRecoveryRequest({ ...options, recovery })
+          : await prepareCourseworkStudyRequest(options);
         signal.throwIfAborted();
         return jsonResponse({
           version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,
@@ -398,8 +464,15 @@ export async function handleV2(request: NextRequest, action: string) {
         error: code,
         ...(PLAN_PROTECTION_MESSAGES[code]
           ? { message: PLAN_PROTECTION_MESSAGES[code] }
+          : code === 'TASK_RETRY_EXPIRED' || code === 'TASK_RETRY_INVALID'
+          ? { message: '這次重查來源已過期或與目前帳號、校園不符，請重新描述要查詢的項目。原本的行程與待確認內容沒有變更。' }
+          : code === 'TASK_RETRY_LIMIT'
+          ? { message: '這次重查次數已達上限，請稍後再試；已完成的結果仍保留。' }
+          : code === 'TASK_RETRY_BUSY'
+          ? { message: '仍有一項資料重查正在進行，請等結果回來後再試。' }
           : code === 'EVENT_START_PASSED'
           ? { message: '這個時段已經開始，請重新安排時間。' }
+          : CAMPUS_EVENT_MESSAGES[code] ? { message: CAMPUS_EVENT_MESSAGES[code] }
           : FOOD_PICKUP_MESSAGES[code] ? { message: FOOD_PICKUP_MESSAGES[code] }
           : COURSEWORK_STUDY_MESSAGES[code] ? { message: COURSEWORK_STUDY_MESSAGES[code] }
           : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),

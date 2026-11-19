@@ -109,6 +109,37 @@ it('keeps the homepage picker closed until requested and plans only the selected
   expect(input.onConfirm).not.toHaveBeenCalled();
 });
 
+it('keeps explicit elapsed recovery in the compact recent list without restoring a duplicate task picker', () => {
+  const original = followup({ status: 'elapsed', checkedAt: '2026-11-13T00:05:00.000Z',
+    event: { ...followup().event, startTime: '07:00', endTime: '07:30' } });
+  const input = props({ compact: true, followups: [original] });
+  render(<TodayAgentPanel {...input} />);
+  expect(screen.queryByText('選一件待辦，找 30 分鐘空檔')).toBeNull();
+  const recent = screen.getByText('最近安排（1）').closest('details')!;
+  expect(recent.open).toBe(true);
+  const recover = within(recent).getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' });
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(recover);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], original.mutationId);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps compact unknown-result reconciliation visible while elapsed recovery stays disabled', () => {
+  const original = followup({ status: 'elapsed', checkedAt: '2026-11-13T00:05:00.000Z',
+    event: { ...followup().event, startTime: '07:00', endTime: '07:30' } });
+  const input = props({ compact: true, followups: [original], reply,
+    states: { [card.mutationId]: { status: 'unknown', message: '原操作仍待核對' } } });
+  render(<TodayAgentPanel {...input} />);
+  const recover = screen.getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' });
+  expect((recover as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(recover);
+  expect(input.onPlan).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  expect(input.onReconcile).toHaveBeenCalledExactlyOnceWith(card);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
 it('selects the nearest unplanned coursework after already-arranged tasks and counts only remaining candidates', () => {
   const allTasks = Array.from({ length: 7 }, (_, index) => task(
     String(index + 1), `2026-11-13T${String(9 + index).padStart(2, '0')}:00:00+08:00`,
@@ -484,6 +515,71 @@ it('does not turn elapsed preparation time into a submitted assignment', () => {
   })]} />);
   expect(screen.getByText('作業已繳交')).toBeTruthy();
   expect(screen.queryByText('作業仍待繳交。')).toBeNull();
+});
+
+const elapsedFollowup = (change: Partial<AssistantCourseworkFollowup> = {}) => followup({
+  status: 'elapsed',
+  event: { ...followup().event, date: '2026-11-12' },
+  ...change,
+});
+it('offers an explicit new preview for an elapsed arrangement and preserves its original history', () => {
+  const original = elapsedFollowup();
+  const input = props({ followups: [original] });
+  render(<TodayAgentPanel {...input} />);
+
+  expect(screen.getByText('準備時間已結束')).toBeTruthy();
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' }));
+
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], original.mutationId);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+  expect(input.onCancel).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '查看「作業 one」的行程' }).getAttribute('href'))
+    .toContain(original.mutationId);
+});
+it.each([
+  { status: 'scheduled' },
+  { status: 'in_progress' },
+  { status: 'unavailable', source: null, calendar: 'unavailable' },
+  { status: 'event_changed', calendar: 'changed' },
+  { status: 'event_missing', calendar: 'missing' },
+  { status: 'submitted', source: { ...followup().source!, submitted: true } },
+  { status: 'closed', source: { ...followup().source!, state: 'closed' } },
+  { source: { ...followup().source!, dueAt: '2026-11-13T07:59:00+08:00' } },
+  { event: followup().event },
+] as Partial<AssistantCourseworkFollowup>[])(
+  'does not offer recovery for a source or arrangement that is not a verified elapsed task: %j',
+  change => {
+    render(<TodayAgentPanel {...props({ followups: [elapsedFollowup(change)] })} />);
+    expect(screen.queryByRole('button', { name: /重新找 30 分鐘/ })).toBeNull();
+  },
+);
+it.each(['scheduled', 'unavailable'] as const)('another %s arrangement for the same task blocks recovery of its old parent', status => {
+  const active = followup({ mutationId: 'other-arrangement', status,
+    ...(status === 'unavailable' ? { source: null, calendar: 'unavailable' as const } : {}) });
+  render(<TodayAgentPanel {...props({ followups: [elapsedFollowup(), active] })} />);
+  expect(screen.queryByRole('button', { name: /重新找 30 分鐘/ })).toBeNull();
+});
+it('continues only the latest elapsed arrangement while retaining older parents', () => {
+  const old = elapsedFollowup({ mutationId: 'older-parent', event: { ...followup().event, date: '2026-11-11' } });
+  const latest = elapsedFollowup();
+  const input = props({ followups: [old, latest] });
+  render(<TodayAgentPanel {...input} />);
+  const buttons = screen.getAllByRole('button', { name: /重新找 30 分鐘/ });
+  expect(buttons).toHaveLength(1);
+  fireEvent.click(buttons[0]);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], latest.mutationId);
+  expect(screen.getAllByText('準備時間已結束')).toHaveLength(2);
+});
+it('keeps recovery available in recent arrangements outside the first three pending tasks', () => {
+  const fourth = task('four', '2026-11-15T12:00:00+08:00');
+  const row = elapsedFollowup({ task: { workspaceId: fourth.courseId, taskId: fourth.id, kind: 'assignment' },
+    source: { ...followup().source!, title: fourth.title, dueAt: fourth.dueAt! } });
+  const input = props({ tasks: [task('one'), task('two'), task('three'), fourth], followups: [row] });
+  render(<TodayAgentPanel {...input} />);
+  fireEvent.click(screen.getByText(/最近安排（1）/));
+  fireEvent.click(screen.getByRole('button', { name: '替「作業 four」重新找 30 分鐘準備時間' }));
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(fourth, row.mutationId);
 });
 
 it('shows changed or missing calendar evidence without inventing a replacement operation', () => {

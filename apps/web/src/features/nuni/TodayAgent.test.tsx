@@ -96,6 +96,17 @@ async function saveTracking(card = cardFor(), issuedContext = context, conversat
     card: { tool: 'propose_personal_event', token: card.token, mutationId: card.mutationId, schoolId: card.schoolId,
       destination: card.destination, args: parseAssistantCalendarEvent(card.args) } }, receiptFor(card), () => true);
 }
+const elapsedCard = () => ({ ...cardFor('elapsed-calendar-001'),
+  args: { ...cardFor().args, date: '2026-11-12' } });
+const recoveryButtonName = '替「資料結構作業」重新找 30 分鐘準備時間';
+function recoveryApi(original: V2Card, replacement: V2Card, handler?: Handler) {
+  return api(replacement, call => {
+    const handled = handler?.(call);
+    if (handled) return handled;
+    if (call.action === 'followup') return json(call.body.token === original.token
+      ? followupFor(original, { status: 'elapsed' }) : followupFor(replacement));
+  });
+}
 const localStorageMethods = (): Storage => Object.hasOwn(localStorage, 'setItem') ? localStorage : Object.getPrototypeOf(localStorage);
 
 beforeEach(() => {
@@ -136,6 +147,235 @@ it('automatically prepares the nearest future task without a chat prompt or any 
   view.rerender(<TodayAgent {...props} tasks={[...tasks]} />);
   await act(async () => {});
   expect(actions()).toEqual(['plan', 'plan']);
+});
+
+it('explicitly prepares a new confirmed slot for an elapsed tracked task using its original read proof', async () => {
+  const original = { ...cardFor('elapsed-calendar-001'), args: { ...cardFor().args, date: '2026-11-12' } };
+  const replacement = cardFor('replacement-calendar-001');
+  const issuedContext = 'b'.repeat(43);
+  await saveTracking(original, issuedContext, 'original-conversation');
+  const { calls, actions } = api(replacement, call => {
+    if (call.action === 'followup') return json(followupFor(original, { status: 'elapsed' }));
+  });
+  render(<TodayAgent {...props} />);
+  await screen.findByText('準備時間已結束');
+  expect(actions()).toEqual(['followup']);
+
+  fireEvent.click(screen.getByRole('button', { name: '替「資料結構作業」重新找 30 分鐘準備時間' }));
+
+  await screen.findByRole('button', { name: '確認' });
+  expect(calls.filter(call => call.action === 'plan')).toHaveLength(2);
+  for (const call of calls.filter(item => item.action === 'plan')) {
+    expect(call.body.recovery).toEqual({ issuedContext, conversationId: 'original-conversation',
+      token: original.token, args: original.args });
+    expect(call.body.task).toEqual({ workspaceId: urgent.courseId, taskId: urgent.id, kind: urgent.kind });
+  }
+  expect(actions()).not.toContain('confirm');
+  expect(readPersonalImports(localScope)).toEqual([]);
+  expect(readTodayAgentFollowups(localScope).map(entry => entry.card.mutationId)).toEqual([original.mutationId]);
+});
+
+it('cancels only the recovery preview, permits an explicit retry, and never replans on return', async () => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  await saveTracking(original);
+  const originalProof = readTodayAgentFollowups(localScope);
+  const { calls, actions } = recoveryApi(original, replacement);
+  const view = render(<TodayAgent {...props} />);
+  const recover = await screen.findByRole('button', { name: recoveryButtonName });
+  fireEvent.click(recover);
+  fireEvent.click(recover);
+  fireEvent.click(await screen.findByRole('button', { name: '取消' }));
+  await screen.findByText('已取消這份尚未送出的安排。可以再選一件待辦，重新尋找時間。');
+  expect(actions()).toEqual(['followup', 'plan', 'plan']);
+  expect(readTodayAgentFollowups(localScope)).toEqual(originalProof);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readPersonalImports(localScope)).toEqual([]);
+
+  fireEvent.click(screen.getByRole('button', { name: recoveryButtonName }));
+  await screen.findByRole('button', { name: '確認' });
+  expect(actions()).toEqual(['followup', 'plan', 'plan', 'plan']);
+  expect(calls.at(-1)?.body).toMatchObject({ routeToken: 'signed-route-token',
+    recovery: { token: original.token, args: original.args, issuedContext: context, conversationId: 'home-conversation' } });
+  view.unmount();
+  render(<TodayAgent {...props} />);
+  await screen.findByRole('button', { name: recoveryButtonName });
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(actions()).toEqual(['followup', 'plan', 'plan', 'plan', 'followup']);
+  expect(readTodayAgentFollowups(localScope)).toEqual(originalProof);
+});
+
+it('confirms a recovery once and retains both proofs before clearing its journal', async () => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  await saveTracking(original, 'b'.repeat(43), 'original-conversation');
+  const originalProof = readTodayAgentFollowups(localScope)[0];
+  const pending = deferred<Response>();
+  const { calls, actions } = recoveryApi(original, replacement, call => {
+    if (call.action === 'confirm') return pending.promise;
+  });
+  render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+  const confirm = await screen.findByRole('button', { name: '確認' });
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+  await waitFor(() => expect(actions().filter(action => action === 'confirm')).toHaveLength(1));
+  expect(readAssistantExecutionJournal(journalScope)).toMatchObject([{ card: { mutationId: replacement.mutationId } }]);
+  expect(readTodayAgentFollowups(localScope)).toEqual([originalProof]);
+  expect(readPersonalImports(localScope)).toEqual([]);
+  await act(async () => pending.resolve(json(receiptFor(replacement))));
+  await screen.findByText('已安排');
+  expect(screen.getByText('準備時間已結束')).toBeTruthy();
+  const proofs = readTodayAgentFollowups(localScope);
+  expect(proofs).toHaveLength(2);
+  expect(proofs.find(entry => entry.card.mutationId === original.mutationId)).toEqual(originalProof);
+  expect(proofs.find(entry => entry.card.mutationId === replacement.mutationId)).toMatchObject({
+    issuedContext: context, conversationId: 'home-conversation', card: { token: replacement.token } });
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readPersonalImports(localScope)).toEqual([receiptFor(replacement).record]);
+  expect(screen.queryByRole('button', { name: recoveryButtonName })).toBeNull();
+  expect(calls.find(call => call.action === 'confirm')?.body).toEqual({ schoolId: 'pu',
+    conversationId: 'home-conversation', token: replacement.token, args: replacement.args });
+});
+
+it.each([
+  [401, '登入狀態已變更'],
+  [403, '目前無法使用這項操作'],
+  [409, '原始資料或確認內容已變更'],
+] as const)('preserves recovery history on plan rejection %s and requires an explicit retry', async (status, text) => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  await saveTracking(original);
+  let denied = true;
+  const { actions } = recoveryApi(original, replacement, call => call.action === 'plan' && call.body.routeToken && denied
+    ? json({ error: 'RECOVERY_REJECTED' }, status) : undefined);
+  render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+  expect((await screen.findByRole('alert')).textContent).toContain(text);
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(readTodayAgentFollowups(localScope).map(entry => entry.card.mutationId)).toEqual([original.mutationId]);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readPersonalImports(localScope)).toEqual([]);
+  expect(actions()).toEqual(['followup', 'plan', 'plan']);
+  denied = false;
+  fireEvent.click(screen.getByRole('button', { name: recoveryButtonName }));
+  await screen.findByRole('button', { name: '確認' });
+  expect(actions()).toEqual(['followup', 'plan', 'plan', 'plan', 'plan']);
+});
+
+it.each(['COURSEWORK_RECOVERY_UNAVAILABLE', 'COURSEWORK_RECOVERY_EXISTS'] as const)(
+  'does not invent a recovery card when the fresh server check returns %s', async stopReason => {
+    const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+    await saveTracking(original);
+    const { actions } = recoveryApi(original, replacement, call => call.action === 'plan' && call.body.routeToken
+      ? json({ ...replyFor(replacement), stopReason, cards: [], answer: '原安排或課務已變更，請先核對最新資料。' }) : undefined);
+    render(<TodayAgent {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+    await screen.findByText('原安排或課務已變更，請先核對最新資料。');
+    expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+    expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+    expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+    expect(readPersonalImports(localScope)).toEqual([]);
+    expect(actions()).toEqual(['followup', 'plan', 'plan']);
+  },
+);
+
+it.each([403, 409])('keeps a recovery rejected at confirmation (%s) unresolved instead of starting a second child', async status => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  await saveTracking(original);
+  const { actions } = recoveryApi(original, replacement, call => {
+    if (call.action === 'confirm') return json({ error: 'COURSEWORK_CHANGED' }, status);
+    if (call.action === 'reconcile') return json(checkFor(replacement, 'absent', false));
+  });
+  render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+  fireEvent.click(await screen.findByRole('button', { name: '確認' }));
+  await screen.findByRole('button', { name: '重新核對結果' });
+  expect((screen.getByRole('button', { name: recoveryButtonName }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: '重試原確認' })).toBeNull();
+  expect(actions()).toEqual(['followup', 'plan', 'plan', 'confirm', 'reconcile']);
+  expect(readAssistantExecutionJournal(journalScope)).toMatchObject([{ card: { mutationId: replacement.mutationId } }]);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  expect(readPersonalImports(localScope)).toEqual([]);
+});
+
+it.each(['account', 'school', 'context'] as const)('discards a late recovery plan after switching %s', async changed => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  await saveTracking(original);
+  const pending = deferred<Response>();
+  const { calls, actions } = recoveryApi(original, replacement, call => call.action === 'plan' && call.body.routeToken
+    ? pending.promise : undefined);
+  const view = render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+  await waitFor(() => expect(actions()).toEqual(['followup', 'plan', 'plan']));
+  if (changed === 'school') environment.schoolId = 'nthu';
+  view.rerender(<TodayAgent {...props} tasks={[]} accountId={changed === 'account' ? 'bob' : accountId}
+    context={changed === 'context' ? 'c'.repeat(43) : context} />);
+  expect(calls[2].signal?.aborted).toBe(true);
+  await act(async () => pending.resolve(json(replyFor(replacement))));
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(actions().filter(action => action === 'plan')).toHaveLength(2);
+  expect(readTodayAgentFollowups(localScope).map(entry => entry.card.mutationId)).toEqual([original.mutationId]);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readPersonalImports(localScope)).toEqual([]);
+  if (changed !== 'context') expect(readTodayAgentFollowups({
+    owner: changed === 'account' ? 'platform:bob' : localScope.owner,
+    schoolId: changed === 'school' ? 'nthu' : 'pu',
+  })).toEqual([]);
+});
+
+it('restores an unknown recovery after return and reads the same child without a new plan or write', async () => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  await saveTracking(original);
+  let found = false;
+  const { calls, actions } = recoveryApi(original, replacement, call => {
+    if (call.action === 'confirm') return Promise.reject(new TypeError('Receipt lost after commit'));
+    if (call.action === 'reconcile') return found ? json(receiptFor(replacement, true)) : json({ error: 'UNAVAILABLE' }, 503);
+  });
+  const first = render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+  fireEvent.click(await screen.findByRole('button', { name: '確認' }));
+  await screen.findByRole('button', { name: '重新核對結果' });
+  first.unmount();
+  render(<TodayAgent {...props} />);
+  const retry = await screen.findByRole('button', { name: '重新核對結果' });
+  await waitFor(() => expect(actions().filter(action => action === 'followup')).toHaveLength(2));
+  expect((screen.getByRole('button', { name: recoveryButtonName }) as HTMLButtonElement).disabled).toBe(true);
+  expect(readAssistantExecutionJournal(journalScope)).toHaveLength(1);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(1);
+  found = true;
+  fireEvent.click(retry);
+  await screen.findByText('已安排');
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(2);
+  expect(actions().filter(action => action === 'confirm')).toHaveLength(1);
+  expect(actions().filter(action => action === 'plan')).toHaveLength(2);
+  for (const call of calls.filter(item => item.action === 'reconcile')) {
+    expect(call.body).toEqual(calls.find(item => item.action === 'confirm')?.body);
+  }
+  expect(readPersonalImports(localScope)).toEqual([receiptFor(replacement, true).record]);
+  expect(screen.queryByRole('button', { name: recoveryButtonName })).toBeNull();
+});
+
+it('keeps a recovery preview after rechecking its parent but withdraws it when another active child appears', async () => {
+  const original = elapsedCard(), replacement = cardFor('replacement-calendar-001');
+  const concurrent = cardFor('concurrent-calendar-002');
+  await saveTracking(original);
+  const { actions } = recoveryApi(original, replacement, call => call.action === 'followup' && call.body.token === concurrent.token
+    ? json(followupFor(concurrent)) : undefined);
+  render(<TodayAgent {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: recoveryButtonName }));
+  await screen.findByRole('button', { name: '確認' });
+  vi.mocked(Date.now).mockReturnValue(now.getTime() + 60001);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  fireEvent.focus(window);
+  await waitFor(() => expect(actions()).toEqual(['followup', 'plan', 'plan', 'followup']));
+  await waitFor(() => expect((screen.getByRole('button', { name: '確認' }) as HTMLButtonElement).disabled).toBe(false));
+  await saveTracking(concurrent);
+  fireEvent(window, new StorageEvent('storage', { key: todayAgentFollowupStorageKey(localScope), storageArea: localStorage }));
+  await screen.findByText('已安排');
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(screen.queryByRole('button', { name: recoveryButtonName })).toBeNull();
+  expect(readTodayAgentFollowups(localScope)).toHaveLength(2);
+  expect(readAssistantExecutionJournal(journalScope)).toEqual([]);
+  expect(actions()).not.toContain('confirm');
 });
 
 it('can stop a rejected, uncreated arrangement and then prepare a fresh preview', async () => {
