@@ -785,3 +785,41 @@ describe('delimited non-building category annotations', () => {
     }
   });
 });
+
+describe('malformed scalar transit markers cannot impersonate classroom buildings', () => {
+  it('rejects non-null numeric, boolean and object metadata across schools', () => {
+    // Synthetic import schema drift, not an observation of any physical stop.
+    for (const transitStopIds of [0, 42, false, true, {}, { stop: 'synthetic' }]) {
+      const malformed = {
+        ...hall, id: 'synthetic-malformed-scalar-stop', transitStopIds,
+        building: '主顧樓',
+      } as unknown as CampusMapPlaceLike;
+      for (const schoolId of ['pu', 'another-school']) {
+        const query = schoolId === 'pu' ? 'PH303' : '主顧樓303';
+        expect(resolveCampusClassroom({
+          schoolId, query, locations: [malformed, hall],
+        }).matches, `${schoolId}: ${typeof transitStopIds}`).toEqual([hall]);
+        expect(resolveCampusClassroom({
+          schoolId, query, locations: [malformed],
+        }).status).toBe('unmatched');
+      }
+    }
+  });
+
+  it('preserves a classroom POI when transit metadata is absent or blank', () => {
+    for (const transitStopIds of [null, undefined, '', ' ', []]) {
+      const building = {
+        ...hall, transitStopIds,
+      } as unknown as CampusMapPlaceLike;
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [building],
+      }).matches).toEqual([building]);
+      expect(resolveCampusClassroom({
+        schoolId: 'another-school', query: '主顧樓303', locations: [building],
+      }).matches).toEqual([building]);
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [hall],
+    }).matches).toEqual([hall]);
+  });
+});
