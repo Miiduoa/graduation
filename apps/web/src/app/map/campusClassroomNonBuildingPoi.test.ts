@@ -823,3 +823,35 @@ describe('malformed scalar transit markers cannot impersonate classroom building
     }).matches).toEqual([hall]);
   });
 });
+
+
+describe('padded imported school scope cannot bypass classroom ID safety', () => {
+  const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+
+  it('reserves the ID of a same-school duplicate even when its schoolId has surrounding whitespace', () => {
+    expect(sourcedHall).toBeDefined();
+    // Synthetic import damage; neither row asserts an indoor room location.
+    for (const schoolId of [' pu ', '\tpu\n']) {
+      const duplicate = { ...sourcedHall!, schoolId, name: 'Damaged duplicated hall' };
+      for (const locations of [[duplicate, sourcedHall!], [sourcedHall!, duplicate]]) {
+        const result = resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations });
+        expect(result.status, JSON.stringify(schoolId)).toBe('unmatched');
+        expect(result.matches).toEqual([]);
+      }
+    }
+  });
+
+  it('keeps one padded local row eligible while excluding padded foreign-school rows', () => {
+    expect(sourcedHall).toBeDefined();
+    const local = { ...sourcedHall!, schoolId: ' pu ' };
+    const foreign = { ...sourcedHall!, schoolId: ' other-campus ' };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [foreign, local],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([local]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [foreign],
+    }).status).toBe('unmatched');
+  });
+});
