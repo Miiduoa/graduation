@@ -20,34 +20,55 @@ export function TodayWelcome({
   importHref,
   timetableHref,
   hasTimetable = false,
+  needsSchool = false,
 }: {
   importHref: string;
   timetableHref: string;
   hasTimetable?: boolean;
+  needsSchool?: boolean;
 }) {
   const params = new URL(timetableHref, 'https://campus.local').searchParams;
   const campusSearch = buildCampusNavigationSearch(params);
+  const title = needsSchool
+    ? '先選擇你的校園。'
+    : hasTimetable
+      ? '課表準備好了。'
+      : '先把課表放進來。';
 
   return (
     <section className={styles.welcome} aria-labelledby="today-welcome-title">
       <div className={styles.intro}>
-        <h2 id="today-welcome-title">{hasTimetable ? '課表準備好了。' : '先把課表放進來。'}</h2>
+        <h2 id="today-welcome-title">{title}</h2>
         <p className={styles.description}>
-          {hasTimetable
-            ? '查看本週的上課時間與教室。'
-            : '可匯入課表截圖、檔案，或手動新增課程。'}
+          {needsSchool
+            ? '選好學校，再整理課表；也可以先使用下方公開服務。'
+            : hasTimetable
+              ? '查看本週的上課時間與教室。'
+              : '可匯入課表截圖、檔案，或手動新增課程。'}
         </p>
         <div className={styles.actions}>
-          <Link href={hasTimetable ? timetableHref : importHref} className={styles.primary}>
-            <CampusIcon name={hasTimetable ? 'timetable' : 'import'} size={18} />
-            {hasTimetable ? '查看這週課表' : '匯入我的課表'}
+          <Link
+            href={needsSchool || hasTimetable ? timetableHref : importHref}
+            className={styles.primary}
+          >
+            <CampusIcon name={needsSchool || hasTimetable ? 'timetable' : 'import'} size={18} />
+            {needsSchool ? '選校園、整理課表' : hasTimetable ? '查看這週課表' : '匯入我的課表'}
           </Link>
-          <Link href={hasTimetable ? importHref : timetableHref} className={styles.secondary}>
-            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'}
+          <Link
+            href={
+              needsSchool
+                ? campusServiceHref('/life', campusSearch)
+                : hasTimetable
+                  ? importHref
+                  : timetableHref
+            }
+            className={styles.secondary}
+          >
+            {needsSchool ? '先看生活服務' : hasTimetable ? '更新匯入紀錄' : '手動建立課表'}
           </Link>
         </div>
         <p className={styles.signIn}>
-          <Link href={loginHref(campusServiceHref('/', campusSearch))}>登入看課程待辦</Link>
+          <Link href={loginHref(campusServiceHref('/', campusSearch))}>登入查看作業與通知</Link>
         </p>
       </div>
       <nav className={styles.shortcuts} aria-label="常用校園服務">

@@ -47,7 +47,7 @@ it('updates work navigation when an active membership is revoked or changed', ()
   expect(result.current).toBeNull();
   act(() => state.listeners[0].next(snapshot({ role: 'teacher', status: 'active' })));
   expect(result.current).toBe('teacher');
-  act(() => state.listeners[0].next(snapshot(null)));
+  act(() => state.listeners[0].next(snapshot({ role: 'teacher', status: 'inactive' })));
   expect(result.current).toBeNull();
   act(() => state.listeners[0].next(snapshot({ role: 'student', status: 'active' })));
   expect(result.current).toBe('student');
@@ -55,12 +55,11 @@ it('updates work navigation when an active membership is revoked or changed', ()
   expect(result.current).toBeNull();
 });
 
-it('does not expose a work role from missing, malformed, cached, or locally edited membership', () => {
+it('does not expose a work role from pending, missing, cached, or locally edited membership', () => {
   const { result } = renderHook(() => useSchoolRole('account-a', 'school-a'));
   for (const entry of [
     snapshot(null),
-    snapshot({ status: 'active' }),
-    snapshot({ role: 123 }),
+    snapshot({ role: 'admin', status: 'pending' }),
     snapshot({ role: 'admin', status: 'active' }, true),
     snapshot({ role: 'admin', status: 'active' }, false, true),
   ]) {
@@ -70,6 +69,27 @@ it('does not expose a work role from missing, malformed, cached, or locally edit
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
   expect(result.current).toBe('admin');
 });
+
+it.each(['admin', 'editor', 'teacher', 'student'])(
+  'preserves the server-confirmed legacy %s role while honoring explicit revocation',
+  (role) => {
+    const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+    act(() => state.listeners[0].next(snapshot({ role }, true)));
+    expect(result.current).toMatchObject({ status: 'loading', role: null });
+    act(() => state.listeners[0].next(snapshot({ role }, false, true)));
+    expect(result.current).toMatchObject({ status: 'loading', role: null });
+    act(() => state.listeners[0].next(snapshot({ role })));
+    expect(result.current).toMatchObject({ status: 'ready', role });
+    for (const status of ['inactive', 'pending', 'disabled', 'deleted', 'suspended']) {
+      act(() => state.listeners[0].next(snapshot({ role, status })));
+      expect(result.current).toMatchObject({ status: 'ready', role: null });
+    }
+    act(() => state.listeners[0].next(snapshot({ role, status: 'active' })));
+    expect(result.current).toMatchObject({ status: 'ready', role });
+    act(() => state.listeners[0].next(snapshot(null)));
+    expect(result.current).toMatchObject({ status: 'ready', role: null });
+  },
+);
 
 it('disposes the previous account and school subscription and ignores its late response', () => {
   const { result, rerender, unmount } = renderHook(
@@ -81,8 +101,6 @@ it('disposes the previous account and school subscription and ignores its late r
   expect(state.listeners[0].unsubscribe).toHaveBeenCalledOnce();
   expect(result.current).toBeNull();
   expect(state.listeners[1].path).toEqual(['schools', 'school-b', 'members', 'account-b']);
-  act(() => state.listeners[1].next(snapshot({ role: 'admin', status: 'active' }, true)));
-  expect(result.current).toBeNull();
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
   expect(result.current).toBeNull();
   act(() => state.listeners[1].next(snapshot({ role: 'student', status: 'active' })));
@@ -119,56 +137,7 @@ it('distinguishes server-confirmed non-membership from an unconfirmed cached mem
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
   expect(result.current).toMatchObject({ status: 'ready', role: 'admin' });
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'inactive' })));
-  expect(result.current).toMatchObject({
-    status: 'ready',
-    role: 'admin',
-    memberStatus: 'inactive',
-  });
-});
-
-it.each(['admin', 'editor', 'teacher'])(
-  'keeps the confirmed %s role and legacy status when going offline until the server updates it',
-  (role) => {
-    const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
-    act(() => state.listeners[0].next(snapshot({ role })));
-    expect(result.current).toMatchObject({ status: 'ready', role, memberStatus: undefined });
-
-    for (const entry of [
-      snapshot({ role }, true),
-      snapshot(null, true),
-      snapshot({ role: 'student', status: 'inactive' }, true),
-      snapshot({ role: 'student', status: 'inactive' }, false, true),
-    ]) {
-      act(() => state.listeners[0].next(entry));
-      expect(result.current).toMatchObject({ status: 'ready', role, memberStatus: undefined });
-    }
-
-    act(() => state.listeners[0].next(snapshot({ role: 'student', status: 'active' })));
-    expect(result.current).toMatchObject({
-      status: 'ready',
-      role: 'student',
-      memberStatus: 'active',
-    });
-    act(() => state.listeners[0].next(snapshot(null)));
-    act(() => state.listeners[0].next(snapshot({ role }, true)));
-    expect(result.current).toMatchObject({ status: 'ready', role: null });
-  },
-);
-
-it('does not replace a confirmed inactive membership with an active cached or pending status', () => {
-  const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
-  act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'inactive' })));
-  for (const entry of [
-    snapshot({ role: 'admin', status: 'active' }, true),
-    snapshot({ role: 'admin', status: 'active' }, false, true),
-  ]) {
-    act(() => state.listeners[0].next(entry));
-    expect(result.current).toMatchObject({
-      status: 'ready',
-      role: 'admin',
-      memberStatus: 'inactive',
-    });
-  }
+  expect(result.current).toMatchObject({ status: 'ready', role: null });
 });
 
 it('retries a failed listener without accepting late callbacks or retries from its previous attempt', () => {
@@ -221,16 +190,3 @@ it('ignores a retry from an older account scope even after returning to the same
   expect(result.current).toMatchObject({ status: 'ready', role: 'student' });
   expect(state.listeners).toHaveLength(3);
 });
-
-it.each(['admin', 'editor', 'teacher', 'student', 'vendor'])(
-  'preserves main role reading for %s without requiring status',
-  (role) => {
-    const { result } = renderHook(() => useSchoolRole('account-a', 'school-a'));
-    for (const status of [undefined, null, '', 'active', 'pending', 'inactive']) {
-      act(() =>
-        state.listeners[0].next(snapshot({ role, ...(status === undefined ? {} : { status }) })),
-      );
-      expect(result.current).toBe(role);
-    }
-  },
-);

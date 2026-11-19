@@ -8,7 +8,7 @@ export type SchoolRole = 'student' | 'teacher' | 'admin' | 'editor' | 'vendor' |
 
 type RoleResult =
   | { status: 'loading' | 'error'; role: null }
-  | { status: 'ready'; role: SchoolRole | null; memberStatus?: unknown };
+  | { status: 'ready'; role: SchoolRole | null };
 
 export type SchoolRoleState = RoleResult & { retry: () => void };
 
@@ -57,18 +57,15 @@ export function useSchoolRoleState(
         { includeMetadataChanges: true },
         (snapshot) => {
           if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
-            // Keep this scope's last server-confirmed membership for display.
-            // Cache metadata and local edits cannot confirm a role change or
-            // revocation. Writes still use the existing backend authorization.
+            update({ status: 'loading', role: null });
             return;
           }
           const member = snapshot.exists() ? snapshot.data() : null;
+          // Legacy memberships predate status; explicit non-active states remain blocked.
+          const active = member && (member.status === undefined || member.status === 'active');
           update({
             status: 'ready',
-            // Main reads roles independently of membership status. Consumers that
-            // write announcements apply the backend's active-or-legacy policy.
-            role: typeof member?.role === 'string' ? member.role : null,
-            memberStatus: member?.status,
+            role: active && typeof member.role === 'string' ? member.role : null,
           });
         },
         () => update({ status: 'error', role: null }),
@@ -84,11 +81,11 @@ export function useSchoolRoleState(
 
   if (state.key !== key) return { status: key ? 'loading' : 'ready', role: null, retry };
   return state.status === 'ready'
-    ? { status: 'ready', role: state.role, memberStatus: state.memberStatus, retry }
+    ? { status: 'ready', role: state.role, retry }
     : { status: state.status, role: null, retry };
 }
 
-/** Display the current scope's last server-confirmed school role, including offline. */
+/** Display only the current account's active, server-confirmed school membership. */
 export function useSchoolRole(
   uid: string | null | undefined,
   schoolId: string | null | undefined,

@@ -25,6 +25,14 @@ type Props = {
   onPreview: (instruction: string, protectedIndices: readonly number[]) => Promise<{ ok: boolean; message: string }>;
 };
 
+type TabPosition = {
+  event: KeyboardEvent;
+  visibleControls: Set<HTMLElement>;
+  left: number;
+  top: number;
+  ancestors: { element: HTMLElement; left: number; top: number }[];
+};
+
 function eventTime(event: PlanRevisionEvent): string {
   if (event.allDay) {
     const endDate = exclusiveAllDayEnd(event.date, event.endDate);
@@ -35,41 +43,6 @@ function eventTime(event: PlanRevisionEvent): string {
     : `${event.date} · ${event.startTime}–${event.endTime}（台灣時間）`;
 }
 
-function focusGeometry(target: HTMLElement) {
-  const style = window.getComputedStyle(target);
-  // Native alignment reserves one extra CSS pixel for scroll-offset rounding.
-  // Visibility still requires the original clearance, not that alignment buffer.
-  const roundingBuffer = Math.max(0, Number.parseFloat(style.getPropertyValue('--assistant-focus-rounding-buffer')) || 0);
-  const topMargin = Math.max(0, (Number.parseFloat(style.scrollMarginBlockStart) || 0) - roundingBuffer);
-  const bottomMargin = Math.max(0, (Number.parseFloat(style.scrollMarginBlockEnd) || 0) - roundingBuffer);
-  const viewport = window.visualViewport;
-  const top = viewport?.offsetTop ?? 0;
-  const left = viewport?.offsetLeft ?? 0;
-  const height = viewport?.height ?? window.innerHeight;
-  const width = viewport?.width ?? window.innerWidth;
-  const bounds = target.getBoundingClientRect();
-  const block = bounds.bottom > top + height - bottomMargin ? 'end' as const
-    : bounds.top < top + topMargin ? 'start' as const : undefined;
-  return { block,
-    visible: !block && bounds.width > 0 && bounds.height > 0 && bounds.left >= left && bounds.right <= left + width };
-}
-
-function hasClippingOrScrollingAncestor(target: HTMLElement): boolean {
-  for (let parent = target.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
-    const style = window.getComputedStyle(parent);
-    if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) return true;
-  }
-  return false;
-}
-
-function focusRevisionControl(target: HTMLElement | null) {
-  if (!target) return;
-  // The focus handler reveals document-level controls instantly. Nested scroll
-  // containers still need native focus to reveal their clipped descendants.
-  if (hasClippingOrScrollingAncestor(target)) target.focus();
-  else target.focus({ preventScroll: true });
-}
-
 function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft, protectedSelection, onProtectedSelectionChange }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
   const panel = useRef<HTMLElement>(null);
@@ -77,6 +50,8 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
   const field = useRef<HTMLTextAreaElement>(null);
   const mounted = useRef(false);
   const focusFrame = useRef<number | null>(null);
+  const tabPosition = useRef<TabPosition | null>(null);
+  const tabFrame = useRef<number | null>(null);
   const busy = useRef(false);
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
@@ -96,10 +71,13 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
     return () => {
       mounted.current = false;
       if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
+      if (tabFrame.current !== null) window.cancelAnimationFrame(tabFrame.current);
       focusFrame.current = null;
+      tabFrame.current = null;
+      tabPosition.current = null;
     };
   }, []);
-  useEffect(() => { if (open) focusRevisionControl(field.current); }, [open]);
+  useEffect(() => { if (open) field.current?.focus(); }, [open]);
   const pristine = isUnattemptedCalendarPlan(turn, states);
   // The owner resumes only this registered revision, cancelling remaining cards first.
   const retryable = started && turn.reply.cards.every(card =>
@@ -115,55 +93,101 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       ? '全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。'
       : '全部項目已勾選保留原樣，這次不會重新預覽；請依原確認卡顯示的結果核對。';
 
-  function focusVisibleTabControl(event: ReactKeyboardEvent<HTMLElement>) {
-    if (!mounted.current || event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-    const root = panel.current;
-    const current = document.activeElement;
-    if (!root || !(current instanceof HTMLElement) || current !== event.target || !root.contains(current)) return;
-    const controls: HTMLElement[] = [];
-    for (const target of root.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex], [contenteditable]')) {
-      const style = window.getComputedStyle(target);
-      if (target.matches(':disabled') || target.closest('[hidden], [inert]') || style.display === 'none' ||
-        style.visibility === 'hidden' || style.visibility === 'collapse') continue;
-      const bounds = target.getBoundingClientRect();
-      if (bounds.width <= 0 || bounds.height <= 0) continue;
-      if (target.tabIndex < 0 && !target.matches('[contenteditable]:not([contenteditable="false"])')) continue;
-      // Only this panel's ordinary native controls have a known DOM Tab order.
-      // Positive tabindex, radios and custom stops keep the browser's behavior.
-      if (target.tabIndex !== 0 || !target.matches('button, input[type="checkbox"], textarea')) return;
-      controls.push(target);
+  function clearTabPosition() {
+    if (tabFrame.current !== null) window.cancelAnimationFrame(tabFrame.current);
+    tabFrame.current = null;
+    tabPosition.current = null;
+  }
+
+  function rememberTabPosition(event: ReactKeyboardEvent<HTMLElement>) {
+    clearTabPosition();
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey ||
+      event.nativeEvent.isComposing || event.defaultPrevented || !panel.current) return;
+    const viewport = window.visualViewport;
+    const top = viewport?.offsetTop ?? 0;
+    const bottom = top + (viewport?.height ?? window.innerHeight);
+    const left = viewport?.offsetLeft ?? 0;
+    const right = left + (viewport?.width ?? window.innerWidth);
+    const visibleControls = new Set<HTMLElement>();
+    panel.current.querySelectorAll<HTMLElement>('button, input, textarea').forEach(control => {
+      const bounds = control.getBoundingClientRect();
+      const style = window.getComputedStyle(control);
+      if (bounds.width > 0 && bounds.height > 0 && bounds.left >= left && bounds.right <= right &&
+        bounds.top >= top + (Number.parseFloat(style.scrollMarginBlockStart) || 0) &&
+        bounds.bottom <= bottom - (Number.parseFloat(style.scrollMarginBlockEnd) || 0)) {
+        visibleControls.add(control);
+      }
+    });
+    if (!visibleControls.size) return;
+    const ancestors: TabPosition['ancestors'] = [];
+    for (let element = panel.current.parentElement; element && element !== document.scrollingElement;
+      element = element.parentElement) {
+      if (element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth) {
+        ancestors.push({ element, left: element.scrollLeft, top: element.scrollTop });
+        const style = window.getComputedStyle(element);
+        const bounds = element.getBoundingClientRect();
+        const clipsX = /^(auto|scroll|hidden|clip)$/.test(style.overflowX);
+        const clipsY = /^(auto|scroll|hidden|clip)$/.test(style.overflowY);
+        for (const control of visibleControls) {
+          const box = control.getBoundingClientRect();
+          if ((clipsX && (box.left < bounds.left + element.clientLeft ||
+            box.right > bounds.left + element.clientLeft + element.clientWidth)) ||
+            (clipsY && (box.top < bounds.top + element.clientTop ||
+              box.bottom > bounds.top + element.clientTop + element.clientHeight))) {
+            visibleControls.delete(control);
+          }
+        }
+      }
     }
-    const index = controls.indexOf(current);
-    if (index < 0) return;
-    const next = controls[index + (event.shiftKey ? -1 : 1)];
-    if (!next || !focusGeometry(next).visible) return;
-    // Inline threads can have their own clipping/scroller. Leave those to native
-    // Tab rather than preventing a needed scroll of an ancestor.
-    if (hasClippingOrScrollingAncestor(next)) return;
-    event.preventDefault();
-    // preventScroll blocks a new focus scroll, but not one already in flight.
-    // Request cancellation at the current offset before transferring focus.
-    window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: 'instant' });
-    next.focus({ preventScroll: true });
+    if (!visibleControls.size) return;
+    tabPosition.current = { event: event.nativeEvent, visibleControls,
+      left: window.scrollX, top: window.scrollY, ancestors };
+    // Native Tab changes focus in this event turn. A later pointer/programmatic
+    // focus must not inherit an old keyboard reading position.
+    tabFrame.current = window.requestAnimationFrame(() => {
+      tabFrame.current = null;
+      tabPosition.current = null;
+    });
   }
 
   function revealFocusedControl(target: EventTarget) {
     if (!(target instanceof HTMLElement) || !target.matches('button, input, textarea')) return;
+    const position = tabPosition.current;
+    clearTabPosition();
     if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
     focusFrame.current = window.requestAnimationFrame(() => {
       focusFrame.current = null;
       if (!mounted.current || document.activeElement !== target || !panel.current?.contains(target)) return;
-      const geometry = focusGeometry(target);
+      // Native focus scrolling can race an earlier smooth reveal. Keep a control
+      // that was already readable at the person's position before Tab; do not
+      // change the browser's focus order or suppress its keyboard event.
+      if (position && !position.event.defaultPrevented && position.visibleControls.has(target)) {
+        for (const ancestor of position.ancestors) {
+          if (ancestor.element.isConnected && ancestor.element.contains(target)) {
+            ancestor.element.scrollTo({ left: ancestor.left, top: ancestor.top, behavior: 'instant' });
+          }
+        }
+        window.scrollTo({ left: position.left, top: position.top, behavior: 'instant' });
+      }
+      const style = window.getComputedStyle(target);
+      const topMargin = Number.parseFloat(style.scrollMarginBlockStart) || 0;
+      const bottomMargin = Number.parseFloat(style.scrollMarginBlockEnd) || 0;
+      const viewport = window.visualViewport;
+      const top = viewport?.offsetTop ?? 0;
+      const bottom = top + (viewport?.height ?? window.innerHeight);
+      const bounds = target.getBoundingClientRect();
       // Explicit alignment reveals controls hidden by the sticky dock even when
       // they are still inside the layout viewport and nearest would not move.
-      if (geometry.block)
-        target.scrollIntoView?.({ block: geometry.block, inline: 'nearest', behavior: 'instant' });
+      if (bounds.bottom > bottom - bottomMargin)
+        target.scrollIntoView?.({ block: 'end', inline: 'nearest', behavior: 'instant' });
+      else if (bounds.top < top + topMargin)
+        target.scrollIntoView?.({ block: 'start', inline: 'nearest', behavior: 'instant' });
     });
   }
 
   function closeEditor() {
     setOpen(false);
-    if (entry.current && !entry.current.disabled) focusRevisionControl(entry.current);
+    if (entry.current && !entry.current.disabled) entry.current.focus();
     else panel.current?.focus();
   }
 
@@ -179,7 +203,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       setProtectedIndices([]);
       setMessage('');
       setDraftNotice({ text: result.message || '修改內容已清除，原確認卡未變更。', error: false });
-      focusRevisionControl(field.current);
+      field.current?.focus();
     } catch (cause) {
       setDraftNotice({ text: cause instanceof Error ? cause.message : '修改內容尚未清除，原內容仍保留。', error: true });
     }
@@ -197,7 +221,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       setProtectedIndices([...result.content.protectedIndices]);
       setMessage('');
       setDraftNotice({ text: result.message || '草稿已帶入，請核對後再重新預覽。', error: false });
-      focusRevisionControl(field.current);
+      field.current?.focus();
     } catch (cause) {
       setDraftNotice({ text: cause instanceof Error ? cause.message : '草稿尚未套用，原修改內容仍保留。', error: true });
     }
@@ -210,7 +234,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
     try { buildPlanRevisionQuestion(turn, instruction, selection); }
     catch (cause) {
       setMessage(cause instanceof Error ? cause.message : '請先確認修改條件與保留項目，再重新預覽。');
-      focusRevisionControl(field.current);
+      field.current?.focus();
       return;
     }
     busy.current = true;
@@ -232,7 +256,11 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
 
   if (!open && !started && !pristine) return null;
   return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議" data-assistant-plan-revision="true"
-    onKeyDown={focusVisibleTabControl}
+    onKeyDownCapture={rememberTabPosition}
+    onPointerDownCapture={clearTabPosition}
+    onBlurCapture={event => {
+      if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) clearTabPosition();
+    }}
     onFocusCapture={event => revealFocusedControl(event.target)}>
     {complete ? <p role="status" className={styles.notice}>{message}</p> : <>
       <button ref={entry} type="button" className={styles.secondary}

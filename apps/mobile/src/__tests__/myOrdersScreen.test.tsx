@@ -273,7 +273,7 @@ test('從展開的生活分類搜尋取餐號碼，查看訂單後返回原搜�
     </NavigationContainer>,
   );
   expect(view.queryByText('我的訂單')).toBeNull();
-  fireEvent.press(view.getByRole('button', { name: /^展開辦事與服務/ }));
+  fireEvent.press(view.getByRole('button', { name: /^展開餐飲與住宿/ }));
   expect(view.getByText('我的訂單')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '取餐號碼');
   fireEvent.press(view.getByText('我的訂單'));
@@ -282,7 +282,7 @@ test('從展開的生活分類搜尋取餐號碼，查看訂單後返回原搜�
   expect(await view.findByDisplayValue('取餐號碼')).toBeTruthy();
   expect(view.getByText('我的訂單')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '清除搜尋' }));
-  expect(view.getByRole('button', { name: /^收合辦事與服務/ }).props.accessibilityState.expanded).toBe(true);
+  expect(view.getByRole('button', { name: /^收合餐飲與住宿/ }).props.accessibilityState.expanded).toBe(true);
   expect(view.getByText('我的訂單')).toBeTruthy();
 });
 

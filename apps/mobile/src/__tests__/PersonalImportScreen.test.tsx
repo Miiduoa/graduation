@@ -31,6 +31,7 @@ jest.setTimeout(60000);
 
 let mockScope: { owner: string; schoolId: string } | null;
 const mockRequest = jest.fn();
+const mockRecognizeImportImage = jest.fn();
 let mockPlatform: ReturnType<typeof useNuniSession>;
 const mockRecognize = jest.fn();
 const mockDocumentRead = jest.fn();
@@ -132,6 +133,7 @@ const scope = { owner: 'nuni:pa-a', schoolId: 'pu' };
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
+  mockRecognizeImportImage.mockReset();
   mockFileText.mockReset();
   mockDocumentRead.mockReset();
   mockDocumentCancel.mockReset();
@@ -153,6 +155,7 @@ beforeEach(async () => {
     signIn: jest.fn(),
     logout: jest.fn(),
     request: mockRequest,
+    recognizeImportImage: mockRecognizeImportImage,
   };
 });
 
@@ -1361,7 +1364,10 @@ test('one screenshot action sends OCR text to the scoped organizer and opens a r
   );
   const view = render(<PersonalImportScreen />);
   await view.findByText('用 AI 辨識課表截圖');
-  expect(view.getByText(/原圖留在手機/)).toBeTruthy();
+  expect(view.getByText(/目前由手機 OCR 讀取圖片.*原圖不會上傳/)).toBeTruthy();
+  expect(
+    view.getByLabelText('同意將原始課表截圖交給雲端視覺模型').props.accessibilityState.checked,
+  ).toBe(false);
   fireEvent.press(view.getByText('用 AI 辨識課表截圖'));
   await view.findByText('前往核對 1 堂課');
   expect(mockRecognize).toHaveBeenCalledWith(expect.any(String), 'image/png', expect.anything(), true);
@@ -1385,6 +1391,44 @@ test('one screenshot action sends OCR text to the scoped organizer and opens a r
   expect((await loadPersonalImports(scope)).records[0]).toMatchObject({ academicYear: '115', semester: '1' });
   expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(1);
   expect(JSON.stringify(await loadPersonalImports(scope))).not.toContain('file:///');
+});
+
+test.each([true, false])('consented cloud screenshot uses the session controller and preserves OCR fallback (success=%s)', async (success) => {
+  readyAi();
+  mockPlatform.session = {
+    platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    context: 'native-1000-1',
+    isPlatformOperator: false,
+  };
+  mockRequest.mockResolvedValue({ workspaces: [] });
+  prepareScreenshot();
+  mockRecognize.mockResolvedValue(timetableImageText);
+  mockRecognizeImportImage.mockResolvedValue(success ? {
+    ok: true,
+    output: JSON.stringify({ complete: true, rows: [{
+      title: '資料庫', dayOfWeek: 1, startPeriod: '1', endPeriod: '2',
+      location: '主顧303', evidence: timetableImageText, uncertainFields: [],
+    }] }),
+  } : { ok: false, reason: 'unavailable', message: '雲端圖片辨識暫時不可用。' });
+  jest.mocked(runMobilePersonalImportAi).mockImplementation(async (text, options) =>
+    parsePersonalImportAiResponse(JSON.stringify({ complete: true, rows: [{
+      title: '資料庫', dayOfWeek: 1, startPeriod: 1, endPeriod: 2,
+      location: '主顧303', evidence: timetableImageText,
+    }] }), text, options));
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByLabelText('同意將原始課表截圖交給雲端視覺模型'));
+  fireEvent.press(view.getByText('用雲端 AI 直接看課表'));
+  await view.findByText('前往核對 1 堂課');
+  expect(mockRecognizeImportImage).toHaveBeenCalledWith('native-1000-1', expect.objectContaining({
+    base64: expect.any(String), mime: 'image/png', kind: 'timetable', explicitConsent: true,
+    signal: expect.anything(),
+  }));
+  const input = mockRecognizeImportImage.mock.calls[0][1];
+  expect(input.headers).toBeUndefined();
+  expect(input.endpoint).toBeUndefined();
+  expect(mockRecognize).toHaveBeenCalledTimes(success ? 0 : 1);
+  expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(success ? 0 : 1);
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
 });
 
 test('batch term entry fills missing screenshot terms and preserves source and individually edited values', async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAuth } from '../../state/auth';
 import { getAuthInstance as getAuth } from '../../firebase';
 import { Linking, Text } from 'react-native';
@@ -12,38 +12,72 @@ import { createInternshipCallableTransport } from '@campus/shared/src/careerInte
 import { createCareerInternshipPorts } from './careerInternshipPorts';
 import { CareerWorkstudy } from './CareerWorkstudy';
 import { CareerInternship } from './CareerInternship';
+import { theme, getThemeVersion, subscribeToTheme } from '../../ui/theme';
 
 export function CareerHost({ schoolId }: { schoolId: string }) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
-  const loginUrl = `/login?returnUrl=${encodeURIComponent(`/career?schoolId=${schoolId}`)}`;
-  return user ? (
-    <Workspace
-      key={`${user.uid}:${schoolId}`}
-      uid={user.uid}
-      schoolId={schoolId}
-      loginUrl={loginUrl}
-    />
-  ) : (
+  return (
+    <CareerEntry key={JSON.stringify([user?.uid, schoolId])} uid={user?.uid} schoolId={schoolId} />
+  );
+}
+
+function CareerEntry({ uid, schoolId }: { uid?: string; schoolId: string }) {
+  const schoolSearch = `schoolId=${encodeURIComponent(schoolId)}`;
+  const loginUrl = `/login?returnUrl=${encodeURIComponent(`/career?${schoolSearch}`)}&${schoolSearch}`;
+  const [loginError, setLoginError] = useState('');
+  const live = useRef(true);
+  const opening = useRef(false);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const onLogin = async () => {
+    if (!live.current || opening.current) return;
+    opening.current = true;
+    setLoginError('');
+    try {
+      await Linking.openURL(`https://nuni.tw${loginUrl}`);
+    } catch {
+      if (live.current) setLoginError('無法開啟登入頁，請稍後再試。');
+    } finally {
+      opening.current = false;
+    }
+  };
+  return (
     <>
-      <Text>登入後查看本校工讀、實習與校徵</Text>
-      <Text
-        onPress={() => {
-          void Linking.openURL(`https://nuni.tw${loginUrl}`);
-        }}
-      >
-        登入後可申請校內工讀與查看實習學分
-      </Text>
+      {uid ? (
+        <Workspace uid={uid} schoolId={schoolId} onLogin={onLogin} />
+      ) : (
+        <>
+          <Text style={{ color: theme.colors.text, lineHeight: 22 }}>登入後查看本校工讀、實習與校徵</Text>
+          <Text
+            accessibilityRole="link"
+            style={{ color: theme.colors.accent, paddingVertical: 12, lineHeight: 22 }}
+            onPress={onLogin}
+          >
+            登入後可申請校內工讀與查看實習學分
+          </Text>
+        </>
+      )}
+      {!!loginError && (
+        <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>
+          {loginError}
+        </Text>
+      )}
     </>
   );
 }
 function Workspace({
   uid,
   schoolId,
-  loginUrl,
+  onLogin,
 }: {
   uid: string;
   schoolId: string;
-  loginUrl: string;
+  onLogin: () => void;
 }) {
   const [review, setReview] = useState(false);
   const [operate, setOperate] = useState(false);
@@ -63,9 +97,6 @@ function Workspace({
       ports.dispose();
     };
   }, [ports]);
-  const onLogin = () => {
-    void Linking.openURL(`https://nuni.tw${loginUrl}`);
-  };
   const workstudy = (audience: 'student' | 'staff' | 'ops') => (
     <CareerWorkstudy
       key={`workstudy:${audience}`}

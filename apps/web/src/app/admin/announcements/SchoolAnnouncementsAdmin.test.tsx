@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   user: null as null | { uid: string },
   loading: false,
   role: null as string | null,
-  memberStatus: undefined as unknown,
   roleStatus: 'ready' as 'loading' | 'ready' | 'error',
   retry: vi.fn(),
   campus: {
@@ -32,12 +31,7 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => mocks.campus,
 }));
 vi.mock('@/lib/useSchoolRole', () => ({
-  useSchoolRoleState: () => ({
-    status: mocks.roleStatus,
-    role: mocks.role,
-    memberStatus: mocks.memberStatus,
-    retry: mocks.retry,
-  }),
+  useSchoolRoleState: () => ({ status: mocks.roleStatus, role: mocks.role, retry: mocks.retry }),
 }));
 vi.mock('@/lib/schoolAnnouncementsAdmin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/schoolAnnouncementsAdmin')>();
@@ -81,7 +75,6 @@ beforeEach(() => {
   mocks.user = { uid: 'admin-1' };
   mocks.loading = false;
   mocks.role = 'admin';
-  mocks.memberStatus = undefined;
   mocks.roleStatus = 'ready';
   mocks.retry.mockReset();
   mocks.campus = {
@@ -286,102 +279,3 @@ it('discards private editing state after access is revoked and starts fresh when
   expect(screen.getByRole('heading', { name: '發布公告' })).toBeTruthy();
   expect((screen.getByLabelText('標題 *') as HTMLInputElement).value).toBe('');
 });
-
-it.each(['admin', 'editor'])(
-  'allows legacy %s membership under the backend status policy',
-  async (role) => {
-    mocks.role = role;
-    const { rerender } = render(<SchoolAnnouncementsAdmin />);
-    for (const memberStatus of [undefined, null, '', false, 'active']) {
-      mocks.memberStatus = memberStatus;
-      rerender(<SchoolAnnouncementsAdmin />);
-      expect(await screen.findByRole('button', { name: '發布公告' })).toBeTruthy();
-    }
-    for (const memberStatus of ['inactive', 'pending', 'suspended']) {
-      mocks.memberStatus = memberStatus;
-      rerender(<SchoolAnnouncementsAdmin />);
-      expect(screen.getByRole('heading', { name: '目前帳號無法管理公告' })).toBeTruthy();
-      expect(screen.queryByRole('button', { name: '發布公告' })).toBeNull();
-    }
-  },
-);
-
-it.each([false, true])(
-  'preserves the %s editing draft through cache, error, and retry revalidation',
-  async (edit) => {
-    const { rerender } = render(<SchoolAnnouncementsAdmin />);
-    await screen.findByText('置頂 · 既有公告');
-    if (edit) fireEvent.click(screen.getByRole('button', { name: '編輯' }));
-    fireEvent.change(screen.getByLabelText('標題 *'), { target: { value: '尚未儲存的標題' } });
-    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '尚未儲存的內容' } });
-    fireEvent.change(screen.getByLabelText('來源'), { target: { value: '測試來源' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: '置頂公告' }));
-    const pinned = (screen.getByRole('checkbox') as HTMLInputElement).checked;
-
-    for (const status of ['loading', 'error', 'loading'] as const) {
-      mocks.roleStatus = status;
-      mocks.role = null;
-      rerender(<SchoolAnnouncementsAdmin />);
-      expect(screen.queryByRole('textbox', { name: '標題 *' })).toBeNull();
-      expect(screen.queryByRole('button', { name: edit ? '儲存變更' : '發布公告' })).toBeNull();
-      if (status === 'error') fireEvent.click(screen.getByRole('button', { name: '重新確認權限' }));
-    }
-    expect(upsertSchoolAnnouncement).not.toHaveBeenCalled();
-    mocks.roleStatus = 'ready';
-    mocks.role = 'admin';
-    rerender(<SchoolAnnouncementsAdmin />);
-    expect(screen.getByRole('heading', { name: edit ? '編輯公告' : '發布公告' })).toBeTruthy();
-    expect((screen.getByRole('textbox', { name: '標題 *' }) as HTMLInputElement).value).toBe(
-      '尚未儲存的標題',
-    );
-    expect((screen.getByRole('textbox', { name: '內容' }) as HTMLTextAreaElement).value).toBe(
-      '尚未儲存的內容',
-    );
-    expect((screen.getByRole('textbox', { name: '來源' }) as HTMLInputElement).value).toBe(
-      '測試來源',
-    );
-    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(pinned);
-    expect(listSchoolAnnouncementsForAdmin).toHaveBeenCalledOnce();
-    vi.mocked(upsertSchoolAnnouncement).mockResolvedValueOnce({
-      success: true,
-      announcementId: edit ? 'ann-1' : 'new',
-    });
-    fireEvent.click(screen.getByRole('button', { name: edit ? '儲存變更' : '發布公告' }));
-    await waitFor(() =>
-      expect(upsertSchoolAnnouncement).toHaveBeenCalledWith(
-        expect.objectContaining({
-          schoolId: 'pu',
-          announcementId: edit ? 'ann-1' : null,
-          title: '尚未儲存的標題',
-          body: '尚未儲存的內容',
-          source: '測試來源',
-          pinned,
-        }),
-      ),
-    );
-  },
-);
-
-it.each(['revoked', 'account', 'school'] as const)(
-  'discards a suspended draft on %s',
-  async (change) => {
-    const { rerender } = render(<SchoolAnnouncementsAdmin />);
-    await screen.findByText('置頂 · 既有公告');
-    fireEvent.click(screen.getByRole('button', { name: '編輯' }));
-    fireEvent.change(screen.getByLabelText('標題 *'), {
-      target: { value: '不應跨範圍恢復的草稿' },
-    });
-    mocks.roleStatus = 'error';
-    mocks.role = null;
-    rerender(<SchoolAnnouncementsAdmin />);
-    if (change === 'account') mocks.user = { uid: 'admin-2' };
-    if (change === 'school') selectSchool('nthu');
-    if (change === 'revoked') mocks.roleStatus = 'ready';
-    rerender(<SchoolAnnouncementsAdmin />);
-    mocks.roleStatus = 'ready';
-    mocks.role = 'admin';
-    rerender(<SchoolAnnouncementsAdmin />);
-    expect(await screen.findByRole('heading', { name: '發布公告' })).toBeTruthy();
-    expect((screen.getByRole('textbox', { name: '標題 *' }) as HTMLInputElement).value).toBe('');
-  },
-);

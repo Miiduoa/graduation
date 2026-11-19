@@ -8,9 +8,11 @@
  *   3. 找不到 → 顯示明確 fallback Alert，不會 silent
  */
 import { Alert } from 'react-native';
-import { ROUTE_TO_TAB, isRouteRegistered, resolveTabForRoute } from './routeRegistry';
+import { isRouteRegistered, resolveTabForRoute } from './routeRegistry';
 
 export interface SafeNavigateOptions {
+  /** 首次開啟跨分頁堆疊時，從首頁或目的頁開始；不重設已開啟的堆疊。 */
+  crossTabInitialRoute?: 'home' | 'destination';
   fallbackRoute?: string;
   fallbackParams?: Record<string, unknown>;
   /** 找不到 route 時顯示的提示文字；給 null 表示靜默 */
@@ -23,11 +25,14 @@ export interface SafeNavigateOptions {
 export { isRouteRegistered, resolveTabForRoute, ROUTE_TO_TAB } from './routeRegistry';
 
 export function safeNavigate(
-  navigation: {
-    navigate?: (...args: any[]) => void;
-    getState?: () => unknown;
-    getParent?: () => unknown;
-  } | null | undefined,
+  navigation:
+    | {
+        navigate?: (route: string, params?: Record<string, unknown>) => void;
+        getState?: () => unknown;
+        getParent?: () => unknown;
+      }
+    | null
+    | undefined,
   route: string,
   params?: Record<string, unknown>,
   options: SafeNavigateOptions = {},
@@ -36,7 +41,10 @@ export function safeNavigate(
   const showFallback = (msg?: string) => {
     if (options.fallbackMessage === null) return;
     const title = options.fallbackTitle ?? '無法開啟';
-    Alert.alert(title, options.fallbackMessage ?? msg ?? `「${route}」目前無法存取，請稍後再試或回到主畫面。`);
+    Alert.alert(
+      title,
+      options.fallbackMessage ?? msg ?? `「${route}」目前無法存取，請稍後再試或回到主畫面。`,
+    );
   };
 
   if (typeof navigate !== 'function') {
@@ -59,10 +67,15 @@ export function safeNavigate(
   if (targetTab) {
     try {
       // navigate('TabName', { screen: 'RouteName', params: {...} })
-      // 這個 pattern 會把目標 tab 切換到目標 screen
-      navigate(targetTab, { screen: route, params });
+      // 預設保留分頁首頁；明確的往返任務可讓首次返回直接回到來源。
+      // 兩種模式都沿用已存在的 stack，不重設其路由、參數或返回順序。
+      navigate(targetTab, {
+        screen: route,
+        params,
+        initial: options.crossTabInitialRoute === 'destination',
+      });
       return true;
-    } catch (e) {
+    } catch {
       // fallback
     }
   }
@@ -72,7 +85,11 @@ export function safeNavigate(
     const fbTab = resolveTabForRoute(options.fallbackRoute);
     try {
       if (fbTab) {
-        navigate(fbTab, { screen: options.fallbackRoute, params: options.fallbackParams });
+        navigate(fbTab, {
+          screen: options.fallbackRoute,
+          params: options.fallbackParams,
+          initial: options.crossTabInitialRoute === 'destination',
+        });
       } else {
         navigate(options.fallbackRoute, options.fallbackParams);
       }

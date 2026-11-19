@@ -5,7 +5,7 @@
  * 只保留核心路由：
  * - TodayHome: RoleAwareTodayScreen（今天）
  * - 公告/活動詳情
- * - 校園社群（唯一的社交入口）
+ * - 校園社群（舊連結相容入口，主要入口在交流）
  * - CampusGame：校園漫步原型（`campus://home/campus-game`）
  * - 智慧行事曆
  *

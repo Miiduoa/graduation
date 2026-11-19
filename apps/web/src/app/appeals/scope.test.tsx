@@ -23,7 +23,10 @@ const school = vi.hoisted(() => ({
   selectedSchoolId: 'pu' as string | null,
   loading: false,
 }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => school }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => school,
+  useOptionalSelectedSchool: () => null,
+}));
 vi.mock('@/components/SchoolScopePlaceholder', () => ({
   SchoolScopePlaceholder: () => <p role="status">選擇校園</p>,
 }));

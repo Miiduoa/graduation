@@ -47,7 +47,12 @@ it.each([
   expect(academicNavigationPath(pathname)).toBe(expected);
 });
 
-it.each(['/classroom/grades', '/classroom/account', '/classroom/login', '/course/cs101', '/life', '/teacher', null])(
+it.each([
+  '/classroom/grades', '/classroom/account', '/classroom/login',
+  '/course/cs101', '/course/cs101/attendance', '/teacher/course/cs101',
+  '/teacher/course/cs101/assignments', '/groups', '/groups/course-team',
+  '/groups/music/club', '/life', '/teacher', null,
+])(
   'does not treat %s as an academic navigation surface',
   (pathname) => {
     expect(academicNavigationPath(pathname)).toBeNull();

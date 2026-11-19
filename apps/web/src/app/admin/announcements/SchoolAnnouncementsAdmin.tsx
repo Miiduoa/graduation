@@ -35,11 +35,7 @@ export function SchoolAnnouncementsAdmin() {
   const schoolId = campus.schoolId;
   const readySchool = campus.status === 'ready' && Boolean(schoolId);
   const membership = useSchoolRoleState(!authLoading && readySchool ? user?.uid : null, schoolId);
-  // Match authz.js: legacy members without a truthy status remain eligible.
-  const allowed =
-    membership.status === 'ready' &&
-    (!membership.memberStatus || membership.memberStatus === 'active') &&
-    canSeeSchoolAnnouncementAdmin(membership.role);
+  const allowed = membership.status === 'ready' && canSeeSchoolAnnouncementAdmin(membership.role);
   const publicHref = `/announcements${campus.schoolSearch}`;
   const recovery = (
     <div className={styles.actions}>
@@ -92,72 +88,35 @@ export function SchoolAnnouncementsAdmin() {
             <p>校園公告會寫入目前所選學校。請先選擇學校後再回來發布。</p>
             <Link href="/">返回今天並選擇學校</Link>
           </section>
+        ) : membership.status === 'loading' ? (
+          <section className={styles.gate}>
+            <p className={styles.status} role="status">
+              正在確認校管權限…
+            </p>
+            <p>取得目前學校的確認前，暫停編輯。也可以先查看公開公告。</p>
+            {recovery}
+          </section>
+        ) : membership.status === 'error' ? (
+          <section className={styles.gate}>
+            <h2>暫時無法確認校管權限</h2>
+            <p role="alert">目前無法讀取你的校內資格，請重新確認。</p>
+            {recovery}
+          </section>
+        ) : !allowed ? (
+          <section className={styles.gate}>
+            <h2>目前帳號無法管理公告</h2>
+            <p>這個帳號需要取得目前學校的公告管理權限。若校方剛完成指派，可以重新確認。</p>
+            {recovery}
+          </section>
         ) : (
-          <AnnouncementWorkspaceScope
+          <AuthorizedAnnouncementsWorkspace
             key={JSON.stringify([user.uid, schoolId])}
             schoolId={schoolId!}
             schoolName={campus.schoolName}
-            allowed={allowed}
-            confirmed={membership.status === 'ready'}
-            gate={
-              membership.status === 'loading' ? (
-                <section className={styles.gate}>
-                  <p className={styles.status} role="status">
-                    正在確認校管權限…
-                  </p>
-                  <p>取得目前學校的確認前，暫停編輯。也可以先查看公開公告。</p>
-                  {recovery}
-                </section>
-              ) : membership.status === 'error' ? (
-                <section className={styles.gate}>
-                  <h2>暫時無法確認校管權限</h2>
-                  <p role="alert">目前無法讀取你的校內資格，請重新確認。</p>
-                  {recovery}
-                </section>
-              ) : !allowed ? (
-                <section className={styles.gate}>
-                  <h2>目前帳號無法管理公告</h2>
-                  <p>這個帳號需要取得目前學校的公告管理權限。若校方剛完成指派，可以重新確認。</p>
-                  {recovery}
-                </section>
-              ) : null
-            }
           />
         )}
       </div>
     </SiteShell>
-  );
-}
-
-/** Preserve drafts during revalidation, discard them on confirmed loss of access. */
-function AnnouncementWorkspaceScope({
-  schoolId,
-  schoolName,
-  allowed,
-  confirmed,
-  gate,
-}: {
-  schoolId: string;
-  schoolName: string;
-  allowed: boolean;
-  confirmed: boolean;
-  gate: React.ReactNode;
-}) {
-  const [retained, setRetained] = useState(allowed);
-  if (allowed && !retained) setRetained(true);
-  if (confirmed && !allowed && retained) setRetained(false);
-
-  return (
-    <>
-      {gate}
-      {allowed || (retained && !confirmed) ? (
-        <div hidden={!allowed} inert={!allowed}>
-          <fieldset disabled={!allowed} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-            <AuthorizedAnnouncementsWorkspace schoolId={schoolId} schoolName={schoolName} />
-          </fieldset>
-        </div>
-      ) : null}
-    </>
   );
 }
 
