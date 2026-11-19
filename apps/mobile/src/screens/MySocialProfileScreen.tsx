@@ -108,11 +108,11 @@ function OwnPosts({ uid, schoolId, schoolName, displayName, bio }: {
       </View>
       <View style={styles.actions}>
         <Pressable accessibilityRole="button" style={styles.primary}
-          onPress={() => { rootNavigateNested('Today', 'CreatorPostCompose'); }}>
+          onPress={() => { rootNavigateNested('訊息', 'CreatorPostCompose'); }}>
           <Text style={styles.primaryText}>發表貼文</Text>
         </Pressable>
         <Pressable accessibilityRole="button" style={styles.secondary}
-          onPress={() => { rootNavigateNested('Today', 'CampusSocialScreen'); }}>
+          onPress={() => { rootNavigateNested('訊息', 'CampusSocialScreen'); }}>
           <Text style={styles.secondaryText}>探索動態</Text>
         </Pressable>
       </View>
@@ -156,7 +156,7 @@ function OwnPosts({ uid, schoolId, schoolName, displayName, bio }: {
           <Pressable key={post.id} accessibilityRole="button"
             accessibilityLabel={'查看貼文：' + (post.title || '未命名貼文')}
             style={({ pressed }) => [styles.post, pressed && styles.pressed]}
-            onPress={() => { rootNavigateNested('Today', 'PostDetail', { postId: post.id }); }}>
+            onPress={() => { rootNavigateNested('訊息', 'PostDetail', { postId: post.id }); }}>
             {cover ? <Image source={{ uri: cover }} style={styles.cover} resizeMode="cover" accessibilityLabel="貼文附圖" /> : null}
             <Text style={styles.date}>{postDate(post.createdAt)}</Text>
             <Text style={styles.postTitle} numberOfLines={2}>{post.title || '未命名貼文'}</Text>

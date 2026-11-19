@@ -26,7 +26,14 @@ export function academicNavigationPath(
   if (!pathname) return null;
   if (pathname === '/credit-planner/review') return '/credit-planner';
   if (pathname.startsWith('/school-lms/')) return '/school-lms';
-  if (pathname === '/classroom' || pathname.startsWith('/classroom/course')) return '/classroom';
+  // School course and group workspaces provide their own navigation. Highlighting
+  // Google Classroom here would send their return flow to a different account/source.
+  if (
+    pathname === '/classroom' ||
+    pathname.startsWith('/classroom/course/') ||
+    pathname === '/classroom/material-bookmarks'
+  )
+    return '/classroom';
   if (ACADEMIC_SECTIONS.some((section) => section.path === pathname)) {
     return pathname as AcademicSectionPath;
   }

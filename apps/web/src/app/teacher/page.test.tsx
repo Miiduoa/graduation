@@ -5,9 +5,8 @@ import { writeDemoRole } from '@/lib/demoRole';
 import TeacherDeskPage from './page';
 
 const store = vi.hoisted(() => ({
-  decideCourseAppeal: vi.fn<
-    (id: string, status: 'approved' | 'rejected', teacherNote: string) => Promise<void>
-  >(),
+  decideCourseAppeal:
+    vi.fn<(id: string, status: 'approved' | 'rejected', teacherNote: string) => Promise<void>>(),
   listTeacherAppeals: vi.fn(),
 }));
 vi.mock('@/lib/timetable/store', () => store);
@@ -20,7 +19,10 @@ const school = vi.hoisted(() => ({
   selectedSchoolId: 'pu' as string | null,
   loading: false,
 }));
-vi.mock('@/components/SelectedSchoolProvider', () => ({ useSelectedSchool: () => school }));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useSelectedSchool: () => school,
+  useOptionalSelectedSchool: () => null,
+}));
 vi.mock('@/components/SchoolScopePlaceholder', () => ({
   SchoolScopePlaceholder: () => <p role="status">選擇校園</p>,
 }));
@@ -97,8 +99,8 @@ it('school or account change clears private records and teacher notes immediatel
 });
 
 it('pending A-B-A reads cannot overwrite the newer A state', async () => {
-  const firstA = deferred<{ courses: string[]; rows: typeof rowA[] }>();
-  const secondA = deferred<{ courses: string[]; rows: typeof rowA[] }>();
+  const firstA = deferred<{ courses: string[]; rows: (typeof rowA)[] }>();
+  const secondA = deferred<{ courses: string[]; rows: (typeof rowA)[] }>();
   let puReads = 0;
   store.listTeacherAppeals.mockImplementation(async (schoolId: string) => {
     if (schoolId !== 'pu') return { courses: ['資料庫B'], rows: [rowB] };
@@ -196,7 +198,7 @@ it('pending decision cannot set new scope state or trigger new scope reads', asy
 
   await act(async () => pendingDecide.resolve());
   expect(screen.queryByText(/已核准/)).toBeNull();
-  expect(screen.queryByText('這次沒有存成，請稍後再試。')).toBeNull();
+  expect(screen.queryByText('尚未確認這次處理結果，請先重新讀取申訴。')).toBeNull();
   expect(store.listTeacherAppeals.mock.calls.filter((call) => call[0] === 'nthu').length).toBe(
     nthuReadsBefore,
   );
@@ -226,7 +228,7 @@ it('presentation role changes clear prior teacher notes and recheck server autho
   act(() => writeDemoRole('student'));
   expect(screen.queryByDisplayValue('原角色私有備註')).toBeNull();
   expect(screen.queryByText(/學生甲.*期中成績A/)).toBeNull();
-  await screen.findByText('這頁給老師用。你的帳號在這所學校不是老師身分。');
+  await screen.findByText('目前帳號沒有這所學校的申訴審核權限');
   expect(store.listTeacherAppeals).toHaveBeenLastCalledWith('pu');
 });
 
@@ -255,13 +257,13 @@ it('rejected decision isolates notice/busy from a later school', async () => {
   expect((screen.getByRole('button', { name: '核准' }) as HTMLButtonElement).disabled).toBe(true);
 
   await act(async () => pendingDecide.reject(new Error('unavailable')));
-  expect(screen.getByRole('status').textContent).toBe('這次沒有存成，請稍後再試。');
-  expect((screen.getByRole('button', { name: '核准' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByRole('status').textContent).toBe('尚未確認這次處理結果，請先重新讀取申訴。');
+  expect(screen.queryByRole('button', { name: '核准' })).toBeNull();
 
   school.selectedSchoolId = 'nthu';
   view.rerender(<TeacherDeskPage />);
   await screen.findByText(/學生乙.*期中成績B/);
-  expect(screen.queryByText('這次沒有存成，請稍後再試。')).toBeNull();
+  expect(screen.queryByText('尚未確認這次處理結果，請先重新讀取申訴。')).toBeNull();
   expect((screen.getByRole('button', { name: '核准' }) as HTMLButtonElement).disabled).toBe(false);
 });
 
@@ -284,11 +286,102 @@ it('permission-denied read shows teacher-only copy without leaking other school 
     Object.assign(new Error('denied'), { code: 'functions/permission-denied' }),
   );
   const view = render(<TeacherDeskPage />);
-  await screen.findByText('這頁給老師用。你的帳號在這所學校不是老師身分。');
+  await screen.findByText('目前帳號沒有這所學校的申訴審核權限');
   expect(screen.queryByText(/學生甲/)).toBeNull();
 
   school.selectedSchoolId = 'nthu';
   view.rerender(<TeacherDeskPage />);
   await screen.findByText(/學生乙.*期中成績B/);
-  expect(screen.queryByText('這頁給老師用。你的帳號在這所學校不是老師身分。')).toBeNull();
+  expect(screen.queryByText('目前帳號沒有這所學校的申訴審核權限')).toBeNull();
+});
+
+it('rechecks denied access in the same school and recovers from a transient authorization read failure', async () => {
+  store.listTeacherAppeals.mockRejectedValueOnce(
+    Object.assign(new Error('denied'), { code: 'functions/permission-denied' }),
+  );
+  render(<TeacherDeskPage />);
+  await screen.findByRole('button', { name: '重新確認授課權限' });
+  store.listTeacherAppeals.mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: '重新確認授課權限' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('button', { name: '核准' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新確認授課權限' }));
+  await screen.findByText(/學生甲.*期中成績A/);
+  expect(store.listTeacherAppeals.mock.calls.map(([schoolId]) => schoolId)).toEqual([
+    'pu',
+    'pu',
+    'pu',
+  ]);
+  expect(store.decideCourseAppeal).not.toHaveBeenCalled();
+});
+
+it('recovers a failed initial read without showing a zero-count queue', async () => {
+  store.listTeacherAppeals.mockRejectedValueOnce(new Error('offline'));
+  render(<TeacherDeskPage />);
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('button', { name: '待處理 0' })).toBeNull();
+  expect(screen.queryByText('現在沒有待處理的申訴。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取申訴' }));
+  await screen.findByText(/學生甲.*期中成績A/);
+  expect(screen.getByRole('button', { name: '待處理 1' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(store.listTeacherAppeals).toHaveBeenCalledTimes(2);
+});
+
+it('keeps a draft through status filters and a failed same-school refresh', async () => {
+  render(<TeacherDeskPage />);
+  const note = await screen.findByLabelText('給學生的話（可不填）');
+  fireEvent.change(note, { target: { value: '請補上計算過程' } });
+  fireEvent.click(screen.getByRole('button', { name: '已處理 0' }));
+  expect(screen.queryByRole('button', { name: '核准' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '待處理 1' }));
+  expect(screen.getByDisplayValue('請補上計算過程')).toBeTruthy();
+
+  store.listTeacherAppeals.mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByRole('button', { name: '更新申訴' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('button', { name: '核准' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取申訴' }));
+  expect(await screen.findByDisplayValue('請補上計算過程')).toBeTruthy();
+  expect(store.decideCourseAppeal).not.toHaveBeenCalled();
+});
+
+it('moves the refreshed decision to completed work and restores keyboard focus', async () => {
+  render(<TeacherDeskPage />);
+  fireEvent.change(await screen.findByLabelText('給學生的話（可不填）'), {
+    target: { value: '已核對原始答案' },
+  });
+  store.listTeacherAppeals.mockResolvedValueOnce({
+    courses: ['資料庫A'],
+    rows: [{ ...rowA, status: 'approved', teacherNote: '已核對原始答案' }],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '核准' }));
+  await screen.findByText('現在沒有待處理的申訴。');
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '待處理申訴' }));
+  fireEvent.click(screen.getByRole('button', { name: '已處理 1' }));
+  expect(screen.getByText('給學生的回覆：已核對原始答案')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '核准' })).toBeNull();
+  expect(store.decideCourseAppeal).toHaveBeenCalledWith('a1', 'approved', '已核對原始答案');
+});
+
+it('reads back an unknown decision before allowing further work', async () => {
+  render(<TeacherDeskPage />);
+  await screen.findByText(/學生甲.*期中成績A/);
+  store.decideCourseAppeal.mockRejectedValueOnce(new Error('connection lost'));
+  fireEvent.click(screen.getByRole('button', { name: '核准' }));
+  await screen.findByText('尚未確認這次處理結果，請先重新讀取申訴。');
+  expect(screen.queryByRole('button', { name: '核准' })).toBeNull();
+  expect(store.decideCourseAppeal).toHaveBeenCalledTimes(1);
+
+  store.listTeacherAppeals.mockResolvedValueOnce({
+    courses: ['資料庫A'],
+    rows: [{ ...rowA, status: 'approved' }],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取申訴' }));
+  await screen.findByText('現在沒有待處理的申訴。');
+  expect(screen.queryByText('尚未確認這次處理結果，請先重新讀取申訴。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '已處理 1' }));
+  expect(await screen.findByText(/學生甲.*期中成績A/)).toBeTruthy();
+  expect(store.decideCourseAppeal).toHaveBeenCalledTimes(1);
 });

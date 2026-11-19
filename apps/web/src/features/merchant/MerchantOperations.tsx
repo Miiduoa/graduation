@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { NuniError } from '@campus/shared/src/nuni';
 import { merchantWorkspaceStateLabel } from '@campus/shared/src/nuniMerchant';
+import { isMerchantWorkspaceOperational } from '@campus/shared/src/merchantJourney';
 import {
   createMerchantOperations,
   type NuniMerchantWorkspaceDetail,
@@ -248,11 +249,7 @@ export function MerchantOperations({
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
   const locked = !!busy || loading || !!uncertain || !fresh;
   const menuExists = menuReceipt !== null || !!detail?.publishedMenuItems;
-  const operational =
-    detail?.activated &&
-    detail.merchantStatus === 'active' &&
-    ((detail.locationStatus === 'open' && detail.publicAccess) ||
-      (detail.locationStatus === 'closed' && !detail.publicAccess));
+  const operational = !!detail && isMerchantWorkspaceOperational(detail);
   const canActivate =
     detail &&
     !detail.activated &&
@@ -300,6 +297,33 @@ export function MerchantOperations({
               </p>
             )}
           </section>
+
+          {operational && (
+            <section className={styles.panel} aria-labelledby="merchant-daily-work-title">
+              <h3 id="merchant-daily-work-title">門市工作台</h3>
+              <p>開班、確認收款、準備餐點與核對取餐憑證。暫停新訂單時，仍可處理已收到的訂單。</p>
+              <Button
+                variant="primary"
+                disabled={locked}
+                aria-expanded={showOrders}
+                aria-controls="merchant-order-workspace"
+                onClick={() => setShowOrders((value) => !value)}
+              >
+                {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
+              </Button>
+              <div id="merchant-order-workspace">
+                {showOrders && !locked && (
+                  <MerchantOrderDesk
+                    key={`${context}:${tenantId}:${locationId}`}
+                    context={context}
+                    tenantId={tenantId}
+                    locationId={locationId}
+                    cache={foodDrafts ?? localFoodDrafts}
+                  />
+                )}
+              </div>
+            </section>
+          )}
 
           {!detail.activated && (
             <section className={styles.panel} aria-labelledby="merchant-settings-title">
@@ -655,24 +679,6 @@ export function MerchantOperations({
               <p>門市的營運狀態需要由場域管理者確認，這裡無法自行恢復接單。</p>
             )}
           </section>
-          {operational && (
-            <section className={styles.panel}>
-              <h3>門市工作台</h3>
-              <p>開班、確認收款、準備餐點與核對取餐憑證。</p>
-              <Button disabled={locked} onClick={() => setShowOrders((value) => !value)}>
-                {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
-              </Button>
-              {showOrders && !locked && (
-                <MerchantOrderDesk
-                  key={`${context}:${tenantId}:${locationId}`}
-                  context={context}
-                  tenantId={tenantId}
-                  locationId={locationId}
-                  cache={foodDrafts ?? localFoodDrafts}
-                />
-              )}
-            </section>
-          )}
         </>
       )}
     </div>

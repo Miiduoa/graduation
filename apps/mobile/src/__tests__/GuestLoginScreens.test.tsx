@@ -405,12 +405,12 @@ test('an already displayed success dialog cannot navigate after its screen unmou
 test('a restored platform account has a return entry rather than another registration prompt', () => {
   mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
   const view = render(<LoginLandingScreen />);
-  expect(view.getByRole('button', { name: '回到我的 nuni' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '回到我的課程' })).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '開啟課表助理' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniTimetableAssistant');
   expect(view.queryByText('登入或建立帳號')).toBeNull();
   fireEvent.press(view.getByTestId('login-start'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });
 });
 
 test('an unknown platform account state remains an explicit recovery entry', () => {
@@ -419,7 +419,7 @@ test('an unknown platform account state remains an explicit recovery entry', () 
   expect(view.getByRole('alert')).toHaveTextContent(mockPlatformAuth.error);
   fireEvent.press(view.getByRole('button', { name: '查看登入問題' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
-  expect(view.queryByText('回到我的 nuni')).toBeNull();
+  expect(view.queryByText('回到我的課程')).toBeNull();
   expect(view.queryByRole('button', { name: '開啟課表助理' })).toBeNull();
 });
 
@@ -430,7 +430,7 @@ test('pending logout explains the next step without presenting a restored accoun
   expect(view.getByRole('alert')).toHaveTextContent(/上次登出還沒完成/);
   fireEvent.press(view.getByRole('button', { name: '處理未完成的登出' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
-  expect(view.queryByText('回到我的 nuni')).toBeNull();
+  expect(view.queryByText('回到我的課程')).toBeNull();
   expect(view.queryByRole('button', { name: '開啟課表助理' })).toBeNull();
 });
 
