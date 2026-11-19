@@ -175,15 +175,25 @@ function StorySlide({
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
   const playbackActive = playing && !inspecting && !replying;
-  const [loadedImage, setLoadedImage] = useState('');
-  const [failedImage, setFailedImage] = useState('');
+  const [loadedImage, setLoadedImage] = useState<object | null>(null);
+  const [failedImage, setFailedImage] = useState<object | null>(null);
   const [imageRetry, setImageRetry] = useState(0);
   const mediaUrl = usePrivateMedia(story.mediaUrl);
+  // Revisiting a story must wait for the newly mounted Image, even if this ID loaded before.
+  // A fresh request identity also invalidates old native onLoad/onError callbacks.
+  const imageRequest = useMemo(
+    () => ({ storyId: story.id, mediaUrl, retry: imageRetry }),
+    [story.id, mediaUrl, imageRetry],
+  );
+  const activeImageRequest = React.useRef(imageRequest);
+  React.useLayoutEffect(() => {
+    activeImageRequest.current = imageRequest;
+  }, [imageRequest]);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
-  // An image error must not start the next-story timer before the student can retry.
-  const ready = !hasImage || (loadedImage === story.id && !imageFailed);
+  const imageFailed = hasImage && (!mediaUrl || failedImage === imageRequest);
+  // An image error or an earlier visit's onLoad cannot start the next-story timer.
+  const ready = !hasImage || (loadedImage === imageRequest && !imageFailed);
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
@@ -307,15 +317,18 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={JSON.stringify([story.id, imageRetry])}
+              key={JSON.stringify([story.id, mediaUrl, imageRetry])}
               source={{ uri: mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
-              onLoad={() => setLoadedImage(story.id)}
+              onLoad={() => {
+                if (activeImageRequest.current === imageRequest) setLoadedImage(imageRequest);
+              }}
               onError={() => {
-                setLoadedImage('');
-                setFailedImage(story.id);
+                if (activeImageRequest.current !== imageRequest) return;
+                setLoadedImage(null);
+                setFailedImage(imageRequest);
               }}
             />
           ) : (
@@ -323,14 +336,14 @@ function StorySlide({
               <Text style={styles.storyText}>
                 {imageFailed ? '照片暫時無法顯示' : story.text || '（無內容）'}
               </Text>
-              {hasImage && failedImage === story.id && !!mediaUrl && (
+              {hasImage && failedImage === imageRequest && !!mediaUrl && (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="重新載入照片"
                   style={[styles.step, styles.photoRetry]}
                   onPress={() => {
-                    setLoadedImage('');
-                    setFailedImage('');
+                    setLoadedImage(null);
+                    setFailedImage(null);
                     setImageRetry((count) => count + 1);
                   }}
                 >
