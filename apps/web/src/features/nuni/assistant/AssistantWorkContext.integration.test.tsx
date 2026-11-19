@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useState, type ComponentProps } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { assistantRoleToolAllowed, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import { AssistantThread, assistantQuestionReadRoute } from './AssistantThread';
@@ -12,11 +13,10 @@ function Harness({ initialProfile = 'student', ...props }: Partial<Props> & { in
   return <AssistantThread schoolId="pu" ready fallback={false} consent onConsent={noop}
     turns={[]} states={{}} pending={false} asking={false} onStopAsk={noop} error=""
     recoverableQuestion="" onRecoverQuestion={noop} onConfirm={noop} onCancel={noop}
-    {...props} onAsk={() => {
-      expect(assistantQuestionReadRoute(taskProfile, question).roleGuide).toBeNull();
-      expect(assistantRoleToolAllowed(taskProfile, taskProfile === 'teacher' ? 'get_teaching_overview' : 'get_merchant_overview')).toBe(true);
-      props.onAsk?.();
-    }} taskProfile={taskProfile} onTaskProfile={onTaskProfile} question={question} onQuestion={onQuestion} />;
+    {...props} onAsk={props.onAsk ?? noop} taskProfile={taskProfile} onTaskProfile={next => {
+      props.onTaskProfile?.(next);
+      onTaskProfile(next);
+    }} question={question} onQuestion={onQuestion} />;
 }
 const work = () => screen.getByLabelText('目前處理的工作') as HTMLSelectElement;
 const profile = () => screen.getByLabelText('目前要處理') as HTMLSelectElement;
@@ -26,7 +26,10 @@ it.each([
   ['teacher', '查我的授課概況', 'get_teaching_overview'],
   ['merchant', '查我的門市營運概況，查學校電話', 'get_merchant_overview'],
 ] as const)('selecting %s work updates the submitted profile and lets the overview reach readers', (context, question, tool) => {
-  const onAsk = vi.fn();
+  const onAsk = vi.fn(() => {
+    expect(assistantQuestionReadRoute(profile().value as AssistantRoleProfileId, question).roleGuide).toBeNull();
+    expect(assistantRoleToolAllowed(profile().value, tool)).toBe(true);
+  });
   render(<Harness question={question} onAsk={onAsk} />);
   fireEvent.change(work(), { target: { value: context } });
   expect(profile().value).toBe(context);
@@ -46,13 +49,29 @@ it.each([['teacher', 'teacher'], ['merchant', 'merchant'], ['school', 'staff'], 
   },
 );
 
-it('initializes the task profile from loaded workspace preference and preserves manual selection', () => {
-  const view = render(<Harness preferredWorkContext="teacher" />);
-  expect(profile().value).toBe('teacher');
+it.each(['teacher', 'merchant'] as const)('uses the %s workspace preference only for examples and preserves manual selection', preferredWorkContext => {
+  const onTaskProfile = vi.fn();
+  const onAsk = vi.fn(() => expect(profile().value).toBe('student'));
+  const view = render(<Harness preferredWorkContext={preferredWorkContext} onTaskProfile={onTaskProfile} onAsk={onAsk} />);
+  expect(profile().value).toBe('student');
+  expect(work().value).toBe(preferredWorkContext);
+  expect(onTaskProfile).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: preferredWorkContext === 'teacher' ? '查我的授課概況' : '查我的門市營運概況' }));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  expect(onAsk).toHaveBeenCalledOnce();
+  expect(onTaskProfile).not.toHaveBeenCalled();
   fireEvent.change(work(), { target: { value: 'merchant' } });
+  expect(onTaskProfile).toHaveBeenCalledExactlyOnceWith('merchant');
   view.rerender(<Harness preferredWorkContext="student" />);
   expect(profile().value).toBe('merchant');
   expect(work().value).toBe('merchant');
+});
+
+it('shows the loaded workspace preference on the first render without changing the task profile', () => {
+  const container = document.createElement('div');
+  container.innerHTML = renderToStaticMarkup(<Harness preferredWorkContext="teacher" />);
+  const selects = Array.from(container.querySelectorAll('select'));
+  expect(selects.map(select => select.value)).toEqual(['student', 'teacher']);
 });
 
 it('initializes explicit overview entries and respects an existing nonstudent task profile', () => {
@@ -64,11 +83,23 @@ it('initializes explicit overview entries and respects an existing nonstudent ta
   expect(work().value).toBe('merchant');
 });
 
-it('locks both selectors while an existing operation prevents a profile change', () => {
-  render(<Harness initialProfile="teacher" taskProfileLocked />);
+it('locks only the profile while work context changes examples without changing the existing operation', () => {
+  const onTaskProfile = vi.fn();
+  const onAsk = vi.fn();
+  const view = render(<Harness initialProfile="teacher" taskProfileLocked onTaskProfile={onTaskProfile} onAsk={onAsk} />);
+  const conversation = screen.getByRole('log');
   expect(profile().disabled).toBe(true);
-  expect(work().disabled).toBe(true);
+  expect(work().disabled).toBe(false);
   fireEvent.change(work(), { target: { value: 'merchant' } });
   expect(profile().value).toBe('teacher');
-  expect(work().value).toBe('teacher');
+  expect(work().value).toBe('merchant');
+  expect(screen.getByRole('button', { name: '查我的門市營運概況' })).toBeTruthy();
+  expect(screen.getByRole('log')).toBe(conversation);
+  expect(onTaskProfile).not.toHaveBeenCalled();
+  expect(onAsk).not.toHaveBeenCalled();
+  view.rerender(<Harness initialProfile="teacher" onTaskProfile={onTaskProfile} onAsk={onAsk} />);
+  expect(profile().value).toBe('teacher');
+  expect(onTaskProfile).not.toHaveBeenCalled();
+  fireEvent.change(work(), { target: { value: 'teacher' } });
+  expect(onTaskProfile).toHaveBeenCalledExactlyOnceWith('teacher');
 });

@@ -158,15 +158,16 @@ export function AssistantThread({
   const [chosenWorkContext, setWorkContext] = useState<AssistantWorkContext | null>(null);
   const [initialWorkContext] = useState(() => assistantWorkContextFromQuestion(question));
   const manuallySelectedContext = useRef(false);
-  const suggestedWorkContext = chosenWorkContext ?? preferredWorkContext ?? initialWorkContext;
-  const workContext = onTaskProfile ? assistantWorkContextForTaskProfile(taskProfile) : suggestedWorkContext;
-  // Loaded workspace preferences and explicit entry questions initialize the same
-  // task vocabulary sent to the readers. A later manual selection takes priority.
+  const workContext = chosenWorkContext ?? (onTaskProfile && taskProfile !== 'student'
+    ? assistantWorkContextForTaskProfile(taskProfile)
+    : preferredWorkContext ?? initialWorkContext);
+  // Only an explicit entry question initializes the task profile. Loaded workspace
+  // preferences affect examples only; a later manual selection takes priority.
   useEffect(() => {
     if (!onTaskProfile || taskProfileLocked || manuallySelectedContext.current || taskProfile !== 'student') return;
-    const next = assistantTaskProfileForWorkContext(suggestedWorkContext);
+    const next = assistantTaskProfileForWorkContext(initialWorkContext);
     if (next !== taskProfile) onTaskProfile(next);
-  }, [onTaskProfile, taskProfileLocked, taskProfile, suggestedWorkContext]);
+  }, [onTaskProfile, taskProfileLocked, taskProfile, initialWorkContext]);
   function chooseTaskProfile(next: AssistantRoleProfileId) {
     if (taskProfileLocked) return;
     manuallySelectedContext.current = true;
@@ -174,10 +175,9 @@ export function AssistantThread({
     onTaskProfile?.(next);
   }
   function chooseWorkContext(next: AssistantWorkContext) {
-    if (taskProfileLocked) return;
     manuallySelectedContext.current = true;
     setWorkContext(next);
-    onTaskProfile?.(assistantTaskProfileForWorkContext(next));
+    if (!taskProfileLocked) onTaskProfile?.(assistantTaskProfileForWorkContext(next));
   }
   const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
@@ -245,8 +245,9 @@ export function AssistantThread({
   const profile = getAssistantRoleProfile(taskProfile)!;
   const foodPickup = taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
-  const suggestions = taskProfile !== 'student' ? profile.examples.map(example => example.prompt)
-    : foodPickupEnabled ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
+  const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
+    : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
   const canSubmit = !pending && !onStop && !!question.trim() &&
     (readRoute.roleGuide || (foodPickup ? foodPickupEnabled
       : parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
@@ -308,7 +309,7 @@ export function AssistantThread({
           </nav>
         </>
       )}
-      <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} disabled={taskProfileLocked} schoolId={schoolId}
+      <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} schoolId={schoolId}
         linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
         compact={inline || turns.length > 0} />
       {!ready ? (
@@ -500,7 +501,7 @@ export function AssistantThread({
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder={inline && turns.length ? '接著問…' : taskProfile === 'student' ? workflow.placeholder : profile.placeholder}
+            placeholder={inline && turns.length ? '接著問…' : useProfileExamples ? profile.placeholder : workflow.placeholder}
             onChange={(e) => {
               setDraft(editComposerDraft(draft));
               onQuestion(e.target.value);
