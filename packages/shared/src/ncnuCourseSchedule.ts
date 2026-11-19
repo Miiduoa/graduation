@@ -58,6 +58,12 @@ export function ncnuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   const meetings = ncnuCourseMeetings(course.time, course.semester);
   const term = /^(\d{3})([12])$/.exec(course.semester);
   if (!meetings || !term) return null;
+  // Do not silently omit unknown or out-of-range official credits from the
+  // student's personal timetable. An empty source value remains explicitly
+  // unknown; other malformed values require manual verification, as at NTHU.
+  const credits = course.credits;
+  if (credits !== '' && (!/^\d+(?:\.\d+)?$/.test(credits) ||
+      !Number.isFinite(Number(credits)) || Number(credits) > 40)) return null;
   // One course cannot safely import the same weekday/period twice, even when
   // the provider splits it into separate day groups. Keep the raw public listing
   // for manual verification instead of writing overlapping personal sessions.
@@ -84,7 +90,7 @@ export function ncnuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     periodLabel: meeting.periodLabel,
     startTime: meeting.startTime,
     endTime: meeting.endTime,
-    credits: /^\d+(\.\d+)?$/.test(course.credits) ? Number(course.credits) : undefined,
+    credits: credits === '' ? undefined : Number(credits),
     source: { type: 'paste', line: index + 1, rawText: course.time },
   })), ['schoolId', 'academicYear', 'semester', 'courseCode', 'className', 'title', 'teacher', 'location', 'credits', 'dayOfWeek', 'periodLabel', 'startTime', 'endTime']);
 }
