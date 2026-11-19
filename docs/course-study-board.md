@@ -1,3 +1,9 @@
+## 2026-11-20：軟體版本／修訂版／Build 識別值不可誤作數量圖
+
+- 電腦與資管課程常以純數字標示 Version、Revision、Edition、Release、Build Number，或「版本／版次／修訂號／編譯號」。這些是版本識別或順序，不能將第 4 版畫成第 2 版的兩倍；現在保留可讀屏表格與逐列原文複製／下載，但不顯示比例長條。
+- 明確寫成「版本數／版本數量／修訂次數／發行次數」與 `Version Count`、`Number of Versions`、`Release Total` 等真正的計數仍可比較。新增模擬 DOM 正反測試，逐字核對來源欄位及圖表存在與否。只涉及白板表格與測試，未改教材、checkpoint 格式、API、依賴或其他模組。
+- 先前 head `75a0ab43fc8816513530627fe2021f720d3fab22` 的 CI／CodeQL／Course access review 在精確該版成功；不可視為新提交通過。GitHub App 5504170 正式 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同教材同題同機實測仍未取得；PR 維持 Draft，不合併、不部署。
+
 ## 2026-11-19：教材週次／章節／單元編號不再被畫成倍數
 
 - 課程表格若將 Week Number、Chapter、Lesson、Unit ID 或「章節」「單元」「課次」存為純數字，這些是教材的**位置與順序**，第 4 章不能因此顯示為第 2 章的兩倍。現在保留原文表格、可選取複製與下載，但不為這類欄位產生比例長條。

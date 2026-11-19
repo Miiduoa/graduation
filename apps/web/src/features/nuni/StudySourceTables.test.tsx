@@ -659,6 +659,42 @@ it('does not compare numeric ordinals, class levels or pages as quantities', () 
   }
 });
 
+it('keeps software versions, editions and build identifiers as text, not misleading ratios', () => {
+  for (const header of [
+    '版本', '軟體版本', '版本號', '版次', '修訂版', '修訂號', '發行版', '發行號', '編譯號',
+    'Version', 'Software Version', 'Version (major)', 'Revision', 'Revision No.',
+    'Edition', 'Release', 'Build Number', 'Build ID',
+  ]) {
+    const material = [
+      '| 軟體 | ' + header + ' |', '| --- | --- |',
+      '| 舊版 | 2 |', '| 新版 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['2', '4']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares explicit numbers of software releases rather than hiding real counts', () => {
+  for (const header of [
+    '版本數', '版本數量', '版本總數', '修訂次數', '發行次數',
+    'Number of Versions', 'Version Count', 'Revision Count',
+    'Release Total', 'Number of Editions',
+  ]) {
+    const material = [
+      '| 專案 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((node) => node.getAttribute('value')))
+      .toEqual(['2', '4']);
+    unmount();
+  }
+});
+
 it('still compares actual amounts when an English header mentions a year or course', () => {
   for (const header of ['Annual Budget', 'Yearly Budget', 'Course Credits', '學期學分',
     '練習題數', 'Number of Questions']) {

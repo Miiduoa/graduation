@@ -5,6 +5,15 @@ import { extractStudySourceTables, type StudySourceTable } from './studySourceTa
 import styles from './CourseStudyPanel.module.css';
 
 
+// Software release labels are identifiers, not ratio-scale measurements:
+// version 4 is not twice version 2, and build 300 is not three times build 100.
+// Explicit counts of versions/releases are measured quantities, however.
+const NON_RATIO_RELEASE_COLUMN =
+  /(?:版本|版次|修訂(?:版|號)|發行版|發行號|編譯號|\b(?:version|revision|edition|release)\b|\bbuild\s+(?:number|no\.?|id)\b)/iu;
+const RELEASE_COUNT_COLUMN = /(?:版本(?:數量|總數|數)|修訂(?:次數|總數)|發行(?:次數|總數))/u;
+const ENGLISH_RELEASE_COUNT_COLUMN =
+  /\b(?:number\s+of\s+(?:versions|revisions|editions|releases)|(?:version|revision|edition|release)\s+(?:count|total))\b/iu;
+
 type SourceValueRow = { label: string; original: string; amount: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
@@ -125,6 +134,9 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // "教室數" / "Room Count" header remains a valid measured quantity.
   if (/^(?:教室|實驗室|房號|寢室|寢室號|宿舍房號|房間號碼|校舍|大樓|座位|座位號|位置|地點)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
       /^(?:classroom|room|dorm(?:itory)?\s+room|lab(?:oratory)?|building|location|seat)(?:\s+(?:no\.?|number|id|code))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return null;
+  if (NON_RATIO_RELEASE_COLUMN.test(column) &&
+      !RELEASE_COUNT_COLUMN.test(column) &&
+      !ENGLISH_RELEASE_COUNT_COLUMN.test(column)) return null;
   // Repeated "學分" is an explicit source unit, not a value to infer.
   // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
