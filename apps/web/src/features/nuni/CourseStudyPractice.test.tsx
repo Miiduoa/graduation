@@ -626,3 +626,19 @@ it('warns that a pending-only retry also replaces ratings outside the selected s
   expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
   expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
 });
+
+
+it('keeps invisible-only pasted practice drafts unanswered until a visible attempt is entered', () => {
+  render(<Controller deck={cards.slice(0, 2)} />);
+  writeAnswer('\u200b\u2060\u200d\u00ad\ufe0f\u202e \n');
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(true);
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  writeAnswer('主鍵\u200d');
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(false);
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，草稿待自評' })).toBeTruthy();
+  revealAnswer();
+  expect(screen.getByRole('region', { name: '本題參考回答' })).toBeTruthy();
+});

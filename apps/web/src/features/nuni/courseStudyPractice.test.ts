@@ -7,6 +7,7 @@ import {
   buildStudyPracticeDeck,
   courseStudyPracticeFilename,
   getStudyPracticeSummary,
+  hasVisibleStudyAttempt,
   nextUnreviewedStudyPracticeIndex,
   previousUnreviewedStudyPracticeIndex,
   startStudyPracticeRound,
@@ -515,5 +516,34 @@ describe('practice note disclosure and filenames', () => {
     const filename = courseStudyPracticeFilename('😀'.repeat(150));
     expect(filename).toBe(`${'😀'.repeat(48)}-逐題複習.txt`);
     expect(Buffer.byteLength(filename, 'utf8')).toBeLessThan(255);
+  });
+});
+
+
+describe('visible attempts required for self-check', () => {
+  it('does not count invisible-only pasted text as a draft or unlock the reference answer', () => {
+    const invisible = '\u200b\u2060\u200d\u00ad\ufe0f\u202e \n\t';
+    expect(hasVisibleStudyAttempt(invisible)).toBe(false);
+    expect(hasVisibleStudyAttempt('　\r\n')).toBe(false);
+    const entered = change(round(2), { type: 'attempt', value: invisible });
+    expect(updateStudyPracticeRound(entered, { type: 'toggle_answer' })).toBe(entered);
+    expect(updateStudyPracticeRound(entered, { type: 'decide', outcome: 'understood' })).toBe(entered);
+    expect(getStudyPracticeSummary(entered)).toMatchObject({ answered: 0, unreviewed: 2 });
+    const exported = buildCourseStudyPracticeNotes('資料庫', '講義', entered);
+    expect(exported).toContain('（尚未作答）');
+    expect(exported).not.toContain(invisible);
+    expect(exported).not.toContain('參考答案秘密');
+  });
+
+  it('still accepts actual Chinese text, numbers, mathematical symbols and joined emoji', () => {
+    for (const answer of ['\u200b主鍵\u200d', '0', '∅', '👩‍💻']) {
+      expect(hasVisibleStudyAttempt(answer)).toBe(true);
+      const entered = change(round(2), { type: 'attempt', value: answer });
+      const revealed = updateStudyPracticeRound(entered, { type: 'toggle_answer' });
+      expect(revealed.responses[revealed.cards[0].id].answerVisible).toBe(true);
+      expect(getStudyPracticeSummary(revealed).answered).toBe(1);
+      const assessed = updateStudyPracticeRound(revealed, { type: 'decide', outcome: 'again' });
+      expect(assessed.responses[assessed.cards[0].id].outcome).toBe('again');
+    }
   });
 });

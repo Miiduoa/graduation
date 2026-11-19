@@ -70,6 +70,17 @@ function emptyResponse(): StudyPracticeResponse {
   return { attempt: '', answerVisible: false, hintVisible: false, outcome: null };
 }
 
+/**
+ * A pasted response made only of whitespace, direction markers, joiners or
+ * variation selectors is not a visible attempt. Do not unlock the reference
+ * answer or count it as answered. Visible text, symbols, numbers and emoji
+ * remain valid. This only affects practice presentation, not the v1 backup
+ * schema or source text.
+ */
+export function hasVisibleStudyAttempt(attempt: string): boolean {
+  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}]/gu, '').length > 0;
+}
+
 /** Read actual source order and only the selected lesson of the requested mode. */
 export function buildStudyPracticeDeck(
   sectionPassages: readonly (readonly StudyPassage[])[],
@@ -173,7 +184,7 @@ export function updateStudyPracticeRound(
         action.value === response.attempt) return round;
       return withResponse(round, { ...response, attempt: action.value, answerVisible: false, outcome: null });
     case 'toggle_answer':
-      if (!response.attempt.trim()) return round;
+      if (!hasVisibleStudyAttempt(response.attempt)) return round;
       // Hiding a reference answer is a disclosure choice, not a new self-rating.
       // Only changing the attempt or explicitly reassessing should clear/replace it.
       return withResponse(round, { ...response, answerVisible: !response.answerVisible });
@@ -181,7 +192,7 @@ export function updateStudyPracticeRound(
       return withResponse(round, { ...response, hintVisible: !response.hintVisible });
     case 'decide':
       if ((action.outcome !== 'again' && action.outcome !== 'understood') ||
-        !response.attempt.trim() || !response.answerVisible) return round;
+        !hasVisibleStudyAttempt(response.attempt) || !response.answerVisible) return round;
       return advance(withResponse(round, { ...response, outcome: action.outcome }));
     case 'undo_skip':
       // A deliberate undo restores an unanswered card without erasing its draft
@@ -228,7 +239,7 @@ export function getStudyPracticeSummary(round: StudyPracticeRound): StudyPractic
   };
   for (const card of round.cards) {
     const response = round.responses[card.id];
-    if (response?.attempt.trim()) summary.answered += 1;
+    if (response && hasVisibleStudyAttempt(response.attempt)) summary.answered += 1;
     if (response?.outcome === 'understood') summary.understood += 1;
     else {
       summary.pending += 1;
@@ -260,14 +271,14 @@ export function buildCourseStudyPracticeNotes(
   ];
   round.cards.forEach((card, index) => {
     const response = round.responses[card.id] ?? emptyResponse();
-    const canRevealAnswer = response.answerVisible && !!response.attempt.trim();
+    const canRevealAnswer = response.answerVisible && hasVisibleStudyAttempt(response.attempt);
     lines.push(
       '', '────────────────────',
       `第 ${index + 1} 題／共 ${round.cards.length} 題`,
       `原文位置：${card.label}`,
       `讀法：${modeLabels[card.mode]}・第 ${card.lessonId} 次講解`,
       '自我檢查題：', card.question,
-      '', '本輪試答：', response.attempt.trim() ? response.attempt : '（尚未作答）',
+      '', '本輪試答：', hasVisibleStudyAttempt(response.attempt) ? response.attempt : '（尚未作答）',
       `本人自評：${response.outcome ? outcomeLabels[response.outcome] : '尚未自評'}`,
       `原文提示：${response.hintVisible ? '已展開' : '未展開'}`,
     );
