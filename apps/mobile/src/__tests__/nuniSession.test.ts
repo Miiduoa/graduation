@@ -878,3 +878,62 @@ describe('private TronClass submission attachment capability', () => {
     expect(download).toHaveBeenCalledTimes(1);
   });
 });
+
+const cloudImageInput = {
+  base64: 'aGVsbG8=', mime: 'image/png' as const, kind: 'timetable' as const, explicitConsent: true,
+};
+it('sends consented import images with the private platform handle rather than native context', async () => {
+  const { controller } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const originalFetch = global.fetch;
+  const fetcher = jest.fn().mockResolvedValue({
+    ok: true, json: async () => ({ provider: 'cloud-vision', output: '{"complete":true,"rows":[]}' }),
+  } as Response);
+  global.fetch = fetcher;
+  try {
+    await expect(controller.recognizeImportImage(context, cloudImageInput)).resolves.toMatchObject({ ok: true });
+    expect(fetcher).toHaveBeenCalledWith('https://nuni.tw/api/personal-import/recognize-image',
+      expect.objectContaining({
+        method: 'POST', headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+        body: JSON.stringify({ kind: 'timetable', mime: 'image/png', imageBase64: 'aGVsbG8=',
+          explicitConsent: true, academicYear: '', semester: '' }),
+      }));
+    expect(context).toMatch(/^native-/);
+    await expect(controller.recognizeImportImage('stale-context', cloudImageInput))
+      .rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+    await expect(controller.recognizeImportImage(context, { ...cloudImageInput, explicitConsent: false }))
+      .resolves.toMatchObject({ ok: false, reason: 'invalid-input' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    global.fetch = originalFetch;
+    controller.dispose();
+  }
+});
+it.each(['cancel', 'logout'] as const)('aborts an in-flight cloud image request on %s', async (action) => {
+  const { controller } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const abort = new AbortController();
+  let requestSignal: AbortSignal | undefined;
+  const originalFetch = global.fetch;
+  const fetcher = jest.fn((_url: unknown, options?: RequestInit): Promise<Response> => {
+    requestSignal = options?.signal as AbortSignal;
+    return new Promise((_resolve, reject) => {
+      requestSignal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+  });
+  global.fetch = fetcher;
+  try {
+    const pending = controller.recognizeImportImage(context, { ...cloudImageInput, signal: abort.signal });
+    const rejected = expect(pending).rejects.toThrow();
+    expect(requestSignal?.aborted).toBe(false);
+    if (action === 'cancel') abort.abort();
+    else await controller.logout();
+    expect(requestSignal?.aborted).toBe(true);
+    await rejected;
+  } finally {
+    global.fetch = originalFetch;
+    controller.dispose();
+  }
+});

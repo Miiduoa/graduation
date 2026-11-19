@@ -45,6 +45,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   Reflect.deleteProperty(window, 'webkitSpeechRecognition');
+  Reflect.deleteProperty(document, 'permissionsPolicy');
+  Reflect.deleteProperty(document, 'featurePolicy');
 });
 
 it('fills a draft after a final Taiwanese Mandarin transcript without submitting it', () => {
@@ -73,6 +75,42 @@ it('explains microphone denial without changing the draft', () => {
   act(() => FakeSpeechRecognition.last.onerror?.({ error: 'not-allowed' }));
   expect(screen.getByRole('alert').textContent).toContain('允許權限');
   expect(onTranscript).not.toHaveBeenCalled();
+});
+
+it.each(['permissionsPolicy', 'featurePolicy'] as const)(
+  'keeps text work intact when %s blocks microphone access instead of starting capture',
+  (policyName) => {
+    const onTranscript = vi.fn();
+    const allowsFeature = vi.fn(() => false);
+    Object.defineProperty(document, policyName, { configurable: true, value: { allowsFeature } });
+    const previous = FakeSpeechRecognition.last;
+    render(<VoiceDictationButton onTranscript={onTranscript} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(allowsFeature).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    expect(allowsFeature).toHaveBeenCalledWith('microphone');
+    expect(FakeSpeechRecognition.last).toBe(previous);
+    expect(FakeSpeechRecognition.active).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('這個頁面未開放麥克風');
+    expect(screen.getByRole('alert').textContent).toContain('手機鍵盤的語音輸入');
+    expect(screen.getByRole('alert').textContent).not.toContain('允許權限');
+    expect(onTranscript).not.toHaveBeenCalled();
+
+    allowsFeature.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    expect(FakeSpeechRecognition.last.start).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '停止語音輸入' })).toBeTruthy();
+  },
+);
+
+it('still permits an explicit voice action when the browser cannot inspect its policy', () => {
+  Object.defineProperty(document, 'permissionsPolicy', {
+    configurable: true,
+    value: { allowsFeature: () => { throw new Error('unsupported policy inspection'); } },
+  });
+  render(<VoiceDictationButton onTranscript={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  expect(FakeSpeechRecognition.last.start).toHaveBeenCalledOnce();
 });
 
 it('disables speech if the browser does not support recognition', () => {

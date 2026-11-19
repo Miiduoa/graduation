@@ -8,7 +8,7 @@ const PANELS = ['outline', 'materials', 'assignments', 'quizzes', 'attendance', 
 export type CoursePanel = (typeof PANELS)[number];
 const LOCATION_EVENT = 'campus-course-location';
 
-function subscribe(changed: () => void) {
+export function subscribeCourseLocation(changed: () => void) {
   window.addEventListener('hashchange', changed);
   window.addEventListener('popstate', changed);
   window.addEventListener(LOCATION_EVENT, changed);
@@ -39,7 +39,7 @@ export function resolveCoursePanel(search: string, hash: string): CoursePanel {
 export function useCoursePanel() {
   // Keep this subscription as well: Next navigation can update the query without a popstate.
   const params = useSearchParams();
-  const location = useSyncExternalStore(subscribe, locationSnapshot, () => '');
+  const location = useSyncExternalStore(subscribeCourseLocation, locationSnapshot, () => '');
   const current = new URL(location || `?${params.toString()}`, 'https://campus.local');
   const panel = resolveCoursePanel(current.search, current.hash);
   const listParams = new URLSearchParams();
@@ -64,13 +64,18 @@ export function useCoursePanel() {
     const before = `${url.pathname}${url.search}${url.hash}`;
     const previousHash = url.hash;
     url.searchParams.set('view', next);
+    // Notification targets describe the arrival, not a permanent panel lock.
+    // A deliberate panel choice consumes them; the preceding history entry
+    // keeps the original target for browser Back.
+    url.searchParams.delete('assignmentId');
+    url.searchParams.delete('submissions');
     // Explicitly choosing another panel clears only a conflicting task target.
     // Unrelated fragments and the current campus stay in the address.
     if (parseCourseWorkHash(url.hash) && resolveCoursePanel('', url.hash) !== next) {
       url.hash = '';
     }
     const destination = `${url.pathname}${url.search}${url.hash}`;
-    if (destination !== before) window.history.pushState(null, '', destination);
+    if (destination !== before) window.history.pushState(window.history.state, '', destination);
     window.dispatchEvent(new Event(LOCATION_EVENT));
     if (previousHash !== url.hash) window.dispatchEvent(new HashChangeEvent('hashchange'));
   }

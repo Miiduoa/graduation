@@ -36,4 +36,20 @@
 
 上述校方唯讀與 emulator 結果不構成真人 nuni 綁定、BFF 同步／下載、附件上傳、正式 POST 或教師收件的端對端證據。
 
+### 同日續作：恢復預覽與綁定驗證
+
+續作開始時，預覽管理服務明確回報 stopped，原啟動 session 亦不存在；判定依據不是其他終端機對 loopback 的連線失敗。已以相同隔離 launcher 恢復完整 Next、Auth 與 Firestore emulator。11:43（台灣時間）在 daemon 自己的網路環境完成 `GET /health/live` 與 `GET /login`，均為 200；這個新檢查不登入、不帶 Cookie、不呼叫 TronClass binding API。
+
+TronClass launcher 的 seed 改為 `--missing-only`：已存在的公開測試 Auth 帳號不更新，Firestore fixture 只建立缺少的文件，其他錯誤仍中止。原本會驗證及操作 fixture binding 的 acceptance 沒有重新執行。此修正不會保存已停止 emulator 的記憶體，也不表示舊 binding 已復原。
+
+新瀏覽器分頁可開啟實際 Web，以「使用本機測試學生甲」按鈕完成正常 SDK 登入後，頁面顯示已登入帳號及尚未連接的 TronClass 表單。已核對可見欄位的語意、型別及 autocomplete；安全登入請求仍回傳 `locator_invalid`，後續 canonical origin 新分頁驗證遇到導航逾時。沒有可確認的真人綁定結果，也沒有從失敗推論密碼錯誤或綁定成功；未讀取、輸出或轉移帳密。本輪沒有取得可用的新截圖，不使用舊畫面冒充本輪證據。
+
+### 同日程式整合與回歸
+
+整合 `c9a187df` 與 main `b1f38039` 時保留新版登入、帳號切換、圖片辨識與 TronClass 私人下載能力，並補回抽出 `schoolLinking` 後遺漏的 `campus://tronclass` 路徑。真實 navigator parser 與課務入口回歸涵蓋這個缺口；Mobile 五個針對性測試檔共 183 個案例、Web 登入頁 118 個案例均通過，修改的八個 TS／TSX 檔案 ESLint 為零錯誤、零警告。
+
+`c9a187df` 的 [Build Web 工作](https://github.com/Miiduoa/graduation/actions/runs/44449516535/job/135313954182) 在實際 Web／Docker 建置及 standalone 驗證完成後，因 61.2 MB 的 Noto CJK 字型下載三次達到 60 秒期限而失敗，TronClass Chromium 檢查尚未執行。字型的單次有界期限調整為 180 秒，保留三次重試、具權限的 timeout 與持續失敗時阻擋。模擬持續下載 90 秒的回歸先在舊設定重現失敗，修正後 installer 九項檢查通過；seed 四項與 launcher 隔離一項共五項通過。兩組回歸已加入既有 CI readiness 檢查，不略過實際 Chromium 驗收，也未延長任何工作整體期限。
+
+這些是程式與本機 fixture 的驗證；新提交的 CI、指定 App 審查及正式發布仍需獨立取得結果。
+
 沒有新上傳、校方草稿儲存、重新繳交、撤回或正式送交。本次查核不會解除 production `contractVerified: false`。

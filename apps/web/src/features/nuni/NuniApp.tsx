@@ -30,6 +30,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useClientNow } from '@/lib/useMaterialClientState';
 import { useLocationHash } from '@/lib/useLocationHash';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useNuniSession } from './Session';
 import { CourseAccessBoundary, MutationForm, useClasses } from './CourseUI';
 import { CourseAssignments } from './CourseAssignments';
@@ -604,6 +605,7 @@ function AccountMembershipEntry({
 
 function NuniContent() {
   const pathname = usePathname() || '/';
+  const campusSearch = useCampusNavigationSearch(useSearchParams());
   const hydrated = useClientHydrated();
   const { session, loading, error, refresh, pendingLogout, logout } = useNuniSession();
   let content: ReactNode;
@@ -616,7 +618,7 @@ function NuniContent() {
         <p className={styles.muted}>
           查看各校資格，或用學校配發的信箱提出申請。課程身分仍由各課程管理。
         </p>
-        <Link className={styles.button} href="/classroom">
+        <Link className={styles.button} href={campusServiceHref('/classroom', campusSearch)}>
           前往我的課程
         </Link>
         {!error && !pendingLogout && (
@@ -650,7 +652,7 @@ function NuniContent() {
       <section className={styles.panel}>
         <h1>找不到這個課程空間</h1>
         <p className={styles.muted}>請回到課程空間確認網址，或從「所有服務」前往其他校園功能。</p>
-        <Link className={styles.button} href="/classroom">
+        <Link className={styles.button} href={campusServiceHref('/classroom', campusSearch)}>
           回到我的課程
         </Link>
       </section>

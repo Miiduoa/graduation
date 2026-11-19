@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Campus requires Chromium but tolerates unavailable system packages; Admin
 # (--fonts-noto-cjk) requires Chromium, system dependencies, and fonts.
-# Bound each stalled apt/download attempt so GitHub's 20-minute runner limit
-# can still report an actual failed installation rather than a hung check.
+# Bound each stalled apt/download attempt so CI reports an installation failure.
 set -euo pipefail
 
 if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--fonts-noto-cjk" ) ]]; then
@@ -39,7 +38,9 @@ if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
   retry_install 'Playwright system dependencies' 180s sudo "$(command -v python)" -m playwright install-deps chromium
   # Download as the runner user so the browser remains in that user's cache.
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
-  retry_install 'Noto CJK fonts' 60s sudo apt-get \
+  # The CJK package is over 60 MB. Use the same bounded download budget as
+  # Chromium so a progressing Ubuntu mirror transfer can finish between retries.
+  retry_install 'Noto CJK fonts' 180s sudo apt-get \
     -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \
     -o Acquire::Retries=3 install -y fonts-noto-cjk
 else

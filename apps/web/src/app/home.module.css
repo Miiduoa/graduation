@@ -112,6 +112,11 @@
   padding: var(--page-padding-block) var(--page-padding-inline) 28px;
   min-width: 0;
 }
+.personalTools {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
 .mainMap {
   padding-top: 12px;
 }

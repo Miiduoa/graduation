@@ -16,13 +16,18 @@ import {
   sanitizeInternalPath,
 } from '@/lib/navigation';
 import styles from '../servicePages.module.css';
+import loginStyles from './login.module.css';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { platformDestination } from '@/lib/accountDestination';
 import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServices';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { SchoolLoginHttpError, schoolLoginFailureCopy } from '@/lib/schoolLoginErrorCopy';
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
-import { buildCampusNavigationSearch, campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import {
+  buildCampusNavigationSearch,
+  campusServiceHref,
+  useCampusNavigationSearch,
+} from '@/lib/campusNavigation';
 
 function loginDestination(value: string | null): string {
   const safe = collapseInternalPathHash(
@@ -65,9 +70,11 @@ function LoginForm({
   const campusSearch = useCampusNavigationSearch(params);
   const selectedSchoolId = selection?.selectedSchoolId ?? null;
   const schoolDirectoryReady = !selection || !selection.loading;
-  const importHref = selectedSchoolId && selection?.selectedSchool
-    ? `/import?schoolId=${encodeURIComponent(selectedSchoolId)}`
-    : '/import';
+  const navigationSearch = selection?.requestedUnavailable
+    ? buildCampusNavigationSearch(params)
+    : campusSearch;
+  const href = (path: string) => campusServiceHref(path, navigationSearch);
+  const importHref = href('/import');
   const options = useSignInOptions(selectedSchoolId, schoolDirectoryReady);
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
@@ -85,17 +92,14 @@ function LoginForm({
   const hasSchoolIdentity = Boolean(
     user?.uid.startsWith('pu-') && (!selectedSchoolId || selectedSchoolId === 'pu'),
   );
-  const schoolUnavailable =
-    schoolTask && !options.loading && !options.error && !schoolAvailable;
+  const schoolUnavailable = schoolTask && !options.loading && !options.error && !schoolAvailable;
   // School destinations stay school-only; Google must not appear to fulfill them.
   const hideGoogle = schoolTask;
   const taskPath = new URL(destination, 'https://campus.local').pathname;
   const publicDestination = isPublicCampusPath(taskPath);
-  const merchantTask = !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
-  const directoryDestination = campusServiceHref(
-    '/search',
-    selection?.requestedUnavailable ? buildCampusNavigationSearch(params) : campusSearch,
-  );
+  const merchantTask =
+    !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
+  const directoryDestination = href('/search');
   const guestDestination = publicDestination ? destination : directoryDestination;
   useEffect(() => {
     const restore = () => {
@@ -182,9 +186,18 @@ function LoginForm({
   }
   if (merchantTask) {
     return (
-      <SiteShell title="店家帳號登入" subtitle="第一次使用可透過 Google 建立帳號。已申請店家請用原帳號登入。">
-        <NuniSignIn returnUrl={destination} issue={issue} />
-        <Link href="/login" className={styles.backLink}>查看其他身分入口</Link>
+      <SiteShell
+        title="店家帳號登入"
+        subtitle="第一次使用可透過 Google 建立帳號。已申請店家請用原帳號登入。"
+      >
+        <div className={loginStyles.flow}>
+          <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
+            <NuniSignIn returnUrl={destination} issue={issue} />
+          </div>
+          <Link href={href('/login')} className={styles.backLink}>
+            查看其他身分入口
+          </Link>
+        </div>
       </SiteShell>
     );
   }
@@ -205,208 +218,215 @@ function LoginForm({
             : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
-      {!schoolTask && <AccountRoleLinks showSchool />}
-      {localEmulator && <section className={styles.stateCard} aria-label="本機測試登入">
-        <h2>本機測試環境</h2>
-        <p>使用隔離的測試學生帳號登入 nuni。下一頁連接 TronClass 時，再另外輸入你本人的學校帳密。</p>
-        <Button type="button" variant="primary" loading={busy}
-          disabled={busy || platformBusy || schoolLoading || !schoolAvailable || options.loading || options.error}
-          onClick={() => {
-            if (!localEmulator) return;
-            // gitleaks:allow Public Auth emulator fixture; never a school credential.
-            void runSchoolLogin('S0000001', 'campus-test-1234', 'pu');
-          }}>
-          使用本機測試學生甲
-        </Button>
-        {error && <p role="alert" className={styles.errorNotice}>{error}</p>}
-      </section>}
-      <section
-        className={styles.connectionIntro}
-        aria-label={schoolTask ? '校務連線方式' : '開始使用平台'}
-      >
-        <div>
-          <p className={styles.connectionKicker}>{schoolTask ? '校園資料，一次整理' : '從日常需要的事開始'}</p>
-          <h2>{schoolTask ? '用匯入與 Google 帳號，整理自己的課表' : '一個 Google 帳號，就能開始'}</h2>
-          <p>
-            {schoolTask
-              ? '尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。'
-              : '整理課表與行程、參與公開交流，或接續已加入課班的教材與作業。需要校方提供的個人資料時，再另外連線學校帳號。'}
-          </p>
-        </div>
-        <div className={styles.connectionFacts}>
-          <span>{schoolTask ? '尚未開放學號直接登入' : '不需要學號或學校信箱'}</span>
-          <span>可自行匯入課表、成績與活動</span>
-        </div>
-      </section>
-      <div className={styles.loginLayout}>
-        {!hideGoogle && (
-          <NuniSignIn
-            returnUrl={destination}
-            issue={issue}
-            disabled={busy}
-            onStart={() => {
-              if (busyRef.current) return false;
-              busyRef.current = 'platform';
-              setPlatformBusy(true);
-              return true;
-            }}
-          />
+      <div className={loginStyles.flow}>
+        {localEmulator && <section className={styles.stateCard} aria-label="本機測試登入">
+          <h2>本機測試環境</h2>
+          <p>使用隔離的測試學生帳號登入 nuni。下一頁連接 TronClass 時，再另外輸入你本人的學校帳密。</p>
+          <Button type="button" variant="primary" loading={busy}
+            disabled={busy || platformBusy || schoolLoading || !schoolAvailable || options.loading || options.error}
+            onClick={() => {
+              if (!localEmulator) return;
+              // gitleaks:allow Public Auth emulator fixture; never a school credential.
+              void runSchoolLogin('S0000001', 'campus-test-1234', 'pu');
+            }}>
+            使用本機測試學生甲
+          </Button>
+          {error && <p role="alert" className={styles.errorNotice}>{error}</p>}
+        </section>}
+        {!schoolTask && destination !== '/' && (
+          <p className={loginStyles.continuation}>登入後會回到你原本的頁面，接著完成剛才的事。</p>
         )}
-        <details
-          className={`${styles.loginHelp} ${styles.schoolConnection}`}
-          aria-label="學校帳號登入"
-          open={schoolTask}
-        >
-          <summary>
-            <div className={styles.methodHeading}>
-              <div>
-                <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-                <h2>需要校務資料時再連線</h2>
+        <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
+          {!hideGoogle && (
+            <NuniSignIn
+              returnUrl={destination}
+              issue={issue}
+              disabled={busy}
+              onStart={() => {
+                if (busyRef.current) return false;
+                busyRef.current = 'platform';
+                setPlatformBusy(true);
+                return true;
+              }}
+            />
+          )}
+          <details
+            className={`${styles.loginHelp} ${styles.schoolConnection}`}
+            aria-label="學校帳號登入"
+            open={schoolTask}
+          >
+            <summary>
+              <div className={styles.methodHeading}>
+                <div>
+                  <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
+                  <h2>{schoolTask ? '確認你的學校帳號' : '需要校務資料時再連線'}</h2>
+                </div>
+                <span className={styles.methodStatus}>依服務開放</span>
               </div>
-              <span className={styles.methodStatus}>依服務開放</span>
-            </div>
-          </summary>
-          {(selection?.schools?.length ?? 0) > 0 && (
-            <label className={styles.schoolPicker} htmlFor="login-school">
-              <span>選擇學校</span>
-              <select
-                id="login-school"
-                value={selectedSchoolId ?? ''}
-                onChange={(event) => selection?.selectSchool(event.target.value || null)}
-                disabled={busy || platformBusy || schoolLoading || !schoolDirectoryReady}
-              >
-                <option value="">全部校園／未指定</option>
-                {selection?.schools.map((school) => (
-                  <option key={school.id} value={school.id}>{school.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          {selection?.selectedSchool && (
-            <p className={styles.selectedCampus}>目前選擇：{selection.selectedSchool.name}</p>
-          )}
-          {options.loading ? (
-            <p role="status">正在確認登入方式…</p>
-          ) : options.error ? (
-            <div role="alert">
-              <p>暫時無法確認登入方式，請重新連線後再試。</p>
-              <button type="button" className="btn" onClick={options.retry}>重新確認登入方式</button>
-            </div>
-          ) : schoolAvailable ? (
-            <>
-              <p>
-                學號直接登入目前尚未開放；開通後可用於讀取本人的課表、成績與校務紀錄。學校帳號驗證不會自動取得教師、課班或平台管理權限。
-              </p>
-              {schoolRequired && (
+            </summary>
+            {(selection?.schools?.length ?? 0) > 0 && (
+              <label className={styles.schoolPicker} htmlFor="login-school">
+                <span>選擇學校</span>
+                <select
+                  id="login-school"
+                  value={selectedSchoolId ?? ''}
+                  onChange={(event) => selection?.selectSchool(event.target.value || null)}
+                  disabled={busy || platformBusy || schoolLoading || !schoolDirectoryReady}
+                >
+                  <option value="">全部校園／未指定</option>
+                  {selection?.schools.map((school) => (
+                    <option key={school.id} value={school.id}>
+                      {school.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {selection?.selectedSchool && (
+              <p className={styles.selectedCampus}>目前選擇：{selection.selectedSchool.name}</p>
+            )}
+            {options.loading ? (
+              <p role="status">正在確認登入方式…</p>
+            ) : options.error ? (
+              <div role="alert">
+                <p>暫時無法確認登入方式，請重新連線後再試。</p>
+                <button type="button" className="btn" onClick={options.retry}>
+                  重新確認登入方式
+                </button>
+              </div>
+            ) : schoolAvailable ? (
+              <>
                 <p>
-                  {publicDestination
-                    ? '你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。'
-                    : '你要開啟的頁面要用學校帳號登入，Google 帳號不會自動取得校務權限。'}
+                  使用所選學校的帳號驗證身分。課程、教師與管理權限依各服務的授權提供。
                 </p>
-              )}
-              <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
-                <p className={styles.formIntro}>學號直接登入尚未開放；開通前請先匯入課表與成績，或以 Google 帳號登入平台服務。</p>
-                <Input
-                  id="student-id"
-                  name="studentId"
-                  label="學號"
-                  value={studentId}
-                  onChange={(e) => {
-                    setStudentId(e.target.value);
-                    setError('');
-                  }}
-                  maxLength={64}
-                  required
-                  autoComplete="username"
-                  autoCapitalize="characters"
-                  spellCheck={false}
-                  disabled={busy || platformBusy || schoolLoading}
-                />
-                <Input
-                  id="password"
-                  name="password"
-                  label="密碼"
-                  type="password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError('');
-                  }}
-                  required
-                  autoComplete="current-password"
-                  disabled={busy || platformBusy || schoolLoading}
-                />
-                {busy && (
-                  <p role="status" className={styles.loginProgress}>正在驗證帳號與建立校務資料連線…</p>
-                )}
-                {error && !localEmulator && (
-                  <p role="alert" className={styles.errorNotice}>
-                    {error}
+                {schoolRequired && (
+                  <p>
+                    {publicDestination
+                      ? '你選擇的個人功能仍使用學校帳號；瀏覽校園資訊不需登入。'
+                      : '你要開啟的頁面要用學校帳號登入，Google 帳號不會自動取得校務權限。'}
                   </p>
                 )}
-                <Button
-                  variant="primary"
-                  type="submit"
-                  fullWidth
-                  loading={busy}
-                  disabled={busy || platformBusy || schoolLoading || !studentId.trim() || !password}
-                >
-                  {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : '連線學校帳號'}
-                </Button>
-              </form>
-              <details className={styles.connectionDetails}>
-                <summary>連線後能看到哪些資料？</summary>
-                <p>學號直接登入目前尚未開放；開通後可依學校系統當次回應取得個人課表與成績。學校帳號驗證不等於取得平台的教師或管理權限。</p>
-                <p>密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。</p>
-              </details>
-            </>
-          ) : schoolUnavailable ? (
-            <p role="status">
-              學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。
-            </p>
-          ) : (
-            <p role="status">{STUDENT_ID_PREPARING_COPY}</p>
-          )}
-          <div className={styles.importRoute}>
-            <span className={styles.methodEyebrow}>另一種方式 · 各校適用</span>
-            <h3>不使用學號，也能匯入課表</h3>
-            <p>在校務系統開啟課表或成績列表後，直接複製網頁表格貼上，或匯入從學校下載的 HTML、PDF、CSV 與截圖。先核對預覽再儲存，不必提供學校密碼。</p>
-            <Link href={importHref} className="btn">前往資料匯入 <span aria-hidden="true">↗</span></Link>
-          </div>
-          <div className={styles.helpLinks}>
-            <Link href="/privacy">
-              了解資料使用方式 <span aria-hidden="true">↗</span>
+                <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
+                  <p className={styles.formIntro}>
+                    輸入學號與密碼，完成後返回原本的頁面。
+                  </p>
+                  <Input
+                    id="student-id"
+                    name="studentId"
+                    label="學號"
+                    value={studentId}
+                    onChange={(e) => {
+                      setStudentId(e.target.value);
+                      setError('');
+                    }}
+                    maxLength={64}
+                    required
+                    autoComplete="username"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    disabled={busy || platformBusy || schoolLoading}
+                  />
+                  <Input
+                    id="password"
+                    name="password"
+                    label="密碼"
+                    type="password"
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setError('');
+                    }}
+                    required
+                    autoComplete="current-password"
+                    disabled={busy || platformBusy || schoolLoading}
+                  />
+                  {busy && (
+                    <p role="status" className={styles.loginProgress}>
+                      正在驗證帳號與建立校務資料連線…
+                    </p>
+                  )}
+                  {error && !localEmulator && (
+                    <p role="alert" className={styles.errorNotice}>
+                      {error}
+                    </p>
+                  )}
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    fullWidth
+                    loading={busy}
+                    disabled={
+                      busy || platformBusy || schoolLoading || !studentId.trim() || !password
+                    }
+                  >
+                    {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : '連線學校帳號'}
+                  </Button>
+                </form>
+                <details className={styles.connectionDetails}>
+                  <summary>連線後能看到哪些資料？</summary>
+                  <p>
+                    依學校當次提供的資料查看個人紀錄。課程成員、教師與平台管理權限會分別確認。
+                  </p>
+                  <p>
+                    密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。
+                  </p>
+                </details>
+              </>
+            ) : schoolUnavailable ? (
+              <p role="status">
+                學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。
+              </p>
+            ) : (
+              <p role="status">{STUDENT_ID_PREPARING_COPY}</p>
+            )}
+            <div className={styles.importRoute}>
+              <span className={styles.methodEyebrow}>另一種方式 · 各校適用</span>
+              <h3>不使用學號，也能匯入課表</h3>
+              <p>可自行匯入課表、成績與活動</p>
+              <p>
+                在校務系統開啟課表或成績列表後，直接複製網頁表格貼上，或匯入從學校下載的
+                HTML、PDF、CSV 與截圖。先核對預覽再儲存，不必提供學校密碼。
+              </p>
+              <Link href={importHref} className="btn">
+                前往資料匯入 <span aria-hidden="true">↗</span>
+              </Link>
+            </div>
+            <div className={styles.helpLinks}>
+              <Link href={href('/privacy')}>
+                了解資料使用方式 <span aria-hidden="true">↗</span>
+              </Link>
+              <Link href={href('/terms')}>
+                閱讀使用條款 <span aria-hidden="true">↗</span>
+              </Link>
+            </div>
+            {schoolTask && (
+              <Link href={href('/login')} className={styles.backLink}>
+                改用一般登入
+              </Link>
+            )}
+            <Link href={href('/')} className={styles.backLink}>
+              ← 返回首頁
             </Link>
-            <Link href="/terms">
-              閱讀使用條款 <span aria-hidden="true">↗</span>
-            </Link>
-          </div>
-          {schoolTask && (
-            <Link href="/login" className={styles.backLink}>
-              改用一般登入
-            </Link>
-          )}
-          <Link href="/" className={styles.backLink}>
-            ← 返回首頁
-          </Link>
-        </details>
-      </div>
-      <section className={styles.guestAccess} aria-labelledby="guest-access-title">
-        <div>
-          <h2 id="guest-access-title">先瀏覽校園資訊</h2>
-          <p>地圖、公車、公開公告、餐廳與圖書館入口不需登入。資料是否提供，依各校來源為準。</p>
+          </details>
         </div>
-        <Link href={guestDestination} className="btn">
-          不登入，繼續瀏覽
-        </Link>
-        <nav aria-label="不需登入的校園服務">
-          {publicCampusServices.map((service) => (
-            <Link key={service.href} href={service.href}>
-              {service.title}
-            </Link>
-          ))}
-        </nav>
-      </section>
+        {!schoolTask && <AccountRoleLinks showSchool />}
+        <section className={styles.guestAccess} aria-labelledby="guest-access-title">
+          <div>
+            <h2 id="guest-access-title">先瀏覽校園資訊</h2>
+            <p>地圖、公車、公開公告、餐廳與圖書館入口不需登入。資料是否提供，依各校來源為準。</p>
+          </div>
+          <Link href={guestDestination} className="btn">
+            不登入，繼續瀏覽
+          </Link>
+          <nav aria-label="不需登入的校園服務">
+            {publicCampusServices.map((service) => (
+              <Link key={service.href} href={href(service.href)}>
+                {service.title}
+              </Link>
+            ))}
+          </nav>
+        </section>
+      </div>
     </SiteShell>
   );
 }

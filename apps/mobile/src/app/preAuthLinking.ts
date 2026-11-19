@@ -15,6 +15,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       Library: 'library',
       LibraryCatalog: 'library/catalog',
       Dormitory: 'dormitory',
+      Career: 'career',
       PlatformLostFound: 'platform-lost-found/:id?',
       SchoolInfo: 'school-info',
       StudentCard: 'student-card',

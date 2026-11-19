@@ -93,7 +93,8 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
           node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
-          node --test scripts/test-env/tronclass-launcher.test.mjs
+          node --test scripts/test-env/tronclass-launcher.test.mjs scripts/test-env/seed.test.cjs
+          bash scripts/qa/browser/install-playwright.test.sh
           python3 deploy/nuni-api/food-ordering/build_test.py
           python3 scripts/platform-lost-found/prepare_test.py
           python3 deploy/nuni-api/assistant-permissions/prepare_test.py

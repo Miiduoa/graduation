@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NavigationContext } from '@react-navigation/native';
 import {
   ActivityIndicator,
@@ -286,6 +286,7 @@ function Account({ onLogout }: { onLogout: () => void }) {
 function SignedInWorkspace({
   onLogout,
   initialTab,
+  entryTarget,
   courseAccountChanged,
   initialWorkspaceId,
   initialAssignmentId,
@@ -293,6 +294,7 @@ function SignedInWorkspace({
 }: {
   onLogout: () => void;
   initialTab?: Tab;
+  entryTarget?: PreAuthStackParamList['NuniWorkspace'];
   courseAccountChanged: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
@@ -309,10 +311,13 @@ function SignedInWorkspace({
   }, [navigation]);
   const isFocused = React.useCallback(() => navigation?.isFocused() ?? true, [navigation]);
   const focused = React.useSyncExternalStore(subscribeToFocus, isFocused, isFocused);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // React Navigation replaces params for a new explicit entry, even when its
+    // tab matches a previous entry. Reapply that intent before paint; ordinary
+    // tab changes and same-route renders keep the user's current work intact.
     if (initialTab && ['courses', 'food', 'merchant', 'account'].includes(initialTab))
       setTab(initialTab);
-  }, [initialTab, setTab]);
+  }, [entryTarget, initialTab, setTab]);
   return (
     <View testID="nuni-workspace" style={s.page}>
       <View accessibilityRole="tablist" style={s.tabs}>
@@ -478,8 +483,18 @@ export function NuniWorkspaceScreen({
     });
   };
   const merchantEntry = target?.tab === 'merchant';
+  const foodEntry = target?.tab === 'food';
+  const accountEntry = target?.tab === 'account';
   const openWeb = () => {
-    const path = merchantEntry ? '/merchant' : target?.tab === 'courses' ? '/classroom/login' : '/login';
+    const path = merchantEntry
+      ? '/merchant'
+      : target?.tab === 'courses'
+        ? '/classroom/login'
+        : foodEntry
+          ? '/login?returnUrl=%2Ffood'
+          : accountEntry
+            ? '/login?returnUrl=%2Fclassroom%2Faccount'
+            : '/login';
     void run('正在開啟網頁…', () => Linking.openURL(`https://nuni.tw${path}`));
   };
   if (auth.loading || action)
@@ -518,6 +533,7 @@ export function NuniWorkspaceScreen({
           key={`${auth.session.platformAccountId}:${auth.session.context}:${drafts.current!.revision}`}
           onLogout={logout}
           initialTab={courseAccountChanged ? 'courses' : target?.tab}
+          entryTarget={target}
           courseAccountChanged={courseAccountChanged}
           initialWorkspaceId={target?.workspaceId}
           initialAssignmentId={target?.assignmentId}
@@ -528,7 +544,7 @@ export function NuniWorkspaceScreen({
   const capability = getGoogleCredentialCapability();
   return (
     <ScrollView testID="nuni-workspace" contentContainerStyle={s.content}>
-      <Text style={s.eyebrow}>CAMPUS ONE</Text>
+      <Text style={s.eyebrow}>nuni</Text>
       <Text accessibilityRole="header" style={s.heading}>
         登入或建立帳號
       </Text>
@@ -537,11 +553,17 @@ export function NuniWorkspaceScreen({
         繼續時會建立帳號；再次登入會回到原本的帳號。
       </Text>
       <View style={s.panel}>
-        <Text style={s.title}>{merchantEntry ? '店家進駐與門市管理' : '從你的課程開始'}</Text>
+        <Text style={s.title}>
+          {merchantEntry ? '店家進駐與門市管理' : foodEntry ? '點餐與訂單' : accountEntry ? '帳號與資格' : '從你的課程開始'}
+        </Text>
         <Text style={s.body}>
           {merchantEntry
             ? '新店家可在登入後申請進駐。門市負責人請用原申請帳號查進度或管理門市。店員請向負責人確認登入方式。'
-            : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
+            : foodEntry
+              ? '登入後回到點餐頁；可用服務依店家實際開放狀態顯示。'
+              : accountEntry
+                ? '登入後查看你的學校資格、申請進度與帳號設定。'
+                : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
         </Text>
         {capability.available ? (
           <Action label="使用 Google 繼續" onPress={() => void run('正在登入…', auth.signIn)} />

@@ -1,7 +1,11 @@
-/** 主導覽固定插入「訊息」Tab（在「我的」之前），不刪既有入口。 */
+import { PRIMARY_DESTINATIONS } from '@campus/shared/src/primaryDestinations';
+
+const connect = PRIMARY_DESTINATIONS.find((destination) => destination.id === 'connect')!;
+
+/** 「交流」沿用訊息 route key，讓既有深層連結與通知仍可開啟。 */
 export const MESSAGE_TAB = {
-  key: '訊息',
-  label: '訊息',
+  key: connect.mobileTab,
+  label: connect.label,
   icon: 'ic_tab_messages' as const,
 };
 

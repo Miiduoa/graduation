@@ -105,7 +105,7 @@ if [ "$TRONCLASS_EMULATOR_READY" != true ]; then
   exit 1
 fi
 
-node scripts/test-env/seed.cjs >"$TRONCLASS_RUNTIME_DIR/seed.log" 2>&1
+node scripts/test-env/seed.cjs --missing-only >"$TRONCLASS_RUNTIME_DIR/seed.log" 2>&1
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
@@ -119,6 +119,11 @@ if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   node scripts/test-env/verify-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/acceptance.log" 2>&1
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."
+fi
+if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
+  cd "$TRONCLASS_PROJECT_ROOT"
+  node scripts/test-env/health-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/health.log" 2>&1
+  echo "Verified read-only health and login page requests; see $TRONCLASS_RUNTIME_DIR/health.json."
 fi
 wait "$TRONCLASS_WEB_PID"
 }
