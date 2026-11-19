@@ -407,6 +407,38 @@ it('pauses image-story auto-advance while the caption is focused and resumes the
   expect(viewer.next).toHaveBeenCalledOnce();
 });
 
+it('explains blocked continuous video playback and lets the student retry with native controls intact', async () => {
+  const { viewer, video } = renderVideo();
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play')
+    .mockRejectedValueOnce(new DOMException('Autoplay blocked', 'NotAllowedError'))
+    .mockResolvedValue(undefined);
+
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.getByRole('status').textContent).toContain('無法自動播放');
+  expect(screen.getByRole('button', { name: '連續播放' }).getAttribute('aria-pressed')).toBe('false');
+  expect(video).toHaveProperty('controls', true);
+  expect(viewer.next).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(play).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '停止連播' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('ignores a harmless interrupted play promise without reporting a playback error', async () => {
+  const { video } = renderVideo();
+  vi.spyOn(HTMLMediaElement.prototype, 'play')
+    .mockRejectedValue(new DOMException('Interrupted by pause', 'AbortError'));
+
+  fireEvent.click(screen.getByRole('button', { name: '連續播放' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '停止連播' }).getAttribute('aria-pressed')).toBe('true');
+  expect(video).toHaveProperty('controls', true);
+});
+
 it('does not inherit a failed video from a different campus with the same story ID', () => {
   const makeViewer = (schoolId: string, mediaUrl: string) => ({
     group: {
