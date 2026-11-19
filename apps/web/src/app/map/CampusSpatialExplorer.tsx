@@ -65,7 +65,33 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // Fallback is only for non-streaming WebViews / synthetic fetch stubs.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   if (!response.body || typeof response.body.getReader !== 'function') {
-    return response.json() as Promise<unknown>;
+    // Old embedded WebViews can expose a Response without a usable stream.
+    // We cannot stop their text() buffering mid-flight, but reject decoded
+    // content before JSON.parse() allocates a potentially huge object tree.
+    // Check UTF-16 length first (a lower bound on encoded UTF-8 bytes) to
+    // avoid creating an extra giant byte array for clearly oversized bodies.
+    if (typeof response.text === 'function') {
+      const raw = await response.text();
+      if (signal?.aborted) throw new Error('Building outline read aborted');
+      if (raw.length > MAX_DECLARED_FOOTPRINT_BYTES ||
+          new TextEncoder().encode(raw).byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      return JSON.parse(raw) as unknown;
+    }
+    // Nonstandard JSON-only fetch bridges (also used by older test mocks)
+    // have no raw-body interface. Still prevent oversized parsed values from
+    // being accepted as verified geometry, although their initial allocation
+    // cannot be bounded here.
+    const payload: unknown = await response.json();
+    if (signal?.aborted) throw new Error('Building outline read aborted');
+    const normalized = JSON.stringify(payload);
+    if (typeof normalized !== 'string' ||
+        normalized.length > MAX_DECLARED_FOOTPRINT_BYTES ||
+        new TextEncoder().encode(normalized).byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
+      throw new Error('Building outline response exceeded byte limit');
+    }
+    return payload;
   }
   const reader = response.body.getReader();
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
