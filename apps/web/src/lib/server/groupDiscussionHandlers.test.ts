@@ -5,7 +5,10 @@ import { FieldPath, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { createGroupDiscussionHandlers } from './groupDiscussionHandlers';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 
-type Row = { id: string; createdAt: Timestamp; [key: string]: unknown };
+type Row = { id: string; createdAt: Timestamp | string; [key: string]: unknown };
+const testTime = (value: Timestamp | string) =>
+  value instanceof Timestamp ? value : Timestamp.fromDate(new Date(value));
+
 function setup(rows: Row[], status: string | null = 'active', options: { profile?: Record<string, unknown> | null; group?: Record<string, unknown> | null; schoolStatus?: string | null; globalRows?: Row[]; canonicalError?: boolean } = {}) {
   const writes = vi.fn(() => {
     throw new Error('Listing must not write');
@@ -14,22 +17,22 @@ function setup(rows: Row[], status: string | null = 'active', options: { profile
   const globalReads = vi.fn();
   const membershipReads = vi.fn();
   const ordered = [...rows].sort(
-    (a, b) => b.createdAt.toMillis() - a.createdAt.toMillis() || b.id.localeCompare(a.id),
+    (a, b) => testTime(b.createdAt).toMillis() - testTime(a.createdAt).toMillis() || b.id.localeCompare(a.id),
   );
   function query(offset = 0, count = Infinity): any {
     return {
       orderBy: () => query(offset, count),
       startAt: (time: Timestamp) => {
-        const next = ordered.findIndex((r) => r.createdAt.toMillis() <= time.toMillis());
+        const next = ordered.findIndex((r) => testTime(r.createdAt).toMillis() <= time.toMillis());
         return query(next < 0 ? rows.length : next, count);
       },
       startAfter: (timeOrDoc: Timestamp | { id: string }, ref?: { id: string }) => {
         const id = ref?.id ?? (timeOrDoc as { id: string }).id;
-        const time = ref ? (timeOrDoc as Timestamp) : rows.find((r) => r.id === id)!.createdAt;
+        const time = ref ? (timeOrDoc as Timestamp) : testTime(rows.find((r) => r.id === id)!.createdAt);
         const next = ordered.findIndex(
           (r) =>
-            r.createdAt.toMillis() < time.toMillis() ||
-            (r.createdAt.isEqual(time) && r.id.localeCompare(id) < 0),
+            testTime(r.createdAt).toMillis() < time.toMillis() ||
+            (testTime(r.createdAt).isEqual(time) && r.id.localeCompare(id) < 0),
         );
         return query(next < 0 ? rows.length : next, count);
       },
@@ -132,6 +135,38 @@ it('includes legacy, partially populated and four-field published posts without 
   expect(page.posts.map((p) => p.id).sort()).toEqual(['active', 'empty-status', 'legacy', 'partial', 'published']);
   expect(page.hasMore).toBe(false);
   expect(writes).not.toHaveBeenCalled();
+});
+
+it('pages ISO-string createdAt posts in chronological order', async () => {
+  const { list } = setup([
+    row('c', { createdAt: '2024-05-03T00:00:00.000Z', status: 'active' }),
+    row('b', { createdAt: '2024-05-02T00:00:00.000Z', status: 'active' }),
+    row('a', { createdAt: '2024-05-01T00:00:00.000Z', status: 'active' }),
+  ]);
+  const first = await list(request({ pageSize: 1 }));
+  expect(first.posts.map((p) => p.id)).toEqual(['c']);
+  expect(first.hasMore).toBe(true);
+  const second = await list(request({ pageSize: 1, cursor: first.cursor }));
+  expect(second.posts.map((p) => p.id)).toEqual(['b']);
+  expect(second.hasMore).toBe(true);
+  const third = await list(request({ pageSize: 1, cursor: second.cursor }));
+  expect(third.posts.map((p) => p.id)).toEqual(['a']);
+  expect(third.hasMore).toBe(false);
+});
+
+it('pages global ISO-string posts from the groupPosts fallback', async () => {
+  const { list } = setup([], 'active', {
+    globalRows: [
+      row('c', { createdAt: '2024-05-03T00:00:00.000Z', status: 'active' }),
+      row('b', { createdAt: '2024-05-02T00:00:00.000Z', status: 'active' }),
+      row('a', { createdAt: '2024-05-01T00:00:00.000Z', status: 'active' }),
+    ],
+  });
+  const first = await list(request({ pageSize: 1 }));
+  expect(first.posts.map((p) => p.id)).toEqual(['c']);
+  expect(first.hasMore).toBe(true);
+  const second = await list(request({ pageSize: 1, cursor: first.cursor }));
+  expect(second.posts.map((p) => p.id)).toEqual(['b']);
 });
 
 it('excludes every explicit hide signal, even on otherwise published posts', async () => {

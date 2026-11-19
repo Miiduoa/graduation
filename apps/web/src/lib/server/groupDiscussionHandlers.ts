@@ -7,6 +7,31 @@ function validId(value: unknown): value is string {
   return typeof value === 'string' && !!value.trim() && value.length <= 160 && !value.includes('/');
 }
 
+/** Normalize Timestamp, ISO/date strings, millis, or {seconds,nanoseconds} for stable sort and cursors. */
+export function createdAtTime(value: unknown): Timestamp {
+  if (value instanceof Timestamp) return value;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return Timestamp.fromMillis(value.getTime());
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const ms = Date.parse(value);
+    if (!Number.isNaN(ms)) return Timestamp.fromMillis(ms);
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value > 1e12 ? value : value > 1e9 ? value * 1000 : value;
+    if (ms >= 0) return Timestamp.fromMillis(ms);
+  }
+  if (value && typeof value === 'object') {
+    const rec = value as { seconds?: unknown; nanoseconds?: unknown; _seconds?: unknown; _nanoseconds?: unknown };
+    const seconds = rec.seconds ?? rec._seconds;
+    const nanos = rec.nanoseconds ?? rec._nanoseconds ?? 0;
+    if (typeof seconds === 'number' && Number.isInteger(seconds) && typeof nanos === 'number' && Number.isInteger(nanos)) {
+      return new Timestamp(seconds, nanos);
+    }
+  }
+  return new Timestamp(0, 0);
+}
+
 export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
   async function listGroupDiscussionPage(request: CallableRequest) {
     const uid = request.auth?.uid;
@@ -67,15 +92,15 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
       let nextCursor: { id: string; createdAt: { seconds: number; nanoseconds: number } } | null =
         null;
       const batchSize = Math.max(size + 1, 50);
-      // Resume using the single-field index, then apply timestamp/document-ID
-      // boundaries in process, even if the cursor document has been deleted.
-      let scan = boundary ? base.startAt(boundary.time) : base;
+      // Apply the cursor only in process so ISO-string and Timestamp createdAt
+      // values stay in one order. startAt(Timestamp) would skip legacy string rows.
+      let scan = base;
       while (true) {
         const batch = globalDocs ? { docs: globalDocs } : await scan.limit(batchSize).get();
         for (const doc of batch.docs) {
           const data = doc.data();
-          // Legacy rows without a timestamp use the epoch for a stable JSON cursor.
-          const time = data.createdAt instanceof Timestamp ? data.createdAt : new Timestamp(0, 0);
+          // Legacy ISO/date strings and Timestamp values must sort and page the same way.
+          const time = createdAtTime(data.createdAt);
           if (
             boundary &&
             (time.seconds > boundary.time.seconds ||
@@ -145,10 +170,7 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
       if (batch.docs.length < count) break;
       legacyScan = legacyBase.startAfter(batch.docs[batch.docs.length - 1]!);
     }
-    const timeOf = (doc: PostDoc): Timestamp => {
-      const value = doc.data().createdAt;
-      return value instanceof Timestamp ? value : new Timestamp(0, 0);
-    };
+    const timeOf = (doc: PostDoc): Timestamp => createdAtTime(doc.data().createdAt);
     const sorted = legacyDocs.sort((a, b) => {
       const left = timeOf(a);
       const right = timeOf(b);
