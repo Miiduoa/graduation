@@ -111,7 +111,7 @@ it('loads general and filtered courseware activities without downloading locked 
   expect(JSON.stringify(body)).not.toMatch(/secret|cookies|upload-key-restricted/);
 });
 
-it('preserves main visibility for school-returned rows and attachments', async () => {
+it('does not expose hidden, unpublished or cross-course rows from school feeds', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({
     ok: true,
@@ -156,21 +156,16 @@ it('preserves main visibility for school-returned rows and attachments', async (
   const response = await request({ courseId: 10001 });
   expect(response.status).toBe(200);
   const body = await response.json();
-  expect(body.result.homework.map((row: { id: number }) => row.id)).toEqual([20001, 20002, 20003, 20004]);
-  expect(body.result.materials.map((row: { id: number }) => row.id)).toEqual([30001, 31002, 31003, 31004, 31001]);
-  expect(body.result.materials.find((row: { id: number }) => row.id === 31004).files).toEqual([
-    expect.objectContaining({ name: 'hidden.pdf', allowDownload: true }),
+  expect(body.result.homework.map((row: { id: number }) => row.id)).toEqual([20004]);
+  expect(body.result.materials.map((row: { id: number }) => row.id)).toEqual([31004]);
+  expect(body.result.materials[0].files).toEqual([
     expect.objectContaining({ name: 'public.pdf', allowDownload: true }),
   ]);
   expect(body.result.announcements).toEqual([
     expect.objectContaining({ title: '停課通知', source: 'course' }),
-    expect.objectContaining({ title: '外課公告', source: 'course' }),
-    expect.objectContaining({ title: '隱藏公告', source: 'course' }),
-    expect.objectContaining({ title: '外課公告', source: 'activity' }),
-    expect.objectContaining({ title: '草稿公告', source: 'activity' }),
-    expect.objectContaining({ title: '被另一來源隱藏的公告', source: 'activity' }),
   ]);
   expect(body.result.courseErrors).toEqual([]);
+  expect(JSON.stringify(body)).not.toMatch(/hidden-key|hidden\.pdf|外課公告|草稿公告|隱藏公告|被另一來源隱藏的公告/);
 });
 
 it('pages homework until total and does not treat a later 500 as an empty course', async () => {
@@ -235,7 +230,7 @@ it('counts source IDs even when a homework row has no displayable title', async 
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
 });
 
-it('retries incomplete homework after its stored short TTL expires', async () => {
+it('retries incomplete homework after a short TTL, including legacy cache entries', async () => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
 
@@ -253,10 +248,11 @@ it('retries incomplete homework after its stored short TTL expires', async () =>
   expect(immediate.result.cache.hit).toBe(true);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
 
-  // Expire both cache TTLs without waiting for the retry window.
+  // An older release stored incomplete homework for ten minutes. Its expiry
+  // alone must not prevent retrying the now-recovered school source.
   cached.snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
-  cached.snapshot.cache.expiresAt = new Date(Date.now() - 1).toISOString();
-  cached.expiresAt = new Date(Date.now() - 1);
+  cached.snapshot.cache.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  cached.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS);
   const recovered = await (await request()).json();
   expect(recovered.result.cache.hit).toBe(false);
   expect(recovered.result.homework).toHaveLength(2);
@@ -284,10 +280,10 @@ it('retries an incomplete upcoming-course list without discarding current homewo
   expect(immediate.result.cache.hit).toBe(true);
   expect(source.fetchCourses).toHaveBeenCalledTimes(2);
 
-  // Expire the stored retry window.
+  // Simulate an old partial cache with its ten-minute expiry still intact.
   stored.snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
-  stored.snapshot.cache.expiresAt = new Date(Date.now() - 1).toISOString();
-  stored.expiresAt = new Date(Date.now() - 1);
+  stored.snapshot.cache.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
+  stored.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS);
   const recovered = await (await request()).json();
   expect(recovered.result.cache.hit).toBe(false);
   expect(recovered.result.homework).toHaveLength(2);
@@ -393,7 +389,7 @@ it('marks announcements incomplete when the general feed fails despite dedicated
   ]);
 });
 
-it('retries incomplete course content after its stored one-minute TTL expires', async () => {
+it('retries incomplete course content after one minute even when an old cache has a longer TTL', async () => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
     query === 'type=courseware_activity'
@@ -424,9 +420,10 @@ it('retries incomplete course content after its stored one-minute TTL expires', 
   expect(cached.result.cache.hit).toBe(true);
   expect(source.fetchActivities).not.toHaveBeenCalled();
 
-  // Expire the stored course-content retry window.
+  // Simulate a legacy partial document that kept the full TTL. Even if its
+  // stored expiresAt is in the future, its 60-second retry window has elapsed.
   partial.fetchedAt = new Date(Date.now() - 61_000).toISOString();
-  partial.expiresAt = new Date(Date.now() - 1).toISOString();
+  partial.expiresAt = new Date(Date.now() + LMS_SNAPSHOT_TTL_MS).toISOString();
   const recovered = await (await request({ courseId: 10001 })).json();
   expect(recovered.result.cache.hit).toBe(false);
   expect(recovered.result.courseErrors).toEqual([]);
@@ -438,8 +435,6 @@ it('retries incomplete course content after its stored one-minute TTL expires', 
 });
 
 it.each([
-  { status: 401, thrown: false },
-  { status: 401, thrown: true },
   { status: 404, thrown: false },
   { status: 503, thrown: false },
   { status: 503, thrown: true },
@@ -466,19 +461,32 @@ it.each([
   expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
 
-it('keeps original course data when supplementary courseware throws a session error', async () => {
-  const { request, source } = setup();
+it('does not return partial data when supplementary courseware throws a session error', async () => {
+  const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
     if (query === 'type=courseware_activity') throw new Error('TronClass session 已失效，請重新登入');
     return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
   });
   const response = await request({ courseId: 10001 });
-  expect(response.status).toBe(200);
   const body = await response.json();
-  expect(body.result.materials).toHaveLength(1);
-  expect(body.result.courseErrors).toEqual([
-    expect.objectContaining({ area: 'materials', status: 401 }),
-  ]);
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
+it.each([false, true])('does not cache partial materials when the filtered courseware feed rejects the session (thrown=%s)', async thrown => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+    if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+    if (thrown) throw Object.assign(new Error('upstream failure'), { status: 401 });
+    return { ok: false, status: 401 };
+  });
+  const response = await request({ courseId: 10001 });
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
 
 it.each(['homework', 'activities', 'announcements'] as const)(
@@ -793,6 +801,136 @@ it('refetches a legacy cache missing sessionId', async () => {
   expect(store.docs.get(CACHE)?.sessionId).toBeDefined();
 });
 
+it('refetches a versionless legacy cache instead of presenting it as a session-bound hit', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchCourses).mockClear();
+
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
+it.each([undefined, 0, 1, 3, '2'])('refetches old or unknown projections so previously cached hidden items cannot survive an upgrade: %j', async version => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  if (version === undefined) delete cached.projectionVersion;
+  else cached.projectionVersion = version;
+  // The old projection retained no hidden flag. Only a fresh school request can
+  // establish that this formerly visible assignment and material are hidden.
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValue({ ok: true, value: {
+    homework_activities: [{ ...LMS_FIXTURE_HOMEWORK_OPEN, hidden: true }], total: 1,
+  } });
+  vi.mocked(source.fetchActivities).mockResolvedValue({ ok: true, value: [{ ...LMS_FIXTURE_MATERIAL, hidden: true }] });
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: true, value: [] });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.homework).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(body.result.announcements).toEqual([]);
+  expect(store.docs.get(CACHE)?.projectionVersion).toBe(2);
+});
+
+it.each([false, true])('corrupt course-error cache is a miss and cannot block manual refresh=%s', async refresh => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  (store.docs.get(CACHE)!.snapshot as Record<string, unknown>).courseErrors = [null];
+  const response = await request({ refresh });
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+});
+
+it('prunes a corrupt per-course error entry and recovers through a fresh owned course read', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, { errors: unknown[] }>;
+  extras['10001'].errors = [null];
+  vi.mocked(source.fetchActivities).mockClear();
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.courseErrors).toEqual([]);
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+});
+
+it('refetches versionless course cache even when the requested course is unknown', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchActivities).mockClear();
+
+  const body = await (await request({ courseId: 19999 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
+it('discards versionless cached materials rather than mixing them with a new session', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchActivities).mockClear().mockResolvedValue({ ok: true, value: [] });
+  vi.mocked(source.fetchCourseAnnouncements).mockClear().mockResolvedValue({ ok: true, value: [] });
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.materials).toEqual([]);
+  expect(body.result.announcements).toEqual([]);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
+it('does not expose legacy homework when the same LMS document rotates credentials', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  await store.db.doc(LMS).set({ cookies: { session: 'rotated-fixture' }, userId: 11 }, { merge: true });
+  vi.mocked(source.fetchCourses).mockClear().mockResolvedValue([{ id: 10002, name: '新連線課程' }]);
+  vi.mocked(source.fetchHomeworkPage).mockClear().mockResolvedValue({
+    ok: true, value: { homework_activities: [], total: 0 },
+  });
+  vi.mocked(source.fetchActivities).mockClear();
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.courses).toEqual([{ id: 10002, name: '新連線課程' }]);
+  expect(body.result.homework).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(source.fetchCourses).toHaveBeenCalledWith(
+    { session: 'rotated-fixture' }, { userId: 11, status: 'ongoing' },
+  );
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
+it('does not fall back to versionless homework when a safe refetch fails', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  const stale = structuredClone(store.docs.get(CACHE));
+  vi.mocked(source.fetchCourses).mockRejectedValueOnce(new Error('upstream unavailable'));
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('UNAVAILABLE');
+  expect(store.docs.get(CACHE)).toEqual(stale);
+});
+
 it.each([{}, { courseId: 19999 }, { courseId: 10001 }])(
   'refetches a versionless cache and stamps only fresh results (%j)',
   async (data) => {
@@ -1004,6 +1142,26 @@ it('does not overwrite a concurrent successful refresh with a retry result', asy
   const next = await (await request()).json();
   expect(next.result.cache.hit).toBe(true);
   expect(next.result.courseErrors).toEqual([]);
+});
+
+it.each([undefined, 1])('ignores a retry with an older visibility projection without hiding the current complete cache: %j', async projectionVersion => {
+  const { request, source, store } = setup();
+  await request({ courseId: 10001 });
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+  await request({ courseId: 10001, refresh: true });
+  const retry = store.docs.get(RETRY)!;
+  if (projectionVersion === undefined) delete retry.projectionVersion;
+  else retry.projectionVersion = projectionVersion;
+  const extras = retry.extras as Record<string, { materials: { title: string }[] }>;
+  extras['10001'].materials[0].title = '舊投影未核對的教材';
+  const calls = Object.values(source).map(method => vi.mocked(method).mock.calls.length);
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(body.result.homework).toHaveLength(2);
+  expect(JSON.stringify(body)).not.toContain('舊投影未核對的教材');
+  expect(Object.values(source).map(method => vi.mocked(method).mock.calls.length)).toEqual(calls);
 });
 
 it('preserves both cache documents if saving a retry fails', async () => {

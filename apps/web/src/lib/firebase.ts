@@ -7,6 +7,7 @@
 import { initializeApp, deleteApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   getDoc,
@@ -150,7 +151,14 @@ const EMULATOR_FIRESTORE_PORT = Number(
 const EMULATOR_AUTH_PORT = Number(
   process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_AUTH_PORT || '9099',
 );
+const EMULATOR_SAME_ORIGIN = process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_SAME_ORIGIN === 'true';
 const _emulatorWired = { functions: false, firestore: false, auth: false };
+
+function authEmulatorUrl(): string {
+  return EMULATOR_SAME_ORIGIN && typeof window !== 'undefined'
+    ? window.location.origin : `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`;
+}
 
 // 測試環境只能接 demo- 開頭的模擬器專案，避免本機測試不小心寫進正式專案。
 export function isEmulatorTestEnv(): boolean {
@@ -185,7 +193,14 @@ function getApp(): FirebaseApp {
 
 export function getDb(): Firestore {
   if (!db) {
-    db = getFirestore(getApp());
+    if (isEmulatorTestEnv() && EMULATOR_SAME_ORIGIN && typeof window !== 'undefined') {
+      db = initializeFirestore(getApp(), {
+        host: window.location.host,
+        ssl: window.location.protocol === 'https:',
+        experimentalForceLongPolling: true,
+      });
+      _emulatorWired.firestore = true;
+    } else db = getFirestore(getApp());
   }
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.firestore && typeof window !== 'undefined') {
     try {
@@ -213,7 +228,7 @@ export function getAuth(): Auth | null {
   }
   if (USE_FIREBASE_EMULATOR && !_emulatorWired.auth && auth) {
     try {
-      connectAuthEmulator(auth, `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`, {
+      connectAuthEmulator(auth, authEmulatorUrl(), {
         disableWarnings: true,
       });
       _emulatorWired.auth = true;
@@ -387,7 +402,7 @@ export async function signInWithPuStudentId(
   try {
     const stagingAuth = initializeAuth(stagingApp, { persistence: inMemoryPersistence });
     if (USE_FIREBASE_EMULATOR) {
-      connectAuthEmulator(stagingAuth, `http://${EMULATOR_HOST}:${EMULATOR_AUTH_PORT}`, {
+      connectAuthEmulator(stagingAuth, authEmulatorUrl(), {
         disableWarnings: true,
       });
     }

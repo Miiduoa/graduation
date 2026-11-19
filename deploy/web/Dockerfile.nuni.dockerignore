@@ -25,6 +25,7 @@
 !backend/functions/dormSsoIdentity.js
 !backend/functions/puScraper.js
 !backend/functions/tronClassScraper.js
+!backend/functions/tronClassAccountLifecycle.js
 !backend/functions/campusStoryAccessBinding.js
 !backend/functions/campusAnnouncements/
 !backend/functions/campusAnnouncements/catalog.js

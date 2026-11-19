@@ -35,6 +35,8 @@ set -euo pipefail
 printf 'fonts\n' >> "$MOCK_LOG"
 count="$(grep -c '^fonts$' "$MOCK_LOG" || true)"
 (( count > MOCK_FONT_FAILS ))
+# Model a download that is still progressing when its attempt deadline expires.
+(( ${MOCK_ATTEMPT_DEADLINE%s} >= MOCK_FONT_SECONDS )) || exit 124
 MOCK
 cat > "$mock_dir/bin/sleep" <<'MOCK'
 #!/usr/bin/env bash
@@ -46,6 +48,7 @@ set -euo pipefail
 [[ "$1" == '--kill-after=5s' ]]
 shift
 limit="$1"; shift
+export MOCK_ATTEMPT_DEADLINE="$limit"
 printf 'timeout:%s\n' "$limit" >> "$MOCK_LOG"
 count="$(grep -c '^timeout:' "$MOCK_LOG" || true)"
 if (( count <= MOCK_TIMEOUT_FAILS )); then exit 124; fi
@@ -53,7 +56,7 @@ if (( count <= MOCK_TIMEOUT_FAILS )); then exit 124; fi
 MOCK
 chmod +x "$mock_dir/bin/"*
 export PATH="$mock_dir/bin:$PATH" MOCK_LOG="$mock_dir/install.log"
-export MOCK_DEPS_FAILS=0 MOCK_BROWSER_FAILS=0 MOCK_FONT_FAILS=0 MOCK_TIMEOUT_FAILS=0
+export MOCK_DEPS_FAILS=0 MOCK_BROWSER_FAILS=0 MOCK_FONT_FAILS=0 MOCK_TIMEOUT_FAILS=0 MOCK_FONT_SECONDS=0
 
 # Transient dependency, browser and font failures each recover independently.
 export MOCK_DEPS_FAILS=1 MOCK_BROWSER_FAILS=1 MOCK_FONT_FAILS=1
@@ -71,6 +74,19 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >"$mock_dir/output" 2>
 [[ "$(grep -c '^sudo:timeout$' "$MOCK_LOG")" -eq 4 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 2 ]]
 export MOCK_TIMEOUT_FAILS=0
+
+# The 61 MB CJK package can download successfully while needing more than a
+# minute. A healthy 90-second transfer must not be killed on every retry.
+export MOCK_FONT_SECONDS=90
+: > "$MOCK_LOG"
+if ! bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >"$mock_dir/output" 2>&1; then
+  cat "$mock_dir/output" >&2
+  echo 'A healthy CJK font download exceeded an unnecessarily short deadline' >&2
+  exit 1
+fi
+[[ "$(grep -c '^fonts$' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^sleep:' "$MOCK_LOG" || true)" -eq 0 ]]
+export MOCK_FONT_SECONDS=0
 
 # Admin fails closed independently for dependencies, browser downloads and fonts.
 for failure in MOCK_DEPS_FAILS MOCK_BROWSER_FAILS MOCK_FONT_FAILS; do
@@ -113,4 +129,4 @@ if bash "$script_dir/install-playwright.sh" --unsupported >"$mock_dir/output" 2>
   exit 1
 fi
 [[ ! -s "$MOCK_LOG" ]]
-echo 'Browser installation retry and privilege tests: 8/8 passed'
+echo 'Browser installation retry and privilege tests: 9/9 passed'
