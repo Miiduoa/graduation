@@ -957,10 +957,25 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
     expect(comparisonSummaries(container)).toEqual([]);
     unmount();
   }
+});
+
+it('keeps repeated percentage labels independently traceable to each original source row', () => {
   const repeated = ['| 項目 | 完成率 |', '| --- | --- |',
     '| 甲 | 20% |', '| 甲 | 30% |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
-  expect(comparisonSummaries(container)).toEqual([]);
+  expect(comparisonSummaries(container)).toEqual([
+    '展開第 2 欄「完成率」的原文百分比（100% 滿格）',
+  ]);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
+    value: bar.getAttribute('value'),
+    max: bar.getAttribute('max'),
+    label: bar.getAttribute('aria-label'),
+  }))).toEqual([
+    { value: '20', max: '100', label: '甲：20%；教材原文第 3 行' },
+    { value: '30', max: '100', label: '甲：30%；教材原文第 4 行' },
+  ]);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['20%', '30%']);
 });
 
 
