@@ -15,7 +15,6 @@ export function SiteFooter() {
         <Link href="/support">支援</Link>
         <Link href="/account-deletion">刪除帳號</Link>
         <Link href="/settings">設定</Link>
-        <Link href="/demo/oral-exam">口試示範</Link>
       </nav>
     </footer>
   );

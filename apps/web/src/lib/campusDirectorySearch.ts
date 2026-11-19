@@ -1,5 +1,5 @@
 import { sanitizeInternalPath } from './navigation';
-import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
+import { CAMPUS_SERVICES, SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
 
 export const DIRECTORY_SEARCH_STORAGE_KEY = 'campus.directory.search.v1';
 export const DIRECTORY_SEARCH_MAX_QUERY = 160;
@@ -12,9 +12,27 @@ export type DirectorySearchSnapshot = {
   query: string;
   category: ServiceCategory | 'all';
   open: boolean;
+  /** Optional opaque account/campus binding. Unscoped callers keep their existing behavior. */
+  scope?: string;
+  expanded?: string[];
 };
 
 type DirectorySearchStore = Partial<Record<DirectorySearchSource, DirectorySearchSnapshot>>;
+
+const sectionIds = new Set([
+  ...SERVICE_CATEGORIES.map((category) => `group:${category.id}`),
+  ...CAMPUS_SERVICES.map((service) => `service:${service.href}`),
+]);
+
+function safeExpanded(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === 'string' && sectionIds.has(id)))].slice(0, 50);
+}
+
+export function expandedDirectorySections(container: Element | null): string[] {
+  return safeExpanded(Array.from(container?.querySelectorAll('details[open][data-directory-section]') ?? [])
+    .map((element) => element.getAttribute('data-directory-section')));
+}
 
 function isCategory(value: unknown): value is ServiceCategory | 'all' {
   return value === 'all' || SERVICE_CATEGORIES.some((item) => item.id === value);
@@ -52,7 +70,8 @@ function isSnapshot(value: unknown): value is DirectorySearchSnapshot {
     typeof item.destination === 'string' &&
     typeof item.query === 'string' &&
     isCategory(item.category) &&
-    typeof item.open === 'boolean'
+    typeof item.open === 'boolean' &&
+    (item.scope === undefined || (typeof item.scope === 'string' && item.scope.length <= 1024))
   );
 }
 
@@ -92,6 +111,8 @@ export function rememberDirectorySearch(
     query: string;
     category?: ServiceCategory | 'all';
     open?: boolean;
+    scope?: string;
+    expanded?: string[];
   },
 ): void {
   const path = internalPathname(snapshot.path);
@@ -104,6 +125,8 @@ export function rememberDirectorySearch(
     query: sanitizeQuery(snapshot.query),
     category: isCategory(snapshot.category) ? snapshot.category : 'all',
     open: snapshot.open !== false,
+    ...(snapshot.scope !== undefined ? { scope: snapshot.scope.slice(0, 1024) } : {}),
+    ...(safeExpanded(snapshot.expanded).length ? { expanded: safeExpanded(snapshot.expanded) } : {}),
   };
   writeStore(store);
 }
@@ -118,11 +141,16 @@ export function forgetDirectorySearch(source: DirectorySearchSource): void {
 export function restoreDirectorySearch(
   source: DirectorySearchSource,
   currentPath: string,
+  scope?: string,
 ): DirectorySearchSnapshot | null {
   const current = internalPathname(currentPath);
   if (!current) return null;
   const snapshot = readStore()[source];
   if (!snapshot) return null;
+  if (scope !== undefined && snapshot.scope !== scope) {
+    forgetDirectorySearch(source);
+    return null;
+  }
   const path = internalPathname(snapshot.path);
   const destination = internalSitePath(snapshot.destination);
   if (!path || !destination || path !== snapshot.path || destination !== snapshot.destination) {
@@ -136,5 +164,7 @@ export function restoreDirectorySearch(
     query: sanitizeQuery(snapshot.query),
     category: snapshot.category,
     open: snapshot.open,
+    ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+    ...(safeExpanded(snapshot.expanded).length ? { expanded: safeExpanded(snapshot.expanded) } : {}),
   };
 }
