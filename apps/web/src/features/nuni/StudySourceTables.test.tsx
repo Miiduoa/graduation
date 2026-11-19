@@ -1720,3 +1720,34 @@ it.each([
     view.unmount();
   });
 });
+
+
+it('shows the exact authorized source line beside each derived bar and updates it on lesson replacement', () => {
+  const numeric = [
+    '教材說明：這些數字均來自下表。',
+    '',
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+    '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={numeric} />);
+  const valueMeters = Array.from(view.container.querySelectorAll('meter'));
+  expect(valueMeters).toHaveLength(2);
+  expect(valueMeters[0].closest('li')?.textContent).toContain('資料庫3原文第 5 行');
+  expect(valueMeters[1].closest('li')?.textContent).toContain('網路2原文第 6 行');
+
+  const percentages = [
+    '另一份教材',
+    '| 課程 | 完成率 |',
+    '| --- | --- |',
+    '| 資料庫 | 75% |',
+    '| 網路 | 50% |',
+  ].join('\n');
+  view.rerender(<StudySourceTables text={percentages} />);
+  const percentMeters = Array.from(view.container.querySelectorAll('meter'));
+  expect(percentMeters).toHaveLength(2);
+  expect(percentMeters[0].closest('li')?.textContent).toContain('資料庫75%原文第 4 行');
+  expect(percentMeters[1].closest('li')?.textContent).toContain('網路50%原文第 5 行');
+  expect(screen.queryByText('原文第 6 行')).toBeNull();
+});

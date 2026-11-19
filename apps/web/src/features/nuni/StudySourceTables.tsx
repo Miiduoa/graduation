@@ -23,7 +23,9 @@ const ENGLISH_NON_RATIO_STATUS_COLUMN =
 const STATUS_COUNT_COLUMN = /(?:人數|數量|總數|次數|筆數|件數|個數|數目)/u;
 const ENGLISH_STATUS_COUNT_COLUMN = /\b(?:count|total|number\s+of|quantity)\b/iu;
 
-type SourceValueRow = { label: string; original: string; amount: number };
+// Carry the exact Markdown source line through both derived views, so students
+// can cross-check every bar against the original authorized lesson table.
+type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
 // After this limit, restore a clear manual-copy route without changing the source.
@@ -158,7 +160,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   let rowFormat: 'plain' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
-  for (const [label, original] of table.rows) {
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original || labels.has(label.trim())) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
     const format = plainNumber.test(original) ? 'plain' : creditMatch ? 'credits' : null;
@@ -167,7 +169,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
     const amount = Number(creditMatch?.[1] ?? original);
     if (!Number.isFinite(amount)) return null;
     labels.add(label.trim());
-    rows.push({ label, original, amount });
+    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;
 }
@@ -182,14 +184,14 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (!isBoundedPercentageColumn(table.headers[1])) return null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
-  for (const [label, original] of table.rows) {
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original ||
         !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original) ||
         labels.has(label.trim())) return null;
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;
     labels.add(label.trim());
-    rows.push({ label, original, amount });
+    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows;
 }
@@ -211,6 +213,7 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
+            <span className={styles.note}>原文第 {row.sourceLine} 行</span>
             <meter min={0} max={100} value={row.amount}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；滿格 100%'} />
@@ -241,6 +244,7 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
+            <span className={styles.note}>原文第 {row.sourceLine} 行</span>
             <meter min={0} max={max} value={row.amount}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
