@@ -78,6 +78,24 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it('does not mislabel punctuation-only text as a verifiable AI source quotation', () => {
+    const original = '主鍵？（主鍵）……—，。\n公式 x²+y²，圖示 👩‍💻。';
+    // Exact punctuation may appear repeatedly, but it cannot by itself
+    // support an explanation; never show a misleading "source located" label.
+    for (const quote of ['？', '（', '）', '……', '—', '，。']) {
+      expect(original.includes(quote)).toBe(true);
+      expect(locateStudyEvidence(original, quote)).toBeNull();
+    }
+    // Complete words, punctuation attached to words, mathematics and emoji
+    // must still be located at their exact unnormalized source positions.
+    for (const quote of ['主鍵？', '（主鍵）', 'x²+y²', '👩‍💻']) {
+      const located = locateStudyEvidence(original, quote);
+      if (!located) throw new Error('Readable source quotation unexpectedly rejected');
+      expect(located.quote).toBe(quote);
+      expect(located.before + located.quote + located.after).toBe(original);
+    }
+  });
+
   it('rejects explicit bidi formatting and isolate controls without rejecting native RTL text', () => {
     // Every quote is byte-identical to source; visually it may render in a
     // different order or suppress/isolate part of the surrounding citation.

@@ -10,11 +10,11 @@ export type StudyEvidenceLocation = {
 };
 
 export function locateStudyEvidence(source: string, quote: string, occurrence = 0): StudyEvidenceLocation | null {
-  // A model's "quotation" made entirely of invisible formatting, isolated
-  // combining marks or Braille blank is not readable source evidence, even
+  // A model's "quotation" made entirely of punctuation, invisible formatting,
+  // isolated combining marks or Braille blank is not readable source evidence, even
   // when identical bytes occur in the PDF. Keep real words, maths and emoji
   // unchanged, including any format characters attached to them.
-  if (!source || !quote.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '')) return null;
+  if (!source || !quote.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800]/gu, '')) return null;
   // Explicit Unicode bidi marks, embeddings, overrides and isolates can make
   // a quote render in a different reading order from its literal source bytes.
   // Reject those controls only in the citation, not the original document.

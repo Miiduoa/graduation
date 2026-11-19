@@ -1,3 +1,9 @@
+## 2026-11-19：標點符號不能單獨冒充 AI 原文佐證
+
+- 原文定位器過去只要找到相同位元組，就可能把「？」、「……」、「，。」或括號等**純標點引句**標示為「已定位」。即使原文確實有那些標點，也無法支持 AI 對教材內容的解釋，容易造成學生誤認佐證已核對。
+- 原文定位器現在額外拒絕全部由 Unicode 標點、空白或不可見字元組成的模型引句；保留教材原文不變。完整中文字句、附著標點的語句、數學式與 Emoji 原文仍可依字素邊界逐位元定位。新增純標點正反回歸（單字與完整可見引句仍必須成功，候選引句若只有標點必須失敗）。
+- 這只保證「不能以純標點當證據」，**不代表**已判斷引用的事實相關性或模型回答正確。正式 Vitest／CI、CodeQL、指定 App 5504170 APPROVED、Maestro、iOS／Android 真機和 Ahaboard 同教材同題同裝置仍須按新 head 逐一驗收；PR 保持 Draft，不合併、不部署。不增加套件或上傳私人教材，閱讀／練習 checkpoint 格式不變。
+
 ## 2026-11-19：雙向排版控制字元不可被當成可目視核對的原文引句
 
 - 重新核對 PR #719 前版精確 head `1e10c347177930e54ae1dece1d827bb92d0e0c2a`：CI #44488465714 的 Web/Mobile、Web/Mobile Build、Lint/TypeCheck、Security Gates、Firestore/Functions/Assistant 均成功，CodeQL #44488465463 與 Course access review #44488465510 也成功；這些僅適用於**前版** SHA。GitHub App 5504170 的 APPROVED、Maestro／iOS／Android 真機及 Ahaboard 同條件驗收仍未取得。
