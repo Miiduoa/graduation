@@ -49,4 +49,23 @@ describe('exact source-to-lesson evidence', () => {
       before: 'aa', quote: 'aa', after: '', occurrences: 2,
     });
   });
+  it('does not mark invisible-only AI citations as visible source evidence', () => {
+    const original = '甲\u200b乙 / \u2800 / \u0301 / \u202e';
+    for (const invisibleQuote of ['\u200b', '\u2800', '\u0301', '\u202e', ' \u2800 ']) {
+      // Exact byte overlap alone is insufficient for a readable citation.
+      expect(original.includes(invisibleQuote)).toBe(true);
+      expect(locateStudyEvidence(original, invisibleQuote)).toBeNull();
+    }
+  });
+
+  it('still locates visible text, maths and emoji with attached Unicode marks exactly', () => {
+    const original = '甲\u200b乙；數學 x²+y²；e\u0301；👩‍💻';
+    for (const quote of ['甲\u200b乙', 'x²+y²', 'e\u0301', '👩‍💻']) {
+      const found = locateStudyEvidence(original, quote);
+      expect(found?.quote).toBe(quote);
+      expect(found?.before + found?.quote + found?.after).toBe(original);
+      expect(found?.occurrences).toBe(1);
+    }
+  });
+
 });
