@@ -75,10 +75,12 @@ vi.mock('@/components/VoiceDictationButton', () => ({
 const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
 
+const router = vi.hoisted(() => ({ search: null as string | null }));
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(window.location.search),
+  useSearchParams: () => new URLSearchParams(router.search ?? window.location.search),
 }));
 beforeEach(() => {
+  router.search = null;
   window.history.replaceState({}, '', '/search');
   sessionStorage.clear();
   selection.current = null;
@@ -278,7 +280,9 @@ it.each(['職涯', '實習', '校內工讀'])(
     expect(target.pathname).toBe('/career');
     expect(target.searchParams.get('campus')).toBe('nthu');
     expect(target.searchParams.has('q')).toBe(false);
-    expect(screen.getByRole('link', { name: /^職涯/ }).getAttribute('href')).toBe('/career?campus=nthu');
+    expect(screen.getByRole('link', { name: /^職涯/ }).getAttribute('href')).toBe(
+      '/career?campus=nthu',
+    );
     // A matching catalog result already provides the destination; do not
     // repeat the same career entry as an additional quick action.
     expect(screen.getAllByRole('link')).toHaveLength(1);
@@ -842,7 +846,6 @@ it.each([false, true])(
   },
 );
 
-
 it('shows everyday services first while searchable secondary entries remain reachable', () => {
   render(<SearchPage />);
   expect(expandedLinks()).toHaveLength(16);
@@ -865,4 +868,158 @@ it('returns to the expanded family after opening a secondary service', () => {
   expect(family.open).toBe(true);
   expect(family.parentElement!.closest('details')!.open).toBe(true);
   expect(feedback.getAttribute('href')).toBe('/grades?tab=feedback');
+});
+
+it('keeps the newest draft while earlier Router URL updates arrive after typing', () => {
+  router.search = '';
+  const view = render(<SearchPage />);
+  const search = screen.getByRole('searchbox') as HTMLInputElement;
+  fireEvent.change(search, { target: { value: '借' } });
+  const earlier = window.location.search;
+  fireEvent.change(search, { target: { value: '借書' } });
+  const latest = window.location.search;
+  expect(new URLSearchParams(latest).get('q')).toBe('借書');
+
+  router.search = earlier;
+  view.rerender(<SearchPage />);
+  expect(search.value).toBe('借書');
+  expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+  router.search = latest;
+  view.rerender(<SearchPage />);
+  expect(search.value).toBe('借書');
+});
+
+it('keeps the latest search after more than 32 edits when the first Router update arrives late', () => {
+  router.search = '';
+  const view = render(<SearchPage />);
+  const search = screen.getByRole('searchbox') as HTMLInputElement;
+  fireEvent.change(search, { target: { value: '借書1' } });
+  const earliest = window.location.search;
+  for (let index = 2; index <= 40; index += 1) {
+    fireEvent.change(search, { target: { value: `借書${index}` } });
+  }
+  const latest = window.location.search;
+  router.search = earliest;
+  view.rerender(<SearchPage />);
+  expect(window.location.search).toBe(latest);
+  expect(search.value).toBe('借書40');
+  router.search = latest;
+  view.rerender(<SearchPage />);
+  expect(search.value).toBe('借書40');
+});
+
+it('publishes a completed composition without losing its draft to an earlier Router update', () => {
+  router.search = '';
+  const view = render(<SearchPage />);
+  const search = screen.getByRole('searchbox') as HTMLInputElement;
+  search.focus();
+  fireEvent.change(search, { target: { value: '借' } });
+  const earlier = window.location.search;
+  const saved = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+
+  fireEvent.compositionStart(search);
+  fireEvent.change(search, { target: { value: '借書' } });
+  expect(window.location.search).toBe(earlier);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(saved);
+  router.search = earlier;
+  view.rerender(<SearchPage />);
+  expect(search.value).toBe('借書');
+  fireEvent.keyDown(search, { key: 'Escape' });
+  fireEvent.keyDown(search, { key: 'Enter', isComposing: true });
+  fireEvent.submit(screen.getByRole('search', { name: '尋找服務' }));
+  expect(search.value).toBe('借書');
+  expect(document.activeElement).toBe(search);
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+
+  fireEvent.compositionEnd(search);
+  expect(new URL(window.location.href).searchParams.get('q')).toBe('借書');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('借書');
+});
+
+it('lets a real Back traversal to an empty directory override queued drafts and session restore', () => {
+  router.search = '';
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+  const pending = window.location.search;
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('公車');
+  window.history.replaceState(null, '', '/search');
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+
+  router.search = pending;
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  router.search = '';
+  view.rerender(<SearchPage />);
+  expect(screen.getByRole('heading', { name: '服務目錄' })).toBeTruthy();
+  view.unmount();
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+});
+
+it('lets a history traversal to an earlier pending query win over newer typing', () => {
+  router.search = '';
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+  const earlier = window.location.search;
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  window.history.replaceState(null, '', '/search' + earlier);
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  router.search = earlier;
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+  expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+});
+
+it('publishes filters through the Router without echoing its private history state', () => {
+  const original = window.history.replaceState.bind(window.history);
+  original({ __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['search'] }, '', '/search');
+  router.search = '';
+  const history = vi
+    .spyOn(window.history, 'replaceState')
+    .mockImplementation((data, title, url) => {
+      original(data, title, url);
+      // Next skips its URL notification when a caller supplies one of its own internal entries.
+      if (!data?.__NA) router.search = window.location.search;
+    });
+  try {
+    const view = render(<SearchPage />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    view.rerender(<SearchPage />);
+    expect(new URLSearchParams(router.search!).get('q')).toBe('借書');
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  } finally {
+    history.mockRestore();
+  }
+});
+
+it.each(['submit', 'button'] as const)(
+  'moves to results on %s without sending typed text to AI or opening a service',
+  (action) => {
+    userState.uid = 'alice';
+    render(<SearchPage />);
+    const search = screen.getByRole('searchbox');
+    fireEvent.change(search, { target: { value: '借書' } });
+    search.focus();
+    const address = window.location.href;
+    if (action === 'submit') fireEvent.submit(screen.getByRole('search', { name: '尋找服務' }));
+    else fireEvent.click(screen.getByRole('button', { name: '查看結果' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: '搜尋結果' }));
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+    expect(window.location.href).toBe(address);
+  },
+);
+
+it('clears only the search phrase and returns focus to the input while keeping its category', () => {
+  render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
+  expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(new URL(window.location.href).searchParams.get('category')).toBe('campus');
+  expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
 });

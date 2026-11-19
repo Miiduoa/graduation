@@ -2,14 +2,25 @@
 
 const ORDER_ID = /^[\w.-]{1,128}$/;
 
-export const ORDER_FOCUS_MISSING =
-  '找不到這筆訂單。請確認目前選擇的校園及登入帳號。';
+export const ORDER_FOCUS_MISSING = '找不到這筆訂單。請確認目前選擇的校園及登入帳號。';
 
 export function parseOrderFocusId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const id = value.trim();
   if (!id || id === '.' || id === '..' || id.includes('/') || !ORDER_ID.test(id)) return null;
   return id;
+}
+
+/** Platform order IDs and tenant scope are separate from Firebase's orderId links. */
+export function parsePlatformOrderLink(params: Pick<URLSearchParams, 'get' | 'getAll'>) {
+  const tenant = params.get('tenant');
+  const orderId = params.get('order');
+  const invalid =
+    params.getAll('tenant').length > 1 ||
+    params.getAll('order').length > 1 ||
+    (tenant !== null && !/^[a-z0-9][a-z0-9-]{0,198}[a-z0-9]$/.test(tenant)) ||
+    (orderId !== null && (!tenant || !/^[A-Za-z0-9_-]{1,100}$/.test(orderId)));
+  return { tenant, orderId, invalid };
 }
 
 export function orderFocusElementId(orderId: string): string {

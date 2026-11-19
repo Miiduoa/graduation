@@ -9,6 +9,7 @@ import { SiteFooter } from './SiteFooter';
 import styles from '@/app/home.module.css';
 import notices from './SystemNotice.module.css';
 import { SchoolDataScope } from './SchoolDataScope';
+import { AccountDemoFeature } from './AccountDemoFeature';
 import { AcademicNavigation } from './academic/AcademicNavigation';
 import { ServiceBreadcrumbs } from './ServiceBreadcrumbs';
 
@@ -56,6 +57,7 @@ export function SiteShell(props: {
         {props.schoolName && <SchoolDataScope schoolName={props.schoolName} />}
         <Suspense fallback={null}>
           <AcademicNavigation />
+          <AccountDemoFeature />
         </Suspense>
         <Suspense fallback={<p role="status">載入中…</p>}>{props.children}</Suspense>
         <SiteFooter />
