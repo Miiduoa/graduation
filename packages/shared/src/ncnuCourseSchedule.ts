@@ -30,6 +30,16 @@ export function ncnuCourseMeetings(time: string, semester?: string): NcnuCourseM
   const maxWeeklyTimeLength = 7 * periodOrder.length * 2;
   if (typeof time !== 'string' || time.length > maxWeeklyTimeLength ||
       !/^(?:[1-7][a-mxyz]+)+$/.test(time)) return null;
+  // Repeated periods can occur across separate weekday groups in a malformed
+  // official cache. A preview must reject the same overlapping slots as import.
+  const seenSlots = new Set<string>();
+  for (const [, day, periods] of time.matchAll(/([1-7])([a-mxyz]+)/g)) {
+    for (const period of periods) {
+      const slot = `${day}:${period}`;
+      if (seenSlots.has(slot)) return null;
+      seenSlots.add(slot);
+    }
+  }
   const verified = semester === '1142' || semester === '1151';
   return Array.from(time.matchAll(/([1-7])([a-mxyz]+)/g)).flatMap(([, day, periods]) => {
     const runs: string[] = [];
@@ -68,8 +78,9 @@ export function ncnuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   // student's personal timetable. An empty source value remains explicitly
   // unknown; other malformed values require manual verification, as at NTHU.
   const credits = course.credits;
-  if (credits !== '' && (!/^\d+(?:\.\d+)?$/.test(credits) ||
-      !Number.isFinite(Number(credits)) || Number(credits) > 40)) return null;
+  if (typeof credits !== 'string' || (credits !== '' &&
+      (credits.length > 32 || !/^\d+(?:\.\d+)?$/.test(credits) ||
+       !Number.isFinite(Number(credits)) || Number(credits) > 40))) return null;
   // One course cannot safely import the same weekday/period twice, even when
   // the provider splits it into separate day groups. Keep the raw public listing
   // for manual verification instead of writing overlapping personal sessions.
