@@ -145,6 +145,19 @@ function isExplicitNonClassroomCategory(value: unknown): boolean {
     NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(category));
 }
 
+/** Missing school scope is legacy/unscoped even when an importer writes
+ * null, undefined or whitespace instead of omitting the property. Such rows
+ * must still reserve their IDs; otherwise an ambiguous duplicate can be
+ * selected by the map using a published building's ID. A real foreign-school
+ * marker (or malformed non-string marker) is never treated as local.
+ */
+function isCandidateInSchoolScope(location: CampusMapPlaceLike, school: string): boolean {
+  if (!('schoolId' in location)) return true;
+  const suppliedSchool: unknown = location.schoolId;
+  return suppliedSchool == null ||
+    (typeof suppliedSchool === 'string' && (!suppliedSchool.trim() || suppliedSchool === school));
+}
+
 function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
   const name = comparisonText(suppliedName);
   if (!name) return false;
@@ -251,7 +264,7 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // this school's ID and hide a valid destination with the same identifier.
     // Rows without a schoolId still count: legacy data may be unscoped, and
     // duplicate IDs within the selected campus must continue to fail closed.
-    if ('schoolId' in location && location.schoolId !== school) continue;
+    if (!isCandidateInSchoolScope(location, school)) continue;
     counts.set(location.id, (counts.get(location.id) ?? 0) + 1);
   }
   const matches = locations.filter((location) => {
@@ -271,7 +284,7 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       (location.lat === 0 && location.lng === 0)
     )
       return false;
-    if ('schoolId' in location && location.schoolId !== school) return false;
+    if (!isCandidateInSchoolScope(location, school)) return false;
     // Recheck the existing sourced identity rather than trusting a reused ID.
     // Classroom identity accepts normalized names and verified bilingual aliases.
     // Once the supplied name is verified, use the catalog name for attribution's
