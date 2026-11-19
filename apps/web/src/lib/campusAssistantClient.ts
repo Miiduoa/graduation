@@ -244,6 +244,7 @@ export interface CreateOrderResult {
   cafeteria?: string;
   total?: number;
   itemCount?: number;
+  status?: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled';
   /** 伺服器下單時一起發的取餐號碼；沒拿到是 null */
   queueNumber?: number | null;
   queueStatus?: 'assigned' | 'pending_confirmation';

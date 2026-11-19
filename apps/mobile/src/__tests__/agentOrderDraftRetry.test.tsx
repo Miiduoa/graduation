@@ -154,6 +154,61 @@ test('助理下單卡成功：寫末 6 碼；還沒號碼時寫待給號碼兩�
   expect(view.queryByText(/co_abcdef123456/)).toBeNull();
 });
 
+test.each([
+  ['cancelled', null, '訂單已取消'],
+  ['cancelled', 7, '訂單已取消'],
+  ['completed', null, '訂單已完成'],
+  ['completed', 7, '訂單已完成'],
+])('成功回執的終態 %s（號碼 %s）不顯示取餐指示或要求重下', async (status, queueNumber, text) => {
+  mockCallable.mockResolvedValue({ data: { success: true, orderId: 'co_terminal', status, queueNumber } });
+  const view = render(<AgentCardList cards={[card]} />);
+
+  await act(async () => fireEvent.press(view.getByText('✅ 確認下單')));
+
+  expect(view.getByText(text)).toBeTruthy();
+  expect(view.getByText('訂單紀錄')).toBeTruthy();
+  expect(view.queryByText(/下單成功|取餐號碼|待給號碼|請到櫃台確認|沒送出去|操作失敗|店家取消/)).toBeNull();
+  expect(view.queryByText('再試一次')).toBeNull();
+  expect(view.queryByText('✅ 確認下單')).toBeNull();
+  fireEvent.press(view.getByText('我的訂單'));
+  expect(mockNavigate).toHaveBeenCalledWith('StudentOrders');
+  expect(mockCallable).toHaveBeenCalledTimes(1);
+});
+
+test.each([['cancelled', '訂單已取消'], ['completed', '訂單已完成']])(
+  '逾時後查回的 %s 訂單也呈現終態',
+  async (status, text) => {
+    mockCallable.mockRejectedValueOnce(timeout());
+    mockGetDoc.mockImplementation(async () => ({
+      exists: () => true,
+      data: () => ({ userId: 'alice', requestId: mockCallable.mock.calls[0][0].requestId, status, queueNumber: null }),
+    }));
+    const view = render(<AgentCardList cards={[card]} />);
+
+    await act(async () => fireEvent.press(view.getByText('✅ 確認下單')));
+
+    expect(view.getByText(text)).toBeTruthy();
+    expect(view.queryByText(/下單成功|待給號碼|請到櫃台確認|店家取消/)).toBeNull();
+    expect(view.queryByText('再試一次')).toBeNull();
+    expect(mockCallable).toHaveBeenCalledTimes(1);
+  },
+);
+
+test.each([['cancelled', '訂單已取消'], ['completed', '訂單已完成']])(
+  '已保存的 %s 回執卡照實呈現終態',
+  (status, text) => {
+    const view = render(<AgentCardList cards={[{
+      kind: 'order_submitted',
+      payload: { orderId: 'co_terminal', cafeteria: '校園餐廳', total: 95, status, queueNumber: 7 },
+    }]} />);
+
+    expect(view.getByText(text)).toBeTruthy();
+    expect(view.queryByText(/下單成功|取餐號碼|待給號碼|操作失敗|店家取消/)).toBeNull();
+    fireEvent.press(view.getByText('查看我的訂單'));
+    expect(mockNavigate).toHaveBeenCalledWith('StudentOrders');
+  },
+);
+
 test('助理下單卡在餐廳下單關閉時顯示權限文案且不呼叫下單', async () => {
   mockLoadPermissions.mockResolvedValue({
     permissions: { createOrder: false },

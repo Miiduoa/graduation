@@ -128,10 +128,21 @@ export async function answerPublicCourseQuestion(input: {
         input.origin === 'mobile' &&
         response.url &&
         !isPublicCourseResponseUrl(response.url, intent)
-      )
+      ) {
+        controller.abort();
         throw new Error('Unexpected public course response URL');
-      if (!response.ok || Number(response.headers.get('content-length')) > MAX_RESPONSE_BYTES)
+      }
+      const lengthHeader = response.headers.get('content-length');
+      const declaredBytes = lengthHeader === null ? 0 : Number(lengthHeader);
+      const contentType = response.headers.get('content-type');
+      // Match the native catalog's metadata guard before reading untrusted bodies.
+      if (!response.ok ||
+          (lengthHeader !== null && (!/^\d+$/.test(lengthHeader.trim()) ||
+            !Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_RESPONSE_BYTES)) ||
+          (contentType !== null && !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) {
+        controller.abort();
         throw new Error('Public course source unavailable');
+      }
       const body = await response.text();
       if (!current() || controller.signal.aborted) throw cancelled();
       if (exceedsPublicCourseResponseByteLimit(body)) throw new Error('Public course response too large');

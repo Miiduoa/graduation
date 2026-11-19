@@ -25,22 +25,24 @@ export function StoryViewer({
   const closeButton = useRef<HTMLButtonElement>(null);
   const videoElement = useRef<HTMLVideoElement>(null);
   const videoBar = useRef<HTMLElement>(null);
+  // Save whether a video was already playing before either a panel or keyboard reading interrupted it.
   const beforePanel = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
   const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const [auto, setAuto] = useState(false);
-  const [readingFocused, setReadingFocused] = useState(false);
+  const [readingScope, setReadingScope] = useState<string | null>(null);
   const [panelFor, setPanelFor] = useState<string | null>(null);
   const [hidden, setHidden] = useState(() => document.hidden);
-  const [loadedId, setLoadedId] = useState<string | null>(null);
-  const [failedId, setFailedId] = useState<string | null>(null);
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
+  const [failedScope, setFailedScope] = useState<string | null>(null);
   const story = viewer.group.stories[viewer.index]!;
-  const onMediaFailure = useCallback(() => setFailedId(story.id), [story.id]);
+  const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
+  const readingFocused = readingScope === scope;
+  const onMediaFailure = useCallback(() => setFailedScope(scope), [scope]);
   const mediaUrl = usePrivateMedia(story.mediaUrl, onMediaFailure);
   const photo = story.kind === 'image' && !!story.mediaUrl;
   const video = story.kind === 'video';
   const media = photo || video;
-  const failedVideo = video && (!mediaUrl || failedId === story.id);
-  const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
+  const failedVideo = video && (!mediaUrl || failedScope === scope);
   const canReply =
     story.allowReplies !== false &&
     !!viewer.viewerUid &&
@@ -55,7 +57,7 @@ export function StoryViewer({
     !hidden &&
     !readingFocused &&
     !video &&
-    (!photo || loadedId === story.id || failedId === story.id);
+    (!photo || loadedScope === scope || failedScope === scope);
   const onNext = useRef(viewer.next);
   useEffect(() => {
     onNext.current = viewer.next;
@@ -78,7 +80,7 @@ export function StoryViewer({
       });
     }
     const saved = beforePanel.current;
-    if (panelOpen && element) {
+    if ((panelOpen || readingFocused) && element) {
       if (saved?.element !== element) {
         beforePanel.current = { element, playing: !element.paused && !element.ended };
       }
@@ -93,7 +95,7 @@ export function StoryViewer({
       setHidden(document.hidden);
       if (!element) return;
       if (document.hidden) {
-        resumeOnReturn = !panelOpen && auto && !element.paused && !element.ended;
+        resumeOnReturn = !panelOpen && !readingFocused && auto && !element.paused && !element.ended;
         element.pause();
       } else if (resumeOnReturn) {
         resumeOnReturn = false;
@@ -105,11 +107,11 @@ export function StoryViewer({
       live = false;
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [auto, panelOpen, failedVideo, story.id]);
+  }, [auto, panelOpen, readingFocused, failedVideo, scope]);
 
   useEffect(() => {
     remaining.current = DWELL_MS;
-  }, [story.id]);
+  }, [scope]);
   useEffect(() => {
     if (!running) return;
     const start = performance.now();
@@ -154,7 +156,7 @@ export function StoryViewer({
         style={{ backgroundColor: media ? '#121212' : story.bgColor || '#243b35' }}
       >
         <header className={styles.header}>
-          <div className={styles.segments} aria-hidden="true" key={story.id}>
+          <div className={styles.segments} aria-hidden="true" key={scope}>
             {viewer.group.stories.map((s, i) => (
               <span key={s.id} data-past={i < viewer.index}>
                 {i === viewer.index && (
@@ -205,10 +207,10 @@ export function StoryViewer({
           aria-description="閱讀區取得鍵盤焦點時會暫停自動播放，移開焦點後接續剩餘時間。"
           tabIndex={0}
           onFocus={(e) => {
-            if (e.target === e.currentTarget) setReadingFocused(true);
+            if (e.target === e.currentTarget) setReadingScope(scope);
           }}
           onBlur={(e) => {
-            if (e.target === e.currentTarget) setReadingFocused(false);
+            if (e.target === e.currentTarget) setReadingScope((current) => current === scope ? null : current);
           }}
           onPointerDown={(e) => {
             // Keep native seek controls and selectable captions free of story gestures.
@@ -232,6 +234,17 @@ export function StoryViewer({
             const start = gesture.current;
             gesture.current = null;
             if (!start || e.pointerId !== start.pointerId) return;
+            // A pointer may begin on the canvas and finish over selectable text or
+            // native seek controls. Touch pointer capture can keep e.target on the
+            // original canvas, so also inspect the actual release coordinates.
+            const isProtectedRelease = (target: EventTarget | null) =>
+              (target instanceof Element && target.closest('[data-story-caption]') !== null) ||
+              (target instanceof HTMLVideoElement &&
+                e.clientY >= target.getBoundingClientRect().bottom - 60);
+            if (
+              isProtectedRelease(e.target) ||
+              isProtectedRelease(document.elementFromPoint?.(e.clientX, e.clientY) ?? null)
+            ) return;
             const dx = e.clientX - start.x;
             const dy = e.clientY - start.y;
             if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
@@ -249,9 +262,9 @@ export function StoryViewer({
             }
           }}
         >
-          {video && mediaUrl && failedId !== story.id ? (
+          {video && mediaUrl && failedScope !== scope ? (
             <video
-              key={story.id}
+              key={scope}
               ref={videoElement}
               className={styles.photo}
               src={mediaUrl ?? undefined}
@@ -268,10 +281,10 @@ export function StoryViewer({
                 }
               }}
               onEnded={() => {
-                if (auto && !panelOpen && !document.hidden) viewer.next();
+                if (auto && !panelOpen && !readingFocused && !document.hidden) viewer.next();
               }}
               onError={() => {
-                setFailedId(story.id);
+                setFailedScope(scope);
                 setAuto(false);
               }}
             />
@@ -279,18 +292,18 @@ export function StoryViewer({
             <p role="status" className={styles.unavailable}>
               這段影片暫時無法播放。
             </p>
-          ) : photo && failedId !== story.id ? (
+          ) : photo && failedScope !== scope ? (
             <Image
               unoptimized
               loading="eager"
               width={900}
               height={1600}
-              key={story.id}
+              key={scope}
               className={styles.photo}
               src={mediaUrl!}
               alt="限時動態照片"
-              onLoad={() => setLoadedId(story.id)}
-              onError={() => setFailedId(story.id)}
+              onLoad={() => setLoadedScope(scope)}
+              onError={() => setFailedScope(scope)}
             />
           ) : photo ? (
             <p className={styles.unavailable}>照片暫時無法顯示</p>
@@ -303,8 +316,8 @@ export function StoryViewer({
               aria-description={media ? '使用方向鍵閱讀說明文字，不會切換限時動態。' : undefined}
               tabIndex={media ? 0 : undefined}
               data-story-caption={media ? 'true' : undefined}
-              onFocus={media ? () => setReadingFocused(true) : undefined}
-              onBlur={media ? () => setReadingFocused(false) : undefined}
+              onFocus={media ? () => setReadingScope(scope) : undefined}
+              onBlur={media ? () => setReadingScope((current) => current === scope ? null : current) : undefined}
             >
               {story.text}
             </p>
@@ -343,7 +356,11 @@ export function StoryViewer({
               type="button"
               aria-pressed={auto}
               disabled={failedVideo}
-              onClick={() => setAuto((v) => !v)}
+              onClick={() => {
+                // Keep the student's latest playback choice, but defer playing until reading ends.
+                if (beforePanel.current) beforePanel.current.playing = !auto;
+                setAuto((v) => !v);
+              }}
             >
               {video ? (auto ? '停止連播' : '連續播放') : auto ? '暫停' : '自動播放'}
             </button>
