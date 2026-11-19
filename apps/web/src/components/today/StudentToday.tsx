@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { buildPersonalToday } from '@campus/shared';
@@ -80,8 +80,6 @@ type BoundProps = {
   timetableRefreshKey?: number;
 };
 
-const SCROLL_KEY = 'campus-today-scroll';
-
 export function StudentToday(props: Props) {
   const now = props.now ?? new Date();
   const action = pickNextAction(props.classes, props.todos, now);
@@ -110,28 +108,6 @@ export function StudentToday(props: Props) {
           ? TODAY_COPY.dueToday
           : '明天截止'
         : TODAY_COPY.nextAssignment;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = sessionStorage.getItem(SCROLL_KEY);
-      if (stored) window.scrollTo(0, Number(stored) || 0);
-    } catch {
-      // The page remains usable when the browser blocks session storage.
-    }
-    const persist = () => {
-      try {
-        sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
-      } catch {
-        // Scroll restoration is optional.
-      }
-    };
-    window.addEventListener('pagehide', persist);
-    return () => {
-      persist();
-      window.removeEventListener('pagehide', persist);
-    };
-  }, []);
 
   const schedule = (
     <TodayClassList
@@ -426,7 +402,7 @@ function TodoList({
               <li
                 key={item.id}
                 data-testid={primary ? 'next-action' : undefined}
-                className={styles.workItem + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
+                className={styles.workItem + (primary ? ' ' + styles.priority : '') + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
               >
                 <Link
                   href={assignmentHref(item)}

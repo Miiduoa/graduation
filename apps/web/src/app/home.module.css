@@ -1434,6 +1434,8 @@
   white-space: nowrap;
 }
 
+
+/* Keep the Today reading width while using the shared light and dark palette. */
 .todayPage .main {
   max-width: 1008px;
   padding-top: 32px;

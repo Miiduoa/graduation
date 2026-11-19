@@ -226,7 +226,7 @@ it('keeps Next history data and unrelated fields, but filter edits remove the ol
   expect(window.history.state).toMatchObject(nextHistoryState);
   expect(Object.keys(window.history.state)).toHaveLength(Object.keys(nextHistoryState).length + 1);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
-  expect(window.history.state).toEqual(nextHistoryState);
+  expect(window.history.state).toEqual({ ...nextHistoryState, __NA: undefined });
   expect(window.location.search).toBe('?campus=pu&q=%E5%85%AC%E8%BB%8A');
 });
 

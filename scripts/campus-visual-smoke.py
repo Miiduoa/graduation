@@ -223,6 +223,195 @@ def assert_login_destination(href, return_path, school_context=None):
     assert not destination.fragment, href
 
 
+async def check_life_navigation_continuity(page, results):
+    """Exercise the built Next routes and history, not a simulated router."""
+    scope = {'school': 'PU', 'schoolId': 'pu', 'campus': 'pu', 'term': '115|2'}
+    fragment = 'life-service-results'
+
+    async def expect_address(query='', category='all'):
+        expected = {key: [value] for key, value in scope.items()}
+        if query:
+            expected['q'] = [query]
+        if category != 'all':
+            expected['access'] = [category]
+
+        def matches(value):
+            address = urlparse(value)
+            return (
+                address.path == '/life'
+                and parse_qs(address.query, keep_blank_values=True) == expected
+                and address.fragment == fragment
+            )
+
+        await page.wait_for_url(matches)
+
+    await page.set_viewport_size({'width': 390, 'height': 844})
+    await goto_path(page, '/life?' + urlencode({
+        **scope, 'q': '館藏', 'access': 'public',
+    }) + '#' + fragment)
+    search = page.get_by_role('searchbox', name='快速找服務')
+    public = page.get_by_role('checkbox', name='只看免登入服務', exact=True)
+    matches = page.locator('#life-service-results a')
+    library = page.locator('#life-service-results a[href^="/library"]')
+    await expect(search).to_have_value('館藏')
+    await expect(public).to_be_checked()
+    await expect(matches).to_have_count(1)
+    await expect(library).to_be_visible()
+    await expect_address('館藏', 'public')
+    history_length = await page.evaluate('history.length')
+
+    await search.fill('借')
+    await expect_address('借', 'public')
+    await search.press_sequentially('書')
+    await expect(search).to_have_value('借書')
+    await expect_address('借書', 'public')
+    await page.get_by_role('button', name='全部', exact=True).click()
+    await expect_address('借書', 'public')
+    await public.check()
+    await expect_address('借書', 'public')
+    assert await page.evaluate('history.length') == history_length, (
+        'Typing and category changes must replace the life entry, not add history entries'
+    )
+    await expect(matches).to_have_count(1)
+    await no_overflow(page)
+    results.append('life incoming filters preserve school, term and fragment without adding typing history')
+
+    destination = urlparse(await library.get_attribute('href'))
+    destination_query = parse_qs(destination.query, keep_blank_values=True)
+    assert destination.path == '/library', destination
+    assert destination_query.get('schoolId') == ['pu'], destination
+    assert destination_query.get('campus') == ['pu'], destination
+    assert 'q' not in destination_query and 'category' not in destination_query, destination
+    assert not destination.fragment, destination
+    await library.click()
+    await page.wait_for_url(lambda value: urlparse(value).path == '/library')
+    await expect(page.get_by_role('heading', name='圖書館', exact=True)).to_be_visible()
+    assert parse_qs(urlparse(page.url).query, keep_blank_values=True) == destination_query
+
+    await page.go_back()
+    await expect_address('借書', 'public')
+    await expect(search).to_have_value('借書')
+    await expect(public).to_be_checked()
+    await expect(matches).to_have_count(1)
+    await expect(library).to_be_visible()
+    await page.go_forward()
+    await page.wait_for_url(lambda value: urlparse(value).path == '/library')
+    await expect(page.get_by_role('heading', name='圖書館', exact=True)).to_be_visible()
+    assert parse_qs(urlparse(page.url).query, keep_blank_values=True) == destination_query
+    await page.go_back()
+    await expect_address('借書', 'public')
+    await expect(search).to_have_value('借書')
+    await expect(public).to_be_checked()
+    await page.reload(wait_until='load')
+    await expect_address('借書', 'public')
+    await expect(search).to_have_value('借書')
+    await expect(public).to_be_checked()
+    await expect(matches).to_have_count(1)
+    await no_overflow(page)
+    await page.screenshot(
+        path=str(OUT / 'life-search-return-mobile.png'), full_page=True, animations='disabled',
+    )
+    results.append('life service links keep their own query; back, forward and reload preserve directory filters')
+
+    await page.get_by_role('button', name='清除搜尋', exact=True).click()
+    await expect(search).to_have_value('')
+    await expect(search).to_be_focused()
+    await expect(public).to_be_checked()
+    await expect_address('', 'public')
+
+    # DOM composition events test the controlled input's IME handlers. This is not
+    # a claim that Chromium automation opens or operates an OS input method.
+    history_length = await page.evaluate('history.length')
+    await search.dispatch_event('compositionstart', {'data': ''})
+    await search.fill('圖')
+    await expect(search).to_have_value('圖')
+    await expect_address('', 'public')
+    await search.dispatch_event('keydown', {
+        'key': 'Escape', 'code': 'Escape', 'isComposing': True,
+    })
+    await expect(search).to_have_value('圖')
+    await expect_address('', 'public')
+    await search.fill('圖書館')
+    await search.dispatch_event('compositionend', {'data': '圖書館'})
+    await expect_address('圖書館', 'public')
+    await expect(matches).to_have_count(1)
+    await expect(library).to_be_visible()
+    await search.press('Escape')
+    await expect(search).to_have_value('')
+    await expect(search).to_be_focused()
+    await expect_address('', 'public')
+
+    await search.fill('ＢＯＯＫ')
+    await expect_address('ＢＯＯＫ', 'public')
+    await expect(search).to_have_value('ＢＯＯＫ')
+    await expect(matches).to_have_count(1)
+    await expect(library).to_be_visible()
+    await search.press('Escape')
+    await expect(search).to_have_value('')
+    await expect_address('', 'public')
+    await expect(public).to_be_checked()
+    assert await page.evaluate('history.length') == history_length
+    await page.get_by_role('button', name='顯示全部服務', exact=True).click()
+    await expect(search).to_be_focused()
+    await expect(page.get_by_role('button', name='全部', exact=True)).to_have_attribute(
+        'aria-pressed', 'true',
+    )
+    await expect_address()
+    await expect(page.get_by_role('heading', name='校園資源', exact=True)).to_be_visible()
+    results.append('life clear and Escape retain category; composition and full-width search keep usable text and scoped URLs')
+
+
+async def check_today_navigation_continuity(page, results):
+    """A new Today visit must not consume another visit's global scroll cache."""
+    await page.set_viewport_size({'width': 390, 'height': 844})
+    # The preceding directory test covers the full school/schoolId/term deep link.
+    await goto_path(page, '/life?campus=pu')
+    await expect(page.get_by_role('heading', name='生活', exact=True)).to_be_visible()
+    previous = await page.evaluate('''() => {
+        const saved = sessionStorage.getItem('campus-today-scroll');
+        sessionStorage.setItem('campus-today-scroll', '960');
+        return saved;
+    }''')
+    try:
+        await page.get_by_role('heading', name='校園資源', exact=True).scroll_into_view_if_needed()
+        navigation = page.get_by_role('navigation', name='主要導覽')
+        today = navigation.get_by_role('link', name='今天', exact=True)
+        await today.click()
+        await page.wait_for_url(lambda value: urlparse(value).path == '/')
+        await expect(page.get_by_test_id('student-today')).to_be_visible()
+        await expect(page.get_by_test_id('today-skeleton')).to_have_count(0)
+        heading = page.get_by_test_id('student-today').get_by_role(
+            'heading', name='今天', exact=True,
+        )
+        await expect(heading).to_be_in_viewport(ratio=1)
+        await expect(today).to_have_attribute('aria-current', 'page')
+        await page.screenshot(
+            path=str(OUT / 'today-new-visit-mobile.png'), animations='disabled',
+        )
+
+        # Next and the browser own each history entry's position. Check the real
+        # destinations and the newly visited Today header, without imposing an
+        # unverified pixel-for-pixel restoration policy on the life page.
+        await page.go_back()
+        await page.wait_for_url(lambda value: urlparse(value).path == '/life')
+        await expect(page.get_by_role('heading', name='生活', exact=True)).to_be_visible()
+        assert parse_qs(urlparse(page.url).query).get('campus') == ['pu']
+        await page.go_forward()
+        await page.wait_for_url(lambda value: urlparse(value).path == '/')
+        await expect(page.get_by_test_id('student-today')).to_be_visible()
+        await expect(page.get_by_test_id('today-skeleton')).to_have_count(0)
+        await expect(heading).to_be_in_viewport(ratio=1)
+        assert await page.evaluate("sessionStorage.getItem('campus-today-scroll')") == '960', (
+            'Today must not write a document position back to the legacy shared cache'
+        )
+        results.append('new Today navigation ignores legacy scroll; real back and forward retain the expected destinations')
+    finally:
+        await page.evaluate('''saved => {
+            if (saved === null) sessionStorage.removeItem('campus-today-scroll');
+            else sessionStorage.setItem('campus-today-scroll', saved);
+        }''', previous)
+
+
 async def follow_account_return(page, target, expected_target=None, school_context=None):
     destination = target if expected_target is None else expected_target
     expected = urlparse(destination)
@@ -1245,6 +1434,9 @@ async def main():
             await check_life_public_filter(page)
             results.append('life visitor filter retains public cafeteria, excludes gated tasks, and restores campus, category, search and keyboard focus on Back')
 
+            await check_life_navigation_continuity(page, results)
+            await check_today_navigation_continuity(page, results)
+
             await page.set_viewport_size({'width': 390, 'height': 844})
             await check_directory_keyboard_return(page, 'life', '校園資源', '借書', '/library', '圖書館')
             results.append('life directory Back and Forward restore the result and keyboard position without affecting a fresh visit')
@@ -1443,7 +1635,7 @@ async def main():
             results.append('home titles, copy and actions grow with the large-text preference at 320/768/1440px')
             await expect(page.locator('html')).to_have_attribute('data-reduced-motion', 'true')
             assert await page.locator('body').evaluate(
-                'el => getComputedStyle(el).backgroundColor === "rgb(248, 247, 243)"'
+                'el => getComputedStyle(el).backgroundColor === "rgb(246, 247, 245)"'
             ), 'Explicit light theme must remain light'
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'home-large-text.png'), full_page=True, animations='disabled')
@@ -1684,6 +1876,12 @@ async def main():
                     await goto_path(signed_page, f'{start}?campus={scope}&token=fixture-only&q=old-search#old-position')
                     link = signed_page.get_by_role('link', name=label, exact=True)
                     await expect(link).to_be_visible()
+                    if scope == 'pu':
+                        # The streamed link is visible before the campus catalog
+                        # hydrates and enriches its explicit URL browsing scope.
+                        await expect(link).to_have_attribute(
+                            'href', re.compile(r'(?:\?|&)schoolId=pu(?:&|$)'),
+                        )
                     target = urlparse(await link.get_attribute('href'))
                     assert target.path == destination, (start, label, target)
                     assert parse_qs(target.query) == {**extra, **expected_scope}, (start, label, target)

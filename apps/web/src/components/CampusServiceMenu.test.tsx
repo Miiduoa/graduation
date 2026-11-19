@@ -159,7 +159,8 @@ it('routes the Nuni account to its courses and hides operator links during reval
   const view = render(<AppHeader />);
   expect(screen.getByRole('link', { name: '課務' }).getAttribute('href')).toBe('/timetable');
   expect(screen.getByRole('link', { name: '我的' }).getAttribute('href')).toBe('/profile');
-  expect(screen.queryByRole('link', { name: '我的帳號' })).toBeNull();
+  fireEvent.click(screen.getByLabelText('帳號'));
+  expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
   expect(screen.getByRole('link', { name: '平台管理' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
   auth.loading = true;

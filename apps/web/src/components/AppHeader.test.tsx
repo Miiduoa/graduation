@@ -280,9 +280,10 @@ it('keeps keyboard focus on the page when the first campus resolves after the us
   state.campusLoading = false;
   state.schoolId = 'pu';
   view.rerender(content());
-  await screen.findByRole('textbox', { name: '問題' });
-  await act(async () => {});
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(document.activeElement).toBe(edit);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByRole('textbox', { name: '問題' });
 });
 
 it.each(['account', 'campus', 'route'] as const)(
@@ -324,9 +325,10 @@ it('does not take focus from the current page when an assistant finishes loading
   edit.focus();
   state.loading = false;
   view.rerender(content());
-  await screen.findByRole('textbox', { name: '問題' });
-  await act(async () => {});
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(document.activeElement).toBe(edit);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByRole('textbox', { name: '問題' });
 });
 
 it('preserves the current service, filters and campus in the guest assistant login return', async () => {

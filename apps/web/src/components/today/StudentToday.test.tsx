@@ -71,6 +71,45 @@ function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
   return render(todayElement(overrides));
 }
 
+it('ignores a previous visit\'s saved position when opening Today', () => {
+  sessionStorage.setItem('campus-today-scroll', '960');
+  try {
+    const result = view({ scopeKey: 'account-a:pu' });
+    expect(screen.getByRole('heading', { name: '今天' })).toBeTruthy();
+    expect(window.scrollTo).not.toHaveBeenCalled();
+
+    result.rerender(todayElement({ scopeKey: 'account-b:ntnu', timetableSchoolId: 'ntnu' }));
+    expect(window.scrollTo).not.toHaveBeenCalled();
+    result.unmount();
+  } finally {
+    sessionStorage.removeItem('campus-today-scroll');
+  }
+});
+
+it('leaves restored reading positions to the router without persisting them across accounts', () => {
+  // The router may already have restored a history entry before this content mounts.
+  const scrollY = Object.getOwnPropertyDescriptor(window, 'scrollY');
+  Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 });
+  sessionStorage.removeItem('campus-today-scroll');
+  try {
+    const result = view({ scopeKey: 'account-a:pu', skeleton: true });
+    result.rerender(todayElement({ scopeKey: 'account-a:pu', classes: [klass()] }));
+    expect(window.scrollTo).not.toHaveBeenCalled();
+    expect(window.scrollY).toBe(480);
+
+    window.dispatchEvent(new Event('pagehide'));
+    result.unmount();
+    expect(sessionStorage.getItem('campus-today-scroll')).toBeNull();
+
+    const nextAccount = view({ scopeKey: 'account-b:ntnu', timetableSchoolId: 'ntnu' });
+    expect(window.scrollTo).not.toHaveBeenCalled();
+    nextAccount.unmount();
+  } finally {
+    if (scrollY) Object.defineProperty(window, 'scrollY', scrollY);
+    sessionStorage.removeItem('campus-today-scroll');
+  }
+});
+
 it('shows the next class once in the timetable with a keyboard-accessible destination', () => {
   view({ classes: [klass()] });
   const row = screen.getByTestId('next-action');

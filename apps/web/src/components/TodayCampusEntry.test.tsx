@@ -252,7 +252,11 @@ it.each([
       .mockReturnValueOnce(reply(secondReply));
     mockNuniAsk(ask);
     render(entry());
-    const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+    // The first conversation imports the full assistant lazily. Parallel suites
+    // may compile that module for longer than the default one-second DOM wait.
+    const field = await screen.findByRole<HTMLTextAreaElement>(
+      'textbox', { name: '問題' }, { timeout: 5000 },
+    );
     fireEvent.click(await screen.findByRole('button', { name: '使用語音輸入' }));
     act(() => dictate(spoken));
     expect(field.value).toBe(spoken);

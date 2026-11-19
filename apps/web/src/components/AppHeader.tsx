@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { CampusIcon } from './CampusIcon';
@@ -20,6 +20,14 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 const CampusAssistantEntry = lazy(async () => ({
   default: (await import('./TodayCampusEntry')).TodayCampusEntry,
 }));
+
+function closeNavigationPopovers(header: HTMLElement | null, except?: HTMLDetailsElement) {
+  header
+    ?.querySelectorAll<HTMLDetailsElement>('details[name="campus-navigation-popover"][open]')
+    .forEach((element) => {
+      if (element !== except) element.open = false;
+    });
+}
 
 type HeaderProps = { onOpenAssistant?: () => void; assistantExpanded?: boolean };
 type AssistantPanelState = {
@@ -39,6 +47,11 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const hydrated = useClientHydrated();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const id = useId();
+  const header = useRef<HTMLElement>(null);
+  const accountMenu = useRef<HTMLDetailsElement>(null);
+  const accountTrigger = useRef<HTMLElement>(null);
+  const [accountScope, setAccountScope] = useState<string | null>(null);
   const [assistant, setAssistant] = useState<AssistantPanelState | null>(null);
   const quickTrigger = useRef<HTMLButtonElement>(null);
   const quickPanel = useRef<HTMLElement>(null);
@@ -48,6 +61,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const scope = JSON.stringify([
     pathname,
     params?.toString(),
+    hash,
     user?.uid,
     nuni.session?.context,
     nuni.session?.platformAccountId,
@@ -66,16 +80,27 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
     // A later campus, account or page change must still discard the whole panel.
     setAssistant({ ...panel, campusId });
   }
+  const navigationScope = JSON.stringify([scope, hash, context, Boolean(onOpenAssistant)]);
+  const accountOpen = accountScope === navigationScope;
+  if (accountScope !== null && accountScope !== navigationScope) setAccountScope(null);
+  const closeAccount = () => {
+    if (!accountMenu.current?.open) return;
+    accountMenu.current.open = false;
+    accountTrigger.current?.focus({ preventScroll: true });
+  };
   useLayoutEffect(() => {
     if (assistantOpen) quickPanel.current?.focus({ preventScroll: true });
   }, [assistantOpen]);
-  const closeAssistant = () => {
+  const hideAssistant = useCallback(() => {
     quickPanel.current
       ?.querySelectorAll<HTMLButtonElement>(
         '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
       )
       .forEach((button) => button.click());
-    setAssistant((current) => (current?.scope === scope ? { ...current, open: false } : null));
+    setAssistant((current) => current ? { ...current, open: false } : null);
+  }, []);
+  const closeAssistant = () => {
+    hideAssistant();
     if (window.location.hash === '#campus-assistant-entry') {
       try {
         window.history.replaceState(
@@ -98,6 +123,70 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
       focusRequest: current?.scope === scope ? current.focusRequest + 1 : 1,
     }));
   };
+  useEffect(() => {
+    const navigation = header.current;
+    function onToggle(event: Event) {
+      const element = event.target;
+      if (element === accountMenu.current && element instanceof HTMLDetailsElement) {
+        setAccountScope(element.open ? navigationScope : null);
+      }
+      if (
+        element instanceof HTMLDetailsElement &&
+        element.getAttribute('name') === 'campus-navigation-popover' &&
+        element.open
+      ) {
+        closeNavigationPopovers(navigation, element);
+        hideAssistant();
+      }
+    }
+    // Native details toggle does not bubble; capture also covers keyboard/programmatic opening.
+    navigation?.addEventListener('toggle', onToggle, true);
+    return () => navigation?.removeEventListener('toggle', onToggle, true);
+  }, [navigationScope, hideAssistant]);
+  useEffect(() => {
+    function dismissOutside(event: PointerEvent | FocusEvent) {
+      if (!(event.target instanceof Node)) return;
+      if (accountMenu.current?.open && !accountMenu.current.contains(event.target)) {
+        accountMenu.current.open = false;
+      }
+      if (
+        assistantOpen &&
+        !quickPanel.current?.contains(event.target) &&
+        !quickTrigger.current?.contains(event.target)
+      ) {
+        // Keep focus on the destination the person selected outside this nonmodal panel.
+        hideAssistant();
+      }
+    }
+    document.addEventListener('pointerdown', dismissOutside);
+    document.addEventListener('focusin', dismissOutside);
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside);
+      document.removeEventListener('focusin', dismissOutside);
+    };
+  }, [assistantOpen, hideAssistant]);
+  useLayoutEffect(() => {
+    const navigation = header.current;
+    const panel = quickPanel.current;
+    if (!navigation) return;
+    const updateHeaderInset = () => {
+      // A nonmodal panel must leave the other header destinations reachable.
+      const bottom = Math.max(0, navigation.getBoundingClientRect().bottom);
+      navigation.style.setProperty('--navigation-header-bottom', `${bottom}px`);
+      panel?.style.setProperty('--voice-header-bottom', `${bottom}px`);
+    };
+    updateHeaderInset();
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateHeaderInset);
+    observer?.observe(navigation);
+    window.addEventListener('resize', updateHeaderInset);
+    window.addEventListener('scroll', updateHeaderInset, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateHeaderInset);
+      window.removeEventListener('scroll', updateHeaderInset);
+    };
+  }, [assistantOpen]);
   const activeSection = primaryNavigationSection(pathname);
   const href = (path: string) => campusServiceHref(path, context);
   const currentPage = currentReturnPath(pathname || '/', params?.size ? `?${params}` : '', hash);
@@ -126,7 +215,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   ]);
   return (
     <>
-      <header className={headerStyles.header} data-campus-navigation="true">
+      <header ref={header} className={headerStyles.header} data-campus-navigation="true">
         <Link href={href('/')} className={headerStyles.brand} aria-label="nuni">
           <span className={headerStyles.mark} aria-hidden>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -147,39 +236,131 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
             aria-label="開啟校園助理"
             aria-controls={onOpenAssistant ? 'today-voice-entry' : 'campus-assistant-entry'}
             aria-expanded={onOpenAssistant ? assistantExpanded : assistantOpen}
-            onClick={onOpenAssistant ?? (assistantOpen ? closeAssistant : openAssistant)}
+            onClick={() => {
+              closeNavigationPopovers(header.current);
+              if (onOpenAssistant) onOpenAssistant();
+              else if (assistantOpen) closeAssistant();
+              else openAssistant();
+            }}
           >
             <CampusIcon name="social" size={18} />
             <span>助理</span>
           </button>
           <CampusServiceMenu />
-          {!checking && nuni.session?.isPlatformOperator && (
-            <Link className={headerStyles.operatorLink} href="/admin">
-              平台管理
-            </Link>
-          )}
+          <Link
+            href={href('/search')}
+            className={headerStyles.quickSearch}
+            aria-label="搜尋服務與語音輸入"
+            title="搜尋服務與語音輸入"
+          >
+            <CampusIcon name="search" size={17} />
+            <span>搜尋</span>
+          </Link>
           {user || nuni.session || nuni.pendingLogout ? (
-            <button
-              type="button"
-              disabled={busy || checking}
-              onClick={async () => {
-                if (busy) return;
-                setBusy(true);
-                setError('');
-                try {
-                  await Promise.all([
-                    ...(user ? [signOutUser()] : []),
-                    ...(nuni.session || nuni.pendingLogout ? [nuni.logout()] : []),
-                  ]);
-                } catch {
-                  setError('登出失敗，請稍後重試。');
-                } finally {
-                  setBusy(false);
+            <details
+              ref={accountMenu}
+              key={navigationScope}
+              name="campus-navigation-popover"
+              className={headerStyles.accountMenu}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'Escape' &&
+                  !event.nativeEvent.isComposing &&
+                  event.currentTarget.open
+                ) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeAccount();
                 }
               }}
             >
-              {busy ? '登出中…' : nuni.pendingLogout ? '重試登出' : '登出'}
-            </button>
+              <summary
+                ref={accountTrigger}
+                aria-controls={`${id}-account`}
+                aria-label={nuni.pendingLogout || error ? '帳號，登出尚未完成' : '帳號'}
+              >
+                <CampusIcon name="profile" size={17} />
+                <span>帳號</span>
+                {(nuni.pendingLogout || error) && (
+                  <span className={headerStyles.retryIndicator} aria-hidden />
+                )}
+              </summary>
+              <div
+                className={headerStyles.accountPanel}
+                id={`${id}-account`}
+                onClick={(event) => {
+                  if (event.target instanceof Element && event.target.closest('a')) {
+                    if (accountMenu.current) accountMenu.current.open = false;
+                  }
+                }}
+              >
+                <div className={headerStyles.accountHeading}>
+                  <span>帳號</span>
+                  <button type="button" onClick={closeAccount} aria-label="關閉帳號選單">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path d="m6 6 12 12M18 6 6 18" />
+                    </svg>
+                  </button>
+                </div>
+                {checking && (
+                  <p role="status" className={headerStyles.accountStatus}>
+                    確認帳號中…
+                  </p>
+                )}
+                {!checking && (user || nuni.session) && (
+                  <Link href="/profile">
+                    <CampusIcon name="profile" size={18} />
+                    我的帳號
+                    <CampusIcon name="arrow" size={16} />
+                  </Link>
+                )}
+                {!checking && nuni.session?.isPlatformOperator && (
+                  <Link href="/admin">
+                    <CampusIcon name="services" size={18} />
+                    平台管理
+                    <CampusIcon name="arrow" size={16} />
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  className={headerStyles.logout}
+                  disabled={busy || checking}
+                  aria-describedby={error ? `${id}-error` : undefined}
+                  onClick={async () => {
+                    if (busy) return;
+                    setBusy(true);
+                    setError('');
+                    try {
+                      await Promise.all([
+                        ...(user ? [signOutUser()] : []),
+                        ...(nuni.session || nuni.pendingLogout ? [nuni.logout()] : []),
+                      ]);
+                    } catch {
+                      setError('登出失敗，請稍後重試。');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? '登出中…' : nuni.pendingLogout ? '重試登出' : '登出'}
+                </button>
+                {error && accountOpen && (
+                  <p id={`${id}-error`} role="alert" className={headerStyles.accountError}>
+                    {error}
+                  </p>
+                )}
+              </div>
+            </details>
           ) : checking ? (
             <span role="status">確認帳號中…</span>
           ) : !loginPage ? (
@@ -223,7 +404,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
           hidden={!assistantOpen}
           className={headerStyles.voicePanel}
           onKeyDown={(event) => {
-            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
               event.preventDefault();
               event.stopPropagation();
               closeAssistant();
@@ -250,8 +431,8 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
           </Suspense>
         </section>
       )}
-      {error && (
-        <p role="alert" className={headerStyles.error}>
+      {error && !accountOpen && (
+        <p id={`${id}-error`} role="alert" className={headerStyles.error}>
           {error}
         </p>
       )}
@@ -262,7 +443,7 @@ export function AppHeader(props: HeaderProps) {
   return (
     <Suspense
       fallback={
-        <header className={headerStyles.header} data-campus-navigation="true">
+        <header className={headerStyles.header} data-campus-navigation="true" aria-busy="true">
           <Link href="/" className={headerStyles.brand} aria-label="nuni">
             <span className={headerStyles.mark} aria-hidden="true">
               {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -1,3 +1,4 @@
+import { readLifeFilters } from '@/app/life/lifeFilters';
 import type { CampusIconName } from '@/components/CampusIcon';
 import {
   presentCampusService,
@@ -77,13 +78,21 @@ export function readJourneyFilters(
   const group = params.get('group');
   return {
     // Remove ASCII control characters from URL search terms.
-    query: (params.get('q') || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 100),
+    query:
+      journey === 'life'
+        ? readLifeFilters(params).query
+        : (params.get('q') || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 100),
     group: SERVICE_JOURNEY_GROUPS[journey].some((item) => item.id === group) ? group! : 'all',
-    ...(params.get('access') === 'public' ? { publicOnly: true } : {}),
+    ...((params.get('access') === 'public' ||
+    (journey === 'life' && readLifeFilters(params).category === 'public'))
+      ? { publicOnly: true }
+      : {}),
   };
 }
 
 export function writeJourneyFilters(params: URLSearchParams, filters: JourneyFilters) {
+  // Old life links keep working; subsequent edits use the shared directory schema.
+  params.delete('category');
   if (filters.query) params.set('q', filters.query);
   else params.delete('q');
   if (filters.group === 'all') params.delete('group');

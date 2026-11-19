@@ -61,7 +61,7 @@ it('返回參數只接受目前目錄的分類，過長搜尋有上限', () => {
   });
   expect(
     readJourneyFilters(new URLSearchParams({ q: 'x'.repeat(200) }), 'life').query,
-  ).toHaveLength(100);
+  ).toHaveLength(80);
 });
 
 it('修改或清除篩選時保留校園資訊與其它網址狀態', () => {
