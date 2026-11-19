@@ -220,6 +220,23 @@ describe('private group file HTTP handler', () => {
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
   });
 
+  test('global-only historical receipts authorize exact downloads and canonical withdrawals still win', async () => {
+    const receipt = { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] };
+    store.docs.set('assignments/work/submissions/alice', receipt);
+    store.docs.delete('groups/course/assignments/work');
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
+    expect((await invoke({ path: ANSWER, uid: 'bob' })).status).toBe(403);
+    expect((await invoke({ path: ANSWER.replace('answer.pdf', 'draft.pdf'), uid: 'teacher' })).status).toBe(403);
+    store.docs.set('assignments/work/submissions/alice', { ...receipt, submittedAt: null });
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    store.docs.set('assignments/work/submissions/alice', receipt);
+    store.docs.set('groups/course/assignments/work/submissions/alice', { ...receipt, attachments: [] });
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    store.docs.delete('groups/course/assignments/work/submissions/alice');
+    store.docs.set('users/teacher', { status: 'disabled' });
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+  });
+
   test('legacy assignment POST refuses closed assignments and already submitted receipts', async () => {
     const fresh = ANSWER.replace('answer.pdf', 'new-answer.pdf');
     store.docs.set('groups/course/assignments/work', { published: false });

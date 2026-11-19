@@ -167,6 +167,40 @@ it('legacy assignment URLs also require a submitted receipt with an exact file r
   await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
 });
 
+it('reads a submitted global-only historical receipt without reopening drafts or sibling files', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const globalPath = 'assignments/work/submissions/alice';
+  const canonicalPath = 'groups/course/assignments/work/submissions/alice';
+  const receipt = { userId: 'alice', submittedAt: '2026-11-11T08:00:00Z', attachments: [ANSWER] };
+  store.docs.set(globalPath, receipt);
+  // Historical assignments may have no group copy at all.
+  store.docs.delete('groups/course/assignments/work');
+  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, ANSWER.replace('answer.pdf', 'draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  for (const invalid of [
+    { ...receipt, submittedAt: null }, { ...receipt, submittedAt: 'invalid' },
+    { ...receipt, userId: 'bob' }, { ...receipt, attachments: [] },
+    { ...receipt, attachments: null },
+  ]) {
+    store.docs.set(globalPath, invalid);
+    await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+    await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
+  }
+  store.docs.set(globalPath, receipt);
+  // A canonical draft or explicit file withdrawal wins over the old receipt.
+  for (const canonical of [{ ...receipt, submittedAt: null }, { ...receipt, attachments: [] }]) {
+    store.docs.set(canonicalPath, canonical);
+    await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.delete(canonicalPath);
+  store.docs.set('assignments/work', { groupId: 'other' });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('assignments/work', { groupId: 'course' });
+  store.docs.set('users/teacher', { status: 'suspended' });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it.each([GROUP_ANSWER, ANSWER])('rejects malformed submitted-receipt attachment fields for %s', async (path) => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const receipt = 'groups/course/assignments/work/submissions/alice';

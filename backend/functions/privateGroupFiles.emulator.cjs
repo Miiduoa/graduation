@@ -245,6 +245,25 @@ test('legacy assignment upload is not visible to the instructor before submissio
   assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
 });
 
+test('global-only historical submission receipts preserve exact instructor downloads', { timeout: 30_000 }, async () => {
+  const objectPath = paths().answer;
+  assert.equal((await request('POST', objectPath, 'alice')).status, 201);
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}`).delete();
+  const receipt = db.doc(`assignments/${assignmentId}/submissions/alice`);
+  await receipt.set({ userId: 'alice', submittedAt: new Date(), attachments: [objectPath] });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  assert.equal((await request('GET', objectPath, 'bob')).status, 403);
+  assert.equal((await request('GET', objectPath.replace('answer.pdf', 'draft.pdf'), 'teacher')).status, 403);
+  await receipt.update({ submittedAt: null });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  assert.equal((await request('GET', objectPath, 'alice')).status, 200);
+  await receipt.update({ submittedAt: new Date() });
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    userId: 'alice', submittedAt: new Date(), attachments: [],
+  });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+});
+
 test('direct Storage clients cannot list private objects or alter their metadata', { timeout: 30_000 }, async () => {
   const objectPath = paths().post;
   assert.equal((await request('POST', objectPath)).status, 201);

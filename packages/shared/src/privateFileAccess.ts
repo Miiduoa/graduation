@@ -612,11 +612,19 @@ export async function authorizePrivateFile(
       }
       // Legacy assignments/{id}/submissions/{uid}/ paths are still reachable
       // via the GCS HTTP and Web signed-URL handlers. A manager must not
-      // download an uploaded draft without the canonical submission receipt.
+      // download an uploaded draft without a submitted receipt. The canonical
+      // receipt is authoritative when present; global-only historical receipts
+      // remain valid in the legacy namespace after its parent resolved groupId.
       if (scope.kind === 'assignment' && !scope.groupId && !writing && scope.userId !== uid) {
         if (!manager) deny();
-        const submission = await tx.get(
+        const canonicalSubmission = await tx.get(
           groupRef.collection('assignments').doc(scope.assignmentId || '')
+            .collection('submissions').doc(scope.userId || ''),
+        );
+        // Never let a stale mirror override a canonical draft, removed file or
+        // inconsistent owner. Only an absent canonical receipt uses the mirror.
+        const submission = canonicalSubmission.exists ? canonicalSubmission : await tx.get(
+          db.collection('assignments').doc(scope.assignmentId || '')
             .collection('submissions').doc(scope.userId || ''),
         );
         const previous = asRecord(submission.data());

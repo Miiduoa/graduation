@@ -885,3 +885,10 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 以本次實際生成並核對 Git blob SHA 的兩個檔案，在 Node.js v22.16.0 隔離容器執行 node --test scripts/audit-group-post-visibility.test.cjs，**10/10 通過、0 失敗、0 略過**。包含正常輸入、重複紀錄、無效 JSON 不吐個資、CLI 符號連結、失效／含秘密路徑、目錄與超 32 MiB 檔案；原始碼 blob f9e68662e7ea5e5e601c13799629be394b8d9af7、測試 blob 95536dff7ce30ef1e27d43182c816019977caf71，均與本機已跑版本逐位元組相符。
 - **驗證限制：** 這是盤點 CLI 的隔離 Node 回歸，不等於 Firebase Emulator、Supabase Storage、GCS CAS 或 Web/Mobile/Rules 成功。既有精確 fe9a0663 沒有 PR-triggered Actions、CodeQL 或 combined checks；本次新 head 須另查。指定 nuni-merge-gate App 5504170 仍待對新 head 核可。P0 未發布貼文及子留言的 Firestore 修補、歷史資料盤點與發布相容性、已簽發 GCS/Supabase URL 撤權、真實 GCS staging、minimatch 雙鎖檔相容等未關閉。
 - 全程只用本機合成檔案，未接 E 校園、未操作正式資料／憑證／token／migration、未啟動任何 npm/pnpm audit，也沒有繞過主線合併閘門。
+
+## 2026-11-19：PR #577 全域歷史提交收據相容性修正
+
+- 審查使用 `git merge-base HEAD origin/main` 的 `5c9e058cafb8bed3a5f7f7cbf8cb73e623012828`。歷史 `assignments/{id}/submissions/{uid}/...` 下載，先由全域作業父文件解析群組並驗證目前帳號、群組及學校資格。群組收據不存在時，改讀同一全域作業下的歷史收據；群組收據存在時仍以它為準，避免舊鏡像繞過未提交狀態或明確撤回的附件。
+- 兩種收據均須符合原有 owner 驗證、有效提交時間及附件引用限制。仍保留真正缺少附件欄位的已提交歷史收據相容性；明示空清單、格式錯誤、其他檔名、錯誤作者均拒絕。提交者預覽草稿、舊帳號缺少較新欄位與現有轉校／綁定判斷不變；停用、刪除、暫停帳號與撤銷 membership 的限制保留。
+- 本機 Web 三個定向套件 140/140、Functions HTTP 單元測試 74/74 通過。使用 `/tmp/career-jre/bin/java` 執行隔離 Firestore/Storage Emulator，HTTP 整合測試 9/9 通過，包含新增的全域歷史收據下載。Emulator 仍無法證明正式 GCS generation CAS 或撤銷舊下載 token；本輪沒有進行正式資料或部署操作。
+- **尚未解決：舊貼文列表相容性 P1。** 現有四欄等值查詢排除缺少欄位的正常歷史貼文。Firestore 不能以缺少欄位作等值查詢；直接放寬成員 LIST 再於用戶端篩選會洩漏隱藏內容，不能採用。僅做一次回填也不能保護仍在使用舊寫入格式的用戶端。完整的無資料異動方案需要可信的伺服器列表讀取、用戶端分頁及父貼文／留言相容判斷；伺服器入口來源檔目前不在 PR diff 中，須先取得擴大檔案範圍的授權。此提交不宣稱 COMPAT 已通過，也不撤回既有隱藏內容保護。
