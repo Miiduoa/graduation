@@ -763,6 +763,46 @@ it('does not turn numeric years or identifiers into misleading comparison bars',
   expect(container.querySelectorAll('meter')).toHaveLength(2);
 });
 
+it('keeps textbook chapter and lesson ordinals as source text, not quantity bars', () => {
+  // A lesson index or course week is an ordinal even when the cells contain
+  // plain digits. Do not imply that the fourth lesson is twice the second.
+  for (const header of [
+    '章節', '章次', '單元', '單元編號', '課次', '講次', '節次', '單元（教材）',
+    'Week', 'Week No.', 'Week Number', 'Week #', 'Chapter', 'Chapter Number',
+    'Chapter No.', 'Unit ID', 'Lesson', 'Lesson Number', 'Module (Textbook)',
+    'Lecture No.', 'Section ID', 'Session',
+  ]) {
+    const material = [
+      '| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 2 |', '| 網路 | 4 |',
+    ].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
+      .toEqual(['2', '4']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares explicit numbers of weeks, chapters and learning units', () => {
+  for (const header of [
+    '章節數量', '單元數', '課程時數',
+    'Number of Weeks', 'Week Count', 'Number of Chapters',
+    'Chapter Count', 'Lesson Count', 'Sessions Completed',
+  ]) {
+    const material = [
+      '| 班級 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |',
+    ].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter')).map(bar => [
+      bar.getAttribute('value'), bar.getAttribute('max'),
+    ])).toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});
+
 it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
   for (const header of ['教室', '實驗室', '房號', '宿舍房號', '寢室', '座位',
     '位置', '地點', 'Room', 'Room Number', 'Classroom', 'Lab No.',
