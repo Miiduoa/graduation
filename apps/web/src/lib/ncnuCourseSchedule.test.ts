@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
+import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { readImportDelimitedRecords } from '@campus/shared/src/imports/aiDelimitedText';
 import type { PublicCatalogCourse } from '@campus/shared/src/publicCourseCatalog';
 
@@ -46,4 +46,19 @@ describe('NCNU public course to personal timetable credit handoff', () => {
       expect(ncnuTimetableImportCsv({ ...officialCourse, credits })).toBeNull();
     },
   );
+
+  it('rejects an overlong but syntactically valid course time before expanding rows', () => {
+    const time = '1a'.repeat(1_200);
+    expect(ncnuCourseMeetings(time, '1151')).toBeNull();
+    expect(ncnuTimetableImportCsv({ ...officialCourse, time })).toBeNull();
+  });
+
+  it('accepts a full week of distinct periods without cutting off a valid schedule', () => {
+    const week = 'xyabcdzefghijklm';
+    const time = '1234567'.split('').map(day => day + week).join('');
+    const meetings = ncnuCourseMeetings(time, '1151');
+    expect(meetings).not.toBeNull();
+    expect(meetings?.every(meeting => meeting.startTime && meeting.endTime)).toBe(true);
+    expect(ncnuTimetableImportCsv({ ...officialCourse, time })).not.toBeNull();
+  });
 });
