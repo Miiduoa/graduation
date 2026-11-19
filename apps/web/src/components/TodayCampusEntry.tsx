@@ -25,6 +25,7 @@ import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import styles from './TodayCampusEntry.module.css';
+import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -41,10 +42,12 @@ function TodayConversation({
   account,
   schoolId,
   cloudEnabled,
+  preferredWorkContext,
 }: {
   account: Account;
   schoolId: string;
   cloudEnabled: boolean;
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
@@ -90,6 +93,7 @@ function TodayConversation({
         <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
           {account.kind === 'nuni' ? (
             <NuniConversation
+              preferredWorkContext={preferredWorkContext}
               context={account.context}
               accountId={account.accountId}
               schoolId={schoolId}
@@ -118,7 +122,9 @@ export function TodayCampusEntry({
   active = true,
   focusRequest = 0,
   returnAnchor = 'today-voice-entry',
+  preferredWorkContext,
 }: {
+  preferredWorkContext?: AssistantWorkContext;
   active?: boolean;
   focusRequest?: number;
   returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
@@ -166,12 +172,14 @@ export function TodayCampusEntry({
   }, [active, focusRequest]);
   return (
     <div ref={entry}>
-      <CampusEntryContent returnPath={returnPath} />
+      <CampusEntryContent returnPath={returnPath} preferredWorkContext={preferredWorkContext} />
     </div>
   );
 }
 
-function CampusEntryContent({ returnPath }: { returnPath: string }) {
+function CampusEntryContent({ returnPath, preferredWorkContext }: {
+  returnPath: string; preferredWorkContext?: AssistantWorkContext;
+}) {
   const hydrated = useClientHydrated();
   const auth = useAuth();
   const nuni = useNuniSession();
@@ -220,6 +228,7 @@ function CampusEntryContent({ returnPath }: { returnPath: string }) {
   }
   return (
     <TodayConversation
+      preferredWorkContext={preferredWorkContext}
       key={JSON.stringify([
         uid,
         session?.context,
@@ -263,7 +272,9 @@ function clearAssistantAnchor(anchor: string) {
 export function TodayAssistantDisclosure({
   ref,
   onOpenChange,
+  preferredWorkContext,
 }: {
+  preferredWorkContext?: AssistantWorkContext;
   ref: Ref<TodayAssistantHandle>;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -337,7 +348,7 @@ export function TodayAssistantDisclosure({
         <span className={styles.triggerHint}>打字或語音詢問</span>
       </summary>
       <div className={styles.body}>
-        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} />}
+        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
       </div>
     </details>
   );

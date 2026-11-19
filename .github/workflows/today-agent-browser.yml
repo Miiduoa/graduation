@@ -6,6 +6,8 @@ on:
     paths:
       - 'apps/web/src/app/page*'
       - 'apps/web/src/components/today/**'
+      - 'apps/web/src/components/TodayCampusEntry*'
+      - 'apps/web/src/features/nuni/Assistant.tsx'
       - 'apps/web/src/features/nuni/TodayAgent*'
       - 'apps/web/src/features/nuni/assistant/**'
       - 'apps/web/src/lib/nuni/assistantV2/**'
@@ -17,6 +19,7 @@ on:
       - 'apps/web/src/lib/homeOverview*'
       - 'apps/web/src/app/globals.css'
       - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/assistantRoleWorkflows*'
       - 'packages/shared/src/assistantCourseworkFollowup*'
       - 'packages/shared/src/taipeiTime*'
       - 'packages/shared/src/imports/**'
@@ -69,10 +72,14 @@ jobs:
           pnpm --filter web exec vitest run \
             src/features/nuni/TodayAgent.test.tsx \
             src/components/today/TodayAgentPanel.test.tsx \
+            src/components/TodayCampusEntry.test.tsx \
+            src/features/nuni/assistant/AssistantRoleTasks.test.tsx \
             src/lib/todayAgentFollowups.test.ts \
             src/lib/assistantCourseworkFollowupContract.test.ts \
             src/lib/nuni/assistantV2/courseworkFollowup.test.ts \
             src/lib/nuni/assistantV2/courseworkFollowupHandler.test.ts \
+            src/lib/nuni/assistantV2/courseworkRecoveryHandler.test.ts \
+            src/lib/nuni/assistantV2/courseworkRecoveryAdapter.test.ts \
             src/lib/nuni/assistantV2/planningHandler.test.ts \
             src/lib/nuni/assistantV2/courseworkStudyHandler.test.ts \
             src/lib/nuni/assistantV2/calendarExecution.test.ts \

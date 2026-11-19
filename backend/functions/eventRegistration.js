@@ -1,6 +1,7 @@
 const { createHash } = require('crypto');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
+const { isAccountUnavailable } = require('./accountLifecycle');
 const fail = (code, message) => {
   throw new HttpsError(code, message);
 };
@@ -226,8 +227,8 @@ function createEventRegistrationHandlers({ db, now = Date.now }) {
         ...refs,
       );
       requireMember(member);
-      if (user.data()?.accountDeletionInProgress === true)
-        fail('permission-denied', '帳號正在刪除。');
+      if (isAccountUnavailable(user.exists ? user.data() : {}))
+        fail('permission-denied', '帳號正在刪除或已停用。');
       return {
         ok: true,
         states: ids.map((id, i) =>
@@ -263,8 +264,8 @@ function createEventRegistrationHandlers({ db, now = Date.now }) {
         receiptRef,
       );
       requireMember(member);
-      if (user.data()?.accountDeletionInProgress === true)
-        fail('permission-denied', '帳號正在刪除。');
+      if (isAccountUnavailable(user.exists ? user.data() : {}))
+        fail('permission-denied', '帳號正在刪除或已停用。');
       if (!eventSnap.exists || eventSnap.data().schoolId !== schoolId)
         fail('not-found', '找不到目前學校的活動。');
       const event = eventSnap.data();

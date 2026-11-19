@@ -1,3 +1,4 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -317,13 +318,9 @@ function SearchWorkspace({
         const pages = await Promise.all(
           groupIds.map(async (groupId) => {
             const [posts, assignments] = await Promise.allSettled([
-              getDocs(
-                query(
-                  collection(db, 'groups', groupId, 'posts'),
-                  orderBy('createdAt', 'desc'),
-                  limit(31),
-                ),
-              ),
+              postNuniWebFn<{ groupId: string; pageSize: number }, { posts: GroupContent[] }>(
+                'listGroupDiscussionPage', { groupId, pageSize: 31 }, uid!,
+              ).then((page) => ({ docs: page.posts.map((post) => ({ id: post.id, data: () => post })) })),
               getDocs(
                 query(
                   collection(db, 'groups', groupId, 'assignments'),
