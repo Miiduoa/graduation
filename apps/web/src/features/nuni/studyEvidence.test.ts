@@ -131,4 +131,22 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it('locates a late repeated quote without losing non-overlapping counts', () => {
+    const original = '甲'.repeat(20_000);
+    const last = locateStudyEvidence(original, '甲', 19_999);
+    expect(last?.occurrences).toBe(20_000);
+    expect(last?.before).toBe('甲'.repeat(19_999));
+    expect(last?.quote).toBe('甲');
+    expect(last?.after).toBe('');
+    expect(locateStudyEvidence(original, '甲', 20_000)).toBeNull();
+
+    // A rejected partial glyph cannot consume a later, overlapping full glyph.
+    expect(locateStudyEvidence('🇺🇹🇹🇹', '🇹🇹')).toEqual({
+      before: '🇺🇹', quote: '🇹🇹', after: '', occurrences: 1,
+    });
+    expect(locateStudyEvidence('aaaa', 'aa', 1)).toEqual({
+      before: 'aa', quote: 'aa', after: '', occurrences: 2,
+    });
+  });
+
 });

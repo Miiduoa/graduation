@@ -30,46 +30,35 @@ export function locateStudyEvidence(source: string, quote: string, occurrence = 
     }
   }
   if (!Number.isSafeInteger(occurrence) || occurrence < 0) return null;
-  // UTF-16 substring equality is necessary but not sufficient: 'e' inside e+accent
-  // or '👩' inside 👩‍💻 is not a complete, inspectable quotation.
-  // Keep the original source unchanged; only count whole grapheme-cluster matches.
-  const matches: number[] = [];
-  for (let from = 0; from < source.length;) {
-    const match = source.indexOf(quote, from);
-    if (match === -1) break;
-    matches.push(match);
-    // A partial grapheme hit can overlap a later complete quotation.
-    // Collect overlapping candidates until their boundaries are checked below.
-    from = match + 1;
-  }
-  if (matches.length === 0) return null;
-  // Fail closed on older engines, rather than claiming that a truncated quote
-  // is verified when the Unicode boundary check is unavailable.
+  // Only whole visible grapheme clusters can be cited. A literal substring
+  // may start inside a combining sequence, emoji, or flag. Check each candidate
+  // against native grapheme boundaries rather than caching all candidate hits:
+  // a long imported document can contain hundreds of thousands of repetitions.
+  const firstMatch = source.indexOf(quote);
+  if (firstMatch === -1) return null;
+  // If an older WebView lacks grapheme segmentation, never claim evidence that
+  // might be only part of a visible character.
   if (typeof Intl.Segmenter !== 'function') return null;
-
-  // Track just the candidate boundaries instead of caching every grapheme in
-  // a large PDF. This keeps memory proportional to the number of matches.
-  const wanted = new Set<number>();
-  for (const start of matches) {
-    wanted.add(start);
-    wanted.add(start + quote.length);
-  }
-  const boundaries = new Set<number>();
-  for (const { index } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source)) {
-    if (wanted.has(index)) boundaries.add(index);
-  }
-  if (wanted.has(source.length)) boundaries.add(source.length);
+  const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source);
+  if (typeof segments.containing !== 'function') return null;
+  const isBoundary = (index: number): boolean =>
+    index === 0 || index === source.length || segments.containing(index)?.index === index;
 
   let selected = -1;
   let occurrences = 0;
-  let nextStart = 0;
-  for (const start of matches) {
-    if (start < nextStart) continue;
-    if (!boundaries.has(start) || !boundaries.has(start + quote.length)) continue;
-    // Only complete matches consume the quote's full length.
-    nextStart = start + quote.length;
+  for (let from = firstMatch; from < source.length;) {
+    const start = source.indexOf(quote, from);
+    if (start === -1) break;
+    const end = start + quote.length;
+    if (!isBoundary(start) || !isBoundary(end)) {
+      // Partial grapheme matches can overlap a later *complete* quotation.
+      from = start + 1;
+      continue;
+    }
     if (occurrences === occurrence) selected = start;
     occurrences += 1;
+    // Count only non-overlapping complete quotations, preserving v1 behavior.
+    from = end;
   }
   if (selected === -1) return null;
   return {
