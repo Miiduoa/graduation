@@ -1,3 +1,9 @@
+## 2026-11-19：雙向排版控制字元不可被當成可目視核對的原文引句
+
+- 重新核對 PR #719 前版精確 head `1e10c347177930e54ae1dece1d827bb92d0e0c2a`：CI #44488465714 的 Web/Mobile、Web/Mobile Build、Lint/TypeCheck、Security Gates、Firestore/Functions/Assistant 均成功，CodeQL #44488465463 與 Course access review #44488465510 也成功；這些僅適用於**前版** SHA。GitHub App 5504170 的 APPROVED、Maestro／iOS／Android 真機及 Ahaboard 同條件驗收仍未取得。
+- 原文定位器先前只拒絕 U+202D/U+202E 兩種覆寫控制；實際上含 U+202A/U+202B 嵌入、U+202C 結束記號、U+2066–U+2069 隔離與 U+061C／U+200E／U+200F 方向標記的引句，也可能在原文逐位元命中卻無法由人眼按畫面顯示核對。現在只對**AI 提取的引句**排除 Unicode `Bidi_Control` 類別；教材原文字元不刪改，普通阿拉伯文／希伯來文、Emoji／數學引句仍逐字定位。來源含格式控制但所引片段為完整可見文字時，仍可依原文定位。
+- 新增 12 種控制字元的拒收回歸與原始 RTL 引句可定位的正例。不改備份格式、私人教材傳輸、依賴或其他模組。此純函式測試不是模型繁中正確率、手機讀屏、WebGPU 或競品實測；新 head 必須重跑 GitHub 全部 gate，未齊前 PR 保持 Draft、不合併、不部署。
+
 ## 2026-11-19：修正原文引句視覺反轉與半個 Emoji 誤定位
 
 - 依 PR #719 精確 head `1e5adddaa07486203000f55eeb0d436bf3dae461` 核對最新版本：本版 CI（Web／Mobile Tests、Build Web／Mobile、Lint/TypeCheck、Functions、Firestore、Assistant、Security）、Course access review 與 CodeQL 均已成功；此結果**只屬舊 head**。App 5504170 未有 APPROVED、Maestro、iOS／Android 真機與 Ahaboard 同機比較仍無通過證據。

@@ -78,6 +78,33 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it('rejects explicit bidi formatting and isolate controls without rejecting native RTL text', () => {
+    // Every quote is byte-identical to source; visually it may render in a
+    // different order or suppress/isolate part of the surrounding citation.
+    const controls = [
+      '\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c',
+      '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069',
+    ];
+    for (const control of controls) {
+      const quote = `甲${control}乙`;
+      const source = `前${quote}後`;
+      expect(source.includes(quote)).toBe(true);
+      expect(locateStudyEvidence(source, quote)).toBeNull();
+    }
+
+    // The source document remains untouched: only the quoted span is
+    // validated, so real Hebrew/Arabic letters can still be cited exactly
+    // even when the original document surrounds them with bidi controls.
+    const rtlText = 'שלום العربية';
+    const source = `前\u202b${rtlText}\u202c後`;
+    expect(locateStudyEvidence(source, rtlText)).toEqual({
+      before: '前\u202b',
+      quote: rtlText,
+      after: '\u202c後',
+      occurrences: 1,
+    });
+  });
+
   it('still locates visible text, maths and emoji with attached Unicode marks exactly', () => {
     const original = '甲\u200b乙；數學 x²+y²；e\u0301；👩‍💻';
     for (const quote of ['甲\u200b乙', 'x²+y²', 'e\u0301', '👩‍💻']) {
