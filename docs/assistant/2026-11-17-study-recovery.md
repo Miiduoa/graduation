@@ -59,3 +59,17 @@ App `5504170` 的必要核准、正式帳號及實機驗收仍屬獨立門檻；
 #672 不是本功能執行的必要依賴。額外本機合併實際遇到 `TodayAgentPanel.tsx` 衝突：若直接保留 #672 的 taskPicker 區塊，會漏傳 recovery callback，合併測試曾有 2 failed／46 passed。解析時兩個追蹤呈現入口都必須呼叫本批 `arrangement(row)`。
 
 獨立 reviewer 另發現 #631＋#672 的 **P1 相依阻擋**：#672 將 career 加入 `ASSISTANT_SERVICES`，而 #631 的 `capabilityDescriptions` 沒有對應項目，導致 TypeScript TS1360／TS7053，執行時也可能讀取 `undefined.modes`。本機隔離整合提交 `9463ed5ca1ff4be24631f47f6dbcd2a8c02707fe`（parents：本批 `1d5c17917c910f40a9c2214bd0dca770ba159e8b` 與 #672 `f3d1f28f4f973becabba0275dafb95da972733f2`）已修正 callback 合併遺失，並補最小 career handoff 描述與回歸，沒有新增代理權限。修正後 4 suites／182 tests、shared capability 17 tests、Web／shared typecheck、修改的 UI lint 及 diff checks 通過。未修改或推送 #672；其正式合併前仍須移植這些相容修正，不能當作正式分支 blocker 已解。完整本機整合 commits、logs、screenshots 目前未推送；此文件是可分享的結果摘要，不是正式服務驗收。
+## 2026-11-19 同步 main（PR #682）
+
+整合 main `bb61b1fa64dfea624bcd72f1c9f76e28f6c8ef8b`，保留工作情境、既有訂單取餐行程、原生 Tab 焦點修正及其回歸。課業復原、公開來源與跨服務接續共用入口合併；簽章卡片分別保留取餐、活動與課業復原的來源限制。學生情境保留本分支既有工具，教師的下一堂課問題仍沿用 main 的個人課表路徑。較舊的 Tab 攔截斷言改為驗證原生焦點轉移、可讀性及位置穩定，未移除 main 測試。
+
+本地驗證結果：
+
+- Web 助理／assistantV2／Today：151 個檔案、3,066 項測試通過，包含課業復原 handler 及實際 adapter。
+- Shared 助理服務、任務、工作情境、學務摘要與執行契約：232 項通過；離線助理 CLI：4 項通過。
+- Mobile 跨服務：1 suite、10 項通過。
+- Chromium 合成瀏覽器：行程修改 44 個情境、Today／課業復原 11 個情境通過；包含取餐行程及重新載入。
+- Web／shared 型別檢查、修改的 Web 檔案 lint、Python syntax 與 git diff 檢查通過。
+
+測試使用目前環境 Node 24.22.1；套件宣告 Node 22，執行時有 engine 警告。瀏覽器使用合成 API／帳號資料，未執行正式寫入、部署或推送。
+

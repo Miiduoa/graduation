@@ -395,7 +395,7 @@ describe('connected readers in conversational fallback and public-post boundarie
   it('retains original read provenance during a read-only retry without reactivating a completed study question', async () => {
     const f = fixture();
     const question = '查未交作業，安排今天15:00到16:00讀書，查公開貼文，查學校電話';
-    const tools = createTools(f.adapter, binding, secret, now, false, false, '', false, question);
+    const tools = createTools(f.adapter, binding, secret, now, false, false, '', false, undefined, question);
     await expect(tools.call('get_public_social', {})).resolves.toMatchObject({ value: { source: 'platform-public-social' } });
     await expect(tools.call('get_school_info', { field: 'phone' })).resolves.toMatchObject({ value: { query: { field: 'phone' } } });
     await expect(tools.call('get_school_info', { field: 'address' })).rejects.toMatchObject({ code: 'PUBLIC_READ_QUERY_MISMATCH' });

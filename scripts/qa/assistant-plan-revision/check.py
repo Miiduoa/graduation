@@ -27,6 +27,11 @@ ORIGINAL = [
     {'title': '測試微積分複習', 'date': '2026-11-12', 'allDay': False, 'startTime': '19:00', 'endTime': '19:30'},
     {'title': '測試英文閱讀', 'date': '2026-11-12', 'allDay': False, 'startTime': '20:00', 'endTime': '20:30'},
 ]
+PICKUP_QUESTION = '把最近訂單的取餐時間加入行事曆'
+PICKUP_EVENT = {
+    'title': '取餐：測試學生餐廳', 'date': '2099-11-18', 'allDay': False,
+    'startTime': '12:00', 'endTime': '12:15',
+}
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -536,6 +541,113 @@ async def no_overflow(page):
     return dimensions
 
 
+async def no_pickup_revision(page):
+    for name in ['精確時間調整', '修改行程提議', '整組時間調整', '選擇待建立的提議項目']:
+        await expect(page.get_by_role('region', name=name, exact=True)).to_have_count(0)
+    for name in ['修改時間或條件', '重新預覽']:
+        await expect(page.get_by_role('button', name=name, exact=True)).to_have_count(0)
+
+
+async def start_pickup(page, name):
+    consent = page.get_by_role('checkbox', name=re.compile('同意在本次對話'))
+    await expect(consent).to_be_enabled()
+    await expect(consent).not_to_be_checked()
+    await expect(page.get_by_role('status').filter(has_text='雲端回答暫時無法使用')).to_be_visible()
+    question = page.get_by_role('textbox', name='問題', exact=True)
+    send = page.get_by_role('button', name='送出', exact=True)
+    await question.fill('請幫我寫社團介紹稿')
+    await expect(send).to_be_disabled()
+    await question.press('Enter')
+    assert actions(await snapshot(page)) == [], 'An unrelated prompt bypassed the model/consent gate'
+    await question.fill('')
+    await page.get_by_role('button', name=PICKUP_QUESTION, exact=True).click()
+    await expect(question).to_have_value(PICKUP_QUESTION)
+    await expect(question).to_be_focused()
+    await expect(send).to_be_enabled()
+    await expect(consent).not_to_be_checked()
+    await no_writes(page)
+    drafted = await snapshot(page)
+    assert actions(drafted) == [], 'A suggestion sent a question instead of filling the draft'
+    draft_overflow = await no_overflow(page)
+    await capture(page, name + '-suggestion')
+    await send.click()
+    await expect(card_list(page)).to_have_count(1)
+    await idle(page)
+    card = card_list(page)
+    await expect(card).to_contain_text(PICKUP_EVENT['title'])
+    await expect(card).to_contain_text('12:00–12:15')
+    await expect(card.get_by_role('button', name='確認', exact=True)).to_be_enabled()
+    await expect(consent).not_to_be_checked()
+    await no_pickup_revision(page)
+    await no_writes(page)
+    state = await snapshot(page)
+    assert state['pickupScenario'] is True and actions(state) == ['ask'], state
+    body = state['requests'][-1]['body']
+    assert body['question'] == PICKUP_QUESTION and body['consent'] is False, body
+    assert body['history'] == [] and body['schoolId'] == 'fixture-campus-a', body
+    assert 'planProtection' not in body, body
+    preview_card = state['previews'][0]['cards'][0]
+    assert preview_card['sourceBound'] == 'food-pickup' and preview_card['args'] == PICKUP_EVENT, state
+    preview_overflow = await no_overflow(page)
+    await capture(page, name + '-preview-zero-writes')
+    return {'suggestionOnlyActions': actions(drafted), 'suggestionOnlyWrites': len(drafted['writes']),
+            'previewActions': actions(state), 'previewWrites': len(state['writes']),
+            'overflowBeforeConfirm': {'draft': draft_overflow, 'preview': preview_overflow}}
+
+
+async def verified_pickup(page, expected_actions):
+    await expect(card_list(page)).to_have_count(1)
+    receipt = card_list(page).get_by_label('行程執行回執', exact=True)
+    await expect(receipt).to_contain_text('已核對並加入個人行事曆')
+    await expect(receipt.get_by_role('link', name='開啟這筆行程', exact=True)).to_be_visible()
+    await idle(page)
+    await no_pickup_revision(page)
+    state = await snapshot(page)
+    assert actions(state) == expected_actions, state
+    assert len(state['writes']) == 1 and len(state['records']) == 1, state
+    assert all(state['writes'][0]['record'][key] == value for key, value in PICKUP_EVENT.items()), state
+    confirm = [row for row in state['requests'] if row['action'] == 'confirm']
+    assert len(confirm) == 1, state
+    original_card = state['previews'][0]['cards'][0]
+    for row in state['requests']:
+        if row['action'] in ['confirm', 'reconcile']:
+            assert row['body']['token'] == original_card['token'] and row['body']['args'] == PICKUP_EVENT, row
+            assert row['body']['schoolId'] == 'fixture-campus-a' and row['account'] == 'qa-agent', row
+    local = await page.evaluate("JSON.parse(localStorage.getItem('campus.personal-imports.v1:platform%3Aqa-agent:fixture-campus-a'))")
+    assert local['records'] == state['records'] and len(local['records']) == 1, local
+    await expect(page.get_by_role('checkbox', name=re.compile('同意在本次對話'))).not_to_be_checked()
+    return {'overflowAfterConfirm': await no_overflow(page), 'confirmedWrites': len(state['writes']),
+            'receipt': await receipt.inner_text(), 'localRecordMatchesReadback': True}
+
+
+async def pickup_case(page, width):
+    name = f'pickup-{width}'
+    result = await start_pickup(page, name)
+    await card_list(page).get_by_role('button', name='確認', exact=True).click()
+    result.update(await verified_pickup(page, ['ask', 'confirm']))
+    await card_list(page).get_by_role('button', name='重新核對結果', exact=True).click()
+    result.update(await verified_pickup(page, ['ask', 'confirm', 'reconcile']))
+    await capture(page, name + '-verified')
+    return {**result, 'mode': 'source-bound pickup; native suggestion, no-model/no-consent send, explicit confirm, readback; exactly one fake write'}
+
+
+async def pickup_reload_case(page):
+    name = 'pickup-reload-390'
+    result = await start_pickup(page, name)
+    await page.evaluate('window.__agentQA.configure({holdConfirmAfterWrite:true})')
+    await card_list(page).get_by_role('button', name='確認', exact=True).click()
+    await page.wait_for_function('window.__agentQA.snapshot().waiting')
+    before = await snapshot(page)
+    assert actions(before) == ['ask', 'confirm'] and len(before['writes']) == 1, before
+    result['reload'] = await true_reload(page, name, ['reconcile'])
+    result.update(await verified_pickup(page, ['ask', 'confirm', 'reconcile']))
+    after = await snapshot(page)
+    assert after['writes'] == before['writes'], 'Reload repeated the confirmed write'
+    assert after['requests'][-1]['body']['conversationId'] == before['requests'][-1]['body']['conversationId'], after
+    await capture(page, name + '-verified')
+    return {**result, 'mode': 'lost confirm response across actual reload; original source-bound journal reconciles without another ask or write'}
+
+
 async def native_case(page, width):
     await start_plan(page)
     await capture(page, f'native-{width}-initial')
@@ -768,8 +880,35 @@ async def protected_good_case(page, name):
     if len(before) == 2:
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        # The previous native Tab may still be scrolling the textarea into view.
+        # Observe both elements settling before measuring this Tab's baseline;
+        # never move focus, scroll the page, or change motion/CSS for the check.
+        settling = {
+            'button': await settled_comparison_geometry(button),
+            'dock': await settled_comparison_geometry(dock),
+        }
+        before_tab = await geometry_against_composer(button, await dock.element_handle())
+        before_tab['settling'] = settling
+        (OUT / f'protected-{name}-preview-before-tab.json').write_text(
+            json.dumps(before_tab, ensure_ascii=False, indent=2), encoding='utf-8')
+        assert all(value['settled'] for value in settling.values()), (
+            f'Native focus layout did not settle before Tab: {settling}')
+        # Observe only this button instance; every product call delegates unchanged to native.
+        await button.evaluate('''node => {
+          const original=node.scrollIntoView, requests=[];
+          const sample=target=>{const r=target.getBoundingClientRect(), scrolling=document.scrollingElement;
+            return {button:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height},
+              scroll:{x:scrollX,y:scrollY},documentScrollingElement:scrolling?{
+                scrollHeight:scrolling.scrollHeight,clientHeight:scrolling.clientHeight,scrollTop:scrolling.scrollTop}:null};};
+          node.__qaScrollRequests=requests;
+          node.scrollIntoView=function(options){
+            const request={options:options ?? null,before:sample(this)};
+            requests.push(request);
+            try {return original.call(this,options);}
+            finally {request.after=sample(this);}
+          };
+        }''')
         dock_element = await dock.element_handle()
-        before_tab = await geometry_against_composer(button, dock_element)
         await observe_next_forward_tab(button, dock_element)
         await page.keyboard.press('Tab')
         focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus', before_tab)
@@ -924,7 +1063,7 @@ async def controlled_native_smooth_tab_case(page):
         assert (keydown['isTrusted'] and keydown['key'] == 'Tab' and not keydown['shiftKey']
                 and keydown['target']['tag'] == 'TEXTAREA' and keydown['readable']
                 and keydown['defaultPreventedAtCapture'] is False
-                and keydown['defaultPreventedAfterDispatch'] is True), native
+                and keydown['defaultPreventedAfterDispatch'] is False), native
         assert (keydown['progressSinceStart'] >= native['minimumProgress']
                 and keydown['remainingToDestination'] >= native['minimumRemaining']), (
                     f'Real Tab missed the pending native smooth-scroll interval: {native}')
@@ -1080,7 +1219,7 @@ async def revision_native_focus_policy_case(page):
             page, button, name + '-visible-preview', before_visible_tab, require_no_scroll=True)
         evidence['visiblePreviewFocus'] = focus
         keydown = focus['tabEvent']
-        assert keydown['defaultPreventedAtCapture'] is False and keydown['defaultPreventedAfterDispatch'] is True, focus
+        assert keydown['defaultPreventedAtCapture'] is False and keydown['defaultPreventedAfterDispatch'] is False, focus
         expected_scroll = focus['beforeTab']['scroll']
         frames = [value for value in stability['timeline'] if value['phase'] == 'animation frame']
         assert len(frames) >= 4 and frames[-1]['time'] - stability['started'] >= 500, stability
@@ -1644,11 +1783,11 @@ def build_evidence():
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
 
-async def main(diagnose_native_smooth_scroll=False):
+async def main(selected_cases=None, diagnose_native_smooth_scroll=False):
     report = {'scope': 'Production React UI in Chromium; fixed fake API/account/campus; no model or real backend',
               'modelLimitation': 'Fixture returns predefined revised cards; this does not test model interpretation or generation quality',
               'runKind': 'engine-diagnostic' if diagnose_native_smooth_scroll else 'product-acceptance',
-              'build': build_evidence(), 'cases': []}
+              'selectedCases': selected_cases, 'build': build_evidence(), 'cases': []}
     report_path = OUT / ('native-smooth-scroll-diagnostic-results.json' if diagnose_native_smooth_scroll else 'results.json')
     if diagnose_native_smooth_scroll:
         report['diagnosticScope'] = ('Manually injected native smooth animation; preserves the strict no-scroll assertions. '
@@ -1703,6 +1842,16 @@ async def main(diagnose_native_smooth_scroll=False):
                     ('draft-pending-ask', 1440, lambda p: draft_pending_case(p, 'ask')),
                     ('draft-pending-confirm', 1440, lambda p: draft_pending_case(p, 'confirm')),
                 ])
+                cases.extend([
+                    ('pickup-1440', 1440, lambda p: pickup_case(p, 1440)),
+                    ('pickup-390', 390, lambda p: pickup_case(p, 390)),
+                    ('pickup-reload-390', 390, pickup_reload_case),
+                ])
+                if selected_cases:
+                    unknown = set(selected_cases) - {name for name, _width, _run in cases}
+                    if unknown:
+                        raise ValueError('Unknown --case: ' + ', '.join(sorted(unknown)))
+                    cases = [case for case in cases if case[0] in selected_cases]
                 if diagnose_native_smooth_scroll:
                     cases = [('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case)]
                 for name, width, run in cases:
@@ -1723,7 +1872,12 @@ async def main(diagnose_native_smooth_scroll=False):
                     await context.route('**/*', route)
                     result = {'name': name, 'viewport': width, 'motion': motion, 'status': 'failed'}
                     try:
-                        await page.goto(base + '/index.html' + ('?draft-reload=1' if name.startswith('draft-') else ''), wait_until='networkidle')
+                        query = []
+                        if name.startswith('draft-') or name == 'pickup-reload-390':
+                            query.append('draft-reload=1')
+                        if name.startswith('pickup-'):
+                            query.append('pickup=1')
+                        await page.goto(base + '/index.html' + ('?' + '&'.join(query) if query else ''), wait_until='networkidle')
                         result.update(await run(page))
                         assert not errors, errors
                         assert not blocked, blocked
@@ -1756,7 +1910,9 @@ async def main(diagnose_native_smooth_scroll=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--case', action='append', dest='cases',
+                        help='Run only this exact case name; repeat for multiple cases. Defaults to all cases.')
     parser.add_argument('--diagnose-native-smooth-scroll', action='store_true',
                         help='Run only the strict external native-animation engine diagnostic, outside product acceptance')
     arguments = parser.parse_args()
-    asyncio.run(main(diagnose_native_smooth_scroll=arguments.diagnose_native_smooth_scroll))
+    asyncio.run(main(selected_cases=arguments.cases, diagnose_native_smooth_scroll=arguments.diagnose_native_smooth_scroll))

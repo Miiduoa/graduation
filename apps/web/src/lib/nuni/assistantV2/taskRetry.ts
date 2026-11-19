@@ -153,7 +153,7 @@ export async function retryTaskReads(input: {
   const proof = retryProof(input);
   // Empty question prevents a completed study/reorder clause from influencing
   // any tools used in this read-only continuation.
-  const tools = createTools(input.adapter, input.binding, input.secret, input.now, false, false, '', false, proof.question);
+  const tools = createTools(input.adapter, input.binding, input.secret, input.now, false, false, '', false, undefined, proof.question);
   const result = await runCrossService({ request: proof.subset, tools, binding: input.binding,
     now: input.now, signal: input.signal, availableAfter: input.now, eventMapSelections: proof.eventMapSelections });
   input.signal.throwIfAborted();

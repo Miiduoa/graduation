@@ -15,6 +15,14 @@ const statuses: V2ActionState['status'][] = ['executing', 'checking', 'unknown',
   'absent', 'cancelled', 'superseded', 'handoff', 'verified'];
 
 describe('unattempted calendar plan eligibility', () => {
+  it('keeps source-bound pickup cards out of ordinary time, selection and protected replanning', () => {
+    const original = turn([{ ...card(), sourceBound: 'food-pickup' }, card('calendar-2')]);
+    expect(isUnattemptedCalendarPlan(original, {})).toBe(false);
+    expect(() => getPlanRevisionEvents(original)).toThrow('原安排無法完整核對');
+    expect(() => buildPlanRevisionQuestion(original, '延後一小時')).toThrow('原安排無法完整核對');
+    expect(() => buildPlanRevisionQuestion(original, '延後一小時', [0])).toThrow('原安排無法完整核對');
+  });
+
   it('accepts only a nonempty, valid calendar-only plan with no recorded attempt', () => {
     expect(isUnattemptedCalendarPlan(turn([card(), card('calendar-2')]), {})).toBe(true);
     expect(isUnattemptedCalendarPlan(turn(), { unrelated: { status: 'cancelled' } })).toBe(true);

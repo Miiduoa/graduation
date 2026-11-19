@@ -12,16 +12,18 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 16px;
-  margin-bottom: 4px;
+  margin-bottom: 0;
+  padding-block: 4px 8px;
 }
 
 .title {
   margin: 0;
   color: var(--text);
-  font-size: calc(var(--font-h1-size) + 0.25rem);
-  line-height: 1.25;
-  font-weight: 650;
-  letter-spacing: -0.025em;
+  /* Apply the app's heading preference after the responsive size, including its fluid range. */
+  font-size: calc(clamp(1.75rem, 3vw, 2.25rem) + var(--font-h1-size) - 1.5rem);
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.035em;
 }
 
 .date,
@@ -45,6 +47,10 @@
   color: var(--muted);
   font-size: var(--font-body-size);
   line-height: 1.7;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 
 .dayStatus p {
@@ -61,7 +67,7 @@
 .flow {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 18px;
   width: 100%;
   min-width: 0;
 }
@@ -69,8 +75,12 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
   min-width: 0;
+  padding: 18px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 
 .sectionHeading {
@@ -89,7 +99,7 @@
   color: var(--text);
   font-size: var(--font-body-size);
   line-height: 1.5;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .sectionLink {
@@ -101,10 +111,10 @@
 }
 
 .list {
-  margin: 0;
+  margin: 0 -12px;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--border);
+  border-top: 0;
 }
 
 .list > li + li {
@@ -118,10 +128,12 @@
   min-height: 64px;
   min-width: 0;
   width: 100%;
-  padding: 14px 0;
+  padding: 16px 12px;
+  border-radius: var(--radius);
   color: inherit;
   background: transparent;
   text-decoration: none;
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 
 .scheduleRow {
@@ -165,6 +177,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  border-radius: var(--radius);
 }
 
 .classRowWithMap + .classRowWithMap {
@@ -181,13 +194,14 @@
   justify-self: end;
   min-height: 44px;
   max-width: 100%;
-  margin-right: 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
+  margin-right: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   color: var(--brand);
   font-size: var(--font-body-sm-size);
   font-weight: 600;
   text-underline-offset: 4px;
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 
 @media (max-width: 26rem) {
@@ -196,7 +210,7 @@
   }
 
   .classroomLink {
-    margin-bottom: 4px;
+    margin: -4px 8px 8px 0;
   }
 }
 
@@ -204,7 +218,7 @@
   color: var(--text);
   font-size: calc(var(--font-body-size) + 0.0625rem);
   line-height: 1.5;
-  font-weight: 550;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -227,6 +241,22 @@
 
 .current .classStatus {
   color: var(--brand);
+}
+
+.priority {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+
+.list > li.priority + li,
+.list > li.priority {
+  border-top-color: transparent;
+}
+
+.priority .classStatus,
+.priority .kind {
+  color: var(--brand);
+  font-weight: 650;
 }
 
 .current .classStatus::before {
@@ -258,7 +288,8 @@
 .workItem {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  border-radius: var(--radius);
 }
 
 .workItem > .row {
@@ -270,10 +301,14 @@
   align-items: center;
   flex-shrink: 0;
   min-height: 44px;
-  padding-inline: 4px;
+  margin-inline-end: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
   color: var(--brand);
   font-size: var(--font-body-sm-size);
-  font-weight: 500;
+  font-weight: 600;
+  text-align: center;
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 
 .dueSoon .rowDeadline {
@@ -293,7 +328,7 @@
   align-items: center;
   align-self: flex-start;
   min-height: 44px;
-  padding: 0;
+  padding: 8px 4px;
   border: 0;
   background: transparent;
   color: var(--brand);
@@ -328,18 +363,19 @@
   display: block;
   width: 45%;
   height: 14px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--panel);
 }
 
 .boneRow {
   width: 100%;
-  height: 60px;
+  height: 80px;
+  border-radius: var(--radius);
 }
 
 .leaving {
   opacity: 0;
-  transition: opacity 200ms ease;
+  transition: opacity var(--motion-normal) var(--ease-out);
 }
 
 .srOnly {
@@ -360,6 +396,10 @@
   .row:hover {
     background: var(--panel);
   }
+  .classroomLink:hover,
+  .submit:hover {
+    background: color-mix(in srgb, var(--brand) 10%, transparent);
+  }
   .sectionLink:hover,
   .submit:hover,
   .more:hover,
@@ -375,11 +415,29 @@
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     align-items: start;
-    column-gap: 48px;
+    column-gap: 20px;
   }
 
   .notifications {
     grid-column: 1 / -1;
+  }
+}
+
+.row:active,
+.classroomLink:active,
+.submit:active {
+  background: var(--panel2);
+}
+
+@media (max-width: 600px) {
+  .screen {
+    gap: 20px;
+  }
+  .section {
+    padding: 12px 18px;
+  }
+  .flow {
+    gap: 14px;
   }
 }
 
@@ -393,7 +451,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .leaving {
+  .screen * {
     transition: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .section {
+    border-color: var(--border-strong);
+  }
+  .priority {
+    outline: 2px solid var(--brand);
+    outline-offset: -2px;
+  }
+}
+
+@media (forced-colors: active) {
+  .priority {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }

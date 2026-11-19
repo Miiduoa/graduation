@@ -2,6 +2,7 @@
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { createHash } = require('node:crypto');
+const { isAccountUnavailable } = require('../../accountLifecycle');
 
 function assertServiceScope(ctx) {
   if (!ctx.uid || typeof ctx.uid !== 'string' || ctx.uid.includes('/')) {
@@ -12,7 +13,7 @@ function assertServiceScope(ctx) {
   }
 }
 
-// 在與服務寫入相同的交易內讀取身分，撤銷校籍或刪除帳號時會重新驗證。
+// 在與服務寫入相同的交易內重讀身分，撤銷校籍、停用或刪除帳號時會重新驗證。
 async function readServiceActor(tx, db, ctx) {
   const [member, account] = await Promise.all([
     tx.get(db.doc(`schools/${ctx.schoolId}/members/${ctx.uid}`)),
@@ -21,8 +22,10 @@ async function readServiceActor(tx, db, ctx) {
   if (!member.exists || (member.data().status && member.data().status !== 'active')) {
     throw new HttpsError('permission-denied', '請使用目前學校的有效帳號。');
   }
+  // Preserve the admission policy for new/legacy profiles; a failed tx.get is
+  // never converted into an empty profile and therefore aborts the write.
   const profile = account.exists ? account.data() : {};
-  if (profile.accountDeletionInProgress === true || profile.status === 'deleted') {
+  if (isAccountUnavailable(profile)) {
     throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。');
   }
 }

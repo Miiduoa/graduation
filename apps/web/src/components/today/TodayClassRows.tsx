@@ -39,7 +39,11 @@ export function TodayClassRows({
           const courseHref = courseWeekHref(item.courseId);
           const mapHref = buildCampusClassroomMapHref({ schoolId: timetableSchoolId, location: item.location });
           return (
-            <li key={item.id} className={styles.classRowWithMap} data-testid={item.id === primaryId ? 'next-action' : undefined}>
+            <li
+              key={item.id}
+              className={styles.classRowWithMap + (item.id === primaryId ? ' ' + styles.priority : '')}
+              data-testid={item.id === primaryId ? 'next-action' : undefined}
+            >
               <Link
                 href={courseHref === '/timetable' ? timetableHref : courseHref}
                 className={styles.row + ' ' + styles.scheduleRow + (current ? ' ' + styles.current : ended ? ' ' + styles.ended : '')}
