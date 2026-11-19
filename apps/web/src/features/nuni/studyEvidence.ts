@@ -30,15 +30,40 @@ export function locateStudyEvidence(source: string, quote: string, occurrence = 
     }
   }
   if (!Number.isSafeInteger(occurrence) || occurrence < 0) return null;
-  let selected = -1;
-  let occurrences = 0;
-  // Count full, non-overlapping, exact-text matches. Never normalize student material.
+  // UTF-16 substring equality is necessary but not sufficient: 'e' inside e+accent
+  // or '👩' inside 👩‍💻 is not a complete, inspectable quotation.
+  // Keep the original source unchanged; only count whole grapheme-cluster matches.
+  const matches: number[] = [];
   for (let from = 0; from < source.length;) {
     const match = source.indexOf(quote, from);
     if (match === -1) break;
-    if (occurrences === occurrence) selected = match;
-    occurrences += 1;
+    matches.push(match);
     from = match + quote.length;
+  }
+  if (matches.length === 0) return null;
+  // Fail closed on older engines, rather than claiming that a truncated quote
+  // is verified when the Unicode boundary check is unavailable.
+  if (typeof Intl.Segmenter !== 'function') return null;
+
+  // Track just the candidate boundaries instead of caching every grapheme in
+  // a large PDF. This keeps memory proportional to the number of matches.
+  const wanted = new Set<number>();
+  for (const start of matches) {
+    wanted.add(start);
+    wanted.add(start + quote.length);
+  }
+  const boundaries = new Set<number>();
+  for (const { index } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source)) {
+    if (wanted.has(index)) boundaries.add(index);
+  }
+  if (wanted.has(source.length)) boundaries.add(source.length);
+
+  let selected = -1;
+  let occurrences = 0;
+  for (const start of matches) {
+    if (!boundaries.has(start) || !boundaries.has(start + quote.length)) continue;
+    if (occurrences === occurrence) selected = start;
+    occurrences += 1;
   }
   if (selected === -1) return null;
   return {

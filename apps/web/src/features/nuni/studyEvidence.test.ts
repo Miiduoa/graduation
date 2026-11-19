@@ -91,4 +91,36 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+
+  it('rejects partial grapheme citations and counts only complete repeated matches', () => {
+    // A byte-for-byte substring can still split what the student sees as one glyph.
+    expect(locateStudyEvidence('e\u0301', 'e')).toBeNull();
+    expect(locateStudyEvidence('👩‍💻', '👩')).toBeNull();
+    expect(locateStudyEvidence('🇹🇼', '🇹')).toBeNull();
+    expect(locateStudyEvidence('1️⃣', '1')).toBeNull();
+
+    // The same literal quotation later appears as an independent complete glyph.
+    const original = 'e\u0301e';
+    expect(locateStudyEvidence(original, 'e')).toEqual({
+      before: 'e\u0301', quote: 'e', after: '', occurrences: 1,
+    });
+    expect(locateStudyEvidence(original, 'e', 1)).toBeNull();
+    expect(locateStudyEvidence('👩‍💻👩', '👩')).toEqual({
+      before: '👩‍💻', quote: '👩', after: '', occurrences: 1,
+    });
+    expect(locateStudyEvidence('🇹🇼🇹', '🇹')).toEqual({
+      before: '🇹🇼', quote: '🇹', after: '', occurrences: 1,
+    });
+    expect(locateStudyEvidence('1️⃣1', '1')).toEqual({
+      before: '1️⃣', quote: '1', after: '', occurrences: 1,
+    });
+
+    // The complete original grapheme is still valid, with no normalization.
+    for (const glyph of ['e\u0301', '👩‍💻', '🇹🇼', '1️⃣']) {
+      expect(locateStudyEvidence(glyph, glyph)).toEqual({
+        before: '', quote: glyph, after: '', occurrences: 1,
+      });
+    }
+  });
+
 });
