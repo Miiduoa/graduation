@@ -37,6 +37,8 @@ export type CampusSpatialBenchmarkRow = {
   outcome: Outcome;
   destinationLevel: DestinationLevel;
   buildingCorrect: boolean | null;
+  entranceCorrect: boolean | null;
+  floorCorrect: boolean | null;
   roomCorrect: boolean | null;
   routeVerified: boolean | null;
   steps: number | null;
@@ -122,7 +124,8 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
         !['correct', 'incorrect', 'unverified'].includes(String(row.outcome))) {
       issues.push(`${prefix}: invalid result classification`);
     }
-    if (!triState(row.buildingCorrect) || !triState(row.roomCorrect) || !triState(row.routeVerified) ||
+    if (!triState(row.buildingCorrect) || !triState(row.entranceCorrect) ||
+        !triState(row.floorCorrect) || !triState(row.roomCorrect) || !triState(row.routeVerified) ||
         !count(row.steps) || !duration(row.elapsedMs)) {
       issues.push(`${prefix}: invalid accuracy, steps or elapsed time`);
     }
@@ -147,6 +150,12 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
           typeof row.visualScore !== 'number' || !Number.isInteger(row.visualScore) ||
           !text(row.visualRubric))) {
       issues.push(`${prefix}: performance comparison requires measured FPS and rated visual rubric`);
+    }
+    if (row.outcome === 'correct' && (
+        (row.destinationLevel === 'entrance' && row.entranceCorrect !== true) ||
+        (row.destinationLevel === 'floor' && row.floorCorrect !== true) ||
+        (row.destinationLevel === 'room' && row.roomCorrect !== true))) {
+      issues.push(`${prefix}: claimed indoor destination exceeds verified location accuracy`);
     }
     if (row.roomCorrect === true && row.buildingCorrect !== true) {
       issues.push(`${prefix}: room correctness requires verified building correctness`);
