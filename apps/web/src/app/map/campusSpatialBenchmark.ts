@@ -92,6 +92,7 @@ export type CampusSpatialBenchmarkValidation = {
 export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): CampusSpatialBenchmarkValidation {
   const issues: string[] = [];
   const trials = new Map<string, { baseline: Record<string, unknown>; products: Set<Product>; verified: boolean }>();
+  const taintedTrials = new Set<string>();
   // Detect replayed captures within the same scenario/product across different trial IDs.
   // A shared cross-product video is allowed; recycled runs from one product are not.
   const observedCaptures = new Map<string, string>();
@@ -166,7 +167,7 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     if (row.roomCorrect === true && row.buildingCorrect !== true) {
       issues.push(`${prefix}: room correctness requires verified building correctness`);
     }
-    const unsupportedIndoorLevels = (['entrance', 'floor', 'room'] as const).filter((level) =>
+    const unsupportedIndoorLevels = (['building', 'entrance', 'floor', 'room'] as const).filter((level) =>
       row[`${level}Correct`] === true &&
       LEVELS.indexOf(row.groundTruthLevel as DestinationLevel) < LEVELS.indexOf(level));
     for (const level of unsupportedIndoorLevels) {
@@ -214,6 +215,9 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
         }
       }
     }
+    if (text(id) && issues.some((issue) => issue.startsWith(`${prefix}:`))) {
+      taintedTrials.add(id as string);
+    }
   });
   let completeTrials = 0;
   // Repetitions must use one exact scenario. Three unrelated destinations or
@@ -222,7 +226,7 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
   for (const [id, trial] of trials) {
     const missing = CAMPUS_SPATIAL_PRODUCTS.filter((product) => !trial.products.has(product));
     if (missing.length) issues.push(`trial ${id}: missing comparisons: ${missing.join(', ')}`);
-    else if (trial.verified) {
+    else if (trial.verified && !taintedTrials.has(id)) {
       completeTrials += 1;
       const key = JSON.stringify(CONDITIONS.map((field) => trial.baseline[field]));
       const scenario = countsByScenario.get(key);

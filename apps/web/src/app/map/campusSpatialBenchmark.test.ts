@@ -154,6 +154,40 @@ describe('campus spatial benchmark evidence gate', () => {
     },
   );
 
+
+  it('rejects building correctness when ground truth has no building evidence', () => {
+    const rows = [
+      ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
+    ];
+    for (const row of rows) {
+      row.groundTruthLevel = 'none';
+      row.destinationLevel = 'none';
+      row.outcome = 'incorrect';
+      row.buildingCorrect = true;
+    }
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.issues.join(' ')).toContain('building correctness exceeds verified ground-truth evidence');
+    expect(result.completeTrials).toBe(0);
+    expect(result.reviewableTasks).toEqual([]);
+  });
+
+  it('does not count a mismatched or unevidenced trial as complete', () => {
+    const mismatched = fixture('synthetic-1');
+    mismatched[1] = { ...mismatched[1], deviceId: 'different-device' };
+    const mismatchedResult = validateCampusSpatialBenchmarkRows(mismatched);
+    expect(mismatchedResult.valid).toBe(false);
+    expect(mismatchedResult.issues.join(' ')).toContain('mismatched deviceId');
+    expect(mismatchedResult.completeTrials).toBe(0);
+
+    const missingEvidence = fixture('synthetic-2');
+    missingEvidence[0] = { ...missingEvidence[0], evidenceUrl: '' };
+    const missingResult = validateCampusSpatialBenchmarkRows(missingEvidence);
+    expect(missingResult.valid).toBe(false);
+    expect(missingResult.completeTrials).toBe(0);
+    expect(missingResult.reviewableTasks).toEqual([]);
+  });
+
   it('requires real evidence links, plausible measurements, and a visual rubric', () => {
     const rows = fixture('synthetic-1');
     rows[0] = {
