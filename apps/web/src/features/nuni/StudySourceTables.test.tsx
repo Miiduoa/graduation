@@ -1783,3 +1783,63 @@ it('returns from numeric and percentage bars to the exact original row with keyb
   expect(view.container.textContent).not.toContain('資料庫');
   view.unmount();
 });
+
+
+it('returns keyboard focus to the exact comparison button after inspecting a source row', () => {
+  const material = [
+    '閱讀前言', '| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
+  const jump = screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' });
+  const firstRow = view.container.querySelector('tbody tr');
+  expect(firstRow).not.toBeNull();
+  fireEvent.click(jump);
+  expect(document.activeElement).toBe(firstRow);
+  const back = screen.getByRole('button', { name: '返回原文第 4 行的圖表' });
+  expect(firstRow?.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(back);
+  expect(document.activeElement).toBe(jump);
+  expect(screen.queryByRole('button', { name: '返回原文第 4 行的圖表' })).toBeNull();
+});
+
+it('falls back to the first source cell when a mobile WebView cannot focus a table row', () => {
+  const material = [
+    '| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const firstRow = view.container.querySelector('tbody tr');
+  expect(firstRow).not.toBeNull();
+  if (!firstRow) return;
+  Object.defineProperty(firstRow, 'focus', { configurable: true, value: () => {} });
+  fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
+  fireEvent.click(screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' }));
+  const firstCell = firstRow.querySelector('th');
+  expect(firstCell?.tabIndex).toBe(-1);
+  expect(document.activeElement).toBe(firstCell);
+  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  expect(document.activeElement?.textContent).toContain('原文第 3 行 · 回表格核對');
+});
+
+it('never shows a stale return-to-chart control after the authorized source changes', () => {
+  const oldMaterial = [
+    '| 舊課程 | 學分 |', '| --- | --- |',
+    '| 舊課程一 | 3 |', '| 舊課程二 | 2 |',
+  ].join('\n');
+  const newMaterial = [
+    '新教材前言', '| 新課程 | 學分 |', '| --- | --- |',
+    '| 新課程一 | 4 |', '| 新課程二 | 1 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={oldMaterial} />);
+  fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
+  fireEvent.click(screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' }));
+  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBeTruthy();
+  view.rerender(<StudySourceTables text={newMaterial} />);
+  expect(screen.queryByRole('button', { name: /返回原文第 .* 行的圖表/ })).toBeNull();
+  fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
+  fireEvent.click(screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' }));
+  expect(document.activeElement?.textContent).toContain('新課程一4');
+  expect(screen.getByRole('button', { name: '返回原文第 4 行的圖表' })).toBeTruthy();
+});

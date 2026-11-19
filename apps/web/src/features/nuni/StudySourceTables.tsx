@@ -198,7 +198,7 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
 
 function StudySourcePercentComparison({ table, onJumpToSource }: {
   table: StudySourceTable;
-  onJumpToSource: (rowIndex: number) => void;
+  onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
 }) {
   const rows = sourcePercentRows(table);
   if (!rows) return null;
@@ -217,7 +217,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
               <span>{row.original}</span>
             </div>
             <button type="button" className={styles.sourceLineJump}
-              onClick={() => onJumpToSource(row.sourceLine - table.startLine - 2)}>
+              onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
               原文第 {row.sourceLine} 行 · 回表格核對
             </button>
             <meter min={0} max={100} value={row.amount}
@@ -233,7 +233,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
 /** Keep the original table visible; numeric bars are an opt-in derived view. */
 function StudySourceValueComparison({ table, onJumpToSource }: {
   table: StudySourceTable;
-  onJumpToSource: (rowIndex: number) => void;
+  onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
 }) {
   const rows = sourceValueRows(table);
   if (!rows) return null;
@@ -254,7 +254,7 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
               <span>{row.original}</span>
             </div>
             <button type="button" className={styles.sourceLineJump}
-              onClick={() => onJumpToSource(row.sourceLine - table.startLine - 2)}>
+              onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
               原文第 {row.sourceLine} 行 · 回表格核對
             </button>
             <meter min={0} max={max} value={row.amount}
@@ -496,12 +496,34 @@ export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
   const sourceRowRefs = useRef(new Map<string, HTMLTableRowElement>());
-  // Focus the exact original source row, without editing or re-parsing its cells.
-  const jumpToSource = (startLine: number, rowIndex: number) => {
+  const [returnTarget, setReturnTarget] = useState<{
+    sourceLines: OriginalSourceLine[];
+    startLine: number;
+    rowIndex: number;
+    origin: HTMLButtonElement;
+  } | null>(null);
+  // A replaced lesson must never retain the previous chart's DOM button or text.
+  useEffect(() => { setReturnTarget(null); }, [sourceLines]);
+  // Focus the original row; some Safari/WebViews cannot focus table rows, so
+  // fall back to its first cell without adding a normal Tab stop.
+  const jumpToSource = (startLine: number, rowIndex: number, origin: HTMLButtonElement) => {
     const row = sourceRowRefs.current.get(`${startLine}:${rowIndex}`);
     if (!row) return;
-    try { row.focus(); } catch { /* The original table remains visible. */ }
+    setReturnTarget({ sourceLines, startLine, rowIndex, origin });
+    try { row.focus(); } catch { /* Try a focusable source cell below. */ }
+    if (document.activeElement !== row && !row.contains(document.activeElement)) {
+      try { row.querySelector<HTMLElement>('th, td')?.focus(); }
+      catch { /* The table remains readable and the return control remains reachable. */ }
+    }
     try { row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    catch { /* A failed scroll must not prevent keyboard focus. */ }
+  };
+  const returnToChart = () => {
+    const origin = returnTarget?.origin;
+    setReturnTarget(null);
+    if (!origin?.isConnected) return;
+    try { origin.focus(); } catch { /* The comparison remains visible. */ }
+    try { origin.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
     catch { /* A failed scroll must not prevent keyboard focus. */ }
   };
   if (!tables.length) return null;
@@ -532,15 +554,20 @@ export function StudySourceTables({ text }: { text: string }) {
                     else sourceRowRefs.current.delete(key);
                   }}>{row.map((cell, column) =>
                   column === 0 && cell.trim()
-                    ? <th scope="row" key={column}>{cell}</th>
-                    : <td key={column}>{cell}</td>)}</tr>)}
+                    ? <th scope="row" key={column} tabIndex={-1}>{cell}</th>
+                    : <td key={column} tabIndex={column === 0 ? -1 : undefined}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
+          {returnTarget?.sourceLines === sourceLines && returnTarget.startLine === table.startLine && (
+            <button type="button" className={styles.sourceLineJump} onClick={returnToChart}>
+              返回原文第 {table.startLine + 2 + returnTarget.rowIndex} 行的圖表
+            </button>
+          )}
           <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
           <StudySourceValueComparison table={table}
-            onJumpToSource={(rowIndex) => jumpToSource(table.startLine, rowIndex)} />
+            onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
           <StudySourcePercentComparison table={table}
-            onJumpToSource={(rowIndex) => jumpToSource(table.startLine, rowIndex)} />
+            onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
         </div>
       ))}
     </section>
