@@ -148,6 +148,32 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('ignores a queued visibility callback after the spatial dialog releases WebGL', async () => {
+  // Some embedded WebViews still deliver a queued IntersectionObserver callback
+  // after disconnect(). It must not call setActive on the disposed renderer.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      intersection?.([{ isIntersecting: true, target }] as IntersectionObserverEntry[],
+        this as unknown as IntersectionObserver);
+    }
+    disconnect = disconnect;
+  });
+  const { unmount } = render(<CampusSpatialExplorer school="other-school"
+    locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  await open();
+  expect(scene.setActive).toHaveBeenCalledWith(true);
+
+  unmount();
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
+  expect(disconnect).toHaveBeenCalledTimes(1);
+  scene.setActive.mockClear();
+  act(() => intersection?.([{ isIntersecting: true }] as IntersectionObserverEntry[],
+    {} as IntersectionObserver));
+  expect(scene.setActive).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
 it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
   // The API exists and observe() succeeds, but the WebView never invokes its
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
