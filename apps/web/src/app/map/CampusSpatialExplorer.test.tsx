@@ -145,6 +145,19 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   ] as IntersectionObserverEntry[], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
+
+  // Browser entries carry timestamps. If a WebView presents an older
+  // transition last in a batch, follow the newest observation, not the
+  // final array item. Test doubles above omit time to verify fallback.
+  act(() => intersection?.([
+    { isIntersecting: false, time: 220 }, { isIntersecting: true, time: 210 },
+  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  act(() => intersection?.([
+    { isIntersecting: true, time: 240 }, { isIntersecting: false, time: 230 },
+  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
