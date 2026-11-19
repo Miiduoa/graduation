@@ -234,6 +234,11 @@ function createGroupMembershipHandlers({ db }) {
       }
 
       assertEligibleAccount(actorUserDoc, '目前帳號');
+      // A new recipient must have an account document; an existing empty legacy
+      // profile is still eligible. Historical receipt recovery above skips this check.
+      if (!targetUserDoc.exists) {
+        throw new HttpsError('failed-precondition', '接收對象帳號不存在，無法完成轉讓。');
+      }
       assertEligibleAccount(targetUserDoc, '接收對象');
       assertActiveSchoolSeat(actorSchoolDoc, '目前帳號');
       assertActiveSchoolSeat(targetSchoolDoc, '接收對象');

@@ -466,23 +466,65 @@ describe('transferGroupOwnership', () => {
 
   test.each([
     { role: 'student' }, { role: 'student', status: 'active' }, { role: 'teacher' }, {},
-    { status: '' }, null,
+    { status: '' },
     { role: 'student', schoolId: 'other-school' },
   ])('legacy profiles %j still transfer and recover the same immutable receipt', async (profile) => {
     for (const uid of ['alice', 'bob']) {
-      if (profile === null) store.docs.delete(`users/${uid}`);
-      else store.docs.set(`users/${uid}`, { ...profile });
+      store.docs.set(`users/${uid}`, { ...profile });
     }
     const first = await transfer();
     expect(first).toMatchObject({ success: true, reused: false, fromUid: 'alice', toUid: 'bob' });
     expect(store.docs.get('groups/one/members/alice').role).toBe('member');
     expect(store.docs.get('groups/one/members/bob').role).toBe('owner');
     for (const uid of ['alice', 'bob']) {
-      expect(store.docs.get(`users/${uid}`)).toEqual(profile === null ? undefined : profile);
+      expect(store.docs.get(`users/${uid}`)).toEqual(profile);
     }
     const beforeReplay = completeState();
     expect(await transfer()).toEqual({ ...first, reused: true });
     expect(completeState()).toBe(beforeReplay);
+  });
+
+  test('a missing target account cannot receive ownership despite active school and group memberships', async () => {
+    store.docs.delete('users/bob');
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test('a missing actor profile preserves legacy transfer compatibility', async () => {
+    store.docs.delete('users/alice');
+    expect(await transfer()).toMatchObject({ success: true, reused: false });
+    expect(store.docs.has('users/alice')).toBe(false);
+    expect(store.docs.get('groups/one/members/bob').role).toBe('owner');
+  });
+
+  test('a transaction retry rejects a target account that disappears after the first attempt', async () => {
+    const aborted = new Error('discard first attempt');
+    let attempts = 0;
+    handlers = createGroupMembershipHandlers({ db: {
+      ...store.db,
+      runTransaction: async (callback) => {
+        await expect(store.db.runTransaction(async (transaction) => {
+          attempts++;
+          expect(await callback(transaction)).toMatchObject({ success: true, reused: false });
+          throw aborted;
+        })).rejects.toBe(aborted);
+        store.docs.delete('users/bob');
+        const before = completeState();
+        try {
+          return await store.db.runTransaction((transaction) => {
+            attempts++;
+            return callback(transaction);
+          });
+        } finally {
+          expect(completeState()).toBe(before);
+        }
+      },
+    } });
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(attempts).toBe(2);
+    expect(store.docs.get('groups/one/members/alice').role).toBe('owner');
+    expect(store.docs.get('groups/one/members/bob').role).toBe('member');
   });
 
   test.each(['deleted', 'deleting', 'disabled', 'suspended', 'inactive'])('receipt recovery rejects an unavailable original actor who becomes %s', async (status) => {

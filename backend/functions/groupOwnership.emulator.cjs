@@ -454,18 +454,27 @@ test('an actor marked for deletion after the real callable admission cannot comm
   await assertOwnership('alice');
 });
 
-for (const uid of ['alice', 'bob']) {
-  test(`a missing ${uid === 'alice' ? 'actor' : 'target'} profile preserves legacy transfer and immutable receipt recovery`, async () => {
-    await db.doc(`users/${uid}`).delete();
-    const original = await accountGuardedTransfer()(request());
-    assert.equal(original.reused, false);
-    assert.equal((await db.doc(`users/${uid}`).get()).exists, false);
-    await assertOwnership('bob');
-    const committed = await ownershipState();
-    assert.deepEqual(await accountGuardedTransfer()(request()), { ...original, reused: true });
-    assert.deepEqual(await ownershipState(), committed);
-  });
+test('a missing actor profile preserves legacy transfer and immutable receipt recovery', async () => {
+  await db.doc('users/alice').delete();
+  const original = await accountGuardedTransfer()(request());
+  assert.equal(original.reused, false);
+  assert.equal((await db.doc('users/alice').get()).exists, false);
+  await assertOwnership('bob');
+  const committed = await ownershipState();
+  assert.deepEqual(await accountGuardedTransfer()(request()), { ...original, reused: true });
+  assert.deepEqual(await ownershipState(), committed);
+});
 
+test('a missing target account cannot receive ownership despite active school and group memberships', async () => {
+  await db.doc('users/bob').delete();
+  const before = await ownershipState();
+  await assert.rejects(accountGuardedTransfer()(request()), { code: 'failed-precondition' });
+  assert.equal((await db.doc('users/bob').get()).exists, false);
+  assert.deepEqual(await ownershipState(), before);
+  await assertOwnership('alice');
+});
+
+for (const uid of ['alice', 'bob']) {
   test(`an existing empty ${uid === 'alice' ? 'actor' : 'target'} profile preserves legacy transfer and receipt compatibility`, async () => {
     await db.doc(`users/${uid}`).set({});
     const invoke = accountGuardedTransfer();
@@ -611,7 +620,7 @@ for (const uid of ['alice', 'bob']) {
         }),
       };
       const result = createGroupMembershipHandlers({ db: database }).transferGroupOwnership(request());
-      const unavailable = patch !== null;
+      const unavailable = patch !== null || uid === 'bob';
       if (unavailable) await assert.rejects(result, { code: 'failed-precondition' });
       else assert.equal((await result).reused, false);
       assert.equal(stagedAttempt, true, 'first attempt must stage the normal transfer');
