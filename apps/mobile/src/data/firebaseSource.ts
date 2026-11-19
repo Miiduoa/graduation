@@ -1,3 +1,4 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
 import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
@@ -1753,25 +1754,20 @@ export const firebaseSource: DataSource = {
 
   // ===== 群組貼文 =====
   async listGroupPosts(groupId, options) {
-    try {
-      const rows = await fetchCollectionAtPath<GroupPost>(
-        buildGroupCollectionPath(groupId, 'posts'),
-        [orderBy('createdAt', 'desc')],
-        options,
-      );
-      if (rows.length > 0) {
-        return rows.map((row) => ({ ...row, groupId: row.groupId ?? groupId }));
-      }
-    } catch (error) {
-      console.warn('[firebaseSource] listGroupPosts canonical read failed:', error);
-    }
-
-    return fetchCollection<GroupPost>(
-      'groupPosts',
-      [where('groupId', '==', groupId), orderBy('createdAt', 'desc')],
-      undefined,
-      options,
-    );
+    const user = getAuthInstance().currentUser;
+    if (!user) throw new Error('請先登入');
+    const page = await postNuniWebFn<
+      { groupId: string; pageSize: number },
+      { posts: (Omit<GroupPost, 'createdAt'> & { createdAt: { seconds: number; nanoseconds: number } })[] }
+    >('listGroupDiscussionPage', {
+      groupId, pageSize: options?.limit ?? options?.pageSize ?? DEFAULT_PAGE_SIZE,
+    }, user.uid);
+    if (getAuthInstance().currentUser !== user) throw new Error('帳號已變更');
+    return page.posts.map((post) => ({
+      ...post,
+      groupId,
+      createdAt: new Date(post.createdAt.seconds * 1000 + post.createdAt.nanoseconds / 1e6).toISOString(),
+    }));
   },
 
   async getGroupPost(id, groupId = undefined) {
