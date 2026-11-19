@@ -232,6 +232,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [status, setStatus] = useState<'loading' | 'deferred' | 'ready' | 'error'>('loading');
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen'>('background');
   const [attempt, setAttempt] = useState(0);
+  // An embedded WebView may construct an observer but never deliver entries.
+  // Only an explicit user choice bypasses offscreen detection.
+  const [manualStart, setManualStart] = useState(false);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -255,7 +258,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Do not allocate a mobile WebGL context until the viewport observer has
     // actually confirmed that this map is on screen. Without the API, retain
     // the original eager-start fallback for older WebViews.
-    let visible = typeof IntersectionObserver === 'undefined';
+    let visible = manualStart || typeof IntersectionObserver === 'undefined';
     let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
@@ -346,7 +349,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // construction or observe(). Do not strand the tour in offscreen mode:
     // the safe fallback is the existing eager startup path.
     let intersection: IntersectionObserver | null = null;
-    if (typeof IntersectionObserver !== 'undefined') {
+    if (!manualStart && typeof IntersectionObserver !== 'undefined') {
       try {
         intersection = new IntersectionObserver(([entry]) => {
           visible = entry?.isIntersecting ?? false;
@@ -377,7 +380,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       scene?.dispose();
       runtime.current = null;
     };
-  }, [host, model, onSelect, onCameraChange, attempt, footprints]);
+  }, [host, model, onSelect, onCameraChange, attempt, footprints, manualStart]);
 
   return (
     <>
@@ -395,7 +398,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? (
             deferredCause === 'background'
               ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p>
-              : <p>立體畫面尚未進入可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。地點資訊與步行導航仍可使用。</p>
+              : <>
+                <p>尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。</p>
+                <button className="btn" type="button" onClick={() => setManualStart(true)}>手動開啟立體畫面</button>
+              </>
           ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
             <button className="btn" type="button" onClick={() => setAttempt((value) => value + 1)}>
