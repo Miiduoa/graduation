@@ -1,3 +1,8 @@
+## 2026-11-19：原文證據定位 Vitest 修正 TypeScript 嚴格空值檢查
+
+- 精確 PR #719 head `eecd94a0741c59955de6d6a873eaf0bece9244c2` 的 [CI #44458547965](https://github.com/Miiduoa/graduation/actions/runs/44458547965) 已結束失敗：Web/Mobile、Functions、Firestore、Assistant、Security 和 Course access review 通過，CodeQL 成功，但 Lint & Type Check 的 `tsc` 在 `studyEvidence.test.ts:66` 報 TS18048（兩處 `found` 欄位可能為 `undefined`）；Build Web/Mobile 因 gate 失敗被跳過。這不是要放寬生產程式的原文核對。
+- 新回歸測試在還原整段原文前，明確要求每段正常可見引句的 `locateStudyEvidence` 不得回傳 `null`，並使用 TypeScript 可識別的中止分支作為型別收斂；失去定位時測試會失敗，不會靠 optional chaining 偷偷略過。產品程式、學生原文、v1/v2 閱讀與 v1 練習 checkpoint 均維持不變。此修正仍需依**新 head** 重跑完整 CI／CodeQL，不能沿用前版。指定 App 5504170 APPROVED、Maestro／真機與 Ahaboard 同條件對照仍無通過證據；PR 繼續 Draft，不合併、不部署。
+
 ## 2026-11-19：原文引句只有隱形字元時不再誤標為可核對證據
 
 - 學生按「查看原文提示」時，若裝置端講解只產生零寬字元、Unicode 雙向控制符、獨立組合記號或盲文空白作為引句，過去只要教材含同樣位元，白板便可能標示為「已定位」，即使讀者看不到任何可核對文字。現在定位器會拒絕這類純不可見引句，UI 沿用既有「無法在原文定位，請回白板核對」提示；保留整段原文、原試答及揭答狀態。

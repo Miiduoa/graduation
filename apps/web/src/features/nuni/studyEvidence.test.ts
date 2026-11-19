@@ -63,7 +63,10 @@ describe('exact source-to-lesson evidence', () => {
     for (const quote of ['甲\u200b乙', 'x²+y²', 'e\u0301', '👩‍💻']) {
       const found = locateStudyEvidence(original, quote);
       expect(found?.quote).toBe(quote);
-      expect(found?.before + found?.quote + found?.after).toBe(original);
+      // The assertion below must narrow the nullable location for TypeScript.
+      // If a visible source quote disappears, fail this test rather than hide it.
+      if (found === null) throw new Error('Visible citation must match the source exactly');
+      expect(found.before + found.quote + found.after).toBe(original);
       expect(found?.occurrences).toBe(1);
     }
   });
