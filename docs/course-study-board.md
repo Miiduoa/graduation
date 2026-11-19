@@ -1866,3 +1866,8 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修正閱讀進度 v1／v2 還原時僅以 `trim()` 判定是否曾作答：單獨的零寬字元、盲文空白與組合記號不再能讓讀檔後的參考回答呈現「已展開」。無效來源匯入會中止還原，不清除原有學習狀態；若從未揭答，原始草稿仍可保留。
 - TXT 學習筆記下載同步使用相同判斷，避免從異常的記憶體狀態匯出未經有效試答的參考回答。與逐題練習、練習 checkpoint 共用 `hasVisibleStudyAttempt`，避免不同備份入口逐漸分歧。保留中文、公式、完整 Emoji、附著重音及非空白點字。
 - 新增 v1/v2 閱讀備份與 TXT 匯出的 Vitest 正反測試；不修改 checkpoint 格式、原始教材、私有筆記，也不新增套件、傳送教材或啟用 E 校園抓取。需以本次精確 head 再驗證全部 CI/CodeQL；App 5504170、Maestro、手機真機與 Ahaboard 同教材同題同機仍需獨立驗收，PR 保持 Draft，不合併、不部署。
+
+## 2026-11-19：閱讀畫面試答按鈕與備份／下載的揭答規則對齊
+
+- 原頁自我檢查題仍有 `selected.attempt.trim()`：在學生只輸入零寬字元、盲文空白等不可見內容時，瀏覽器按鈕可能被誤啟用。現在 `CourseStudyPassage` 的按鈕 disabled、`aria-expanded`、參考回答渲染與實際更新事件全使用相同 `hasVisibleStudyAttempt` 門檻；即使舊狀態的 `answerVisible` 為 true，只有有效試答才能顯示答案。
+- 補實際 React DOM 模擬互動回歸，逐一確認不可見內容無法揭答，合法中文／公式／Emoji／附著重音／非空白點字可使用；已揭答後更改答案會重新鎖定。正式 Vitest/CI、iOS Safari／Android Chrome 真機仍須在精確 SHA 重新取得結果，不能視為已驗收。
