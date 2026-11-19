@@ -224,12 +224,15 @@ async def check_short_service_menu(page, report, capture):
             await trigger.click()
             close = page.get_by_role('button', name='關閉所有服務')
             await expect(close).to_be_in_viewport(ratio=1)
-            assert await close.evaluate('''node => {
+            geometry = await close.evaluate('''node => {
               const panel=node.parentElement.parentElement.getBoundingClientRect();
               const header=node.closest('header').getBoundingClientRect();
               const navigation=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();
-              return panel.top >= header.bottom-1 && panel.bottom <= navigation.top+1;
-            }'''), 'Short-window service menu covered the header or bottom navigation'
+              return {panelTop:panel.top,panelBottom:panel.bottom,headerBottom:header.bottom,navigationTop:navigation.top};
+            }''')
+            assert (geometry['panelTop'] >= geometry['headerBottom'] - 1
+                    and geometry['panelBottom'] <= geometry['navigationTop'] + 1), (
+                'Short-window service menu covered the header or bottom navigation', geometry)
             # The task-first menu discloses secondary services progressively.
             # Expand the real controls before checking keyboard reachability.
             for summary in await page.locator('details[data-directory-section] > summary').all():

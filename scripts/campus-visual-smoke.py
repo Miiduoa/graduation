@@ -483,9 +483,10 @@ async def check_full_service_search_journey(page, results):
         await goto_path(page, '/settings?campus=pu&section=appearance')
         await page.get_by_role('group', name='字級', exact=True).get_by_role('button', name='中', exact=True).click()
         await page.get_by_role('button', name='淺色', exact=True).click()
-        await goto_path(page, '/search?campus=pu')
+        # Visual cases start with an explicit query: session restoration may
+        # already show the same text, so filling it again need not emit a change.
+        await goto_path(page, '/search?campus=pu&q=借書')
         await wait_for_campus_header(page, 'pu', '靜宜大學')
-        await search.fill('借書')
         await expect_search('借書')
         normal_input_size = await search.evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
         for width in (320, 390, 1440):
@@ -501,9 +502,8 @@ async def check_full_service_search_journey(page, results):
         await goto_path(page, '/settings?campus=pu&section=appearance')
         await page.get_by_role('group', name='字級', exact=True).get_by_role('button', name='大', exact=True).click()
         await page.get_by_role('button', name='深色', exact=True).click()
-        await goto_path(page, '/search?campus=pu')
+        await goto_path(page, '/search?campus=pu&q=借書')
         await wait_for_campus_header(page, 'pu', '靜宜大學')
-        await search.fill('借書')
         await expect_search('借書')
         assert await search.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') > normal_input_size, 'Search input ignored the large text preference'
         await page.locator('html').evaluate("node => { node.style.fontSize='200%'; }")

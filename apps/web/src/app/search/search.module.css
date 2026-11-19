@@ -68,6 +68,10 @@
   line-height: 1.5;
 }
 
+.queryField .searchInput[type='search'] {
+  background-color: transparent;
+}
+
 .queryActions,
 .assistantActions {
   display: flex;
@@ -256,6 +260,11 @@
 
 .smartGrid {
   gap: 10px;
+}
+
+.smartGrid > .smartAction:only-child,
+.services > .serviceEntry:only-child {
+  grid-column: 1 / -1;
 }
 
 .smartAction {

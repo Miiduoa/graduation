@@ -286,6 +286,31 @@ export function QuickCampusEntry({
       void analyze(transcript);
   }
 
+  const analysisAction =
+    phrase && (publicIntent || (canInterpret && !serviceIntent)) ? (
+      <div className={styles.aiRow}>
+        <button
+          type="button"
+          className={styles.analyzeButton}
+          disabled={active?.state === 'loading'}
+          onClick={() => void analyze(phrase)}
+        >
+          {active?.state === 'loading'
+            ? publicIntent
+              ? '正在查詢課程…'
+              : 'AI 正在理解…'
+            : publicIntent
+              ? '查詢公開課程'
+              : '用 AI 理解這句話'}
+        </button>
+        <span className={styles.hint}>
+          {publicIntent
+            ? '從校方公開資料找課，可接著查看完整課程。'
+            : '語音完成後會自動分析轉寫文字；打字則由你決定是否送出。'}
+        </span>
+      </div>
+    ) : null;
+
   return (
     <section
       className={compact ? styles.compactEntry : styles.entry}
@@ -371,29 +396,7 @@ export function QuickCampusEntry({
           </details>
         </div>
       </form>
-      {phrase && (publicIntent || (canInterpret && !serviceIntent)) ? (
-        <div className={styles.aiRow}>
-          <button
-            type="button"
-            className={styles.analyzeButton}
-            disabled={active?.state === 'loading'}
-            onClick={() => void analyze(phrase)}
-          >
-            {active?.state === 'loading'
-              ? publicIntent
-                ? '正在查詢課程…'
-                : 'AI 正在理解…'
-              : publicIntent
-                ? '查詢公開課程'
-                : '用 AI 理解這句話'}
-          </button>
-          <span className={styles.hint}>
-            {publicIntent
-              ? '從校方公開資料找課，可接著查看完整課程。'
-              : '語音完成後會自動分析轉寫文字；打字則由你決定是否送出。'}
-          </span>
-        </div>
-      ) : null}
+      {!publicIntent && analysisAction}
       {primaryHandoff ? (
         <div className={styles.aiRow}>
           {onAsk ? (
@@ -435,6 +438,7 @@ export function QuickCampusEntry({
           aria-label="服務搜尋結果"
           tabIndex={-1}
         >
+          {publicIntent && analysisAction}
           {serviceIntent?.kind === 'catalog' && selectedSchoolId && (
             <AssistantServiceLinks
               serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
