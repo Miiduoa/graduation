@@ -1798,7 +1798,8 @@ it('returns keyboard focus to the exact comparison button after inspecting a sou
   fireEvent.click(jump);
   expect(document.activeElement).toBe(firstRow);
   const back = screen.getByRole('button', { name: '返回原文第 4 行的圖表' });
-  expect(firstRow?.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  if (!firstRow) throw new Error('Expected a source row for chart focus navigation');
+  expect(firstRow.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(back);
   expect(document.activeElement).toBe(jump);
   expect(screen.queryByRole('button', { name: '返回原文第 4 行的圖表' })).toBeNull();
