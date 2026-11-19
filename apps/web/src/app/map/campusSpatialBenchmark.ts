@@ -54,6 +54,10 @@ const CONDITIONS = [
   'groundTruthLevel', 'groundTruthUrl',
 ] as const;
 const LEVELS: DestinationLevel[] = ['none', 'building', 'entrance', 'floor', 'room'];
+// The five products in one paired trial must be measured in a single session.
+// Otherwise differing traffic, weather or app updates can contaminate the comparison.
+const MAX_PAIRED_TRIAL_SPAN_MS = 60 * 60 * 1000;
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const object = (v: unknown): Record<string, unknown> | null =>
   !!v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
 const text = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.length <= 300;
@@ -70,7 +74,8 @@ const timestamp = (value: unknown) =>
   typeof value === 'string' &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   Number.isFinite(Date.parse(value)) &&
-  new Date(Date.parse(value)).toISOString() === value;
+  new Date(Date.parse(value)).toISOString() === value &&
+  Date.parse(value) <= Date.now() + MAX_CLOCK_SKEW_MS;
 const count = (value: unknown) => value === null ||
   (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 10000);
 const duration = (value: unknown) => value === null ||
@@ -98,6 +103,7 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     verified: boolean;
   }>();
   const taintedTrials = new Set<string>();
+  const captureTimesByTrial = new Map<string, number[]>();
   // Detect replayed captures within the same scenario/product across different trial IDs.
   // A shared cross-product video is allowed; recycled runs from one product are not.
   const observedCaptures = new Map<string, string>();
@@ -187,6 +193,11 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     }
     const id = row.trialId;
     if (!text(id)) return;
+    if (timestamp(row.testedAt)) {
+      const times = captureTimesByTrial.get(id as string) ?? [];
+      times.push(Date.parse(row.testedAt as string));
+      captureTimesByTrial.set(id as string, times);
+    }
     if (evidenceUrl(row.evidenceUrl) && timestamp(row.testedAt)) {
       const scenario = JSON.stringify([row.product, ...CONDITIONS.map((field) => row[field])]);
       const observations = [
@@ -231,6 +242,11 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
   // devices under the same task name are not a paired benchmark.
   const countsByScenario = new Map<string, { task: Task; count: number }>();
   for (const [id, trial] of trials) {
+    const times = captureTimesByTrial.get(id) ?? [];
+    if (times.length > 1 && Math.max(...times) - Math.min(...times) > MAX_PAIRED_TRIAL_SPAN_MS) {
+      issues.push(`trial ${id}: product observations exceed the one-hour paired session`);
+      taintedTrials.add(id);
+    }
     const missing = CAMPUS_SPATIAL_PRODUCTS.filter((product) => !trial.products.has(product));
     if (missing.length) issues.push(`trial ${id}: missing comparisons: ${missing.join(', ')}`);
     else if (trial.verified && !taintedTrials.has(id)) {
