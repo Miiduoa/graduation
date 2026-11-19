@@ -205,6 +205,50 @@ it('ignores foreign and older viewport callbacks without disabling walking navig
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('does not let untimed WebView records override newer timestamped visibility', async () => {
+  // A partially implemented mobile IntersectionObserver can mix entries
+  // without time into a batch, and deliver old untimed callbacks later.
+  // In neither case should an offscreen WebGL scene resume by mistake.
+  let observedHost: Element | null = null;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) { observedHost = target; }
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  expect(observedHost).toBe(graphics);
+  expect(scene.create).not.toHaveBeenCalled();
+
+  const notify = (records: Array<{ isIntersecting: boolean; time?: number }>) => {
+    act(() => intersection?.(records.map((record) => ({ ...record, target: graphics }))
+      as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+  };
+  // An earlier timed on-screen entry remains valid even when an untimed
+  // offscreen record happens to be last in the batch.
+  notify([{ isIntersecting: true, time: 100 }, { isIntersecting: false }]);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+  notify([{ isIntersecting: false, time: 300 }, { isIntersecting: true }]);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  const pausedCalls = scene.setActive.mock.calls.length;
+
+  // No timestamp means no evidence that this record is newer; reject it
+  // once the observer has established a trustworthy timestamp order.
+  notify([{ isIntersecting: true }]);
+  notify([{ isIntersecting: true, time: 250 }, { isIntersecting: true }]);
+  expect(scene.setActive.mock.calls.length).toBe(pausedCalls);
+
+  notify([{ isIntersecting: true, time: 400 }]);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('ignores a queued visibility callback after the spatial dialog releases WebGL', async () => {
   // Some embedded WebViews still deliver a queued IntersectionObserver callback
   // after disconnect(). It must not call setActive on the disposed renderer.
