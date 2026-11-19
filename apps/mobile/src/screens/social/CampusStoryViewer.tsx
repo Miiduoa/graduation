@@ -174,19 +174,36 @@ function StorySlide({
   if (panelFor !== null && panelFor !== scope) setPanelFor(null);
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
-  const playbackActive = playing && !inspecting && !replying;
-  const [loadedImage, setLoadedImage] = useState('');
-  const [failedImage, setFailedImage] = useState('');
+  // Reading a long caption is deliberate: do not replace the content underneath it.
+  // Scope the pause to the current story so the next story never inherits it.
+  const [readingCaptionFor, setReadingCaptionFor] = useState<string | null>(null);
+  const readingCaption = readingCaptionFor === story.id;
+  const playbackActive = playing && !inspecting && !replying && !readingCaption;
+  const [loadedImage, setLoadedImage] = useState<object | null>(null);
+  const [failedImage, setFailedImage] = useState<object | null>(null);
+  const [imageRetry, setImageRetry] = useState(0);
   const mediaUrl = usePrivateMedia(story.mediaUrl);
+  // Revisiting a story must wait for the newly mounted Image, even if this ID loaded before.
+  // A fresh request identity also invalidates old native onLoad/onError callbacks.
+  const imageRequest = useMemo(
+    () => ({ storyId: story.id, mediaUrl, retry: imageRetry }),
+    [story.id, mediaUrl, imageRetry],
+  );
+  const activeImageRequest = React.useRef(imageRequest);
+  React.useLayoutEffect(() => {
+    activeImageRequest.current = imageRequest;
+  }, [imageRequest]);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
-  const ready = !hasImage || loadedImage === story.id || imageFailed;
+  const imageFailed = hasImage && (!mediaUrl || failedImage === imageRequest);
+  // An image error or an earlier visit's onLoad cannot start the next-story timer.
+  const ready = !hasImage || (loadedImage === imageRequest && !imageFailed);
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
   useEffect(() => {
     remaining.current = STORY_DURATION;
+    setReadingCaptionFor(null);
   }, [story.id]);
 
   useEffect(() => {
@@ -305,19 +322,39 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={story.id}
+              key={JSON.stringify([story.id, mediaUrl, imageRetry])}
               source={{ uri: mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
-              onLoad={() => setLoadedImage(story.id)}
-              onError={() => setFailedImage(story.id)}
+              onLoad={() => {
+                if (activeImageRequest.current === imageRequest) setLoadedImage(imageRequest);
+              }}
+              onError={() => {
+                if (activeImageRequest.current !== imageRequest) return;
+                setLoadedImage(null);
+                setFailedImage(imageRequest);
+              }}
             />
           ) : (
             <ScrollView key={story.id} contentContainerStyle={styles.centerText}>
               <Text style={styles.storyText}>
                 {imageFailed ? '照片暫時無法顯示' : story.text || '（無內容）'}
               </Text>
+              {hasImage && failedImage === imageRequest && !!mediaUrl && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新載入照片"
+                  style={[styles.step, styles.photoRetry]}
+                  onPress={() => {
+                    setLoadedImage(null);
+                    setFailedImage(null);
+                    setImageRetry((count) => count + 1);
+                  }}
+                >
+                  <Text style={styles.stepText}>重新載入照片</Text>
+                </Pressable>
+              )}
             </ScrollView>
           )}
           <Pressable
@@ -341,7 +378,19 @@ function StorySlide({
             contentContainerStyle={styles.detailContent}
           >
             {(hasImage || hasVideo) && !!story.text && (
-              <Text style={styles.caption}>{story.text}</Text>
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={readingCaption ? '結束閱讀說明' : '閱讀說明並暫停播放'}
+                  accessibilityHint="閱讀期間暫停自動切換；結束後依原本的播放狀態接續"
+                  accessibilityState={{ selected: readingCaption }}
+                  style={[styles.step, styles.captionRead]}
+                  onPress={() => setReadingCaptionFor(readingCaption ? null : story.id)}
+                >
+                  <Text style={styles.stepText}>{readingCaption ? '完成閱讀' : '閱讀說明'}</Text>
+                </Pressable>
+                <Text style={styles.caption}>{story.text}</Text>
+              </>
             )}
             {!!story.poiName && <Text style={styles.counter}>{story.poiName}</Text>}
           </ScrollView>
@@ -566,6 +615,8 @@ const styles = StyleSheet.create({
   sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
+  photoRetry: { alignSelf: 'center', marginTop: 16 },
+  captionRead: { alignSelf: 'flex-start', marginBottom: 4 },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
     color: 'white',

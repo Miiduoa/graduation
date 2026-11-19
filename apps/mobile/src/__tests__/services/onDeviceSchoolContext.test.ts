@@ -643,6 +643,41 @@ test('offline assignment excerpt prioritizes verified deadlines beyond the first
   expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('最早截止作業');
 });
 
+test('deadline hints use device time only and never infer submission or closed status', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
+  try {
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+    const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+    const items: CampusSenseSnapshot['assignments']['items'] = [
+      { title: '沒有設定期限', groupName: '資料庫', dueAt: null },
+      { title: '下一個截止', groupName: '資料庫', dueAt: '2026-11-19T20:30:00+08:00',
+        source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'upcoming' } },
+      { title: '剛過截止', groupName: '資料庫', dueAt: '2026-11-19T19:30:00+08:00',
+        source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'expired' } },
+    ];
+    const authorized: CampusSenseSnapshot = {
+      userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'available', count: 1 },
+      assignments: { status: 'available', count: items.length, items,
+        coverage: { complete: true, reason: 'complete', pages: 1 } },
+      announcements: { status: 'available', items: [] },
+    };
+    const prompt = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
+    expect(prompt.indexOf('剛過截止')).toBeLessThan(prompt.indexOf('下一個截止'));
+    expect(prompt.indexOf('下一個截止')).toBeLessThan(prompt.indexOf('沒有設定期限'));
+    expect(prompt).toContain('"assignmentId":"expired"');
+    expect(prompt).toContain('"assignmentId":"upcoming"');
+    expect(prompt).toContain('依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對');
+    expect(prompt).toContain('依裝置時間推估尚未到截止點');
+    expect(prompt).toContain('來源未提供截止時間');
+    expect(prompt).toContain('不證明校方系統仍接受繳交、已繳交或尚未繳交');
+    expect(items[0].title).toBe('沒有設定期限');
+    expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('剛過截止');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('complete pending-only evidence never implies all assignments or submitted history', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });

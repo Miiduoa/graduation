@@ -26,6 +26,7 @@ export type V2Reply = {
   roleGuide?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
   serviceIds?: readonly import('@campus/shared/src/assistantServices').AssistantServiceId[];
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
+  demo?: import('@/lib/accountDemoAssistant').AccountDemoAssistantAnswer;
   courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
   courseworkDate?: string;
   /** Exact public records offered for an explicit, independently re-read selection. */

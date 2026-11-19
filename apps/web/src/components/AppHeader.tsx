@@ -2,7 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { CampusIcon } from './CampusIcon';
@@ -97,7 +106,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
         '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
       )
       .forEach((button) => button.click());
-    setAssistant((current) => current ? { ...current, open: false } : null);
+    setAssistant((current) => (current ? { ...current, open: false } : null));
   }, []);
   const closeAssistant = () => {
     hideAssistant();
@@ -179,10 +188,15 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
     const observer =
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateHeaderInset);
     observer?.observe(navigation);
+    // A notice above the header can move it without changing its own size.
+    // Refresh on opening as well, so every disclosure uses the current position.
+    if (navigation.parentElement) observer?.observe(navigation.parentElement);
+    navigation.addEventListener('toggle', updateHeaderInset, true);
     window.addEventListener('resize', updateHeaderInset);
     window.addEventListener('scroll', updateHeaderInset, { passive: true });
     return () => {
       observer?.disconnect();
+      navigation.removeEventListener('toggle', updateHeaderInset, true);
       window.removeEventListener('resize', updateHeaderInset);
       window.removeEventListener('scroll', updateHeaderInset);
     };
@@ -404,7 +418,11 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
           hidden={!assistantOpen}
           className={headerStyles.voicePanel}
           onKeyDown={(event) => {
-            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+            if (
+              event.key === 'Escape' &&
+              !event.nativeEvent.isComposing &&
+              !event.defaultPrevented
+            ) {
               event.preventDefault();
               event.stopPropagation();
               closeAssistant();

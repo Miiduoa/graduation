@@ -22,7 +22,7 @@ const auth = {
   session:{platformAccountId:'pa_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',context:'qa-role-context'},
   loading:false,error:'',pendingLogout:false,refresh:async()=>{},logout:async()=>{}
 };
-export function useNuniSession() { return auth; }
+export function useNuniSession() { return auth; } export const useOptionalNuniSession=useNuniSession;
 export async function browserRequest(path,context,input,method,query) {
   const verb=method ?? (input === undefined ? 'GET' : 'POST');
   const search=new URLSearchParams(query).toString();
@@ -82,6 +82,7 @@ for (const filename of Object.keys(result.metafile.inputs).sort()) {
   if (
     filename.startsWith('fixture:') ||
     filename.startsWith('<') ||
+    filename.startsWith('(disabled):') ||
     filename.includes('node_modules/')
   )
     continue;
