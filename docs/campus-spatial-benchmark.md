@@ -94,3 +94,20 @@ Campus One 的空間圖目前表示公開地點座標的相對位置，不包含
 - [P1：靜宜大學綜合業務組 2026-05-06 樓別縮寫表](https://dorac.pu.edu.tw/p/16-1059-71708.php?Lang=zh-tw)：PH = Providence Hall。
 - [P2：靜宜大學資訊處「開放時間及使用規範」](https://oits.pu.edu.tw/p/406-1002-2655,r207.php?Lang=zh-tw)：Providence Hall (Zhu Gu Lou)／主顧樓；僅證明建物名稱，沒有教室門口資料。
 - [I1：本專案空間導覽與 MapClient 瀏覽器驗收](../scripts/qa/campus-spatial/README.md)；[驗收腳本](../scripts/qa/campus-spatial/check.py)；[GitHub workflow](../.github/workflows/campus-spatial-browser.yml)。
+
+
+## 2026-11-19｜對照紀錄的機械式證據閘門
+
+新增純函式 `validateCampusSpatialBenchmarkRows`（`apps/web/src/app/map/campusSpatialBenchmark.ts`）及 Vitest 回歸。這不是實地測試結果，也不會自動對競品排名。人工蒐集的紀錄輸入檢查器之前，先確保所有資料來源獲准使用，且不含可辨識學生的真實課表或位置資訊。
+
+每個 `trialId` 代表同一輪、同一任務、同一裝置及同一地點的完整對照，應包含 nuni、Google Maps、Apple Maps、靜宜官方導覽、UniTable 五筆紀錄。輸入的 `schoolId` 必須是 `pu`；`sceneId`、`task`、`deviceId`、`osVersion`、`network`、`locationPermission`、`textScale`、`startState`、`destinationId`、`groundTruthLevel` 與 `groundTruthUrl` 必須完全一致。產品自己的 `appVersion` 則分別記錄。
+
+每筆應填寫真實的 `testedAt`、`evidenceUrl`、`outcome`、`destinationLevel`、`buildingCorrect`、`roomCorrect`、`routeVerified`、`steps`、`elapsedMs`；有量測才填 `fpsP50`，有視覺評分才填 1～5 分的 `visualScore` 與 `visualRubric`。來源及操作證據需為可核對的 HTTPS 連結。室內房間的正確性不能由建築標記推得；若只能證實建築，不得將房間層級記為成功。步行路線若沒有通行核對，不得標成功。
+
+可用以下命令執行驗證器的**合成資料回歸測試**：
+
+```bash
+pnpm --filter web exec vitest run src/app/map/campusSpatialBenchmark.test.ts
+```
+
+只有同一任務達到至少三輪、五產品齊全、無不可核實或不一致的紀錄，才會出現在 `reviewableTasks`，供人員進一步人工比較；此旗標不會自動宣稱 nuni 較好。測試檔的 `.invalid` 網址及所有數字都是**合成測試夾具**，不可作為實測結果。現地記錄、裝置效能和競品相同場景的證據目前仍須另行取得。
