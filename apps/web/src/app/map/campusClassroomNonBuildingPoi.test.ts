@@ -746,3 +746,42 @@ describe('nullable, blank and absent school markers are unscoped ID reservations
     expect(result.matches).toEqual([sourcedHall]);
   });
 });
+
+describe('delimited non-building category annotations', () => {
+  it('does not choose a bus, parking or dining POI with a descriptive suffix as a classroom', () => {
+    // Synthetic import categories, not evidence of new campus places.
+    for (const category of [
+      '公車站 / 校內', 'Bus Stop (Campus) / Inbound',
+      '公車站（主校區）：往主顧樓', '餐飲 - B1 美食街',
+      'parking — P1', '餐廳／主校區',
+    ]) {
+      const unrelated = {
+        ...hall, id: 'synthetic-qualified-nonbuilding',
+        name: '非教室設施', building: '主顧樓', category,
+      };
+      for (const schoolId of ['pu', 'another-school']) {
+        const query = schoolId === 'pu' ? 'PH303' : '主顧樓303';
+        const result = resolveCampusClassroom({ schoolId, query, locations: [unrelated, hall] });
+        expect(result.matches, `${schoolId}: ${category}`).toEqual([hall]);
+        expect(result.status).toBe('matched');
+        expect(resolveCampusClassroom({
+          schoolId, query, locations: [unrelated],
+        }).status, `${schoolId}: ${category}`).toBe('unmatched');
+      }
+    }
+  });
+
+  it('keeps teaching buildings with similar words or descriptive separators selectable', () => {
+    for (const category of [
+      '交通工程學院 - 教學區', '交通工程學院 (公車站)',
+      '教學 / 主校區', '圖書館 — 綜合樓',
+    ]) {
+      const building = { ...hall, category };
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: '主顧樓303', locations: [building],
+      });
+      expect(result.matches, category).toEqual([building]);
+      expect(result.status).toBe('matched');
+    }
+  });
+});
