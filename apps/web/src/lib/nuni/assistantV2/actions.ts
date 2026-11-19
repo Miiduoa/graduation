@@ -141,11 +141,16 @@ export function signCard(
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
   studyGuard?: CourseworkStudyGuard,
-  pickupGuard?: FoodPickupGuard,
-  publicEventGuard?: PublicEventGuard,
+  sourceGuard?: PublicEventGuard | FoodPickupGuard,
   recoveryGuard?: CourseworkRecoveryGuard,
+  pickupGuard?: FoodPickupGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
+  const publicEventGuard = sourceGuard && 'target' in sourceGuard ? sourceGuard : undefined;
+  if (sourceGuard && !('target' in sourceGuard)) {
+    if (pickupGuard) return fail('CONFIRMATION_INVALID', 409);
+    pickupGuard = sourceGuard;
+  }
   if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail();
   if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || previousEvent)) return fail();
   if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))

@@ -15,7 +15,8 @@ import {
 } from './TodayCampusEntry';
 
 const state = vi.hoisted(() => ({
-  context: 'session-a' as string | null,
+  context: 'a'.repeat(43) as string | null,
+  accountId: 'session-a',
   school: 'pu',
   uid: null as string | null,
   functionsConfigured: true,
@@ -35,7 +36,7 @@ vi.mock('./AuthGuard', () => ({
 }));
 vi.mock('@/features/nuni/Session', () => {
   const session = () => ({
-    session: state.context ? { context: state.context.padEnd(43, '_'), platformAccountId: state.context } : null,
+    session: state.context ? { context: state.context, platformAccountId: state.accountId } : null,
     loading: false,
     pendingLogout: state.pendingLogout,
     error: state.nuniError,
@@ -74,15 +75,16 @@ function entry(enabled = true) {
 
 function mockNuniAsk(
   ask: (body: Record<string, unknown>, signal?: AbortSignal | null) => Response | Promise<Response>,
+  mapRead?: (body: Record<string, unknown>, signal?: AbortSignal | null) => Response | Promise<Response>,
 ) {
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string, init: RequestInit) => {
       if (url === '/api/nuni/assistant/capability')
         return Promise.resolve(Response.json({ version: 2, enabled: true, ready: true }));
-      // Explicit location questions now use the same cancellable transport via map-read.
-      if (url === '/api/nuni/assistant/ask' || url === '/api/nuni/assistant/map-read')
-        return ask(JSON.parse(String(init.body)), init.signal);
+      if (url === '/api/nuni/assistant/ask') return ask(JSON.parse(String(init.body)), init.signal);
+      if (url === '/api/nuni/assistant/map-read' && mapRead)
+        return mapRead(JSON.parse(String(init.body)), init.signal);
       throw new Error('Unexpected request ' + url);
     }),
   );
@@ -144,7 +146,7 @@ function saveTodayLesson(now?: Date): string {
     source: { type: 'paste', line: 1, rawText: '來源原文不應外送' },
   };
   localStorage.setItem(
-    personalImportsStorageKey({ owner: 'platform:' + state.context, schoolId: state.school }),
+    personalImportsStorageKey({ owner: 'platform:' + state.accountId, schoolId: state.school }),
     JSON.stringify({ version: 1, records: [row] }),
   );
   return daysAhead === 2 ? '後天有哪些課？' : daysAhead === 1 ? '明天有哪些課？' : '今天有哪些課？';
@@ -155,7 +157,8 @@ beforeEach(() => {
   sessionStorage.clear();
   window.history.replaceState({}, '', '/?campus=pu');
   Element.prototype.scrollIntoView = vi.fn();
-  state.context = 'session-a';
+  state.context = 'a'.repeat(43);
+  state.accountId = 'session-a';
   state.school = 'pu';
   state.uid = null;
   state.functionsConfigured = true;
@@ -175,7 +178,7 @@ afterEach(() => {
 it('pins the default PU lesson UI fixture to a valid Thursday without faking async timers', () => {
   expect(saveTodayLesson()).toBe('今天有哪些課？');
   expect(new Date().toISOString()).toBe('2026-11-12T02:30:00.000Z');
-  const rows = readPersonalImports({ owner: 'platform:' + state.context, schoolId: state.school });
+  const rows = readPersonalImports({ owner: 'platform:' + state.accountId, schoolId: state.school });
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({
     schoolId: 'pu',
@@ -199,7 +202,7 @@ it.each([
     // Use the production storage reader/validator: an invalid weekend PU
     // fixture must never be mistaken for a broken logged-in user's storage.
     const rows = readPersonalImports({
-      owner: 'platform:' + state.context,
+      owner: 'platform:' + state.accountId,
       schoolId: state.school,
     });
     expect(rows).toHaveLength(1);
@@ -347,7 +350,7 @@ it.each(['account', 'school'])(
     expect(ask).not.toHaveBeenCalled();
 
     if (scope === 'school') state.school = 'ncku';
-    else state.context = 'session-b';
+    else { state.context = 'b'.repeat(43); state.accountId = 'session-b'; }
     view.rerender(entry());
     const newField = await screen.findByRole('textbox', { name: '問題' });
     expect(screen.queryByText(/首頁裝置專用課程/)).toBeNull();
@@ -440,7 +443,7 @@ it.each(['account', 'school'])(
     fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
     await waitFor(() => expect(requestSignal).toBeDefined());
     if (scope === 'school') state.school = 'ncku';
-    else state.context = 'session-b';
+    else { state.context = 'b'.repeat(43); state.accountId = 'session-b'; }
     view.rerender(entry());
     expect(requestSignal?.aborted).toBe(true);
     await act(async () => finish(reply('舊的私人課表')));
@@ -702,12 +705,14 @@ it('keeps the draft and ignores a late bootstrap after stopping a question and a
   expect(input.value).toBe('下一堂課在哪裡？');
   expect(document.activeElement).toBe(input);
   expect(ask).not.toHaveBeenCalled();
+  // Use a general question for the ask bootstrap; map cancellation has its own test.
+  fireEvent.change(input, { target: { value: '請解釋資料庫索引？' } });
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   fireEvent.click(await screen.findByRole('button', { name: '停止回答' }));
   expect(firstSignal?.aborted).toBe(true);
   fireEvent.click(await screen.findByRole('button', { name: '切換到這個問題' }));
-  expect(input.value).toBe('下一堂課在哪裡？');
+  expect(input.value).toBe('請解釋資料庫索引？');
   expect(input.readOnly).toBe(false);
   fireEvent.change(input, { target: { value: '請解釋資料庫交易的特性？' } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
@@ -855,4 +860,74 @@ it('aborts an old cloud answer when the feature flag changes while keeping direc
   });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
+});
+
+it('uses the existing teacher homepage preference only for examples, without adding role authority to requests', async () => {
+  const ask = vi.fn().mockReturnValue(reply('授課概況已整理。'));
+  mockNuniAsk(ask);
+  render(<AssistantEnabledProvider enabled><TodayCampusEntry preferredWorkContext="teacher" /></AssistantEnabledProvider>);
+  expect((await screen.findByLabelText('目前處理的工作') as HTMLSelectElement).value).toBe('teacher');
+  expect(screen.queryByRole('button', { name: '下一堂課在哪裡？' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查我的授課概況' }));
+  expect(ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('授課概況已整理。');
+  expect(ask.mock.calls[0][0]).toMatchObject({ question: '查我的授課概況', schoolId: 'pu', consent: true });
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('role');
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('preferredWorkContext');
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('isTeacher');
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+    '/api/nuni/assistant/capability', '/api/nuni/assistant/ask',
+  ]);
+});
+
+
+it('stops a Today map read, preserves both drafts and ignores its late result after a new question', async () => {
+  let finishMap!: (response: Response) => void;
+  let mapSignal: AbortSignal | null | undefined;
+  const ask = vi.fn<(body: Record<string, unknown>) => Response>(() => reply('交易具有原子性與一致性。'));
+  const mapRead = vi.fn((_body: Record<string, unknown>, signal?: AbortSignal | null) => {
+    mapSignal = signal;
+    return new Promise<Response>((resolve) => { finishMap = resolve; });
+  });
+  mockNuniAsk(ask, mapRead);
+  render(entry());
+  fireEvent.click(await screen.findByRole('button', { name: '下一堂課在哪裡？' }));
+  const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(mapRead).toHaveBeenCalledOnce());
+  expect(mapRead.mock.calls[0][0]).toEqual({
+    schoolId: 'pu', conversationId: expect.any(String), task: { kind: 'next-class' },
+  });
+  expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
+  expect(ask).not.toHaveBeenCalled();
+
+  const followup = '請解釋資料庫交易的特性？';
+  fireEvent.change(input, { target: { value: followup } });
+  fireEvent.click(screen.getByRole('button', { name: '停止回答' }));
+  await screen.findByText(/已停止這次地點查詢/);
+  expect(mapSignal?.aborted).toBe(true);
+  expect(input.value).toBe(followup);
+  expect(input.readOnly).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(input.value).toBe('下一堂課在哪裡？');
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(input.value).toBe(followup);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('交易具有原子性與一致性。');
+  await act(async () => finishMap(Response.json({
+    version: 2, modelCalls: 0, dataRead: true, answer: '舊地點不應顯示。', cards: [],
+    steps: [{ name: 'get_campus_map', status: 'ok', summary: '舊地點來源已核對。' }],
+    taskPlan: { version: 1, steps: [{ id: 'map', label: '查校園地點', serviceId: 'map',
+      dependsOn: [], status: 'completed', summary: '舊地點來源已核對。', href: '/map?schoolId=pu' }] },
+  })));
+  expect(screen.queryByText('舊地點不應顯示。')).toBeNull();
+  expect(screen.queryByText('舊地點來源已核對。')).toBeNull();
+  expect(screen.getByText('交易具有原子性與一致性。')).toBeTruthy();
+  expect(mapRead).toHaveBeenCalledOnce();
+  expect(ask).toHaveBeenCalledOnce();
+  expect(ask.mock.calls[0][0]).toMatchObject({ question: followup, history: [] });
 });

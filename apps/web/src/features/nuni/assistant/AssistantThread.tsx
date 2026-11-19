@@ -26,7 +26,9 @@ import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
+import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
+import { assistantTaskProfileForWorkContext, assistantWorkContextForTaskProfile, assistantWorkContextFromQuestion, getAssistantRoleWorkflow, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import { AssistantRoleTasks } from './AssistantRoleTasks';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
@@ -104,6 +106,7 @@ export function AssistantThread({
   renderPlanRevision,
   renderPlanComparison,
   allowBatchConfirmation,
+  preferredWorkContext,
 }: {
   inline?: boolean;
   schoolId: string;
@@ -139,6 +142,8 @@ export function AssistantThread({
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
   allowBatchConfirmation?: (turn: V2Turn) => boolean;
+  /** Display preference from an already-loaded workspace, never authorization. */
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -150,6 +155,31 @@ export function AssistantThread({
   const revisionFocus = useRef(false);
   const [showJump, setShowJump] = useState(false);
   const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
+  const [chosenWorkContext, setWorkContext] = useState<AssistantWorkContext | null>(null);
+  const [initialWorkContext] = useState(() => assistantWorkContextFromQuestion(question));
+  const manuallySelectedContext = useRef(false);
+  const workContext = chosenWorkContext ?? (onTaskProfile && taskProfile !== 'student'
+    ? assistantWorkContextForTaskProfile(taskProfile)
+    : preferredWorkContext ?? initialWorkContext);
+  // Only an explicit entry question initializes the task profile. Loaded workspace
+  // preferences affect examples only; a later manual selection takes priority.
+  useEffect(() => {
+    if (!onTaskProfile || taskProfileLocked || manuallySelectedContext.current || taskProfile !== 'student') return;
+    const next = assistantTaskProfileForWorkContext(initialWorkContext);
+    if (next !== taskProfile) onTaskProfile(next);
+  }, [onTaskProfile, taskProfileLocked, taskProfile, initialWorkContext]);
+  function chooseTaskProfile(next: AssistantRoleProfileId) {
+    if (taskProfileLocked) return;
+    manuallySelectedContext.current = true;
+    setWorkContext(assistantWorkContextForTaskProfile(next));
+    onTaskProfile?.(next);
+  }
+  function chooseWorkContext(next: AssistantWorkContext) {
+    manuallySelectedContext.current = true;
+    setWorkContext(next);
+    if (!taskProfileLocked) onTaskProfile?.(assistantTaskProfileForWorkContext(next));
+  }
+  const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -210,17 +240,20 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
-  const profile = getAssistantRoleProfile(taskProfile)!;
   const publicCompound = publicCourseCompoundRequest(question, schoolId);
   const publicCourseIntent = !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
+  const profile = getAssistantRoleProfile(taskProfile)!;
   const foodPickup = taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
-  const suggestions = taskProfile !== 'student' ? profile.examples.map(example => example.prompt)
-    : foodPickupEnabled ? [...SUGGESTIONS, PICKUP_SUGGESTION] : SUGGESTIONS;
+  const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
+    : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (readRoute.roleGuide || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) || (onTaskRetry && isAssistantTaskRetryQuestion(question)) || (foodPickup ? foodPickupEnabled
-      : !!publicCourseIntent || (!publicCompound && (readRoute.local || readRoute.personal)) ||
-        (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null) || (consent && ready)));
+    (readRoute.roleGuide || (foodPickup ? foodPickupEnabled
+      : parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
+        (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
+        (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
+          (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null))) || (consent && ready)));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -263,7 +296,7 @@ export function AssistantThread({
         const next = event.relatedTarget;
         if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
       }}>
-      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={onTaskProfile} />}
+      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={chooseTaskProfile} />}
       {!inline && (
         <>
           <p className={styles.intro}>{taskProfile === 'student'
@@ -276,6 +309,9 @@ export function AssistantThread({
           </nav>
         </>
       )}
+      <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} schoolId={schoolId}
+        linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
+        compact={inline || turns.length > 0} />
       {!ready ? (
         <p className={styles.notice} role="status">
           {taskProfile === 'student'
@@ -295,7 +331,7 @@ export function AssistantThread({
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
             <h2>{taskProfile === 'student' ? '今天想問什麼？' : profile.title}</h2>
-            <p>{taskProfile === 'student' ? '可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。' : profile.description}</p>
+            <p>{taskProfile === 'student' ? '選一個問題後，可以在下方修改再送出。安排個人行程時，會先提供確認卡。' : profile.description}</p>
             <div className={styles.chips}>
               {suggestions.map((phrase) => (
                 <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
@@ -465,7 +501,7 @@ export function AssistantThread({
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder={inline && turns.length ? '接著問…' : taskProfile === 'student' ? '輸入問題' : profile.placeholder}
+            placeholder={inline && turns.length ? '接著問…' : useProfileExamples ? profile.placeholder : workflow.placeholder}
             onChange={(e) => {
               setDraft(editComposerDraft(draft));
               onQuestion(e.target.value);
@@ -512,7 +548,7 @@ export function AssistantThread({
         </p>
         {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {(taskProfile === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
+            {(taskProfile === 'student' && workContext === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

@@ -43,6 +43,41 @@ function eventTime(event: PlanRevisionEvent): string {
     : `${event.date} · ${event.startTime}–${event.endTime}（台灣時間）`;
 }
 
+function focusGeometry(target: HTMLElement) {
+  const style = window.getComputedStyle(target);
+  // Native alignment reserves one extra CSS pixel for scroll-offset rounding.
+  // Visibility still requires the original clearance, not that alignment buffer.
+  const roundingBuffer = Math.max(0, Number.parseFloat(style.getPropertyValue('--assistant-focus-rounding-buffer')) || 0);
+  const topMargin = Math.max(0, (Number.parseFloat(style.scrollMarginBlockStart) || 0) - roundingBuffer);
+  const bottomMargin = Math.max(0, (Number.parseFloat(style.scrollMarginBlockEnd) || 0) - roundingBuffer);
+  const viewport = window.visualViewport;
+  const top = viewport?.offsetTop ?? 0;
+  const left = viewport?.offsetLeft ?? 0;
+  const height = viewport?.height ?? window.innerHeight;
+  const width = viewport?.width ?? window.innerWidth;
+  const bounds = target.getBoundingClientRect();
+  const block = bounds.bottom > top + height - bottomMargin ? 'end' as const
+    : bounds.top < top + topMargin ? 'start' as const : undefined;
+  return { block,
+    visible: !block && bounds.width > 0 && bounds.height > 0 && bounds.left >= left && bounds.right <= left + width };
+}
+
+function hasClippingOrScrollingAncestor(target: HTMLElement): boolean {
+  for (let parent = target.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
+    const style = window.getComputedStyle(parent);
+    if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) return true;
+  }
+  return false;
+}
+
+function focusRevisionControl(target: HTMLElement | null) {
+  if (!target) return;
+  // The focus handler reveals document-level controls instantly. Nested scroll
+  // containers still need native focus to reveal their clipped descendants.
+  if (hasClippingOrScrollingAncestor(target)) target.focus();
+  else target.focus({ preventScroll: true });
+}
+
 function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft, protectedSelection, onProtectedSelectionChange }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
   const panel = useRef<HTMLElement>(null);
@@ -77,7 +112,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       tabPosition.current = null;
     };
   }, []);
-  useEffect(() => { if (open) field.current?.focus(); }, [open]);
+  useEffect(() => { if (open) focusRevisionControl(field.current); }, [open]);
   const pristine = isUnattemptedCalendarPlan(turn, states);
   // The owner resumes only this registered revision, cancelling remaining cards first.
   const retryable = started && turn.reply.cards.every(card =>
@@ -92,6 +127,38 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
     : pristine
       ? '全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。'
       : '全部項目已勾選保留原樣，這次不會重新預覽；請依原確認卡顯示的結果核對。';
+
+  function focusVisibleTabControl(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!mounted.current || event.key !== 'Tab' || event.nativeEvent.isComposing || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    const root = panel.current;
+    const current = document.activeElement;
+    if (!root || !(current instanceof HTMLElement) || current !== event.target || !root.contains(current)) return;
+    const controls: HTMLElement[] = [];
+    for (const target of root.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex], [contenteditable]')) {
+      const style = window.getComputedStyle(target);
+      if (target.matches(':disabled') || target.closest('[hidden], [inert]') || style.display === 'none' ||
+        style.visibility === 'hidden' || style.visibility === 'collapse') continue;
+      const bounds = target.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      if (target.tabIndex < 0 && !target.matches('[contenteditable]:not([contenteditable="false"])')) continue;
+      // Only this panel's ordinary native controls have a known DOM Tab order.
+      // Positive tabindex, radios and custom stops keep the browser's behavior.
+      if (target.tabIndex !== 0 || !target.matches('button, input[type="checkbox"], textarea')) return;
+      controls.push(target);
+    }
+    const index = controls.indexOf(current);
+    if (index < 0) return;
+    const next = controls[index + (event.shiftKey ? -1 : 1)];
+    if (!next || !focusGeometry(next).visible) return;
+    // Inline threads can have their own clipping/scroller. Leave those to native
+    // Tab rather than preventing a needed scroll of an ancestor.
+    if (hasClippingOrScrollingAncestor(next)) return;
+    event.preventDefault();
+    // preventScroll blocks a new focus scroll, but not one already in flight.
+    // Request cancellation at the current offset before transferring focus.
+    window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: 'instant' });
+    next.focus({ preventScroll: true });
+  }
 
   function clearTabPosition() {
     if (tabFrame.current !== null) window.cancelAnimationFrame(tabFrame.current);
@@ -169,25 +236,17 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
         }
         window.scrollTo({ left: position.left, top: position.top, behavior: 'instant' });
       }
-      const style = window.getComputedStyle(target);
-      const topMargin = Number.parseFloat(style.scrollMarginBlockStart) || 0;
-      const bottomMargin = Number.parseFloat(style.scrollMarginBlockEnd) || 0;
-      const viewport = window.visualViewport;
-      const top = viewport?.offsetTop ?? 0;
-      const bottom = top + (viewport?.height ?? window.innerHeight);
-      const bounds = target.getBoundingClientRect();
+      const geometry = focusGeometry(target);
       // Explicit alignment reveals controls hidden by the sticky dock even when
       // they are still inside the layout viewport and nearest would not move.
-      if (bounds.bottom > bottom - bottomMargin)
-        target.scrollIntoView?.({ block: 'end', inline: 'nearest', behavior: 'instant' });
-      else if (bounds.top < top + topMargin)
-        target.scrollIntoView?.({ block: 'start', inline: 'nearest', behavior: 'instant' });
+      if (geometry.block)
+        target.scrollIntoView?.({ block: geometry.block, inline: 'nearest', behavior: 'instant' });
     });
   }
 
   function closeEditor() {
     setOpen(false);
-    if (entry.current && !entry.current.disabled) entry.current.focus();
+    if (entry.current && !entry.current.disabled) focusRevisionControl(entry.current);
     else panel.current?.focus();
   }
 
@@ -203,7 +262,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       setProtectedIndices([]);
       setMessage('');
       setDraftNotice({ text: result.message || '修改內容已清除，原確認卡未變更。', error: false });
-      field.current?.focus();
+      focusRevisionControl(field.current);
     } catch (cause) {
       setDraftNotice({ text: cause instanceof Error ? cause.message : '修改內容尚未清除，原內容仍保留。', error: true });
     }
@@ -221,7 +280,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       setProtectedIndices([...result.content.protectedIndices]);
       setMessage('');
       setDraftNotice({ text: result.message || '草稿已帶入，請核對後再重新預覽。', error: false });
-      field.current?.focus();
+      focusRevisionControl(field.current);
     } catch (cause) {
       setDraftNotice({ text: cause instanceof Error ? cause.message : '草稿尚未套用，原修改內容仍保留。', error: true });
     }
@@ -234,7 +293,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
     try { buildPlanRevisionQuestion(turn, instruction, selection); }
     catch (cause) {
       setMessage(cause instanceof Error ? cause.message : '請先確認修改條件與保留項目，再重新預覽。');
-      field.current?.focus();
+      focusRevisionControl(field.current);
       return;
     }
     busy.current = true;
@@ -256,6 +315,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
 
   if (!open && !started && !pristine) return null;
   return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議" data-assistant-plan-revision="true"
+    onKeyDown={focusVisibleTabControl}
     onKeyDownCapture={rememberTabPosition}
     onPointerDownCapture={clearTabPosition}
     onBlurCapture={event => {

@@ -1,3 +1,49 @@
+# #684 再次同步 main（8642a166f）
+
+本次完成既有 no-ff merge，父提交為 `3c97433c2b32` 與 `8642a166f401`。下方較早紀錄描述前一次同步，並非本次的差異或測試結果。
+
+逐檔先取 MERGE_HEAD，再核對 `git diff c112ac4199bd...3c97433c2b32 -- <file>`。本次 20 個衝突全部採用 main 原文，沒有需要額外移植的 #684 hunk：main 已包含 task-first 完整清單與 compact 的復原 renderer、elapsed／missed 作業安排復原、原 mutation identity、未知結果阻擋，以及 coursework recovery 與 task retry 的功能和測試。本次合併樹相對 main 僅多出這份處理紀錄。
+
+## 本次採用 main 原文的衝突檔案（20 個）
+
+- `.github/workflows/ci.yml`
+- `apps/web/src/components/TodayCampusEntry.test.tsx`
+- `apps/web/src/features/nuni/Assistant.tsx`
+- `apps/web/src/features/nuni/assistant/AssistantPlanRevision.tsx`
+- `apps/web/src/features/nuni/assistant/AssistantThread.tsx`
+- `apps/web/src/lib/nuni/assistantV2/actions.ts`
+- `apps/web/src/lib/nuni/assistantV2/adapter.ts`
+- `apps/web/src/lib/nuni/assistantV2/campusEventRequest.ts`
+- `apps/web/src/lib/nuni/assistantV2/connectedServiceFlow.test.ts`
+- `apps/web/src/lib/nuni/assistantV2/connectedServiceReads.ts`
+- `apps/web/src/lib/nuni/assistantV2/contracts.ts`
+- `apps/web/src/lib/nuni/assistantV2/courseworkRecovery.ts`
+- `apps/web/src/lib/nuni/assistantV2/crossService.ts`
+- `apps/web/src/lib/nuni/assistantV2/crossServiceRequest.ts`
+- `apps/web/src/lib/nuni/assistantV2/handler.ts`
+- `apps/web/src/lib/nuni/assistantV2/runner.ts`
+- `apps/web/src/lib/nuni/assistantV2/taskRetry.ts`
+- `apps/web/src/lib/nuni/assistantV2/tools.ts`
+- `packages/shared/src/assistantRoleProfiles.ts`
+- `scripts/qa/assistant-plan-revision/check.py`
+
+## 本次保留與驗證
+
+保留 #689 的 `focusVisibleTabControl`、`event.preventDefault()` 與 `onKeyDown={focusVisibleTabControl}`；保留所有 browser cases，包含 `revision_native_focus_policy_case` 與 `role_context_case`。保留 preferredWorkContext 僅影響顯示、鎖定時仍能選擇工作情境範例、未鎖定手動選擇同步 taskProfile 的規則；教師偏好測試及 merchantWorkspace 的大小寫 script 斷言完全沿用 main。
+
+ServiceDirectory、生活與交流的分類及 `/life?group=daily` 的「吃飯與住宿」完全沿用 main。權限、登入、Firestore rules／indexes 等檔案也僅接收 main 既有版本，沒有新增修改。
+
+- Web 主要回歸：100 files / 2,324 tests passed。執行 TodayCampusEntry、TodayAgent、TodayAgentPanel、AssistantWorkContext.integration、AssistantPlanRevision、AssistantTaskRetry、AssistantTaskPlan、assistantTaskRetry，以及 assistantV2 整個目錄（含 merchantWorkspace、courseworkRecovery、taskRetry 與角色工作區測試）。
+- Web 入口與 UI：7 files / 206 tests passed。執行 life/page、ServiceDirectory、CampusServiceMenu、serviceJourneys、Assistant、AssistantThread 與 AssistantThread.scroll。
+- Shared：99 tests passed，涵蓋 assistantRoleProfiles、assistantRoleWorkflows、assistantRoleTasks、assistantTaskPlan、assistantServices。
+- Chromium：`revision-native-focus-policy-320`、`role-pending-390`、`role-unknown-390` 全部通過，實際使用本工作樹的 production UI fixture。
+- Web typecheck 通過；相對 main 的 `git diff --check` 通過。相對舊 HEAD 的 staged check 僅指出 main 已存在的 GroupPresentation.test.tsx EOF 空行，未為此改動 main 原文。
+- 執行環境 Node 24.22.1，repository 宣告為 22.x；未調整環境設定或測試斷言。
+
+未推送、部署或合併 PR。
+
+---
+
 # #684 同步 main 的衝突處理紀錄
 
 本次在 `fix/agent-task-recovery-integration-20261117` 完成既有的 no-ff 合併，父提交為 `9daceac8f445` 與 `c112ac4199bd`（origin/main）。所有 43 個衝突先取 main，再核對 `git diff 89408730815c...9daceac8f445 -- <file>`，只移植仍需要且不回退 main 的內容。
