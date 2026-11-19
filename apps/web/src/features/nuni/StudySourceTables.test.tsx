@@ -1751,3 +1751,35 @@ it('shows the exact authorized source line beside each derived bar and updates i
   expect(percentMeters[1].closest('li')?.textContent).toContain('網路50%原文第 5 行');
   expect(screen.queryByText('原文第 6 行')).toBeNull();
 });
+
+it('returns from numeric and percentage bars to the exact original row with keyboard focus', () => {
+  const numeric = [
+    '教材段落', '| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={numeric} />);
+  const jump = (label: string): HTMLButtonElement => {
+    const button = Array.from(view.container.querySelectorAll('button'))
+      .find((node) => node.textContent?.includes(label));
+    expect(button).toBeDefined();
+    return button as HTMLButtonElement;
+  };
+  const originalRows = () => Array.from(view.container.querySelectorAll('tbody tr'));
+  const sourceBefore = originalRows().map((row) => row.textContent);
+  fireEvent.click(jump('原文第 4 行 · 回表格核對'));
+  expect(document.activeElement).toBe(originalRows()[0]);
+  fireEvent.click(jump('原文第 5 行 · 回表格核對'));
+  expect(document.activeElement).toBe(originalRows()[1]);
+  expect(originalRows().map((row) => row.textContent)).toEqual(sourceBefore);
+
+  const percentages = [
+    '新版資料', '', '| 課程 | 完成率 |', '| --- | --- |',
+    '| 新資料 | 80% |', '| 新網路 | 50% |',
+  ].join('\n');
+  view.rerender(<StudySourceTables text={percentages} />);
+  fireEvent.click(jump('原文第 6 行 · 回表格核對'));
+  expect(document.activeElement).toBe(originalRows()[1]);
+  expect(document.activeElement?.textContent).toContain('新網路50%');
+  expect(view.container.textContent).not.toContain('資料庫');
+  view.unmount();
+});

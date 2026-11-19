@@ -196,7 +196,10 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   return rows;
 }
 
-function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
+function StudySourcePercentComparison({ table, onJumpToSource }: {
+  table: StudySourceTable;
+  onJumpToSource: (rowIndex: number) => void;
+}) {
   const rows = sourcePercentRows(table);
   if (!rows) return null;
   return (
@@ -213,7 +216,10 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
-            <span className={styles.note}>原文第 {row.sourceLine} 行</span>
+            <button type="button" className={styles.sourceLineJump}
+              onClick={() => onJumpToSource(row.sourceLine - table.startLine - 2)}>
+              原文第 {row.sourceLine} 行 · 回表格核對
+            </button>
             <meter min={0} max={100} value={row.amount}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；滿格 100%'} />
@@ -225,7 +231,10 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
 }
 
 /** Keep the original table visible; numeric bars are an opt-in derived view. */
-function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
+function StudySourceValueComparison({ table, onJumpToSource }: {
+  table: StudySourceTable;
+  onJumpToSource: (rowIndex: number) => void;
+}) {
   const rows = sourceValueRows(table);
   if (!rows) return null;
   const maxRow = rows.reduce((best, row) => row.amount > best.amount ? row : best);
@@ -244,7 +253,10 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
-            <span className={styles.note}>原文第 {row.sourceLine} 行</span>
+            <button type="button" className={styles.sourceLineJump}
+              onClick={() => onJumpToSource(row.sourceLine - table.startLine - 2)}>
+              原文第 {row.sourceLine} 行 · 回表格核對
+            </button>
             <meter min={0} max={max} value={row.amount}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
@@ -483,6 +495,15 @@ function StudySourceSelection({ table, index, sourceLines }: {
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
+  const sourceRowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  // Focus the exact original source row, without editing or re-parsing its cells.
+  const jumpToSource = (startLine: number, rowIndex: number) => {
+    const row = sourceRowRefs.current.get(`${startLine}:${rowIndex}`);
+    if (!row) return;
+    try { row.focus(); } catch { /* The original table remains visible. */ }
+    try { row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    catch { /* A failed scroll must not prevent keyboard focus. */ }
+  };
   if (!tables.length) return null;
 
   return (
@@ -504,15 +525,22 @@ export function StudySourceTables({ text }: { text: string }) {
             </thead>
             <tbody>
               {table.rows.map((row, rowIndex) =>
-                <tr key={rowIndex}>{row.map((cell, column) =>
+                <tr key={rowIndex} tabIndex={-1}
+                  ref={(element) => {
+                    const key = `${table.startLine}:${rowIndex}`;
+                    if (element) sourceRowRefs.current.set(key, element);
+                    else sourceRowRefs.current.delete(key);
+                  }}>{row.map((cell, column) =>
                   column === 0 && cell.trim()
                     ? <th scope="row" key={column}>{cell}</th>
                     : <td key={column}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
           <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
-          <StudySourceValueComparison table={table} />
-          <StudySourcePercentComparison table={table} />
+          <StudySourceValueComparison table={table}
+            onJumpToSource={(rowIndex) => jumpToSource(table.startLine, rowIndex)} />
+          <StudySourcePercentComparison table={table}
+            onJumpToSource={(rowIndex) => jumpToSource(table.startLine, rowIndex)} />
         </div>
       ))}
     </section>
