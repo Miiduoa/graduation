@@ -91,7 +91,12 @@ export type CampusSpatialBenchmarkValidation = {
  */
 export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): CampusSpatialBenchmarkValidation {
   const issues: string[] = [];
-  const trials = new Map<string, { baseline: Record<string, unknown>; products: Set<Product>; verified: boolean }>();
+  const trials = new Map<string, {
+    baseline: Record<string, unknown>;
+    products: Set<Product>;
+    appVersions: Map<Product, string>;
+    verified: boolean;
+  }>();
   const taintedTrials = new Set<string>();
   // Detect replayed captures within the same scenario/product across different trial IDs.
   // A shared cross-product video is allowed; recycled runs from one product are not.
@@ -203,11 +208,13 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     if (!found) {
       trials.set(id as string, {
         baseline: row, products: new Set([row.product as Product]),
+        appVersions: new Map([[row.product as Product, row.appVersion as string]]),
         verified,
       });
     } else {
       if (found.products.has(row.product as Product)) issues.push(`${prefix}: duplicate product in trial ${id}`);
       found.products.add(row.product as Product);
+      found.appVersions.set(row.product as Product, row.appVersion as string);
       found.verified &&= verified;
       for (const field of CONDITIONS) {
         if (found.baseline[field] !== row[field]) {
@@ -228,7 +235,13 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     if (missing.length) issues.push(`trial ${id}: missing comparisons: ${missing.join(', ')}`);
     else if (trial.verified && !taintedTrials.has(id)) {
       completeTrials += 1;
-      const key = JSON.stringify(CONDITIONS.map((field) => trial.baseline[field]));
+      // A repeated scenario must also keep each app's exact tested build.
+      // Different releases may legitimately be recorded, but must form
+      // separate comparison cohorts rather than a synthetic three-run result.
+      const key = JSON.stringify([
+        CONDITIONS.map((field) => trial.baseline[field]),
+        CAMPUS_SPATIAL_PRODUCTS.map((product) => trial.appVersions.get(product)),
+      ]);
       const scenario = countsByScenario.get(key);
       if (scenario) scenario.count += 1;
       else countsByScenario.set(key, { task: trial.baseline.task as Task, count: 1 });
