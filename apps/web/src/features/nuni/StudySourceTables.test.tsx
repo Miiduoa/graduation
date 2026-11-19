@@ -1855,7 +1855,7 @@ it.each([
     '| --- | --- |',
     '| 必修 | ' + values[0] + ' |',
     '| 必修 | ' + values[1] + ' |',
-  ].join('\\n');
+  ].join('\n');
   const view = render(<StudySourceTables text={material} />);
   const meters = Array.from(view.container.querySelectorAll('meter'));
   expect(meters).toHaveLength(2);
