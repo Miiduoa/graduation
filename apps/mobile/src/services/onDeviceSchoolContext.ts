@@ -196,9 +196,11 @@ function dueOrderedAssignmentExcerpt(
     ...evidence,
     deadlineHint: dueMs === null
       ? '來源未提供截止時間'
-      : dueMs < deviceNowMs
-        ? '依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對'
-        : '依裝置時間推估尚未到截止點',
+      : dueMs === deviceNowMs
+        ? '依裝置時間推估正好到截止點；是否仍可繳交請到原作業頁核對'
+        : dueMs < deviceNowMs
+          ? '依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對'
+          : '依裝置時間推估尚未到截止點',
   }));
 }
 

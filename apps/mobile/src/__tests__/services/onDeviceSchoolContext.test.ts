@@ -654,6 +654,8 @@ test('deadline hints use device time only and never infer submission or closed s
         source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'upcoming' } },
       { title: '剛過截止', groupName: '資料庫', dueAt: '2026-11-19T19:30:00+08:00',
         source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'expired' } },
+      { title: '正好截止', groupName: '資料庫', dueAt: '2026-11-19T20:00:00+08:00',
+        source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'exact-deadline' } },
     ];
     const authorized: CampusSenseSnapshot = {
       userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
@@ -663,10 +665,13 @@ test('deadline hints use device time only and never infer submission or closed s
       announcements: { status: 'available', items: [] },
     };
     const prompt = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
-    expect(prompt.indexOf('剛過截止')).toBeLessThan(prompt.indexOf('下一個截止'));
+    expect(prompt.indexOf('剛過截止')).toBeLessThan(prompt.indexOf('正好截止'));
+    expect(prompt.indexOf('正好截止')).toBeLessThan(prompt.indexOf('下一個截止'));
     expect(prompt.indexOf('下一個截止')).toBeLessThan(prompt.indexOf('沒有設定期限'));
     expect(prompt).toContain('"assignmentId":"expired"');
+    expect(prompt).toContain('"assignmentId":"exact-deadline"');
     expect(prompt).toContain('"assignmentId":"upcoming"');
+    expect(prompt).toMatch(/"assignmentId":"exact-deadline"[^\n]*?"deadlineHint":"依裝置時間推估正好到截止點；是否仍可繳交請到原作業頁核對"/);
     expect(prompt).toContain('依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對');
     expect(prompt).toContain('依裝置時間推估尚未到截止點');
     expect(prompt).toContain('來源未提供截止時間');
