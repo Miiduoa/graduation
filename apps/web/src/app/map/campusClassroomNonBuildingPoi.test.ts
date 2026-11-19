@@ -708,3 +708,41 @@ describe('classroom floor-only labels require a room number', () => {
     }).status).toBe('unmatched');
   });
 });
+
+describe('nullable, blank and absent school markers are unscoped ID reservations', () => {
+  const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
+
+  it('fails closed when a malformed duplicate has an explicit null, undefined or blank schoolId', () => {
+    expect(sourcedHall).toBeDefined();
+    // These are synthetic Firestore import shapes, not real campus data.
+    // An unscoped duplicate could be selected by the map using the same ID.
+    for (const marker of [null, undefined, '', '   ']) {
+      const duplicate = {
+        ...sourcedHall!, schoolId: marker,
+        name: 'Damaged imported campus location',
+      };
+      for (const locations of [[duplicate, sourcedHall!], [sourcedHall!, duplicate]]) {
+        const result = resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations });
+        expect(result.status, String(marker)).toBe('unmatched');
+        expect(result.matches).toEqual([]);
+      }
+    }
+  });
+
+  it('can still search one unscoped record and ignores explicitly foreign or invalid school scopes', () => {
+    expect(sourcedHall).toBeDefined();
+    for (const marker of [null, undefined, '', '   ']) {
+      const unscoped = { ...sourcedHall!, schoolId: marker };
+      const result = resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations: [unscoped] });
+      expect(result.status, String(marker)).toBe('matched');
+      expect(result.matches).toEqual([unscoped]);
+    }
+    const foreign = { ...sourcedHall!, schoolId: 'other-campus' };
+    const malformed = { ...sourcedHall!, schoolId: 123 };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [foreign, malformed, sourcedHall!],
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([sourcedHall]);
+  });
+});
