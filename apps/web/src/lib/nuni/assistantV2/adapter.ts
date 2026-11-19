@@ -23,6 +23,8 @@ import { readLostFound } from './lostFoundAdapter';
 import { parseCampusMapArguments } from './campusMap';
 import { readCampusMap } from './campusMapAdapter';
 import { readPublicSocial } from './publicSocialAdapter';
+import { readTeachingOverview } from './teacherWorkspaceAdapter';
+import { readMerchantOverview } from './merchantWorkspaceAdapter';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
   const v = object(raw);
   if (!Array.isArray(v[key])) throw new V2Error(502, 'INVALID_RESPONSE');
@@ -299,6 +301,33 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
       if (verifiedPrincipal?.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
       return result;
     },
+    teachingOverview: async (args) => {
+      const expectedAccount = verifiedPrincipal?.platformAccountId;
+      const check = () => {
+        signal.throwIfAborted();
+        operationSignal()?.throwIfAborted();
+        if (!expectedAccount || !verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        if (verifiedPrincipal.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
+      };
+      check();
+      const result = await readTeachingOverview({ schoolId, args, request, accountId: expectedAccount!,
+        guard: { beforeRead: check, afterRead: check }, remainingApiCalls: () => Math.max(0, 12 - apiCalls) });
+      check();
+      return result;
+    },
+    merchantOverview: async (args, expectedTarget) => {
+      const expectedAccount = verifiedPrincipal?.platformAccountId;
+      const guard = () => {
+        signal.throwIfAborted();
+        operationSignal()?.throwIfAborted();
+        if (!expectedAccount || !verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+        if (verifiedPrincipal.platformAccountId !== expectedAccount) throw new V2Error(401, 'SESSION_CHANGED');
+      };
+      guard();
+      const result = await readMerchantOverview({ schoolId, args, request, scopedRealm, guard, expectedTarget });
+      guard();
+      return result;
+    },
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),
     course: async (courseId) => {
@@ -508,6 +537,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
   return {
     adapter,
     async principal() {
+      // A failed refresh must not leave a previously verified account usable.
+      verifiedPrincipal = undefined;
       verifiedPrincipal = parseNuniPrincipal(await request('sessions/current'));
       return verifiedPrincipal;
     },

@@ -737,6 +737,94 @@ async def unknown_case(page):
     return {'mode': 'controlled cancellation response loss + failed readback; explicit reconcile then resume'}
 
 
+async def role_context_case(page, unknown=False):
+    await start_plan(page)
+    if unknown:
+        await open_revision(page)
+        await page.evaluate('window.__agentQA.configure({unknownCancellation:true})')
+        await page.get_by_role('button', name='重新預覽', exact=True).click()
+        await expect(card_list(page).nth(0).get_by_role('button', name='重新核對結果', exact=True)).to_be_enabled()
+        await idle(page)
+        await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+    question = page.get_by_role('textbox', name='問題', exact=True)
+    draft = ' 尚未送出的原問題\n第二行補充內容 '
+    await question.fill(draft)
+    choice = page.get_by_role('combobox', name='目前處理的工作', exact=True)
+    await expect(choice).to_have_value('student')
+    # Retain real DOM handles: matching replacement cards or a remounted
+    # conversation must not satisfy the preservation assertions.
+    retained = [(question, await question.element_handle()),
+                (choice, await choice.element_handle()),
+                (page.get_by_role('log'), await page.get_by_role('log').element_handle())]
+    for index in range(2):
+        card = card_list(page).nth(index)
+        retained.append((card, await card.element_handle()))
+    if unknown:
+        revision = page.get_by_role('textbox', name='修改條件', exact=True)
+        recovery = card_list(page).nth(0).get_by_role('button', name='重新核對結果', exact=True)
+        retained.extend([(revision, await revision.element_handle()), (recovery, await recovery.element_handle())])
+    else:
+        confirmation = card_list(page).nth(0).get_by_role('button', name='確認', exact=True)
+        retained.append((confirmation, await confirmation.element_handle()))
+    ledger = await snapshot(page)
+    expected_actions = ['ask', 'cancel', 'reconcile'] if unknown else ['ask']
+    assert actions(ledger) == expected_actions, ledger
+    card_text = await card_list(page).all_text_contents()
+    name = 'role-unknown-390' if unknown else 'role-pending-390'
+    evidence = []
+
+    async def assert_retained():
+        await expect(card_list(page)).to_have_count(2)
+        assert await card_list(page).all_text_contents() == card_text, 'Changing work context altered an existing card'
+        for locator, original in retained:
+            assert await locator.evaluate('(node, original) => node === original && original.isConnected', original), (
+                'Changing work context remounted the conversation, composer or existing action')
+        if unknown:
+            await expect(revision).to_have_value(CHANGE)
+            await expect(recovery).to_be_enabled()
+            await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+        else:
+            await expect(confirmation).to_be_enabled()
+            await expect(card_list(page).nth(1).get_by_role('button', name='確認', exact=True)).to_be_disabled()
+        assert await snapshot(page) == ledger, 'Changing context or filling an example caused an API call or write'
+        await no_writes(page)
+
+    for context, example in [('teacher', '查我的授課概況，查近期活動'),
+                             ('merchant', '查我的門市營運概況，查近期活動')]:
+        await choice.select_option(context)
+        await expect(choice).to_have_value(context)
+        await expect(question).to_have_value(draft)
+        await expect(page.get_by_role('button', name='幫我排今晚寫作業', exact=True)).to_have_count(0)
+        await assert_retained()
+        await page.get_by_role('button', name=example, exact=True).click()
+        await expect(question).to_have_value(example)
+        await expect(question).to_be_focused()
+        await assert_retained()
+        await page.get_by_role('button', name='切換保留草稿', exact=True).click()
+        await expect(question).to_have_value(draft)
+        await assert_retained()
+        # Reuse the strict existing viewport/composer bounds. Focusing the
+        # native select is the user action; no geometry or scroll repair follows.
+        await choice.focus()
+        readability = await focused_action_readability(page, choice, name + '-' + context)
+        evidence.append({'context': context, 'readability': readability, 'overflow': await no_overflow(page)})
+    await capture(page, name + '-preserved')
+    await assert_retained()
+    if unknown:
+        await page.evaluate('window.__agentQA.configure({unknownCancellation:false})')
+        await recovery.click()
+        await expect(card_list(page).nth(0)).to_contain_text('已撤銷未執行提議')
+        state = await snapshot(page)
+        assert actions(state) == expected_actions + ['reconcile'], state
+        assert state['requests'][-1]['body']['token'] == ledger['requests'][-1]['body']['token'], state
+        await expect(question).to_have_value(draft)
+        await expect(revision).to_have_value(CHANGE)
+        await no_writes(page)
+    return {'mode': 'native work-context selection and example filling preserve drafts and existing actions',
+            'existingAction': 'unknown cancellation with explicit recovery' if unknown else 'unconfirmed plan',
+            'noRequestsDuringContextChanges': True, 'sameConversationAndCardNodes': True, 'readability': evidence}
+
+
 async def late_school_case(page):
     await start_plan(page)
     await open_revision(page)
@@ -880,6 +968,7 @@ async def protected_good_case(page, name):
     if len(before) == 2:
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        dock_element = await dock.element_handle()
         # The previous native Tab may still be scrolling the textarea into view.
         # Observe both elements settling before measuring this Tab's baseline;
         # never move focus, scroll the page, or change motion/CSS for the check.
@@ -893,22 +982,6 @@ async def protected_good_case(page, name):
             json.dumps(before_tab, ensure_ascii=False, indent=2), encoding='utf-8')
         assert all(value['settled'] for value in settling.values()), (
             f'Native focus layout did not settle before Tab: {settling}')
-        # Observe only this button instance; every product call delegates unchanged to native.
-        await button.evaluate('''node => {
-          const original=node.scrollIntoView, requests=[];
-          const sample=target=>{const r=target.getBoundingClientRect(), scrolling=document.scrollingElement;
-            return {button:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height},
-              scroll:{x:scrollX,y:scrollY},documentScrollingElement:scrolling?{
-                scrollHeight:scrolling.scrollHeight,clientHeight:scrolling.clientHeight,scrollTop:scrolling.scrollTop}:null};};
-          node.__qaScrollRequests=requests;
-          node.scrollIntoView=function(options){
-            const request={options:options ?? null,before:sample(this)};
-            requests.push(request);
-            try {return original.call(this,options);}
-            finally {request.after=sample(this);}
-          };
-        }''')
-        dock_element = await dock.element_handle()
         await observe_next_forward_tab(button, dock_element)
         await page.keyboard.press('Tab')
         focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus', before_tab)
@@ -1063,7 +1136,7 @@ async def controlled_native_smooth_tab_case(page):
         assert (keydown['isTrusted'] and keydown['key'] == 'Tab' and not keydown['shiftKey']
                 and keydown['target']['tag'] == 'TEXTAREA' and keydown['readable']
                 and keydown['defaultPreventedAtCapture'] is False
-                and keydown['defaultPreventedAfterDispatch'] is False), native
+                and keydown['defaultPreventedAfterDispatch'] is True), native
         assert (keydown['progressSinceStart'] >= native['minimumProgress']
                 and keydown['remainingToDestination'] >= native['minimumRemaining']), (
                     f'Real Tab missed the pending native smooth-scroll interval: {native}')
@@ -1219,7 +1292,7 @@ async def revision_native_focus_policy_case(page):
             page, button, name + '-visible-preview', before_visible_tab, require_no_scroll=True)
         evidence['visiblePreviewFocus'] = focus
         keydown = focus['tabEvent']
-        assert keydown['defaultPreventedAtCapture'] is False and keydown['defaultPreventedAfterDispatch'] is False, focus
+        assert keydown['defaultPreventedAtCapture'] is False and keydown['defaultPreventedAfterDispatch'] is True, focus
         expected_scroll = focus['beforeTab']['scroll']
         frames = [value for value in stability['timeline'] if value['phase'] == 'animation frame']
         assert len(frames) >= 4 and frames[-1]['time'] - stability['started'] >= 500, stability
@@ -1778,12 +1851,12 @@ def build_evidence():
     meta = json.loads((OUT / 'bundle-meta.json').read_text())
     paths = [name for name in meta['inputs'] if not name.startswith(('fixture:', '<', '(disabled):')) and 'node_modules/' not in name]
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
-    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts', 'assistantPlanRevisionDraft.ts', 'usePlanRevisionDraft.ts', 'AssistantPlanDraftRecovery.tsx']:
+    for required in ['Assistant.tsx', 'AssistantThread.tsx', 'AssistantRoleTasks.tsx', 'assistantRoleWorkflows.ts', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts', 'assistantPlanRevisionDraft.ts', 'usePlanRevisionDraft.ts', 'AssistantPlanDraftRecovery.tsx']:
         assert any(name.endswith('/' + required) for name in hashes), f'Real implementation missing: {required}'
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
 
-async def main(selected_cases=None, diagnose_native_smooth_scroll=False):
+async def main(diagnose_native_smooth_scroll=False, selected_cases=None):
     report = {'scope': 'Production React UI in Chromium; fixed fake API/account/campus; no model or real backend',
               'modelLimitation': 'Fixture returns predefined revised cards; this does not test model interpretation or generation quality',
               'runKind': 'engine-diagnostic' if diagnose_native_smooth_scroll else 'product-acceptance',
@@ -1804,6 +1877,8 @@ async def main(selected_cases=None, diagnose_native_smooth_scroll=False):
             try:
                 cases = [('native-1440', 1440, lambda p: native_case(p, 1440)),
                          ('native-320', 320, lambda p: native_case(p, 320)),
+                         ('role-pending-390', 390, role_context_case),
+                         ('role-unknown-390', 390, lambda p: role_context_case(p, unknown=True)),
                          ('controlled-ask-error', 1440, lambda p: ask_error_case(p, 'error')),
                          ('controlled-empty-preview', 1440, lambda p: ask_error_case(p, 'empty')),
                          ('controlled-unknown-cancel', 1440, unknown_case),
@@ -1847,13 +1922,13 @@ async def main(selected_cases=None, diagnose_native_smooth_scroll=False):
                     ('pickup-390', 390, lambda p: pickup_case(p, 390)),
                     ('pickup-reload-390', 390, pickup_reload_case),
                 ])
+                if diagnose_native_smooth_scroll:
+                    cases = [('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case)]
                 if selected_cases:
                     unknown = set(selected_cases) - {name for name, _width, _run in cases}
                     if unknown:
                         raise ValueError('Unknown --case: ' + ', '.join(sorted(unknown)))
                     cases = [case for case in cases if case[0] in selected_cases]
-                if diagnose_native_smooth_scroll:
-                    cases = [('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case)]
                 for name, width, run in cases:
                     motion = 'no-preference' if name in ['protected-single-320', 'revision-native-focus-policy-320',
                                                        'controlled-native-smooth-scroll-320'] else 'reduce'
@@ -1910,9 +1985,9 @@ async def main(selected_cases=None, diagnose_native_smooth_scroll=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--case', action='append', dest='cases',
-                        help='Run only this exact case name; repeat for multiple cases. Defaults to all cases.')
     parser.add_argument('--diagnose-native-smooth-scroll', action='store_true',
                         help='Run only the strict external native-animation engine diagnostic, outside product acceptance')
+    parser.add_argument('--case', action='append', dest='cases',
+                        help='Run only this exact case name; repeat for multiple cases. Defaults to all cases.')
     arguments = parser.parse_args()
-    asyncio.run(main(selected_cases=arguments.cases, diagnose_native_smooth_scroll=arguments.diagnose_native_smooth_scroll))
+    asyncio.run(main(diagnose_native_smooth_scroll=arguments.diagnose_native_smooth_scroll, selected_cases=arguments.cases))

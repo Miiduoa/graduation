@@ -141,14 +141,20 @@ export function signCard(
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
   studyGuard?: CourseworkStudyGuard,
-  pickupGuard?: FoodPickupGuard,
-  publicEventGuard?: PublicEventGuard,
+  sourceGuard?: PublicEventGuard | FoodPickupGuard,
   recoveryGuard?: CourseworkRecoveryGuard,
+  pickupGuard?: FoodPickupGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
-  if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard || pickupGuard)) return fail();
-  if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || pickupGuard || previousEvent)) return fail();
-  if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail('CONFIRMATION_INVALID', 409);
+  const publicEventGuard = sourceGuard && 'target' in sourceGuard ? sourceGuard : undefined;
+  if (sourceGuard && !('target' in sourceGuard)) {
+    if (pickupGuard) return fail('CONFIRMATION_INVALID', 409);
+    pickupGuard = sourceGuard;
+  }
+  if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail();
+  if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || previousEvent)) return fail();
+  if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     tool === 'propose_food_order'
       ? foodCardArgs(raw)
@@ -254,14 +260,14 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   const studyGuard = p.studyGuard === undefined ? undefined : courseworkStudyGuard(p.studyGuard);
   if (studyGuard && p.tool !== 'propose_personal_event') return fail('CONFIRMATION_INVALID', 409);
   const publicEventGuard = p.publicEventGuard === undefined ? undefined : parsePublicEventGuard(p.publicEventGuard);
-  if (publicEventGuard && (p.tool !== 'propose_personal_event' || studyGuard || p.pickupGuard !== undefined ||
+  if (publicEventGuard && (p.tool !== 'propose_personal_event' || studyGuard ||
       publicEventGuard.target.schoolId !== binding.schoolId)) return fail('CONFIRMATION_INVALID', 409);
   const recoveryGuard = p.recoveryGuard === undefined ? undefined : courseworkRecoveryGuard(p.recoveryGuard);
-  if (recoveryGuard && (p.tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || p.pickupGuard !== undefined ||
+  if (recoveryGuard && (p.tool !== 'propose_personal_event' || !studyGuard || publicEventGuard ||
       p.previousEventHash !== undefined ||
       p.mutationId !== courseworkRecoveryId(binding, recoveryGuard.mutationId))) return fail('CONFIRMATION_INVALID', 409);
   const pickupGuard = p.pickupGuard === undefined ? undefined : foodPickupGuard(p.pickupGuard);
-  if (pickupGuard && (p.tool !== 'propose_personal_event' || studyGuard))
+  if (pickupGuard && (p.tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
     return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'

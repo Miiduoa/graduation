@@ -30,7 +30,7 @@ import { CAMPUS_EVENT_MESSAGES, prepareCampusEventRequest } from './campusEventR
 import { parseCampusEventDiscovery, prepareCampusEventDiscovery } from './campusEventDiscovery';
 import { parseCampusMapReadTask, readCampusMapRequest } from './campusMapReadRequest';
 import { FOOD_PICKUP_MESSAGES, prepareSelectedFoodPickupRequest, selectedFoodPickupTarget } from './foodPickupRequest';
-const ACTIONS = ['capability', 'ask', 'plan', 'pickup-plan', 'event-preview', 'map-read', 'retry', 'followup', 'revise', 'confirm', 'cancel', 'reconcile'];
+const ACTIONS = ['capability', 'ask', 'plan', 'pickup-plan', 'event-preview', 'map-read', 'followup', 'retry', 'revise', 'confirm', 'cancel', 'reconcile'];
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
 const followupHits = new Map<string, number[]>();
@@ -173,8 +173,6 @@ export async function handleV2(request: NextRequest, action: string) {
       throw new V2Error(422, 'INVALID_INPUT');
     const direct = action === 'ask' && typeof raw.question === 'string' ? directReads(raw.question, Date.now()) : [];
     const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
-    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
-      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question) : null;
     const studyTarget = action === 'plan'
       ? courseworkStudyTarget(raw.task)
       : action === 'ask' && raw.studyTarget !== undefined
@@ -199,7 +197,7 @@ export async function handleV2(request: NextRequest, action: string) {
     if (action === 'followup' && (typeof raw.issuedContext !== 'string' ||
         !/^[A-Za-z0-9_-]{43}$/.test(raw.issuedContext))) throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const preparing = action === 'ask' || action === 'plan' || action === 'pickup-plan' || action === 'event-preview';
+    const preparing = action === 'ask' || action === 'plan' || action === 'event-preview' || action === 'pickup-plan';
     const routePurpose = action === 'event-preview' ? 'event-preview' : 'chat';
     const target = action === 'reconcile' || action === 'followup' || action === 'retry' || action === 'map-read' ? undefined : preparing || action === 'revise'
       ? raw.routeToken === undefined && preparing ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret, routePurpose)
@@ -212,6 +210,12 @@ export async function handleV2(request: NextRequest, action: string) {
     }
     const source = createAdapter(session, schoolId, signal),
       principal = await source.principal();
+    // Unconnected adapters retain the existing service-only path, including its
+    // zero-model consent boundary. A task context never manufactures a source.
+    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
+      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question, Date.now(),
+        profile!.id === 'teacher' ? typeof source.adapter.teachingOverview === 'function'
+          : profile!.id === 'merchant' ? typeof source.adapter.merchantOverview === 'function' : false) : null;
     const binding = {
       account: principal.platformAccountId,
       session: sessionContext(session),
@@ -329,20 +333,13 @@ export async function handleV2(request: NextRequest, action: string) {
     allowance.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
-      if (action === 'event-preview') {
+      if (action === 'event-preview' || action === 'pickup-plan') {
         const options = { adapter: source.adapter, binding, secret, writes, now, signal };
-        const result = eventDiscovery
+        const result = action === 'pickup-plan'
+          ? await prepareSelectedFoodPickupRequest({ target: pickupTarget!, adapter: source.adapter, binding, secret, writes, now, signal })
+          : eventDiscovery
           ? await prepareCampusEventDiscovery({ ...options, discovery: eventDiscovery })
           : { ...await prepareCampusEventRequest({ ...options, target: selectedEvent! }), campusEventPreview: true };
-        signal.throwIfAborted();
-        return jsonResponse({ version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,
-          ...(result.cards.length ? { expiresAt: now + 300000 } : {}),
-          ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}) });
-      }
-      if (action === 'pickup-plan') {
-        const result = await prepareSelectedFoodPickupRequest({
-          target: pickupTarget!, adapter: source.adapter, binding, secret, writes, now, signal,
-        });
         signal.throwIfAborted();
         return jsonResponse({
           version: 2, ...result, modelCalls: 0, simulation: source.adapter.simulation,

@@ -73,3 +73,16 @@ App `5504170` 的必要核准、正式帳號及實機驗收仍屬獨立門檻；
 - Web／shared 型別檢查、修改的 Web 檔案 lint、Python syntax 與 git diff 檢查通過。
 
 測試使用目前環境 Node 24.22.1；套件宣告 Node 22，執行時有 engine 警告。瀏覽器使用合成 API／帳號資料，未執行正式寫入、部署或推送。
+
+## 2026-11-19 再次同步 main（PR #682）
+
+本輪接續既有 merge，整合 `origin/main` `182da8f9a3897a52312d1b8b29975a318e690a66`。main 已包含本批課業復原實作及回歸；解析後所有產品程式與 main 相同，保留 main 新增的教師／店家工作區、指定個人行程、來源綁定重試、Tab 焦點控制及其測試。另保留本分支 Today 地點查詢停止後忽略晚到結果、保存草稿及重新提問的回歸。沒有刪除 main 的功能、路由或測試；Firestore、權限及後端檔案均沿用 main，沒有額外修改。
+
+本輪本機驗證：
+
+- Web assistantV2／助理 UI／Today：135 files、2,911 tests 通過；補充課業接續與行程草稿契約：7 files、271 tests 通過。
+- Shared 助理與學務摘要／匯入確認：245 tests 通過。
+- Chromium 合成瀏覽器：行程修改 46 個情境、Today／課業復原 11 個情境通過。
+- Web／shared 型別檢查、Today 測試檔 lint、Python syntax、相對 main 的 diff check 通過。
+
+首次 Web 聚合執行曾在實際 adapter 測試觸及預設 5 秒逾時；單獨重跑通過後，以 `--maxWorkers=4 --testTimeout=20000` 重跑整組，全部通過，未修改測試斷言。環境為 Node 24.22.1（套件要求 Node 22，仍有 engine 警告）。相對舊分支的整體 diff check 另顯示 main 原有 `GroupPresentation.test.tsx` 檔尾空白行，未修改該檔。瀏覽器僅使用合成 API／帳號，未操作正式資料、部署或推送。

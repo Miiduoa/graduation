@@ -295,7 +295,8 @@ it('clears old protection choices on a new proposal and ignores its predecessor\
 
 
 // Explicit jsdom geometry uses the measured 720px viewport and computed margins:
-// 150px dock + 72px bottom clearance + 12px focus gap. Browser QA checks movement.
+// 150px dock + 72px bottom clearance + 12px focus gap + 1px alignment buffer.
+// Browser QA checks actual native rounding and movement.
 function focusScrollFixture(top = 526.94, nested = false) {
   let frameId = 0;
   const frames = new Map<number, FrameRequestCallback>();
@@ -508,13 +509,12 @@ function visibleTabFixture(top = 376.84375) {
     back: screen.getByRole('button', { name: '收起修改' }), focus: vi.spyOn(fixture.button, 'focus') };
 }
 
-it.each([false, true])('keeps a visible native Tab target readable (shift=%s)', shiftKey => {
+it.each([false, true])('focuses the visible adjacent control without native scrolling for Tab (shift=%s)', shiftKey => {
   const { button, field, back, scroll, focus, flush } = visibleTabFixture();
   const from = shiftKey ? back : field;
   act(() => from.focus());
-  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(true);
-  expect(focus).not.toHaveBeenCalled();
-  act(() => button.focus()); // jsdom does not perform native Tab navigation.
+  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(false);
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
   expect(document.activeElement).toBe(button);
   flush();
   expect(scroll).not.toHaveBeenCalled();
@@ -525,10 +525,9 @@ it.each([
   { edge: 'bottom', top: 441.140625 },
 ])('accepts a rounded $edge alignment that still preserves the full 12px clearance', ({ top }) => {
   const { button, field, scroll, focus, flush } = visibleTabFixture(top);
-  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
-  expect(focus).not.toHaveBeenCalled();
-  act(() => button.focus());
+  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false);
   expect(document.activeElement).toBe(button);
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
   flush();
   expect(scroll).not.toHaveBeenCalled();
 });
@@ -546,22 +545,25 @@ it.each([
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ block, inline: 'nearest', behavior: 'instant' });
 });
 
-it.each([false, true])('restores the reading position after visible native Tab focus (shift=%s)', shiftKey => {
+it.each([false, true])('requests same-position instant cancellation before visible Tab focus (shift=%s)', shiftKey => {
   const { button, field, back, scroll, documentScroll, focus, flush } = visibleTabFixture(406.84375);
   const from = shiftKey ? back : field;
   act(() => from.focus());
   const position = { x: 31.25, y: 1920.5 };
   vi.stubGlobal('scrollX', position.x);
   vi.stubGlobal('scrollY', position.y);
-  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(true);
-  expect(focus).not.toHaveBeenCalled();
-  expect(documentScroll).not.toHaveBeenCalled();
-  act(() => button.focus()); // Emulate the browser's native focus transfer.
-  flush();
+  // jsdom verifies request order and arguments only. It cannot model a native
+  // compositor update that was queued before cancellation; browser QA observes it.
+  expect(fireEvent.keyDown(from, { key: 'Tab', shiftKey })).toBe(false);
   expect(document.activeElement).toBe(button);
   expect({ x: window.scrollX, y: window.scrollY }).toEqual(position);
   expect(documentScroll).toHaveBeenCalledExactlyOnceWith({ left: position.x, top: position.y, behavior: 'instant' });
+  expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  expect(documentScroll.mock.invocationCallOrder[0]).toBeLessThan(focus.mock.invocationCallOrder[0]);
+  flush();
+  expect({ x: window.scrollX, y: window.scrollY }).toEqual(position);
   expect(scroll).not.toHaveBeenCalled();
+  expect(documentScroll).toHaveBeenCalledOnce(); // No later restore or correction.
 });
 
 it.each([false, true])('lets native Tab (shift=%s) leave the panel without wrapping focus', shiftKey => {
@@ -580,16 +582,15 @@ it.each([false, true])('lets native Tab (shift=%s) leave the panel without wrapp
   expect(scroll).not.toHaveBeenCalled();
 });
 
-it.each(['disabled', 'negative tabindex', 'hidden'])('leaves skipping a %s control to native Tab order', skipped => {
+it.each(['disabled', 'negative tabindex', 'hidden'])('skips a %s control in the ordinary Tab order', skipped => {
   const { button, field, back, focus } = visibleTabFixture();
   if (skipped === 'disabled') (button as HTMLButtonElement).disabled = true;
   else if (skipped === 'negative tabindex') button.tabIndex = -1;
   else button.hidden = true;
   const backFocus = vi.spyOn(back, 'focus');
-  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(true);
-  expect(backFocus).not.toHaveBeenCalled();
-  act(() => back.focus()); // Native Tab skips the unavailable control.
+  expect(fireEvent.keyDown(field, { key: 'Tab' })).toBe(false);
   expect(document.activeElement).toBe(back);
+  expect(backFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
   expect(focus).not.toHaveBeenCalled();
 });
 

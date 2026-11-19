@@ -1,12 +1,8 @@
 import { formatTaipeiDateTime, taipeiParts } from '@campus/shared/src/taipeiTime';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
+import { getAssistantRoleWorkflow } from '@campus/shared/src/assistantRoleWorkflows';
 
-export const SUGGESTIONS = [
-  '這禮拜有什麼要交的',
-  '下一堂課在哪，幾點',
-  '中午吃什麼',
-  '幫我排今晚寫作業',
-];
+export const SUGGESTIONS = getAssistantRoleWorkflow('student').suggestions;
 
 const PERMISSION_MESSAGES: Record<string, string> = {
   ASSISTANT_PERMISSION_DENIED: '這項 AI 代辦權限尚未開啟或已關閉，這次沒有執行。請到助理權限調整後再確認。',
@@ -120,6 +116,8 @@ export function formatDueInstant(value: string): string {
 }
 
 export function stepFamily(name: string): string {
+  if (name === 'get_teaching_overview') return '授課概況';
+  if (name === 'get_merchant_overview') return '門市營運概況';
   if (name === 'get_imported_academics') return '個人成績與學分紀錄';
   if (name === 'list_campus_services') return '服務入口';
   if (/food/.test(name)) return '餐點與訂單';

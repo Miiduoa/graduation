@@ -51,8 +51,8 @@ const capabilityDescriptions = {
   },
   classroom: {
     modes: ['read', 'prepare'],
-    summary: '可查本人有權限的 nuni 課程、作業、測驗與教材，並準備讀書行程；不會代交作業或作答。',
-    tools: ['list_courses', 'get_course_work', 'get_due_work', 'get_materials', 'propose_study_plan'],
+    summary: '可查本人有權限的 nuni 課程、作業、測驗與教材，並準備讀書行程；教師可另查已核對校園的負責授課概況與收件數，不會代交、作答或批改。',
+    tools: ['list_courses', 'get_course_work', 'get_due_work', 'get_materials', 'propose_study_plan', 'get_teaching_overview'],
   },
   'material-bookmarks': handoff('可開啟教材收藏；本助理尚未讀取裝置收藏或代替收藏。'),
   calendar: {
@@ -154,7 +154,11 @@ const capabilityDescriptions = {
   settings: handoff('可開啟設定；本助理不會自行更改設定。'),
   'assistant-permissions': handoff('可開啟助理權限設定；授權變更由本人確認。'),
   assistant: handoff('可開啟校園助理；每項資料查詢與提議仍依原功能權限執行。'),
-  merchant: handoff('可開啟店家工作區；本助理不會授予門市資格或代替管理店家。'),
+  merchant: {
+    modes: ['read'],
+    summary: '可讀取本人有權限且已核對校園的門市、訂單狀態及當班摘要；多門市需先選擇，不會授予門市資格、接單、退款或交班。',
+    tools: ['get_merchant_overview'],
+  },
   admin: handoff('可開啟平台管理；本助理不會取得管理權限或代替管理操作。'),
   support: handoff('可開啟使用說明與支援；本助理不會代送聯絡訊息。'),
 } satisfies Record<AssistantServiceId, CapabilityDescription>;

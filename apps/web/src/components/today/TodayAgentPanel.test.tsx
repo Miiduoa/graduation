@@ -109,6 +109,37 @@ it('keeps the homepage picker closed until requested and plans only the selected
   expect(input.onConfirm).not.toHaveBeenCalled();
 });
 
+it('keeps explicit elapsed recovery in the compact recent list without restoring a duplicate task picker', () => {
+  const original = followup({ status: 'elapsed', checkedAt: '2026-11-13T00:05:00.000Z',
+    event: { ...followup().event, startTime: '07:00', endTime: '07:30' } });
+  const input = props({ compact: true, followups: [original] });
+  render(<TodayAgentPanel {...input} />);
+  expect(screen.queryByText('選一件待辦，找 30 分鐘空檔')).toBeNull();
+  const recent = screen.getByText('最近安排（1）').closest('details')!;
+  expect(recent.open).toBe(true);
+  const recover = within(recent).getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' });
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(recover);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], original.mutationId);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps compact unknown-result reconciliation visible while elapsed recovery stays disabled', () => {
+  const original = followup({ status: 'elapsed', checkedAt: '2026-11-13T00:05:00.000Z',
+    event: { ...followup().event, startTime: '07:00', endTime: '07:30' } });
+  const input = props({ compact: true, followups: [original], reply,
+    states: { [card.mutationId]: { status: 'unknown', message: '原操作仍待核對' } } });
+  render(<TodayAgentPanel {...input} />);
+  const recover = screen.getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' });
+  expect((recover as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(recover);
+  expect(input.onPlan).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  expect(input.onReconcile).toHaveBeenCalledExactlyOnceWith(card);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
 it('selects the nearest unplanned coursework after already-arranged tasks and counts only remaining candidates', () => {
   const allTasks = Array.from({ length: 7 }, (_, index) => task(
     String(index + 1), `2026-11-13T${String(9 + index).padStart(2, '0')}:00:00+08:00`,

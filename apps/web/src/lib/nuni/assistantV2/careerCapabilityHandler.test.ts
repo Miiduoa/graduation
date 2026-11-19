@@ -107,12 +107,18 @@ it('loads the career directory through the real handler and keeps ordinary servi
   const modelToolResult = modelEvidence[0].result;
   expect(modelToolResult.excerpt ?? JSON.stringify(modelToolResult)).toContain('"modes":["handoff"]');
 
+  const ordinary = await ask('查學校電話');
+  expect(ordinary.result.answer).toContain('靜宜大學');
+  expect(ordinary.result.steps).toContainEqual(expect.objectContaining({ name: 'get_school_info', status: 'ok' }));
+  expect(ordinary.result.cards).toEqual([]);
+  expect(providerCall).toHaveBeenCalledTimes(2);
+
   providerCall.mockResolvedValueOnce(tool('list_campus_services', { serviceId: 'library' }))
     .mockResolvedValueOnce(answer('可到圖書館頁核對服務。'));
-  const ordinary = await ask('有哪些圖書館服務？');
-  expect(ordinary.result.answer).toContain('圖書館');
-  expect(ordinary.result.steps).toContainEqual(expect.objectContaining({ name: 'list_campus_services', status: 'ok' }));
-  expect(ordinary.result.cards).toEqual([]);
+  const library = await ask('有哪些圖書館服務？');
+  expect(library.result.answer).toContain('圖書館');
+  expect(library.result.steps).toContainEqual(expect.objectContaining({ name: 'list_campus_services', status: 'ok' }));
+  expect(library.result.cards).toEqual([]);
   expect(providerCall).toHaveBeenCalledTimes(4);
   noBusinessAccess(f);
 });

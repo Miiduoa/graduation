@@ -714,8 +714,7 @@ it('keeps the draft and ignores a late bootstrap after stopping a question and a
   expect(input.value).toBe('下一堂課在哪裡？');
   expect(document.activeElement).toBe(input);
   expect(ask).not.toHaveBeenCalled();
-  // A location shortcut now uses map-read. Exercise the general ask bootstrap
-  // with a free-form question; the independent map cancellation is covered below.
+  // Use a general question for the ask bootstrap; map cancellation has its own test.
   fireEvent.change(input, { target: { value: '請解釋資料庫索引？' } });
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
@@ -919,4 +918,74 @@ it('aborts an old cloud answer when the feature flag changes while keeping direc
   });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   expect(await screen.findByText(/入口測試資料庫/)).toBeTruthy();
+});
+
+it('uses the existing teacher homepage preference only for examples, without adding role authority to requests', async () => {
+  const ask = vi.fn().mockReturnValue(reply('授課概況已整理。'));
+  mockNuniAsk(ask);
+  render(<AssistantEnabledProvider enabled><TodayCampusEntry preferredWorkContext="teacher" /></AssistantEnabledProvider>);
+  expect((await screen.findByLabelText('目前處理的工作') as HTMLSelectElement).value).toBe('teacher');
+  expect(screen.queryByRole('button', { name: '下一堂課在哪裡？' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查我的授課概況' }));
+  expect(ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('授課概況已整理。');
+  expect(ask.mock.calls[0][0]).toMatchObject({ question: '查我的授課概況', schoolId: 'pu', consent: true });
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('role');
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('preferredWorkContext');
+  expect(ask.mock.calls[0][0]).not.toHaveProperty('isTeacher');
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+    '/api/nuni/assistant/capability', '/api/nuni/assistant/ask',
+  ]);
+});
+
+
+it('stops a Today map read, preserves both drafts and ignores its late result after a new question', async () => {
+  let finishMap!: (response: Response) => void;
+  let mapSignal: AbortSignal | null | undefined;
+  const ask = vi.fn<(body: Record<string, unknown>) => Response>(() => reply('交易具有原子性與一致性。'));
+  const mapRead = vi.fn((_body: Record<string, unknown>, signal?: AbortSignal | null) => {
+    mapSignal = signal;
+    return new Promise<Response>((resolve) => { finishMap = resolve; });
+  });
+  mockNuniAsk(ask, mapRead);
+  render(entry());
+  fireEvent.click(await screen.findByRole('button', { name: '下一堂課在哪裡？' }));
+  const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(mapRead).toHaveBeenCalledOnce());
+  expect(mapRead.mock.calls[0][0]).toEqual({
+    schoolId: 'pu', conversationId: expect.any(String), task: { kind: 'next-class' },
+  });
+  expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
+  expect(ask).not.toHaveBeenCalled();
+
+  const followup = '請解釋資料庫交易的特性？';
+  fireEvent.change(input, { target: { value: followup } });
+  fireEvent.click(screen.getByRole('button', { name: '停止回答' }));
+  await screen.findByText(/已停止這次地點查詢/);
+  expect(mapSignal?.aborted).toBe(true);
+  expect(input.value).toBe(followup);
+  expect(input.readOnly).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(input.value).toBe('下一堂課在哪裡？');
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(input.value).toBe(followup);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('交易具有原子性與一致性。');
+  await act(async () => finishMap(Response.json({
+    version: 2, modelCalls: 0, dataRead: true, answer: '舊地點不應顯示。', cards: [],
+    steps: [{ name: 'get_campus_map', status: 'ok', summary: '舊地點來源已核對。' }],
+    taskPlan: { version: 1, steps: [{ id: 'map', label: '查校園地點', serviceId: 'map',
+      dependsOn: [], status: 'completed', summary: '舊地點來源已核對。', href: '/map?schoolId=pu' }] },
+  })));
+  expect(screen.queryByText('舊地點不應顯示。')).toBeNull();
+  expect(screen.queryByText('舊地點來源已核對。')).toBeNull();
+  expect(screen.getByText('交易具有原子性與一致性。')).toBeTruthy();
+  expect(mapRead).toHaveBeenCalledOnce();
+  expect(ask).toHaveBeenCalledOnce();
+  expect(ask.mock.calls[0][0]).toMatchObject({ question: followup, history: [] });
 });

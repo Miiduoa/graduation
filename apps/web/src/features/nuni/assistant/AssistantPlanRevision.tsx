@@ -128,6 +128,38 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
       ? '全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。'
       : '全部項目已勾選保留原樣，這次不會重新預覽；請依原確認卡顯示的結果核對。';
 
+  function focusVisibleTabControl(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!mounted.current || event.key !== 'Tab' || event.nativeEvent.isComposing || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    const root = panel.current;
+    const current = document.activeElement;
+    if (!root || !(current instanceof HTMLElement) || current !== event.target || !root.contains(current)) return;
+    const controls: HTMLElement[] = [];
+    for (const target of root.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex], [contenteditable]')) {
+      const style = window.getComputedStyle(target);
+      if (target.matches(':disabled') || target.closest('[hidden], [inert]') || style.display === 'none' ||
+        style.visibility === 'hidden' || style.visibility === 'collapse') continue;
+      const bounds = target.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      if (target.tabIndex < 0 && !target.matches('[contenteditable]:not([contenteditable="false"])')) continue;
+      // Only this panel's ordinary native controls have a known DOM Tab order.
+      // Positive tabindex, radios and custom stops keep the browser's behavior.
+      if (target.tabIndex !== 0 || !target.matches('button, input[type="checkbox"], textarea')) return;
+      controls.push(target);
+    }
+    const index = controls.indexOf(current);
+    if (index < 0) return;
+    const next = controls[index + (event.shiftKey ? -1 : 1)];
+    if (!next || !focusGeometry(next).visible) return;
+    // Inline threads can have their own clipping/scroller. Leave those to native
+    // Tab rather than preventing a needed scroll of an ancestor.
+    if (hasClippingOrScrollingAncestor(next)) return;
+    event.preventDefault();
+    // preventScroll blocks a new focus scroll, but not one already in flight.
+    // Request cancellation at the current offset before transferring focus.
+    window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: 'instant' });
+    next.focus({ preventScroll: true });
+  }
+
   function clearTabPosition() {
     if (tabFrame.current !== null) window.cancelAnimationFrame(tabFrame.current);
     tabFrame.current = null;
@@ -283,6 +315,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
 
   if (!open && !started && !pristine) return null;
   return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議" data-assistant-plan-revision="true"
+    onKeyDown={focusVisibleTabControl}
     onKeyDownCapture={rememberTabPosition}
     onPointerDownCapture={clearTabPosition}
     onBlurCapture={event => {
