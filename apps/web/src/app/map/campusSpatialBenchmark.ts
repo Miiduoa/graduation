@@ -92,6 +92,9 @@ export type CampusSpatialBenchmarkValidation = {
 export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): CampusSpatialBenchmarkValidation {
   const issues: string[] = [];
   const trials = new Map<string, { baseline: Record<string, unknown>; products: Set<Product>; verified: boolean }>();
+  // Detect replayed captures within the same scenario/product across different trial IDs.
+  // A shared cross-product video is allowed; recycled runs from one product are not.
+  const observedCaptures = new Map<string, string>();
   if (!Array.isArray(rows) || rows.length === 0) {
     return { valid: false, issues: ['No actual benchmark measurements supplied'], completeTrials: 0, reviewableTasks: [] };
   }
@@ -151,6 +154,9 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
           !text(row.visualRubric))) {
       issues.push(`${prefix}: performance comparison requires measured FPS and rated visual rubric`);
     }
+    if (row.outcome === 'correct' && row.destinationLevel === 'none') {
+      issues.push(`${prefix}: a correct task cannot have no verified destination`);
+    }
     if (row.outcome === 'correct' && (
         (row.destinationLevel === 'entrance' && row.entranceCorrect !== true) ||
         (row.destinationLevel === 'floor' && row.floorCorrect !== true) ||
@@ -169,6 +175,22 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     }
     const id = row.trialId;
     if (!text(id)) return;
+    if (evidenceUrl(row.evidenceUrl) && timestamp(row.testedAt)) {
+      const scenario = JSON.stringify([row.product, ...CONDITIONS.map((field) => row[field])]);
+      const observations = [
+        ['evidenceUrl', new URL(row.evidenceUrl as string).href],
+        ['testedAt', row.testedAt as string],
+      ] as const;
+      for (const [field, value] of observations) {
+        const key = JSON.stringify([scenario, field, value]);
+        const previousTrial = observedCaptures.get(key);
+        if (previousTrial && previousTrial !== id) {
+          issues.push(`${prefix}: reused ${field} across trials ${previousTrial} and ${id}`);
+        } else {
+          observedCaptures.set(key, id as string);
+        }
+      }
+    }
     const found = trials.get(id as string);
     if (!found) {
       trials.set(id as string, {
