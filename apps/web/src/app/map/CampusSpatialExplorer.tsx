@@ -396,6 +396,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // construction or observe(). Do not strand the tour in offscreen mode:
     // the safe fallback is the existing eager startup path.
     let intersection: IntersectionObserver | null = null;
+    // Keep timestamps across observer callbacks, not only within one batch:
+    // an old, queued notification must not restart offscreen mobile WebGL.
+    let lastObservationTime = -Infinity;
     if (!manualStart && typeof IntersectionObserver !== 'undefined') {
       try {
         intersection = new IntersectionObserver((entries) => {
@@ -403,16 +406,24 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // (including after the modal closes). Do not reactivate a disposed
           // WebGL scene or issue state updates from the previous dialog.
           if (!active) return;
+          // Only entries for this canvas host may change its visibility.
+          // Legacy callback shims may omit target; a *different* explicit
+          // target is never proof that our map entered the viewport.
+          const hostEntries = entries.filter((entry) => !entry.target || entry.target === host);
           // A fast scroll can batch several transitions. Real observer
           // entries expose time; use the most recent timestamp rather than
           // trusting array order. Keep last-entry fallback for legacy WebViews
           // or test shims without timestamps; an empty batch changes nothing.
-          let latest = entries[entries.length - 1];
+          let latest = hostEntries[hostEntries.length - 1];
           if (!latest) return;
           if (Number.isFinite(latest.time)) {
-            for (const entry of entries) {
+            for (const entry of hostEntries) {
               if (Number.isFinite(entry.time) && entry.time > latest.time) latest = entry;
             }
+            // A delayed older callback may arrive after a newer one, even
+            // if it is the sole entry in its own callback.
+            if (latest.time < lastObservationTime) return;
+            lastObservationTime = latest.time;
           }
           visible = latest.isIntersecting;
           updateVisibility();
