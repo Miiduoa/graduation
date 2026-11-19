@@ -64,6 +64,13 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // Fallback is only for non-streaming WebViews / synthetic fetch stubs.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+  // Content-Length describes transport bytes for gzip/br, but the browser
+  // delivers decoded bytes. Enforce exact framing ONLY for identity responses;
+  // a truncated but syntactically valid JSON document is not a complete map.
+  const encoding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? null;
+  const declared = response.headers?.get('content-length') ?? null;
+  const identityLength = (encoding === null || encoding === 'identity') &&
+    declared !== null && /^\d+$/.test(declared) ? Number(declared) : null;
   if (!response.body || typeof response.body.getReader !== 'function') {
     // Old embedded WebViews can expose a Response without a usable stream.
     // We cannot stop their text() buffering mid-flight, but reject decoded
@@ -73,9 +80,15 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     if (typeof response.text === 'function') {
       const raw = await response.text();
       if (signal?.aborted) throw new Error('Building outline read aborted');
-      if (raw.length > MAX_DECLARED_FOOTPRINT_BYTES ||
-          new TextEncoder().encode(raw).byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
+      if (raw.length > MAX_DECLARED_FOOTPRINT_BYTES) {
         throw new Error('Building outline response exceeded byte limit');
+      }
+      const decodedBytes = new TextEncoder().encode(raw).byteLength;
+      if (decodedBytes > MAX_DECLARED_FOOTPRINT_BYTES) {
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      if (identityLength !== null && decodedBytes !== identityLength) {
+        throw new Error('Incomplete building outline response');
       }
       return JSON.parse(raw) as unknown;
     }
@@ -129,6 +142,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         throw new Error('Building outline response exceeded byte/chunk limit');
       }
       const end = total + value.byteLength;
+      if (identityLength !== null && end > identityLength) {
+        cancelReader();
+        throw new Error('Building outline response length mismatch');
+      }
       if (end > bytes.byteLength) {
         const larger = new Uint8Array(Math.min(MAX_DECLARED_FOOTPRINT_BYTES,
           Math.max(bytes.byteLength * 2, end)));
@@ -143,6 +160,9 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     reader.releaseLock();
   }
   if (signal?.aborted) throw new Error('Building outline read aborted');
+  if (identityLength !== null && total !== identityLength) {
+    throw new Error('Incomplete building outline response');
+  }
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
