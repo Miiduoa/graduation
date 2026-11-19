@@ -98,6 +98,20 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(validateCampusSpatialBenchmarkRows(repeated).issues.join(' ')).toContain('duplicate product');
   });
 
+  it.each([1, 3])('excludes %i otherwise complete trials with an unknown product', (trialCount) => {
+    const rows = ['synthetic-1', 'synthetic-2', 'synthetic-3']
+      .slice(0, trialCount)
+      .flatMap((trialId) => {
+        const paired = fixture(trialId);
+        return [...paired, { ...paired[0], product: 'unknown' }];
+      });
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.issues.join(' ')).toContain('unknown product');
+    expect(result.completeTrials).toBe(0);
+    expect(result.reviewableTasks).toEqual([]);
+  });
+
   it('rejects different devices, settings, task, or destination as a matched trial', () => {
     const changed = fixture('synthetic-1');
     changed[1] = { ...changed[1], deviceId: 'different-device', destinationId: 'wrong-building' };
@@ -135,6 +149,25 @@ describe('campus spatial benchmark evidence gate', () => {
       ...row, task: 'walking-route' as const, routeVerified: false,
     }));
     expect(validateCampusSpatialBenchmarkRows(routes).issues.join(' ')).toContain('route evidence');
+  });
+
+  it('rejects route verification without ground truth even for incorrect outcomes', () => {
+    const rows = [
+      ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
+    ].map((row) => ({
+      ...row,
+      task: 'walking-route',
+      groundTruthLevel: 'none',
+      destinationLevel: 'none',
+      outcome: 'incorrect',
+      buildingCorrect: null,
+      routeVerified: true,
+    }));
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.issues.join(' ')).toContain('route verification exceeds verified ground-truth evidence');
+    expect(result.completeTrials).toBe(0);
+    expect(result.reviewableTasks).toEqual([]);
   });
 
   it.each(['entranceCorrect', 'floorCorrect', 'roomCorrect'] as const)(

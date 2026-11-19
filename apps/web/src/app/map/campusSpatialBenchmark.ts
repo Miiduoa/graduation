@@ -126,7 +126,9 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     }
     if (!timestamp(row.testedAt)) issues.push(`${prefix}: invalid testedAt`);
     if (!CAMPUS_SPATIAL_PRODUCTS.includes(row.product as Product)) {
-      issues.push(`${prefix}: unknown product`); return;
+      issues.push(`${prefix}: unknown product`);
+      if (text(row.trialId)) taintedTrials.add(row.trialId as string);
+      return;
     }
     if (!CAMPUS_SPATIAL_TASKS.includes(row.task as Task) || row.schoolId !== 'pu' ||
         !['wifi', 'cellular', 'offline'].includes(String(row.network)) ||
@@ -183,6 +185,9 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
       LEVELS.indexOf(row.groundTruthLevel as DestinationLevel) < LEVELS.indexOf(level));
     for (const level of unsupportedIndoorLevels) {
       issues.push(`${prefix}: ${level} correctness exceeds verified ground-truth evidence`);
+    }
+    if (row.routeVerified === true && row.groundTruthLevel === 'none') {
+      issues.push(`${prefix}: route verification exceeds verified ground-truth evidence`);
     }
     if (row.outcome === 'correct' &&
         (row.buildingCorrect !== true ||
