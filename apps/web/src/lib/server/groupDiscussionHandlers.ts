@@ -1,4 +1,4 @@
-import { Timestamp, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { FieldPath, Timestamp, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import { isAccountUnavailable } from './dmConversationsHandler';
@@ -86,7 +86,10 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
             continue;
           if (
             data.published === false ||
-            (typeof data.status === 'string' && data.status !== 'published') ||
+            [
+              'draft', 'scheduled', 'pending', 'unpublished',
+              'archived', 'cancelled', 'canceled', 'deleted',
+            ].includes(data.status) ||
             data.deleted === true ||
             data.deletedAt != null
           )
@@ -125,21 +128,28 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
     } catch {
       // Match the legacy read path when the canonical read is unavailable.
     }
-    // Equality-only query uses the automatic single-field index. Read one extra
-    // row to detect overflow; never return a partial or incorrectly sorted page.
-    const maxLegacyRows = 500;
-    const legacy = await db.collection('groupPosts')
+    // Equality plus document-ID ordering uses the automatic single-field index.
+    // Scan before sorting: document-ID batches do not represent the newest rows.
+    // At the safety cap, paginate only the documents actually collected.
+    const maxLegacyRows = 5000;
+    const legacyBatchSize = 500;
+    const legacyBase = db.collection('groupPosts')
       .where('groupId', '==', input.groupId)
-      .limit(maxLegacyRows + 1)
-      .get();
-    if (legacy.docs.length > maxLegacyRows) {
-      throw new HttpsError('resource-exhausted', '群組歷史貼文超過讀取上限，請聯絡管理員');
+      .orderBy(FieldPath.documentId());
+    const legacyDocs: PostDoc[] = [];
+    let legacyScan = legacyBase;
+    while (legacyDocs.length < maxLegacyRows) {
+      const count = Math.min(legacyBatchSize, maxLegacyRows - legacyDocs.length);
+      const batch = await legacyScan.limit(count).get();
+      legacyDocs.push(...batch.docs);
+      if (batch.docs.length < count) break;
+      legacyScan = legacyBase.startAfter(batch.docs[batch.docs.length - 1]!);
     }
     const timeOf = (doc: PostDoc): Timestamp => {
       const value = doc.data().createdAt;
       return value instanceof Timestamp ? value : new Timestamp(0, 0);
     };
-    const sorted = [...legacy.docs].sort((a, b) => {
+    const sorted = legacyDocs.sort((a, b) => {
       const left = timeOf(a);
       const right = timeOf(b);
       return (

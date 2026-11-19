@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
-import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { FieldPath, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { createGroupDiscussionHandlers } from './groupDiscussionHandlers';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 
@@ -54,14 +54,28 @@ function setup(rows: Row[], status: string | null = 'active', options: { profile
     collection: (root: string) => root === 'groupPosts' ? {
       where: (field: string, operator: string, value: string) => {
         expect([field, operator, value]).toEqual(['groupId', '==', 'g1']);
-        return {
-          // No orderBy method: combining it with equality would need an index.
-          limit: (count: number) => ({ get: async () => {
-            globalReads(count);
-            return { docs: (options.globalRows ?? []).slice(0, count)
-              .map((row) => ({ id: row.id, data: () => row })) };
-          } }),
-        };
+        const orderedGlobal = [...(options.globalRows ?? [])].sort((a, b) =>
+          Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
+        function globalQuery(offset = 0, count = Infinity): any {
+          return {
+            orderBy: (field: FieldPath) => {
+              expect(field.isEqual(FieldPath.documentId())).toBe(true);
+              return globalQuery(offset, count);
+            },
+            startAfter: (doc: { id: string }) => {
+              const next = orderedGlobal.findIndex(row => row.id === doc.id) + 1;
+              expect(next).toBeGreaterThan(0);
+              return globalQuery(next, count);
+            },
+            limit: (size: number) => globalQuery(offset, size),
+            get: async () => {
+              globalReads(count, offset);
+              return { docs: orderedGlobal.slice(offset, offset + count)
+                .map(row => ({ id: row.id, data: () => row })) };
+            },
+          };
+        }
+        return globalQuery();
       },
       set: writes, update: writes, delete: writes, add: writes,
     } : ({
@@ -109,11 +123,13 @@ const request = (data: Record<string, unknown> = {}) => ({
 it('includes legacy, partially populated and four-field published posts without writes', async () => {
   const { list, writes } = setup([
     row('legacy'),
+    row('active', { status: 'active' }),
+    row('empty-status', { status: '' }),
     row('partial', { published: true }),
     row('published', { published: true, status: 'published', deleted: false, deletedAt: null }),
   ]);
   const page = await list(request());
-  expect(page.posts.map((p) => p.id).sort()).toEqual(['legacy', 'partial', 'published']);
+  expect(page.posts.map((p) => p.id).sort()).toEqual(['active', 'empty-status', 'legacy', 'partial', 'published']);
   expect(page.hasMore).toBe(false);
   expect(writes).not.toHaveBeenCalled();
 });
@@ -121,7 +137,7 @@ it('includes legacy, partially populated and four-field published posts without 
 it('excludes every explicit hide signal, even on otherwise published posts', async () => {
   const hidden = [
     { published: false },
-    ...['draft', 'unpublished', 'scheduled', 'pending', ''].map((status) => ({ status })),
+    ...['draft', 'unpublished', 'scheduled', 'pending', 'archived', 'cancelled', 'canceled', 'deleted'].map((status) => ({ status })),
     { deleted: true },
     { deletedAt: new Timestamp(1, 0) },
     { deletedAt: false },
@@ -264,19 +280,19 @@ it.each([false, true])('reads global-only legacy posts when canonical fails=%s, 
   const second = await next.list(request({ pageSize: 2, cursor: JSON.parse(JSON.stringify(first.cursor)) }));
   expect(second.posts.map(p => p.id)).toEqual(['tie-a', 'old']);
   expect(second.hasMore).toBe(false);
-  expect(globalReads).toHaveBeenCalledWith(501);
+  expect(globalReads).toHaveBeenCalledWith(500, 0);
   expect(writes).not.toHaveBeenCalled();
   expect(next.writes).not.toHaveBeenCalled();
 });
 
 it('applies every canonical visibility exclusion to global posts', async () => {
   const flags = [
-    { published: false }, ...['draft', 'unpublished', 'scheduled', 'pending', ''].map(status => ({ status })),
+    { published: false }, ...['draft', 'unpublished', 'scheduled', 'pending', 'archived', 'cancelled', 'canceled', 'deleted'].map(status => ({ status })),
     { deleted: true }, { deletedAt: new Timestamp(1, 0) }, { deletedAt: false }, { deletedAt: 0 },
   ];
-  const { list, writes } = setup([], 'active', { globalRows: [row('legacy'),
+  const { list, writes } = setup([], 'active', { globalRows: [row('legacy'), row('active', { status: 'active' }), row('published', { status: 'published' }), row('empty-status', { status: '' }),
     ...flags.map((data, i) => row(`hidden-${i}`, data))] });
-  expect((await list(request())).posts.map(p => p.id)).toEqual(['legacy']);
+  expect((await list(request())).posts.map(p => p.id)).toEqual(['published', 'legacy', 'empty-status', 'active']);
   expect(writes).not.toHaveBeenCalled();
 });
 
@@ -287,11 +303,38 @@ it('never falls back for raw canonical rows, even hidden or past the cursor', as
   expect(globalReads).not.toHaveBeenCalled();
 });
 
-it('fails closed above the legacy cap, including hidden rows', async () => {
-  const globalRows = Array.from({ length: 500 }, (_, i) => row(String(i), { status: 'draft' }));
-  expect((await setup([], 'active', { globalRows }).list(request())).posts).toEqual([]);
-  const { list, writes } = setup([], 'active', { globalRows: [...globalRows, row('visible')] });
-  await expect(list(request())).rejects.toMatchObject({ code: 'resource-exhausted' });
+it('scans beyond 500 global rows before sorting and paginates visible legacy posts', async () => {
+  const globalRows = Array.from({ length: 625 }, (_, i) => row(`post-${String(i).padStart(4, '0')}`, {
+    status: 'active', createdAt: new Timestamp(i, 0),
+  }));
+  globalRows.push(...['draft', 'unpublished', 'deleted'].map((status, i) =>
+    row(`hidden-${i}`, { status, createdAt: new Timestamp(1000 + i, 0) })));
+  const { list, globalReads, writes } = setup([], 'active', { globalRows });
+  const first = await list(request({ pageSize: 2 }));
+  expect(first.posts.map(p => p.id)).toEqual(['post-0624', 'post-0623']);
+  expect(first.hasMore).toBe(true);
+  expect(globalReads.mock.calls).toEqual([[500, 0], [500, 500]]);
+  const second = await list(request({ pageSize: 2, cursor: JSON.parse(JSON.stringify(first.cursor)) }));
+  expect(second.posts.map(p => p.id)).toEqual(['post-0622', 'post-0621']);
+  expect(second.hasMore).toBe(true);
+  const last = await list(request({ cursor: { id: 'post-0002', createdAt: { seconds: 2, nanoseconds: 0 } } }));
+  expect(last.posts.map(p => p.id)).toEqual(['post-0001', 'post-0000']);
+  expect(last.hasMore).toBe(false);
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it('returns the newest collected rows at the safety cap with hasMore based on visible rows', async () => {
+  const globalRows = Array.from({ length: 5001 }, (_, i) => row(`post-${String(i).padStart(4, '0')}`, {
+    status: i < 4997 ? 'draft' : 'active', createdAt: new Timestamp(i, 0),
+  }));
+  const { list, globalReads, writes } = setup([], 'active', { globalRows });
+  const first = await list(request({ pageSize: 2 }));
+  expect(first.posts.map(p => p.id)).toEqual(['post-4999', 'post-4998']);
+  expect(first.hasMore).toBe(true);
+  expect(globalReads).toHaveBeenCalledTimes(10);
+  const second = await list(request({ pageSize: 2, cursor: first.cursor }));
+  expect(second.posts.map(p => p.id)).toEqual(['post-4997']);
+  expect(second.hasMore).toBe(false);
   expect(writes).not.toHaveBeenCalled();
 });
 
