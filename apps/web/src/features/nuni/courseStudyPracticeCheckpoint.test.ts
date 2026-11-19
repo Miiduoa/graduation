@@ -161,6 +161,48 @@ describe('versioned independent review checkpoint', () => {
     }), scope)).not.toThrow();
   });
 
+  it('restores visible drafts but rejects invisible-only forged answer disclosure and self-ratings', () => {
+    const raw = serializeStudyPracticeCheckpoint(checkpoint());
+    // These all pass String.trim() despite containing no substantive answer.
+    for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
+      expect(invisible.trim().length).toBeGreaterThan(0);
+      // An already self-rated response cannot be restored with invisible text.
+      expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+        item.practice.responses[item.practice.cardIds[0]].attempt = invisible;
+      }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
+      // Even if the learner had hidden the reference answer after rating.
+      expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+        const response = item.practice.responses[item.practice.cardIds[0]];
+        response.attempt = invisible;
+        response.answerVisible = false;
+      }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
+      // A blank, unrated answer must not restore an unlocked reference answer.
+      expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+        const response = item.practice.responses[item.practice.cardIds[1]];
+        response.attempt = invisible;
+        response.answerVisible = true;
+      }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
+      // Untouched raw drafts are not silently erased or mistaken for a rating.
+      const resumed = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+        const response = item.practice.responses[item.practice.cardIds[1]];
+        response.attempt = invisible;
+        response.answerVisible = false;
+      }), scope);
+      expect(resumed.round.responses[resumed.round.cards[1].id]).toMatchObject({
+        attempt: invisible, answerVisible: false, outcome: null,
+      });
+    }
+    // Real student maths, Chinese, a complete emoji and attached accents remain valid.
+    for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
+      const restored = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+        item.practice.responses[item.practice.cardIds[0]].attempt = visible;
+      }), scope);
+      expect(restored.round.responses[restored.round.cards[0].id]).toMatchObject({
+        attempt: visible, answerVisible: true, outcome: 'again',
+      });
+    }
+  });
+
   it('rejects a corrupted underlying lesson or source instead of trusting cached answer text', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
     expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
