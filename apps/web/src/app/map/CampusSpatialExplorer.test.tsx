@@ -1173,6 +1173,93 @@ it('accepts a complete, correctly sized JSON snapshot with a valid Content-Lengt
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A 200 JSON body can be syntactically valid despite missing/trailing bytes.
+// Only an identity-encoded Content-Length can be compared with decoded bytes:
+// on gzip/br, browsers deliver decompressed bytes but keep the wire length.
+function sourcedLibraryFootprintFixture() {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  if (buildings.length !== 1) throw new Error('Missing source-checked OSM fixture');
+  return { library, buildings, body: JSON.stringify({
+    schoolId: 'pu', source: 'OpenStreetMap',
+    fetchedAt: new Date().toISOString(), stale: false, buildings,
+  }) };
+}
+
+it.each(['understated', 'overstated'] as const)(
+  'rejects valid-looking 200 outline JSON with %s identity Content-Length',
+  async (difference) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
+    const bytes = new TextEncoder().encode(body);
+    const declared = bytes.byteLength + (difference === 'understated' ? -5 : 5);
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(bytes); controller.close(); },
+    }), {
+      status: 200,
+      headers: { 'Content-Length': String(declared), 'Content-Type': 'application/json' },
+    });
+    const json = vi.spyOn(response, 'json');
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(json).not.toHaveBeenCalled();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    fireEvent.click(retry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('rejects a legacy non-streaming WebView text body shorter than identity Content-Length', async () => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const bytes = new TextEncoder().encode(body).byteLength;
+  const json = vi.fn();
+  const textBody = vi.fn().mockResolvedValue(body);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, body: null,
+    headers: { get: (name: string) => name === 'content-length' ? String(bytes + 1) : null },
+    text: textBody, json,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(textBody).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('accepts an already-decoded compressed map body with a different wire Content-Length', async () => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  // Browser fetch has already decoded gzip before exposing the ReadableStream.
+  const bytes = new TextEncoder().encode(body);
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(bytes); controller.close(); },
+  }), {
+    status: 200,
+    headers: { 'Content-Encoding': 'gzip', 'Content-Length': '40' },
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 // Content-Length is optional and can be incorrect. A decoded-byte cap must
 // reject a too-large streaming 200 response before JSON parsing and keep
 // campus POIs/navigation usable without hammering the public API.
