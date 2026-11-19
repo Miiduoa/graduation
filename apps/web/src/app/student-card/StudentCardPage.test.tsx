@@ -491,6 +491,34 @@ it.each(['disabled', 'expired', 'other-school', 'other-account'] as const)(
   },
 );
 
+it.each(['disabled', 'expired', 'other-school'] as const)(
+  'keeps the official card usable when showcase authorization is %s',
+  async (condition) => {
+    state.platform.session = { platformAccountId: demoAccountId, context: 'platform-session-a' };
+    const demo = accountDemo();
+    if (condition === 'disabled') demo.permissions.studentCard = false;
+    if (condition === 'expired') demo.expiresAt = new Date(Date.now() - 1).toISOString();
+    if (condition === 'other-school') demo.profile.schoolId = 'thu';
+    state.demoRequest.mockResolvedValue({ demo });
+    render(<StudentCardPage />);
+    await screen.findByRole('heading', {
+      name:
+        condition === 'disabled'
+          ? '學生證展示尚未開啟'
+          : condition === 'expired'
+            ? '展示資料已到期'
+            : '請切回展示帳號的學校',
+    });
+    const card = await screen.findByRole('article', { name: '學生證個人資料' });
+    expect(card.textContent).toContain('•••• 4567');
+    expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+    expect(screen.queryByText('展示同學')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '取得驗證碼' }));
+    await screen.findByAltText('供現場核對學號的限時 QR Code');
+    expect(within(screen.getByRole('dialog')).getByText('S7654321')).toBeTruthy();
+  },
+);
+
 it('accepts a canonical school alias while keeping the same account boundary', async () => {
   signInPlatform();
   const demo = accountDemo();

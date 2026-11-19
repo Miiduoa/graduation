@@ -222,7 +222,7 @@ export function AccountDemoStudentCard({
   );
   return (
     <>
-      {(state.status === 'loading' || state.status === 'error') && fallback}
+      {!enabled && fallback}
       {showcase}
     </>
   );

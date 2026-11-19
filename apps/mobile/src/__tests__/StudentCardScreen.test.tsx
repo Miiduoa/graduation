@@ -298,6 +298,39 @@ test.each(['disabled', 'expired', 'other-school', 'other-account'] as const)(
   },
 );
 
+test.each(['disabled', 'expired', 'other-school'] as const)(
+  'keeps the official card usable when showcase authorization is %s',
+  async (condition) => {
+    signInPlatform();
+    mockAuth.user = mockUser;
+    const demo = accountDemo();
+    if (condition === 'disabled') demo.permissions.studentCard = false;
+    if (condition === 'expired') demo.expiresAt = new Date(Date.now() - 1).toISOString();
+    if (condition === 'other-school') demo.profile.schoolId = 'thu';
+    mockDemoRequest.mockResolvedValue({ demo });
+    jest.mocked(requestStudentCardCode).mockResolvedValue({
+      token: 'x'.repeat(32),
+      studentId: 'S0003141',
+      expiresAt: Date.now() + 60_000,
+    });
+    const v = render(<StudentCardScreen />);
+    expect(
+      await v.findByText(
+        condition === 'disabled'
+          ? '學生證展示尚未開啟'
+          : condition === 'expired'
+            ? '展示資料已到期'
+            : '請切回展示帳號的學校',
+      ),
+    ).toBeTruthy();
+    expect(v.getByLabelText('學號已隱藏')).toBeTruthy();
+    expect(v.queryByText('展示同學')).toBeNull();
+    expect(v.queryByText('出示展示 QR Code')).toBeNull();
+    fireEvent.press(v.getByText('取得驗證碼'));
+    expect(await v.findByText('S0003141')).toBeTruthy();
+  },
+);
+
 test('a late demo response cannot restore a card from the previous platform account', async () => {
   signInPlatform();
   let finish!: (value: unknown) => void;

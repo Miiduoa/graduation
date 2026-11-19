@@ -162,22 +162,25 @@ export function AccountDemoStudentCard({
   const sameSchool = toPublicSchoolId(demo.profile.schoolId) === schoolId;
   if (expired || !demo.permissions.studentCard || !sameSchool) {
     return (
-      <section className={styles.message}>
-        <h2>
-          {expired ? '展示資料已到期' : !sameSchool ? '請切回展示帳號的學校' : '學生證展示尚未開啟'}
-        </h2>
-        <p>
-          {!sameSchool && !expired
-            ? `這張展示學生證屬於${demo.profile.schoolName}，從上方切換學校後即可查看。`
-            : '到設定頁確認學生證的開啟狀態。'}
-        </p>
-        <Link
-          className={styles.link}
-          href={`/settings?campus=${encodeURIComponent(toPublicSchoolId(demo.profile.schoolId) || demo.profile.schoolId)}&section=platform#account-demo-permissions`}
-        >
-          學生證設定
-        </Link>
-      </section>
+      <>
+        {fallback}
+        <section className={styles.message}>
+          <h2>
+            {expired ? '展示資料已到期' : !sameSchool ? '請切回展示帳號的學校' : '學生證展示尚未開啟'}
+          </h2>
+          <p>
+            {!sameSchool && !expired
+              ? `這張展示學生證屬於${demo.profile.schoolName}，從上方切換學校後即可查看。`
+              : '到設定頁確認學生證的開啟狀態。'}
+          </p>
+          <Link
+            className={styles.link}
+            href={`/settings?campus=${encodeURIComponent(toPublicSchoolId(demo.profile.schoolId) || demo.profile.schoolId)}&section=platform#account-demo-permissions`}
+          >
+            學生證設定
+          </Link>
+        </section>
+      </>
     );
   }
   return (
