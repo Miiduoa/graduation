@@ -78,6 +78,15 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(result.issues.join(' ')).toContain('elapsed time');
     expect(result.issues.join(' ')).toContain('fpsP50');
     expect(result.issues.join(' ')).toContain('named rubric');
+
+    const missing = fixture('synthetic-2');
+    missing[0] = { ...missing[0], steps: null, elapsedMs: null };
+    expect(validateCampusSpatialBenchmarkRows(missing).issues.join(' ')).toContain('measured steps');
+
+    const visual = fixture('synthetic-3').map((row) => ({
+      ...row, task: 'visual-performance' as const,
+    }));
+    expect(validateCampusSpatialBenchmarkRows(visual).issues.join(' ')).toContain('measured FPS');
   });
 
   it('does not turn missing or unverified observations into a comparative claim', () => {
