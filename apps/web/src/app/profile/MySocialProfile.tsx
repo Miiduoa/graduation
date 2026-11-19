@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
+import { campusServiceHref } from '@/lib/campusNavigationLinks';
 import { loadOwnCampusPosts, type OwnPostCursor } from '@/lib/community/myPosts';
 import type { CampusPostDoc } from '@/lib/community/firestore';
 import styles from './my-social-profile.module.css';
@@ -26,11 +27,12 @@ function publishedDate(value: unknown) {
     : '日期未提供';
 }
 
-function TimelineContent({ uid, schoolId, schoolName, name }: {
+function TimelineContent({ uid, schoolId, schoolName, name, navigationSearch }: {
   uid: string;
   schoolId: string;
   schoolName: string;
   name: string;
+  navigationSearch: string;
 }) {
   const [timeline, setTimeline] = useState<Timeline>(initial);
   const [kind, setKind] = useState<'all' | 'media'>('all');
@@ -90,6 +92,7 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
     ? timeline.posts.filter((post) => Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0)
     : timeline.posts;
   const scope = encodeURIComponent(schoolId);
+  const href = (path: string) => campusServiceHref(path, navigationSearch);
   return (
     <section className={styles.profile} aria-labelledby="my-social-title">
       <header className={styles.header}>
@@ -100,8 +103,8 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
           <p>在 {schoolName} 分享的公開署名內容</p>
         </div>
         <div className={styles.actions}>
-          <Link className={styles.secondary} href="/settings?section=account">編輯資料</Link>
-          <Link className={styles.primary} href={'/community/post/new?schoolId=' + scope + '&source=profile'}>發表貼文</Link>
+          <Link className={styles.secondary} href={href('/settings?section=account')}>編輯資料</Link>
+          <Link className={styles.primary} href={href('/community/post/new?schoolId=' + scope + '&source=profile')}>發表貼文</Link>
         </div>
       </header>
 
@@ -132,7 +135,7 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
               <p>{kind === 'media'
                 ? '有照片的貼文會集中顯示在這裡。'
                 : '從一段想法或一張照片開始。匿名貼文不會連到個人頁。'}</p>
-              <Link className={styles.secondary} href={'/community/post/new?schoolId=' + scope + '&source=profile'}>去發第一篇</Link>
+              <Link className={styles.secondary} href={href('/community/post/new?schoolId=' + scope + '&source=profile')}>去發第一篇</Link>
             </div>
           ) : (
             <div className={styles.grid}>
@@ -141,7 +144,7 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
                 const likes = typeof post.likes === 'number' && post.likes >= 0 ? post.likes : 0;
                 const replies = typeof post.commentCount === 'number' && post.commentCount >= 0 ? post.commentCount : 0;
                 return (
-                  <Link key={post.id} className={styles.post} href={'/community/post/' + encodeURIComponent(post.id) + '?schoolId=' + scope}>
+                  <Link key={post.id} className={styles.post} href={href('/community/post/' + encodeURIComponent(post.id) + '?schoolId=' + scope)}>
                     {cover && <div className={styles.cover}><Image src={cover} width={480} height={300} alt="貼文附圖" unoptimized /></div>}
                     <div className={styles.postText}>
                       <time className={styles.date}>{publishedDate(post.createdAt)}</time>
@@ -163,8 +166,8 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
             </div>
           )}
           <div className={styles.bottomLink}>
-            <Link href={'/community?schoolId=' + scope}>看看校園動態</Link>
-            <Link href="/dms">私人訊息</Link>
+            <Link href={href('/community?schoolId=' + scope)}>看看校園動態</Link>
+            <Link href={href('/dms')}>私人訊息</Link>
           </div>
         </>
       )}
@@ -172,16 +175,20 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
   );
 }
 
-export function MySocialProfile({ uid, name }: { uid: string; name: string }) {
+export function MySocialProfile({ uid, name, navigationSearch = '' }: {
+  uid: string;
+  name: string;
+  navigationSearch?: string;
+}) {
   const { ready, schoolId, schoolName } = useBrowsingSchoolPageContext();
   if (!ready) {
     return (
       <section className={styles.profile}>
         <h2>我的社群</h2>
         <p className={styles.notice}>選擇校園後，就能整理在該校發表的內容。</p>
-        <Link href="/community" className={styles.secondary}>選擇校園</Link>
+        <Link href={campusServiceHref('/community', navigationSearch)} className={styles.secondary}>選擇校園</Link>
       </section>
     );
   }
-  return <TimelineContent key={uid + ':' + schoolId} uid={uid} name={name} schoolId={schoolId} schoolName={schoolName} />;
+  return <TimelineContent key={uid + ':' + schoolId} uid={uid} name={name} schoolId={schoolId} schoolName={schoolName} navigationSearch={navigationSearch} />;
 }

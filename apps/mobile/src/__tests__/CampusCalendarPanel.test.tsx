@@ -100,6 +100,7 @@ test('真正空白的日期與近期列表都能前往既有活動總覽', async
   const view = render(<CalendarPanel navigation={mockNavigation} />);
   fireEvent.press(await view.findByRole('button', { name: '瀏覽校園活動' }));
   expect(mockNavigation.navigate).toHaveBeenLastCalledWith('Today', {
+    initial: false,
     screen: '活動總覽',
     params: undefined,
   });

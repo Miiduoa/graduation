@@ -33,15 +33,32 @@ it('starts with the actual timetable task and keeps four campus services navigab
 });
 
 it('opens an existing timetable instead of starting setup again', () => {
-  render(
-    <TodayWelcome hasTimetable importHref={importHref} timetableHref={timetableHref} />,
-  );
+  render(<TodayWelcome hasTimetable importHref={importHref} timetableHref={timetableHref} />);
   expect(screen.getByRole('heading', { name: '課表準備好了。' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '查看這週課表' }).getAttribute('href')).toBe(
     timetableHref,
   );
-  expect(screen.getByRole('link', { name: '更新匯入紀錄' }).getAttribute('href')).toBe(
-    importHref,
+  expect(screen.getByRole('link', { name: '更新匯入紀錄' }).getAttribute('href')).toBe(importHref);
+  expect(screen.queryByRole('link', { name: '匯入我的課表' })).toBeNull();
+});
+
+it('guides an unselected guest to choose a campus while keeping public services available', () => {
+  render(
+    <TodayWelcome
+      needsSchool
+      importHref="/import?kind=timetable&campus=all"
+      timetableHref="/timetable?campus=all"
+    />,
+  );
+  expect(screen.getByRole('heading', { name: '先選擇你的校園。' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '選校園、整理課表' }).getAttribute('href')).toBe(
+    '/timetable?campus=all',
+  );
+  expect(screen.getByRole('link', { name: '先看生活服務' }).getAttribute('href')).toBe(
+    '/life?campus=all',
+  );
+  expect(screen.getByRole('link', { name: /找教室/ }).getAttribute('href')).toBe(
+    '/map?campus=all',
   );
   expect(screen.queryByRole('link', { name: '匯入我的課表' })).toBeNull();
 });
@@ -60,7 +77,7 @@ it('preserves explicit school context in guest shortcuts and login return URL', 
     expect(target.searchParams.get('schoolId')).toBe('ntu');
     expect(target.searchParams.get('campus')).toBe('ntu');
   }
-  const login = screen.getByRole('link', { name: '登入看課程待辦' });
+  const login = screen.getByRole('link', { name: '登入查看作業與通知' });
   const url = new URL(login.getAttribute('href')!, 'https://fixture.invalid');
   expect(url.pathname).toBe('/login');
   expect(url.searchParams.get('returnUrl')).toBe('/?school=NTU&schoolId=ntu&campus=ntu');
