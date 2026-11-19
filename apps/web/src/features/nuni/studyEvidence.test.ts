@@ -58,6 +58,26 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it('rejects bidi visual overrides and partial surrogate citations without rejecting RTL or emoji', () => {
+    const source = '甲A\u202e123乙、😀、العربية、שלום、甲\u200b乙、x²+y²';
+    // An override makes the displayed order differ from the literal source.
+    expect(locateStudyEvidence(source, 'A\u202e123')).toBeNull();
+    expect(locateStudyEvidence('甲\u202d乙', '甲\u202d乙')).toBeNull();
+    // indexOf() alone would match an unreadable half of an existing emoji.
+    expect(source.includes('\uD83D')).toBe(true);
+    expect(source.includes('\uDE00')).toBe(true);
+    expect(locateStudyEvidence(source, '\uD83D')).toBeNull();
+    expect(locateStudyEvidence(source, '\uDE00')).toBeNull();
+    expect(locateStudyEvidence('甲\uD83D乙', '甲\uD83D乙')).toBeNull();
+
+    for (const visible of ['😀', 'العربية', 'שלום', '甲\u200b乙', 'x²+y²']) {
+      const found = locateStudyEvidence(source, visible);
+      expect(found?.quote).toBe(visible);
+      if (found === null) throw new Error('Readable citation unexpectedly lost its exact source');
+      expect(found.before + found.quote + found.after).toBe(source);
+    }
+  });
+
   it('still locates visible text, maths and emoji with attached Unicode marks exactly', () => {
     const original = '甲\u200b乙；數學 x²+y²；e\u0301；👩‍💻';
     for (const quote of ['甲\u200b乙', 'x²+y²', 'e\u0301', '👩‍💻']) {

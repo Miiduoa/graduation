@@ -15,6 +15,20 @@ export function locateStudyEvidence(source: string, quote: string, occurrence = 
   // when identical bytes occur in the PDF. Keep real words, maths and emoji
   // unchanged, including any format characters attached to them.
   if (!source || !quote.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '')) return null;
+  // A visually reordered quote or half of a UTF-16 surrogate pair is not
+  // inspectable evidence. Leave source bytes intact; fail closed on the quote.
+  // Real RTL letters, full emoji and ZWJ sequences remain valid.
+  if (/[\u202d\u202e]/u.test(quote)) return null;
+  for (let index = 0; index < quote.length; index++) {
+    const unit = quote.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const following = quote.charCodeAt(index + 1);
+      if (!(following >= 0xdc00 && following <= 0xdfff)) return null;
+      index++;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return null;
+    }
+  }
   if (!Number.isSafeInteger(occurrence) || occurrence < 0) return null;
   let selected = -1;
   let occurrences = 0;

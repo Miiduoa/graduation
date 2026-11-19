@@ -1,3 +1,9 @@
+## 2026-11-19：修正原文引句視覺反轉與半個 Emoji 誤定位
+
+- 依 PR #719 精確 head `1e5adddaa07486203000f55eeb0d436bf3dae461` 核對最新版本：本版 CI（Web／Mobile Tests、Build Web／Mobile、Lint/TypeCheck、Functions、Firestore、Assistant、Security）、Course access review 與 CodeQL 均已成功；此結果**只屬舊 head**。App 5504170 未有 APPROVED、Maestro、iOS／Android 真機與 Ahaboard 同機比較仍無通過證據。
+- 修補 `locateStudyEvidence`：若模型輸出的逐字引句含 Unicode 左右向視覺覆寫控制 U+202D/U+202E，或只有 UTF-16 配對代理字元的半邊（如 Emoji 的高／低 surrogate），即使 `indexOf` 可在教材找到相同位元，也不得標示「原文已定位」。使用原有來源核對提示，教材位元、正常文字、阿拉伯語／希伯來語、完整 Emoji、ZWJ 與數學式皆保留逐字匹配。新增 Vitest 回歸涵蓋拒絕與可用正例，另以 Node 22 獨立執行 12 個邏輯煙測。
+- 僅更動原文證據定位器、相關測試與本文件。沒有新增套件、網路 API、AI 自動判分或變動閱讀／練習 checkpoint；不修改 TronClass、社群或跨校模組。更新後需按新 commit SHA 重新完整驗證 CI/CodeQL/審查，不沿用前述舊綠燈；Draft 不合併、不部署。
+
 ## 2026-11-19：原文證據定位 Vitest 修正 TypeScript 嚴格空值檢查
 
 - 精確 PR #719 head `eecd94a0741c59955de6d6a873eaf0bece9244c2` 的 [CI #44458547965](https://github.com/Miiduoa/graduation/actions/runs/44458547965) 已結束失敗：Web/Mobile、Functions、Firestore、Assistant、Security 和 Course access review 通過，CodeQL 成功，但 Lint & Type Check 的 `tsc` 在 `studyEvidence.test.ts:66` 報 TS18048（兩處 `found` 欄位可能為 `undefined`）；Build Web/Mobile 因 gate 失敗被跳過。這不是要放寬生產程式的原文核對。
