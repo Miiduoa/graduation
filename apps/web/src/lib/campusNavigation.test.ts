@@ -66,6 +66,26 @@ it('matches the feedback service only on its selected tab and respects route bou
   expect(campusServiceMatches('/cafeteria', '/cafeteria-old', null)).toBe(false);
 });
 
+it.each([
+  '/groups/club-1/club',
+  '/groups/club-1/club/overview',
+  '/groups/club-1/club/members',
+])('matches %s to the club directory instead of course groups', (pathname) => {
+  expect(campusServiceMatches('/clubs', pathname, null)).toBe(true);
+  expect(campusServiceMatches('/groups', pathname, null)).toBe(false);
+});
+
+it.each([
+  '/groups',
+  '/groups/group-1',
+  '/groups/group-1/assignments',
+  '/groups/group-1/clubhouse',
+  '/groups/group-1/club-other',
+])('keeps %s in the course group directory', (pathname) => {
+  expect(campusServiceMatches('/groups', pathname, null)).toBe(true);
+  expect(campusServiceMatches('/clubs', pathname, null)).toBe(false);
+});
+
 it('does not turn the all-campuses selection into the previous campus', () => {
   const previous = new URLSearchParams('school=PU&schoolId=pu');
   expect(buildCampusNavigationSearch(previous, null, true)).toBe('campus=all');

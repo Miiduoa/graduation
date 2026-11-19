@@ -53,7 +53,7 @@ await writeFile(path.join(output, 'bundle-meta.json'), JSON.stringify(result.met
 const inputs = [
   ...new Set([
     ...Object.keys(result.metafile.inputs).filter(
-      (file) => !file.includes('node_modules/') && !file.startsWith('<'),
+      (file) => !file.includes('node_modules/') && !file.startsWith('<') && !file.startsWith('(disabled):'),
     ),
     'scripts/qa/interface-design/build.mjs',
     'scripts/qa/interface-design/check.py',

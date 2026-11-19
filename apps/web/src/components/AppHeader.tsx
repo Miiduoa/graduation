@@ -2,11 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthGuard';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { CampusIcon } from './CampusIcon';
-import { QuickCampusEntry } from './QuickCampusEntry';
 import { SchoolSelector } from './SchoolSelector';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useClientHydrated } from '@/lib/useClientHydrated';
@@ -15,9 +14,12 @@ import headerStyles from './AppHeader.module.css';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { LoginLink } from './LoginLink';
 import { currentReturnPath } from '@/lib/navigation';
-import { primaryNavigationSection } from '@/lib/primaryNavigation';
+import { PRIMARY_DESTINATIONS, primaryNavigationSection } from '@/lib/primaryNavigation';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
-type HeaderProps = { onOpenVoice?: () => void };
+const CampusAssistantEntry = lazy(async () => ({
+  default: (await import('./TodayCampusEntry')).TodayCampusEntry,
+}));
 
 function closeNavigationPopovers(header: HTMLElement | null, except?: HTMLDetailsElement) {
   header
@@ -27,7 +29,16 @@ function closeNavigationPopovers(header: HTMLElement | null, except?: HTMLDetail
     });
 }
 
-function Header({ onOpenVoice }: HeaderProps) {
+type HeaderProps = { onOpenAssistant?: () => void; assistantExpanded?: boolean };
+type AssistantPanelState = {
+  scope: string;
+  /** undefined waits for the first campus; null is a confirmed all-campus selection. */
+  campusId: string | null | undefined;
+  open: boolean;
+  focusRequest: number;
+};
+
+function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const pathname = usePathname();
   const params = useSearchParams();
   const hash = useLocationHash();
@@ -41,34 +52,76 @@ function Header({ onOpenVoice }: HeaderProps) {
   const accountMenu = useRef<HTMLDetailsElement>(null);
   const accountTrigger = useRef<HTMLElement>(null);
   const [accountScope, setAccountScope] = useState<string | null>(null);
-  const [quickScope, setQuickScope] = useState<string | null>(null);
+  const [assistant, setAssistant] = useState<AssistantPanelState | null>(null);
   const quickTrigger = useRef<HTMLButtonElement>(null);
   const quickPanel = useRef<HTMLElement>(null);
   const context = useCampusNavigationSearch(params);
-  const navigationScope = JSON.stringify([
+  const campus = useCampusBrowseContext();
+  const campusId = campus.status === 'loading' ? undefined : campus.schoolId;
+  const scope = JSON.stringify([
     pathname,
     params?.toString(),
     hash,
-    context,
     user?.uid,
-    nuni.session?.platformAccountId,
     nuni.session?.context,
+    nuni.session?.platformAccountId,
     nuni.pendingLogout,
-    Boolean(onOpenVoice),
+    Boolean(nuni.error),
   ]);
-  const quickOpen = quickScope === navigationScope && !onOpenVoice;
+  const panel =
+    assistant?.scope === scope &&
+    (assistant.campusId === undefined || assistant.campusId === campusId)
+      ? assistant
+      : null;
+  const assistantOpen = panel?.open === true;
+  if (assistant && !panel) setAssistant(null);
+  else if (panel && panel.campusId === undefined && campusId !== undefined) {
+    // Resolve the initial opening once without remounting its focus observer.
+    // A later campus, account or page change must still discard the whole panel.
+    setAssistant({ ...panel, campusId });
+  }
+  const navigationScope = JSON.stringify([scope, hash, context, Boolean(onOpenAssistant)]);
   const accountOpen = accountScope === navigationScope;
-  if (quickScope !== null && quickScope !== navigationScope) setQuickScope(null);
   if (accountScope !== null && accountScope !== navigationScope) setAccountScope(null);
-
-  const closeQuick = () => {
-    setQuickScope(null);
-    quickTrigger.current?.focus({ preventScroll: true });
-  };
   const closeAccount = () => {
     if (!accountMenu.current?.open) return;
     accountMenu.current.open = false;
     accountTrigger.current?.focus({ preventScroll: true });
+  };
+  useLayoutEffect(() => {
+    if (assistantOpen) quickPanel.current?.focus({ preventScroll: true });
+  }, [assistantOpen]);
+  const hideAssistant = useCallback(() => {
+    quickPanel.current
+      ?.querySelectorAll<HTMLButtonElement>(
+        '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
+      )
+      .forEach((button) => button.click());
+    setAssistant((current) => current ? { ...current, open: false } : null);
+  }, []);
+  const closeAssistant = () => {
+    hideAssistant();
+    if (window.location.hash === '#campus-assistant-entry') {
+      try {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}`,
+        );
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      } catch {
+        // Closing is still available when the browser disallows History access.
+      }
+    }
+    quickTrigger.current?.focus({ preventScroll: true });
+  };
+  const openAssistant = () => {
+    setAssistant((current) => ({
+      scope,
+      campusId,
+      open: true,
+      focusRequest: current?.scope === scope ? current.focusRequest + 1 : 1,
+    }));
   };
   useEffect(() => {
     const navigation = header.current;
@@ -83,13 +136,13 @@ function Header({ onOpenVoice }: HeaderProps) {
         element.open
       ) {
         closeNavigationPopovers(navigation, element);
-        setQuickScope(null);
+        hideAssistant();
       }
     }
     // Native details toggle does not bubble; capture also covers keyboard/programmatic opening.
     navigation?.addEventListener('toggle', onToggle, true);
     return () => navigation?.removeEventListener('toggle', onToggle, true);
-  }, [navigationScope]);
+  }, [navigationScope, hideAssistant]);
   useEffect(() => {
     function dismissOutside(event: PointerEvent | FocusEvent) {
       if (!(event.target instanceof Node)) return;
@@ -97,12 +150,12 @@ function Header({ onOpenVoice }: HeaderProps) {
         accountMenu.current.open = false;
       }
       if (
-        quickOpen &&
+        assistantOpen &&
         !quickPanel.current?.contains(event.target) &&
         !quickTrigger.current?.contains(event.target)
       ) {
         // Keep focus on the destination the person selected outside this nonmodal panel.
-        setQuickScope(null);
+        hideAssistant();
       }
     }
     document.addEventListener('pointerdown', dismissOutside);
@@ -111,10 +164,7 @@ function Header({ onOpenVoice }: HeaderProps) {
       document.removeEventListener('pointerdown', dismissOutside);
       document.removeEventListener('focusin', dismissOutside);
     };
-  }, [quickOpen]);
-  useEffect(() => {
-    if (quickOpen) quickPanel.current?.focus({ preventScroll: true });
-  }, [quickOpen]);
+  }, [assistantOpen, hideAssistant]);
   useLayoutEffect(() => {
     const navigation = header.current;
     const panel = quickPanel.current;
@@ -136,12 +186,33 @@ function Header({ onOpenVoice }: HeaderProps) {
       window.removeEventListener('resize', updateHeaderInset);
       window.removeEventListener('scroll', updateHeaderInset);
     };
-  }, [quickOpen]);
+  }, [assistantOpen]);
   const activeSection = primaryNavigationSection(pathname);
   const href = (path: string) => campusServiceHref(path, context);
   const currentPage = currentReturnPath(pathname || '/', params?.size ? `?${params}` : '', hash);
   const loginPage = ['/login', '/classroom/login', '/admin/login'].includes(pathname || '');
   const checking = !hydrated || loading || nuni.loading;
+  const restoredReturn = useRef<string | null>(null);
+  useEffect(() => {
+    if (hash !== '#campus-assistant-entry') {
+      restoredReturn.current = null;
+      return;
+    }
+    if (onOpenAssistant || checking || nuni.pendingLogout || campus.status === 'loading') return;
+    if (restoredReturn.current === currentPage) return;
+    restoredReturn.current = currentPage;
+    // Resume the visible task after login, without sending a question or starting audio.
+    setAssistant({ scope, campusId, open: true, focusRequest: 1 });
+  }, [
+    hash,
+    currentPage,
+    scope,
+    campusId,
+    checking,
+    nuni.pendingLogout,
+    campus.status,
+    onOpenAssistant,
+  ]);
   return (
     <>
       <header ref={header} className={headerStyles.header} data-campus-navigation="true">
@@ -162,22 +233,20 @@ function Header({ onOpenVoice }: HeaderProps) {
             ref={quickTrigger}
             type="button"
             className={headerStyles.voiceTrigger}
-            aria-label="開啟校園語音 AI"
-            aria-controls={onOpenVoice ? 'today-voice-entry' : `${id}-voice`}
-            aria-expanded={onOpenVoice ? undefined : quickOpen}
+            aria-label="開啟校園助理"
+            aria-controls={onOpenAssistant ? 'today-voice-entry' : 'campus-assistant-entry'}
+            aria-expanded={onOpenAssistant ? assistantExpanded : assistantOpen}
             onClick={() => {
               closeNavigationPopovers(header.current);
-              if (onOpenVoice) {
-                setQuickScope(null);
-                onOpenVoice();
-              } else {
-                setQuickScope(quickOpen ? null : navigationScope);
-              }
+              if (onOpenAssistant) onOpenAssistant();
+              else if (assistantOpen) closeAssistant();
+              else openAssistant();
             }}
           >
-            <CampusIcon name="microphone" size={18} />
-            <span>語音 AI</span>
+            <CampusIcon name="social" size={18} />
+            <span>助理</span>
           </button>
+          <CampusServiceMenu />
           <Link
             href={href('/search')}
             className={headerStyles.quickSearch}
@@ -311,75 +380,55 @@ function Header({ onOpenVoice }: HeaderProps) {
           ) : null}
         </div>
         <nav aria-label="主要導覽" className={headerStyles.nav}>
-          <Link href={href('/')} aria-current={activeSection === 'today' ? 'page' : undefined}>
-            <CampusIcon name="calendar" size={17} />
-            今天
-          </Link>
-          <Link
-            href={href('/timetable')}
-            aria-current={activeSection === 'study' ? 'page' : undefined}
-            title="課務：課表、課程與作業、成績"
-          >
-            <CampusIcon name="library" size={17} />
-            課務
-          </Link>
-          <Link href={href('/life')} aria-current={activeSection === 'life' ? 'page' : undefined}>
-            <CampusIcon name="map" size={17} />
-            生活
-          </Link>
-          <Link
-            href={user || nuni.session ? '/profile' : '/login?returnUrl=%2Fprofile'}
-            aria-current={activeSection === 'me' ? 'page' : undefined}
-          >
-            <CampusIcon name="profile" size={17} />我
-          </Link>
-          <CampusServiceMenu />
+          {PRIMARY_DESTINATIONS.map((destination) => (
+            <Link
+              key={destination.id}
+              href={href(destination.href)}
+              aria-current={activeSection === destination.id ? 'page' : undefined}
+              title={destination.id === 'study' ? '課務：課表、課程與作業、成績' : undefined}
+            >
+              <CampusIcon name={destination.icon} size={17} />
+              {destination.label}
+            </Link>
+          ))}
         </nav>
       </header>
-      {quickOpen && (
+      {panel && !onOpenAssistant && (
         <section
-          id={`${id}-voice`}
+          key={scope}
+          id="campus-assistant-entry"
           ref={quickPanel}
           role="dialog"
-          aria-label="校園語音與 AI 快速操作"
+          aria-label="校園助理"
           tabIndex={-1}
+          hidden={!assistantOpen}
           className={headerStyles.voicePanel}
           onKeyDown={(event) => {
-            if (
-              event.key === 'Escape' &&
-              !event.nativeEvent.isComposing &&
-              !event.defaultPrevented
-            ) {
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
               event.preventDefault();
               event.stopPropagation();
-              closeQuick();
+              closeAssistant();
             }
           }}
           onClick={(event) => {
             if (event.target instanceof Element && event.target.closest('a')) {
-              setQuickScope(null);
+              closeAssistant();
             }
           }}
         >
           <div className={headerStyles.voicePanelHeading}>
-            <span>校園助理</span>
-            <button type="button" onClick={closeQuick} aria-label="關閉校園語音 AI">
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path d="m6 6 12 12M18 6 6 18" />
-              </svg>
+            <h2>校園助理</h2>
+            <button type="button" onClick={closeAssistant} aria-label="關閉校園助理">
+              關閉
             </button>
           </div>
-          <QuickCampusEntry />
+          <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
+            <CampusAssistantEntry
+              active={assistantOpen}
+              focusRequest={panel.focusRequest}
+              returnAnchor="campus-assistant-entry"
+            />
+          </Suspense>
         </section>
       )}
       {error && !accountOpen && (

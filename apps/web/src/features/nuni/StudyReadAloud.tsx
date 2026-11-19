@@ -1,0 +1,449 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import styles from './CourseStudyPanel.module.css';
+
+// Mobile speech engines can stop unexpectedly on a long single utterance.
+// Split on natural punctuation where possible, preserving every source character.
+const STUDY_SPEECH_CHUNK_LENGTH = 160;
+// Some mobile engines accept speak() but never deliver onend or onerror.
+// Bound each utterance separately so a stalled chunk cannot leave Stop active forever.
+const STUDY_SPEECH_STALL_MS = 180_000;
+// Some older WebViews lack a functioning grapheme segmenter. Preserve common
+// multi-code-point characters in the local fallback, within the speech cap.
+// This is intentionally bounded and not a replacement for Unicode UAX #29.
+function isRegionalIndicator(character: string): boolean {
+  const point = character.codePointAt(0) ?? 0;
+  return point >= 0x1f1e6 && point <= 0x1f1ff;
+}
+
+function isStudySpeechContinuation(current: string, previous: string, regionalRun: number): boolean {
+  if (current === '\n' && previous === '\r') return true;
+  if (!previous || previous === '\r' || previous === '\n') return false;
+  const point = current.codePointAt(0) ?? 0;
+  const prior = previous.codePointAt(0) ?? 0;
+  // Combining accents, variation selectors, ZWNJ/ZWJ, emoji modifiers/tags
+  // and joined sequences should not begin a new mobile utterance.
+  if (/^\p{Mark}$/u.test(current) || current === '\u200c' || previous === '\u200c' ||
+      current === '\u200d' || previous === '\u200d' ||
+      (point >= 0x1f3fb && point <= 0x1f3ff) ||
+      (point >= 0xe0020 && point <= 0xe007f)) return true;
+  // Pairs of regional indicators form one flag; the next pair is independent.
+  if (isRegionalIndicator(current) && regionalRun % 2 === 1) return true;
+  // Common decomposed Hangul L+V+T syllables.
+  const isL = (value: number) =>
+    (value >= 0x1100 && value <= 0x115f) || (value >= 0xa960 && value <= 0xa97f);
+  const isV = (value: number) =>
+    (value >= 0x1160 && value <= 0x11a7) || (value >= 0xd7b0 && value <= 0xd7c6);
+  const isT = (value: number) =>
+    (value >= 0x11a8 && value <= 0x11ff) || (value >= 0xd7cb && value <= 0xd7fb);
+  return (isV(point) && (isL(prior) || isV(prior))) ||
+    (isT(point) && (isV(prior) || isT(prior)));
+}
+
+function fallbackStudySpeechUnits(text: string): string[] {
+  const result: string[] = [];
+  let previous = '';
+  let regionalRun = 0;
+  for (const character of text) {
+    const last = result.length - 1;
+    if (last >= 0 && result[last].length + character.length <= STUDY_SPEECH_CHUNK_LENGTH &&
+        isStudySpeechContinuation(character, previous, regionalRun)) {
+      result[last] += character;
+    } else {
+      result.push(character);
+    }
+    regionalRun = isRegionalIndicator(character) ? regionalRun + 1 : 0;
+    previous = character;
+  }
+  return result;
+}
+
+// Decimal numbers, thousands separators and short ASCII domains in source
+// lessons should not be interrupted just because the speech engine needs a
+// new chunk. This only changes the preferred pause point, not the 160-unit cap.
+function isStudySpeechNaturalPause(units: string[], index: number): boolean {
+  const token = units[index];
+  // A classic Mac TXT can contain CR-only paragraph boundaries. CRLF is
+  // one grapheme in modern WebViews; both forms should be natural pauses.
+  if (!/[。！？；，、\r\n.!?;:：]/u.test(token)) return false;
+  const previous = units[index - 1] ?? '';
+  const next = units[index + 1] ?? '';
+  if ((token === '.' || token === ',') &&
+      /^[0-9]$/u.test(previous) && /^[0-9]$/u.test(next)) return false;
+  if (token === '.' &&
+      /^[A-Za-z0-9]$/u.test(previous) && /^[A-Za-z0-9]$/u.test(next)) return false;
+  // Time notation and ratios such as 12:30 or 3：2 are not sentence
+  // pauses. Keep the source bytes unchanged, including full-width colons.
+  if ((token === ':' || token === '：') &&
+      /^[0-9]$/u.test(previous) && /^[0-9]$/u.test(next)) return false;
+  // A scheme delimiter in an explicitly written URL is not a speech pause.
+  // Do not suppress normal Chinese explanatory colons (例如：說明：內容).
+  if (token === ':' && /^[A-Za-z]$/u.test(previous) &&
+      next === '/' && units[index + 2] === '/') return false;
+  // A punctuation mark inside an explicit HTTP(S) URL query or path is
+  // not a preferred speech pause. Ordinary questions and sentence endings
+  // still pause normally; the 160-unit hard cap remains unchanged.
+  if (/^[?!;:]$/u.test(token) && /^[A-Za-z0-9_/#%=&+?!.~-]$/u.test(next)) {
+    const left = units.slice(Math.max(0, index - 512), index).join('');
+    if (/https?:\/\/[^\s<>，。！？；、：]*$/iu.test(left)) return false;
+  }
+  return true;
+}
+
+function splitStudySpeech(text: string): string[] {
+  // Code-point slicing keeps surrogate pairs but can split a Chinese combining
+  // character, Korean Jamo syllable or emoji ZWJ/flag in mid-utterance.
+  // Intl.Segmenter is built into current browsers and runs on the device.
+  const units: string[] = [];
+  // A WebView can expose Intl.Segmenter but throw during construction or
+  // iteration (for example while its locale data is unavailable). Never lose
+  // a student's original text or crash the reading button in that case.
+  // Discard partial segments before falling back so speech cannot repeat text.
+  let segmented = false;
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    try {
+      const segmenter = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
+      let verifiedOffset = 0;
+      let previousCharacter = '';
+      let regionalRun = 0;
+      for (const { segment } of segmenter.segment(text)) {
+        // Some WebViews return a partial, duplicated or corrupted iterator
+        // without throwing. Verify every unit against the original text so
+        // fallback never silently skips or repeats private lesson content.
+        if (typeof segment !== 'string' || !segment || !text.startsWith(segment, verifiedOffset)) {
+          throw new Error('invalid on-device grapheme segmentation');
+        }
+        // A faulty iterator can reproduce the original text yet claim that
+        // an accent, ZWJ emoji, flag pair or Hangul syllable ends mid-grapheme.
+        // Such boundaries are unsafe even when the UTF-16 content matches.
+        const firstCharacter = String.fromCodePoint(segment.codePointAt(0)!);
+        if (verifiedOffset > 0 &&
+            isStudySpeechContinuation(firstCharacter, previousCharacter, regionalRun)) {
+          throw new Error('broken on-device grapheme boundary');
+        }
+        // A damaged WebView can yield individual UTF-16 code units while
+        // still concatenating back to the full source. Never trust a segment
+        // that starts with a low surrogate or ends with a high surrogate:
+        // it would split an emoji in half at a mobile speech chunk boundary.
+        const firstUnit = segment.charCodeAt(0);
+        const lastUnit = segment.charCodeAt(segment.length - 1);
+        if ((firstUnit >= 0xdc00 && firstUnit <= 0xdfff) ||
+            (lastUnit >= 0xd800 && lastUnit <= 0xdbff)) {
+          throw new Error('broken surrogate pair in on-device grapheme segmentation');
+        }
+        verifiedOffset += segment.length;
+        for (const character of segment) {
+          regionalRun = isRegionalIndicator(character) ? regionalRun + 1 : 0;
+          previousCharacter = character;
+        }
+        if (segment.length <= STUDY_SPEECH_CHUNK_LENGTH) {
+          units.push(segment);
+          continue;
+        }
+        // A WebView can report one oversized segment containing many actual
+        // graphemes. Use the bounded on-device continuation rules instead of
+        // slicing code points straight through a flag, CRLF, or emoji ZWJ.
+        // A truly oversized single cluster may still require a bounded cut.
+        for (const unit of fallbackStudySpeechUnits(segment)) units.push(unit);
+      }
+      if (verifiedOffset !== text.length) {
+        throw new Error('incomplete on-device grapheme segmentation');
+      }
+      segmented = true;
+    } catch {
+      units.length = 0;
+    }
+  }
+  if (!segmented) {
+    // Older or partially broken engines use the previous code-point-safe path.
+    // Do not spread long lesson arrays into push(): older WebViews can reject
+    // hundreds of thousands of function arguments with RangeError.
+    for (const unit of fallbackStudySpeechUnits(text)) units.push(unit);
+  }
+
+  const chunks: string[] = [];
+  for (let offset = 0; offset < units.length;) {
+    let end = offset;
+    let length = 0;
+    while (end < units.length && length + units[end].length <= STUDY_SPEECH_CHUNK_LENGTH) {
+      length += units[end].length;
+      end += 1;
+    }
+    if (end === offset) end = offset + 1;
+    if (end < units.length) {
+      for (let index = end - 1; index >= offset + 80; index -= 1) {
+        if (isStudySpeechNaturalPause(units, index)) {
+          end = index + 1;
+          break;
+        }
+      }
+    }
+    chunks.push(units.slice(offset, end).join(''));
+    offset = end;
+  }
+  return chunks;
+}
+
+/** Use an installed voice so reading a private course does not require a speech service. */
+export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChange, rate: selectedRate, onRateChange }: {
+  text: string;
+  label?: string;
+  onSpeakingChange?: (speaking: boolean) => void;
+  /** Pass a controlled rate to preserve the choice when a teaching step remounts. */
+  rate?: number;
+  onRateChange?: (rate: number) => void;
+}) {
+  const [available, setAvailable] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const refreshVoices = useRef<(() => void) | null>(null);
+  const [speaking, setSpeaking] = useState(false);
+  // Apply the student's locally chosen pace only to the next utterance.
+  const [localRate, setLocalRate] = useState(0.95);
+  const rate = selectedRate ?? localRate;
+  const [error, setError] = useState('');
+  const voice = useRef<SpeechSynthesisVoice | null>(null);
+  // A parent may recreate this callback while narrating (for example on a UI state change).
+  // Keep the latest listener without tearing down a playing utterance.
+  const onSpeakingChangeRef = useRef(onSpeakingChange);
+  useEffect(() => {
+    onSpeakingChangeRef.current = onSpeakingChange;
+  }, [onSpeakingChange]);
+  const active = useRef<SpeechSynthesisUtterance | null>(null);
+  const remainingChunks = useRef<string[]>([]);
+  const playbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPlaybackTimeout = () => {
+    if (playbackTimeout.current !== null) {
+      clearTimeout(playbackTimeout.current);
+      playbackTimeout.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+    const synthesis = window.speechSynthesis;
+    setSupported(true);
+    setSpeaking(false);
+    const update = () => {
+      // Some mobile browsers return an empty list at first without firing
+      // voiceschanged later. An explicit retry must share this same local-only filter.
+      let voices: SpeechSynthesisVoice[];
+      try {
+        voices = synthesis.getVoices().filter((item) =>
+          item.localService && /^(?:zh|cmn)(?:[-_]|$)/i.test(item.lang));
+      } catch { voices = []; }
+      // Some mobile engines list zh-CN first even when an installed
+      // Traditional/Taiwanese voice is available later. Match BCP 47 subtags
+      // rather than list order; never switch to a network-backed voice.
+      const localeRank = (lang: string) => {
+        const subtags = lang.toLowerCase().replace(/_/g, '-').split('-').slice(1);
+        // The script tag wins over a contradictory region tag. An explicitly
+        // Simplified voice such as zh-Hans-TW must not outrank an installed
+        // Traditional Chinese voice just because its region says TW.
+        if (subtags.includes('hans')) return 4;
+        if (subtags.includes('tw')) return 0;
+        if (subtags.includes('hant')) return 1;
+        if (subtags.includes('hk') || subtags.includes('mo')) return 2;
+        return 3;
+      };
+      voice.current = voices.reduce<SpeechSynthesisVoice | null>((best, candidate) =>
+        !best || localeRank(candidate.lang) < localeRank(best.lang) ? candidate : best, null);
+      setAvailable(!!voice.current);
+    };
+    refreshVoices.current = update;
+    update();
+    // iOS Safari and in-app WebViews may not emit voiceschanged after students
+    // enable an installed voice in device settings. Refresh on returning to
+    // the lesson; do not resume or start speech without a user gesture.
+    const refreshOnForeground = () => {
+      if (document.visibilityState !== 'hidden') update();
+    };
+    window.addEventListener('focus', refreshOnForeground);
+    window.addEventListener('pageshow', refreshOnForeground);
+    document.addEventListener('visibilitychange', refreshOnForeground);
+    // Some mobile speech engines throw when adding a voiceschanged listener.
+    // Keep manual installed-voice detection available rather than crashing the panel.
+    try { synthesis.addEventListener('voiceschanged', update); }
+    catch { /* Students can retry through the manual voice refresh button. */ }
+    return () => {
+      clearPlaybackTimeout();
+      window.removeEventListener('focus', refreshOnForeground);
+      window.removeEventListener('pageshow', refreshOnForeground);
+      document.removeEventListener('visibilitychange', refreshOnForeground);
+      refreshVoices.current = null;
+      remainingChunks.current = [];
+      // A failed listener teardown must never prevent cancelling private speech.
+      try { synthesis.removeEventListener('voiceschanged', update); }
+      catch { /* Continue cleaning up the current utterance. */ }
+      if (active.current) {
+        active.current.onend = null;
+        active.current.onerror = null;
+        active.current = null;
+        // Some mobile speech engines throw while the view is closing.
+        // Focus changes and source replacement must still complete safely.
+        try { synthesis.cancel(); } catch { /* The browser owns this speech engine. */ }
+        onSpeakingChangeRef.current?.(false);
+      }
+    };
+  }, [text]);
+
+  function stop(): boolean {
+    clearPlaybackTimeout();
+    if (active.current) {
+      const utterance = active.current;
+      // cancel() may fire onend synchronously. Detach first so a cancelled
+      // chunk cannot start the next piece behind the student's back.
+      const oldEnd = utterance.onend;
+      const oldError = utterance.onerror;
+      utterance.onend = null;
+      utterance.onerror = null;
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // Keep Stop and the active playback state for a genuine retry.
+        utterance.onend = oldEnd;
+        utterance.onerror = oldError;
+        // A rejected stop still means the student asked to end this sequence.
+        // Never auto-start the next chunk when the current one later ends.
+        remainingChunks.current = [];
+        setError('瀏覽器尚未確認停止朗讀，請再按一次「停止朗讀」；若仍播放，請使用裝置的語音控制。');
+        return false;
+      }
+      remainingChunks.current = [];
+      active.current = null;
+    }
+    setSpeaking(false);
+    setError('');
+    onSpeakingChangeRef.current?.(false);
+    return true;
+  }
+
+  function toggle() {
+    if (active.current) { stop(); return; }
+    if (!voice.current || !available) return;
+    // Snapshot the approved on-device voice. voiceschanged can briefly report
+    // no voices between chunks; never silently fall back to a remote/default one.
+    const selectedVoice = voice.current;
+    remainingChunks.current = splitStudySpeech(text);
+    let announced = false;
+
+    const finishPlayback = (message = '') => {
+      clearPlaybackTimeout();
+      remainingChunks.current = [];
+      setSpeaking(false);
+      onSpeakingChangeRef.current?.(false);
+      // A failed cancel can still be followed by a natural onend. Once the
+      // browser reports completion, remove the now-inaccurate Stop warning.
+      setError(message);
+    };
+    // A browser may dispatch onend inside speak(). Drain that completion
+    // without recursively nesting one speakNext call per lesson chunk.
+    let launchingChunk = false;
+    let nextChunkQueued = false;
+    const speakNext = () => {
+      if (launchingChunk) {
+        nextChunkQueued = true;
+        return;
+      }
+      do {
+        nextChunkQueued = false;
+        launchingChunk = true;
+        try { launchChunk(); }
+        finally { launchingChunk = false; }
+      } while (nextChunkQueued);
+    };
+    const launchChunk = () => {
+      const part = remainingChunks.current.shift();
+      if (part === undefined) { finishPlayback(); return; }
+
+      let utterance: SpeechSynthesisUtterance;
+      try {
+        utterance = new SpeechSynthesisUtterance(part);
+        utterance.voice = selectedVoice;
+        utterance.lang = selectedVoice.lang;
+        utterance.rate = rate;
+      } catch {
+        finishPlayback('目前無法朗讀，可繼續閱讀文字。');
+        return;
+      }
+      active.current = utterance;
+      const finishPart = (failed: boolean) => {
+        if (active.current !== utterance) return;
+        clearPlaybackTimeout();
+        active.current = null;
+        utterance.onend = null;
+        utterance.onerror = null;
+        if (failed) {
+          finishPlayback('朗讀未能完成，可重新朗讀或繼續閱讀文字。');
+        } else if (remainingChunks.current.length) {
+          speakNext();
+        } else {
+          finishPlayback();
+        }
+      };
+      utterance.onend = () => finishPart(false);
+      utterance.onerror = () => finishPart(true);
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        if (active.current === utterance) active.current = null;
+        utterance.onend = null;
+        utterance.onerror = null;
+        finishPlayback(announced
+          ? '朗讀未能完成，可重新朗讀或繼續閱讀文字。'
+          : '目前無法朗讀，可繼續閱讀文字。');
+        return;
+      }
+      // Some installed mobile voices never fire end/error. This is a bounded,
+      // local-only recovery attempt, not proof that speech finished. A timer
+      // belongs to its own chunk and is cleared on end, Stop or source change.
+      // Do not arm it if speak() already completed synchronously.
+      if (active.current === utterance) {
+        playbackTimeout.current = setTimeout(() => {
+          if (active.current !== utterance) return;
+          if (stop()) {
+            setError('裝置語音長時間沒有回應，已嘗試停止；可重新朗讀或繼續閱讀原文。');
+          }
+        }, STUDY_SPEECH_STALL_MS);
+        if (!announced) {
+          announced = true;
+          setSpeaking(true);
+          onSpeakingChangeRef.current?.(true);
+        }
+      }
+    };
+
+    setError('');
+    speakNext();
+  }
+
+  return (
+    <div className={styles.readAloud}>
+      <button type="button" className={styles.button} disabled={!available && !speaking}
+        aria-pressed={speaking} onClick={toggle}>
+        {speaking ? '停止朗讀' : label}
+      </button>
+      <label className={styles.note}>朗讀速度
+        <select aria-label="朗讀速度" value={rate} disabled={!available || speaking}
+          onChange={(event) => {
+            const nextRate = Number(event.target.value);
+            if (![0.8, 0.95, 1.1].includes(nextRate)) return;
+            if (onRateChange) onRateChange(nextRate);
+            else setLocalRate(nextRate);
+          }}>
+          <option value={0.8}>慢速（0.8 倍）</option>
+          <option value={0.95}>一般（0.95 倍）</option>
+          <option value={1.1}>稍快（1.1 倍）</option>
+        </select>
+      </label>
+      {!available && !speaking && <>
+        <small>{supported
+          ? '目前找不到裝置上的中文離線語音；開啟或安裝語音後可重新檢查，仍可閱讀文字。'
+          : '此瀏覽器未提供語音朗讀功能，仍可閱讀文字。'}</small>
+        {supported && <button type="button" className={styles.button}
+          onClick={() => refreshVoices.current?.()}>重新檢查中文語音</button>}
+      </>}
+      {error && <small role="status">{error}</small>}
+    </div>
+  );
+}
