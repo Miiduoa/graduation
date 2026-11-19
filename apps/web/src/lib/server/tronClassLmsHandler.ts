@@ -390,7 +390,7 @@ async function loadCourseContents(
   return { announcements, materials, errors };
 }
 
-function readCachedExtras(value: unknown, nowMs: number): {
+function readCachedExtras(value: unknown, nowMs: number, allowedCourseIds: Set<number>): {
   extras: Record<string, CachedCourseContents>;
   pruned: boolean;
 } {
@@ -402,7 +402,7 @@ function readCachedExtras(value: unknown, nowMs: number): {
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const courseId = positiveId(key);
     const row = record(item);
-    if (!courseId || !cacheStillFresh(row.expiresAt, nowMs) ||
+    if (!courseId || !allowedCourseIds.has(courseId) || !cacheStillFresh(row.expiresAt, nowMs) ||
       typeof row.fetchedAt !== 'string' || typeof row.expiresAt !== 'string' ||
       !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !Array.isArray(row.errors)) {
       pruned = true;
@@ -611,7 +611,10 @@ export function createTronClassLmsHandler({
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
         cacheData.sessionVersion === sessionVersion &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
-        const pruned = readCachedExtras(cacheData.extras, now());
+        // An extra cached course is not proof of enrollment in this snapshot.
+        // Drop entries no longer present in the verified course list.
+        const allowedCourseIds = new Set((cacheData.snapshot as LmsReadonlySnapshot).courses.map((course) => course.id));
+        const pruned = readCachedExtras(cacheData.extras, now(), allowedCourseIds);
         extras = refresh ? {} : pruned.extras;
         cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid, now())!);
         shouldPruneExtras = !refresh && pruned.pruned;
