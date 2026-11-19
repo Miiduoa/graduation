@@ -361,6 +361,173 @@ async def check_life_navigation_continuity(page, results):
     results.append('life clear and Escape retain category; composition and full-width search keep usable text and scoped URLs')
 
 
+async def check_full_service_search_journey(page, results):
+    """Check the built /search route with real Next history and local guest fixtures."""
+    original_viewport = page.viewport_size
+    previous_preferences = await page.evaluate(
+        "localStorage.getItem('campus-web-preferences')"
+    )
+    search = page.get_by_role('searchbox', name='想找什麼？', exact=True)
+    form = page.get_by_role('search', name='尋找服務', exact=True)
+    library = page.locator('#service-search-results a[href^="/library"]')
+    result_title = page.locator('#service-search-results').get_by_role(
+        'heading', name='搜尋結果', exact=True,
+    )
+
+    async def expect_search(query='', category='all'):
+        expected = {'campus': ['pu']}
+        if query:
+            expected['q'] = [query]
+        if category != 'all':
+            expected['category'] = [category]
+        await page.wait_for_url(lambda value: (
+            urlparse(value).path == '/search'
+            and parse_qs(urlparse(value).query, keep_blank_values=True) == expected
+            and not urlparse(value).fragment
+        ))
+        await expect(search).to_have_value(query)
+        label = '全部' if category == 'all' else '校園生活'
+        await expect(form.get_by_role('button', name=label, exact=True)).to_have_attribute(
+            'aria-pressed', 'true',
+        )
+
+    try:
+        await page.set_viewport_size({'width': 390, 'height': 844})
+        await goto_path(page, '/search?campus=pu')
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect(page.get_by_role('heading', name='所有服務', exact=True)).to_be_visible()
+        history_length = await page.evaluate('history.length')
+        await search.fill('借')
+        await search.press_sequentially('書')
+        await form.get_by_role('button', name='校園生活', exact=True).click()
+        await expect_search('借書', 'campus')
+        assert await page.evaluate('history.length') == history_length, 'Typing added search history entries'
+        await search.press('Enter')
+        await expect(result_title).to_be_focused()
+        await expect(library).to_have_count(1)
+        destination = urlparse(await library.get_attribute('href'))
+        destination_query = parse_qs(destination.query, keep_blank_values=True)
+        assert destination.path == '/library' and destination_query.get('campus') == ['pu'], destination
+        assert 'q' not in destination_query and 'category' not in destination_query, destination
+        assert not destination.fragment, destination
+        await library.click()
+        await page.wait_for_url(lambda value: urlparse(value).path == '/library')
+        await expect(page.get_by_role('heading', name='圖書館', exact=True)).to_be_visible()
+        await page.go_back()
+        await expect_search('借書', 'campus')
+        await page.go_forward()
+        await page.wait_for_url(lambda value: urlparse(value).path == '/library')
+        await expect(page.get_by_role('heading', name='圖書館', exact=True)).to_be_visible()
+        await page.go_back()
+        await expect_search('借書', 'campus')
+        await page.reload(wait_until='load')
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect_search('借書', 'campus')
+        await no_overflow(page)
+        await page.screenshot(path=str(OUT / 'full-service-search-history-mobile.png'), full_page=True, animations='disabled')
+
+        await form.get_by_role('button', name='清除搜尋', exact=True).click()
+        await expect(search).to_be_focused()
+        await expect_search('', 'campus')
+        # DOM composition events cover React's IME event path, not an OS keyboard.
+        await search.dispatch_event('compositionstart', {'data': ''})
+        await search.fill('圖')
+        await expect(search).to_have_value('圖')
+        assert parse_qs(urlparse(page.url).query).get('q') is None
+        assert await search.evaluate("""node => {
+            const event = new KeyboardEvent('keydown', {key:'Enter',isComposing:true,bubbles:true,cancelable:true});
+            node.dispatchEvent(event);
+            return event.defaultPrevented;
+        }"""), 'IME Enter was not cancelled'
+        await form.evaluate('node => node.requestSubmit()')
+        await expect(search).to_be_focused()
+        await search.dispatch_event('keydown', {'key': 'Escape', 'isComposing': True})
+        await expect(search).to_have_value('圖')
+        await search.fill('圖書館')
+        await search.dispatch_event('compositionend', {'data': '圖書館'})
+        await expect_search('圖書館', 'campus')
+        assert await search.evaluate("""node => {
+            const event = new KeyboardEvent('keydown', {key:'Enter',keyCode:229,bubbles:true,cancelable:true});
+            node.dispatchEvent(event);
+            return event.defaultPrevented;
+        }"""), 'WebKit composition fallback was not cancelled'
+        await search.press('Enter')
+        await expect(result_title).to_be_focused()
+        await expect(library).to_have_count(1)
+        await page.get_by_role('button', name='清除篩選', exact=True).click()
+        await expect_search()
+        await expect(search).to_be_focused()
+
+        # Create a second real native History entry, observed by Next. After a
+        # service visit has saved the filtered draft, Back must still reach the
+        # deliberately empty first entry, including after a reload.
+        await page.evaluate("""() => {
+            const url = new URL(location.href);
+            url.searchParams.set('q', '借書');
+            url.searchParams.set('category', 'campus');
+            history.pushState(null, '', url.pathname + url.search);
+        }""")
+        await expect_search('借書', 'campus')
+        await library.click()
+        await page.wait_for_url(lambda value: urlparse(value).path == '/library')
+        await page.go_back()
+        await expect_search('借書', 'campus')
+        await page.go_back()
+        await expect_search()
+        await page.reload(wait_until='load')
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect_search()
+        await expect(page.locator('#service-search-results').get_by_role('heading', name='服務目錄', exact=True)).to_be_visible()
+        results.append('full service search preserves campus and category through Enter, service visits, Back, Forward and reload; real empty history entries override saved drafts; composition stays local until completion')
+
+        await goto_path(page, '/settings?campus=pu&section=appearance')
+        await page.get_by_role('group', name='字級', exact=True).get_by_role('button', name='中', exact=True).click()
+        await page.get_by_role('button', name='淺色', exact=True).click()
+        # Visual cases start with an explicit query: session restoration may
+        # already show the same text, so filling it again need not emit a change.
+        await goto_path(page, '/search?campus=pu&q=借書')
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect_search('借書')
+        normal_input_size = await search.evaluate('node => parseFloat(getComputedStyle(node).fontSize)')
+        for width in (320, 390, 1440):
+            await page.set_viewport_size({'width': width, 'height': 1000 if width > 760 else 844})
+            await no_overflow(page)
+            await search.press('Enter')
+            await expect(result_title).to_be_focused()
+            await expect(result_title).to_be_in_viewport(ratio=1)
+            await library.focus()
+            await expect(library).to_be_in_viewport(ratio=1)
+            await page.screenshot(path=str(OUT / f'full-service-search-{width}.png'), full_page=True, animations='disabled')
+
+        await goto_path(page, '/settings?campus=pu&section=appearance')
+        await page.get_by_role('group', name='字級', exact=True).get_by_role('button', name='大', exact=True).click()
+        await page.get_by_role('button', name='深色', exact=True).click()
+        await goto_path(page, '/search?campus=pu&q=借書')
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect_search('借書')
+        assert await search.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') > normal_input_size, 'Search input ignored the large text preference'
+        await page.locator('html').evaluate("node => { node.style.fontSize='200%'; }")
+        for width in (320, 390):
+            await page.set_viewport_size({'width': width, 'height': 844})
+            await check_oled(page)
+            await no_overflow(page)
+            await search.press('Enter')
+            await expect(result_title).to_be_focused()
+            await expect(result_title).to_be_in_viewport(ratio=1)
+            await page.screenshot(path=str(OUT / f'full-service-search-oled-large-{width}.png'), full_page=True, animations='disabled')
+        results.append('full service search reflows at 320, 390 and 1440px; the input follows the saved large text preference and the 200% root text/OLED layouts remain readable without horizontal overflow')
+    except Exception:
+        await page.screenshot(path=str(OUT / 'full-service-search-failure.png'), full_page=True, animations='disabled')
+        raise
+    finally:
+        await page.evaluate("""previous => {
+            if (previous === null) localStorage.removeItem('campus-web-preferences');
+            else localStorage.setItem('campus-web-preferences', previous);
+            document.documentElement.style.fontSize = '';
+        }""", previous_preferences)
+        await page.set_viewport_size(original_viewport)
+
+
 async def check_today_navigation_continuity(page, results):
     """A new Today visit must not consume another visit's global scroll cache."""
     await page.set_viewport_size({'width': 390, 'height': 844})
@@ -1435,6 +1602,7 @@ async def main():
             results.append('life visitor filter retains public cafeteria, excludes gated tasks, and restores campus, category, search and keyboard focus on Back')
 
             await check_life_navigation_continuity(page, results)
+            await check_full_service_search_journey(page, results)
             await check_today_navigation_continuity(page, results)
 
             await page.set_viewport_size({'width': 390, 'height': 844})

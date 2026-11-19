@@ -283,7 +283,7 @@ export function CampusServiceMenu() {
           if (menu.current?.open) forgetDirectorySearch('menu');
         }}
       >
-        <CampusIcon name="search" size={17} />
+        <CampusIcon name="services" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">
           所有服務
         </span>

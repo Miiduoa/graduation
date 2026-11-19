@@ -53,14 +53,16 @@ await writeFile(path.join(output, 'bundle-meta.json'), JSON.stringify(result.met
 const inputs = [
   ...new Set([
     ...Object.keys(result.metafile.inputs).filter(
-      (file) => !file.includes('node_modules/') && !file.startsWith('<') && !file.startsWith('(disabled):'),
+      (file) =>
+        !file.includes('node_modules/') && !file.startsWith('<') && !file.startsWith('(disabled):'),
     ),
     'scripts/qa/interface-design/build.mjs',
     'scripts/qa/interface-design/check.py',
-      'scripts/qa/browser/install-playwright.sh',
-      'package.json',
-      'apps/web/package.json',
-      'pnpm-lock.yaml',
+    'scripts/qa/interface-design/quick_search.py',
+    'scripts/qa/browser/install-playwright.sh',
+    'package.json',
+    'apps/web/package.json',
+    'pnpm-lock.yaml',
     '.github/workflows/interface-design-browser.yml',
     'apps/web/public/icons/mark.svg',
   ]),

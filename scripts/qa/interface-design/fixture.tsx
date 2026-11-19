@@ -8,6 +8,7 @@ import { ToastProvider, useToast } from '../../../apps/web/src/components/ui/Toa
 import { Modal, ConfirmModal } from '../../../apps/web/src/components/ui/Modal';
 import { Input, Textarea, Select } from '../../../apps/web/src/components/ui/Input';
 import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
+import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEntry';
 import {
   applyWebAppearancePreferences,
   defaultWebPreferences,
@@ -62,6 +63,9 @@ function Controls() {
         </Button>
         <Button type="button" variant="ghost" onClick={() => navigate('/')}>
           返回今天
+        </Button>
+        <Button type="button" variant="outline" onClick={() => navigate('/interface-quick')}>
+          檢查快速搜尋
         </Button>
         <Button type="button" loading>
           儲存中
@@ -215,6 +219,13 @@ function Fixture() {
                 timetableHref="/timetable?schoolId=pu&campus=pu"
                 timetableSchoolId="pu"
               />
+            ) : pathname === '/interface-quick' ? (
+              <>
+                <div className={home.heading}>
+                  <h1>服務搜尋</h1>
+                </div>
+                <QuickCampusEntry onAsk={null} />
+              </>
             ) : (
               <>
                 <div className={home.heading}>

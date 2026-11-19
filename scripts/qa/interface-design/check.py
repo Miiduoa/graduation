@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from playwright.async_api import async_playwright, expect
+from quick_search import check_quick_search
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
 SCENARIOS = [
@@ -223,12 +224,15 @@ async def check_short_service_menu(page, report, capture):
             await trigger.click()
             close = page.get_by_role('button', name='關閉所有服務')
             await expect(close).to_be_in_viewport(ratio=1)
-            assert await close.evaluate('''node => {
+            geometry = await close.evaluate('''node => {
               const panel=node.parentElement.parentElement.getBoundingClientRect();
               const header=node.closest('header').getBoundingClientRect();
               const navigation=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();
-              return panel.top >= header.bottom-1 && panel.bottom <= navigation.top+1;
-            }'''), 'Short-window service menu covered the header or bottom navigation'
+              return {panelTop:panel.top,panelBottom:panel.bottom,headerBottom:header.bottom,navigationTop:navigation.top};
+            }''')
+            assert (geometry['panelTop'] >= geometry['headerBottom'] - 1
+                    and geometry['panelBottom'] <= geometry['navigationTop'] + 1), (
+                'Short-window service menu covered the header or bottom navigation', geometry)
             # The task-first menu discloses secondary services progressively.
             # Expand the real controls before checking keyboard reachability.
             for summary in await page.locator('details[data-directory-section] > summary').all():
@@ -249,6 +253,100 @@ async def check_short_service_menu(page, report, capture):
             await expect(trigger).to_be_focused()
         report['checks'].append('390×320 and 640×360 service menus keep header and bottom navigation clear; last service and close action are reachable')
     finally:
+        await page.set_viewport_size(original)
+
+
+async def check_short_navigation_panels(page, report, capture):
+    original = page.viewport_size
+    original_font = await page.locator('html').evaluate('node => node.style.fontSize')
+
+    async def contained_control(control, panel, name):
+        await expect(control).to_be_focused()
+        await expect(control).to_be_in_viewport(ratio=1)
+        geometry = await control.evaluate('''node => {
+          const bounds=node.getBoundingClientRect();
+          const panel=document.getElementById(node.closest('details').querySelector('summary').getAttribute('aria-controls'));
+          const region=panel.getBoundingClientRect();
+          return {top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right,
+            panelTop:region.top+panel.clientTop,panelBottom:region.top+panel.clientTop+panel.clientHeight,
+            panelLeft:region.left+panel.clientLeft,panelRight:region.left+panel.clientLeft+panel.clientWidth};
+        }''')
+        assert (geometry['top'] >= geometry['panelTop'] - 1
+                and geometry['bottom'] <= geometry['panelBottom'] + 1
+                and geometry['left'] >= geometry['panelLeft'] - 1
+                and geometry['right'] <= geometry['panelRight'] + 1), (name, geometry)
+        await panel_bounds(panel, name)
+
+    async def panel_bounds(panel, name):
+        geometry = await panel.evaluate('''node => {
+          const bounds=node.getBoundingClientRect();
+          const header=node.closest('header').getBoundingClientRect();
+          const navigation=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();
+          return {top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right,
+            headerBottom:header.bottom,navigationTop:navigation.top,width:innerWidth,
+            scrollHeight:node.scrollHeight,clientHeight:node.clientHeight};
+        }''')
+        assert (geometry['top'] >= geometry['headerBottom'] - 1
+                and geometry['bottom'] <= geometry['navigationTop'] + 1
+                and geometry['left'] >= 0 and geometry['right'] <= geometry['width']), (name, geometry)
+        return geometry
+
+    try:
+        for width, height in ((390, 320), (640, 360)):
+            await page.set_viewport_size({'width': width, 'height': height})
+            # Use the real typography preference and layout, not mocked geometry.
+            await page.locator('html').evaluate('node => { node.style.fontSize="200%"; }')
+            await page.evaluate('window.scrollTo({top:0,behavior:"instant"})')
+            school = page.locator('summary[aria-label="切換校園：靜宜大學"]')
+            await school.click()
+            school_panel = page.locator('[id="' + await school.get_attribute('aria-controls') + '"]')
+            close = page.get_by_role('button', name='關閉校園選擇', exact=True)
+            await page.keyboard.press('Tab')
+            await contained_control(close, school_panel, 'school close')
+            await page.keyboard.press('Tab')
+            search = page.get_by_role('searchbox', name='搜尋校園', exact=True)
+            await contained_control(search, school_panel, 'school search')
+            await search.fill('不存在的校園')
+            await expect(page.get_by_role('status', name='校園搜尋結果')).to_contain_text('找不到符合')
+            await page.keyboard.press('Tab')
+            clear = page.get_by_role('button', name='清除搜尋', exact=True)
+            await contained_control(clear, school_panel, 'school clear')
+            await page.keyboard.press('Tab')
+            choice = page.get_by_role('combobox', name='瀏覽校園', exact=True)
+            await contained_control(choice, school_panel, 'school selection')
+            await expect(choice).to_have_value('pu')
+            geometry = await panel_bounds(school_panel, 'school panel after traversal')
+            assert geometry['scrollHeight'] > geometry['clientHeight'], ('Short-window overflow was not exercised', geometry)
+            assert await school_panel.evaluate('node => node.scrollTop > 0'), 'Tab did not reach the lower part of the school panel'
+            await capture(f'school-short-large-{width}', full_page=False)
+            for control in (clear, search, close):
+                await page.keyboard.press('Shift+Tab')
+                await contained_control(control, school_panel, 'school reverse traversal')
+            await close.press('Enter')
+            await expect(school).to_be_focused()
+
+            account = page.locator('summary[aria-label="帳號"]')
+            if await account.count():
+                await account.click()
+                account_panel = page.locator('[id="' + await account.get_attribute('aria-controls') + '"]')
+                account_close = page.get_by_role('button', name='關閉帳號選單', exact=True)
+                await page.keyboard.press('Tab')
+                await contained_control(account_close, account_panel, 'account close')
+                account_links = account_panel.get_by_role('link')
+                for link in await account_links.all():
+                    await page.keyboard.press('Tab')
+                    await contained_control(link, account_panel, 'account destination')
+                await page.keyboard.press('Tab')
+                logout = account_panel.get_by_role('button', name='登出', exact=True)
+                await contained_control(logout, account_panel, 'account logout')
+                await capture(f'account-short-large-{width}', full_page=False)
+                # Reach the last action without executing a logout or navigation.
+                await page.keyboard.press('Escape')
+                await expect(account).to_be_focused()
+            report.setdefault('shortPanelViewports', []).append({'width': width, 'height': height, 'rootText': '200%'})
+        report['checks'].append('School and account disclosures clear the measured header and mobile navigation at 390×320 and 640×360 with 200% text; native Tab reaches search, clear, school choice and the last account action, reverse traversal reaches close, and closing restores the opener')
+    finally:
+        await page.locator('html').evaluate('(node,value) => { node.style.fontSize=value; }', original_font)
         await page.set_viewport_size(original)
 
 
@@ -476,8 +574,10 @@ async def scenario(browser, origin, config, reports):
                 await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
 
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
+        await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
+            await check_section('short-navigation', lambda: check_short_navigation_panels(page, report, capture))
             # The same real modal must remain operable in a short window, too.
             await page.set_viewport_size({'width': config['width'] if config['width'] < 400 else 390, 'height': 360})
             await check_section('short-forms', lambda: check_dialogs_and_fields(page, config, report, capture, '-short'))
