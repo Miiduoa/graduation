@@ -257,6 +257,45 @@ describe('public course transport', () => {
     expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 
+  it('cancels an unread late response after a school switch even if fetch ignores abort', async () => {
+    const controller = new AbortController();
+    let resolveLate!: (response: Response) => void;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(
+      () => new Promise<Response>((resolve) => { resolveLate = resolve; }),
+    );
+    const pending = answer({ ...options, signal: controller.signal, fetcher });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(streamController) { streamController.enqueue(new Uint8Array([123])); },
+      cancel() { cancelled = true; },
+    });
+    resolveLate(new Response(stream, { headers: { 'content-type': 'application/json' } }));
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+  });
+
+  it('cancels a stale response when the selected school changes during fetch', async () => {
+    let current = true;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(streamController) { streamController.enqueue(new Uint8Array([123])); },
+      cancel() { cancelled = true; },
+    });
+    const response = new Response(stream, { headers: { 'content-type': 'application/json' } });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+      current = false;
+      return response;
+    });
+    await expect(answer({
+      ...options,
+      fetcher,
+      isCurrent: () => current,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancelled).toBe(true);
+  });
+
   it('rejects changed school/account scope after a response arrives', async () => {
     let current = true;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {

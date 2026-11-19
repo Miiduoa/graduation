@@ -174,6 +174,12 @@ it('completes settings, one-time menu, confirmed activation and pause/resume wit
   fireEvent.click(button('確認啟用門市'));
   await screen.findByText('門市狀態已更新：營業中。');
   expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
+  const daily = screen.getByRole('region', { name: '門市工作台' });
+  const availability = screen.getByRole('region', { name: '接單狀態' });
+  expect(
+    daily.compareDocumentPosition(availability) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(button('處理訂單與收銀').getAttribute('aria-expanded')).toBe('false');
   fireEvent.click(button('暫停接單'));
   await screen.findByText('門市狀態已更新：暫停接單。');
   fireEvent.click(button('恢復接單'));
@@ -446,6 +452,7 @@ it('cannot resume a store suspended by the administrator', async () => {
   current = { ...current, activated: true };
   await open();
   expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '處理訂單與收銀' })).toBeNull();
   expect(screen.getByText(/門市的營運狀態需要由場域管理者確認/)).toBeTruthy();
 });
 

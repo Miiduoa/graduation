@@ -172,7 +172,12 @@ export async function answerPublicCourseQuestion(input: {
         ...(input.origin === 'web' ? { cache: 'no-store' as const } : {}),
         headers: { Accept: 'application/json' },
       });
-      if (!current() || controller.signal.aborted) throw cancelled();
+      if (!current() || controller.signal.aborted) {
+        // Some native fetch adapters ignore abort after resolving the headers.
+        // A late response must not keep downloading data for the old school.
+        cancelUnreadPublicCourseResponse(response);
+        throw cancelled();
+      }
       if (
         input.origin === 'mobile' &&
         response.url &&

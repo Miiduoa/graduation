@@ -2,6 +2,18 @@ import { findSchoolById } from '@campus/shared/src/schools';
 
 type SearchLike = { get(key: string): string | null } | null | undefined;
 
+/** Teaching tools belong to their course workspace, not the /teacher appeals desk. */
+export function teacherCourseWorkspacePath(pathname: string): string | null {
+  return pathname.match(/^(\/teacher\/course\/[^/]+)(?:\/|$)/u)?.[1] ?? null;
+}
+
+/** Resolve task ownership before matching the catalog's broader route prefixes. */
+export function campusServicePathname(pathname: string): string {
+  if (/^\/groups\/[^/]+\/club(?:\/|$)/u.test(pathname)) return '/clubs';
+  if (teacherCourseWorkspacePath(pathname)) return '/classroom';
+  return pathname;
+}
+
 export function buildCampusNavigationSearch(
   params: SearchLike,
   selected?: { id: string; code?: string } | null,
@@ -47,7 +59,11 @@ export function campusServiceMatches(
 ): boolean {
   if (!pathname) return false;
   const destination = new URL(href, 'https://campus.local');
-  if (pathname !== destination.pathname && !pathname.startsWith(`${destination.pathname}/`))
+  const servicePathname = campusServicePathname(pathname);
+  if (
+    servicePathname !== destination.pathname &&
+    !servicePathname.startsWith(`${destination.pathname}/`)
+  )
     return false;
   return [...destination.searchParams].every(([key, value]) => params?.get(key) === value);
 }

@@ -22,7 +22,7 @@ const workEntries = [
   { title: '平台管理員登入（網頁）', detail: '使用已獲平台授權的管理帳號。', path: '/admin/login' },
 ] as const;
 
-async function openStaffLogin(path: '/auth/account?method=school' | '/admin/login') {
+async function openStaffLogin(path: '/auth/account?method=school' | '/admin/login' | '/admin') {
   const url = `https://nuni.tw${path}`;
   try {
     await Linking.openURL(url);
@@ -67,7 +67,7 @@ export default function LoginLandingScreen() {
             testID="platform-workspace-start"
             accessibilityRole="button"
             accessibilityLabel="開啟課程與作業"
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' })}
             style={({ pressed }) => [s.workspaceShortcut, pressed && s.rowPressed]}
           >
             <Text style={s.workspaceShortcutText}>課程與作業</Text>
@@ -102,12 +102,12 @@ export default function LoginLandingScreen() {
           </View>
         )}
         <View style={s.intro}>
-          <Text style={s.school}>{platformReady && hasSchool ? `${school.name} · 我的課表` : '課程・校園・每天的事'}</Text>
+          <Text style={s.school}>{platformReady && hasSchool ? `${school.name} · 今天` : '課程・校園・每天的事'}</Text>
           <Text accessibilityRole="header" style={s.heading}>
-            {platformReady && hasSchool ? '下一堂課在哪裡？' : '把自己的校園資料，整理在一起'}
+            {platformReady ? '今天先處理哪件事？' : '把自己的校園資料，整理在一起'}
           </Text>
           <Text style={s.body}>
-            {platformReady && hasSchool ? '用這台手機儲存的課表，查現在或下一堂課的時間和教室。'
+            {platformReady ? '從課程、訂單或自己的安排接著做。教學與門市工作可由上方工作入口進入。'
               : '使用 Google 帳號即可加入平台課程、繳交作業與查看自己的訂單，不必先綁定學校。選擇學校後，可另外匯入自己的課表、成績與活動；校園地圖、公車與公開資訊不必登入。'}
           </Text>
           {platformReady && (
@@ -122,10 +122,16 @@ export default function LoginLandingScreen() {
         </View>
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>
-            Google 帳號
+            {platformReady ? '我的 nuni' : 'Google 帳號'}
           </Text>
-          <Text style={s.body}>和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。</Text>
-          <Text style={s.importHelp}>校方私人資料、已驗證學生服務與店家管理，仍依各服務的資格與授權開放。</Text>
+          {!platformReady ? (
+            <>
+              <Text style={s.body}>和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。</Text>
+              <Text style={s.importHelp}>校方私人資料、已驗證學生服務與店家管理，仍依各服務的資格與授權開放。</Text>
+            </>
+          ) : (
+            <Text style={s.body}>修課與授課依每門課的資格顯示，先選課程就能接續作業或教學工作。</Text>
+          )}
           {auth.pendingLogout || auth.error ? (
             <Text accessibilityRole="alert" style={s.body}>
               {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
@@ -135,11 +141,13 @@ export default function LoginLandingScreen() {
             testID="login-start"
             accessibilityRole="button"
             style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+            onPress={() => platformReady
+              ? safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' })
+              : safeNavigate(navigation, 'NuniWorkspace')}
           >
             <Text style={s.buttonText}>
               {platformReady
-                ? '回到我的 nuni'
+                ? '回到我的課程'
                 : auth.loading
                   ? '確認 Google 帳號'
                   : auth.pendingLogout
@@ -149,7 +157,60 @@ export default function LoginLandingScreen() {
                       : '登入或建立帳號'}
             </Text>
           </Pressable>
+          {platformReady ? (
+            <View style={s.taskActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'food' })}
+                style={({ pressed }) => [s.taskAction, pressed && s.rowPressed]}
+              >
+                <Text style={s.publicTitle}>點餐與訂單</Text>
+                <Text style={s.publicDetail}>查看已開放門市與自己的訂單</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'account' })}
+                style={({ pressed }) => [s.taskAction, pressed && s.rowPressed]}
+              >
+                <Text style={s.publicTitle}>帳號與資格</Text>
+                <Text style={s.publicDetail}>確認學校資格、帳號與登入狀態</Text>
+              </Pressable>
+              {auth.session?.isPlatformOperator ? (
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => void openStaffLogin('/admin')}
+                  style={({ pressed }) => [s.taskAction, pressed && s.rowPressed]}
+                >
+                  <Text style={s.publicTitle}>平台管理（網頁）</Text>
+                  <Text style={s.publicDetail}>處理平台待辦與查閱操作紀錄</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
         </View>
+        {platformReady && hasSchool ? (
+          <View style={s.todayTasks}>
+            <TodayTimetablePanel
+              onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+              onOpenTimetable={(term) =>
+                safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
+              }
+            />
+            <Pressable
+              testID="public-PersonalCalendar"
+              accessibilityRole="button"
+              accessibilityLabel="個人行事曆"
+              style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
+              onPress={() => safeNavigate(navigation, 'PersonalCalendar')}
+            >
+              <View style={s.serviceCopy}>
+                <Text style={s.publicTitle}>個人行事曆</Text>
+                <Text style={s.publicDetail}>查看自己的活動、考試與接下來的安排</Text>
+              </View>
+              <Text style={s.serviceArrow} accessibilityElementsHidden>→</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <SchoolBrowsingControl />
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>失物招領</Text>
@@ -251,13 +312,13 @@ export default function LoginLandingScreen() {
                 </Pressable>
               ))}
             </View>
-            <TodayTimetablePanel
+            {!platformReady ? <TodayTimetablePanel
               onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
               onOpenTimetable={(term) =>
                 safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
               }
-            />
-            <Pressable
+            /> : null}
+            {!platformReady ? <Pressable
               testID="public-PersonalCalendar"
               accessibilityRole="button"
               accessibilityLabel="個人行事曆"
@@ -266,7 +327,7 @@ export default function LoginLandingScreen() {
             >
               <Text style={s.publicTitle}>個人行事曆</Text>
               <Text style={s.publicDetail}>新增、編輯自己的活動與考試；不必學校帳號。</Text>
-            </Pressable>
+            </Pressable> : null}
           </>
         )}
         <View style={s.panel}>
@@ -340,6 +401,15 @@ const createStyles = () =>
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
     },
+    taskActions: { gap: 4, marginTop: 10 },
+    taskAction: {
+      minHeight: 64,
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    todayTasks: { marginTop: 18 },
     workspaceShortcutText: { color: theme.colors.accent, fontSize: 12, fontWeight: '600' },
     intro: { paddingTop: 24, paddingBottom: 24 },
     publicPanel: { marginTop: 24, marginBottom: 8 },

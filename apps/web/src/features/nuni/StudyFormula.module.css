@@ -1,0 +1,35 @@
+.root {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+}
+.caption { margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.rendered {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px 0;
+  font-size: 1.15rem;
+}
+.rendered > math { margin: 0; width: max-content; min-width: 100%; }
+.original { margin-top: 8px; border-top: 1px solid var(--border); }
+.original summary {
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 12px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.root :is(summary, [tabindex]):focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.source {
+  max-width: 100%;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 14px / 1.8 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.note { margin: 8px 0 0; font-size: 12px; line-height: 1.8; color: var(--muted); }

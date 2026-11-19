@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import { AIDetailScreen, AISection, AIButton, aiTokens } from '../ui/aiFirst';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth, type UserProfile } from '../state/auth';
@@ -66,16 +66,63 @@ function ProfileForm({
   const [name, setName] = useState(profile.displayName ?? '');
   const [bio, setBio] = useState(profile.bio ?? '');
   const [phone, setPhone] = useState(profile.phone ?? '');
+  const [savedFields, setSavedFields] = useState({ name, bio, phone });
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
+  const navigation = useNavigation();
+  const inputs = useMemo(() => ({ name, bio, phone }), [name, bio, phone]);
+  const currentInputs = useRef(inputs);
+  const pendingRemoval = useRef<symbol | null>(null);
   const canEdit = !uid.startsWith('demo_');
-  useEffect(() => {
+  const dirty = name !== savedFields.name || bio !== savedFields.bio || phone !== savedFields.phone;
+  useLayoutEffect(() => {
+    currentInputs.current = inputs;
+  }, [inputs]);
+  useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      pendingRemoval.current = null;
     };
   }, []);
+
+  // Guard native/system back as well as the custom header. A confirmation only
+  // authorizes the current account's exact inputs, never a later save or screen.
+  usePreventRemove(canEdit && (dirty || saving), ({ data }) => {
+    if (!mounted.current || !isCurrent() || inFlight.current || pendingRemoval.current) return;
+    const id = Symbol('profile-leave-confirmation');
+    const expectedInputs = currentInputs.current;
+    pendingRemoval.current = id;
+    const release = () => {
+      if (pendingRemoval.current === id) pendingRemoval.current = null;
+    };
+    Alert.alert(
+      '尚有未儲存的內容',
+      '離開後，這次修改的個人資料將不會儲存。',
+      [
+        { text: '繼續編輯', style: 'cancel', onPress: release },
+        {
+          text: '捨棄並離開',
+          style: 'destructive',
+          onPress: () => {
+            if (pendingRemoval.current !== id) return;
+            release();
+            if (
+              !mounted.current ||
+              !isCurrent() ||
+              inFlight.current ||
+              currentInputs.current !== expectedInputs ||
+              !navigation.isFocused()
+            )
+              return;
+            navigation.dispatch(data.action);
+          },
+        },
+      ],
+      { cancelable: true, onDismiss: release },
+    );
+  });
 
   const save = async () => {
     if (!canEdit || !isCurrent() || inFlight.current) return;
@@ -84,6 +131,7 @@ function ProfileForm({
       return;
     }
     const patch = { displayName: name.trim(), bio: bio.trim(), phone: phone.trim() };
+    pendingRemoval.current = null;
     inFlight.current = true;
     setSaving(true);
     try {
@@ -100,6 +148,11 @@ function ProfileForm({
       setName(updated.displayName);
       setBio(updated.bio ?? '');
       setPhone(updated.phone ?? '');
+      setSavedFields({
+        name: updated.displayName,
+        bio: updated.bio ?? '',
+        phone: updated.phone ?? '',
+      });
       Alert.alert('已儲存', '個人資料已更新。');
       void refreshProfile().catch(() => undefined);
     } catch {

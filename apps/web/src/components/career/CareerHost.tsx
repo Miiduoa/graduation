@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { getAuth, getCloudFunctionUrl } from '@/lib/firebase';
 import { loadPersonalTimetable } from '@/lib/timetable/store';
+import { loginHref } from '@/lib/navigation';
 import {
   createCareerCallableTransport,
   createWorkstudyService,
@@ -15,7 +16,7 @@ import { buildCampusEventListHref, buildCampusEventDetailHref } from '../events/
 
 export function CareerHost({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
-  const loginUrl = `/login?returnUrl=${encodeURIComponent(`/career?schoolId=${schoolId}`)}`;
+  const loginUrl = loginHref(`/career?${new URLSearchParams({ schoolId })}`);
   return user ? (
     <Workspace
       key={`${user.uid}:${schoolId}`}
