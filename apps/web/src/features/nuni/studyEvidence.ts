@@ -38,7 +38,9 @@ export function locateStudyEvidence(source: string, quote: string, occurrence = 
     const match = source.indexOf(quote, from);
     if (match === -1) break;
     matches.push(match);
-    from = match + quote.length;
+    // A partial grapheme hit can overlap a later complete quotation.
+    // Collect overlapping candidates until their boundaries are checked below.
+    from = match + 1;
   }
   if (matches.length === 0) return null;
   // Fail closed on older engines, rather than claiming that a truncated quote
@@ -60,8 +62,12 @@ export function locateStudyEvidence(source: string, quote: string, occurrence = 
 
   let selected = -1;
   let occurrences = 0;
+  let nextStart = 0;
   for (const start of matches) {
+    if (start < nextStart) continue;
     if (!boundaries.has(start) || !boundaries.has(start + quote.length)) continue;
+    // Only complete matches consume the quote's full length.
+    nextStart = start + quote.length;
     if (occurrences === occurrence) selected = start;
     occurrences += 1;
   }

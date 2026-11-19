@@ -92,6 +92,14 @@ describe('exact source-to-lesson evidence', () => {
   });
 
 
+  it('finds a complete flag after an overlapping partial flag match', () => {
+    const original = '🇺🇹🇹🇹';
+    expect(locateStudyEvidence(original, '🇹🇹')).toEqual({
+      before: '🇺🇹', quote: '🇹🇹', after: '', occurrences: 1,
+    });
+    expect(locateStudyEvidence(original, '🇹🇹', 1)).toBeNull();
+  });
+
   it('rejects partial grapheme citations and counts only complete repeated matches', () => {
     // A byte-for-byte substring can still split what the student sees as one glyph.
     expect(locateStudyEvidence('e\u0301', 'e')).toBeNull();
