@@ -62,14 +62,27 @@ vi.mock('firebase/firestore', () => ({
   query: (ref: { path: string }) => ref,
   orderBy: () => null,
   limit: () => null,
-  onSnapshot: (ref: { path: string; id?: string }, options: { includeMetadataChanges: boolean }, next: (snapshot: unknown) => void, fail: () => void) => {
+  onSnapshot: (
+    ref: { path: string; id?: string },
+    options: { includeMetadataChanges: boolean },
+    next: (snapshot: unknown) => void,
+    fail: () => void,
+  ) => {
     expect(options.includeMetadataChanges).toBe(true);
     state.paths.push(ref.path);
     const emit = () => {
       if (ref.id) {
-        next({ metadata: { fromCache: state.linkedFromCache }, id: ref.id, exists: () => state.linkedRow?.id === ref.id, data: () => state.linkedRow?.data });
+        next({
+          metadata: { fromCache: state.linkedFromCache },
+          id: ref.id,
+          exists: () => state.linkedRow?.id === ref.id,
+          data: () => state.linkedRow?.data,
+        });
       } else {
-        next({ metadata: { fromCache: state.fromCache }, docs: state.rows.map((row) => ({ id: row.id, data: () => row.data })) });
+        next({
+          metadata: { fromCache: state.fromCache },
+          docs: state.rows.map((row) => ({ id: row.id, data: () => row.data })),
+        });
       }
     };
     const entry = {
@@ -245,24 +258,25 @@ it('尚未選校、載入中或目錄錯誤時不訂閱訂單', () => {
   expect(state.paths).toEqual([]);
 });
 
-it('沒登入、線上點餐還沒開：標題、副標題、內文都只寫「目前還不能線上點餐」，不叫人登入', () => {
+it('沒登入、線上點餐還沒開：仍可登入查看既有訂單，不開放新點餐', () => {
   state.uid = null;
   render(<OrdersPage />);
-  expect(screen.getAllByText('目前還不能線上點餐').length).toBeGreaterThanOrEqual(3);
-  expect(screen.queryByTestId('school-heading')).toBeNull();
-  expect(screen.queryByText('登入後查看訂單')).toBeNull();
-  expect(screen.queryByText(/會自動更新/)).toBeNull();
-  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '我的訂單' })).toBeTruthy();
+  expect(screen.getByTestId('school-heading').textContent).toBe('靜宜大學');
+  expect(screen.getByText('登入後查看訂單')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
+    '/login?returnUrl=%2Forders%3Fcampus%3Dpu',
+  );
+  expect(screen.queryByRole('link', { name: '前往點餐與取餐' })).toBeNull();
   expect(state.paths).toEqual([]);
 });
 
 it('沒有訂單、線上點餐還沒開：保留既有訂單入口，不叫學生去點餐', () => {
   state.rows = [];
   render(<OrdersPage />);
-  expect(screen.getAllByRole('heading', { name: '目前還不能線上點餐' }).length).toBeGreaterThan(0);
-  expect(screen.queryByText(/還沒有訂單|要點餐|會自動更新/)).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(screen.getByRole('link', { name: '訂單與取餐進度' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByRole('heading', { name: '還沒有 App 餐廳訂單' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '前往點餐與取餐' })).toBeNull();
+  expect(state.paths).toEqual(['users/alice/schools/pu/orders']);
 });
 
 it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
@@ -270,7 +284,7 @@ it('線上點餐打開、沒登入：請先登入，不讀訂單', () => {
   state.uid = null;
   render(<OrdersPage />);
   expect(screen.getByRole('heading', { name: '我的訂單' })).toBeTruthy();
-  expect(screen.getByText('取餐號碼和訂單狀態以店家那邊為準，會自動更新。')).toBeTruthy();
+  expect(screen.getByText('查看目前校園的訂單、取餐號碼與處理進度。')).toBeTruthy();
   expect(screen.getByText('登入後查看訂單')).toBeTruthy();
   expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
     '/login?returnUrl=%2Forders%3Fcampus%3Dpu',
@@ -312,11 +326,13 @@ it('線上點餐打開、有訂單：區分進行中與已結束，並標明 App
   expect(screen.getByRole('heading', { name: /已結束/ })).toBeTruthy();
   expect(screen.getByText('餐點好了，請到店取餐。')).toBeTruthy();
   expect(screen.getByText('等待店家提供取餐號碼')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe('/food');
+  expect(screen.getByRole('link', { name: '點餐與取餐' }).getAttribute('href')).toBe(
+    '/food?campus=pu',
+  );
   expect(screen.getByRole('link', { name: '餐廳資訊' }).getAttribute('href')).toBe(
     '/cafeteria?schoolId=pu',
   );
-  expect(screen.getByText(/此頁是 App「餐廳」留下的訂單/)).toBeTruthy();
+  expect(screen.getByText(/目前顯示 App「餐廳」留下的訂單/)).toBeTruthy();
 });
 
 it('點餐開啟、帶 orderId 時捲到並標示該筆訂單', async () => {
@@ -338,25 +354,41 @@ it('點餐開啟、orderId 無效時給友善提示且不壞頁', () => {
 });
 
 it.each(['未登入', '空列表', '找不到訂單', '已有該筆訂單', '未選校'])(
-  '點餐關閉、深連（%s）：統一說明無法查看並提供餐廳資訊出口', (scenario) => {
+  '點餐關閉、深連（%s）：依本人與校園讀取既有訂單',
+  (scenario) => {
     vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
     state.search = 'orderId=co_waiting_bbb222';
     if (scenario === '未登入') state.uid = null;
     if (scenario === '空列表') state.rows = [];
     if (scenario === '找不到訂單') state.search = 'orderId=co_missing_zzz999';
     if (scenario === '未選校') {
-      state.campus = { status: 'unselected', schoolId: null, schoolName: '', schoolSearch: '?campus=all' };
+      state.campus = {
+        status: 'unselected',
+        schoolId: null,
+        schoolName: '',
+        schoolSearch: '?campus=all',
+      };
     }
     render(<OrdersPage />);
-    expect(screen.getAllByText('線上點餐目前未開放，無法查看這筆訂單。')).toHaveLength(1);
-    expect(screen.queryByText(/找不到這筆訂單/)).toBeNull();
-    expect(screen.queryByRole('article', { current: true })).toBeNull();
-    expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
-    expect(screen.getAllByRole('link')).toHaveLength(1);
-    expect(screen.getByRole('link', { name: '查看餐廳資訊' }).getAttribute('href')).toBe(
-      scenario === '未選校' ? '/cafeteria' : '/cafeteria?schoolId=pu',
-    );
-    expect(state.paths).toEqual([]);
+    expect(screen.queryByText('線上點餐目前未開放，無法查看這筆訂單。')).toBeNull();
+    if (scenario === '未登入') {
+      expect(screen.getByRole('link', { name: '登入' }).getAttribute('href')).toBe(
+        '/login?returnUrl=%2Forders%3Fcampus%3Dpu%26orderId%3Dco_waiting_bbb222',
+      );
+      expect(state.paths).toEqual([]);
+    } else if (scenario === '未選校') {
+      expect(screen.getByText('先選擇要瀏覽的校園')).toBeTruthy();
+      expect(state.paths).toEqual([]);
+    } else {
+      expect(state.paths[0]).toBe('users/alice/schools/pu/orders');
+      if (scenario === '已有該筆訂單') {
+        expect(screen.getByRole('article', { current: true }).getAttribute('id')).toBe(
+          'order-co_waiting_bbb222',
+        );
+      } else {
+        expect(screen.getByText(/找不到這筆訂單/)).toBeTruthy();
+      }
+    }
   },
 );
 
@@ -366,7 +398,7 @@ it('點餐開啟、空列表深連仍提示找不到該筆訂單', () => {
   state.search = 'orderId=co_missing_zzz999';
   render(<OrdersPage />);
   expect(screen.getByText(/找不到這筆訂單/)).toBeTruthy();
-  expect(screen.getByRole('heading', { name: '還沒有訂單' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '還沒有 App 餐廳訂單' })).toBeTruthy();
   expect(screen.queryByText(/無法查看這筆訂單/)).toBeNull();
 });
 
@@ -385,7 +417,9 @@ it('通知指向近期清單之外的訂單時，只讀本人的當校訂單，�
   state.linkedRow.data.queueNumber = 43;
   await act(async () => archive.emit());
   expect(target.textContent).toContain('取餐號碼 43');
-  await act(async () => { await new Promise(requestAnimationFrame); });
+  await act(async () => {
+    await new Promise(requestAnimationFrame);
+  });
   expect(document.activeElement).toBe(link);
 
   state.rows = [state.linkedRow, ...state.rows];
@@ -413,7 +447,10 @@ it('訂單讀取失敗可在原頁重試，只接收新訂閱的更新', async (
   expect(state.paths).toEqual([first.path, first.path]);
   expect(screen.getByText('取餐號碼 7')).toBeTruthy();
   state.rows = [];
-  await act(async () => { first.emit(); first.fail(); });
+  await act(async () => {
+    first.emit();
+    first.fail();
+  });
   expect(screen.getByText('取餐號碼 7')).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
 });

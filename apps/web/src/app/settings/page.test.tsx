@@ -48,7 +48,9 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => state.nuni,
+  useOptionalNuniSession: () => state.nuni,
   browserRequest: vi.fn(async (path: string) => {
+    if (path === 'account-demo') return { demo: null };
     if (path === 'memberships') return { memberships: [] };
     if (path === 'class-workspaces') return { workspaces: [] };
     if (path === 'merchant-applications') return { applications: [] };
