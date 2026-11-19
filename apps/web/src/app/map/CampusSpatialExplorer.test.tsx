@@ -181,29 +181,29 @@ it('ignores foreign and older viewport callbacks without disabling walking navig
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
   const foreign = document.createElement('div');
-  act(() => intersection?.([{ isIntersecting: true, time: 900, target: foreign }]
-    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  act(() => intersection?.(([{ isIntersecting: true, time: 900, target: foreign }]
+    as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.create).not.toHaveBeenCalled();
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
-  act(() => intersection?.([{ isIntersecting: true, time: 100, target: graphics }]
-    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  act(() => intersection?.(([{ isIntersecting: true, time: 100, target: graphics }]
+    as IntersectionObserverEntry[]), {} as IntersectionObserver));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-  act(() => intersection?.([{ isIntersecting: false, time: 200, target: graphics }]
-    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  act(() => intersection?.(([{ isIntersecting: false, time: 200, target: graphics }]
+    as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   const countBeforeDelayedCallback = scene.setActive.mock.calls.length;
-  act(() => intersection?.([{ isIntersecting: true, time: 150, target: graphics }]
-    as IntersectionObserverEntry[], {} as IntersectionObserver));
+  act(() => intersection?.(([{ isIntersecting: true, time: 150, target: graphics }]
+    as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.setActive.mock.calls.length).toBe(countBeforeDelayedCallback);
   expect(scene.create).toHaveBeenCalledTimes(1);
 
-  act(() => intersection?.([
+  act(() => intersection?.(([
     { isIntersecting: false, time: 225, target: foreign },
     { isIntersecting: true, time: 250, target: graphics },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  ] as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
