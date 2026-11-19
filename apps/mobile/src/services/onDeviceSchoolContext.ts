@@ -155,6 +155,19 @@ function allOwnArrayItems<T>(items: readonly T[], isValid: (item: T) => boolean)
 // A dense array can still contain accessor-backed records. Never invoke a
 // caller-supplied title/ID getter that could change between validation and
 // prompt serialization; live API and JSON-restored records use data fields.
+// Do not call a caller-supplied array's own slice()/Symbol.species during
+// serialization: such a method can replace already-validated student evidence.
+// Read only own data slots, as in the preceding source validation.
+function ownArrayPrefix<T>(items: readonly T[], limit: number): T[] {
+  const prefix: T[] = [];
+  for (let index = 0; index < items.length && index < limit; index += 1) {
+    const own = Object.getOwnPropertyDescriptor(items, index);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value')) return [];
+    prefix.push(own.value as T);
+  }
+  return prefix;
+}
+
 function hasOwnEvidenceFields(value: unknown, required: readonly string[], optional: readonly string[] = []): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   for (const key of required) {
@@ -335,7 +348,7 @@ export function formatOnDeviceSchoolPrompt(
   // An otherwise valid JSON-restored course can carry arbitrary extra fields.
 // Never serialize the caller's object verbatim into the local model prompt.
 const sampleCourses = owned && timetable
-  ? timetable.courses.slice(0, 8).map(({ name, day, start, end, room }) => ({
+  ? ownArrayPrefix(timetable.courses, 8).map(({ name, day, start, end, room }) => ({
       name, day, start, end, ...(room === undefined ? {} : { room }),
     }))
   : [];
@@ -368,11 +381,11 @@ const sampleCourses = owned && timetable
           '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
             ? '來源已完整讀取' : verifiedSense.assignments.coverage
               ? '僅讀取部分資料' : '未能核對是否完整') +
-          '；最多列出前 5 項：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5).map(({
+          '；最多列出前 5 項：' + JSON.stringify(ownArrayPrefix(verifiedSense.assignments.items, 5).map(({
             title, groupName, dueAt, source,
           }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
         '校園公告：' + verifiedSense.announcements.status +
-          '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
+          '；部分項目：' + JSON.stringify(ownArrayPrefix(verifiedSense.announcements.items, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
         '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')

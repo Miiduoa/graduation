@@ -325,10 +325,10 @@ it.each(['unauthorized', 'abort'] as const)('retires internal cards after a seco
   expect(providerCall).toHaveBeenCalledTimes(2);
   expect(result.signed.map(card => card.args)).toEqual([first]);
   expect(result.aborted).toBe(providerFault === 'abort');
-  // Real runner currently turns these post-evidence failures into stopReason;
-  // this exercises the atomic incomplete-result guard, not a mocked run throw.
-  expect(result.response.status).toBe(422);
-  expect(result.body).toMatchObject({ error: 'PLAN_REVISION_INCOMPLETE' });
+  // User cancellation must reject the response even after evidence exists;
+  // provider failures still exercise the atomic incomplete-result guard.
+  expect(result.response.status).toBe(providerFault === 'abort' ? 499 : 422);
+  expect(result.body).toMatchObject({ error: providerFault === 'abort' ? 'ABORTED' : 'PLAN_REVISION_INCOMPLETE' });
   expect(result.body.cards).toBeUndefined();
   expect(fixture.writes).toHaveLength(0);
   await assertRetired([...result.old, ...result.signed]);
