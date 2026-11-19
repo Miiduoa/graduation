@@ -429,7 +429,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             }
             // A delayed older callback may arrive after a newer one, even
             // if it is the sole entry in its own callback.
-            if (latest.time < lastObservationTime) return;
+            // Coarse timestamp precision can assign the same time to
+            // separate batches. Equality cannot prove that a delayed
+            // intersecting callback happened after an offscreen callback;
+            // keep the known state until a strictly newer observation.
+            if (latest.time <= lastObservationTime) return;
             lastObservationTime = latest.time;
           } else {
             if (lastObservationTime !== -Infinity) return;
