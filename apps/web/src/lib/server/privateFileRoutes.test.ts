@@ -261,7 +261,11 @@ it('uploads and downloads an assignment file for the owner', async () => {
 
   const asBob = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' });
   expect(asBob.status).toBe(403);
-  // A finalized upload is not a submitted answer until a trusted receipt references it.
+  // A finalized upload is not a submitted answer until a trusted receipt exists.
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(403);
+  store.docs.set('groups/course/assignments/work/submissions/alice', {
+    userId: 'alice', submittedAt: Date.now(),
+  });
   expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(200);
   store.docs.set('groups/course/assignments/work/submissions/alice', {
     userId: 'alice', submittedAt: Date.now(), attachments: [{ url: ANSWER }],

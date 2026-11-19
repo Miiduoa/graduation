@@ -720,6 +720,10 @@ it('opens a keyboard-dismissible assistant on the current service with a login r
   const view = render(<AppHeader />);
   const trigger = view.getByRole('button', { name: '開啟校園助理' });
   fireEvent.click(trigger);
+  await act(async () => {
+    // Wait for the real lazy entry to load, including cold transforms under CI coverage.
+    await import('./TodayCampusEntry');
+  });
   const dialog = view.getByRole('dialog', { name: '校園助理' });
   expect(dialog).toBeTruthy();
   const login = await view.findByRole('link', { name: '登入後，接著詢問校園助理' });

@@ -1,14 +1,7 @@
 import { clubProfileFeed } from '@campus/shared/src/clubProfile';
 import { callClubPortal } from './clubPortal';
-import {
-  collection,
-  doc,
-  getDocFromServer,
-  getDocsFromServer,
-  limit,
-  orderBy,
-  query,
-} from 'firebase/firestore';
+import { doc, getDocFromServer } from 'firebase/firestore';
+import { postNuniWebFn } from './nuniWebFn';
 import { getDb, getAuthInstance } from '../firebase';
 
 export async function loadClubProfile(uid: string, schoolId: string, groupId: string) {
@@ -23,9 +16,10 @@ export async function loadClubProfile(uid: string, schoolId: string, groupId: st
   const member = mine.data();
   if (!data || data.type !== 'club' || data.schoolId !== schoolId || member?.status !== 'active')
     throw new Error('無法確認社團資格');
-  const posts = await getDocsFromServer(
-    query(collection(getDb(), 'groups', groupId, 'posts'), orderBy('createdAt', 'desc'), limit(20)),
-  );
+  const posts = await postNuniWebFn<
+    { groupId: string; pageSize: number },
+    { posts: { id: string; kind?: string; title?: string; body?: string }[] }
+  >('listGroupDiscussionPage', { groupId, pageSize: 20 }, uid);
   if (getAuthInstance().currentUser !== user) throw new Error('帳號已變更');
   const feed = await callClubPortal(uid, schoolId, { action: 'read', groupId })
     .then(clubProfileFeed)
@@ -42,13 +36,13 @@ export async function loadClubProfile(uid: string, schoolId: string, groupId: st
       Number.isInteger(data.memberCount) && data.memberCount >= 0
         ? (data.memberCount as number)
         : null,
-    announcements: posts.docs
-      .filter((post) => post.data().kind === 'announcement')
+    announcements: posts.posts
+      .filter((post) => post.kind === 'announcement')
       .slice(0, 3)
       .map((post) => ({
         id: post.id,
-        title: String(post.data().title || ''),
-        body: String(post.data().body || ''),
+        title: String(post.title || ''),
+        body: String(post.body || ''),
       })),
   };
 }
