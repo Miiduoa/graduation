@@ -382,18 +382,38 @@ it('scans beyond 500 global rows before sorting and paginates visible legacy pos
   expect(writes).not.toHaveBeenCalled();
 });
 
-it('returns the newest collected rows at the safety cap with hasMore based on visible rows', async () => {
+it('reads past 5,000 document IDs so the newest visible post is not dropped', async () => {
   const globalRows = Array.from({ length: 5001 }, (_, i) => row(`post-${String(i).padStart(4, '0')}`, {
     status: i < 4997 ? 'draft' : 'active', createdAt: new Timestamp(i, 0),
   }));
   const { list, globalReads, writes } = setup([], 'active', { globalRows });
   const first = await list(request({ pageSize: 2 }));
-  expect(first.posts.map(p => p.id)).toEqual(['post-4999', 'post-4998']);
+  expect(first.posts.map(p => p.id)).toEqual(['post-5000', 'post-4999']);
   expect(first.hasMore).toBe(true);
-  expect(globalReads).toHaveBeenCalledTimes(10);
+  expect(globalReads).toHaveBeenCalledTimes(11);
   const second = await list(request({ pageSize: 2, cursor: first.cursor }));
-  expect(second.posts.map(p => p.id)).toEqual(['post-4997']);
+  expect(second.posts.map(p => p.id)).toEqual(['post-4998', 'post-4997']);
   expect(second.hasMore).toBe(false);
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it('pages a canonical collection whose newest post is beyond the first 5,000 document IDs', async () => {
+  const rows = Array.from({ length: 5001 }, (_, i) => row(`post-${String(i).padStart(4, '0')}`, {
+    status: 'active',
+    createdAt: i === 5000
+      ? Timestamp.fromDate(new Date('2026-11-19T00:00:00.000Z'))
+      : '2024-05-01T00:00:00.000Z',
+  }));
+  const { list, writes } = setup(rows);
+  const first = await list(request({ pageSize: 1 }));
+  expect(first.posts.map(p => p.id)).toEqual(['post-5000']);
+  expect(first.hasMore).toBe(true);
+  const last = await list(request({
+    pageSize: 1,
+    cursor: { id: 'post-0000', createdAt: { seconds: Timestamp.fromDate(new Date('2024-05-01T00:00:00.000Z')).seconds, nanoseconds: 0 } },
+  }));
+  expect(last.posts.map(p => p.id)).toEqual([]);
+  expect(last.hasMore).toBe(false);
   expect(writes).not.toHaveBeenCalled();
 });
 

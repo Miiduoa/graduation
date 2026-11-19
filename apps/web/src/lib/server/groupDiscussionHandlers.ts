@@ -86,7 +86,6 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
       boundary = { id: cursor.id, time: new Timestamp(time.seconds!, time.nanoseconds!) };
     }
     type PostDoc = QueryDocumentSnapshot;
-    const maxRows = 5000;
     const batchSize = 500;
 
     function sortByCreatedAt(docs: PostDoc[]): PostDoc[] {
@@ -103,11 +102,10 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
     async function collectByDocumentId(base: Query) {
       const docs: PostDoc[] = [];
       let scan = base.orderBy(FieldPath.documentId());
-      while (docs.length < maxRows) {
-        const count = Math.min(batchSize, maxRows - docs.length);
-        const batch = await scan.limit(count).get();
+      while (true) {
+        const batch = await scan.limit(batchSize).get();
         docs.push(...batch.docs);
-        if (batch.docs.length < count) break;
+        if (batch.docs.length < batchSize) break;
         scan = base.orderBy(FieldPath.documentId()).startAfter(batch.docs[batch.docs.length - 1]!);
       }
       return docs;
@@ -173,7 +171,8 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
       // Match the legacy read path when the canonical read is unavailable.
     }
     // Equality plus document-ID ordering uses the automatic single-field index.
-    // At the safety cap, paginate only the documents actually collected.
+    // Collect every matching row, then sort and page in memory so mixed createdAt
+    // types stay in parsed-time order and later document IDs are not dropped.
     return readPage(sortByCreatedAt(await collectByDocumentId(
       db.collection('groupPosts').where('groupId', '==', input.groupId),
     )));
