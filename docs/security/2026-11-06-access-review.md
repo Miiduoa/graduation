@@ -910,3 +910,28 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增四組 Emulator 回歸案例，涵蓋轉學生、只有主要校籍的舊帳號、只有舊校籍欄位的帳號及 null 主要校籍；同時驗證停權、刪除中、撤權及殘留舊校 membership 不可取得權限。完整 security-rules 測試 199/199、Web 討論服務與私有附件三組測試 147/147、離線盤點工具 10/10 通過；`git diff --check` 通過。
 
 歷史討論列表的 P1 尚未修復：缺少公開欄位的文件無法由現有四條等值查詢找回，而直接放寬列表規則會讓明確草稿外洩。保留此安全限制，完整修補需要可信伺服器分頁讀取及兩端串接；現行 PR 已修改檔案中沒有可用的分頁端點，須先取得擴充檔案範圍的授權。單筆讀取或離線盤點均不能取代此修補，PR 的相容性驗收仍未通過。
+
+## 2026-11-19：PR #577 已合併後，main 舊根集合仍有公開狀態／校籍授權缺口（未發布候選）
+
+- 2026-11-19 08:27 UTC 獨立核對 main 精確 `52403426be2140a4273d14eee34b7279404f1554`；#577 於 05:34 UTC 已合併，merge commit `2a9bad18dd88a6873b08063df8b308e5df2cf9e0`。既有未引用候選 `5db511be2b26da5769fe55854299f877bf5c8d58` 未成為 main，此處重新以當時 main 建立最小變更，避免覆蓋其他開發。
+- 根集合 `groupPosts/{id}` 的 `canReadGroupPost` 原先只核對群組會員資格，沒有對已知 ID 檢查公開四欄及目前 canonical 校籍。全域 `comments/{id}`、`postLikes/{id}` 共用此 helper，還有 `allow read` 可列舉根貼文／留言。知道 ID 的有效成員可能看到未公開內容；轉校殘留 membership 可能重放存取。此為原始碼授權邏輯問題，**沒有**正式站存在受影響資料或遭利用之證據。
+- 最小修補：根貼文單筆 GET 須有目前學校的群組與學校資格；非作者、非合法管理員必須四欄明確公開；草稿僅作者／教師可預覽；根貼文及全域留言列表一律拒絕；投票 GET／CREATE／DELETE 都要公開父文，不因草稿預覽豁免。採用既有 `isCurrentSchoolMember`，但需另驗證主要校籍與舊帳號缺欄相容。
+- 兩筆既有合法投票 fixture 改為四欄完整公開。新增 Firebase Emulator 回歸程式涵蓋正常、匿名、跨帳號／校、已知 ID 草稿與缺欄、列表拒絕、留言、投票、轉校殘留會員、撤權、停權、撤回和重放。測試檔 JS 僅以 V8 做語法解析；本環境無專案依賴及 emulator，**尚未實跑**。
+- 暫不 update_ref 或觸發現有含未授權 npm/pnpm audit 外送的 CI；無正式資料、金鑰、下載 token、migration、GCS staging、E 校園、部署及合併。正式整合須以最新精確 head 重做 Emulator/HTTP、Web/Mobile/Functions、CodeQL、Supabase permissions、Python security、Mobile Agent、適用 Maestro、指定 App 5504170 APPROVED 與回復驗證。Firestore GET/exists 10 次限額及舊用戶資料相容需隔離驗收。
+
+
+### 2026-11-19：全域舊貼文的雙校籍欄位衝突防重放（隔離候選）
+- 從 main `66fe65075423a364883b465a2cd55a0a21b22765` 重新建立包含原候選 `8527ab251d60d77625f06ab7920dd2c193c694d9` P0 明確公開四欄、root comments 讀取與投票驗權、關閉全域 LIST 的最小修補，避免覆蓋當前主線手機限動修改。
+- 額外發現：前候選只檢查 `schoolId`，部分轉學情境可能已把伺服器欄位 `primarySchoolId` 改為新校，而原 `schoolId` 與舊群組／學校 membership 還沒更新。此狀態會讓舊校 GET／留言／投票仍被授權；反向不一致也不能猜測哪個正確。
+- 新的 `isConsistentRootPostSchoolMember` 要求兩個非空校籍欄位與目標校別一致；只有單一伺服器管理欄位的合法歷史帳號仍允許。這項檢查只作用於舊根貼文，不擴散到其他功能。
+- 擴充同一支 Firebase Emulator 回歸，涵蓋 stale `schoolId`、stale `primarySchoolId`、已發 ID 的留言及票據重放、回復一致的正常存取與只有主要校籍的歷史帳號。所有資料均為合成資料。
+- 已完成來源對照與有界 JS 布林授權矩陣，但此候選 **沒有 Firebase Emulator、完整 Jest、CI、CodeQL、Supabase、Python、Mobile Agent、Maestro、GCS staging、發布回復驗證**。還要核實 Rules 單請求文件存取上限與合法多校帳號相容，不能宣稱正式漏洞已修復。
+- npm/pnpm audit 的依賴清單外送拒絕持續有效；本輪未執行／繞道重送、未推送分支觸發 CI、未合併或部署、未操作正式資料／金鑰／token／migration／E 校園。主線窗口必須在精確 head 檢查及 nuni-merge-gate App 5504170 核可後才處理合併。
+
+
+### 2026-11-20｜隔離 Git 整合候選：legacy root 貼文／留言／投票需明確公開與目前校籍
+
+- **精確基準：** main `40cbb474d2d435a784f5356b08a0984059903d82`；本次沿用未引用的 `92c84f7c972ec74595bb00f0cb70db5f6eb58d8a` 原始三檔候選，在主線不變的安全檔案上重新建立單一 parent 的 Git 整合候選。#517、#577 均已 merged，舊 App 5504170 審查成功僅限 #577 原 head，**不可繼承至本候選**。
+- **問題與處理：** 已合併 main 的 root `groupPosts/{id}` 只依群組會員核准讀取，可能讓殘留的舊校會員於已知 ID 讀取缺發布欄位／草稿；root `comments`、`postLikes` 間接承襲。候選改為已驗證目前校籍及群組會員、雙校籍欄位衝突時 fail-closed；非作者／非管理員只接受明確四欄發布狀態。作者與合法管理員仍可精確預覽，但未公開文不可按讚。全域列表拒絕，已在 security-rules.test.js 補合成 Emulator 回歸程式。此變更可能影響舊版列表／未分類歷史文，尚須相容性盤點與人工判讀。
+- **本輪離線確認：** 新增測試檔完整內容經 V8 `new Function()` 語法解析成功；從來源核對 8/8 個關鍵權限子條件；以 **1,152** 組合成布林角色、目前雙校籍、群組／學校狀態及公開／草稿／缺欄／封存情境的獨立矩陣推演（允許 GET 39 組、公開互動 12 組，非作者讀取缺欄 0 組、雙校籍衝突授權 0 組）。此為模型而不是 Firestore Rules 編譯器／Emulator 執行、真實流量或正式資料證明。
+- **仍需阻擋：** 尚無精確候選 Firebase Emulator、HTTP／Web／Functions、CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro，亦無指定 App 5504170 對新 head 的「審查通過」。因先前明確未授權向 npm registry 外送依賴清單，不更新 branch ref 或新建 PR 以免觸發現有 `security-gates` 的 `pnpm/npm audit`；不改工具轉送同一 payload。正式 GCS/Supabase 已發網址撤權、真實 Storage CAS、舊資料／索引相容性、發布及復原仍未驗收。未操作正式資料／金鑰／token／migration／E 校園或部署。

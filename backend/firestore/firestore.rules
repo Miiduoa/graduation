@@ -346,9 +346,55 @@ service cloud.firestore {
         && campusPostCommentCountNum(after) == campusPostCommentCountNum(before) + 1;
     }
 
+    // The server owns both campus bindings. Deny conflicting values: a
+    // partially transferred account must not replay old-campus access.
+    // Legacy profiles with exactly one populated school binding still work.
+    function isConsistentRootPostSchoolMember(schoolId) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let found = exists(userPath);
+      let profile = found ? get(userPath).data : {};
+      let school = profile.get('schoolId', null);
+      let primary = profile.get('primarySchoolId', null);
+      return schoolId is string && schoolId.size() > 0
+        && found && isSchoolMember(schoolId)
+        && (school == schoolId || primary == schoolId)
+        && (school == null || school == '' || school == schoolId)
+        && (primary == null || primary == '' || primary == schoolId);
+    }
+
+    // A group membership alone is not proof that a legacy root post is public.
+    // Author/manager preview still requires a consistent canonical school.
     function canReadGroupPost(postId) {
-      return exists(/databases/$(database)/documents/groupPosts/$(postId))
-        && isActiveGroupMember(get(/databases/$(database)/documents/groupPosts/$(postId)).data.groupId);
+      let postPath = /databases/$(database)/documents/groupPosts/$(postId);
+      return isSignedIn() && exists(postPath)
+        && canReadExistingRootPost(get(postPath).data);
+    }
+
+    function canReadExistingRootPost(post) {
+      let groupId = post.get('groupId', null);
+      return groupId is string && groupId.size() > 0
+        && isActiveGroupMember(groupId)
+        && isConsistentRootPostSchoolMember(
+          get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', '')
+        )
+        && (
+          post.get('authorId', '') == request.auth.uid
+          || canManageGroup(groupId)
+          || (post.get('published', false) == true
+            && post.get('status', '') == 'published'
+            && post.get('deleted', true) == false
+            && post.get('deletedAt', 'missing') == null)
+        );
+    }
+
+    // Draft previews must never grant permission to vote on the draft itself.
+    function canReactToRootPost(postId) {
+      let postPath = /databases/$(database)/documents/groupPosts/$(postId);
+      return canReadGroupPost(postId)
+        && get(postPath).data.get('published', false) == true
+        && get(postPath).data.get('status', '') == 'published'
+        && get(postPath).data.get('deleted', true) == false
+        && get(postPath).data.get('deletedAt', 'missing') == null;
     }
 
     function canReadAssignment(assignmentId) {
@@ -2355,32 +2401,35 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Group Posts (global collection for simplicity)
+    // Legacy global posts are exact-read only; never enumerate unscoped IDs.
     match /groupPosts/{docId} {
-      allow read: if canReadGroupPost(docId);
+      allow get: if canReadGroupPost(docId);
+      allow list: if false;
       allow write: if false;
     }
 
     match /postLikes/{docId} {
-      // A global list of votes exposes campus members' identities across
-      // groups. Keep exact-document reads to members of the parent post;
-      // enumeration is server-only until consumers use a school-scoped index.
+      // A vote always needs an explicitly published parent (including delete).
       allow get: if isSignedIn()
         && resource.data.get('postId', null) is string
-        && canReadGroupPost(resource.data.postId);
+        && canReactToRootPost(resource.data.postId);
       allow list: if false;
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
-        && canReadGroupPost(request.resource.data.postId);
+        && request.resource.data.get('postId', null) is string
+        && canReactToRootPost(request.resource.data.postId);
       allow delete: if isSignedIn()
         && resource.data.userId == request.auth.uid
-        && canReadGroupPost(resource.data.postId);
+        && resource.data.get('postId', null) is string
+        && canReactToRootPost(resource.data.postId);
       allow update: if false;
     }
 
-    // Comments
+    // Comments inherit the parent's current-school and publication boundary.
     match /comments/{docId} {
-      allow read: if canReadGroupPost(resource.data.postId);
+      allow get: if resource.data.get('postId', null) is string
+        && canReadGroupPost(resource.data.postId);
+      allow list: if false;
       allow write: if false;
     }
 

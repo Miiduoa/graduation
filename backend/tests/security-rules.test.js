@@ -503,8 +503,8 @@ describe('firestore security rules', () => {
       await db.doc('groups/ncku-group/members/mallory').set({ status: 'active', role: 'member' });
       await db.doc('groups/pu-group').set({ schoolId: 'pu' });
       await db.doc('groups/ncku-group').set({ schoolId: 'ncku' });
-      await db.doc('groupPosts/pu-post').set({ groupId: 'pu-group' });
-      await db.doc('groupPosts/ncku-post').set({ groupId: 'ncku-group' });
+      await db.doc('groupPosts/pu-post').set({ groupId: 'pu-group', authorId: 'alice', published: true, status: 'published', deleted: false, deletedAt: null });
+      await db.doc('groupPosts/ncku-post').set({ groupId: 'ncku-group', authorId: 'mallory', published: true, status: 'published', deleted: false, deletedAt: null });
       await db.doc('postLikes/pu-like').set({ postId: 'pu-post', userId: 'alice' });
       await db.doc('postLikes/ncku-like').set({ postId: 'ncku-post', userId: 'mallory' });
       // Legacy malformed votes must not authorize a read without a parent.
@@ -555,6 +555,101 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.doc('postLikes/pu-like').get());
     await assertSucceeds(alice.doc('postLikes/pu-like').delete());
     await assertSucceeds(bob.doc('postLikes/bob-pu').delete());
+  });
+
+  test('legacy root post known IDs enforce publication, campus transfer and revocation', async () => {
+    const publicFields = { published: true, status: 'published', deleted: false, deletedAt: null };
+    await seedFirestore(async (db) => {
+      await db.doc('groups/root-pu').set({ schoolId: 'pu' });
+      await db.doc('groups/root-ncku').set({ schoolId: 'ncku' });
+      for (const [uid, role] of [['alice', 'owner'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc('groups/root-pu/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc('users/outsider').set({ status: 'active', schoolId: 'ncku' });
+      await db.doc('schools/ncku/members/outsider').set({ status: 'active' });
+      await db.doc('groups/root-ncku/members/outsider').set({ status: 'active', role: 'member' });
+      await db.doc('groupPosts/root-public').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields });
+      await db.doc('groupPosts/root-draft').set({ groupId: 'root-pu', authorId: 'alice', published: false, status: 'draft' });
+      await db.doc('groupPosts/root-legacy').set({ groupId: 'root-pu', authorId: 'alice' });
+      await db.doc('groupPosts/root-archived').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, status: 'archived' });
+      await db.doc('groupPosts/root-cross').set({ groupId: 'root-ncku', authorId: 'outsider', ...publicFields });
+      await db.doc('comments/root-public-comment').set({ postId: 'root-public', body: 'public' });
+      await db.doc('comments/root-draft-comment').set({ postId: 'root-draft', body: 'private' });
+      await db.doc('comments/root-legacy-comment').set({ postId: 'root-legacy', body: 'unclassified' });
+      await db.doc('postLikes/root-existing-like').set({ postId: 'root-public', userId: 'bob' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('comments/root-public-comment').get());
+    await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await assertFails(guest.doc('groupPosts/root-public').get());
+    await assertFails(outsider.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('groupPosts/root-cross').get());
+    await assertFails(bob.collection('groupPosts').get());
+    await assertFails(bob.collection('comments').get());
+    for (const id of ['root-draft', 'root-legacy', 'root-archived']) {
+      await assertFails(bob.doc('groupPosts/' + id).get());
+    }
+    await assertFails(bob.doc('comments/root-draft-comment').get());
+    await assertFails(bob.doc('comments/root-legacy-comment').get());
+    await assertSucceeds(alice.doc('groupPosts/root-draft').get());
+    await assertSucceeds(teacher.doc('groupPosts/root-draft').get());
+    await assertFails(alice.doc('postLikes/root-draft-vote').set({ postId: 'root-draft', userId: 'alice' }));
+    await assertFails(teacher.doc('postLikes/root-draft-vote').set({ postId: 'root-draft', userId: 'teacher' }));
+    await assertSucceeds(bob.doc('postLikes/root-new-like').set({ postId: 'root-public', userId: 'bob' }));
+    await assertFails(bob.doc('postLikes/root-legacy-like').set({ postId: 'root-legacy', userId: 'bob' }));
+
+    // Both school fields are server-owned. A partial transfer can leave
+    // old membership active; conflicting fields must not authorize the old ID.
+    await seedFirestore(db => db.doc('users/bob').update({ primarySchoolId: 'ncku' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('comments/root-public-comment').get());
+    await assertFails(bob.doc('postLikes/root-existing-like').get());
+    await assertFails(bob.doc('postLikes/conflicting-school-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await seedFirestore(db => db.doc('users/bob').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('postLikes/reverse-school-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+
+    // Older profiles with just one server-owned school binding remain valid.
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', schoolId: 'pu', primarySchoolId: 'pu' }));
+
+    // Reuse the same signed-in client: stale old-school group and school
+    // membership documents must not survive a canonical school transfer.
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('comments/root-public-comment').get());
+    await assertFails(bob.doc('postLikes/root-existing-like').get());
+    await assertFails(bob.doc('postLikes/root-new-like').delete());
+    await assertFails(bob.doc('postLikes/root-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('schools/pu/members/bob').update({ status: 'inactive' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('schools/pu/members/bob').update({ status: 'active' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await seedFirestore(db => db.doc('groupPosts/root-public').update({ status: 'archived' }));
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('postLikes/root-new-like').delete());
+    await seedFirestore(db => db.doc('groupPosts/root-public').update({ status: 'published' }));
+    await assertSucceeds(bob.doc('postLikes/root-new-like').delete());
   });
 
   for (const accountState of [
