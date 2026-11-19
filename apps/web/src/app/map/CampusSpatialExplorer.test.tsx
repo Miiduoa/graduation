@@ -2764,3 +2764,54 @@ it('aborts an in-flight OSM download when a Providence filter changes to transit
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+
+it('keeps relation-only Providence POIs navigable without requesting unsupported way-only outlines', async () => {
+  const relationPlace = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-xijia')!;
+  // Relations have an audited map source but are not rendered by the current
+  // way-only footprint parser. Never pay for an unusable Overpass download.
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[relationPlace]}
+    selected={relationPlace} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(within(dialog).getByText(/沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
+  expect(within(dialog).getByRole('heading', { name: relationPlace.name })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '查看地點資料來源 ↗' }).getAttribute('href'))
+    .toBe('https://www.openstreetmap.org/relation/9246899');
+});
+
+it('discloses missing audited way outlines without treating a partial OSM reply as complete coverage', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  // Synthetic partial source: one of two audited ways has a displayable outline.
+  // The absent way is not proof that its physical building or entrance vanished.
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+    }),
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library, zhugu]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/另有 1 筆清單中的 OSM 建築 way 未取得可顯示的有效外框/))
+    .toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
