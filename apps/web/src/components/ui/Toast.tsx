@@ -5,10 +5,13 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
+  useRef,
   useSyncExternalStore,
   ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import styles from './Toast.module.css';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -81,13 +84,8 @@ export function ToastProvider({
         const updated = [newToast, ...prev];
         return updated.slice(0, maxToasts);
       });
-
-      const duration = toast.duration ?? 4000;
-      if (duration > 0) {
-        setTimeout(() => dismiss(id), duration);
-      }
     },
-    [dismiss, maxToasts],
+    [maxToasts],
   );
 
   const success = useCallback(
@@ -111,15 +109,6 @@ export function ToastProvider({
     [showToast],
   );
 
-  const positionStyles: Record<string, React.CSSProperties> = {
-    'top-right': { top: '20px', right: '20px' },
-    'top-left': { top: '20px', left: '20px' },
-    'bottom-right': { bottom: '20px', right: '20px' },
-    'bottom-left': { bottom: '20px', left: '20px' },
-    'top-center': { top: '20px', left: '50%', transform: 'translateX(-50%)' },
-    'bottom-center': { bottom: '20px', left: '50%', transform: 'translateX(-50%)' },
-  };
-
   return (
     <ToastContext.Provider
       value={{ showToast, success, error, warning, info, dismiss, dismissAll }}
@@ -127,19 +116,9 @@ export function ToastProvider({
       {children}
       {mounted &&
         createPortal(
-          <div
-            style={{
-              position: 'fixed',
-              zIndex: 1100,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              pointerEvents: 'none',
-              ...positionStyles[position],
-            }}
-          >
+          <div className={styles.region} data-position={position}>
             {toasts.map((toast) => (
-              <ToastItem key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
+              <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
             ))}
           </div>,
           document.body,
@@ -150,124 +129,61 @@ export function ToastProvider({
 
 interface ToastItemProps {
   toast: Toast;
-  onDismiss: () => void;
+  onDismiss: (id: string) => void;
 }
 
 function ToastItem({ toast, onDismiss }: ToastItemProps) {
-  const typeStyles: Record<ToastType, { bg: string; border: string; icon: string }> = {
-    success: {
-      bg: 'rgba(16, 185, 129, 0.15)',
-      border: 'rgba(16, 185, 129, 0.3)',
-      icon: '✓',
-    },
-    error: {
-      bg: 'rgba(239, 68, 68, 0.15)',
-      border: 'rgba(239, 68, 68, 0.3)',
-      icon: '✕',
-    },
-    warning: {
-      bg: 'var(--warning-soft)',
-      border: 'var(--warning-soft)',
-      icon: '⚠',
-    },
-    info: {
-      bg: 'rgba(59, 130, 246, 0.15)',
-      border: 'rgba(59, 130, 246, 0.3)',
-      icon: 'ℹ',
-    },
+  const icons: Record<ToastType, string> = {
+    success: '✓',
+    error: '✕',
+    warning: '!',
+    info: 'i',
   };
+  const duration = toast.duration ?? 4000;
+  const remaining = useRef(duration);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const paused = hovered || focused;
 
-  const style = typeStyles[toast.type];
+  useEffect(() => {
+    if (duration <= 0 || paused) return;
+
+    const startedAt = Date.now();
+    const timer = window.setTimeout(() => onDismiss(toast.id), remaining.current);
+    return () => {
+      window.clearTimeout(timer);
+      remaining.current = Math.max(0, remaining.current - (Date.now() - startedAt));
+    };
+  }, [duration, onDismiss, paused, toast.id]);
 
   return (
     <div
-      style={{
-        pointerEvents: 'auto',
-        minWidth: '300px',
-        maxWidth: '400px',
-        background: style.bg,
-        backdropFilter: 'blur(12px)',
-        border: `1px solid ${style.border}`,
-        borderRadius: '12px',
-        padding: '14px 16px',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '12px',
-        animation: 'toastIn 0.3s ease',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
+      className={`${styles.toast} ${styles[toast.type]}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
       }}
     >
-      <style>{`
-        @keyframes toastIn {
-          from {
-            opacity: 0;
-            transform: translateX(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-      `}</style>
-      <div
-        style={{
-          width: '24px',
-          height: '24px',
-          borderRadius: '50%',
-          background: style.border,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '12px',
-          fontWeight: 700,
-          color: 'var(--text)',
-          flexShrink: 0,
-        }}
-      >
-        {style.icon}
+      <div className={styles.icon} aria-hidden="true">
+        {icons[toast.type]}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: '14px',
-            fontWeight: 600,
-            color: 'var(--text)',
-            marginBottom: toast.message ? '4px' : 0,
-          }}
-        >
-          {toast.title}
-        </div>
-        {toast.message && (
-          <div
-            style={{
-              fontSize: '13px',
-              color: 'var(--muted)',
-              lineHeight: 1.4,
-            }}
-          >
-            {toast.message}
-          </div>
-        )}
+      <div
+        className={styles.content}
+        role={toast.type === 'error' ? 'alert' : 'status'}
+        aria-atomic="true"
+      >
+        <div className={styles.title}>{toast.title}</div>
+        {toast.message && <div className={styles.message}>{toast.message}</div>}
       </div>
       <button
-        onClick={onDismiss}
-        style={{
-          width: '24px',
-          height: '24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--muted)',
-          fontSize: '16px',
-          borderRadius: '6px',
-          flexShrink: 0,
-        }}
-        aria-label="Dismiss"
+        type="button"
+        className={styles.dismiss}
+        onClick={() => onDismiss(toast.id)}
+        aria-label={`關閉通知：${toast.title}`}
       >
-        ✕
+        <span aria-hidden="true">✕</span>
       </button>
     </div>
   );
