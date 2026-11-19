@@ -775,7 +775,7 @@ it('keeps textbook chapter and lesson ordinals as source text, not quantity bars
     const material = [
       '| 課程 | ' + header + ' |', '| --- | --- |',
       '| 資料庫 | 2 |', '| 網路 | 4 |',
-    ].join('\\n');
+    ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
       .toEqual(['2', '4']);
@@ -794,7 +794,7 @@ it('still compares explicit numbers of weeks, chapters and learning units', () =
     const material = [
       '| 班級 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2 |', '| 乙 | 4 |',
-    ].join('\\n');
+    ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(Array.from(container.querySelectorAll('meter')).map(bar => [
       bar.getAttribute('value'), bar.getAttribute('max'),

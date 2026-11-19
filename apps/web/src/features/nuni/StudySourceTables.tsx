@@ -118,8 +118,8 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // A textbook's week, chapter or lesson ordinal is a position, not a
   // measurement. "Chapter 4" must not appear twice as large as "Chapter 2".
   // Count headers (e.g. Number of Chapters / 章節數量) remain eligible.
-  if (/^(?:章節|章次|章號|單元|單元號|單元編號|課次|講次|節次|第幾週)(?:\\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
-      /^(?:week|chapter|unit|lesson|module|section|lecture|session)(?:\\s+(?:number|no\\.?|id|#))?(?:\\s*\\([^)]{1,40}\\))?$/iu.test(column)) return null;
+  if (/^(?:章節|章次|章號|單元|單元號|單元編號|課次|講次|節次|第幾週)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
+      /^(?:week|chapter|unit|lesson|module|section|lecture|session)(?:\s+(?:number|no\.?|id|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return null;
   // Numeric room and seat labels identify where a student belongs, not
   // quantities: classroom 301 is not 1.5 times classroom 205. A real
   // "教室數" / "Room Count" header remains a valid measured quantity.
