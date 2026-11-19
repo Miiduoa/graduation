@@ -414,16 +414,26 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // entries expose time; use the most recent timestamp rather than
           // trusting array order. Keep last-entry fallback for legacy WebViews
           // or test shims without timestamps; an empty batch changes nothing.
-          let latest = hostEntries[hostEntries.length - 1];
-          if (!latest) return;
-          if (Number.isFinite(latest.time)) {
-            for (const entry of hostEntries) {
-              if (Number.isFinite(entry.time) && entry.time > latest.time) latest = entry;
+          if (!hostEntries.length) return;
+          // Some embedded WebViews include a time only on *some* entries.
+          // An untimed final item must not hide a newer timed transition,
+          // and an untimed callback cannot safely supersede a timestamped
+          // offscreen event delivered earlier. Purely untimed legacy shims
+          // still follow array order until a trustworthy time is observed.
+          const timed = hostEntries.filter((entry) => Number.isFinite(entry.time));
+          let latest: IntersectionObserverEntry;
+          if (timed.length) {
+            latest = timed[0];
+            for (const entry of timed) {
+              if (entry.time > latest.time) latest = entry;
             }
             // A delayed older callback may arrive after a newer one, even
             // if it is the sole entry in its own callback.
             if (latest.time < lastObservationTime) return;
             lastObservationTime = latest.time;
+          } else {
+            if (lastObservationTime !== -Infinity) return;
+            latest = hostEntries[hostEntries.length - 1];
           }
           visible = latest.isIntersecting;
           updateVisibility();
