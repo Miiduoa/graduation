@@ -1,0 +1,874 @@
+import React from 'react';
+import { act, fireEvent, render } from '@testing-library/react-native';
+import { AppState, type AppStateStatus } from 'react-native';
+import { StoryAudiencePanel } from '../screens/social/StoryAudiencePanel';
+import { listStoryViewers, type CampusStoryDoc } from '../services/stories';
+
+jest.mock('../services/stories', () => ({
+  listStoryViewers: jest.fn(),
+}));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+
+type Page = Awaited<ReturnType<typeof listStoryViewers>>;
+type Cursor = Parameters<typeof listStoryViewers>[1];
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+const puStory: CampusStoryDoc = {
+  id: 'shared-story-id',
+  schoolId: 'pu',
+  authorUid: 'owner',
+  kind: 'text',
+};
+const otherStory: CampusStoryDoc = { ...puStory, schoolId: 'nchu' };
+
+describe('story audience scope transitions', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    // React Native's Jest AppState mock must return a removable subscription.
+    // resetAllMocks() clears its default implementation; restore the real API shape.
+    jest.mocked(AppState.addEventListener).mockImplementation(() => ({
+      remove: jest.fn(),
+    }));
+  });
+
+  test('switching school with the same story ID immediately hides old viewers, resets the cursor, and ignores late pages', async () => {
+    const oldCursor = { id: 'pu-cursor' } as Cursor;
+    const oldPage = deferred<Page>();
+    const newPage = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers.mockImplementation((scope, cursor) => {
+      if (scope.schoolId === 'pu' && cursor === null) {
+        return Promise.resolve({
+          viewers: [{ uid: 'pu-student', displayName: '甲校同學' }],
+          nextCursor: oldCursor,
+        });
+      }
+      if (scope.schoolId === 'pu' && cursor === oldCursor) return oldPage.promise;
+      if (scope.schoolId === 'nchu' && cursor === null) return newPage.promise;
+      return Promise.reject(new Error('Unexpected scope or cursor'));
+    });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('甲校同學')).toBeTruthy();
+
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(fetchViewers).toHaveBeenCalledWith(
+      { id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner' },
+      oldCursor,
+    );
+
+    view.rerender(<StoryAudiencePanel story={otherStory} onBack={jest.fn()} />);
+    expect(view.queryByText('甲校同學')).toBeNull();
+    expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+    expect(fetchViewers).toHaveBeenCalledWith(
+      { id: 'shared-story-id', schoolId: 'nchu', authorUid: 'owner' },
+      null,
+    );
+
+    await act(async () => {
+      newPage.resolve({
+        viewers: [{ uid: 'nchu-student', displayName: '乙校同學' }],
+        nextCursor: null,
+      });
+      await newPage.promise;
+    });
+    expect(view.getByText('乙校同學')).toBeTruthy();
+    expect(view.queryByText('甲校同學')).toBeNull();
+
+    await act(async () => {
+      oldPage.resolve({
+        viewers: [{ uid: 'pu-other', displayName: '甲校晚到名單' }],
+        nextCursor: null,
+      });
+      await oldPage.promise;
+    });
+    expect(view.getByText('乙校同學')).toBeTruthy();
+    expect(view.queryByText('甲校晚到名單')).toBeNull();
+    view.unmount();
+  });
+
+  test('a fresh school permission denial cannot reveal the previous school audience', async () => {
+    const denied = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers.mockImplementation((scope, cursor) => {
+      if (cursor !== null) throw new Error('Unexpected cursor');
+      if (scope.schoolId === 'pu') {
+        return Promise.resolve({
+          viewers: [{ uid: 'pu-student', displayName: '上一校觀看者' }],
+          nextCursor: null,
+        });
+      }
+      return denied.promise;
+    });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('上一校觀看者')).toBeTruthy();
+
+    view.rerender(<StoryAudiencePanel story={otherStory} onBack={jest.fn()} />);
+    expect(view.queryByText('上一校觀看者')).toBeNull();
+    await act(async () => {
+      denied.reject({ code: 'permission-denied' });
+      await denied.promise.catch(() => {});
+    });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('上一校觀看者')).toBeNull();
+    view.unmount();
+  });
+  test('denied audience provides a visible accessible recheck and starts over after membership restoration', async () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '重新取得資格的觀看者' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.getByText('重新檢查權限')).toBeTruthy();
+    const recheck = view.getByLabelText('重新檢查存取權限');
+    expect(recheck.props.accessibilityRole).toBe('button');
+    expect(fetchViewers).toHaveBeenCalledWith(
+      { id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner' }, null,
+    );
+
+    await act(async () => {
+      fireEvent.press(recheck);
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenCalledTimes(2);
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, null);
+    expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
+    expect(view.getByText('重新取得資格的觀看者')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('a stalled first page offers an explicit retry and ignores its late response', async () => {
+    jest.useFakeTimers();
+    const stale = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'fresh-student', displayName: '重試後的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+    await act(async () => {
+      jest.advanceTimersByTime(14_999);
+      await Promise.resolve();
+    });
+    expect(view.queryByText('再試一次')).toBeNull();
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(view.getByText('暫時無法載入觀看名單')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(view.getByText('再試一次'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null]);
+    expect(view.getByText('重試後的同學')).toBeTruthy();
+
+    await act(async () => {
+      stale.resolve({
+        viewers: [{ uid: 'stale-student', displayName: '過期的舊回應' }],
+        nextCursor: null,
+      });
+      await stale.promise;
+    });
+    expect(view.getByText('重試後的同學')).toBeTruthy();
+    expect(view.queryByText('過期的舊回應')).toBeNull();
+    view.unmount();
+    jest.useRealTimers();
+  });
+
+  test('a stalled next page keeps the first page and retries its exact cursor', async () => {
+    jest.useFakeTimers();
+    const cursor = { id: 'first-page-cursor' } as Cursor;
+    const stale = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'first-student', displayName: '第一頁同學' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'next-student', displayName: '下一頁同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText('暫時無法載入觀看名單')).toBeTruthy();
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(view.getByText('再試一次'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, cursor]);
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    expect(view.getByText('下一頁同學')).toBeTruthy();
+
+    await act(async () => {
+      stale.reject({ code: 'permission-denied' });
+      await stale.promise.catch(() => {});
+    });
+    expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
+    expect(view.getByText('第一頁同學')).toBeTruthy();
+    expect(view.getByText('下一頁同學')).toBeTruthy();
+    view.unmount();
+    jest.useRealTimers();
+  });
+
+  test('a late permission denial after the next-page timeout clears old viewers before a manual retry', async () => {
+    jest.useFakeTimers();
+    const cursor = { id: 'expired-page-cursor' } as Cursor;
+    const stalled = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old-student', displayName: '逾時前的觀看者' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => stalled.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored-student', displayName: '恢復資格的新觀看者' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(view.getByText('逾時前的觀看者')).toBeTruthy();
+
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText('暫時無法載入觀看名單')).toBeTruthy();
+    expect(view.getByText('逾時前的觀看者')).toBeTruthy();
+
+    await act(async () => {
+      stalled.reject({ code: 'permission-denied' });
+      await stalled.promise.catch(() => {});
+    });
+    expect(view.queryByText('逾時前的觀看者')).toBeNull();
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新檢查存取權限'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('恢復資格的新觀看者')).toBeTruthy();
+    expect(view.queryByText('逾時前的觀看者')).toBeNull();
+    view.unmount();
+    jest.useRealTimers();
+  });
+
+  test('an owner can refresh the current audience from the first page without replaying cached viewers or an old cursor', async () => {
+    const pendingRefresh = deferred<Page>();
+    const cursor = { id: 'old-cursor' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'first', displayName: '原本觀看者' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => pendingRefresh.promise);
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('原本觀看者')).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+    expect(fetchViewers).toHaveBeenLastCalledWith(
+      { id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner' },
+      null,
+    );
+    expect(view.queryByText('原本觀看者')).toBeNull();
+    expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+
+    await act(async () => {
+      pendingRefresh.resolve({
+        viewers: [{ uid: 'new', displayName: '新觀看者' }],
+        nextCursor: null,
+      });
+      await pendingRefresh.promise;
+    });
+    expect(view.getByText('新觀看者')).toBeTruthy();
+    expect(view.queryByText('原本觀看者')).toBeNull();
+    view.unmount();
+  });
+
+  test('refresh denial clears old viewer names and permits a server recheck after access returns', async () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'previous', displayName: '撤權前觀看者' }],
+        nextCursor: null,
+      })
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '恢復權限後觀看者' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('撤權前觀看者')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+      await Promise.resolve();
+    });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null, null]);
+    expect(view.getByText('恢復權限後觀看者')).toBeTruthy();
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+    view.unmount();
+  });
+
+  test('overlapping audience cursor pages display each student once and continue to the next cursor', async () => {
+    const firstCursor = { id: 'first-cursor' } as Cursor;
+    const secondCursor = { id: 'second-cursor' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [
+          { uid: 'student-a', displayName: '甲同學' },
+          { uid: 'student-b', displayName: '乙同學' },
+        ],
+        nextCursor: firstCursor,
+      })
+      .mockResolvedValueOnce({
+        viewers: [
+          { uid: 'student-b', displayName: '乙同學' },
+          { uid: 'student-c', displayName: '丙同學' },
+        ],
+        nextCursor: secondCursor,
+      })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'student-d', displayName: '丁同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('已顯示 2 位 · 最近觀看優先')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, firstCursor);
+    expect(view.getAllByText('乙同學')).toHaveLength(1);
+    expect(view.getByText('已顯示 3 位 · 最近觀看優先')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenNthCalledWith(3, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, secondCursor);
+    expect(view.getAllByText('乙同學')).toHaveLength(1);
+    expect(view.getByText('丙同學')).toBeTruthy();
+    expect(view.getByText('丁同學')).toBeTruthy();
+    expect(view.getByText('已顯示 4 位 · 最近觀看優先')).toBeTruthy();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+    view.unmount();
+  });
+
+  test('pagination permission denial removes already-rendered viewer names and rechecks a restored author from page one', async () => {
+    const cursor = { id: 'previously-authorized-cursor' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '撤權前可見的同學' }],
+        nextCursor: cursor,
+      })
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '重新授權後的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('撤權前可見的同學')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, cursor);
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('撤權前可見的同學')).toBeNull();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新整理觀看名單'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('重新授權後的同學')).toBeTruthy();
+    expect(view.queryByText('撤權前可見的同學')).toBeNull();
+    view.unmount();
+  });
+
+  test('background removes old viewers, discards late pages, and foreground rechecks from first page', async () => {
+    let notifyState: ((state: AppStateStatus) => void) | undefined;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      if (event === 'change') notifyState = listener as (state: AppStateStatus) => void;
+      return { remove: jest.fn() } as ReturnType<typeof AppState.addEventListener>;
+    });
+    const cursor = { id: 'old-page' } as Cursor;
+    const delayedPage = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '背景前的觀看者' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => delayedPage.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '重新確認後的觀看者' }],
+        nextCursor: null,
+      });
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('背景前的觀看者')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor]);
+    expect(notifyState).toBeDefined();
+    act(() => { notifyState?.('background'); });
+    expect(view.queryByText('背景前的觀看者')).toBeNull();
+    expect(fetchViewers).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      delayedPage.resolve({
+        viewers: [{ uid: 'late', displayName: '背景晚到的觀看者' }],
+        nextCursor: null,
+      });
+      await delayedPage.promise;
+    });
+    expect(view.queryByText('背景晚到的觀看者')).toBeNull();
+    expect(fetchViewers).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      notifyState?.('active');
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('重新確認後的觀看者')).toBeTruthy();
+    expect(view.queryByText('背景前的觀看者')).toBeNull();
+    view.unmount();
+    subscription.mockRestore();
+  });
+
+  test('foreground denial never restores old names and recovered access explicitly rechecks', async () => {
+    let notifyState: ((state: AppStateStatus) => void) | undefined;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      if (event === 'change') notifyState = listener as (state: AppStateStatus) => void;
+      return { remove: jest.fn() } as ReturnType<typeof AppState.addEventListener>;
+    });
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '撤權前觀看者' }],
+        nextCursor: null,
+      })
+      .mockRejectedValueOnce({ code: 'permission-denied' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '恢復權限後觀看者' }],
+        nextCursor: null,
+      });
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('撤權前觀看者')).toBeTruthy();
+    expect(notifyState).toBeDefined();
+    act(() => { notifyState?.('inactive'); });
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+    await act(async () => {
+      notifyState?.('active');
+      await Promise.resolve();
+    });
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('撤權前觀看者')).toBeNull();
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新檢查存取權限'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null, null]);
+    expect(view.getByText('恢復權限後觀看者')).toBeTruthy();
+    view.unmount();
+    subscription.mockRestore();
+  });
+
+  test('a response settling in the same turn as backgrounding cannot restore private viewers', async () => {
+    let notifyState: ((state: AppStateStatus) => void) | undefined;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      if (event === 'change') notifyState = listener as (state: AppStateStatus) => void;
+      return { remove: jest.fn() } as ReturnType<typeof AppState.addEventListener>;
+    });
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'fresh', displayName: '重新驗證後的學生' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    expect(notifyState).toBeDefined();
+    expect(fetchViewers).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      // The event synchronously invalidates the old read; its Promise settles
+      // before this act batch commits React's passive effect cleanup.
+      notifyState?.('background');
+      pending.resolve({
+        viewers: [{ uid: 'old', displayName: '背景切換瞬間的舊名單' }],
+        nextCursor: null,
+      });
+      await pending.promise;
+    });
+    expect(view.queryByText('背景切換瞬間的舊名單')).toBeNull();
+    expect(fetchViewers).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      notifyState?.('active');
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null]);
+    expect(view.getByText('重新驗證後的學生')).toBeTruthy();
+    expect(view.queryByText('背景切換瞬間的舊名單')).toBeNull();
+    view.unmount();
+    subscription.mockRestore();
+  });
+
+  test('a viewer can stop waiting for a slow next page, ignore late success, and retry the exact cursor', async () => {
+    const cursor = { id: 'slow-second-page' } as Cursor;
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'first', displayName: '已載入的同學' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'second', displayName: '重新載入的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    expect(fetchViewers).toHaveBeenNthCalledWith(2, {
+      id: 'shared-story-id', schoolId: 'pu', authorUid: 'owner',
+    }, cursor);
+    expect(view.getByText('正在載入更多觀看者…')).toBeTruthy();
+    expect(view.getByLabelText('停止等待下一頁')).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText('停止等待下一頁'));
+    expect(view.queryByText('正在載入更多觀看者…')).toBeNull();
+    expect(view.getByText('載入更多觀看者')).toBeTruthy();
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+
+    await act(async () => {
+      pending.resolve({
+        viewers: [{ uid: 'late', displayName: '取消後晚到的同學' }],
+        nextCursor: null,
+      });
+      await pending.promise;
+    });
+    expect(view.queryByText('取消後晚到的同學')).toBeNull();
+    expect(view.queryByText('目前無法存取這則限時動態的觀看名單')).toBeNull();
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, cursor]);
+    expect(view.getByText('已載入的同學')).toBeTruthy();
+    expect(view.getByText('重新載入的同學')).toBeTruthy();
+    expect(view.queryByText('停止等待')).toBeNull();
+    view.unmount();
+  });
+
+  test('a canceled page still clears private names when the server denies access before any new read', async () => {
+    const cursor = { id: 'revoked-second-page' } as Cursor;
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'old', displayName: '撤權前同學' }],
+        nextCursor: cursor,
+      })
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'restored', displayName: '重新驗證的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByText('載入更多觀看者'));
+    fireEvent.press(view.getByLabelText('停止等待下一頁'));
+    expect(view.getByText('撤權前同學')).toBeTruthy();
+
+    await act(async () => {
+      pending.reject({ code: 'permission-denied' });
+      await pending.promise.catch(() => {});
+    });
+    expect(view.queryByText('撤權前同學')).toBeNull();
+    expect(view.getByText('目前無法存取這則限時動態的觀看名單')).toBeTruthy();
+    expect(view.queryByText('載入更多觀看者')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('重新檢查存取權限'));
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, null]);
+    expect(view.getByText('重新驗證的同學')).toBeTruthy();
+    expect(view.queryByText('撤權前同學')).toBeNull();
+    view.unmount();
+  });
+
+  test('a next-page network failure identifies the retry scope and preserves the original cursor', async () => {
+    const cursor = { id: 'accessibility-next-page' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'existing', displayName: '已看到的同學' }],
+        nextCursor: cursor,
+      })
+      .mockRejectedValueOnce({ code: 'unavailable' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '剛載入的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      await Promise.resolve();
+    });
+
+    expect(view.getByText('已看到的同學')).toBeTruthy();
+    expect(view.getByText('下一頁讀取失敗，已顯示的觀看者會保留')).toBeTruthy();
+    const retry = view.getByLabelText('重試載入下一頁觀看者');
+    expect(retry.props.accessibilityHint).toContain('原本的分頁位置');
+
+    await act(async () => {
+      fireEvent.press(retry);
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, cursor, cursor]);
+    expect(view.getByText('已看到的同學')).toBeTruthy();
+    expect(view.getByText('剛載入的同學')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('a first-page network failure offers an explicitly labeled fresh retry', async () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockRejectedValueOnce({ code: 'unavailable' })
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'new', displayName: '查詢成功的同學' }],
+        nextCursor: null,
+      });
+
+    const view = render(<StoryAudiencePanel story={puStory} onBack={jest.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(view.queryByText('下一頁讀取失敗，已顯示的觀看者會保留')).toBeNull();
+    const retry = view.getByLabelText('重新載入觀看名單');
+    expect(retry.props.accessibilityHint).toContain('從第一頁');
+    await act(async () => {
+      fireEvent.press(retry);
+      await Promise.resolve();
+    });
+    expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, null]);
+    expect(view.getByText('查詢成功的同學')).toBeTruthy();
+    view.unmount();
+  });
+
+
+  test('a changed story lifetime never reuses the previous viewer list or pagination cursor', async () => {
+    const oldCursor = { id: 'previous-lifetime-cursor' } as Cursor;
+    const pendingOldPage = deferred<Page>();
+    const pendingNewFirstPage = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers
+      .mockResolvedValueOnce({
+        viewers: [{ uid: 'previous-viewer', displayName: '上一段限動的同學' }],
+        nextCursor: oldCursor,
+      })
+      .mockImplementationOnce(() => pendingOldPage.promise)
+      .mockImplementationOnce(() => pendingNewFirstPage.promise);
+
+    const expiresAt = Date.now() + 120_000;
+    const onBack = jest.fn();
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt }} onBack={onBack} />,
+    );
+    try {
+      await act(async () => { await Promise.resolve(); });
+      expect(view.getByText('上一段限動的同學')).toBeTruthy();
+      fireEvent.press(view.getByText('載入更多觀看者'));
+      expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, oldCursor]);
+
+      // The host may reuse this panel when a story document is replaced or
+      // its lifetime metadata changes without changing school/author/ID.
+      view.rerender(
+        <StoryAudiencePanel story={{ ...puStory, expiresAt: expiresAt + 60_000 }} onBack={onBack} />,
+      );
+      expect(view.queryByText('上一段限動的同學')).toBeNull();
+      expect(view.queryByText('載入更多觀看者')).toBeNull();
+      expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+      expect(fetchViewers.mock.calls.map((args) => args[1])).toEqual([null, oldCursor, null]);
+
+      await act(async () => {
+        pendingOldPage.resolve({
+          viewers: [{ uid: 'stale-viewer', displayName: '前一段晚到的同學' }],
+          nextCursor: null,
+        });
+        await pendingOldPage.promise;
+      });
+      expect(view.queryByText('前一段晚到的同學')).toBeNull();
+
+      await act(async () => {
+        pendingNewFirstPage.resolve({
+          viewers: [{ uid: 'current-viewer', displayName: '這一段新查到的同學' }],
+          nextCursor: null,
+        });
+        await pendingNewFirstPage.promise;
+      });
+      expect(view.getByText('這一段新查到的同學')).toBeTruthy();
+      expect(view.queryByText('上一段限動的同學')).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
+  test('an opened audience clears names and pagination once the story expires', async () => {
+    jest.useFakeTimers();
+    const cursor = { id: 'expiry-next-page' } as Cursor;
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers.mockResolvedValueOnce({
+      viewers: [{ uid: 'before-expiry', displayName: '到期前的觀看者' }],
+      nextCursor: cursor,
+    });
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt: Date.now() + 1_000 }} onBack={jest.fn()} />,
+    );
+    try {
+      await act(async () => { await Promise.resolve(); });
+      expect(view.getByText('到期前的觀看者')).toBeTruthy();
+      expect(view.getByText('載入更多觀看者')).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+        await Promise.resolve();
+      });
+      expect(view.queryByText('到期前的觀看者')).toBeNull();
+      expect(view.queryByText('載入更多觀看者')).toBeNull();
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+      // Pressable maps disabled to responder behavior; the host View does not
+      // expose a literal disabled prop in React Native Testing Library.
+      const refresh = view.getByLabelText('重新整理觀看名單');
+      expect(refresh.props.accessibilityState).toMatchObject({ disabled: true });
+      fireEvent.press(refresh);
+      expect(fetchViewers).toHaveBeenCalledTimes(1);
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+    } finally {
+      view.unmount();
+      jest.useRealTimers();
+    }
+  });
+
+  test('an in-flight page cannot paint names after the story has expired', async () => {
+    jest.useFakeTimers();
+    const pending = deferred<Page>();
+    const fetchViewers = jest.mocked(listStoryViewers);
+    fetchViewers.mockImplementationOnce(() => pending.promise);
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt: Date.now() + 1_000 }} onBack={jest.fn()} />,
+    );
+    try {
+      expect(view.getByText('正在載入觀看名單…')).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        pending.resolve({
+          viewers: [{ uid: 'late', displayName: '到期後才回應的姓名' }],
+          nextCursor: null,
+        });
+        await pending.promise;
+      });
+      expect(view.queryByText('到期後才回應的姓名')).toBeNull();
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+      expect(fetchViewers).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      jest.useRealTimers();
+    }
+  });
+
+  test('an already expired story never requests an audience page', () => {
+    const fetchViewers = jest.mocked(listStoryViewers);
+    const view = render(
+      <StoryAudiencePanel story={{ ...puStory, expiresAt: Date.now() - 1_000 }} onBack={jest.fn()} />,
+    );
+    try {
+      expect(view.getByText('限時動態已到期，觀看名單已關閉')).toBeTruthy();
+      expect(fetchViewers).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+    }
+  });
+
+});

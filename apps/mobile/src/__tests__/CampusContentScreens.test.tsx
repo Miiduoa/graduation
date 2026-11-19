@@ -607,28 +607,53 @@ test('event date filters work and list navigation uses the actual event ID', asy
   expect(view.queryByText(/黑客松|32\/50|AI 為你推薦|我報名的/)).toBeNull();
 });
 
-test('event actions share real content and export valid calendar data without claiming registration', async () => {
-  const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.dismissedAction });
-  const view = render(<EventScreen route={{ params: { eventId: 'e1' } }} />);
-  await view.findByText('校方的新活動');
-  await act(async () => fireEvent.press(view.getByText('分享活動')));
-  expect(share).toHaveBeenCalledWith(
-    expect.objectContaining({ message: expect.stringContaining('活動內容與報名方式') }),
-  );
-  await act(async () => fireEvent.press(view.getByText('匯出行事曆')));
-  expect(exportAndShareICalFile).toHaveBeenCalledWith(
-    [
-      expect.objectContaining({
-        id: 'campus-event-pu-school-club-events-e1',
-        title: '校方的新活動',
-        startDate: new Date(event.startsAt),
-        location: '大禮堂',
-      }),
-    ],
-    'campus-event.ics',
-    'nuni 活動',
-  );
-  expect(view.queryByText(/已加入行事曆|立即報名|已報名|朋友 2 人/)).toBeNull();
+test.each(['school-club-events', 'school-events', 'legacy-events'] as const)(
+  '%s sharing and calendar export link back to the same school and source',
+  async (source) => {
+    const activity = { ...event, id: '迎新 & 說明會', source };
+    jest.mocked(loadCampusEvent).mockResolvedValue(activity);
+    const detailUrl = `https://nuni.tw/events/${encodeURIComponent(activity.id)}?schoolId=pu&source=${source}`;
+    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.dismissedAction });
+    const view = render(<EventScreen route={{ params: { eventId: activity.id, source } }} />);
+    await view.findByText('校方的新活動');
+    await act(async () => fireEvent.press(view.getByText('分享活動')));
+    expect(share).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('活動內容與報名方式') }),
+    );
+    expect(share).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining(detailUrl) }),
+    );
+    await act(async () => fireEvent.press(view.getByText('匯出行事曆')));
+    expect(exportAndShareICalFile).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          id: `campus-event-pu-${source}-${activity.id}`,
+          title: '校方的新活動',
+          startDate: new Date(event.startsAt),
+          location: '大禮堂',
+          url: detailUrl,
+          description: expect.stringContaining(detailUrl),
+        }),
+      ],
+      'campus-event.ics',
+      'nuni 活動',
+    );
+    expect(jest.mocked(exportAndShareICalFile).mock.calls[0][0][0].description).toContain(
+      '報名與時間異動請回到活動頁確認',
+    );
+    expect(view.queryByText(/已加入行事曆|立即報名|已報名|朋友 2 人/)).toBeNull();
+  },
+);
+
+test('an event read denied by the server offers no share or calendar action', async () => {
+  jest.mocked(loadCampusEvent).mockRejectedValue(new Error('permission-denied'));
+  const share = jest.spyOn(Share, 'share');
+  const view = render(<EventScreen route={{ params: { id: 'private', source: 'school-club-events' } }} />);
+  await view.findByText('目前無法讀取，請確認網路連線後重試。');
+  expect(view.queryByText('分享活動')).toBeNull();
+  expect(view.queryByText('匯出行事曆')).toBeNull();
+  expect(share).not.toHaveBeenCalled();
+  expect(exportAndShareICalFile).not.toHaveBeenCalled();
 });
 
 test('unknown event dates cannot export a made-up schedule and failed sharing allows retry', async () => {

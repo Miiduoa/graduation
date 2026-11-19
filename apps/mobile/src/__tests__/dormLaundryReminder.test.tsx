@@ -6,7 +6,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { dormStorageKey } from '@campus/shared/src/dormitory';
+import { watchDormCloud, watchDormParcels } from '@campus/shared/src/dormitoryCloud';
 import { laundryNotificationAllowed, refreshDormLaundryReminder, selectDormLaundryScope } from '../services/dormLaundryReminder';
+
+jest.mock('../services/dormitoryCloud', () => ({ subscribeDormCloud: jest.fn((_school, _uid, change) => { change({ packages: [], repairs: [], packagesState: 'ready', repairsState: 'ready', identity: null }); return jest.fn(); }) }));
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
 
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' }, selectionReady: true }) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'private-id' } }) }));
@@ -209,4 +213,190 @@ test('a resident can start a timer after denying notifications, turn reminders o
   await act(async () => fireEvent.press(screen.getByText('清除計時')));
   expect(await screen.findByText('尚未開始')).toBeTruthy();
   expect([...alarms.keys()]).toEqual(['unrelated']);
+});
+
+
+test('a resident records repair follow-up, copies the handoff and reopens a memo', async () => {
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('設備問題'));
+  fireEvent.press(screen.getByText('冷氣無法正常運作'));
+  fireEvent.changeText(screen.getByLabelText('可聯繫時段／入室協調（選填）'), '週五晚上請先聯絡');
+  fireEvent.changeText(screen.getByLabelText('下次追問日期（選填，YYYY-MM-DD）'), '2026-12-01');
+  fireEvent.changeText(screen.getByLabelText('聯繫紀錄（自行記錄）'), '服務台請我補照片');
+  await act(async () => fireEvent.press(screen.getByText('存成我的報修備忘')));
+  expect(screen.getByText('下次追問：2026-12-01')).toBeTruthy();
+  await act(async () => fireEvent.press(screen.getByText('複製內容')));
+  expect(require('expo-clipboard').setStringAsync).toHaveBeenCalledWith(expect.stringContaining('週五晚上請先聯絡'));
+  await act(async () => fireEvent.press(screen.getByText('我已確認修復')));
+  expect(screen.queryByText('下次追問：2026-12-01')).toBeNull();
+  await act(async () => fireEvent.press(screen.getByText('重新開啟備忘')));
+  const saved = JSON.parse((await AsyncStorage.getItem(scope))!);
+  expect(saved.repairs[0]).toMatchObject({ status: 'draft', followUpDate: '2026-12-01', followUpNote: '服務台請我補照片' });
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getByText(/官方包裹查詢未串接/)).toBeTruthy();
+  expect(screen.getByText('到校方確認包裹查詢方式 ↗')).toBeTruthy();
+});
+
+test('cloud parcels show arrival and identity, keep postal items separate, and preserve local notes', async () => {
+  const { projectDormParcel, projectDormRepair } = require('@campus/shared/src/dormitoryCloud');
+  const subscribe = require('../services/dormitoryCloud').subscribeDormCloud;
+  subscribe.mockImplementationOnce((_school, _uid, change) => {
+    change({ packagesState: 'ready', repairsState: 'ready',
+      identity: { studentId: 'S123456', name: '林同學' },
+      packages: [projectDormParcel('estimate', { description: '預估提醒包裹', arrivedAt: Date.now() - 2 * 86400000 }), projectDormParcel('arrival', { description: '家人寄的衣服', location: '希嘉學苑服務台', createdAt: Date.now() - 4 * 86400000 }), projectDormParcel('postal', { description: '不混入的掛號', courier: '中華郵政' })],
+      repairs: [projectDormRepair('r', { description: '冷氣不冷', status: 'completed', completedAt: Date.now(), reference: 'PRIVATE-REF' })],
+    });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  expect(screen.getByText(/待領包裹 2 件/)).toBeTruthy();
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getByText('家人寄的衣服')).toBeTruthy();
+  expect(screen.getByText('已到件多日，請確認領取期限')).toBeTruthy();
+  expect(screen.getByText('預估明天起可能退件（依到件日加三天推算，實際期限以宿舍公告為準）')).toBeTruthy();
+  expect(screen.queryByText(/登錄退件／領取期限/)).toBeNull();
+  expect(screen.getByText('掛號包裹請看收發室公告')).toBeTruthy();
+  expect(screen.queryByText('不混入的掛號')).toBeNull();
+  expect(screen.getByText('我自己記的')).toBeTruthy();
+  fireEvent.press(screen.getAllByText('領取碼')[0]);
+  expect(screen.getByText('S123456')).toHaveStyle({ fontSize: 34 });
+  expect(screen.getByText('林同學')).toHaveStyle({ fontSize: 34 });
+  fireEvent.press(screen.getByText('關閉領取碼'));
+  fireEvent.press(screen.getByText('設備問題'));
+  expect(screen.getByText(/備忘標記：已完成 ·/)).toBeTruthy();
+  expect(screen.queryByText(/PRIVATE-REF|已送出|單號|你抽中了|通行證|已扣款/)).toBeNull();
+  expect(screen.getByText('緊急請直接打服務台')).toBeTruthy();
+});
+
+test.each([
+  ['2026-11-20T02:00:00Z', '2026/11/20 10:00:00'],
+  ['2026-11-15T02:00:00Z', '2026/11/15 10:00:00'],
+])('有登錄期限 %s 時，包裹卡片顯示台灣日期，不使用三天推算', async (pickupDeadline, date) => {
+  const { emptyDormCloud, projectDormParcel } = require('@campus/shared/src/dormitoryCloud');
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    change({
+      ...emptyDormCloud(), packagesState: 'ready', repairsState: 'ready',
+      packages: [projectDormParcel('official', {
+        description: '有登錄期限的包裹', arrivedAt: Date.now() - 2 * 86400000, pickupDeadline,
+      })],
+    });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getByText(`登錄退件／領取期限：${date}（台灣時間）`)).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日|已退件/)).toBeNull();
+});
+
+test.each(['picked_up', 'returned'])('包裹狀態 %s 不顯示待退件提示', async (status) => {
+  const { emptyDormCloud, projectDormParcel } = require('@campus/shared/src/dormitoryCloud');
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    change({
+      ...emptyDormCloud(), packagesState: 'ready', repairsState: 'ready',
+      packages: [projectDormParcel('completed', {
+        description: '已處理的包裹', arrivedAt: Date.now() - 4 * 86400000,
+        returnAt: '2026-11-15T02:00:00Z', status,
+      })],
+    });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  expect(screen.getAllByText(status === 'returned' ? '已退件' : '已領取').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/登錄退件／領取期限|預估|依到件日加三天推算|已到件多日/)).toBeNull();
+});
+
+test('a resident can view and update an existing local repair reference', async () => {
+  const { DORM_REPAIR_COPY } = require('@campus/shared/src/dormitory');
+  await AsyncStorage.setItem(scope, JSON.stringify({ repairs: [{ id: 'local', title: '水龍頭漏水', reference: 'LOCAL-123' }] }));
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('設備問題'));
+  expect(screen.getByText(`${DORM_REPAIR_COPY.referenceDisplay}：LOCAL-123`)).toBeTruthy();
+  fireEvent.press(screen.getByText('編輯'));
+  fireEvent.changeText(screen.getByLabelText(DORM_REPAIR_COPY.referenceLabel), 'LOCAL-456');
+  await act(async () => fireEvent.press(screen.getByText(DORM_REPAIR_COPY.saveMemo)));
+  expect(screen.getByText(`${DORM_REPAIR_COPY.referenceDisplay}：LOCAL-456`)).toBeTruthy();
+  expect(JSON.parse((await AsyncStorage.getItem(scope))!).repairs[0].reference).toBe('LOCAL-456');
+});
+
+test('cancelled repairs show their timestamp without counting as pending tasks', async () => {
+  const { projectDormRepair, dormCloudDate } = require('@campus/shared/src/dormitoryCloud');
+  const cancelledAt = Date.UTC(2026, 10, 14, 8);
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    change({ packages: [], repairs: [projectDormRepair('cancelled', { description: '已取消的報修', status: 'cancelled', cancelledAt })], packagesState: 'ready', repairsState: 'ready', identity: null });
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  expect(screen.queryByText(/報修備忘待辦/)).toBeNull();
+  expect(screen.getByText('今晚沒有待辦。')).toBeTruthy();
+  fireEvent.press(screen.getByText('設備問題'));
+  expect(screen.getByText(`備忘標記：已取消 · ${dormCloudDate(cancelledAt)}`)).toBeTruthy();
+  expect(screen.queryByText(/尚未確認輔導員接手/)).toBeNull();
+});
+
+
+test.each([false, true])('包裹清單為空或只有郵件時顯示個人空狀態（只有郵件：%s）', async (postalOnly) => {
+  const { emptyDormCloud, projectDormParcel } = require('@campus/shared/src/dormitoryCloud');
+  let update!: (state: ReturnType<typeof emptyDormCloud>) => void;
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, change) => {
+    update = change;
+    return jest.fn();
+  });
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  const emptyCopy = '此處目前沒有顯示登錄給你的包裹；郵局包裹及掛號郵件請至櫃檯領取。';
+  expect(screen.getByText('正在讀取包裹…')).toBeTruthy();
+  expect(screen.queryByText(emptyCopy)).toBeNull();
+  act(() => update({ ...emptyDormCloud(), packagesState: 'error' }));
+  expect(screen.getByText(/包裹讀取失敗/)).toBeTruthy();
+  expect(screen.queryByText(emptyCopy)).toBeNull();
+  act(() => update({
+    ...emptyDormCloud(),
+    packagesState: 'ready',
+    packages: postalOnly ? [projectDormParcel('postal', { description: '掛號信', location: '郵局' })] : [],
+  }));
+  expect(screen.getByText(emptyCopy)).toBeTruthy();
+  expect(screen.queryByText('掛號信')).toBeNull();
+});
+
+
+test.each([false, true])('API 成功後保留實際期限，legacy 較晚到達：%s', async (apiFirst) => {
+  type Rows = Array<{ id: string; data: Record<string, unknown> }>;
+  let snapshot!: (rows: Rows) => void;
+  let finish!: (value: { rows: Rows }) => void;
+  require('../services/dormitoryCloud').subscribeDormCloud.mockImplementationOnce((_school, _uid, update) => watchDormCloud({
+    watch: (name, _field, rows, error) => {
+      if (name !== 'packages') { rows([]); return () => {}; }
+      return watchDormParcels(
+        (next) => { snapshot = next; return () => {}; },
+        (change) => { change(true); return () => {}; },
+        () => new Promise((resolve) => { finish = resolve; }), rows, error,
+      );
+    },
+    identity: () => () => {},
+  }, update));
+  const screen = render(<DormApp />);
+  await screen.findByText('我的住宿備忘');
+  fireEvent.press(screen.getByText('包裹領取'));
+  const legacy = [{ id: 'legacy', data: {
+    publicId: 'dw_public', description: '有登錄期限的包裹',
+    arrivedAt: Date.now() - 2 * 86400000, pickupDeadline: '2026-11-25T02:00:00Z',
+  } }];
+  if (!apiFirst) act(() => snapshot(legacy));
+  await act(async () => finish({ rows: [{ id: 'dw_public', data: {
+    description: '有登錄期限的包裹', arrivedAt: Date.now() - 2 * 86400000, status: 'arrived',
+  } }] }));
+  if (apiFirst) act(() => snapshot(legacy));
+  expect(screen.getAllByText('有登錄期限的包裹')).toHaveLength(1);
+  expect(screen.getByText('登錄退件／領取期限：2026/11/25 10:00:00（台灣時間）')).toBeTruthy();
+  expect(screen.queryByText(/預估|依到件日加三天推算|已到件多日/)).toBeNull();
+  act(() => snapshot([{ ...legacy[0], data: { ...legacy[0].data, pickupDeadline: '2026-11-26T02:00:00Z' } }]));
+  expect(screen.getByText('登錄退件／領取期限：2026/11/26 10:00:00（台灣時間）')).toBeTruthy();
 });

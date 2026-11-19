@@ -6,7 +6,7 @@ const scope = { uid: 'alice', schoolId: 'pu' };
 
 test.each([
   ['submitLeaveRequest', { requestId: 'leave-1', status: 'pending' }, {}],
-  ['reserveSeat', { reservationId: 'seat-1', seatId: 'S1', date: '2026-10-28' }, { seatId: 'S1', date: '2026-10-28' }],
+  ['reserveSeat', { reservationId: 'seat-1', seatId: 'S1', date: '2026-10-28', startTime: '14:05', endTime: '16:35' }, { seatId: 'S1', date: '2026-10-28', startTime: '14:05', endTime: '16:35' }],
   ['borrowBook', { loanId: 'loan-1', dueAt: '2026-11-15T00:00:00.000Z' }, {}],
   ['returnBook', { success: true, bookTitle: 'Library book' }, {}],
   ['renewBook', { success: true, newDueAt: '2026-11-15T00:00:00.000Z', renewCount: 1 }, {}],
@@ -42,4 +42,21 @@ test('unknown future writes and failure receipts are blocked', () => {
   expect(confirmedAgentWrite('unknownFutureWrite', { success: true, requestId: 'ok' })).toBe(false);
   expect(confirmedAgentWrite('createOrder', { success: false, orderId: 'ok', userId: 'alice', schoolId: 'pu', total: 10, items: [{}] }, {}, scope)).toBe(false);
   expect(confirmedAgentWrite('returnBook', { success: 'true', bookTitle: 'Book' })).toBe(false);
+});
+
+describe('seat reservation receipt', () => {
+  const input = { seatId: 'S1', date: '2026-11-20', startTime: '14:05', endTime: '16:35' };
+  test.each([
+    { startTime: undefined }, { endTime: undefined }, { startTime: '14:00' }, { endTime: '16:00' },
+    { startTime: 1405 }, { endTime: '16:35:00' },
+  ])('rejects a missing or different reviewed time %j', change => {
+    expect(confirmedAgentWrite('reserveSeat', { reservationId: 'seat-1', ...input, ...change }, input, scope)).toBe(false);
+  });
+  test.each([
+    { startTime: '24:00', endTime: '25:00' }, { startTime: '09:60', endTime: '11:00' },
+    { startTime: '23:00', endTime: '01:00' }, { startTime: '14:00', endTime: '14:00' },
+  ])('does not verify invalid times even if the input echoes them %j', change => {
+    const invalid = { ...input, ...change };
+    expect(confirmedAgentWrite('reserveSeat', { reservationId: 'seat-1', ...invalid }, invalid, scope)).toBe(false);
+  });
 });

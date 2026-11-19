@@ -64,6 +64,29 @@ describe('社團後台授權與統計', () => {
     expect((await request('officer')).members[0]).toHaveProperty('phone', '0900000000');
     expect((await request('president', { action: 'export' })).csv).toContain('S123');
   });
+  test('舊後台寫入維持新服務計數，重送與失敗交易不重複計算', async () => {
+    await create();
+    store.docs.set('groups/club/clubEvents/event', {
+      title: '測試活動',
+      startsAt: 2000,
+      endsAt: 3000,
+      registeredCount: 0,
+      checkedInCount: 0,
+    });
+    const readEvent = async () => store.docs.get('groups/club/clubEvents/event');
+    for (let n = 0; n < 2; n++) await request('student', { action: 'register', eventId: 'event' });
+    expect(await readEvent()).toMatchObject({ registeredCount: 1, checkedInCount: 0 });
+    for (let n = 0; n < 2; n++) await request('student', { action: 'cancel', eventId: 'event' });
+    expect((await readEvent()).registeredCount).toBe(0);
+    store.failNextCommit();
+    await expect(request('student', { action: 'register', eventId: 'event' })).rejects.toThrow();
+    expect((await readEvent()).registeredCount).toBe(0);
+    await request('student', { action: 'register', eventId: 'event' });
+    time = 2500;
+    for (let n = 0; n < 2; n++)
+      await request('officer', { action: 'checkIn', eventId: 'event', targetUid: 'student' });
+    expect(await readEvent()).toMatchObject({ registeredCount: 1, checkedInCount: 1 });
+  });
   test('重載保留、重送報名及簽到不重複，取消後不計數', async () => {
     await create();
     await create();
@@ -161,4 +184,29 @@ describe('社團後台授權與統計', () => {
       role: 'admin',
     });
   });
+});
+
+test('舊流程新建報名保存學校後四碼，重送及取消保留擴充資料', async () => {
+  const store = transactionStore([
+    ['groups/club', { type: 'club', schoolId: 'school' }],
+    ['schools/school/members/student', { status: 'active', studentId: 'S12345678' }],
+    ['groups/club/members/student', { status: 'active', role: 'member' }],
+    ['groups/club/clubEvents/event', { startsAt: 2000, endsAt: 3000 }],
+  ]);
+  const run = createClubAdmin({
+    db: store.db,
+    enabled: () => true,
+    pilotGroupId: 'club',
+    now: () => 1000,
+  });
+  const path = 'groups/club/clubEvents/event/registrations/student';
+  for (const action of ['register', 'register', 'cancel', 'register']) {
+    await run({
+      auth: { uid: 'student' },
+      data: { schoolId: 'school', groupId: 'club', eventId: 'event', action },
+    });
+    expect(store.docs.get(path).studentSuffix).toBe('5678');
+    if (action === 'register') store.docs.get(path).custom = '保留';
+    expect(store.docs.get(path).custom).toBe('保留');
+  }
 });

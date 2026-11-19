@@ -1,13 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { SiteShell } from '@/components/SiteShell';
 import { CampusIcon, type CampusIconName } from '@/components/CampusIcon';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
+import {
+  LIFE_QUERY_LIMIT,
+  readLifeFilters,
+  writeLifeFilters,
+  type LifeFilters,
+} from './lifeFilters';
 import styles from './life.module.css';
 
 type LifeService = {
@@ -21,6 +27,15 @@ type LifeService = {
 };
 
 const ITEMS: LifeService[] = [
+  {
+    href: '/career',
+    title: '職涯',
+    text: '查看職涯截止日、校方公告與附近職缺來源。',
+    action: '看職涯',
+    icon: 'calendar',
+    group: 'public',
+    keywords: '職涯 校內工讀 實習 學分 校園徵才 就業 career internship',
+  },
   {
     href: '/map',
     title: '校園地圖',
@@ -174,7 +189,7 @@ const CATEGORIES = [
   { value: 'personal', label: '個人安排' },
 ] as const;
 
-type ServiceCategory = (typeof CATEGORIES)[number]['value'];
+const MAX_PENDING_FILTER_URLS = 32;
 
 function normalizeSearch(value: string) {
   return value.normalize('NFKC').toLowerCase().trim();
@@ -199,10 +214,45 @@ function ServiceLink({ item, href }: { item: LifeService; href: string }) {
 }
 
 function LifeDirectory() {
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<ServiceCategory>('all');
   const searchInput = useRef<HTMLInputElement>(null);
+  const composing = useRef(false);
   const params = useSearchParams();
+  const queryString = params.toString();
+  const [filterState, setFilterState] = useState(() => ({
+    source: queryString,
+    filters: readLifeFilters(params),
+    pendingUrls: [] as string[],
+  }));
+  // A delayed acknowledgement of our own URL write must not replace a newer input draft.
+  const acknowledgedIndex = filterState.pendingUrls.indexOf(queryString);
+  const filters =
+    filterState.source === queryString || acknowledgedIndex >= 0
+      ? filterState.filters
+      : readLifeFilters(params);
+  if (filterState.source !== queryString) {
+    setFilterState({
+      source: queryString,
+      filters,
+      // Other history entries and campus switches remain authoritative.
+      pendingUrls:
+        acknowledgedIndex >= 0 ? filterState.pendingUrls.slice(acknowledgedIndex + 1) : [],
+    });
+  }
+  useEffect(() => {
+    function restoreHistoryFilters() {
+      const restored = new URLSearchParams(window.location.search);
+      const source = restored.toString();
+      setFilterState((current) => ({
+        source: current.source,
+        filters: readLifeFilters(restored),
+        // A real history traversal wins even when its URL matches an unacknowledged write.
+        pendingUrls: current.source === source ? [] : [source],
+      }));
+    }
+    window.addEventListener('popstate', restoreHistoryFilters);
+    return () => window.removeEventListener('popstate', restoreHistoryFilters);
+  }, []);
+  const { query, category } = filters;
   const selection = useOptionalSelectedSchool();
   const scope = buildCampusNavigationSearch(
     params,
@@ -227,9 +277,37 @@ function LifeDirectory() {
     );
     return terms.every((term) => content.includes(term));
   });
+  function updateFilters(next: LifeFilters, persist = true) {
+    const url = new URL(window.location.href);
+    writeLifeFilters(url.searchParams, next);
+    const destination = `${url.pathname}${url.search}${url.hash}`;
+    const shouldPublish =
+      persist &&
+      destination !== `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const pendingUrl = url.searchParams.toString();
+    setFilterState((current) => ({
+      source: queryString,
+      filters: next,
+      pendingUrls: shouldPublish
+        ? [...current.pendingUrls.filter((entry) => entry !== pendingUrl), pendingUrl].slice(
+            -MAX_PENDING_FILTER_URLS,
+          )
+        : current.pendingUrls,
+    }));
+    if (!shouldPublish) return;
+    try {
+      // Next copies its routing state; passing that private state back would skip URL sync.
+      window.history.replaceState(null, '', destination);
+    } catch {
+      // Filtering remains usable when the browser denies history changes.
+      setFilterState((current) => ({
+        ...current,
+        pendingUrls: current.pendingUrls.filter((entry) => entry !== pendingUrl),
+      }));
+    }
+  }
   const resetFilters = () => {
-    setQuery('');
-    setCategory('all');
+    updateFilters({ query: '', category: 'all' });
     searchInput.current?.focus();
   };
 
@@ -247,17 +325,31 @@ function LifeDirectory() {
               id="life-service-search"
               type="search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) =>
+                updateFilters({ query: event.target.value, category }, !composing.current)
+              }
+              onCompositionStart={() => {
+                composing.current = true;
+              }}
+              onCompositionEnd={(event) => {
+                composing.current = false;
+                updateFilters({ query: event.currentTarget.value, category });
+              }}
               onKeyDown={(event) => {
-                if (event.key === 'Escape' && !event.nativeEvent.isComposing && query) {
+                if (
+                  event.key === 'Escape' &&
+                  !event.nativeEvent.isComposing &&
+                  !composing.current &&
+                  query
+                ) {
                   event.preventDefault();
-                  setQuery('');
+                  updateFilters({ query: '', category });
                 }
               }}
               placeholder="借書、教室、公車…"
               autoComplete="off"
               enterKeyHint="search"
-              maxLength={80}
+              maxLength={LIFE_QUERY_LIMIT}
               aria-describedby="life-search-hint"
               aria-controls="life-service-results"
             />
@@ -266,7 +358,7 @@ function LifeDirectory() {
                 type="button"
                 className={styles.clearSearch}
                 onClick={() => {
-                  setQuery('');
+                  updateFilters({ query: '', category });
                   searchInput.current?.focus();
                 }}
                 aria-label="清除搜尋"
@@ -287,7 +379,7 @@ function LifeDirectory() {
                 type="button"
                 aria-pressed={category === entry.value}
                 aria-controls="life-service-results"
-                onClick={() => setCategory(entry.value)}
+                onClick={() => updateFilters({ query, category: entry.value })}
               >
                 {entry.label}
               </button>

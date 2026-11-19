@@ -1,0 +1,428 @@
+// @vitest-environment node
+import { beforeAll, afterAll, beforeEach, describe, it, expect } from 'vitest';
+import { initializeApp, deleteApp, type App } from 'firebase-admin/app';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { createCareerInternshipHandlers } from './careerInternshipHandlers';
+import {
+  createInternshipService,
+  type InternshipCommand,
+} from '@campus/shared/src/careerInternship';
+import { internshipRule, internshipRecord } from '@campus/shared/testFixtures/careerInternship';
+const host = process.env.FIRESTORE_EMULATOR_HOST || '';
+const suite = /^(127\.0\.0\.1|localhost):\d+$/.test(host) ? describe : describe.skip;
+suite('internship real Firestore transactions', () => {
+  let app: App, db: Firestore, handler: ReturnType<typeof createCareerInternshipHandlers>;
+  const call = (uid: string | null, c: InternshipCommand, schoolId = 'pu') =>
+    handler({ auth: uid ? { uid } : null, data: { ...c, schoolId } });
+  const create = (): Extract<InternshipCommand, { action: 'create' }> => ({
+    action: 'create',
+    id: 'record',
+    ruleId: 'rule',
+    ruleRevision: 1,
+    organization: '測試用機構',
+    teacher: '測試指導老師',
+    teacherUid: 'teacher',
+  });
+  beforeAll(() => {
+    app = initializeApp({ projectId: 'demo-career-internship' }, 'internship');
+    db = getFirestore(app);
+    handler = createCareerInternshipHandlers({
+      db,
+      now: () => new Date('2026-11-14T10:00:00.000Z'),
+    });
+  });
+  afterAll(async () => {
+    await db.terminate();
+    await deleteApp(app);
+  });
+  beforeEach(async () => {
+    await db.recursiveDelete(db.collection('schools'));
+    for (const uid of [
+      'student',
+      'other',
+      'staff',
+      'dept',
+      'wrongDept',
+      'teacher',
+      'advisor',
+      'admin',
+    ])
+      await db.doc(`schools/pu/members/${uid}`).set({
+        status: 'active',
+        role:
+          uid === 'admin' ? 'admin' : uid === 'teacher' || uid === 'advisor' ? 'teacher' : 'member',
+        displayName: uid === 'advisor' ? '王指導' : uid,
+      });
+    await db.doc('schools/pu/serviceRoles/staff').set({ status: 'active', career_staff: true });
+    await db
+      .doc('schools/pu/serviceRoles/dept')
+      .set({ status: 'active', internship_departments: ['測試系'] });
+    await db
+      .doc('schools/pu/serviceRoles/wrongDept')
+      .set({ status: 'active', internship_departments: ['其他系'] });
+    await db.doc('schools/pu/directory/advisor').set({
+      displayName: '王指導',
+      email: 'advisor@school.edu.tw',
+      department: '測試系',
+    });
+    await db.doc('schools/pu/internshipRules/rule').set(internshipRule);
+  });
+  it('enriches only authorized review records with student name and school ID', async () => {
+    await db
+      .doc('schools/pu/members/student')
+      .update({ displayName: '王小明', student_id: 'S123' });
+    await call('student', create());
+    for (const uid of ['teacher', 'staff', 'dept']) {
+      const result = await call(uid, {
+        action: 'list',
+        audience: uid === 'teacher' ? 'student' : 'staff',
+      });
+      expect(result.snapshot?.records[0]).toMatchObject({
+        studentName: '王小明',
+        studentId: 'S123',
+      });
+    }
+    const own = await call('student', { action: 'list', audience: 'student' });
+    expect(own.snapshot?.records[0]).not.toHaveProperty('studentName');
+    expect(own.snapshot?.records[0]).not.toHaveProperty('studentId');
+    expect(
+      (await call('other', { action: 'list', audience: 'student' })).snapshot?.records,
+    ).toEqual([]);
+    await db.doc('schools/pu/members/student').update({ displayName: '', student_id: '' });
+    await db.doc('users/student').set({ displayName: '陳同學', studentId: 'S456' });
+    try {
+      expect(
+        (await call('teacher', { action: 'list', audience: 'student' })).snapshot?.records[0],
+      ).toMatchObject({ studentName: '陳同學', studentId: 'S456' });
+    } finally {
+      await db.doc('users/student').delete();
+    }
+  });
+  it('runs student creation, hours, staff document review and teacher confirmation through service', async () => {
+    const student = createInternshipService('pu', (s, c) => call('student', c, s));
+    await student.execute(create() as Exclude<InternshipCommand, { action: 'list' }>);
+    let revision = 1;
+    for (let i = 0; i < 5; i++) {
+      await call('student', {
+        action: 'document',
+        id: 'record',
+        revision: revision++,
+        index: i,
+        url: 'https://example.test/proof',
+        submitted: true,
+      });
+      await call('dept', {
+        action: 'verifyDocument',
+        id: 'record',
+        revision: revision++,
+        index: i,
+        verified: true,
+        message: '',
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      await call('student', {
+        action: 'hours',
+        id: 'record',
+        revision: revision++,
+        entry: { id: `h${i}`, date: `2026-11-${10 + i}`, hours: 20, note: '測試佐證' },
+      });
+      await call('staff', {
+        action: 'verifyHours',
+        id: 'record',
+        revision: revision++,
+        entryId: `h${i}`,
+        verified: true,
+      });
+    }
+    await expect(
+      call('staff', { action: 'confirm', id: 'record', revision }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await call('teacher', { action: 'confirm', id: 'record', revision: revision++ });
+    expect((await student.load('student')).records[0]).toMatchObject({ confirmed: true, revision });
+    expect((await db.collection('schools/pu/adminLogs').get()).size).toBe(18);
+  });
+  it('supports advisor lookup and returns precise create validation messages', async () => {
+    const list = await call('student', { action: 'list', audience: 'student' });
+    expect(list.snapshot?.canManage).toBe(false);
+    expect(list.snapshot?.advisors).toBeUndefined();
+    await expect(
+      call('student', { action: 'advisorSearch', keyword: '   ' }),
+    ).rejects.toMatchObject({
+      message: '請輸入指導老師姓名、學號或學校信箱。',
+    });
+    const search = await call('student', {
+      action: 'advisorSearch',
+      keyword: 'advisor@school.edu.tw',
+    });
+    expect(search.snapshot?.advisors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ uid: 'advisor', name: '王指導', email: 'advisor@school.edu.tw' }),
+      ]),
+    );
+    await db.doc('users/advisor').set({ studentId: 'T0000001' });
+    await db.doc('schools/pu/members/student').update({ studentId: 'T0000001' });
+    const byId = await call('student', { action: 'advisorSearch', keyword: 'T0000001' });
+    expect(byId.snapshot?.advisors?.map((a) => a.uid)).toEqual(['advisor']);
+    for (const field of ['studentId', 'student_id', 'login']) {
+      for (const source of ['members', 'directory', 'users']) {
+        await db
+          .doc(source === 'users' ? 'users/advisor' : `schools/pu/${source}/advisor`)
+          .set({ [field]: 'T0000002' }, { merge: true });
+        const found = await call('student', { action: 'advisorSearch', keyword: 'T0000002' });
+        expect(found.snapshot?.advisors?.map((a) => a.uid)).toEqual(['advisor']);
+      }
+    }
+    const byName = await call('student', { action: 'advisorSearch', keyword: '王' });
+    expect(byName.snapshot?.advisors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ uid: 'advisor', name: '王指導' })]),
+    );
+    const studentHits = await call('student', { action: 'advisorSearch', keyword: 'student' });
+    expect(studentHits.snapshot?.advisors?.some((advisor) => advisor.uid === 'student')).toBe(
+      false,
+    );
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'missing-teacher-uid',
+        teacherUid: '',
+      }),
+    ).rejects.toMatchObject({ message: '請選擇本校指導老師' });
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'missing-organization',
+        organization: '',
+      }),
+    ).rejects.toMatchObject({ message: '請填寫實習機構' });
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'missing-teacher-name',
+        teacher: '',
+      }),
+    ).rejects.toMatchObject({ message: '請填寫指導老師姓名' });
+    await expect(
+      call('student', {
+        ...create(),
+        id: 'invalid-teacher',
+        teacherUid: 'other',
+      }),
+    ).rejects.toMatchObject({
+      message: '找不到這位本校指導老師，請改用姓名、學號或學校信箱搜尋後選擇',
+    });
+  });
+  it('revokes assigned teacher access after demotion while retaining own student access', async () => {
+    const record = internshipRecord();
+    record.hours = [{ id: 'h', date: '2026-11-13', hours: 60, note: '測試', verified: true }];
+    record.documents = record.documents.map((d) => ({ ...d, submitted: true, verified: true }));
+    await db.doc('schools/pu/internshipRecords/record').set(record);
+    await db.doc('schools/pu/internshipRecords/own').set({ ...record, id: 'own', uid: 'teacher' });
+    expect(
+      (await call('teacher', { action: 'list', audience: 'student' })).snapshot?.records,
+    ).toHaveLength(2);
+    await db.doc('schools/pu/members/teacher').update({ role: 'member' });
+    expect(
+      (await call('teacher', { action: 'list', audience: 'student' })).snapshot?.records.map(
+        (r) => r.id,
+      ),
+    ).toEqual(['own']);
+    for (const id of ['record', 'own']) {
+      for (const command of [
+        { action: 'verifyHours', entryId: 'h', verified: false },
+        { action: 'verifyDocument', index: 0, verified: false, message: '請補件' },
+        { action: 'confirm' },
+      ] as const) {
+        await expect(call('teacher', { ...command, id, revision: 1 })).rejects.toMatchObject({
+          code: 'permission-denied',
+        });
+      }
+      expect((await db.doc(`schools/pu/internshipRecords/${id}`).get()).data()).toMatchObject({
+        revision: 1,
+        confirmed: false,
+      });
+    }
+    expect((await db.collection('schools/pu/adminLogs').get()).empty).toBe(true);
+  });
+  it('coalesces duplicate creation at transaction level and rejects stale concurrent writes', async () => {
+    await Promise.all([call('student', create()), call('student', create())]);
+    expect((await db.collection('schools/pu/internshipRecords').get()).size).toBe(1);
+    const results = await Promise.allSettled(
+      [1, 2].map((i) =>
+        call('student', {
+          action: 'hours',
+          id: 'record',
+          revision: 1,
+          entry: { id: `h${i}`, date: '2026-11-13', hours: 2, note: '測試' },
+        }),
+      ),
+    );
+    expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((x) => x.status === 'rejected')).toHaveLength(1);
+  }, 30000);
+  it('limits students, department staff and teacher to assigned records; ops omits personal data', async () => {
+    await call('student', create());
+    expect(
+      (await call('other', { action: 'list', audience: 'student' })).snapshot?.records,
+    ).toEqual([]);
+    expect(
+      (await call('wrongDept', { action: 'list', audience: 'staff' })).snapshot?.records,
+    ).toEqual([]);
+    for (const uid of ['teacher', 'dept', 'staff'])
+      expect(
+        (await call(uid, { action: 'list', audience: uid === 'teacher' ? 'student' : 'staff' }))
+          .snapshot?.records,
+      ).toHaveLength(1);
+    expect((await call('admin', { action: 'list', audience: 'ops' })).snapshot?.records).toEqual(
+      [],
+    );
+    await expect(
+      call('staff', { action: 'list', audience: 'staff' }, 'other'),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(call(null, { action: 'list', audience: 'student' })).rejects.toMatchObject({
+      code: 'unauthenticated',
+    });
+    await expect(call('other', { action: 'list', audience: 'staff' })).rejects.toMatchObject({
+      code: 'permission-denied',
+    });
+    await expect(
+      call('wrongDept', {
+        action: 'verifyHours',
+        id: 'record',
+        revision: 1,
+        entryId: 'h',
+        verified: true,
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+  it('snapshots department rules, prevents out-of-department editing and stale rule creation', async () => {
+    await call('student', create());
+    await call('dept', { action: 'rule', rule: { ...internshipRule, credits: 2 } });
+    expect(
+      (await call('student', { action: 'list', audience: 'student' })).snapshot?.records[0].rule
+        .credits,
+    ).toBe(1);
+    await expect(
+      call('student', { ...create(), id: 'new' } as InternshipCommand),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    await expect(
+      call('wrongDept', { action: 'rule', rule: { ...internshipRule, revision: 2 } }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await expect(
+      call('staff', { action: 'rule', rule: { ...internshipRule, hoursPerCredit: 59 } }),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
+  it.each([0, -1, 25, 1.1, NaN])('rejects invalid hours %s', async (hours) => {
+    await call('student', create());
+    await expect(
+      call('student', {
+        action: 'hours',
+        id: 'record',
+        revision: 1,
+        entry: { id: 'h', date: '2026-11-13', hours, note: '測試' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+  });
+  it('rejects daily overflow, future dates, unsubmitted document review, premature final confirmation', async () => {
+    const r = internshipRecord();
+    r.hours = [{ id: 'old', date: '2026-11-13', hours: 20, note: '測試', verified: false }];
+    await db.doc('schools/pu/internshipRecords/record').set(r);
+    for (const entry of [
+      { id: 'new', date: '2026-11-13', hours: 5, note: '測試' },
+      { id: 'new', date: '2026-11-15', hours: 1, note: '測試' },
+    ])
+      await expect(
+        call('student', { action: 'hours', id: 'record', revision: 1, entry }),
+      ).rejects.toMatchObject({ code: 'invalid-argument' });
+    await expect(
+      call('staff', {
+        action: 'verifyDocument',
+        id: 'record',
+        revision: 1,
+        index: 0,
+        verified: true,
+        message: '',
+      }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    await expect(
+      call('teacher', { action: 'confirm', id: 'record', revision: 1 }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+  });
+  it('returns document corrections, prevents student verification and reevaluates revoked privileges', async () => {
+    await call('student', create());
+    await call('student', {
+      action: 'document',
+      id: 'record',
+      revision: 1,
+      index: 0,
+      url: 'https://example.test/proof',
+      submitted: true,
+    });
+    await call('dept', {
+      action: 'verifyDocument',
+      id: 'record',
+      revision: 2,
+      index: 0,
+      verified: false,
+      message: '請補簽名',
+    });
+    expect(
+      (await call('student', { action: 'list', audience: 'student' })).snapshot?.records[0]
+        .documents[0].message,
+    ).toBe('請補簽名');
+    await expect(
+      call('student', {
+        action: 'verifyDocument',
+        id: 'record',
+        revision: 3,
+        index: 0,
+        verified: true,
+        message: '',
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+    await db.doc('schools/pu/serviceRoles/dept').update({ status: 'inactive' });
+    await expect(
+      call('dept', {
+        action: 'verifyDocument',
+        id: 'record',
+        revision: 3,
+        index: 0,
+        verified: true,
+        message: '',
+      }),
+    ).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+  it('allows removal of mistaken unverified entries but requires staff to revoke verified hours first', async () => {
+    const r = internshipRecord();
+    r.hours = [{ id: 'h', date: '2026-11-13', hours: 8, note: '測試', verified: true }];
+    await db.doc('schools/pu/internshipRecords/record').set(r);
+    await expect(
+      call('student', { action: 'removeHours', id: 'record', revision: 1, entryId: 'h' }),
+    ).rejects.toMatchObject({ code: 'failed-precondition' });
+    await call('staff', {
+      action: 'verifyHours',
+      id: 'record',
+      revision: 1,
+      entryId: 'h',
+      verified: false,
+    });
+    await call('student', { action: 'removeHours', id: 'record', revision: 2, entryId: 'h' });
+    expect(
+      (await call('student', { action: 'list', audience: 'student' })).snapshot?.records[0].hours,
+    ).toEqual([]);
+  });
+  it('rejects client-forged identity fields and unsafe proof links', async () => {
+    await call('student', create());
+    await expect(
+      call('student', {
+        action: 'document',
+        id: 'record',
+        revision: 1,
+        index: 0,
+        url: 'javascript:alert(1)',
+        submitted: true,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-argument' });
+    await expect(call('other', create())).rejects.toMatchObject({ code: 'already-exists' });
+  });
+});

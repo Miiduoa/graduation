@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  NODE_VERSION: '22.23.4'
+  NODE_VERSION: '22.23.5'
   PNPM_VERSION: '10'
 
 jobs:
@@ -298,7 +298,7 @@ jobs:
         run: node scripts/build-functions-shared.cjs
 
       - name: Test web server lifecycle
-        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs
+        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/career-release-gate.test.mjs
 
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food
@@ -307,7 +307,7 @@ jobs:
         run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
 
       - name: Test assistant services, academic data and verified execution contracts
-        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/assistantRoleProfiles.test.cjs packages/shared/tests/assistantRoleTasks.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
 
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
@@ -465,8 +465,8 @@ jobs:
             }
           }
 
-          if (config.build?.base?.node !== '22.23.4') {
-            throw new Error('EAS base Node must be 22.23.4');
+          if (config.build?.base?.node !== '22.23.5') {
+            throw new Error('EAS base Node must be 22.23.5');
           }
           if (config.build?.base?.pnpm !== '10.28.2') {
             throw new Error('EAS base pnpm must be 10.28.2');
