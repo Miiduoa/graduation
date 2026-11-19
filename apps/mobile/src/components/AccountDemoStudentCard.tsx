@@ -143,7 +143,7 @@ export function AccountDemoStudentCard({
   const expired = sessionExpiresAt <= now || (!!demo && Date.parse(demo.expiresAt) <= now);
   const sameSchool = !!demo && toPublicSchoolId(demo.profile.schoolId) === schoolId;
   const enabled = !!demo && demo.permissions.studentCard && sameSchool && !expired;
-  return (
+  const showcase = (
     <ScrollView style={s.page} contentContainerStyle={[s.content, { paddingBottom: bottom }]}>
       {state.status === 'loading' ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>
@@ -217,8 +217,14 @@ export function AccountDemoStudentCard({
       {state.status !== 'loading' && (
         <Text style={s.body}>設定會在瀏覽器開啟，請使用相同的 Google 帳號登入。</Text>
       )}
-      {footer}
+      {state.status === 'ready' && footer}
     </ScrollView>
+  );
+  return (
+    <>
+      {(state.status === 'loading' || state.status === 'error') && fallback}
+      {showcase}
+    </>
   );
 }
 

@@ -128,26 +128,32 @@ export function AccountDemoStudentCard({
 
   if (state.status === 'loading') {
     return (
-      <section className={styles.message} role="status">
-        正在讀取帳號學生證…
-      </section>
+      <>
+        {fallback}
+        <section className={styles.message} role="status">
+          正在讀取帳號學生證…
+        </section>
+      </>
     );
   }
   if (state.status === 'error') {
     return (
-      <section className={styles.message} role="alert">
-        <h2>暫時無法讀取展示學生證</h2>
-        <p>請確認網路連線後重新讀取。</p>
-        <button
-          className={styles.button}
-          onClick={() => {
-            setState({ status: 'loading' });
-            setAttempt((value) => value + 1);
-          }}
-        >
-          重新讀取
-        </button>
-      </section>
+      <>
+        {fallback}
+        <section className={styles.message} role="alert">
+          <h2>暫時無法讀取展示學生證</h2>
+          <p>請確認網路連線後重新讀取。</p>
+          <button
+            className={styles.button}
+            onClick={() => {
+              setState({ status: 'loading' });
+              setAttempt((value) => value + 1);
+            }}
+          >
+            重新讀取
+          </button>
+        </section>
+      </>
     );
   }
   const demo = state.demo;

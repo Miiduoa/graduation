@@ -112,6 +112,53 @@ function signInPlatform() {
   };
 }
 
+test.each(['503', 'network', 'schema', 'revalidation'])(
+  'keeps the official card usable after a demo %s failure without restoring demo data',
+  async (failure) => {
+    signInPlatform();
+    mockAuth.user = mockUser;
+    if (failure === 'schema') mockDemoRequest.mockResolvedValue({ demo: {} });
+    else if (failure === 'network')
+      mockDemoRequest.mockImplementation(() => {
+        throw new TypeError('Network unavailable');
+      });
+    else
+      mockDemoRequest.mockRejectedValue(Object.assign(new Error('Unavailable'), { status: 503 }));
+    if (failure === 'revalidation') mockDemoRequest.mockResolvedValueOnce({ demo: accountDemo() });
+    jest.mocked(requestStudentCardCode).mockResolvedValue({
+      token: 'x'.repeat(32),
+      studentId: 'S0003141',
+      expiresAt: Date.now() + 60_000,
+    });
+    const v = render(<StudentCardScreen />);
+    if (failure === 'revalidation') fireEvent.press(await v.findByText('出示展示 QR Code'));
+    expect(await v.findByText('暫時無法讀取展示學生證')).toBeTruthy();
+    expect(v.getByLabelText('學號已隱藏')).toBeTruthy();
+    expect(v.queryByLabelText('展示學生證')).toBeNull();
+    expect(v.queryByText('展示同學')).toBeNull();
+    expect(v.queryByText('DEMO20261112')).toBeNull();
+    expect(v.queryByTestId('demo-student-card-presentation')).toBeNull();
+    fireEvent.press(v.getByText('取得驗證碼'));
+    expect(await v.findByText('S0003141')).toBeTruthy();
+    expect(requestStudentCardCode).toHaveBeenCalledWith(mockUser, 'pu', expect.any(AbortSignal));
+    fireEvent.press(v.getByText('收起學生證'));
+    mockDemoRequest.mockImplementationOnce(() => new Promise(() => {}));
+    fireEvent.press(v.getByText('重新讀取'));
+    expect(v.getByText('取得驗證碼')).toBeTruthy();
+    expect(v.queryByLabelText('展示學生證')).toBeNull();
+  },
+);
+
+test('keeps school login required when the demo API fails without an official account', async () => {
+  signInPlatform();
+  mockDemoRequest.mockRejectedValue(new Error('Unavailable'));
+  const v = render(<StudentCardScreen />);
+  expect(await v.findByText('請先登入學校帳號。')).toBeTruthy();
+  expect(v.queryByLabelText('展示學生證')).toBeNull();
+  expect(v.queryByText('取得驗證碼')).toBeNull();
+  expect(v.queryByText('出示學號')).toBeNull();
+});
+
 test('a Google platform account can open its own server-authorized demonstration card without Firebase', async () => {
   signInPlatform();
   mockDemoRequest.mockResolvedValue({ demo: accountDemo() });

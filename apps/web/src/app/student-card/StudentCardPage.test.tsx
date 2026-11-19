@@ -311,6 +311,48 @@ function signInPlatform() {
   state.platform.session = { platformAccountId: demoAccountId, context: 'platform-session-a' };
 }
 
+it.each(['503', 'network', 'schema', 'revalidation'])(
+  'keeps the official card usable after a demo %s failure without restoring demo data',
+  async (failure) => {
+    state.platform.session = { platformAccountId: demoAccountId, context: 'platform-session-a' };
+    if (failure === 'schema') state.demoRequest.mockResolvedValue({ demo: {} });
+    else if (failure === 'network')
+      state.demoRequest.mockImplementation(() => {
+        throw new TypeError('Network unavailable');
+      });
+    else
+      state.demoRequest.mockRejectedValue(Object.assign(new Error('Unavailable'), { status: 503 }));
+    if (failure === 'revalidation')
+      state.demoRequest.mockResolvedValueOnce({ demo: accountDemo() });
+    render(<StudentCardPage />);
+    if (failure === 'revalidation')
+      fireEvent.click(await screen.findByRole('button', { name: '出示展示 QR Code' }));
+    await screen.findByRole('heading', { name: '暫時無法讀取展示學生證' });
+    const card = await screen.findByRole('article', { name: '學生證個人資料' });
+    expect(card.textContent).toContain('•••• 4567');
+    expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+    expect(screen.queryByText('展示同學')).toBeNull();
+    expect(screen.queryByText('DEMO20261112')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '取得驗證碼' }));
+    await screen.findByAltText('供現場核對學號的限時 QR Code');
+    expect(within(screen.getByRole('dialog')).getByText('S7654321')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '收起學生證' }));
+    state.demoRequest.mockImplementationOnce(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+    expect(screen.getByRole('article', { name: '學生證個人資料' })).toBeTruthy();
+    expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
+  },
+);
+
+it('keeps school login required when the demo API fails without an official account', async () => {
+  signInPlatform();
+  state.demoRequest.mockRejectedValue(new Error('Unavailable'));
+  render(<StudentCardPage />);
+  expect(await screen.findByRole('link', { name: '登入學校帳號' })).toBeTruthy();
+  expect(screen.queryByRole('article')).toBeNull();
+  expect(screen.queryByRole('button', { name: '取得驗證碼' })).toBeNull();
+});
+
 it('shows an account-owned demonstration card for Google platform sign-in without Firebase', async () => {
   signInPlatform();
   state.demoRequest.mockResolvedValue({ demo: accountDemo() });
