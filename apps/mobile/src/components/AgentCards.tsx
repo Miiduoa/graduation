@@ -10,7 +10,7 @@ import { getAuthInstance, getFunctionsInstance } from '../firebase';
 import { safeNavigate } from '../utils/safeNavigate';
 import { resolveDeprecatedRouteRedirect } from '../app/deprecatedRouteRedirect';
 import { DORM_REPAIR_COPY, dormRepairAssistantStatusLabel } from '@campus/shared/src/dormitory';
-import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
+import { describePickupNumber, describeTerminalOrderReceipt, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
 import {
   ORDER_NOT_SENT_TEXT,
   placedItems,
@@ -20,13 +20,14 @@ import {
 import { loadAssistantWritePermissionsState } from '../services/assistantPermissions';
 
 function PlacedOrderLines({ order }: { order: PlacedOrder }) {
-  const pickup = describePickupNumber(order);
+  const terminalText = describeTerminalOrderReceipt(order.status);
+  const pickup = terminalText ? null : describePickupNumber(order);
   return (
     <View style={{ gap: 4 }}>
       <Text style={styles.resultOkText}>{formatShortOrderCode(order.orderId)}</Text>
-      <Text style={[styles.resultOkText, { fontWeight: '700' }]}>{pickup.text}</Text>
-      {pickup.state === 'pending' && pickup.detail ? <Text style={styles.resultOkText}>{pickup.detail}</Text> : null}
-      {pickup.state === 'pending' ? <Text style={styles.resultOkText}>狀態：{pickup.label}</Text> : null}
+      <Text style={[styles.resultOkText, { fontWeight: '700' }]}>{terminalText ?? pickup?.text}</Text>
+      {pickup?.state === 'pending' && pickup.detail ? <Text style={styles.resultOkText}>{pickup.detail}</Text> : null}
+      {pickup?.state === 'pending' ? <Text style={styles.resultOkText}>狀態：{pickup.label}</Text> : null}
     </View>
   );
 }
@@ -358,7 +359,7 @@ function OrderDraftCard({ payload }: { payload: any }) {
         <View style={[styles.resultBox, result.ok ? styles.resultOk : styles.resultErr]}>
           {result.ok && result.order ? (
             <>
-              <Text style={[styles.resultOkText, { fontWeight: '700' }]}>下單成功</Text>
+              <Text style={[styles.resultOkText, { fontWeight: '700' }]}>{describeTerminalOrderReceipt(result.order.status) ? '訂單紀錄' : '下單成功'}</Text>
               <PlacedOrderLines order={result.order} />
             </>
           ) : (
@@ -613,7 +614,7 @@ function OrderSubmittedCard({ payload }: { payload: any }) {
   const nav = useNavigation<any>();
   return (
     <View style={[styles.card, styles.successCard]}>
-      <CardHeader icon="✅" title="下單成功" color="#1B5E20" />
+      <CardHeader icon="✅" title={describeTerminalOrderReceipt(payload.status) ? '訂單紀錄' : '下單成功'} color="#1B5E20" />
       <InfoRow label="餐廳" value={payload.cafeteria || payload.restaurantId || '—'} />
       <InfoRow label="金額" value={payload.total ? `NT$${payload.total}` : '—'} />
       {payload.orderId ? (
