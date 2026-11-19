@@ -30,6 +30,55 @@ export function exceedsPublicCourseResponseByteLimit(text: string): boolean {
   return false;
 }
 
+// Bound public course responses as chunks arrive. response.text() alone can
+// buffer an unbounded server reply before the 512 KiB post-read check runs.
+// Native fetch implementations without ReadableStream/TextDecoder retain the
+// existing post-read guard; do not assume they support browser streaming.
+//
+// Some fetch adapters ignore AbortSignal after sending response headers. Release
+// their unread body explicitly when rejecting a response, without buffering it.
+function cancelUnreadPublicCourseResponse(response: Response): void {
+  const body = response.body;
+  if (body && typeof body.cancel === 'function' && !body.locked) {
+    void body.cancel().catch(() => undefined);
+  }
+}
+async function readBoundedPublicCourseBody(response: Response, signal: AbortSignal): Promise<string> {
+  const reader = typeof TextDecoder === 'function' ? response.body?.getReader?.() : undefined;
+  if (!reader) {
+    const text = await response.text();
+    if (exceedsPublicCourseResponseByteLimit(text)) throw new Error('Public course response too large');
+    return text;
+  }
+
+  // Fatal decoding preserves the same trust boundary as Web catalog search:
+  // damaged UTF-8 must not become a plausible replacement-character course.
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const fragments: string[] = [];
+  let bytes = 0;
+  let finished = false;
+  const cancelStream = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener('abort', cancelStream, { once: true });
+  try {
+    if (signal.aborted) throw cancelled();
+    while (true) {
+      const chunk = await reader.read();
+      if (signal.aborted) throw cancelled();
+      if (chunk.done) { finished = true; break; }
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) throw new Error('Public course response too large');
+      fragments.push(decoder.decode(chunk.value, { stream: true }));
+    }
+    fragments.push(decoder.decode());
+    return fragments.join('');
+  } finally {
+    signal.removeEventListener('abort', cancelStream);
+    // Abort, invalid encoding and oversize all release the underlying body.
+    if (!finished) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
 function cancelled(): Error {
   const error = new Error('Public course lookup cancelled');
   error.name = 'AbortError';
@@ -123,12 +172,18 @@ export async function answerPublicCourseQuestion(input: {
         ...(input.origin === 'web' ? { cache: 'no-store' as const } : {}),
         headers: { Accept: 'application/json' },
       });
-      if (!current() || controller.signal.aborted) throw cancelled();
+      if (!current() || controller.signal.aborted) {
+        // Some native fetch adapters ignore abort after resolving the headers.
+        // A late response must not keep downloading data for the old school.
+        cancelUnreadPublicCourseResponse(response);
+        throw cancelled();
+      }
       if (
         input.origin === 'mobile' &&
         response.url &&
         !isPublicCourseResponseUrl(response.url, intent)
       ) {
+        cancelUnreadPublicCourseResponse(response);
         controller.abort();
         throw new Error('Unexpected public course response URL');
       }
@@ -140,12 +195,12 @@ export async function answerPublicCourseQuestion(input: {
           (lengthHeader !== null && (!/^\d+$/.test(lengthHeader.trim()) ||
             !Number.isSafeInteger(declaredBytes) || declaredBytes > MAX_RESPONSE_BYTES)) ||
           (contentType !== null && !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) {
+        cancelUnreadPublicCourseResponse(response);
         controller.abort();
         throw new Error('Public course source unavailable');
       }
-      const body = await response.text();
+      const body = await readBoundedPublicCourseBody(response, controller.signal);
       if (!current() || controller.signal.aborted) throw cancelled();
-      if (exceedsPublicCourseResponseByteLimit(body)) throw new Error('Public course response too large');
       return publicCourseAssistantRead(intent, JSON.parse(body) as unknown);
     })();
     const read = await Promise.race([request, cancellation, timeout]);
