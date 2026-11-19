@@ -426,7 +426,7 @@ function accountGuardedTransfer(afterAdmission = async () => {}) {
 }
 
 for (const [label, patch] of [
-  ['deleted', { status: 'deleted' }],
+  ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => [status, { status }]),
   ['deletion marker', { accountDeletionInProgress: true }],
 ]) {
   test(`an account with ${label} cannot receive ownership despite active school and group memberships`, async () => {
@@ -494,20 +494,20 @@ for (const status of ['disabled', 'suspended', 'inactive']) {
   });
 
   for (const uid of ['alice', 'bob']) {
-    test(`the transaction preserves main compatibility for ${uid} becoming ${status} after admission`, async () => {
+    test(`the transaction rejects ${uid} becoming ${status} after admission without changing ownership documents`, async () => {
+      const before = await ownershipState();
       let admissions = 0;
       const invoke = accountGuardedTransfer(async () => {
         admissions++;
         await db.doc(`users/${uid}`).update({ status });
       });
-      const result = await invoke(request());
-      assert.equal(result.success, true);
-      assert.equal(result.reused, false);
+      await assert.rejects(invoke(request()), { code: 'failed-precondition' });
       assert.equal(admissions, 1);
-      await assertOwnership('bob');
+      assert.deepEqual(await ownershipState(), before);
+      await assertOwnership('alice');
     });
 
-    test(`receipt recovery allows ${uid === 'alice' ? 'the original actor' : 'the historical target'} becoming ${status} after admission without changing ownership documents`, async () => {
+    test(`receipt recovery ${uid === 'alice' ? 'rejects the original actor' : 'allows the historical target'} becoming ${status} after admission without changing ownership documents`, async () => {
       const original = await transfer();
       const committed = await ownershipState();
       let admissions = 0;
@@ -515,7 +515,11 @@ for (const status of ['disabled', 'suspended', 'inactive']) {
         admissions++;
         await db.doc(`users/${uid}`).update({ status });
       });
-      assert.deepEqual(await invoke(request()), { ...original, reused: true });
+      if (uid === 'alice') {
+        await assert.rejects(invoke(request()), { code: 'failed-precondition' });
+      } else {
+        assert.deepEqual(await invoke(request()), { ...original, reused: true });
+      }
       assert.equal(admissions, 1);
       assert.deepEqual(await ownershipState(), committed);
       await assertOwnership('bob');
@@ -580,7 +584,7 @@ for (const uid of ['alice', 'bob']) {
     ['inactive', { status: 'inactive' }],
     ['missing profile', null],
   ]) {
-    test(`an injected ABORTED triggers a real Firestore SDK retry that rechecks the ${uid === 'alice' ? 'actor' : 'target'} ${label} with main-compatible eligibility`, async () => {
+    test(`an injected ABORTED triggers a real Firestore SDK retry that rechecks the ${uid === 'alice' ? 'actor' : 'target'} ${label} with current account eligibility`, async () => {
       const before = await ownershipState();
       let attempts = 0;
       let stagedAttempt = false;
@@ -607,7 +611,7 @@ for (const uid of ['alice', 'bob']) {
         }),
       };
       const result = createGroupMembershipHandlers({ db: database }).transferGroupOwnership(request());
-      const unavailable = patch?.status === 'deleted' || patch?.accountDeletionInProgress === true;
+      const unavailable = patch !== null;
       if (unavailable) await assert.rejects(result, { code: 'failed-precondition' });
       else assert.equal((await result).reused, false);
       assert.equal(stagedAttempt, true, 'first attempt must stage the normal transfer');

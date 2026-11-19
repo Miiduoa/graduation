@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { createHash } = require('node:crypto');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 function id(value, name) {
   if (typeof value !== 'string' || !value.trim() || value.length > 160 || value.includes('/')) {
@@ -325,10 +326,10 @@ function createGroupMembershipHandlers({ db }) {
 }
 
 function assertEligibleAccount(userDoc, label) {
-  // Keep main's transaction eligibility, including legacy missing profiles.
-  // The outer admission guard separately checks the caller's current status.
+  // Recheck canonical account state on every transaction attempt, including replay.
+  // Missing legacy profiles remain compatible with active canonical school seats.
   const data = userDoc.exists ? userDoc.data() || {} : {};
-  if (data.accountDeletionInProgress === true || data.status === 'deleted') {
+  if (isAccountUnavailable(data)) {
     throw new HttpsError('failed-precondition', `${label}正在刪除或已停用，無法完成轉讓。`);
   }
   if (data.role === 'guest' || data.accountKind === 'guest') {

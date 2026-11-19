@@ -454,12 +454,11 @@ describe('transferGroupOwnership', () => {
 
   test.each(
     ['alice', 'bob'].flatMap((uid) => [
-      [uid, { status: 'deleted' }],
+      ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => [uid, { status }]),
       [uid, { accountDeletionInProgress: true }],
     ]),
   )('the transaction rejects unavailable account %s with %j without changing any document', async (uid, profile) => {
-    if (profile === null) store.docs.delete(`users/${uid}`);
-    else store.docs.set(`users/${uid}`, profile);
+    store.docs.set(`users/${uid}`, profile);
     const before = completeState();
     await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
     expect(completeState()).toBe(before);
@@ -467,7 +466,7 @@ describe('transferGroupOwnership', () => {
 
   test.each([
     { role: 'student' }, { role: 'student', status: 'active' }, { role: 'teacher' }, {},
-    { status: '' }, { status: 'disabled' }, { status: 'suspended' }, { status: 'inactive' }, null,
+    { status: '' }, null,
     { role: 'student', schoolId: 'other-school' },
   ])('legacy profiles %j still transfer and recover the same immutable receipt', async (profile) => {
     for (const uid of ['alice', 'bob']) {
@@ -486,7 +485,7 @@ describe('transferGroupOwnership', () => {
     expect(completeState()).toBe(beforeReplay);
   });
 
-  test.each(['deleted', 'deleting'])('receipt recovery rejects an unavailable original actor who becomes %s', async (status) => {
+  test.each(['deleted', 'deleting', 'disabled', 'suspended', 'inactive'])('receipt recovery rejects an unavailable original actor who becomes %s', async (status) => {
     await transfer();
     store.docs.set('users/alice', status === 'deleting' ? { accountDeletionInProgress: true } : { status });
     const before = completeState();
@@ -494,10 +493,9 @@ describe('transferGroupOwnership', () => {
     expect(completeState()).toBe(before);
   });
 
-  test.each(['disabled', 'suspended', 'inactive', 'missing'])('receipt recovery preserves main compatibility when the original actor becomes %s', async (status) => {
+  test('receipt recovery preserves legacy compatibility when the original actor profile disappears', async () => {
     const first = await transfer();
-    if (status === 'missing') store.docs.delete('users/alice');
-    else store.docs.set('users/alice', { status });
+    store.docs.delete('users/alice');
     const before = completeState();
     expect(await transfer()).toEqual({ ...first, reused: true });
     expect(completeState()).toBe(before);
