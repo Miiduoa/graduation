@@ -34,6 +34,7 @@ export function isTeachingCourse(course: Pick<HomeCourse, 'role'>): boolean {
 
 type Props = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   now: Date;
   unsigned: boolean;
   classes: TodayClass[];
@@ -46,6 +47,7 @@ type Props = {
 /** Teacher-facing today stream: classes, grading entry points, upcoming student work. */
 export function TeacherToday({
   assistant,
+  workspaces,
   now,
   unsigned,
   classes,
@@ -63,6 +65,7 @@ export function TeacherToday({
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
       </header>
+      {workspaces}
       {unsigned ? (
         <>
           <p className={styles.empty}>{TEACHER_TODAY_UNSIGNED}</p>
@@ -152,6 +155,7 @@ export function TeacherToday({
 
 type BoundProps = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   now: Date | null;
   unsigned: boolean;
   teachingCourses: readonly HomeCourse[];
@@ -178,6 +182,7 @@ export function TeacherTodayPage(props: BoundProps) {
   return (
     <TeacherToday
       assistant={props.assistant}
+      workspaces={props.workspaces}
       now={now}
       unsigned={props.unsigned}
       classes={classes}

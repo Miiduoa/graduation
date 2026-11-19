@@ -660,3 +660,28 @@
     display: none;
   }
 }
+
+.voicePanel[hidden] { display: none; }
+.voicePanelHeading h2 { margin: 0; font: inherit; }
+.voicePanelHeading { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.voicePanelHeading > button { width: auto; min-width: 44px; flex-basis: auto; padding-inline: 10px; }
+
+@media (max-width: 360px) {
+  .header {
+    grid-template-areas:
+      'brand campus campus'
+      'account account account';
+    row-gap: 8px;
+  }
+  .campus {
+    min-width: 44px;
+  }
+  .account {
+    justify-self: stretch;
+    justify-content: flex-end;
+  }
+  .campus > details > div,
+  .accountPanel {
+    top: calc(var(--navigation-header-bottom, 128px) + 8px);
+  }
+}

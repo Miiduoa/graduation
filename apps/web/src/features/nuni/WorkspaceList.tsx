@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NuniError, nuniErrorMessage, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { CampusIcon } from '@/components/CampusIcon';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { MutationForm, useClasses } from './CourseUI';
 import { useNuniSession } from './Session';
 import { courseRoleLabels } from './courseTasks';
@@ -48,6 +49,7 @@ export function WorkspaceList() {
   const { refresh: refreshSession } = useNuniSession();
   const router = useRouter();
   const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
   const api = useRef(classes);
   const sessionRefresh = useRef(refreshSession);
   const active = useRef(false);
@@ -191,7 +193,10 @@ export function WorkspaceList() {
           <p>先處理待辦，再回到每門課的教材與學習紀錄。</p>
         </div>
         <div className={shared.actions}>
-          <Link href="/grades?tab=feedback" className={styles.quietLink}>
+          <Link
+            href={campusServiceHref('/grades?tab=feedback', campusSearch)}
+            className={styles.quietLink}
+          >
             <CampusIcon name="calendar" size={18} />
             課業成績與回饋
           </Link>

@@ -12,6 +12,10 @@ export class V2Error extends Error {
     super(code);
   }
 }
+export function isSessionInvalidation(error: unknown): boolean {
+  const value = error as { status?: number; code?: string } | null;
+  return value?.status === 401 || value?.code === 'SESSION_CHANGED';
+}
 export const fail = (code = 'INVALID_INPUT', status = 422): never => {
   throw new V2Error(status, code);
 };
@@ -220,6 +224,23 @@ export type Adapter = {
   course?(courseId: string): Promise<Course | null>;
   work(courseId: string): Promise<Task[]>;
   materials(courseId: string, cursor?: string): Promise<unknown>;
+  /** Reviewed anonymous catalogs; this never changes the private school binding. */
+  publicCourses?(search: import('@campus/shared/src/publicCourseAssistant').PublicCourseAssistantSearch): Promise<unknown>;
+  /** Anonymous public content in this adapter's fixed school, never a private school login. */
+  publicCampus?(kind: import('./publicCampus').PublicCampusKind, limit: number): Promise<unknown>;
+  /** Public campus locations in this adapter's fixed school, with source coverage. */
+  campusMap?(args: import('./campusMap').CampusMapArguments): Promise<unknown>;
+  /** Re-read one selected public event in its exact, fixed-school source. */
+  publicEvent?(target: import('./publicEvent').PublicEventTarget): Promise<unknown>;
+  /** Platform-authenticated list summaries only; never contact details or publication. */
+  lostFound?(args: import('./lostFound').LostFoundArguments): Promise<unknown>;
+  /** Platform public feed for this fixed school; never private school conversations. */
+  publicSocial?(args: import('./publicSocial').PublicSocialArguments): Promise<unknown>;
+  /** Fresh reviewed owner-teacher membership; never the student's own submission view. */
+  teachingOverview?(args: import('./teacherWorkspace').TeachingArguments): Promise<unknown>;
+  /** Merchant-authorized locations in this fixed school; never customer order history. */
+  merchantOverview?(args: import('./merchantWorkspace').MerchantArguments,
+    expectedTarget?: { tenantId: string; locationId: string }): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;
   orders(
     tenantId: string,

@@ -203,7 +203,7 @@ describe('resolveNotificationDestination', () => {
     expect(resolveNotificationDestination({ data: { type: 'library_due' } })).toMatchObject({
       ok: true,
       mode: 'nested',
-      tab: '我的',
+      tab: '訊息',
       screen: 'Notifications',
     });
     expect(resolveNotificationDestination({})).toMatchObject({

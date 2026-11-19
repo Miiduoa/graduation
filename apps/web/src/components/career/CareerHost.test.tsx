@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { CareerHost } from './CareerHost';
 import type { CareerWorkstudyProps } from './CareerWorkstudy';
@@ -44,6 +44,24 @@ vi.mock('./CareerInternship', () => ({
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  state.user = { uid: 'alice' };
+});
+
+it('preserves the career campus on both the login form and its return destination', () => {
+  state.user = null;
+  const view = render(<CareerHost schoolId="pu" />);
+  const destination = () =>
+    new URL(
+      screen
+        .getByRole('link', { name: '登入後可申請校內工讀與查看實習學分' })
+        .getAttribute('href')!,
+      'https://campus.local',
+    );
+  expect(destination().searchParams.get('schoolId')).toBe('pu');
+  expect(destination().searchParams.get('returnUrl')).toBe('/career?schoolId=pu');
+  view.rerender(<CareerHost schoolId="nthu" />);
+  expect(destination().searchParams.get('schoolId')).toBe('nthu');
+  expect(destination().searchParams.get('returnUrl')).toBe('/career?schoolId=nthu');
 });
 it('invalidates old calendar scopes on school/account changes and unmount', async () => {
   vi.stubGlobal(

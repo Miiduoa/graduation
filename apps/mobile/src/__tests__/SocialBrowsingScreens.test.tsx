@@ -762,6 +762,22 @@ test('realtime keeps the open text story and grid during refresh and network fai
   expect(view.queryByText(story.text)).toBeNull();
 });
 
+test('從交流開啟社群有可見返回入口，返回不重建其他分區', () => {
+  const goBack = jest.fn();
+  const navigation = {
+    setParams: mockSetParams,
+    navigate: mockNavigate,
+    goBack,
+    canGoBack: () => true,
+  };
+  const view = render(
+    <CommunityScreen navigation={navigation} route={{ params: { initialTab: 'boards' } }} />,
+  );
+  fireEvent.press(view.getByRole('button', { name: '返回上一頁' }));
+  expect(goBack).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).not.toHaveBeenCalled();
+});
+
 test('feed board chip is a standalone accessible button and does not open the surrounding post', async () => {
   jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
   jest.mocked(listBoards).mockResolvedValueOnce([board]);

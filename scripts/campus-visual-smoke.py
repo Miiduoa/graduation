@@ -47,6 +47,14 @@ def session_fixtures(authenticated, operator=False):
             await route.fulfill(json={'kinds': ['google-consumer']})
         elif url.path.startswith('/api/transit'):
             await route.fulfill(json={'status': 'unavailable', 'reason': 'not-configured'})
+        elif url.path == '/career/data':
+            # Match emptyCareerFeed() without contacting school or jobs websites.
+            assert parse_qs(url.query) == {'school': ['pu']}, route.request.url
+            await route.fulfill(json={
+                'announcements': [], 'timeline': [], 'jobs': [],
+                'announcementsUnavailable': True, 'jobsUnavailable': True,
+                'supported': True,
+            })
         elif url.path == '/api/platform-admin/school-applications':
             if not authenticated:
                 await route.fulfill(status=401, json={'error': 'SIGN_IN_REQUIRED'})
@@ -114,6 +122,26 @@ async def no_overflow(page):
     ), 'Page overflows horizontally'
 
 
+async def check_primary_navigation(page, active, campus='pu'):
+    navigation = page.get_by_role('navigation', name='主要導覽')
+    destinations = [
+        ('今天', '/'), ('課務', '/timetable'), ('生活', '/life'),
+        ('交流', '/connect'), ('我的', '/profile'),
+    ]
+    await expect(navigation.get_by_role('link')).to_have_count(len(destinations))
+    for label, path in destinations:
+        link = navigation.get_by_role('link', name=label, exact=True)
+        await expect(link).to_be_visible()
+        destination = urlparse(await link.get_attribute('href'))
+        assert destination.path == path, destination
+        assert parse_qs(destination.query).get('campus') == [campus], destination
+    await expect(navigation.locator('[aria-current="page"]')).to_have_count(0 if active is None else 1)
+    if active is not None:
+        await expect(navigation.get_by_role('link', name=active, exact=True)).to_have_attribute(
+            'aria-current', 'page'
+        )
+
+
 async def check_mobile_navigation(page):
     navigation = page.get_by_role('navigation', name='主要導覽')
     assert await navigation.evaluate('''el => {
@@ -156,6 +184,45 @@ async def goto_path(page, path):
     await page.goto(BASE + path, wait_until='load')
 
 
+async def wait_for_campus_header(page, school_id, school_name):
+    # The load event does not mean React has finished adopting streamed content.
+    # A raw CSS locator can briefly see both client and hidden server headers.
+    # Wait for the whole DOM to contain one header with a resolved picker; never
+    # choose the first/visible copy, which would hide a persistent duplicate.
+    await page.wait_for_function('''({schoolId, schoolName}) => {
+        const headers = document.querySelectorAll('header[data-campus-navigation="true"]');
+        const campuses = document.querySelectorAll('header summary[aria-label^="切換校園："]');
+        if (headers.length !== 1 || campuses.length !== 1) return false;
+        const campus = campuses[0];
+        const picker = campus.closest('details')?.querySelector('select');
+        return headers[0].contains(campus)
+            && campus.getAttribute('aria-label') === `切換校園：${schoolName}`
+            && picker !== null && picker !== undefined && !picker.disabled
+            && picker.value === schoolId;
+    }''', arg={'schoolId': school_id, 'schoolName': school_name}, timeout=5000)
+    await expect(page.locator('header[data-campus-navigation="true"]')).to_have_count(1)
+    campus = page.locator('header summary[aria-label^="切換校園："]')
+    await expect(campus).to_have_count(1)
+    return campus
+
+
+def assert_login_destination(href, return_path, school_context=None):
+    context = school_context or {}
+    assert set(context) <= {'school', 'schoolId', 'campus'}, context
+    if context.get('campus') == 'all':
+        assert context == {'campus': 'all'}, context
+    assert 'personal' not in context.values(), context
+    destination = urlparse(href)
+    assert destination.path == '/login', href
+    # Exact equality rejects token, session, nested redirects and other outer
+    # parameters; expected campus values come from each scenario, not the href.
+    assert parse_qs(destination.query, keep_blank_values=True) == {
+        'returnUrl': [return_path],
+        **{key: [value] for key, value in context.items()},
+    }, href
+    assert not destination.fragment, href
+
+
 async def check_life_navigation_continuity(page, results):
     """Exercise the built Next routes and history, not a simulated router."""
     scope = {'school': 'PU', 'schoolId': 'pu', 'campus': 'pu', 'term': '115|2'}
@@ -166,7 +233,7 @@ async def check_life_navigation_continuity(page, results):
         if query:
             expected['q'] = [query]
         if category != 'all':
-            expected['category'] = [category]
+            expected['access'] = [category]
 
         def matches(value):
             address = urlparse(value)
@@ -180,14 +247,14 @@ async def check_life_navigation_continuity(page, results):
 
     await page.set_viewport_size({'width': 390, 'height': 844})
     await goto_path(page, '/life?' + urlencode({
-        **scope, 'q': '館藏', 'category': 'public',
+        **scope, 'q': '館藏', 'access': 'public',
     }) + '#' + fragment)
     search = page.get_by_role('searchbox', name='快速找服務')
-    public = page.get_by_role('button', name='免登入', exact=True)
+    public = page.get_by_role('checkbox', name='只看免登入服務', exact=True)
     matches = page.locator('#life-service-results a')
     library = page.locator('#life-service-results a[href^="/library"]')
     await expect(search).to_have_value('館藏')
-    await expect(public).to_have_attribute('aria-pressed', 'true')
+    await expect(public).to_be_checked()
     await expect(matches).to_have_count(1)
     await expect(library).to_be_visible()
     await expect_address('館藏', 'public')
@@ -199,8 +266,8 @@ async def check_life_navigation_continuity(page, results):
     await expect(search).to_have_value('借書')
     await expect_address('借書', 'public')
     await page.get_by_role('button', name='全部', exact=True).click()
-    await expect_address('借書')
-    await public.click()
+    await expect_address('借書', 'public')
+    await public.check()
     await expect_address('借書', 'public')
     assert await page.evaluate('history.length') == history_length, (
         'Typing and category changes must replace the life entry, not add history entries'
@@ -224,7 +291,7 @@ async def check_life_navigation_continuity(page, results):
     await page.go_back()
     await expect_address('借書', 'public')
     await expect(search).to_have_value('借書')
-    await expect(public).to_have_attribute('aria-pressed', 'true')
+    await expect(public).to_be_checked()
     await expect(matches).to_have_count(1)
     await expect(library).to_be_visible()
     await page.go_forward()
@@ -234,11 +301,11 @@ async def check_life_navigation_continuity(page, results):
     await page.go_back()
     await expect_address('借書', 'public')
     await expect(search).to_have_value('借書')
-    await expect(public).to_have_attribute('aria-pressed', 'true')
+    await expect(public).to_be_checked()
     await page.reload(wait_until='load')
     await expect_address('借書', 'public')
     await expect(search).to_have_value('借書')
-    await expect(public).to_have_attribute('aria-pressed', 'true')
+    await expect(public).to_be_checked()
     await expect(matches).to_have_count(1)
     await no_overflow(page)
     await page.screenshot(
@@ -249,7 +316,7 @@ async def check_life_navigation_continuity(page, results):
     await page.get_by_role('button', name='清除搜尋', exact=True).click()
     await expect(search).to_have_value('')
     await expect(search).to_be_focused()
-    await expect(public).to_have_attribute('aria-pressed', 'true')
+    await expect(public).to_be_checked()
     await expect_address('', 'public')
 
     # DOM composition events test the controlled input's IME handlers. This is not
@@ -282,7 +349,7 @@ async def check_life_navigation_continuity(page, results):
     await search.press('Escape')
     await expect(search).to_have_value('')
     await expect_address('', 'public')
-    await expect(public).to_have_attribute('aria-pressed', 'true')
+    await expect(public).to_be_checked()
     assert await page.evaluate('history.length') == history_length
     await page.get_by_role('button', name='顯示全部服務', exact=True).click()
     await expect(search).to_be_focused()
@@ -290,7 +357,7 @@ async def check_life_navigation_continuity(page, results):
         'aria-pressed', 'true',
     )
     await expect_address()
-    await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
+    await expect(page.get_by_role('heading', name='校園資源', exact=True)).to_be_visible()
     results.append('life clear and Escape retain category; composition and full-width search keep usable text and scoped URLs')
 
 
@@ -306,7 +373,7 @@ async def check_today_navigation_continuity(page, results):
         return saved;
     }''')
     try:
-        await page.get_by_role('heading', name='個人安排', exact=True).scroll_into_view_if_needed()
+        await page.get_by_role('heading', name='校園資源', exact=True).scroll_into_view_if_needed()
         navigation = page.get_by_role('navigation', name='主要導覽')
         today = navigation.get_by_role('link', name='今天', exact=True)
         await today.click()
@@ -345,7 +412,7 @@ async def check_today_navigation_continuity(page, results):
         }''', previous)
 
 
-async def follow_account_return(page, target, expected_target=None):
+async def follow_account_return(page, target, expected_target=None, school_context=None):
     destination = target if expected_target is None else expected_target
     expected = urlparse(destination)
     await page.goto(
@@ -353,11 +420,7 @@ async def follow_account_return(page, target, expected_target=None):
         wait_until='domcontentloaded',
     )
     await page.wait_for_url(lambda value: urlparse(value).path == '/login')
-    handoff = urlparse(page.url)
-    assert parse_qs(handoff.query, keep_blank_values=True) == {
-        'returnUrl': [destination],
-    }, page.url
-    assert not handoff.fragment, page.url
+    assert_login_destination(page.url, destination, school_context)
     await no_overflow(page)
     action = page.get_by_role('link', name='繼續使用', exact=True)
     await expect(action).to_have_attribute('href', destination)
@@ -370,11 +433,32 @@ async def follow_account_return(page, target, expected_target=None):
     assert actual.fragment == expected.fragment, page.url
 
 
+async def open_account_role_links(page):
+    disclosure = page.locator('details[aria-label="其他身分與工作入口"]')
+    roles = disclosure.locator('nav[aria-label="身分與工作入口"]')
+    summary = disclosure.locator(':scope > summary')
+    await expect(disclosure).to_have_count(1)
+    await expect(summary.locator('strong')).to_have_text('其他身分與工作入口')
+    await expect(disclosure).to_have_js_property('open', False)
+    await expect(roles).to_have_count(1)
+    await expect(roles).not_to_be_visible()
+    await summary.focus()
+    await summary.press('Enter')
+    await expect(disclosure).to_have_js_property('open', True)
+    await expect(roles).to_be_visible()
+    await summary.press('Tab')
+    await expect(roles.get_by_role('link').first).to_be_focused()
+    return roles, summary
+
+
 async def check_unsigned_account_entry(page):
     await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
-    role_links = page.get_by_role('navigation', name='身分與工作入口')
+    role_links, role_summary = await open_account_role_links(page)
     await expect(role_links.get_by_role('link', name='第一次申請店家進駐')).to_have_attribute('href', '/merchant/apply')
     await expect(role_links.get_by_role('link', name='查看申請或進入門市')).to_have_attribute('href', '/merchant/workspace')
+    await expect(role_links.get_by_role('link', name='學生與教師進入課程')).to_have_attribute('href', '/classroom')
+    await expect(role_links.get_by_role('link', name='平台管理員登入')).to_have_attribute('href', '/admin/login')
+    await expect(role_links.get_by_role('link')).to_have_count(4)
     await expect(page.get_by_role('button', name='登入校園帳號')).to_be_visible()
     await expect(page.get_by_role('button', name='用 Google 繼續')).to_be_visible()
     await expect(page.get_by_role('button', name='尋找學校')).to_be_visible()
@@ -413,6 +497,73 @@ async def check_unsigned_account_entry(page):
     for copy in OLD_ACCOUNT_COPY:
         await expect(page.get_by_text(copy, exact=True)).to_have_count(0)
     await expect(page.get_by_role('article')).to_have_count(0)
+    await no_overflow(page)
+    # After verifying the secondary tasks, capture the initial sign-in layout.
+    await role_summary.focus()
+    await role_summary.press('Space')
+    await expect(role_links).not_to_be_visible()
+    await expect(role_summary).to_be_focused()
+    await page.evaluate('window.scrollTo(0, 0)')
+
+
+async def open_login_role_links(page):
+    return await open_account_role_links(page)
+
+
+async def check_unsigned_login_entry(page):
+    """The main login progressively reveals school and work-specific methods."""
+    await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
+    google = page.get_by_role('button', name='使用 Google 帳號繼續', exact=True)
+    await expect(google).to_be_enabled()
+    action = urlparse(await google.evaluate('button => button.form.action'))
+    assert action.path == '/auth/platform/start'
+    assert parse_qs(action.query) == {'returnUrl': ['/']}
+    await check_primary_navigation(page, None)
+
+    school = page.locator('details[aria-label="學校帳號登入"]')
+    school_summary = school.locator(':scope > summary')
+    await expect(school).to_have_js_property('open', False)
+    await expect(school.get_by_role('combobox', name='選擇學校', exact=True)).not_to_be_visible()
+    await school_summary.focus()
+    await school_summary.press('Enter')
+    await expect(school).to_have_js_property('open', True)
+    await expect(school.get_by_role('combobox', name='選擇學校', exact=True)).to_have_value('pu')
+    await expect(school.get_by_role('status')).to_contain_text('此校園尚未開放學號直接登入。')
+    # The fixture does not enable school authentication. Opening help must not
+    # manufacture a usable credential form or suggest Google grants school access.
+    await expect(school.get_by_role('button', name='連線學校帳號', exact=True)).to_have_count(0)
+    await expect(school.get_by_label('學號', exact=True)).to_have_count(0)
+    import_destination = urlparse(await school.get_by_role(
+        'link', name='前往資料匯入'
+    ).get_attribute('href'))
+    assert import_destination.path == '/import'
+    assert parse_qs(import_destination.query) == {
+        'school': ['PU'], 'schoolId': ['pu'], 'campus': ['pu'],
+    }
+    await school_summary.press('Space')
+    await expect(school).to_have_js_property('open', False)
+    await expect(school_summary).to_be_focused()
+
+    roles, summary = await open_login_role_links(page)
+    for label, href in [
+        ('第一次申請店家進駐', '/merchant/apply'),
+        ('查看申請或進入門市', '/merchant/workspace'),
+        ('學生與教師進入課程', '/classroom'),
+        ('校方人員登入', '/auth/account?method=school'),
+        ('平台管理員登入', '/admin/login'),
+    ]:
+        await expect(roles.get_by_role('link', name=label, exact=True)).to_have_attribute('href', href)
+    await expect(roles.get_by_role('link')).to_have_count(5)
+    await summary.focus()
+    await summary.press('Space')
+    await expect(roles).not_to_be_visible()
+    await expect(summary).to_be_focused()
+    guest = page.get_by_role('link', name='不登入，繼續瀏覽', exact=True)
+    await expect(guest).to_be_visible()
+    guest_destination = urlparse(await guest.get_attribute('href'))
+    assert guest_destination.path == '/search'
+    assert parse_qs(guest_destination.query).get('campus') == ['pu']
+    await no_overflow(page)
 
 
 async def check_merchant_entry_links(page):
@@ -421,7 +572,10 @@ async def check_merchant_entry_links(page):
         ('/auth/account', '查看申請或進入門市', '/merchant/workspace'),
     ]:
         await goto_path(page, entry)
-        roles = page.get_by_role('navigation', name='身分與工作入口')
+        if entry == '/login':
+            roles, _ = await open_login_role_links(page)
+        else:
+            roles, _ = await open_account_role_links(page)
         await roles.get_by_role('link', name=label).click()
         await page.wait_for_url(BASE + destination)
         google = page.get_by_role('button', name='使用 Google 帳號繼續')
@@ -430,6 +584,150 @@ async def check_merchant_entry_links(page):
         assert action.path == '/auth/platform/start'
         assert parse_qs(action.query) == {'returnUrl': [destination]}
         await no_overflow(page)
+
+
+async def check_progressive_service_menu(page):
+    """Keep every task reachable behind a compact first level and through Back."""
+    menu = page.locator('header details:has(> summary[aria-label="所有服務"])')
+    await expect(menu).to_have_js_property('open', True)
+    primary = {
+        '學習與課務': ['/timetable', '/classroom', '/calendar', '/import'],
+        '校園生活': ['/map', '/bus', '/food', '/dormitory'],
+        '消息與交流': ['/announcements', '/messages', '/dms', '/social'],
+        '帳號與協助': ['/profile', '/settings', '/ai-assistant', '/support'],
+    }
+    # These are explicit fixture expectations, not counts computed from the UI.
+    # Online ordering and the school-LMS reader stay disabled in this smoke build.
+    all_destinations = {
+        '/student-card', '/calendar', '/import', '/timetable', '/leave', '/leave/review',
+        '/appeals', '/teacher', '/grades?tab=semester', '/grades?tab=feedback',
+        '/classroom', '/classroom/material-bookmarks', '/school-courses', '/credit-planner',
+        '/groups', '/announcements', '/events', '/clubs', '/messages', '/dms', '/social',
+        '/community', '/friends', '/map', '/bus', '/food', '/cafeteria', '/dormitory',
+        '/lost-found', '/merchant', '/library', '/career', '/school-info', '/ai-assistant',
+        '/support', '/account-deletion', '/profile', '/settings', '/classroom/account', '/admin',
+    }
+    links = menu.locator('[data-service-link]')
+    await expect(links).to_have_count(40)
+    await expect(menu.locator('[data-service-link]:visible')).to_have_count(16)
+    for name, expected in primary.items():
+        section = menu.get_by_role('region', name=name, exact=True)
+        visible = section.locator('[data-service-link]:visible')
+        await expect(visible).to_have_count(4)
+        actual = [urlparse(await link.get_attribute('href')).path for link in await visible.all()]
+        assert actual == expected, (name, actual)
+    actual_destinations = []
+    for link in await links.all():
+        href = urlparse(await link.get_attribute('href'))
+        query = parse_qs(href.query)
+        expected_scope = {'school': ['PU'], 'schoolId': ['pu'], 'campus': ['pu']}
+        if href.path == '/grades':
+            assert query.get('tab') in [['semester'], ['feedback']], href
+            expected_scope['tab'] = query['tab']
+        assert query == expected_scope, href
+        assert not href.fragment, href
+        actual_destinations.append(
+            href.path + ('?tab=' + query['tab'][0] if href.path == '/grades' else '')
+        )
+    assert len(actual_destinations) == len(set(actual_destinations)), actual_destinations
+    assert set(actual_destinations) == all_destinations, actual_destinations
+
+    disclosures = menu.locator('details[data-directory-section]')
+    await expect(disclosures).to_have_count(7)
+    for disclosure in await disclosures.all():
+        await expect(disclosure).to_have_js_property('open', False)
+        summary = disclosure.locator(':scope > summary')
+        await summary.focus()
+        await summary.press('Enter')
+        await expect(disclosure).to_have_js_property('open', True)
+        await no_overflow(page)
+    await expect(menu.locator('[data-service-link]:visible')).to_have_count(40)
+    for disclosure in reversed(await disclosures.all()):
+        summary = disclosure.locator(':scope > summary')
+        await summary.focus()
+        await summary.press('Space')
+        await expect(disclosure).to_have_js_property('open', False)
+    await expect(menu.locator('[data-service-link]:visible')).to_have_count(16)
+
+    more = menu.locator('details[data-directory-section="group:campus"]')
+    await more.locator(':scope > summary').click()
+    career = more.get_by_role('link', name='職涯', exact=True)
+    await expect(career).to_be_visible()
+    origin = page.url
+    await career.click()
+    await page.wait_for_url(lambda value: urlparse(value).path == '/career')
+    await page.go_back(wait_until='domcontentloaded')
+    await page.wait_for_url(origin)
+    await expect(menu).to_have_js_property('open', True)
+    await expect(more).to_have_js_property('open', True)
+    await expect(career).to_be_visible()
+    await expect(menu.locator('[data-service-link]:visible')).to_have_count(22)
+    await expect(menu.get_by_role('searchbox', name='搜尋服務', exact=True)).to_have_value('')
+    await more.locator(':scope > summary').click()
+    await expect(more).to_have_js_property('open', False)
+    await expect(menu.locator('[data-service-link]:visible')).to_have_count(16)
+    await no_overflow(page)
+
+
+async def check_life_public_filter(page):
+    """The three-group life directory keeps public child entries reachable."""
+    await goto_path(page, '/life?campus=pu')
+    public_only = page.get_by_role('checkbox', name='只看免登入服務', exact=True)
+    await expect(public_only).not_to_be_checked()
+    await public_only.check()
+    results = page.locator('#life-service-results')
+    links = results.locator('a[data-service-href]')
+    public_services = {
+        '/map', '/bus', '/cafeteria', '/dormitory', '/library', '/events', '/career', '/school-info',
+    }
+    await expect(links).to_have_count(8)
+    assert set(await links.evaluate_all(
+        "links => links.map(link => link.dataset.serviceHref)"
+    )) == public_services
+    for link in await links.all():
+        href = urlparse(await link.get_attribute('href'))
+        assert parse_qs(href.query) == {
+            'school': ['PU'], 'schoolId': ['pu'], 'campus': ['pu'],
+        }, href
+    # Cafeteria is normally nested under signed-in ordering; the visitor filter
+    # must retain the public child even though its parent is excluded.
+    await expect(results.get_by_role('link', name='餐廳', exact=True)).to_be_visible()
+    for path in ['/food', '/orders', '/clubs', '/lost-found']:
+        await expect(results.locator(f'a[data-service-href="{path}"]')).to_have_count(0)
+    await page.get_by_role('button', name='吃飯與住宿', exact=True).click()
+    await expect(links).to_have_count(2)
+    assert set(await links.evaluate_all(
+        "links => links.map(link => link.dataset.serviceHref)"
+    )) == {'/cafeteria', '/dormitory'}
+    search = page.get_by_role('searchbox', name='快速找服務')
+    await search.fill('餐廳')
+    await expect(links).to_have_count(1)
+    directory_url = page.url
+    cafeteria = results.get_by_role('link', name='餐廳', exact=True)
+    await cafeteria.focus()
+    await cafeteria.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/cafeteria')
+    await page.go_back(wait_until='domcontentloaded')
+    await page.wait_for_url(directory_url)
+    await expect(public_only).to_be_checked()
+    await expect(search).to_have_value('餐廳')
+    await expect(page.get_by_role('button', name='吃飯與住宿', exact=True)).to_have_attribute(
+        'aria-pressed', 'true'
+    )
+    await expect(cafeteria).to_be_focused()
+    await expect(links).to_have_count(1)
+    assert parse_qs(urlparse(page.url).query) == {
+        'campus': ['pu'], 'access': ['public'], 'group': ['daily'], 'q': ['餐廳'],
+    }, page.url
+    await page.get_by_role('button', name='顯示全部服務', exact=True).click()
+    await expect(public_only).not_to_be_checked()
+    await expect(search).to_have_value('')
+    await expect(search).to_be_focused()
+    await expect(page.get_by_role('button', name='全部', exact=True)).to_have_attribute(
+        'aria-pressed', 'true'
+    )
+    assert parse_qs(urlparse(page.url).query) == {'campus': ['pu']}, page.url
+    await no_overflow(page)
 
 
 async def check_account_footer_contrast(page):
@@ -454,35 +752,404 @@ async def check_account_footer_contrast(page):
         assert contrast >= 4.5, f'Account footer link contrast is only {contrast:.2f}:1'
 
 
-async def check_unsigned_today(page):
+async def check_unsigned_today(page, campus='pu'):
     today = page.get_by_test_id('student-today')
     await expect(today).to_be_visible()
     await expect(today.get_by_test_id('today-skeleton')).to_have_count(0)
     await expect(today.get_by_role('heading', name='今天', exact=True)).to_be_visible()
     await expect(today.locator('header p').first).to_have_text(TODAY_DATE)
-    flow = today.get_by_test_id('today-unified-flow')
-    await expect(flow).to_be_visible()
-    await expect(flow.get_by_text(UNSIGNED_TODAY)).to_be_visible()
-    await expect(today.get_by_role('heading', name='先把課表放進來。', exact=True)).to_be_visible()
-    await expect(today.get_by_role('link', name='匯入我的課表', exact=True)).to_have_attribute(
-        'href', '/import?kind=timetable&campus=pu'
+    needs_school = campus == 'all'
+    title = '先選擇你的校園。' if needs_school else '先把課表放進來。'
+    welcome = today.get_by_role('region', name=title, exact=True)
+    await expect(welcome).to_be_visible()
+    if needs_school:
+        await expect(welcome.get_by_role('link', name='選校園、整理課表', exact=True)).to_have_attribute(
+            'href', '/timetable?campus=all'
+        )
+        await expect(welcome.get_by_role('link', name='先看生活服務', exact=True)).to_have_attribute(
+            'href', '/life?campus=all'
+        )
+        await expect(welcome.get_by_role('link', name='匯入我的課表', exact=True)).to_have_count(0)
+    else:
+        await expect(welcome.get_by_role('link', name='匯入我的課表', exact=True)).to_have_attribute(
+            'href', f'/import?kind=timetable&campus={campus}'
+        )
+        await expect(welcome.get_by_role('link', name='手動建立課表', exact=True)).to_have_attribute(
+            'href', f'/timetable?campus={campus}'
+        )
+    sign_in = welcome.get_by_role('link', name='登入查看作業與通知', exact=True)
+    await expect(sign_in).to_be_visible()
+    assert_login_destination(
+        await sign_in.get_attribute('href'), f'/?campus={campus}', {'campus': campus}
     )
-    await expect(today.get_by_role('link', name='手動建立課表')).to_have_attribute(
-        'href', '/timetable?campus=pu'
-    )
+
+    # First use has one setup action. Private placeholders and a second empty
+    # timetable would turn the guest entry back into competing tasks.
+    await expect(today.get_by_test_id('today-unified-flow')).to_have_count(0)
+    for test_id in ['today-classes', 'today-work', 'today-notifications']:
+        await expect(today.get_by_test_id(test_id)).to_have_count(0)
+    for heading in [TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE, TODAY_NOTIFY_TITLE]:
+        await expect(today.get_by_role('heading', name=heading, exact=True)).to_have_count(0)
+    await expect(today.get_by_text(UNSIGNED_TODAY)).to_have_count(0)
+    await expect(today.get_by_text('還沒有課表。', exact=True)).to_have_count(0)
+    await expect(today.get_by_role('link', name='匯入課表', exact=True)).to_have_count(0)
     quick_services = today.get_by_role('navigation', name='常用校園服務')
     await expect(quick_services.get_by_role('link')).to_have_count(4)
     for link in await quick_services.get_by_role('link').all():
-        assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == ['pu']
+        assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == [campus]
     await expect(page.get_by_role('link', name='登入', exact=True)).to_be_visible()
-    await expect(flow.get_by_role('heading', name=TODAY_FLOW_CLASS_TITLE, exact=True)).to_be_visible()
-    await expect(flow.get_by_text('還沒有課表。', exact=True)).to_be_visible()
-    await expect(flow.get_by_role('link', name='匯入課表', exact=True)).to_be_visible()
-    await expect(flow.get_by_role('heading', name=TODAY_FLOW_WORK_TITLE, exact=True)).to_be_visible()
-    await expect(flow.get_by_role('heading', name=TODAY_NOTIFY_TITLE, exact=True)).to_be_visible()
+    await expect(today.get_by_role('button', name='設定首頁安排', exact=True)).to_be_visible()
+    await expect(today.get_by_role('form', name='首頁安排偏好')).to_have_count(0)
+    await check_primary_navigation(page, '今天', campus)
     await expect(page.get_by_role('heading', name='今天的校園日常')).to_have_count(0)
     await expect(page.get_by_role('link', name='用 Google 帳號登入')).to_have_count(0)
     await expect(page.locator('time[aria-current="date"]')).to_have_count(0)
+
+
+async def check_deep_link_login_scope(page, preference, *, student_card=False):
+    """The explicit campus survives Header login despite a different saved choice."""
+    key = 'campus.browse-school.v1:guest'
+    previous = await page.evaluate('key => localStorage.getItem(key)', key)
+    saved_school = None if preference == 'all' else preference
+
+    async def expect_saved_school(school_id):
+        expected = json.dumps({'schoolId': school_id}, separators=(',', ':'))
+        try:
+            # wait_for_function can omit a nested Python None argument. Pass the
+            # exact expected JSON as a string so explicit null is still required.
+            await page.wait_for_function(
+                '({key, expected}) => localStorage.getItem(key) === expected',
+                arg={'key': key, 'expected': expected},
+            )
+            assert await page.evaluate('key => JSON.parse(localStorage.getItem(key))', key) == {
+                'schoolId': school_id,
+            }
+        except Exception as error:
+            # Capture only this fixture preference before finally restores it.
+            state = await page.evaluate('''key => ({
+                url: location.href,
+                stored: localStorage.getItem(key),
+                picker: document.querySelector('header select')?.value ?? null,
+            })''', key)
+            raise AssertionError(
+                f'Expected saved campus {school_id!r}; actual state: '
+                + json.dumps(state, ensure_ascii=False)
+            ) from error
+
+    try:
+        await goto_path(page, '/?campus=pu')
+        campus = await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect(campus).to_contain_text('靜宜大學')
+        await campus.focus()
+        await campus.press('Enter')
+        picker = page.get_by_role('combobox', name='瀏覽校園', exact=True)
+        await expect(picker).to_be_visible()
+        await expect(picker).to_be_enabled()
+        await expect(picker).to_have_value('pu')
+        if preference == 'all':
+            # Establish an actual saved campus before clearing it. A missing
+            # preference must not stand in for the explicit {schoolId: null} case.
+            await picker.select_option('nthu')
+            await expect(picker).not_to_be_visible()
+            await page.wait_for_url(
+                lambda value: parse_qs(urlparse(value).query).get('campus') == ['nthu']
+            )
+            await expect_saved_school('nthu')
+            await wait_for_campus_header(page, 'nthu', '國立清華大學')
+            await expect(campus).to_contain_text('國立清華大學')
+            await campus.focus()
+            await campus.press('Enter')
+            await expect(picker).to_be_visible()
+            await expect(picker).to_be_enabled()
+            await expect(picker).to_have_value('nthu')
+        await picker.select_option('' if preference == 'all' else preference)
+        await expect(picker).not_to_be_visible()
+        await page.wait_for_url(
+            lambda value: parse_qs(urlparse(value).query).get('campus') == [preference]
+        )
+        await expect_saved_school(saved_school)
+
+        if student_card:
+            await check_student_card_login_scope(page, preference, saved_school)
+            return
+
+        target = '/school-info?school=PU&schoolId=pu&campus=pu&token=discard-me#contact'
+        await goto_path(page, target)
+        await expect(page.get_by_role('heading', name='學校資訊', exact=True)).to_be_visible()
+        await wait_for_campus_header(page, 'pu', '靜宜大學')
+        await expect(campus).to_contain_text('靜宜大學')
+        sign_in = page.locator('header[data-campus-navigation="true"]').get_by_role(
+            'link', name='登入', exact=True
+        )
+        await expect(sign_in).to_be_visible()
+        context = {'school': 'PU', 'schoolId': 'pu', 'campus': 'pu'}
+        # The original task query and fragment remain inside returnUrl. Only the
+        # three campus selectors may also appear on the login page itself.
+        await expect(sign_in).to_have_attribute('href', re.compile(r'%23contact(?:&|$)'))
+        assert_login_destination(await sign_in.get_attribute('href'), target, context)
+        await sign_in.focus()
+        await sign_in.press('Enter')
+        await page.wait_for_url(lambda value: urlparse(value).path == '/login')
+        await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
+        assert_login_destination(page.url, target, context)
+        await check_primary_navigation(page, None, 'pu')
+
+        school = page.locator('details[aria-label="學校帳號登入"]')
+        await expect(school).to_have_js_property('open', False)
+        await school.locator(':scope > summary').focus()
+        await school.locator(':scope > summary').press('Enter')
+        await expect(school.get_by_role('combobox', name='選擇學校', exact=True)).to_have_value('pu')
+        await expect(school.get_by_role('status')).to_contain_text('此校園尚未開放學號直接登入。')
+        await expect(school.get_by_label('學號', exact=True)).to_have_count(0)
+        assert await page.evaluate('key => JSON.parse(localStorage.getItem(key))', key) == {
+            'schoolId': saved_school,
+        }
+        await no_overflow(page)
+        await page.screenshot(
+            path=str(OUT / f'login-deep-link-from-{preference}-mobile.png'),
+            full_page=True, animations='disabled',
+        )
+    finally:
+        await page.evaluate('''({key, previous}) => {
+            if (previous === null) localStorage.removeItem(key);
+            else localStorage.setItem(key, previous);
+        }''', {'key': key, 'previous': previous})
+
+
+async def check_student_card_login_scope(page, preference, saved_school):
+    """A school-only card keeps its PU task and school method through guest login."""
+    target = '/student-card?campus=pu'
+    expected = {
+        'returnUrl': [target], 'campus': ['pu'], 'reconnect': ['school'],
+    }
+    await goto_path(page, target)
+    await expect(page.get_by_role('heading', level=1, name='數位學生證', exact=True)).to_be_visible()
+    await wait_for_campus_header(page, 'pu', '靜宜大學')
+    await expect(page.locator('header summary[aria-label^="切換校園："]')).to_contain_text('靜宜大學')
+    sign_in = page.get_by_role('link', name='登入學校帳號', exact=True)
+    await expect(sign_in).to_be_visible()
+    destination = urlparse(await sign_in.get_attribute('href'))
+    assert destination.path == '/login'
+    assert parse_qs(destination.query, keep_blank_values=True) == expected
+    assert not destination.fragment
+    await sign_in.focus()
+    await sign_in.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/login')
+    await expect(page.get_by_role('heading', level=1, name='連線學校帳號', exact=True)).to_be_visible()
+    assert parse_qs(urlparse(page.url).query, keep_blank_values=True) == expected
+    assert not urlparse(page.url).fragment
+    school = page.locator('details[aria-label="學校帳號登入"]')
+    await expect(school).to_have_js_property('open', True)
+    await expect(school.get_by_role('combobox', name='選擇學校', exact=True)).to_have_value('pu')
+    await expect(school.get_by_role('status')).to_have_text(
+        '學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'
+    )
+    await expect(school.get_by_label('學號', exact=True)).to_have_count(0)
+    assert await page.evaluate(
+        'key => JSON.parse(localStorage.getItem(key))', 'campus.browse-school.v1:guest'
+    ) == {'schoolId': saved_school}
+    await no_overflow(page)
+    await page.screenshot(
+        path=str(OUT / f'student-card-login-from-{preference}-mobile.png'),
+        full_page=True, animations='disabled',
+    )
+
+
+async def check_directory_keyboard_return(page, journey, group, query, service_path, title):
+    """Real Next Back/Forward restores the selected result, not just its filters."""
+    label = '生活' if journey == 'life' else '交流'
+    await goto_path(page, '/?campus=pu')
+    await page.get_by_role('navigation', name='主要導覽').get_by_role(
+        'link', name=label, exact=True
+    ).click()
+    await expect(page.get_by_role('heading', level=1, name=label, exact=True)).to_be_visible()
+    await page.get_by_role('button', name=group, exact=True).click()
+    search = page.get_by_role('searchbox', name='快速找服務')
+    await search.fill(query)
+    link = page.locator(f'#{journey}-service-results a[href^="{service_path}?"]')
+    await expect(link).to_have_count(1)
+    directory_url = page.url
+    await link.focus()
+    await link.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == service_path)
+    await expect(page.get_by_role('heading', level=1, name=title, exact=True)).to_be_visible()
+    for attempt in range(2):
+        await page.go_back(wait_until='domcontentloaded')
+        await page.wait_for_url(directory_url)
+        await expect(search).to_have_value(query)
+        await expect(page.get_by_role('button', name=group, exact=True)).to_have_attribute('aria-pressed', 'true')
+        await expect(link).to_be_focused()
+        await check_primary_navigation(page, label)
+        if attempt == 0:
+            await page.screenshot(
+                path=str(OUT / f'{journey}-directory-history-mobile.png'),
+                full_page=True, animations='disabled',
+            )
+        await page.keyboard.press('Tab')
+        assert await page.evaluate('''() => Boolean(
+            document.activeElement?.closest('main')
+            && document.activeElement?.getAttribute('href') !== '#page-content'
+        )'''), 'Returning keyboard navigation restarted at the page header'
+        await page.go_forward(wait_until='domcontentloaded')
+        await page.wait_for_url(lambda value: urlparse(value).path == service_path)
+        await expect(page.get_by_role('heading', level=1, name=title, exact=True)).to_be_visible()
+    # A new visit from primary navigation must not reuse the previous entry's return.
+    await page.get_by_role('navigation', name='主要導覽').get_by_role(
+        'link', name=label, exact=True
+    ).click()
+    await expect(page.get_by_role('heading', level=1, name=label, exact=True)).to_be_visible()
+    await expect(search).to_have_value('')
+    await expect(page.get_by_role('button', name='全部', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await expect(link).not_to_be_focused()
+
+
+async def check_directory_child_return(page):
+    await goto_path(page, '/life?campus=pu')
+    await page.get_by_role('button', name='吃飯與住宿', exact=True).click()
+    summary = page.get_by_label('點餐與取餐的其他入口', exact=True)
+    await summary.focus()
+    await summary.press('Space')
+    child = page.locator('#life-service-results a[href^="/cafeteria?"]')
+    await expect(child).to_be_visible()
+    await child.focus()
+    await child.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/cafeteria')
+    await expect(page.get_by_role('heading', level=1, name='餐廳', exact=True)).to_be_visible()
+    await page.go_back(wait_until='domcontentloaded')
+    await expect(page.get_by_role('heading', level=1, name='生活', exact=True)).to_be_visible()
+    await expect(page.get_by_role('button', name='吃飯與住宿', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await expect(summary.locator('..')).to_have_js_property('open', True)
+    await expect(child).to_be_visible()
+    await expect(child).to_be_focused()
+    await page.screenshot(
+        path=str(OUT / 'life-directory-child-history-mobile.png'),
+        full_page=True, animations='disabled',
+    )
+    await page.go_forward(wait_until='domcontentloaded')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/cafeteria')
+    await page.get_by_role('navigation', name='主要導覽').get_by_role('link', name='生活', exact=True).click()
+    await expect(page.get_by_role('heading', level=1, name='生活', exact=True)).to_be_visible()
+    await expect(summary.locator('..')).to_have_js_property('open', False)
+    await expect(child).not_to_be_focused()
+
+
+async def check_career_directory_return(page):
+    await goto_path(page, '/life?school=PU&schoolId=pu&campus=pu')
+    resources = page.get_by_role('button', name='校園資源', exact=True)
+    await resources.click()
+    search = page.get_by_role('searchbox', name='快速找服務', exact=True)
+    await search.fill('校內工讀')
+    results = page.locator('#life-service-results')
+    await expect(results.get_by_role('link')).to_have_count(1)
+    career = results.get_by_role('link', name='職涯', exact=True)
+    await expect(career).to_be_visible()
+    scope = {'school': ['PU'], 'schoolId': ['pu'], 'campus': ['pu']}
+    destination = urlparse(await career.get_attribute('href'))
+    assert destination.path == '/career'
+    assert parse_qs(destination.query) == scope
+    await career.focus()
+    await career.press('Enter')
+    await page.wait_for_url(lambda value: urlparse(value).path == '/career')
+    assert parse_qs(urlparse(page.url).query) == scope
+    heading = page.get_by_role('heading', name='職涯', exact=True, level=1)
+    await expect(heading).to_have_count(1)
+    await expect(heading).to_be_visible()
+    await check_primary_navigation(page, '生活')
+    await expect(page.get_by_role(
+        'navigation', name='課務導覽', exact=True, include_hidden=True
+    )).to_have_count(0)
+    breadcrumb = page.get_by_role('navigation', name='目前位置', exact=True)
+    await expect(breadcrumb).to_have_count(1)
+    back = breadcrumb.get_by_role('link', name='生活', exact=True)
+    await expect(back).to_have_count(1)
+    await expect(back).to_be_visible()
+    await expect(page.get_by_role('navigation', name='麵包屑', exact=True)).to_have_count(0)
+    await expect(page.locator('main a[href="/life"]')).to_have_count(0)
+    back_destination = urlparse(await back.get_attribute('href'))
+    assert back_destination.path == '/life'
+    assert parse_qs(back_destination.query) == scope
+    await no_overflow(page)
+    await page.screenshot(
+        path=str(OUT / 'career-from-life-mobile.png'), full_page=True, animations='disabled',
+    )
+
+    await page.go_back(wait_until='load')
+    await expect(search).to_have_value('校內工讀')
+    await expect(resources).to_have_attribute('aria-pressed', 'true')
+    restored = urlparse(page.url)
+    assert restored.path == '/life'
+    assert parse_qs(restored.query) == {
+        **scope, 'group': ['resources'], 'q': ['校內工讀'],
+    }
+    await expect(results.get_by_role('link')).to_have_count(1)
+    await expect(career).to_be_visible()
+    await check_primary_navigation(page, '生活')
+    await no_overflow(page)
+
+
+async def check_home_personalization(page):
+    """Keep setup optional, keyboard reachable, and scoped to the chosen campus."""
+    key = 'nuni.campus-preferences.v1:guest:pu'
+    previous = await page.evaluate('key => localStorage.getItem(key)', key)
+    try:
+        await check_unsigned_today(page)
+        setup = page.get_by_role('button', name='設定首頁安排', exact=True)
+        await setup.focus()
+        await setup.press('Enter')
+        form = page.get_by_role('form', name='首頁安排偏好')
+        stage = form.get_by_role('combobox', name='你目前的階段', exact=True)
+        living = form.get_by_role('combobox', name='通勤或住宿方式', exact=True)
+        await expect(stage).to_be_focused()
+        await stage.select_option('year-4')
+        await form.get_by_role('radio', name='生活優先', exact=True).check()
+        more = form.locator('summary').filter(has_text='更多安排（選填）')
+        await expect(living).not_to_be_visible()
+        await more.focus()
+        await more.press('Enter')
+        await expect(living).to_be_visible()
+        await living.select_option('commute')
+        await more.press('Space')
+        await expect(living).not_to_be_visible()
+        await more.press('Enter')
+        await expect(living).to_have_value('commute')
+        await no_overflow(page)
+        await page.screenshot(path=str(OUT / 'home-preferences-expanded-mobile.png'), full_page=True, animations='disabled')
+
+        apply = form.get_by_role('button', name='套用首頁安排', exact=True)
+        await apply.focus()
+        await apply.press('Enter')
+        await expect(form).to_have_count(0)
+        await expect(page.get_by_role('heading', name='接下來可以做', exact=True)).to_be_visible()
+        edit = page.get_by_role('button', name='調整安排', exact=True)
+        await expect(edit).to_be_focused()
+        recommendations = page.get_by_role('list', name='為你推薦的下一步')
+        await expect(recommendations.get_by_role('link')).to_have_count(3)
+        for link in await recommendations.get_by_role('link').all():
+            assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == ['pu']
+        await edit.press('Enter')
+        await expect(stage).to_be_focused()
+        await expect(stage).to_have_value('year-4')
+        await stage.select_option('year-2')
+        cancel = form.get_by_role('button', name='取消', exact=True)
+        await cancel.focus()
+        await cancel.press('Enter')
+        await expect(edit).to_be_focused()
+        await edit.press('Enter')
+        await expect(stage).to_have_value('year-4')
+        await cancel.click()
+        await page.reload(wait_until='load')
+        await expect(page.get_by_role('heading', name='接下來可以做', exact=True)).to_be_visible()
+        await expect(form).to_have_count(0)
+        await goto_path(page, '/?campus=nthu')
+        await check_unsigned_today(page, 'nthu')
+        await goto_path(page, '/?campus=pu')
+        await expect(page.get_by_role('heading', name='接下來可以做', exact=True)).to_be_visible()
+    finally:
+        await page.evaluate('''({key, previous}) => {
+            if (previous === null) localStorage.removeItem(key);
+            else localStorage.setItem(key, previous);
+        }''', {'key': key, 'previous': previous})
+        await goto_path(page, '/?campus=pu')
 
 
 async def check_oled(page):
@@ -520,8 +1187,8 @@ async def check_home_font_preference(page):
                 'welcome body': welcome.locator('p').first,
                 'welcome action': welcome.get_by_role('link', name='匯入我的課表', exact=True),
                 'page title': today.get_by_role('heading', name='今天', exact=True),
-                'section title': today.get_by_role('heading', name=TODAY_FLOW_CLASS_TITLE, exact=True),
-                'empty state': today.get_by_text('還沒有課表。', exact=True),
+                'services title': welcome.get_by_role('heading', name='校園服務', exact=True),
+                'sign-in action': welcome.get_by_role('link', name='登入查看作業與通知', exact=True),
             }
             sizes[preference] = {}
             for width in [320, 768, 1440]:
@@ -627,6 +1294,59 @@ async def check_task_text_scaling(page):
         await page.set_viewport_size(viewport)
 
 
+async def check_assistant_return_journey(page):
+    """A guest can resume the same assistant task without losing directory context."""
+    await goto_path(page, '/life?' + urlencode({'campus': 'pu', 'group': 'resources', 'q': '借書'}))
+    finder = page.get_by_role('searchbox', name='快速找服務', exact=True)
+    await expect(finder).to_have_value('借書')
+    original = page.url
+    trigger = page.get_by_role('button', name='開啟校園助理', exact=True)
+    await trigger.click()
+    dialog = page.get_by_role('dialog', name='校園助理', exact=True)
+    await expect(dialog).to_be_visible()
+    field = dialog.get_by_role('searchbox', name='想做什麼？', exact=True)
+    await expect(field).to_be_focused()
+    assert page.url == original, 'Opening the assistant must keep the current task URL'
+    await field.fill('明天下課後想去圖書館')
+    await field.press('Escape')
+    await expect(dialog).not_to_be_visible()
+    await expect(trigger).to_be_focused()
+    await trigger.click()
+    await expect(field).to_have_value('明天下課後想去圖書館')
+    await expect(finder).to_have_value('借書')
+    login = dialog.get_by_role('link', name='登入後，接著詢問校園助理', exact=True)
+    login_href = await login.get_attribute('href')
+    login_url = urlparse(login_href)
+    login_query = parse_qs(login_url.query)
+    target = urlparse(login_query['returnUrl'][0])
+    assert target.path == '/life' and target.fragment == 'campus-assistant-entry', login_href
+    task = parse_qs(target.query)
+    assert task == {'q': ['借書'], 'group': ['resources'], 'schoolId': ['pu'], 'campus': ['pu'], 'school': ['PU']}, login_href
+    assert login_query == {
+        'returnUrl': [login_query['returnUrl'][0]], 'schoolId': ['pu'], 'campus': ['pu'], 'school': ['PU'],
+    }, login_href
+    assert '明天下課後' not in login_href, 'Typed draft must not be added to the login URL'
+    await no_overflow(page)
+    await page.screenshot(path=str(OUT / 'assistant-life-mobile.png'), full_page=True, animations='disabled')
+    await login.click()
+    await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
+    await page.get_by_role('link', name='不登入，繼續瀏覽', exact=True).click()
+    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).to_be_visible()
+    await expect(page.get_by_role('searchbox', name='快速找服務', exact=True)).to_have_value('借書')
+    await page.get_by_role('button', name='關閉校園助理', exact=True).click()
+    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).not_to_be_visible()
+    assert urlparse(page.url).fragment == '', 'Closing a restored panel must clear only its resume anchor'
+    # A fresh visit to the same task must not reopen the old panel.
+    await page.reload(wait_until='load')
+    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).to_have_count(0)
+    await goto_path(page, '/?campus=pu')
+    await page.get_by_role('button', name='開啟校園助理', exact=True).click()
+    disclosure = page.locator('#today-voice-entry')
+    await expect(disclosure).to_have_attribute('open', '')
+    await expect(disclosure.get_by_role('searchbox', name='想做什麼？', exact=True)).to_be_focused()
+    assert urlparse(page.url).path == '/'
+
+
 async def main():
     results = []
     errors = []
@@ -659,15 +1379,36 @@ async def main():
                     await check_mobile_navigation(page)
                 results.append(f'home reflows at {width}px')
 
+                await goto_path(page, '/connect?campus=pu')
+                await expect(page.get_by_role('heading', name='交流', exact=True)).to_be_visible()
+                await expect(page.get_by_role('heading', name='找人與聊天', exact=True)).to_be_visible()
+                await expect(page.locator('#connect-service-results').get_by_role(
+                    'link', name='訊息', exact=True
+                )).to_have_attribute('href', re.compile(r'^/dms\?'))
+                await expect(page.locator('#connect-service-results').get_by_role(
+                    'link', name='通知', exact=True
+                )).to_have_attribute('href', re.compile(r'^/messages\?'))
+                await check_primary_navigation(page, '交流')
+                await no_overflow(page)
+                await page.screenshot(path=str(OUT / f'connect-{label}.png'), full_page=True, animations='disabled')
+                if width <= 760:
+                    await check_mobile_navigation(page)
+                results.append(f'connect directory separates notifications and conversations at {width}px')
+
                 await goto_path(page, '/life?campus=pu')
                 await expect(page.get_by_role('heading', name='生活', exact=True)).to_be_visible()
-                await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
+                await expect(page.get_by_role('heading', name='出門與交通', exact=True)).to_be_visible()
+                await check_primary_navigation(page, '生活')
                 await no_overflow(page)
                 await page.screenshot(path=str(OUT / f'life-{label}.png'), full_page=True, animations='disabled')
                 if width <= 760:
                     await check_mobile_navigation(page)
                 results.append(f'life directory reflows at {width}px')
             results.append('mobile bottom navigation leaves footer actions reachable')
+            await page.set_viewport_size({'width': 390, 'height': 844})
+            await check_assistant_return_journey(page)
+            results.append('assistant opens in place, keeps the draft on close, and resumes the campus task when returning from the login page')
+            await goto_path(page, '/life?campus=pu')
 
             search = page.get_by_role('searchbox', name='快速找服務')
             await search.fill('借書')
@@ -677,27 +1418,89 @@ async def main():
             await expect(page.get_by_role('heading', name='沒有找到符合的服務')).to_be_visible()
             await page.get_by_role('button', name='顯示全部服務').click()
             await expect(search).to_be_focused()
-            await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
-            await page.get_by_role('button', name='個人安排', exact=True).click()
-            # 點餐關閉時不含訂單：宿舍、課程與作業、共同空堂
-            await expect(page.locator('#life-service-results a')).to_have_count(3)
+            await expect(page.get_by_role('heading', name='出門與交通', exact=True)).to_be_visible()
+            await page.get_by_role('button', name='吃飯與住宿', exact=True).click()
+            # 食堂與訂單收在點餐主入口下；點餐關閉時沒有訂單。
+            await expect(page.locator('#life-service-results').get_by_role('link')).to_have_count(2)
             await expect(page.locator('#life-service-results a[href^="/dormitory"]')).to_be_visible()
-            await expect(page.locator('#life-service-results a[href^="/classroom"]')).to_be_visible()
-            await expect(page.locator('#life-service-results a[href^="/timetable"]')).to_be_visible()
+            await expect(page.locator('#life-service-results a[href^="/food"]')).to_be_visible()
+            await expect(page.locator('#life-service-results a[href^="/orders"]')).to_have_count(0)
             await page.get_by_role('button', name='全部', exact=True).click()
             await search.fill('報修')
             await expect(page.locator('#life-service-results a')).to_have_count(1)
             await expect(page.locator('#life-service-results a[href^="/dormitory"]')).to_be_visible()
             await search.fill('')
             results.append('service search, empty recovery and category filtering work on mobile')
+            await check_life_public_filter(page)
+            results.append('life visitor filter retains public cafeteria, excludes gated tasks, and restores campus, category, search and keyboard focus on Back')
 
             await check_life_navigation_continuity(page, results)
             await check_today_navigation_continuity(page, results)
 
             await page.set_viewport_size({'width': 390, 'height': 844})
+            await check_directory_keyboard_return(page, 'life', '校園資源', '借書', '/library', '圖書館')
+            results.append('life directory Back and Forward restore the result and keyboard position without affecting a fresh visit')
+            await check_directory_keyboard_return(page, 'connect', '找人與聊天', '好友', '/friends', '找人')
+            results.append('connect directory Back and Forward restore the result and keyboard position without affecting a fresh visit')
+            await check_directory_child_return(page)
+            results.append('returning to a directory child restores its disclosure and focus only in the original history entry')
+            await check_career_directory_return(page)
+            results.append('career opens from campus resources with scoped life navigation and browser Back restores work-study search')
+            for preference in ['nthu', 'all']:
+                await check_deep_link_login_scope(page, preference)
+                results.append(f'PU deep-link Header login overrides saved {preference} browsing preference without copying auth query to the outer URL')
+                await check_deep_link_login_scope(page, preference, student_card=True)
+                results.append(f'PU student-card school login preserves its task and campus despite saved {preference} browsing preference')
+
+            club_path = '/groups/journey-club/club/overview'
+            await goto_path(page, club_path + '?campus=pu&schoolId=pu')
+            await expect(page.get_by_role('heading', name='社團', exact=True)).to_be_visible()
+            await check_primary_navigation(page, '生活')
+            club_breadcrumb = page.get_by_role('navigation', name='目前位置').get_by_role(
+                'link', name='社團活動', exact=True
+            )
+            await expect(club_breadcrumb).to_be_visible()
+            club_destination = urlparse(await club_breadcrumb.get_attribute('href'))
+            assert club_destination.path == '/clubs'
+            club_scope = parse_qs(club_destination.query)
+            assert club_scope.get('campus') == ['pu']
+            assert club_scope.get('schoolId') == ['pu']
+            await expect(page.get_by_role(
+                'navigation', name='課務導覽', exact=True, include_hidden=True
+            )).to_have_count(0)
+            club_login = page.get_by_role('link', name='登入後查看社團', exact=True)
+            await expect(club_login).to_be_visible()
+            assert_login_destination(
+                await club_login.get_attribute('href'),
+                club_path + '?schoolId=pu', {'schoolId': 'pu'},
+            )
+            assert urlparse(page.url).path == club_path
+            # Correcting the navigation category must not expose the members-only profile.
+            await expect(page.get_by_role(
+                'region', name='社團頁', exact=True, include_hidden=True
+            )).to_have_count(0)
+            await expect(page.get_by_role('button', name='重新讀取社團資料', exact=True)).to_have_count(0)
+            await expect(page.get_by_role('link', name='查看社團討論與更多公告', exact=True)).to_have_count(0)
+            await no_overflow(page)
+            await page.screenshot(
+                path=str(OUT / 'club-overview-unsigned-mobile.png'),
+                full_page=True,
+                animations='disabled',
+            )
+            results.append('unsigned club overview stays in life with a campus-scoped clubs breadcrumb and keeps member data gated')
+
+            await goto_path(page, '/?campus=all')
+            await check_unsigned_today(page, 'all')
+            await no_overflow(page)
+            results.append('unselected-campus home starts with choosing a campus and keeps public services available')
             await goto_path(page, '/?campus=pu')
+            await check_home_personalization(page)
+            results.append('home preferences start collapsed, support keyboard editing and cancel, persist only in their campus scope')
+            await wait_for_campus_header(page, 'pu', '靜宜大學')
             services = page.locator('header summary[aria-label="所有服務"]')
             await services.click()
+            await check_progressive_service_menu(page)
+            results.append('global menu keeps 16 everyday entries, expands all 40 available services and restores secondary work on Back')
             await expect(page.get_by_role('link', name='尋找校園服務')).to_be_visible()
             await expect(page.get_by_role('button', name='關閉所有服務')).to_be_in_viewport()
             await no_overflow(page)
@@ -725,6 +1528,13 @@ async def main():
             await expect(page.get_by_role('navigation', name='主要導覽').get_by_role(
                 'link', name='生活', exact=True
             )).to_have_attribute('aria-current', 'page')
+            back_to_life = page.get_by_role('navigation', name='目前位置').get_by_role(
+                'link', name='生活', exact=True
+            )
+            await expect(back_to_life).to_be_visible()
+            back_destination = urlparse(await back_to_life.get_attribute('href'))
+            assert back_destination.path == '/life'
+            assert parse_qs(back_destination.query).get('campus') == ['pu']
             await page.keyboard.press('Control+k')
             await expect(menu_search).to_be_focused()
             await menu_search.fill('找不到的服務')
@@ -742,7 +1552,7 @@ async def main():
                 'aria-current', 'page'
             )
             await expect(page.get_by_role('navigation', name='主要導覽').get_by_role(
-                'link', name='我', exact=True
+                'link', name='我的', exact=True
             )).to_have_attribute('aria-current', 'page')
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'settings-mobile.png'), full_page=True, animations='disabled')
@@ -764,11 +1574,12 @@ async def main():
             results.append('settings deep links, history and keyboard sections preserve campus and fragment')
 
             await goto_path(page, '/?campus=pu')
-            campus = page.locator('header summary[aria-label^="切換校園："]')
+            campus = await wait_for_campus_header(page, 'pu', '靜宜大學')
             await campus.click()
             await expect(page.get_by_role('combobox', name='瀏覽校園', exact=True)).to_be_visible()
             await no_overflow(page)
             await page.get_by_role('combobox', name='瀏覽校園', exact=True).select_option('nthu')
+            await wait_for_campus_header(page, 'nthu', '國立清華大學')
             await expect(campus).to_contain_text('國立清華大學')
             await expect(page.get_by_role('combobox', name='瀏覽校園', exact=True)).not_to_be_visible()
             timetable = page.get_by_role('navigation', name='主要導覽').get_by_role('link', name='課務')
@@ -776,7 +1587,7 @@ async def main():
             assert parse_qs(urlparse(href).query).get('campus') == ['nthu']
             results.append('campus selection closes the picker and preserves navigation scope')
 
-            for route, heading in [('/', '今天'), ('/life', '生活')]:
+            for route, heading in [('/', '今天'), ('/life', '生活'), ('/connect', '交流')]:
                 await page.emulate_media(color_scheme='dark', reduced_motion='reduce')
                 await goto_path(page, route + '?campus=pu')
                 if route == '/':
@@ -785,16 +1596,17 @@ async def main():
                     await expect(page.get_by_role('heading', name=heading, exact=True)).to_be_visible()
                 await check_oled(page)
                 await no_overflow(page)
-                name = 'home' if route == '/' else 'life'
+                name = 'home' if route == '/' else route.lstrip('/')
                 await page.screenshot(path=str(OUT / f'{name}-dark.png'), full_page=True, animations='disabled')
                 await page.screenshot(path=str(OUT / f'{name}-oled-mobile.png'), animations='disabled')
-            results.append('home and life use OLED black with matching browser chrome')
+            results.append('home, life and connect use OLED black with matching browser chrome')
 
             await page.set_viewport_size({'width': 1440, 'height': 1000})
             await goto_path(page, '/?campus=pu')
             await check_oled(page)
             await page.screenshot(path=str(OUT / 'home-oled-desktop.png'), full_page=True, animations='disabled')
             await page.set_viewport_size({'width': 390, 'height': 844})
+            await wait_for_campus_header(page, 'pu', '靜宜大學')
             await page.locator('header summary[aria-label="所有服務"]').click()
             await page.screenshot(path=str(OUT / 'services-oled-mobile.png'), animations='disabled')
             await page.get_by_role('button', name='關閉所有服務').click()
@@ -858,6 +1670,14 @@ async def main():
 
             for width in [390, 1440]:
                 await page.set_viewport_size({'width': width, 'height': 844})
+                await goto_path(page, '/login?campus=pu')
+                await check_unsigned_login_entry(page)
+                await page.screenshot(
+                    path=str(OUT / f'login-{width}.png'),
+                    full_page=True,
+                    animations='disabled',
+                )
+                results.append(f'login keeps Google primary and reveals school and work entries by keyboard at {width}px')
                 await check_merchant_entry_links(page)
                 results.append(f'merchant registration and returning sign-in preserve their destination at {width}px')
             await page.set_viewport_size({'width': 390, 'height': 844})
@@ -982,7 +1802,7 @@ async def main():
             await signed_page.wait_for_url(re.compile(r'https?://[^/]+/life(?:\?.*)?$'))
             assert urlparse(signed_page.url).path == '/life'
             return_path = '/life?campus=pu#life-service-results'
-            await follow_account_return(signed_page, return_path)
+            await follow_account_return(signed_page, return_path, school_context={'campus': 'pu'})
             assert parse_qs(urlparse(signed_page.url).query).get('campus') == ['pu']
             assert urlparse(signed_page.url).fragment == 'life-service-results'
             await signed_page.goto(BASE + '/auth/account?returnUrl=/staff', wait_until='domcontentloaded')
@@ -990,23 +1810,109 @@ async def main():
             assert urlparse(signed_page.url).path == '/'
             results.append('signed-in account visits preserve campus and anchor on allowed return paths')
 
-            for target in [
-                '/grades?tab=feedback&schoolId=nthu&campus=nthu',
-                '/settings?section=appearance&campus=nthu#reading',
-                '/school-info?campus=pu',
-                '/events?campus=nthu',
+            for target, school_context in [
+                ('/grades?tab=feedback&schoolId=nthu&campus=nthu', {'schoolId': 'nthu', 'campus': 'nthu'}),
+                ('/settings?section=appearance&campus=nthu#reading', {'campus': 'nthu'}),
+                ('/school-info?campus=pu', {'campus': 'pu'}),
+                ('/events?campus=nthu', {'campus': 'nthu'}),
+                ('/life?campus=pu&group=resources&q=%E5%80%9F%E6%9B%B8#life-service-results', {'campus': 'pu'}),
+                ('/connect?campus=pu&group=people&q=%E8%A8%8A%E6%81%AF#connect-service-results', {'campus': 'pu'}),
             ]:
-                await follow_account_return(signed_page, target)
+                await follow_account_return(signed_page, target, school_context=school_context)
                 await no_overflow(signed_page)
-            results.append('account return navigation preserves campus, tabs and settings position')
+                returned = urlparse(target)
+                if returned.path in ['/life', '/connect']:
+                    query = parse_qs(returned.query)
+                    await expect(signed_page.get_by_role('searchbox', name='快速找服務')).to_have_value(query['q'][0])
+                    group = '校園資源' if returned.path == '/life' else '找人與聊天'
+                    await expect(signed_page.get_by_role('button', name=group, exact=True)).to_have_attribute(
+                        'aria-pressed', 'true'
+                    )
+            results.append('account return navigation preserves campus, tabs, directory search and category, and anchor position')
             await follow_account_return(
                 signed_page,
                 '/grades?tab=feedback&campus=nthu&token=discard-me&session=discard-me&next=%2Fstaff#recent',
                 '/grades?tab=feedback&campus=nthu#recent',
+                school_context={'campus': 'nthu'},
             )
             await no_overflow(signed_page)
             results.append('account return navigation drops auth payloads and nested redirects')
             results.append('signed-in account visits follow allowed return paths')
+
+            # These are browser-only session fixtures, not a real school account.
+            # Keep course reads local while checking the actual Next navigation.
+            async def empty_workspaces(route):
+                assert route.request.method == 'GET'
+                await route.fulfill(json={'workspaces': []})
+
+            await signed.route('**/api/nuni/class-workspaces', empty_workspaces)
+            await goto_path(signed_page, '/?campus=pu')
+            signed_campus = await wait_for_campus_header(signed_page, 'pu', '靜宜大學')
+            await expect(signed_campus).to_contain_text('靜宜大學')
+            await signed_campus.click()
+            await signed_page.get_by_role('combobox', name='瀏覽校園', exact=True).select_option('nthu')
+            await wait_for_campus_header(signed_page, 'nthu', '國立清華大學')
+            await expect(signed_campus).to_contain_text('國立清華大學')
+            preference_key = 'campus.browse-school.v1:account:%7Cpa_00000000-0000-4000-8000-000000000001'
+            assert await signed_page.evaluate('key => JSON.parse(localStorage.getItem(key))', preference_key) == {
+                'schoolId': 'nthu',
+            }
+            for scope in ['pu', 'all']:
+                expected_scope = {'campus': ['all']} if scope == 'all' else {
+                    'schoolId': ['pu'], 'campus': ['pu'], 'school': ['PU'],
+                }
+                for start, label, destination, section, extra in [
+                    ('/', '查看行事曆', '/calendar', '課務', {}),
+                    ('/', '加入課程', '/classroom', '課務', {}),
+                    ('/classroom', '課業成績與回饋', '/grades', '課務', {'tab': ['feedback']}),
+                    ('/classroom/account', '前往我的課程', '/classroom', '課務', {}),
+                    ('/classroom/course/invalid-id', '回到我的課程', '/classroom', '課務', {}),
+                    ('/settings', '返回個人資料', '/profile', '我的', {}),
+                ]:
+                    if start == '/settings':
+                        # This explicit sidebar link is desktop-only. Mobile
+                        # returns through the existing breadcrumb below.
+                        await signed_page.set_viewport_size({'width': 1440, 'height': 1000})
+                    await goto_path(signed_page, f'{start}?campus={scope}&token=fixture-only&q=old-search#old-position')
+                    link = signed_page.get_by_role('link', name=label, exact=True)
+                    await expect(link).to_be_visible()
+                    if scope == 'pu':
+                        # The streamed link is visible before the campus catalog
+                        # hydrates and enriches its explicit URL browsing scope.
+                        await expect(link).to_have_attribute(
+                            'href', re.compile(r'(?:\?|&)schoolId=pu(?:&|$)'),
+                        )
+                    target = urlparse(await link.get_attribute('href'))
+                    assert target.path == destination, (start, label, target)
+                    assert parse_qs(target.query) == {**extra, **expected_scope}, (start, label, target)
+                    assert not target.fragment, (start, label, target)
+                    await link.click()
+                    await signed_page.wait_for_url(lambda value: urlparse(value).path == destination)
+                    assert parse_qs(urlparse(signed_page.url).query) == {**extra, **expected_scope}
+                    await check_primary_navigation(signed_page, section, scope)
+                    assert await signed_page.evaluate('key => JSON.parse(localStorage.getItem(key))', preference_key) == {
+                        'schoolId': 'nthu',
+                    }
+                    await no_overflow(signed_page)
+                await signed_page.set_viewport_size({'width': 390, 'height': 844})
+                await goto_path(signed_page, f'/settings?campus={scope}&token=fixture-only&q=old-search#old-position')
+                breadcrumb = signed_page.get_by_role('navigation', name='目前位置').get_by_role(
+                    'link', name='我的', exact=True,
+                )
+                await expect(breadcrumb).to_be_visible()
+                await breadcrumb.click()
+                await signed_page.wait_for_url(lambda value: urlparse(value).path == '/profile')
+                assert parse_qs(urlparse(signed_page.url).query) == expected_scope
+                assert not urlparse(signed_page.url).fragment
+                await check_primary_navigation(signed_page, '我的', scope)
+                assert await signed_page.evaluate('key => JSON.parse(localStorage.getItem(key))', preference_key) == {
+                    'schoolId': 'nthu',
+                }
+                await no_overflow(signed_page)
+                results.append(f'home, course and account service links preserve {scope} despite saved NTHU')
+            await signed_page.screenshot(
+                path=str(OUT / 'profile-return-all-mobile.png'), full_page=True, animations='disabled',
+            )
 
             async def capture_platform(name, operator):
                 nonlocal active_page

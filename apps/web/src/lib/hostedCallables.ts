@@ -8,6 +8,7 @@ export const HOSTED_WEB_CALLABLES = [
   'sendDmText',
   'replyToCampusStory',
   'joinGroupByCode',
+  'listGroupDiscussionPage',
   'leaveGroup',
   'createTimetableShare',
   'revokeTimetableShare',
