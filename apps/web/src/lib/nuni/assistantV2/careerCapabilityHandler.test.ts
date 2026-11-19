@@ -112,6 +112,14 @@ it('loads the career directory through the real handler and keeps ordinary servi
   expect(ordinary.result.steps).toContainEqual(expect.objectContaining({ name: 'get_school_info', status: 'ok' }));
   expect(ordinary.result.cards).toEqual([]);
   expect(providerCall).toHaveBeenCalledTimes(2);
+
+  providerCall.mockResolvedValueOnce(tool('list_campus_services', { serviceId: 'library' }))
+    .mockResolvedValueOnce(answer('可到圖書館頁核對服務。'));
+  const library = await ask('有哪些圖書館服務？');
+  expect(library.result.answer).toContain('圖書館');
+  expect(library.result.steps).toContainEqual(expect.objectContaining({ name: 'list_campus_services', status: 'ok' }));
+  expect(library.result.cards).toEqual([]);
+  expect(providerCall).toHaveBeenCalledTimes(4);
   noBusinessAccess(f);
 });
 
