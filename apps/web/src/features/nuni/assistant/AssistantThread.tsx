@@ -27,7 +27,7 @@ import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
-import { assistantWorkContextFromQuestion, getAssistantRoleWorkflow, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import { assistantTaskProfileForWorkContext, assistantWorkContextForTaskProfile, assistantWorkContextFromQuestion, getAssistantRoleWorkflow, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 import { AssistantRoleTasks } from './AssistantRoleTasks';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
@@ -157,7 +157,28 @@ export function AssistantThread({
   const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
   const [chosenWorkContext, setWorkContext] = useState<AssistantWorkContext | null>(null);
   const [initialWorkContext] = useState(() => assistantWorkContextFromQuestion(question));
-  const workContext = chosenWorkContext ?? preferredWorkContext ?? initialWorkContext;
+  const manuallySelectedContext = useRef(false);
+  const suggestedWorkContext = chosenWorkContext ?? preferredWorkContext ?? initialWorkContext;
+  const workContext = onTaskProfile ? assistantWorkContextForTaskProfile(taskProfile) : suggestedWorkContext;
+  // Loaded workspace preferences and explicit entry questions initialize the same
+  // task vocabulary sent to the readers. A later manual selection takes priority.
+  useEffect(() => {
+    if (!onTaskProfile || taskProfileLocked || manuallySelectedContext.current || taskProfile !== 'student') return;
+    const next = assistantTaskProfileForWorkContext(suggestedWorkContext);
+    if (next !== taskProfile) onTaskProfile(next);
+  }, [onTaskProfile, taskProfileLocked, taskProfile, suggestedWorkContext]);
+  function chooseTaskProfile(next: AssistantRoleProfileId) {
+    if (taskProfileLocked) return;
+    manuallySelectedContext.current = true;
+    setWorkContext(assistantWorkContextForTaskProfile(next));
+    onTaskProfile?.(next);
+  }
+  function chooseWorkContext(next: AssistantWorkContext) {
+    if (taskProfileLocked) return;
+    manuallySelectedContext.current = true;
+    setWorkContext(next);
+    onTaskProfile?.(assistantTaskProfileForWorkContext(next));
+  }
   const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
@@ -274,7 +295,7 @@ export function AssistantThread({
         const next = event.relatedTarget;
         if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
       }}>
-      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={onTaskProfile} />}
+      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={chooseTaskProfile} />}
       {!inline && (
         <>
           <p className={styles.intro}>{taskProfile === 'student'
@@ -287,7 +308,8 @@ export function AssistantThread({
           </nav>
         </>
       )}
-      <AssistantRoleTasks context={workContext} onContext={setWorkContext} schoolId={schoolId}
+      <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} disabled={taskProfileLocked} schoolId={schoolId}
+        linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
         compact={inline || turns.length > 0} />
       {!ready ? (
         <p className={styles.notice} role="status">

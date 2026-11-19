@@ -76,16 +76,7 @@ export function parseTeachingArguments(raw: unknown): { limit: number } {
   } catch { throw new V2Error(422, 'TEACHING_INVALID_INPUT'); }
 }
 
-/** Whole, unfiltered reads only. Never discard a named course, date, write or negation. */
-export function parseTeachingRead(question: string): { tool: 'get_teaching_overview'; args: TeachingArguments } | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 160 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  let value = question.normalize('NFKC').trim().replace(/[。！？!?]+$/, '').replace(/\s+/g, '');
-  value = value.replace(/^(?:(?:麻煩你|麻煩|請問|請|幫我|替我|我想|想|查詢|查看|查一下|看一下|看看|列出|顯示|查|看|核對|目前的|目前))*/, '');
-  value = value.replace(/(?:有哪些|有什麼|如何|怎麼樣|資訊|資料)?(?:嗎|呢)?$/, '');
-  if (!/^(?:(?:我的|本人|我)(?:授課|教學|負責授課)(?:的)?(?:課程|課務|作業|測驗)?(?:概況|摘要|總覽|狀況|進度)?|(?:教師|老師|授課|教學)(?:工作|課務)?(?:概況|摘要|總覽)|(?:我教|我開)的課(?:程)?(?:概況|摘要|總覽|作業|測驗)?)$/.test(value)) return null;
-  return { tool: 'get_teaching_overview', args: {} };
-}
+export { parseTeachingRead } from '@campus/shared/src/assistantRoleReadIntent';
 
 function cleanText(raw: unknown, max: number): string {
   if (typeof raw !== 'string' || !raw.trim() || raw !== raw.trim() || raw.length > max ||

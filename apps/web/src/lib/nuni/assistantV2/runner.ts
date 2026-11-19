@@ -241,7 +241,9 @@ export async function run(input: RunInput) {
   const direct = input.planRevision || hasPublicClause || hasConnectedReads ? [] : directReads(executionQuestion, now);
   const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
   const roleGuide = !input.planRevision && !input.studyTarget && !personalTimetable
-    ? assistantRoleTaskGuide(profile.id, input.question, now) : null;
+    ? assistantRoleTaskGuide(profile.id, input.question, now,
+      profile.id === 'teacher' ? typeof input.adapter.teachingOverview === 'function'
+        : profile.id === 'merchant' ? typeof input.adapter.merchantOverview === 'function' : false) : null;
   const reads = direct.filter(read => allowed(read.tool));
   const selectedNames = selectTools(input.question, input.adapter.simulation, input.binding.schoolId).filter(allowed);
   const requestedPublicCourses = publicCourseSearches(input.question, input.binding.schoolId);

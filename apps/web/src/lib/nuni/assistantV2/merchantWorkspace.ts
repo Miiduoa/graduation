@@ -120,17 +120,7 @@ export function merchantHref(schoolId: string): string {
   return assistantServiceHref('merchant', schoolId)!;
 }
 
-/** Whole explicit clauses only. In particular, a personal customer's orders,
- * a date-filtered queue or a named shop cannot widen into a merchant read. */
-export function parseMerchantRead(question: string): { tool: 'get_merchant_overview'; args: MerchantArguments } | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 120 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  let value = question.normalize('NFKC').trim().replace(/[。！？!?]+$/, '').replace(/\s+/g, '');
-  value = value.replace(/^(?:(?:麻煩你|麻煩|請問|請|幫我|替我|我想|想|查詢|查看|查一下|看一下|看看|查|看|列出|顯示|核對|檢查|目前的|目前|現在的|現在))*/, '');
-  value = value.replace(/(?:有哪些|有什麼|資訊|資料|概況|摘要)?(?:嗎|呢)?$/, '');
-  return /^(?:我的?)?(?:店家(?:營運|訂單|待處理訂單|班次|交班)|門市(?:營運|訂單|待處理訂單|班次|交班)|授權門市|管理的門市|店家工作區|門市工作區)(?:狀態)?$/.test(value)
-    ? { tool: 'get_merchant_overview', args: {} } : null;
-}
+export { parseMerchantRead } from '@campus/shared/src/assistantRoleReadIntent';
 
 /** This is the account-scoped merchant list, not the public food catalogue.
  * Reject altered coverage, duplicate identities and unrecognized private data

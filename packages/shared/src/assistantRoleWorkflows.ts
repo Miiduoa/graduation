@@ -1,3 +1,4 @@
+import type { AssistantRoleProfileId } from './assistantRoleProfiles';
 import type { AssistantServiceId } from './assistantServices';
 
 /** Presentation and task intent only. A selected context never grants a role,
@@ -85,4 +86,13 @@ export function assistantWorkContextFromQuestion(question: string): AssistantWor
   const teacher = /查(?:詢)?(?:我的)?授課概況/.test(question);
   const merchant = /查(?:詢)?(?:我的)?門市營運概況/.test(question);
   return teacher === merchant ? 'student' : teacher ? 'teacher' : 'merchant';
+}
+
+/** Vocabulary mapping only; neither context grants account permissions. */
+export function assistantTaskProfileForWorkContext(context: AssistantWorkContext): AssistantRoleProfileId {
+  return context === 'staff' ? 'school' : context === 'operator' ? 'platform' : context;
+}
+
+export function assistantWorkContextForTaskProfile(profile: AssistantRoleProfileId): AssistantWorkContext {
+  return profile === 'school' ? 'staff' : profile === 'platform' ? 'operator' : profile;
 }

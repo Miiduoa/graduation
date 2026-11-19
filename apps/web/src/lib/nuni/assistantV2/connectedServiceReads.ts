@@ -1,3 +1,5 @@
+import { connectedServiceClauses } from '@campus/shared/src/assistantRoleReadIntent';
+export { connectedServiceClauses } from '@campus/shared/src/assistantRoleReadIntent';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
 import { canonical, type Obj } from './contracts';
 import { parsePublicSocialArguments, parsePublicSocialRead } from './publicSocial';
@@ -32,39 +34,6 @@ export function connectedServiceReads(question: string): ConnectedServiceRead[] 
     other.tool === read.tool && canonical(other.args) === canonical(read.args)) === index);
 }
 
-export function connectedServiceClauses(question: string): string[] {
-  if (!question.trim() || question.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question) ||
-      /不要|不用|不必|無須|不需要|先別|別幫|不是要|翻譯|假設|如果|例如|範例/.test(question)) return [];
-  const text = question.normalize('NFKC').trim();
-  const quotes: Record<string, string> = { '「': '」', '『': '』', '“': '”', '"': '"', "'": "'", '`': '`' };
-  const clauses: string[] = [];
-  let quote = '', part = '';
-  for (let index = 0; index < text.length;) {
-    const character = text[index];
-    if (quote) {
-      part += character;
-      if (character === quote) quote = '';
-      index++;
-      continue;
-    }
-    if (quotes[character]) {
-      quote = quotes[character];
-      part += character;
-      index++;
-      continue;
-    }
-    const separator = /^(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])/.exec(text.slice(index));
-    if (separator) {
-      if (part.trim()) clauses.push(part.trim());
-      part = '';
-      index += separator[0].length;
-    } else { part += character; index++; }
-  }
-  if (quote) return [];
-  if (part.trim()) clauses.push(part.trim());
-  if (!clauses.length || clauses.length > 12) return [];
-  return clauses;
-}
 
 export function connectedServiceReadKey(read: Pick<ConnectedServiceRead, 'tool' | 'args'>): string {
   return read.tool + canonical(read.args);

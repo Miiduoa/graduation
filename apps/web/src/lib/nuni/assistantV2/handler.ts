@@ -173,8 +173,6 @@ export async function handleV2(request: NextRequest, action: string) {
       throw new V2Error(422, 'INVALID_INPUT');
     const direct = action === 'ask' && typeof raw.question === 'string' ? directReads(raw.question, Date.now()) : [];
     const personalTimetable = direct.length === 1 && direct[0].tool === 'get_schedule';
-    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
-      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question) : null;
     const studyTarget = action === 'plan'
       ? courseworkStudyTarget(raw.task)
       : action === 'ask' && raw.studyTarget !== undefined
@@ -212,6 +210,12 @@ export async function handleV2(request: NextRequest, action: string) {
     }
     const source = createAdapter(session, schoolId, signal),
       principal = await source.principal();
+    // Unconnected adapters retain the existing service-only path, including its
+    // zero-model consent boundary. A task context never manufactures a source.
+    const roleGuide = !personalTimetable && action === 'ask' && raw.planProtection === undefined && raw.studyTarget === undefined &&
+      typeof raw.question === 'string' ? assistantRoleTaskGuide(profile!.id, raw.question, Date.now(),
+        profile!.id === 'teacher' ? typeof source.adapter.teachingOverview === 'function'
+          : profile!.id === 'merchant' ? typeof source.adapter.merchantOverview === 'function' : false) : null;
     const binding = {
       account: principal.platformAccountId,
       session: sessionContext(session),

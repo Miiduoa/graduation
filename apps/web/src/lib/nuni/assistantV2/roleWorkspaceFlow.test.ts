@@ -114,6 +114,35 @@ async function prepare(question: string, f = fixture()) {
 
 describe('role workspace reads through the real task runner', () => {
   it.each([
+    ['teacher', '查我的授課概況', 'get_teaching_overview'],
+    ['teacher', '查我的授課概況，查學校電話', 'get_teaching_overview'],
+    ['teacher', '查我的授課概況，查近期活動', 'get_teaching_overview'],
+    ['teacher', '查我的授課概況，幫我新增行程明天15:00到16:00備課', 'get_teaching_overview'],
+    ['merchant', '查我的門市營運概況', 'get_merchant_overview'],
+    ['merchant', '查我的門市營運概況，查學校電話', 'get_merchant_overview'],
+    ['merchant', '查我的門市營運概況，查近期活動', 'get_merchant_overview'],
+  ] as const)('%s uses its dedicated reader after context selection: %s', async (taskProfile, question, tool) => {
+    const f = fixture();
+    f.adapter.publicCampus = vi.fn(async () => ({ version: 1 as const, kind: 'events' as const,
+      schoolId, source: 'school-club-events' as const, sourcePath: `schools/${schoolId}/clubEvents`,
+      checkedAt: new Date(now).toISOString(), status: 'ready' as const, partial: false,
+      href: `/events?schoolId=${schoolId}`, items: [] }));
+    const request = input(question, f, { taskProfile });
+    const reply = await run(request);
+    expect(reply).not.toHaveProperty('roleGuide');
+    expect(reply.steps).toContainEqual(expect.objectContaining({ name: tool, status: 'ok' }));
+    expect(taskProfile === 'teacher' ? f.teachingOverview : f.merchantOverview).toHaveBeenCalledOnce();
+    expect(taskProfile === 'teacher' ? f.merchantOverview : f.teachingOverview).not.toHaveBeenCalled();
+    if (question.includes('學校電話')) expect(reply.steps).toContainEqual(expect.objectContaining({ name: 'get_school_info', status: 'ok' }));
+    if (question.includes('近期活動')) expect(reply.steps).toContainEqual(expect.objectContaining({ name: 'get_campus_events', status: 'ok' }));
+    expect(f.studentCourses).not.toHaveBeenCalled();
+    expect(f.studentWork).not.toHaveBeenCalled();
+    expect(f.orderCalls).toHaveLength(0);
+    expect(f.writes).toHaveLength(0);
+    expect(request.model).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['先查我的授課概況', 'get_teaching_overview', 'classroom'],
     ['先查我的門市營運概況', 'get_merchant_overview', 'merchant'],
   ] as const)('consumes the full prefixed role clause without recursively selecting it again: %s', async (question, tool, serviceId) => {
