@@ -388,6 +388,27 @@ it('prioritizes an unassessed draft from the finished summary without treating i
   expect(summaryCount('未完成')).toBe('2 題');
 });
 
+it('returns to another written draft during practice without revealing answers or resetting the current draft', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  expect(screen.queryByRole('button', { name: '下一題草稿待自評' })).toBeNull();
+  writeAnswer('第一題草稿');
+  expect(screen.queryByRole('button', { name: '下一題草稿待自評' })).toBeNull();
+  selectQuestion(2);
+  writeAnswer('第二題草稿');
+  fireEvent.click(screen.getByRole('button', { name: '下一題草稿待自評' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 0 });
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
+  expect(answerInput().value).toBe('第一題草稿');
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  selectQuestion(2);
+  writeAnswer('');
+  selectQuestion(1);
+  expect(screen.queryByRole('button', { name: '下一題草稿待自評' })).toBeNull();
+  expect(answerInput().value).toBe('第一題草稿');
+});
+
 it('continues unfinished questions from the summary without clearing earlier drafts or self-assessments', () => {
   render(<Controller />);
   writeAnswer('第一題尚待自評，必須保留草稿');

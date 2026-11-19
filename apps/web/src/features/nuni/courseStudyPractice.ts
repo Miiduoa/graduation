@@ -217,11 +217,11 @@ export function updateStudyPracticeRound(
  * A written draft is still unreviewed until the learner explicitly decides;
  * visiting another card must never mark the current one skipped.
  */
-function adjacentUnreviewedStudyPracticeIndex(round: StudyPracticeRound, direction: 1 | -1): number | null {
+function adjacentUnreviewedStudyPracticeIndex(round: StudyPracticeRound, direction: 1 | -1, draftsOnly = false): number | null {
   for (let offset = 1; offset < round.cards.length; offset += 1) {
     const index = (round.index + direction * offset + round.cards.length) % round.cards.length;
     const response = round.responses[round.cards[index].id];
-    if (!response || response.outcome === null) return index;
+    if ((!response || response.outcome === null) && (!draftsOnly || (!!response && hasVisibleStudyAttempt(response.attempt)))) return index;
   }
   return null;
 }
@@ -229,6 +229,11 @@ function adjacentUnreviewedStudyPracticeIndex(round: StudyPracticeRound, directi
 /** Find another not-yet-self-assessed card forward in the active deck, wrapping once. */
 export function nextUnreviewedStudyPracticeIndex(round: StudyPracticeRound): number | null {
   return adjacentUnreviewedStudyPracticeIndex(round, 1);
+}
+
+/** Find another already-written but not self-assessed draft without skipping blank cards. */
+export function nextUnassessedDraftStudyPracticeIndex(round: StudyPracticeRound): number | null {
+  return adjacentUnreviewedStudyPracticeIndex(round, 1, true);
 }
 
 /** Find a previous unfinished card without changing any response or skipping the current card. */

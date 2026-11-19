@@ -8,6 +8,7 @@ import {
   courseStudyPracticeFilename,
   getStudyPracticeSummary,
   hasVisibleStudyAttempt,
+  nextUnassessedDraftStudyPracticeIndex,
   nextUnreviewedStudyPracticeIndex,
   previousUnreviewedStudyPracticeIndex,
   startStudyPracticeRound,
@@ -435,6 +436,27 @@ describe('unreviewed question navigation', () => {
     expect(nextUnreviewedStudyPracticeIndex(retry)).toBe(1);
     expect(nextUnreviewedStudyPracticeIndex(updateStudyPracticeRound(retry, { type: 'go', index: 1 }))).toBe(0);
     expect(nextUnreviewedStudyPracticeIndex(round(1))).toBeNull();
+  });
+  it('jumps only to another visible draft waiting for self-assessment in the active deck', () => {
+    let current = change(round(4),
+      { type: 'attempt', value: '第一題保留草稿' },
+      { type: 'go', index: 1 },
+      { type: 'attempt', value: '\u2800\u0301' },
+      { type: 'go', index: 2 },
+      { type: 'attempt', value: '第三題先寫一半' },
+      { type: 'go', index: 3 },
+    );
+    const snapshot = JSON.stringify(current);
+    expect(nextUnassessedDraftStudyPracticeIndex(current)).toBe(0);
+    expect(nextUnassessedDraftStudyPracticeIndex(change(current, { type: 'go', index: 0 }))).toBe(2);
+    expect(nextUnassessedDraftStudyPracticeIndex(change(current, { type: 'go', index: 2 }))).toBe(0);
+    expect(nextUnassessedDraftStudyPracticeIndex(round(1))).toBeNull();
+    expect(JSON.stringify(current)).toBe(snapshot);
+    current = change(current, { type: 'go', index: 2 }, { type: 'skip' }, { type: 'go', index: 0 });
+    expect(nextUnassessedDraftStudyPracticeIndex(current)).toBeNull();
+    expect(current.responses[current.cards[0].id].attempt).toBe('第一題保留草稿');
+    expect(current.responses[current.cards[2].id].outcome).toBe('skipped');
+    expect(current.responses[current.cards[1].id].attempt).toBe('\u2800\u0301');
   });
 });
 
