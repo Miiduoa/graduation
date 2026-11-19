@@ -3,7 +3,7 @@
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import {
   forgetDirectorySearch,
@@ -52,6 +52,10 @@ export function QuickCampusEntry({
   onAsk?: ((phrase: string) => void) | null;
   compact?: boolean;
 } = {}) {
+  const id = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const results = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const account = useCampusFinderAccount();
@@ -126,6 +130,20 @@ export function QuickCampusEntry({
   const actions =
     semanticActions ||
     getQuickCampusActions(phrase, schoolLmsEnabled, platformAudience ? 'platform' : 'school');
+  const analysisNotice =
+    active?.state === 'loading' || !phrase
+      ? ''
+      : publicAnswer
+        ? '公開課程查詢已回覆。'
+        : aiResult?.status === 'clarify'
+          ? `需要補充需求。${aiResult.clarifyingQuestion || ''}`
+          : publicIntent || serviceIntent?.kind === 'catalog'
+            ? ''
+            : aiResult?.status === 'understood'
+              ? `服務建議已更新，共 ${actions.length} 個入口。`
+              : actions.length
+                ? `找到 ${actions.length} 個服務入口。`
+                : '尚未找到對應服務，可以換個說法。';
   const route = (href: string, serviceId?: AssistantServiceId) =>
     campusServiceHref(
       serviceId
@@ -153,6 +171,12 @@ export function QuickCampusEntry({
     controller.current?.abort();
     setAnalysis(null);
     setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
+  }
+
+  function startOver() {
+    forgetDirectorySearch('quick');
+    updateQuery('');
+    input.current?.focus();
   }
 
   function rememberQuick(href: string) {
@@ -265,17 +289,20 @@ export function QuickCampusEntry({
   return (
     <section
       className={compact ? styles.compactEntry : styles.entry}
-      aria-labelledby="quick-entry-title"
+      aria-labelledby={`${id}-title`}
     >
+      <p role="status" aria-atomic="true" className={styles.srOnly}>
+        {analysisNotice}
+      </p>
       <div className={styles.heading}>
         {compact ? (
-          <h2 id="quick-entry-title" className={styles.compactHeading}>
+          <h2 id={`${id}-title`} className={styles.compactHeading}>
             搜尋服務
           </h2>
         ) : (
           <div>
             <p className={styles.eyebrow}>快速開始</p>
-            <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
+            <h2 id={`${id}-title`}>想做什麼？從這裡開始。</h2>
             <p className={styles.subtitle}>先找到服務，也可以把需求交給校園助理接著處理。</p>
           </div>
         )}
@@ -287,22 +314,63 @@ export function QuickCampusEntry({
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
       </div>
-      <div className={styles.inputRow}>
-        <label className={styles.srOnly} htmlFor="quick-campus-input">
-          想做什麼？
-        </label>
-        <CampusIcon name="search" size={20} />
-        <input
-          id="quick-campus-input"
-          type="search"
-          autoComplete="off"
-          maxLength={320}
-          value={query}
-          onChange={(event) => updateQuery(event.target.value)}
-          placeholder="例如：明天沒課，想讀書再吃飯"
-        />
-        <VoiceDictationButton onTranscript={onVoiceTranscript} />
-      </div>
+      <form
+        className={styles.searchForm}
+        role="search"
+        aria-label="快速尋找服務"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (composing.current) return;
+          // Enter confirms the local search. AI and assistant handoffs stay explicit actions.
+          if (phrase) results.current?.focus();
+          else input.current?.focus();
+        }}
+      >
+        <div className={styles.inputRow}>
+          <label className={styles.srOnly} htmlFor={`${id}-input`}>
+            想做什麼？
+          </label>
+          <CampusIcon name="search" size={20} />
+          <input
+            ref={input}
+            id={`${id}-input`}
+            type="search"
+            autoComplete="off"
+            enterKeyHint="search"
+            maxLength={320}
+            value={query}
+            onChange={(event) => updateQuery(event.target.value)}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+            onKeyDown={(event) => {
+              const isComposing =
+                composing.current || event.nativeEvent.isComposing || event.keyCode === 229;
+              if (event.key === 'Enter' && isComposing) event.preventDefault();
+              if (event.key === 'Escape' && isComposing) event.stopPropagation();
+              // Leave ordinary Escape to the surrounding assistant panel so it
+              // can close without clearing the person's draft.
+            }}
+            placeholder="例如：明天沒課，想讀書再吃飯"
+          />
+          <button type="submit" className={styles.searchButton}>
+            查看結果
+          </button>
+        </div>
+        <div className={styles.inputTools}>
+          <VoiceDictationButton onTranscript={onVoiceTranscript} />
+          <details className={styles.privacy}>
+            <summary>語音與資料使用</summary>
+            <p>
+              轉寫結果可修改。語音辨識可能由瀏覽器供應商處理；公開查課只傳送校別與搜尋條件，其他 AI
+              分析會將轉寫文字傳給雲端模型，不會上傳本功能的錄音檔。此入口不會自行繳交、付款或更改資料。
+            </p>
+          </details>
+        </div>
+      </form>
       {phrase && (publicIntent || (canInterpret && !serviceIntent)) ? (
         <div className={styles.aiRow}>
           <button
@@ -347,13 +415,26 @@ export function QuickCampusEntry({
       {!phrase ? (
         <div className={styles.examples} aria-label="常用需求">
           {[...QUICK_CAMPUS_EXAMPLES, '查清大資料庫課程'].map((example) => (
-            <button key={example} type="button" onClick={() => updateQuery(example)}>
+            <button
+              key={example}
+              type="button"
+              onClick={() => {
+                updateQuery(example);
+                input.current?.focus();
+              }}
+            >
               {example}
             </button>
           ))}
         </div>
       ) : (
-        <div className={styles.results} aria-live="polite">
+        <div
+          ref={results}
+          className={styles.results}
+          role="region"
+          aria-label="服務搜尋結果"
+          tabIndex={-1}
+        >
           {serviceIntent?.kind === 'catalog' && selectedSchoolId && (
             <AssistantServiceLinks
               serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
@@ -464,22 +545,12 @@ export function QuickCampusEntry({
                 {account.status === 'guest' ? '登入後詢問助理' : '詢問校園助理'}
               </Link>
             ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                forgetDirectorySearch('quick');
-                updateQuery('');
-              }}
-            >
+            <button type="button" onClick={startOver}>
               重新輸入
             </button>
           </div>
         </div>
       )}
-      <p className={styles.privacy}>
-        轉寫結果可修改。語音辨識可能由瀏覽器供應商處理；公開查課只傳送校別與搜尋條件，其他 AI
-        分析會將轉寫文字傳給雲端模型，不會上傳本功能的錄音檔。此入口不會自行繳交、付款或更改資料。
-      </p>
     </section>
   );
 }

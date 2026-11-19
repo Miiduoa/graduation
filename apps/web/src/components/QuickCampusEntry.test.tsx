@@ -1,5 +1,5 @@
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
@@ -115,6 +115,98 @@ it('keeps manually typed questions private until the user asks for AI interpreta
   expect(interpretCampusRequest).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '用 AI 理解這句話' }));
   expect(await screen.findByText('要讀書還是借書？')).toBeTruthy();
+});
+
+it.each(['school', 'platform'] as const)(
+  'confirms a local search without interpreting or handing off the %s account request',
+  (account) => {
+    if (account === 'platform') {
+      state.uid = null;
+      state.platform = true;
+    }
+    const onAsk = vi.fn();
+    render(<QuickCampusEntry compact onAsk={onAsk} />);
+    const input = screen.getByRole('searchbox', { name: '想做什麼？' });
+    const form = screen.getByRole('search', { name: '快速尋找服務' });
+    fireEvent.change(input, { target: { value: '想安排讀書時間再去借書' } });
+    input.focus();
+
+    // An IME commit must stay in the input, including WebKit's 229 fallback
+    // after compositionend. fireEvent.submit separately models native submission.
+    fireEvent.compositionStart(input);
+    expect(fireEvent.keyDown(input, { key: 'Enter', isComposing: true })).toBe(false);
+    fireEvent.submit(form);
+    expect(document.activeElement).toBe(input);
+    fireEvent.compositionEnd(input);
+    expect(fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })).toBe(false);
+    expect(document.activeElement).toBe(input);
+    expect(fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 })).toBe(true);
+    fireEvent.submit(form);
+
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: '服務搜尋結果' }));
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+    expect(onAsk).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/');
+    expect((input as HTMLInputElement).value).toBe('想安排讀書時間再去借書');
+  },
+);
+
+it('lets its containing assistant close on Escape without clearing the draft', () => {
+  const closeAssistant = vi.fn();
+  render(
+    <div
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !event.defaultPrevented) closeAssistant();
+      }}
+    >
+      <QuickCampusEntry compact />
+    </div>,
+  );
+  const input = screen.getByRole('searchbox', { name: '想做什麼？' });
+  fireEvent.change(input, { target: { value: '明天下課後想去圖書館' } });
+  fireEvent.compositionStart(input);
+  fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
+  expect(closeAssistant).not.toHaveBeenCalled();
+  fireEvent.compositionEnd(input);
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(closeAssistant).toHaveBeenCalledOnce();
+  expect((input as HTMLInputElement).value).toBe('明天下課後想去圖書館');
+});
+
+it('keeps labels and submitted result focus local when two quick entries are mounted', () => {
+  render(
+    <>
+      <QuickCampusEntry />
+      <QuickCampusEntry compact />
+    </>,
+  );
+  const first = screen.getByRole('region', { name: '想做什麼？從這裡開始。' });
+  const second = screen.getByRole('region', { name: '搜尋服務' });
+  const firstInput = within(first).getByRole('searchbox', {
+    name: '想做什麼？',
+  }) as HTMLInputElement;
+  const secondInput = within(second).getByRole('searchbox', {
+    name: '想做什麼？',
+  }) as HTMLInputElement;
+  expect(firstInput.id).not.toBe(secondInput.id);
+  expect(firstInput.labels?.[0]?.control).toBe(firstInput);
+  expect(secondInput.labels?.[0]?.control).toBe(secondInput);
+  expect(document.getElementById(first.getAttribute('aria-labelledby')!)).toBe(
+    within(first).getByRole('heading'),
+  );
+  expect(document.getElementById(second.getAttribute('aria-labelledby')!)).toBe(
+    within(second).getByRole('heading'),
+  );
+
+  fireEvent.change(firstInput, { target: { value: '借書' } });
+  fireEvent.change(secondInput, { target: { value: '搭公車' } });
+  fireEvent.submit(within(second).getByRole('search', { name: '快速尋找服務' }));
+  expect(document.activeElement).toBe(within(second).getByRole('region', { name: '服務搜尋結果' }));
+  fireEvent.click(within(second).getByRole('button', { name: '重新輸入' }));
+  expect(document.activeElement).toBe(secondInput);
+  expect(secondInput.value).toBe('');
+  expect(firstInput.value).toBe('借書');
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
 });
 
 it('offers an explicit private-message destination without sending the instruction to a model', () => {
@@ -300,6 +392,8 @@ it('does not restore the quick-entry query after starting over', () => {
     '借書',
   );
   fireEvent.click(screen.getByRole('button', { name: '重新輸入' }));
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '想做什麼？' }));
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
   expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
     '',
   );
