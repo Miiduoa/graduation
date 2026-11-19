@@ -47,6 +47,9 @@ cat > "$mock_dir/bin/apt-get" <<'MOCK'
 set -euo pipefail
 printf 'apt:%s\n' "$*" >> "$MOCK_LOG"
 count="$(grep -c '^apt:' "$MOCK_LOG" || true)"
+if [[ "${MOCK_SLOW_FONT:-0}" == 1 ]]; then
+  /bin/sleep 1.5
+fi
 (( count > MOCK_APT_FAILS ))
 MOCK
 cat > "$mock_dir/bin/sleep" <<'MOCK'
@@ -61,6 +64,11 @@ set -euo pipefail
 shift
 limit="$1"; shift
 printf 'timeout:%s\n' "$limit" >> "$MOCK_LOG"
+if [[ "${MOCK_SLOW_FONT:-0}" == 1 && "$1" == apt-get ]]; then
+  # Scale one minute to one second: a 90-second font transfer outlasts the
+  # former 60-second deadline but fits within the 180-second deadline.
+  exec "$REAL_TIMEOUT" --kill-after=0.2s "$((${limit%s} / 60))s" "$@"
+fi
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
   exec "$REAL_TIMEOUT" --kill-after=0.2s 1s "$@"
 fi
@@ -79,17 +87,16 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^apt:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 3 ]]
-[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 4 ]]
-[[ "$(grep -c '^timeout:60s' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 6 ]]
 # Both privileged commands must place timeout inside sudo, preserving Python's path.
 [[ "$(grep -Fc "sudo:timeout --kill-after=5s 180s $mock_dir/bin/python -m playwright install-deps chromium" "$MOCK_LOG")" -eq 2 ]]
-[[ "$(grep -c '^sudo:timeout --kill-after=5s 60s apt-get ' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^sudo:timeout --kill-after=5s 180s apt-get ' "$MOCK_LOG")" -eq 2 ]]
 
 # Both first and second attempts may time out; the third success is still valid.
 export MOCK_PYTHON_FAILS=0 MOCK_APT_FAILS=0 MOCK_DEPS_FAILS=0 MOCK_TIMEOUT_FAILS=2
 : > "$MOCK_LOG"
 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
-[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 4 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 5 ]]
 [[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 2 ]]
 export MOCK_TIMEOUT_FAILS=0
@@ -150,7 +157,15 @@ if bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1; th
 fi
 [[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^apt:' "$MOCK_LOG")" -eq 3 ]]
-[[ "$(grep -c '^timeout:60s' "$MOCK_LOG")" -eq 3 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 5 ]]
+
+# A slow, successful font transfer must finish instead of restarting three times.
+export MOCK_APT_FAILS=0 MOCK_SLOW_FONT=1
+: > "$MOCK_LOG"
+bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
+[[ "$(grep -c '^apt:' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^sleep:' "$MOCK_LOG" || true)" -eq 0 ]]
+export MOCK_SLOW_FONT=0
 
 # Bad parameters fail before any installation attempt.
 : > "$MOCK_LOG"
@@ -173,4 +188,4 @@ grep -q '^recovered$' "$MOCK_LOG"
 [[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 2 ]]
 flock -n "$MOCK_LOCK" true
 
-echo 'Browser installation bounded retry tests: 9/9 passed'
+echo 'Browser installation bounded retry tests: 10/10 passed'
