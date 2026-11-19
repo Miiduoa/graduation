@@ -23,7 +23,12 @@ type NcnuCourseMeeting = {
 };
 
 export function ncnuCourseMeetings(time: string, semester?: string): NcnuCourseMeeting[] | null {
-  if (!/^(?:[1-7][a-mxyz]+)+$/.test(time)) return null;
+  // There are 16 published periods per day and seven weekdays. Even when the
+  // weekday is repeated for every individual period, a valid week needs at most
+  // two characters per slot. Reject overlong cached responses before expanding
+  // them into unbounded timetable rows (the catalog validator checks types only).
+  const maxWeeklyTimeLength = 7 * periodOrder.length * 2;
+  if (time.length > maxWeeklyTimeLength || !/^(?:[1-7][a-mxyz]+)+$/.test(time)) return null;
   const verified = semester === '1142' || semester === '1151';
   return Array.from(time.matchAll(/([1-7])([a-mxyz]+)/g)).flatMap(([, day, periods]) => {
     const runs: string[] = [];
