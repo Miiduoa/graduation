@@ -123,6 +123,28 @@ describe('read-only student submission history', () => {
     expect(normalize([])).toMatchObject({ state: 'available', entries: [], latestId: null });
   });
 
+  it('accepts the optional nested student only when it names the bound student', () => {
+    const expected = normalize([submission]);
+    expect(normalize([{ ...submission, student: { id: binding.userId, name: '私人學生姓名' } }])).toEqual(expected);
+    expect(JSON.stringify(expected)).not.toContain('私人學生姓名');
+  });
+
+  it.each([
+    { label: 'another student', student: { id: 999 } },
+    { label: 'string ID', student: { id: '303' } },
+    { label: 'missing ID', student: {} },
+    { label: 'null', student: null },
+    { label: 'array', student: [] },
+    { label: 'undefined', student: undefined },
+  ])('rejects an explicit $label before projecting history', ({ student }) => {
+      for (const change of [
+        {}, { is_draft: true },
+        { created_by: { id: 404 }, submit_by_instructor: true, marked_submitted: true },
+      ]) {
+        expect(() => normalize([{ ...submission, ...change, student }])).toThrowError('TRONCLASS_HISTORY_UNAVAILABLE');
+      }
+    });
+
   it('removes active HTML and marks limited content and resources not represented by attachments', () => {
     const result = normalize([{ ...submission,
       comment: '<script>credential()</script><p>內容</p>' + '字'.repeat(21000),

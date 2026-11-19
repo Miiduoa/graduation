@@ -48,7 +48,15 @@ describe.each([
     await expect(read({}, 202, 303)).resolves.toEqual({ [key]: null });
   });
 
-  test.each([{}, { [key]: [] }, { [key]: false }, { [key]: '' }, { data: { [key]: null } }])(
+  test('preserves the successful exact empty envelope used when no personal record exists', async () => {
+    respond({ body: '{}' });
+    await expect(read({}, 202, 303)).resolves.toEqual({});
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(https.request.mock.results[0].value.write).not.toHaveBeenCalled();
+  });
+
+  test.each([null, [], { error: 'synthetic-error' }, { unknown: null },
+    { [key]: [] }, { [key]: false }, { [key]: '' }, { data: { [key]: null } }].map(raw => [raw]))(
     'does not convert an invalid or missing envelope into no special permission: %p', async raw => {
       respond({ body: JSON.stringify(raw) });
       await expect(read({}, 202, 303)).rejects.toMatchObject({ code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502 });
@@ -62,10 +70,21 @@ describe.each([
     expect(https.request).not.toHaveBeenCalled();
   });
 
-  test.each([302, 401, 403, 404, 503])('does not follow a redirect or probe after HTTP %s', async status => {
+  test.each([204, 302, 401, 403, 404, 503])('does not follow a redirect or probe after HTTP %s', async status => {
     respond({ status, headers: { location: 'https://untrusted.test' } });
     await expect(read({}, 202, 303)).rejects.toThrow();
     expect(https.request).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([401, 403])('rejects HTTP %s even when its response body is an empty object', async status => {
+    respond({ status, body: '{}' });
+    await expect(read({}, 202, 303)).rejects.toThrow('TronClass session 已失效');
+    expect(https.request).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects an empty response body instead of interpreting it as an empty JSON object', async () => {
+    respond({ body: '' });
+    await expect(read({}, 202, 303)).rejects.toMatchObject({ code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502 });
   });
 
   test('does not expose source text in malformed JSON errors', async () => {

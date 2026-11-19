@@ -74,6 +74,9 @@ export function normalizeTronClassSubmissionHistory(
       (row.homework_id !== undefined && row.homework_id !== scope.homeworkId) ||
       (row.student_id !== undefined && row.student_id !== binding.userId) ||
       (row.user_id !== undefined && row.user_id !== binding.userId) ||
+      // PU history can omit this duplicate identity. If it is supplied, even
+      // a teacher-marked row must agree with the bound student's scope.
+      (Object.prototype.hasOwnProperty.call(row, 'student') && object(row.student).id !== binding.userId) ||
       (row.group_id !== undefined && row.group_id !== null && row.group_id !== 0) || row.group) return invalid();
     const creator = object(row.created_by);
     if (!id(creator.id)) return invalid();

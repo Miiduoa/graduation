@@ -73,7 +73,16 @@ function specialWindow(
 ): TronClassSpecialSubmissionWindow {
   const envelope = record(value);
   const key = kind === 'make-up' ? 'make_up_record' : 'resubmit_record';
-  if (!envelope || !own(envelope, key)) return { state: 'unknown', updatedAt: null };
+  if (!envelope) return { state: 'unknown', updatedAt: null };
+  // The successful student endpoint may return exactly {}. The official
+  // repository resolves its missing record property as undefined, and the
+  // student controller treats that as no record. Do not extend this meaning to
+  // nonempty error envelopes or non-JSON objects from an injected source.
+  const prototype = Object.getPrototypeOf(envelope);
+  if ((prototype === Object.prototype || prototype === null) && Reflect.ownKeys(envelope).length === 0) {
+    return { state: 'none', updatedAt: null };
+  }
+  if (!own(envelope, key)) return { state: 'unknown', updatedAt: null };
   if (envelope[key] === null) return { state: 'none', updatedAt: null };
   const row = record(envelope[key]);
   if (!row) return { state: 'unknown', updatedAt: null };

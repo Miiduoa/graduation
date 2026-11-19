@@ -20,6 +20,7 @@ const LMS_ID = 'b'.repeat(32);
 const LMS = `_puTronClassSessions/${LMS_ID}`;
 const PORTAL = '_puSessions/current';
 const CACHE = `${LMS_CACHE_COLLECTION}/${UID}`;
+const RETRY = `${LMS_CACHE_COLLECTION}/${UID}__retry`;
 
 function setup() {
   const expiresAt = new Date(Date.now() + 60_000);
@@ -182,6 +183,51 @@ it('pages homework until total and does not treat a later 500 as an empty course
   expect(body.result.courseErrors).toEqual([
     expect.objectContaining({ courseId: 10001, area: 'homework', status: 500 }),
   ]);
+});
+
+it.each(['empty', 'error', 'repeated', 'recovered'] as const)(
+  'counts distinct source IDs across duplicate homework pages (%s)',
+  async (ending) => {
+    const { request, source } = setup();
+    const rows = Array.from({ length: 50 }, (_, index) => ({
+      ...LMS_FIXTURE_HOMEWORK_OPEN, id: 21000 + index,
+    }));
+    vi.mocked(source.fetchHomeworkPage)
+      .mockResolvedValueOnce({ ok: true, value: { homework_activities: rows, total: 100 } })
+      .mockResolvedValueOnce({ ok: true, value: { homework_activities: rows, total: 100 } })
+      .mockResolvedValue(ending === 'error'
+        ? { ok: false, status: 503 }
+        : { ok: true, value: {
+          homework_activities: ending === 'empty' ? [] : ending === 'repeated' ? rows
+            : rows.map((row) => ({ ...row, id: row.id + 50 })),
+          total: 100,
+        } });
+
+    const body = await (await request()).json();
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(ending === 'repeated' ? 20 : 3);
+    if (ending === 'recovered') {
+      expect(body.result.homework).toHaveLength(100);
+      expect(body.result.courseErrors).toEqual([]);
+    } else {
+      expect(body.result.homework).toEqual([]);
+      expect(body.result.courseErrors).toEqual([
+        expect.objectContaining({ area: 'homework', status: ending === 'error' ? 503 : null }),
+      ]);
+    }
+  },
+);
+
+it('counts source IDs even when a homework row has no displayable title', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({
+    ok: true, value: {
+      homework_activities: [LMS_FIXTURE_HOMEWORK_OPEN, { id: 20002 }], total: 2,
+    },
+  });
+  const body = await (await request()).json();
+  expect(body.result.homework).toHaveLength(1);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
 });
 
 it('retries incomplete homework after a short TTL, including legacy cache entries', async () => {
@@ -388,32 +434,59 @@ it('retries incomplete course content after one minute even when an old cache ha
   expect(Date.parse(fresh.expiresAt) - Date.parse(fresh.fetchedAt)).toBeGreaterThan(580_000);
 });
 
-it('does not cache partial materials when the filtered courseware feed rejects the session', async () => {
+it.each([
+  { status: 404, thrown: false },
+  { status: 503, thrown: false },
+  { status: 503, thrown: true },
+  { status: null, thrown: true },
+])('keeps original course data after supplementary courseware fails (%j)', async ({ status, thrown }) => {
   const { request, source, store } = setup();
-  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
-    query === 'type=courseware_activity'
-      ? { ok: false, status: 401 }
-      : { ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+    if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+    if (thrown) throw Object.assign(new Error('upstream failure'), { status });
+    return { ok: false, status };
+  });
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.homework).toHaveLength(2);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ title: '停課通知', source: 'course' }),
+  ]);
+  expect(body.result.courseErrors).toEqual(status === 404
+    ? []
+    : [expect.objectContaining({ courseId: 10001, area: 'materials', status })]);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+  expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+});
+
+it('does not return partial data when supplementary courseware throws a session error', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+    if (query === 'type=courseware_activity') throw new Error('TronClass session 已失效，請重新登入');
+    return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+  });
+  const response = await request({ courseId: 10001 });
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
+it.each([false, true])('does not cache partial materials when the filtered courseware feed rejects the session (thrown=%s)', async thrown => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+    if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+    if (thrown) throw Object.assign(new Error('upstream failure'), { status: 401 });
+    return { ok: false, status: 401 };
+  });
   const response = await request({ courseId: 10001 });
   const body = await response.json();
   expect(body.result).toBeUndefined();
   expect(body.error.status).toBe('FAILED_PRECONDITION');
   expect(store.docs.has(CACHE)).toBe(false);
   expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
-});
-
-it.each([404, 503])('keeps general materials after filtered courseware returns HTTP %s', async (status) => {
-  const { request, source } = setup();
-  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) =>
-    query === 'type=courseware_activity'
-      ? { ok: false, status }
-      : { ok: true, value: [LMS_FIXTURE_MATERIAL] });
-  const body = await (await request({ courseId: 10001 })).json();
-  expect(body.result.materials).toHaveLength(1);
-  // A missing optional endpoint is not an error; a live upstream 503 is.
-  expect(body.result.courseErrors).toEqual(status === 404
-    ? []
-    : [expect.objectContaining({ courseId: 10001, area: 'materials', status: 503 })]);
 });
 
 it.each(['homework', 'activities', 'announcements'] as const)(
@@ -858,6 +931,326 @@ it('does not fall back to versionless homework when a safe refetch fails', async
   expect(store.docs.get(CACHE)).toEqual(stale);
 });
 
+it.each([{}, { courseId: 19999 }, { courseId: 10001 }])(
+  'refetches a versionless cache and stamps only fresh results (%j)',
+  async (data) => {
+    const { request, source, store } = setup();
+    await request({ courseId: 10001 });
+    delete store.docs.get(CACHE)!.sessionVersion;
+    for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+    const response = await request(data);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.cache.hit).toBe(false);
+    expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+    expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+    if (data.courseId === 10001) {
+      expect(body.result.materials).toHaveLength(1);
+      expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+    } else {
+      expect(body.result.materials).toEqual([]);
+      expect(body.result.announcements).toEqual([]);
+    }
+  },
+);
+
+it('preserves a fresh versionless document without serving it when refetch fails', async () => {
+  const { request, source, store } = setup();
+  await request({ courseId: 10001 });
+  delete store.docs.get(CACHE)!.sessionVersion;
+  const before = structuredClone(store.docs.get(CACHE));
+  vi.mocked(source.fetchCourses).mockRejectedValue(new Error('upstream unavailable'));
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(503);
+  expect((await response.json()).result).toBeUndefined();
+  expect(store.docs.get(CACHE)).toEqual(before);
+});
+
+it.each([{}, { courseId: 10001 }, { refresh: true }])(
+  'preserves an expired legacy document without serving it when refetch fails (%j)',
+  async (data) => {
+    const { request, source, store } = setup();
+    expect((await request({ courseId: 10001 })).status).toBe(200);
+    delete store.docs.get(CACHE)!.sessionVersion;
+    store.docs.get(CACHE)!.expiresAt = new Date(0);
+    const before = structuredClone(store.docs.get(CACHE));
+    vi.mocked(source.fetchCourses).mockClear().mockRejectedValue(new Error('upstream unavailable'));
+    vi.mocked(source.fetchHomeworkPage).mockClear();
+    vi.mocked(source.fetchActivities).mockClear();
+
+    const response = await request(data);
+    const body = await response.json();
+    expect(response.status).toBe(503);
+    expect(body.error.status).toBe('UNAVAILABLE');
+    expect(body.result).toBeUndefined();
+    expect(source.fetchCourses).toHaveBeenCalled();
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(store.docs.get(CACHE)).toEqual(before);
+  },
+);
+
+it.each(['homework', 'contents'] as const)(
+  'preserves all legacy data when the %s read fails after listing courses',
+  async (area) => {
+    const { request, source, store } = setup();
+    expect((await request({ courseId: 10001 })).status).toBe(200);
+    delete store.docs.get(CACHE)!.sessionVersion;
+    store.docs.get(CACHE)!.expiresAt = new Date(0);
+    const before = structuredClone(store.docs.get(CACHE));
+    if (area === 'homework') {
+      vi.mocked(source.fetchHomeworkPage).mockRejectedValue(new Error('upstream unavailable'));
+    } else {
+      vi.mocked(source.fetchCourseAnnouncements).mockRejectedValue(new Error('upstream unavailable'));
+    }
+
+    const response = await request({ courseId: 10001 });
+    expect(response.status).toBe(503);
+    expect((await response.json()).result).toBeUndefined();
+    expect(store.docs.get(CACHE)).toEqual(before);
+  },
+);
+
+it.each(
+  ['legacy expired', 'legacy refresh', 'versioned refresh'].flatMap((cacheState) =>
+    ['homework', 'activities', 'courseware', 'announcements', 'upcoming'].map((area) => ({ cacheState, area }))),
+)('preserves the complete stored document on returned source failure ($cacheState, $area)', async ({ cacheState, area }) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  if (cacheState.startsWith('legacy')) delete cached.sessionVersion;
+  if (cacheState.endsWith('expired')) cached.expiresAt = new Date(0);
+  // Distinguish stored data from fresh source data to catch an invalid fallback.
+  const snapshot = cached.snapshot as LmsReadonlySnapshot;
+  snapshot.homework[0].title = '舊快取作業';
+  const extras = cached.extras as Record<string, { materials: { title: string }[]; announcements: { title: string }[] }>;
+  extras['10001'].materials[0].title = '舊快取教材';
+  extras['10001'].announcements[0].title = '舊快取公告';
+  const before = structuredClone(cached);
+  const write = vi.spyOn(store.db, 'runTransaction');
+  if (area === 'homework') {
+    vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+  } else if (area === 'announcements') {
+    vi.mocked(source.fetchCourseAnnouncements).mockResolvedValueOnce({ ok: false, status: 503 });
+  } else if (area === 'upcoming') {
+    vi.mocked(source.fetchCourses).mockResolvedValueOnce([LMS_FIXTURE_COURSE])
+      .mockRejectedValueOnce(Object.assign(new Error('HTTP 503'), { status: 503 }));
+  } else {
+    if (area === 'courseware') {
+      vi.mocked(source.fetchActivities).mockResolvedValueOnce({ ok: true, value: [LMS_FIXTURE_MATERIAL] });
+    }
+    vi.mocked(source.fetchActivities).mockResolvedValueOnce({ ok: false, status: 503 });
+  }
+
+  const response = await request({ courseId: 10001, refresh: cacheState.endsWith('refresh') });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  if (area === 'upcoming') expect(body.result.upcomingCoursesError).not.toBeNull();
+  else expect(body.result.courseErrors.length).toBeGreaterThan(0);
+  expect(JSON.stringify(body)).not.toContain('舊快取');
+  expect(store.docs.get(CACHE)).toEqual(before);
+  expect(write).toHaveBeenCalled();
+  expect(store.docs.get(RETRY)).toMatchObject({ ownerUid: UID, sessionId: LMS_ID });
+  const calls = Object.values(source).map((method) => vi.mocked(method).mock.calls.length);
+  const immediate = await (await request({ courseId: 10001 })).json();
+  expect(immediate.result.cache.hit).toBe(true);
+  expect(immediate.result.courseErrors).toEqual(body.result.courseErrors);
+  expect(immediate.result.upcomingCoursesError).toEqual(body.result.upcomingCoursesError);
+  expect(JSON.stringify(immediate)).not.toContain('舊快取');
+  expect(Object.values(source).map((method) => vi.mocked(method).mock.calls.length)).toEqual(calls);
+  expect(store.docs.get(CACHE)).toEqual(before);
+
+  // The next complete refresh may safely replace the document and stamp its version.
+  const recovered = await (await request({ courseId: 10001, refresh: true })).json();
+  expect(recovered.result.courseErrors).toEqual([]);
+  expect(recovered.result.upcomingCoursesError).toBeNull();
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+  expect(store.docs.get(CACHE)).not.toEqual(before);
+  const afterRecovery = await (await request({ courseId: 10001 })).json();
+  expect(afterRecovery.result.courseErrors).toEqual([]);
+  expect(afterRecovery.result.upcomingCoursesError).toBeNull();
+});
+
+it.each(['homework', 'upcoming', 'materials'] as const)(
+  'backs off existing-cache %s failures for one minute and retries after expiry',
+  async (area) => {
+    const { request, source, store } = setup();
+    await request();
+    if (area !== 'materials') store.docs.get(CACHE)!.expiresAt = new Date(0);
+    const before = structuredClone(store.docs.get(CACHE));
+    if (area === 'homework') {
+      vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+    } else if (area === 'upcoming') {
+      vi.mocked(source.fetchCourses).mockResolvedValueOnce([LMS_FIXTURE_COURSE])
+        .mockRejectedValueOnce(new Error('upcoming unavailable'));
+    } else {
+      vi.mocked(source.fetchActivities).mockResolvedValueOnce({ ok: false, status: 503 });
+    }
+
+    const first = await (await request({ courseId: 10001 })).json();
+    expect(first.result.cache.hit).toBe(false);
+    const retry = store.docs.get(RETRY)!;
+    const remaining = (retry.expiresAt as Date).getTime() - Date.now();
+    expect(remaining).toBeGreaterThan(58_000);
+    expect(remaining).toBeLessThanOrEqual(60_000);
+    expect(store.docs.get(CACHE)).toEqual(before);
+    const calls = Object.values(source).map((method) => vi.mocked(method).mock.calls.length);
+
+    const immediate = await (await request({ courseId: 10001 })).json();
+    expect(immediate.result.cache.hit).toBe(true);
+    expect(immediate.result.courseErrors).toEqual(first.result.courseErrors);
+    expect(Object.values(source).map((method) => vi.mocked(method).mock.calls.length)).toEqual(calls);
+
+    // The separate deadline controls retrying even if its contents have longer TTLs.
+    retry.expiresAt = new Date(0);
+    const recovered = await (await request({ courseId: 10001 })).json();
+    expect(recovered.result.cache.hit).toBe(false);
+    expect(recovered.result.homework).toHaveLength(2);
+    expect(recovered.result.materials).toHaveLength(1);
+    expect(recovered.result.courseErrors).toEqual([]);
+    expect(recovered.result.upcomingCoursesError).toBeNull();
+    expect(store.docs.get(CACHE)).not.toEqual(before);
+    if (area === 'materials') {
+      expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+    } else {
+      expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(3);
+    }
+  },
+);
+
+it('does not overwrite a concurrent successful refresh with a retry result', async () => {
+  const { request, source, store } = setup();
+  await request();
+  store.docs.get(CACHE)!.expiresAt = new Date(0);
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  let winner: unknown;
+  vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    expect((await request({ refresh: true })).status).toBe(200);
+    winner = structuredClone(store.docs.get(CACHE));
+    return runTransaction(callback);
+  });
+
+  const body = await (await request()).json();
+  expect(body.result.courseErrors).toHaveLength(1);
+  expect(store.docs.get(CACHE)).toEqual(winner);
+  expect(store.docs.has(RETRY)).toBe(false);
+  const next = await (await request()).json();
+  expect(next.result.cache.hit).toBe(true);
+  expect(next.result.courseErrors).toEqual([]);
+});
+
+it.each([undefined, 1])('ignores a retry with an older visibility projection without hiding the current complete cache: %j', async projectionVersion => {
+  const { request, source, store } = setup();
+  await request({ courseId: 10001 });
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+  await request({ courseId: 10001, refresh: true });
+  const retry = store.docs.get(RETRY)!;
+  if (projectionVersion === undefined) delete retry.projectionVersion;
+  else retry.projectionVersion = projectionVersion;
+  const extras = retry.extras as Record<string, { materials: { title: string }[] }>;
+  extras['10001'].materials[0].title = '舊投影未核對的教材';
+  const calls = Object.values(source).map(method => vi.mocked(method).mock.calls.length);
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(body.result.homework).toHaveLength(2);
+  expect(JSON.stringify(body)).not.toContain('舊投影未核對的教材');
+  expect(Object.values(source).map(method => vi.mocked(method).mock.calls.length)).toEqual(calls);
+});
+
+it('preserves both cache documents if saving a retry fails', async () => {
+  const { request, source, store } = setup();
+  await request();
+  store.docs.get(CACHE)!.expiresAt = new Date(0);
+  const before = structuredClone(store.docs.get(CACHE));
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+  store.failNextCommit();
+
+  const body = await (await request()).json();
+  expect(body.result.courseErrors).toHaveLength(1);
+  expect(store.docs.get(CACHE)).toEqual(before);
+  expect(store.docs.has(RETRY)).toBe(false);
+  const next = await (await request()).json();
+  expect(next.result.cache.hit).toBe(false);
+  expect(next.result.courseErrors).toEqual([]);
+});
+
+it('preserves another owner document occupying the retry path', async () => {
+  const { request, source, store } = setup();
+  await request();
+  store.docs.get(CACHE)!.expiresAt = new Date(0);
+  const otherCache = { ownerUid: `${UID}__retry`, snapshot: { homework: [] } };
+  await store.db.doc(RETRY).set(otherCache);
+  const before = structuredClone(store.docs.get(CACHE));
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+
+  const body = await (await request()).json();
+  expect(body.result.courseErrors).toHaveLength(1);
+  expect(store.docs.get(CACHE)).toEqual(before);
+  expect(store.docs.get(RETRY)).toEqual(otherCache);
+});
+
+it.each([
+  { cookies: { session: 'new-cookie' }, userId: 10 },
+  { cookies: { session: 'lms-secret' }, userId: 11 },
+])('does not reuse retry results after in-place session rotation (%j)', async (session) => {
+  const { request, source, store } = setup();
+  await request();
+  store.docs.get(CACHE)!.expiresAt = new Date(0);
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValueOnce({ ok: false, status: 503 });
+  await request({ courseId: 10001 });
+  expect(store.docs.has(RETRY)).toBe(true);
+  await store.db.doc(LMS).set(session, { merge: true });
+  vi.mocked(source.fetchCourses).mockClear().mockResolvedValue([{ id: 10002, name: '新課程' }]);
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.courses).toEqual([{ id: 10002, name: '新課程' }]);
+  expect(body.result.materials).toEqual([]);
+  expect(body.result.announcements).toEqual([]);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(source.fetchCourses).toHaveBeenCalledWith(session.cookies, { userId: session.userId, status: 'ongoing' });
+});
+
+it.each([
+  { cookies: { session: 'new-cookie' }, userId: 10 },
+  { cookies: { session: 'lms-secret' }, userId: 11 },
+])('refetches versionless legacy homework and extras without refresh after an in-place rotation (%j)', async (session) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  delete store.docs.get(CACHE)!.sessionVersion;
+  const before = structuredClone(store.docs.get(CACHE));
+  await store.db.doc(LMS).set(session, { merge: true });
+  vi.mocked(source.fetchCourses).mockRejectedValue(new Error('upstream unavailable'));
+
+  const failed = await (await request({ courseId: 10001 })).json();
+  expect(failed.result).toBeUndefined();
+  expect(failed.error.status).toBe('UNAVAILABLE');
+  expect(store.docs.get(CACHE)).toEqual(before);
+
+  vi.mocked(source.fetchCourses).mockClear().mockResolvedValue([{ id: 10002, name: '新課程' }]);
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValue({
+    ok: true, value: { homework_activities: [], total: 0 },
+  });
+  vi.mocked(source.fetchActivities).mockClear();
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchCourses).toHaveBeenCalledWith(session.cookies, { userId: session.userId, status: 'ongoing' });
+  expect(body.result.courses).toEqual([{ id: 10002, name: '新課程' }]);
+  expect(body.result.homework).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(body.result.announcements).toEqual([]);
+  expect(body.result.contentsLoadedFor).toEqual([]);
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+});
+
 it.each([
   { scenario: 'missing nested cache', corrupted: undefined },
   { scenario: 'non-object nested cache', corrupted: 'broken' },
@@ -1097,12 +1490,13 @@ it.each([
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
 
-it.each([
-  'rotated cookies',
-  'changed TronClass user ID',
-])('rejects a cache hit after %s in the same session document', async (scenario) => {
+it.each(
+  [false, true].flatMap((legacy) =>
+    ['rotated cookies', 'changed TronClass user ID', 'changed session version'].map((scenario) => ({ legacy, scenario }))),
+)('rejects a cache hit after $scenario during lookup (legacy: $legacy)', async ({ legacy, scenario }) => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
+  if (legacy) delete store.docs.get(CACHE)!.sessionVersion;
   const cacheBefore = structuredClone(store.docs.get(CACHE));
   const originalDoc = store.db.doc.bind(store.db);
   const cacheTransaction = vi.spyOn(store.db, 'runTransaction');
@@ -1117,8 +1511,10 @@ it.each([
         const snapshot = await ref.get();
         if (scenario === 'rotated cookies') {
           Object.assign(store.docs.get(LMS)!, { cookies: { session: 'rotated-lms-session' } });
-        } else {
+        } else if (scenario === 'changed TronClass user ID') {
           Object.assign(store.docs.get(LMS)!, { userId: 11 });
+        } else {
+          await store.db.doc(LMS).set({ refreshedAt: new Date() }, { merge: true });
         }
         return snapshot;
       },

@@ -18,7 +18,7 @@
 
 | 用途 | 方法與固定路徑 | 前端語意 |
 | --- | --- | --- |
-| 本人的補交紀錄 | `GET /api/homework/{activityId}/students/{studentId}/make-up-record` | 讀取 `make_up_record`；明確 null 與讀取失敗不同。 |
+| 本人的補交紀錄 | `GET /api/homework/{activityId}/students/{studentId}/make-up-record` | 讀取 `make_up_record`；成功的 exact `{}` 或明確 null 表示沒有個人紀錄，與讀取失敗不同。 |
 | 本人的重交紀錄 | `GET /api/homework/{activityId}/students/{studentId}/resubmit-record` | 讀取 `resubmit_record`，還須結合作業的 `is_resubmit_open`。 |
 | 建立新草稿 | `POST /api/course/activities/{activityId}/submissions` | `is_draft: true`；不是正式繳交。 |
 | 更新既有草稿 | 同路徑 `PUT` | 學生 editor 已有 `draft_id` 時，附 `submission_id`；仍可保存為草稿。 |
@@ -63,7 +63,7 @@ DTO 為 `TronClassSubmissionAvailability`，保留 courseId、homeworkId、revis
 | 區塊 | 狀態與用途 |
 | --- | --- |
 | `ordinary` | open／not-started／closed／attempts-exhausted／unknown；另外區分 first／repeat／unknown，以及可確認的剩餘次數。 |
-| `makeUp` | none／open／used／closed／unknown；只有明確 null 才是 none。 |
+| `makeUp` | none／open／used／closed／unknown；成功的 exact 空物件 `{}` 或明確 null 才是 none。 |
 | `resubmit` | 同上，另有 disabled，表示紀錄存在但作業未開啟重交。 |
 | `draft` | none／available／ambiguous／unknown；只有唯一且明確屬於本人、非教師代標、非退回版本的草稿才提供 submissionId。 |
 
@@ -71,11 +71,21 @@ DTO 為 `TronClassSubmissionAvailability`，保留 courseId、homeworkId、revis
 
 reader 使用伺服器綁定的 student ID，不接受前端學生或小組 selector。起始、各項本人讀取前、結束都核對 expectedRevision；前後重新確認課程、作業歸屬與固定課程 HTML 的明確學生 enrollment。原始 course list 的展示用 student 預設值不能取代學生身分證據。活動由個人改成小組、角色撤銷或換綁都不返回先前個人的資料。
 
-兩個新低層方法只建立固定 PU origin 的 GET，不重試、不轉址、不探測替代端點；沿用取消訊號、時間與大小上限。HTTP 失敗或缺少欄位保留未知，401／403 不降級成無紀錄。回應只投影明確欄位，不回傳原始紀錄、老師資料、本文、Cookie 或來源 URL。
+兩個新低層方法只建立固定 PU origin 的 GET，不重試、不轉址、不探測替代端點；沿用取消訊號、時間與大小上限。HTTP 失敗或缺少欄位的非空物件保留未知，401／403 不降級成無紀錄。回應只投影明確欄位，不回傳原始紀錄、老師資料、本文、Cookie 或來源 URL。
+
+### 2026-11-19：空的個人紀錄回應
+
+在本人正常已登入頁面，以一般 GET 開啟自己的上述兩個個人端點時，document 可見內容皆為 exact `{}`。此處只記錄無私人欄位的形狀，不保存真人 ID、姓名、profile、完整回應、Cookie 或簽章 URL；單靠 document 文字不推定 HTTP 狀態。沒有使用被停用的 DevTools，也沒有執行校方寫入。
+
+同日以匿名 HTTPS GET 重查 `55200.e380810d.js` 與 `88788.161d6b6a.js`，均回 HTTP 200，SHA-256 與上表一致。`55200` 的 module `946650` 將成功與錯誤 callback 分開；module `429800` 在成功 callback 直接讀取回應的 `make_up_record`／`resubmit_record`，因此 `{}` 會解析成不存在的值。`88788` 的 module `150664` 只在這些紀錄存在時套用個人補交／重交狀態。這共同支持將**已確認成功的 exact 空 JSON 物件**投影為 `none`。
+
+修正只接受低層 HTTP 200 且 JSON 解析成功的 `{}`，並保留原始空 envelope；availability projection 另檢查 plain prototype 及沒有任何 own key，以防測試或注入 source 的 `Date`、`Map`、自訂 prototype、非 enumerable 欄位或 symbol 被誤當空紀錄。陣列、null envelope、空本文、非空錯誤／未知欄位 envelope、以及 `{ make_up_record: {} }` 這類缺少必要狀態的紀錄，均不推導為 `none`。低層 401／403 仍拒絕；reader 收到 401／403 時仍保留授權錯誤，不轉成 `none` 或 `unknown`。
+
+新增測試只使用既有合成 ID，涵蓋兩個端點的成功空物件、錯誤 HTTP、異常 envelope、正常擁有者與 revision 查核，以及不產生 writer capability；沒有加入真人紀錄 fixture。
 
 ## 尚缺的真人證據與開放寫入條件
 
-本次沒有真人 `make-up-record`／`resubmit-record` 的回應樣本；測試中的特殊紀錄來自公開 client 所讀欄位的**合成情境**。已觀察的一般 activity 與 personal history 形狀仍見 [真人唯讀查核](./tronclass-live-read-verification-2026-11-18.md)。後續應在本人正常作業頁核對實際特殊紀錄的 null、使用中、已使用與截止形狀，再調整明確適用的來源投影。
+2026-11-18 初次研究尚無真人 `make-up-record`／`resubmit-record` 的回應形狀；2026-11-19 補查到的可見空物件及其公開來源語義見上節。測試中的**非空特殊紀錄仍全部是合成情境**。已觀察的一般 activity 與 personal history 形狀仍見 [真人唯讀查核](./tronclass-live-read-verification-2026-11-18.md)。後續仍須在本人正常作業頁核對實際特殊紀錄的使用中、已使用與截止形狀，再調整明確適用的來源投影。
 
 若要宣稱某個寫入能力已完成，還須取得該能力本身的受控結果：
 

@@ -12,6 +12,9 @@ function invalidPlan(): never {
 function eventSnapshot(card: V2Card): PlanRevisionEvent {
   if (card.tool !== 'propose_personal_event' || !card.args || typeof card.args !== 'object' || Array.isArray(card.args))
     return invalidPlan();
+  // A pickup appointment derives its time from the live order. Generic
+  // revision must not strip that dependency and turn it into an ordinary event.
+  if ('sourceBound' in card) return invalidPlan();
   const fields: Record<string, unknown> = {};
   const descriptors = Object.getOwnPropertyDescriptors(card.args);
   for (const key of EVENT_FIELDS) {
@@ -47,8 +50,9 @@ export function buildPlanRevisionQuestion(turn: V2Turn, instruction: string, pro
   const change = typeof instruction === 'string' ? instruction.trim() : '';
   if (!change) throw new Error('請先填寫想修改的安排。');
   if (change.length > 300) throw new Error('修改條件最多 300 字，請縮短後再預覽。');
-  const protection = protectedIndices.length ? createPlanProtection(turn.reply.cards.map(card => card.args), protectedIndices) : undefined;
-  const events = protection?.originalEvents || getPlanRevisionEvents(turn);
+  const originalEvents = getPlanRevisionEvents(turn);
+  const protection = protectedIndices.length ? createPlanProtection(originalEvents, protectedIndices) : undefined;
+  const events = protection?.originalEvents || originalEvents;
   const preserved = protection ? '\n必須保留原樣的項目（原安排編號，由 1 開始）：' + protection.protectedIndices.map(index => index + 1).join('、')
     + '。這些項目的所有欄位及筆數必須與原安排完全相同，不可更改、遺漏或複製。' : '';
   const question = '請依下列修改條件，僅重新預覽原安排並產生新的確認卡；沒有要求修改的行程請保持原樣。'

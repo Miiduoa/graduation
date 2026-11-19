@@ -14,7 +14,8 @@ const SCOPE = { courseId: 101, homeworkId: 202 };
 const IDENTITY = { userId: 303, revision: REVISION };
 const COURSE_PAGE = '<input type="hidden" id="courseId" value="101"><input type="hidden" id="enrollment-is-student" value="True">';
 // Synthetic contract cases derived from public client field accesses. These
-// special-record payloads have not been captured from a live student endpoint.
+// populated special-record payloads are not live student captures. The exact
+// empty envelope has been independently observed; all IDs below remain synthetic.
 const ACTIVITY = {
   id: 202, course_id: 101, type: 'homework', published: true, submit_by_group: false,
   is_started: true, is_in_progress: true, is_closed: false, is_resubmit_open: true,
@@ -105,6 +106,30 @@ describe('read-only personal submission windows', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it('maps exact empty JSON envelopes to no personal records without granting a writer capability', () => {
+    const result = project({ makeUp: {}, resubmit: {} });
+    expect(result.makeUp).toEqual({ state: 'none', updatedAt: null });
+    expect(result.resubmit).toEqual({ state: 'none', updatedAt: null });
+    expect(result.ordinary).toEqual(project().ordinary);
+    expect(result).not.toHaveProperty('canSubmit');
+    expect(result).not.toHaveProperty('contractVerified');
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+    expect(project({ makeUp: Object.create(null), resubmit: Object.create(null) })).toMatchObject({
+      makeUp: { state: 'none' }, resubmit: { state: 'none' },
+    });
+  });
+
+  it.each([
+    null, [], '', { error: 'synthetic-error' }, { unknown: null },
+    { make_up_record: {}, resubmit_record: {} },
+    new Date(NOW), new Map(), Object.create({ inherited: true }),
+    Object.defineProperty({}, 'hidden', { value: true }), { [Symbol('synthetic')]: true },
+  ].map(raw => [raw]))('does not extend empty-envelope semantics to malformed or non-JSON values: %j', raw => {
+    const result = project({ makeUp: raw, resubmit: raw });
+    expect(result.makeUp.state).toBe('unknown');
+    expect(result.resubmit.state).toBe('unknown');
+  });
+
   it.each([
     [{ is_started: false, is_in_progress: false }, 'not-started'],
     [{ is_closed: true, is_in_progress: false }, 'closed'],
@@ -139,7 +164,8 @@ describe('read-only personal submission windows', () => {
 
   it('does not infer a personal resubmit permission from the activity setting alone', () => {
     expect(project().resubmit.state).toBe('none');
-    expect(project({ resubmit: {} }).resubmit.state).toBe('unknown');
+    expect(project({ resubmit: {} }).resubmit.state).toBe('none');
+    expect(project({ resubmit: { unknown: null } }).resubmit.state).toBe('unknown');
     expect(project({ activity: { is_resubmit_open: false }, resubmit: { resubmit_record: RESUBMIT } }).resubmit.state).toBe('disabled');
     expect(project({ activity: { is_resubmit_open: undefined }, resubmit: { resubmit_record: RESUBMIT } }).resubmit.state).toBe('unknown');
     expect(project({ resubmit: { resubmit_record: { ...RESUBMIT, has_submitted: true } } }).resubmit.state).toBe('used');
@@ -201,6 +227,20 @@ describe('availability reader ownership and freshness', () => {
     expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
   });
 
+  it('preserves successful empty special records after the normal ownership and freshness checks', async () => {
+    const s = setup();
+    vi.mocked(s.source.fetchStudentMakeUpRecord!).mockResolvedValue({ ok: true, value: {} });
+    vi.mocked(s.source.fetchStudentResubmitRecord!).mockResolvedValue({ ok: true, value: {} });
+    const result = await s.reader(OWNER, SCOPE, REVISION);
+    expect(result).toMatchObject({
+      ...SCOPE, revision: REVISION, ordinary: { state: 'open' },
+      makeUp: { state: 'none' }, resubmit: { state: 'none' },
+    });
+    expect(s.source.fetchCoursePage).toHaveBeenCalledTimes(2);
+    expect(s.bindings.assertCurrent.mock.calls.every(call => call[0] === OWNER && call[1] === REVISION)).toBe(true);
+    expect(isTronClassSubmissionAvailability(result, SCOPE, REVISION)).toBe(true);
+  });
+
   it('does not mix a preparation with an already replaced binding', async () => {
     const s = setup();
     s.changeBinding({ revision: 'b'.repeat(32) });
@@ -244,11 +284,15 @@ describe('availability reader ownership and freshness', () => {
     expect(result.resubmit.state).toBe('unknown');
   });
 
-  it.each([401, 403])('does not soften an authorization error from a special endpoint: %s', async status => {
+  it.each([
+    ['make-up', 401], ['make-up', 403], ['resubmit', 401], ['resubmit', 403],
+  ] as const)('does not soften an authorization error from the %s endpoint: %s', async (kind, status) => {
     const s = setup();
-    vi.mocked(s.source.fetchStudentMakeUpRecord!).mockResolvedValue({ ok: false, status });
+    vi.mocked(s.source.fetchStudentMakeUpRecord!).mockResolvedValue({ ok: true, value: {} });
+    const method = kind === 'make-up' ? s.source.fetchStudentMakeUpRecord! : s.source.fetchStudentResubmitRecord!;
+    vi.mocked(method).mockResolvedValue({ ok: false, status });
     await expect(s.reader(OWNER, SCOPE, REVISION)).rejects.toMatchObject({ status });
-    expect(s.source.fetchStudentResubmitRecord).not.toHaveBeenCalled();
+    if (kind === 'make-up') expect(s.source.fetchStudentResubmitRecord).not.toHaveBeenCalled();
   });
 
   it('does not read a personal history or invent group membership for group homework', async () => {

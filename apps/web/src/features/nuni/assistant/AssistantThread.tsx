@@ -1,6 +1,12 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
+import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
+import { assistantRoleTaskGuide } from '@campus/shared/src/assistantRoleTasks';
+import { parseImportedAcademicIntent } from '@campus/shared/src/importedAcademicSummary';
+import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
+import { AssistantRoleContext } from './AssistantRoleContext';
 import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
 import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -8,8 +14,8 @@ import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
-import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
-import { canAnswerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
+import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
+import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
@@ -18,6 +24,28 @@ import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
+
+const PICKUP_SUGGESTION = '把最近訂單的取餐時間加入行事曆';
+
+/** Classify before any reader runs; the composer and execution must use the same source boundary. */
+export function assistantQuestionReadRoute(taskProfile: AssistantRoleProfileId, question: string) {
+  const query = question.trim();
+  const personal = personalAssistantReadIntent(query);
+  const schedule = parseLocalScheduleIntent(query);
+  const academic = parseImportedAcademicIntent(query);
+  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || academic !== null || canAnswerTronClassQuestion(query));
+  const personalTime = schedule !== null || personal?.kind === 'schedule' || personal?.kind === 'calendar';
+  // A complete read intent is more precise than work-related keywords. Restricted
+  // sources receive fixed guidance even when their parser accepts unusual spacing.
+  const roleGuide = restricted ? assistantRoleTaskGuide(taskProfile, '我的工作')
+    : personalTime ? null : assistantRoleTaskGuide(taskProfile, query);
+  return {
+    roleGuide,
+    local: !restricted && !roleGuide && Boolean(resolveAssistantServiceIntent(query) || schedule || academic),
+    personal: !restricted && !roleGuide && personal !== null,
+    preferCampusReads: personal?.kind === 'calendar',
+  };
+}
 
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
   if (reply.local || reply.dataRead)
@@ -28,7 +56,11 @@ function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
 export function AssistantThread({
   inline = false,
   schoolId,
+  taskProfile = 'student',
+  onTaskProfile,
+  taskProfileLocked = false,
   ready,
+  foodPickupEnabled = false,
   fallback,
   consent,
   onConsent,
@@ -56,7 +88,11 @@ export function AssistantThread({
 }: {
   inline?: boolean;
   schoolId: string;
+  taskProfile?: AssistantRoleProfileId;
+  onTaskProfile?: (profile: AssistantRoleProfileId) => void;
+  taskProfileLocked?: boolean;
   ready: boolean;
+  foodPickupEnabled?: boolean;
   fallback: boolean;
   consent: boolean;
   onConsent: (value: boolean) => void;
@@ -137,10 +173,17 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const profile = getAssistantRoleProfile(taskProfile)!;
   const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
+  const tronClass = taskProfile === 'student' && canAnswerTronClassQuestion(question);
+  const foodPickup = !tronClass && taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
+  const readRoute = assistantQuestionReadRoute(taskProfile, question);
+  const suggestions = taskProfile !== 'student' ? profile.examples.map(example => example.prompt)
+    : foodPickupEnabled ? [...SUGGESTIONS, PICKUP_SUGGESTION] : SUGGESTIONS;
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (!!publicCourseIntent || canAnswerTronClassQuestion(question) || canAnswerAssistantLocally(question) || canAnswerAssistantPersonalQuestion(question) ||
-      (onStudyTarget && courseworkStudyFollowup(question) !== null) || (consent && ready));
+    (readRoute.roleGuide || (foodPickup ? foodPickupEnabled
+      : tronClass || !!publicCourseIntent || readRoute.local || readRoute.personal ||
+        (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null) || (consent && ready)));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
@@ -171,9 +214,12 @@ export function AssistantThread({
   );
   return (
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
+      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={onTaskProfile} />}
       {!inline && (
         <>
-          <p className={styles.intro}>直接查課程、時間、教室與未交作業，也可查個人行程。連接並授權後，可請助理查詢 TronClass、下載教材與準備作業。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。</p>
+          <p className={styles.intro}>{taskProfile === 'student'
+            ? '直接查課程、時間、教室與未交作業，也可查個人行程。連接並授權後，可請助理查詢 TronClass、下載教材與準備作業。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
+            : '查詢自己的行程與公開校園資訊，或接續目前的工作。個人時間安排會先預覽，確認後才儲存。'}</p>
           <nav className={styles.services} aria-label="校園服務入口">
             <Link href={'/map' + schoolQuery}>校園地圖</Link>
             <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -183,7 +229,10 @@ export function AssistantThread({
       )}
       {!ready ? (
         <p className={styles.notice} role="status">
-          雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。
+          {taskProfile === 'student'
+            ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
+            : '雲端回答暫時無法使用，仍可核對保存的個人行程，或從下方建議接續目前的工作。'}
+          {foodPickupEnabled && taskProfile === 'student' ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
         </p>
       ) : null}
       {inline && turns.length > 0 && consent ? (
@@ -196,10 +245,10 @@ export function AssistantThread({
         tabIndex={inline ? 0 : undefined} aria-busy={pending || undefined}>
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
-            <h2>今天想問什麼？</h2>
-            <p>可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。</p>
+            <h2>{taskProfile === 'student' ? '今天想問什麼？' : profile.title}</h2>
+            <p>{taskProfile === 'student' ? '可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。' : profile.description}</p>
             <div className={styles.chips}>
-              {SUGGESTIONS.map((phrase) => (
+              {suggestions.map((phrase) => (
                 <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                   {phrase}
                 </button>
@@ -222,7 +271,8 @@ export function AssistantThread({
                   </SpokenReply>
                 ) : <ReplyBody reply={turn.reply} />}
                 {renderTronClass?.(turn)}
-                {onStudyTarget && parseAssistantCourseworkTargets(turn.reply.courseworkTargets).length > 0 ? (
+                {turn.reply.roleGuide && turn.reply.serviceIds && <AssistantServiceLinks serviceIds={turn.reply.serviceIds} schoolId={schoolId} audience="platform" />}
+                {onStudyTarget && taskProfile === 'student' && parseAssistantCourseworkTargets(turn.reply.courseworkTargets).length > 0 ? (
                   <div className={styles.courseworkChoices} role="group" aria-label="安排作業準備時間">
                     <p className={styles.muted}>先找時段並預覽，確認後才加入個人行程。</p>
                     {parseAssistantCourseworkTargets(turn.reply.courseworkTargets).map((target) => (
@@ -327,7 +377,7 @@ export function AssistantThread({
         ) : null}
         {turns.length > 0 && !inline ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
-            {SUGGESTIONS.map((phrase) => (
+            {suggestions.map((phrase) => (
               <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>
@@ -357,7 +407,7 @@ export function AssistantThread({
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
+            placeholder={inline && turns.length ? '接著問…' : taskProfile === 'student' ? '輸入問題' : profile.placeholder}
             onChange={(e) => {
               setDraft(editComposerDraft(draft));
               onQuestion(e.target.value);
@@ -402,9 +452,9 @@ export function AssistantThread({
         <p id={`${fieldId}-hint`} className={styles.composerHint}>
           {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
         </p>
-        {inline && ready && !turns.length && !question && !pending && (
+        {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (
+            {(taskProfile === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

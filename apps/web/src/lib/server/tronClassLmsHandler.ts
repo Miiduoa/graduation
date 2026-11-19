@@ -248,7 +248,7 @@ async function readPagedHomework(
 ): Promise<{ items: LmsHomeworkItem[]; error: LmsCourseError | null }> {
   const seen = new Set<number>();
   const items: LmsHomeworkItem[] = [];
-  let accumulated = 0;
+  const sourceIds = new Set<number>();
   let total: number | null = null;
   for (let page = 1; page <= HOMEWORK_MAX_PAGES; page += 1) {
     const result = await source.fetchHomeworkPage(cookies, course.id, page, HOMEWORK_PAGE_SIZE);
@@ -260,19 +260,21 @@ async function readPagedHomework(
     total = result.value.total;
     const parsed: LmsHomeworkItem[] = [];
     for (const row of rows) {
+      const sourceId = positiveId(record(row).id);
+      if (sourceId) sourceIds.add(sourceId);
       const item = parseHomework(row, course);
       if (!item || seen.has(item.id)) continue;
       seen.add(item.id);
       parsed.push(item);
     }
     items.push(...parsed);
-    // The school's total includes hidden and out-of-course rows as well.
-    accumulated += rows.length;
+    // Count distinct source IDs, including hidden, out-of-course and undisplayable rows.
+    // Repeated pages must not make an incomplete result look complete.
     const advance = homeworkPageAdvance({
       page,
       pageSize: HOMEWORK_PAGE_SIZE,
       pageLength: rows.length,
-      accumulated,
+      accumulated: sourceIds.size,
       total,
     });
     if (advance === 'complete') return { items, error: null };
@@ -331,7 +333,10 @@ async function loadCourseContents(
     source.fetchActivities(cookies, course.id, ''),
     // TronClass can keep courseware in a separately filtered activity feed.
     // Read both rather than mistaking the unfiltered feed for a complete list.
-    source.fetchActivities(cookies, course.id, 'type=courseware_activity'),
+    source.fetchActivities(cookies, course.id, 'type=courseware_activity').catch((error) => ({
+      ok: false as const,
+      status: schoolHttpStatus(error) ?? (classifySchoolReadError(error) === 'session' ? 401 : null),
+    })),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
@@ -604,11 +609,23 @@ export function createTronClassLmsHandler({
       let extras: Record<string, CachedCourseContents> = {};
       let cachedHomework: LmsReadonlySnapshot | null = null;
       let shouldPruneExtras = false;
-      const cached = await cacheRef.get();
+      // Keep partial results separate, in the same owner-cleaned cache collection.
+      const retryRef = db.doc(`${LMS_CACHE_COLLECTION}/${uid}__retry`);
+      const [cached, retry] = await Promise.all([cacheRef.get(), retryRef.get()]);
       // A relink can leave the original portal document intact.
       await verifyLinkedSession();
-      const cacheData = cached.data();
+      const retryData = retry.data();
+      const cacheVersion = documentVersion(cached);
+      const useRetry = !refresh && cached.exists && cacheVersion &&
+        retryData?.baseCacheVersion === cacheVersion &&
+        retryData?.ownerUid === uid && retryData?.sessionId === linkedId &&
+        retryData?.sessionVersion === sessionVersion &&
+        retryData?.projectionVersion === LMS_CACHE_PROJECTION_VERSION && cacheStillFresh(retryData?.expiresAt, now());
+      const cacheData = useRetry ? retryData : cached.data();
       const saveCache = async (snapshot: LmsReadonlySnapshot) => {
+        const preserveExisting = cached.exists && (snapshot.courseErrors.length > 0 ||
+          snapshot.upcomingCoursesError != null ||
+          Object.values(extras).some((contents) => contents.errors.length > 0));
         if (!sessionVersion || !db.runTransaction) return;
         try {
           await db.runTransaction(async (tx) => {
@@ -617,10 +634,17 @@ export function createTronClassLmsHandler({
             // A concurrent refresh, relink or cleanup has already replaced our input.
             if (cached.exists !== current.exists || (current.exists &&
               (!current.updateTime || documentVersion(current) !== documentVersion(cached)))) return;
-            tx.set(cacheRef, {
+            const currentRetry = await tx.get(retryRef);
+            // A UID can itself end in __retry; never overwrite another owner's cache.
+            if (preserveExisting && currentRetry.exists && currentRetry.data()?.ownerUid !== uid) return;
+            if (retry.exists !== currentRetry.exists || (currentRetry.exists &&
+              (!currentRetry.updateTime || documentVersion(currentRetry) !== documentVersion(retry)))) return;
+            tx.set(preserveExisting ? retryRef : cacheRef, {
               ownerUid: uid, sessionId: linkedId, sessionVersion, projectionVersion: LMS_CACHE_PROJECTION_VERSION,
+              ...(preserveExisting ? { baseCacheVersion: cacheVersion } : {}),
               fetchedAt: snapshot.fetchedAt,
-              expiresAt: new Date(snapshot.cache.expiresAt),
+              expiresAt: preserveExisting
+                ? new Date(now() + PARTIAL_COURSE_RETRY_MS) : new Date(snapshot.cache.expiresAt),
               snapshot,
               extras,
             });
@@ -631,7 +655,8 @@ export function createTronClassLmsHandler({
         }
       };
 
-      if (cached.exists && sessionVersion && cacheData &&
+      // Versionless caches cannot prove which identity populated their contents.
+      if (sessionVersion && cacheData &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
         cacheData.projectionVersion === LMS_CACHE_PROJECTION_VERSION &&
         cacheData.sessionVersion === sessionVersion &&

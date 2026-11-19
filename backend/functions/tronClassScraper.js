@@ -1124,15 +1124,18 @@ async function tcFetchStudentHomeworkSubmissionList(cookies, activityId, student
 }
 
 // Official student homeworkRepository / homeworkApi in 55200.e380810d.js.
-// A missing record is an explicit null, never an HTTP failure or absent key.
+// A successful exact {} resolves to an absent record in the official client;
+// explicit null does too. Neither an HTTP failure nor another missing-key
+// envelope establishes that no personal record exists.
 // These read-only envelopes do not authorize a write by themselves.
 async function readStudentHomeworkPermissionRecord(cookies, activityId, studentId, kind, readOptions) {
   requireHomeworkReadId(activityId);
   requireHomeworkReadId(studentId);
   const key = kind === 'make-up' ? 'make_up_record' : 'resubmit_record';
   const data = await readHomeworkJson(`${TC_BASE}/api/homework/${activityId}/students/${studentId}/${kind}-record`, cookies, readOptions);
-  if (!isHomeworkResponseObject(data) || !Object.prototype.hasOwnProperty.call(data, key) ||
-    !(data[key] === null || isHomeworkResponseObject(data[key]))) {
+  if (!isHomeworkResponseObject(data)) throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+  if (Object.keys(data).length === 0) return data;
+  if (!Object.prototype.hasOwnProperty.call(data, key) || !(data[key] === null || isHomeworkResponseObject(data[key]))) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return data;

@@ -180,6 +180,40 @@ it('discards previous account results and cancels its Agent request on a session
   expect(screen.queryByText('TronClass 未交作業')).toBeNull();
 });
 
+it('cancels student-source downloads on a role change and requires a new query after switching back', async () => {
+  let finishDownload!: (response: Response) => void;
+  let downloadSignal: AbortSignal | undefined;
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/tronclass/agent') return json(requestedDownload());
+    expect(url).toBe('/api/tronclass/agent/download');
+    downloadSignal = init?.signal ?? undefined;
+    return new Promise<Response>(resolve => { finishDownload = resolve; });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const create = vi.spyOn(URL, 'createObjectURL');
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  render(<Assistant cloudEnabled={false} />);
+  await ask('下載 TronClass 講義.pdf');
+  await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
+  const selector = screen.getByLabelText('目前要處理');
+  fireEvent.change(selector, { target: { value: 'teacher' } });
+  expect((selector as HTMLSelectElement).value).toBe('teacher');
+  expect(downloadSignal?.aborted).toBe(true);
+  expect(screen.queryByLabelText('TronClass 查詢結果')).toBeNull();
+
+  // The transport may finish despite cancellation. It must not revive private
+  // result controls or trigger a download in the new task context.
+  await act(async () => finishDownload(downloadedFile()));
+  expect(create).not.toHaveBeenCalled();
+  expect(click).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText('TronClass 查詢結果')).toBeNull();
+  fireEvent.change(selector, { target: { value: 'student' } });
+  await screen.findByText('連接或權限已更新，請重新查詢以使用目前的設定。');
+  expect(screen.queryByRole('button', { name: /下載 講義.pdf/ })).toBeNull();
+  expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent/download')).toHaveLength(1);
+  expect(create).not.toHaveBeenCalled();
+});
+
 it('aborts an earlier turn’s pending download after permissions are revoked in a later turn', async () => {
   let finishDownload!: (response: Response) => void;
   let downloadSignal: AbortSignal | undefined;
