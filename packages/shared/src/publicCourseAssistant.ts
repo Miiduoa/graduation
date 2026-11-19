@@ -10,6 +10,7 @@ import {
 } from './publicCourseOperations';
 import { mockSchools } from './schools';
 import { extractPublicCourseAssistantFilters } from './publicCourseAssistantFilters';
+import { splitPublicCourseClauses } from './publicCourseClauses';
 import {
   hasPublicCourseFilters,
   parsePublicCourseFilters,
@@ -120,7 +121,7 @@ export function resolvePublicCourseAssistantIntent(
   )
     return null;
   if (
-    /我的|本人|我(?:今天|明天|後天|這週|本週|下週|已選|已修|修|選了|這學期|本學期|上學期|下學期)|已(?:選|修)|修過|所選|選上的|下一堂|下堂課|目前這堂|課表|這堂課|期中考|期末考|考試時間|考試日期|(?:課程|課堂)(?:的)?(?:作業(?!系統)|教材|考試|測驗|報告|筆記|成績)|作業(?:$|截止|期限|繳交|內容)|\b(?:my|timetable|homework|next class)\b/i.test(
+    /我的|本人|我(?:今天|明天|後天|這週|本週|下週|已選|已修|修|選了|這學期|本學期|上學期|下學期)|已(?:選|修)|修過|所選|選上的|下一堂|下堂課|目前這堂|課表|這堂課|期中考|期末考|考試時間|考試日期|(?:課程|課堂)(?:的)?(?:作業(?!系統)|教材|考試|測驗|報告|筆記|成績)|作業(?:$|截止|期限|繳交|內容)|功課|\b(?:my|timetable|homework|next class)\b/i.test(
       requestWords,
     )
   )
@@ -158,6 +159,9 @@ export function resolvePublicCourseAssistantIntent(
     )
   )
     return null;
+
+  if ((explicit || hasCourseWord) && (splitPublicCourseClauses(question)?.length ?? 0) > 1)
+    return clarify('這句包含多項需求，不能合併成一個課程關鍵字。此公開課程查詢一次處理一個條件；其他需求尚未執行。');
 
   // An explicit second campus cannot be silently folded into one school's keyword.
   const outsideQuotes = text
@@ -217,7 +221,7 @@ export function resolvePublicCourseAssistantIntent(
     !/^\d[\dA-Z ]{3,79}$/i.test(outsideQuotes)
   )
     return null;
-  if (/加入|選課|退選|繳交|上傳|提交|登記|搶課|然後|順便|並且/.test(text)) {
+  if (/加入|選課|退選|繳交|上傳|提交|登記|搶課|然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我/.test(outsideQuotes)) {
     return clarify('可以先查詢公開開課，再到課程清單核對與帶入課表。' + queryHelp);
   }
   text = text.replace(/^(?:我們學校|我的學校|本校|目前學校|這所學校|這間學校)\s*/, '');

@@ -81,6 +81,13 @@ const clubReading = capability('club-reading', '已加入的社團與可見動�
   ['clubs'], ['list_clubs', 'get_club_feed']);
 const studentServices = capability('student-services', '作業繳交、成績回饋、請假與生活服務', 'service',
   ['classroom', 'grade-feedback', 'school-lms', 'leave', 'dormitory', 'student-card', 'messages'], ['propose_open_page']);
+const teachingOverview = capability('teaching-overview', '本人已授權授課課程的作業與測驗概況', 'query',
+  ['classroom'], ['get_teaching_overview']);
+const merchantOverview = capability('merchant-overview', '本人已授權門市的訂單與當班概況', 'query',
+  ['merchant'], ['get_merchant_overview']);
+const workPublicContext = capability('work-public-context', '公開校園公告、活動、交流與學校聯絡資訊', 'query',
+  ['announcements', 'events', 'public-social', 'school-info'],
+  ['get_campus_announcements', 'get_campus_events', 'get_public_social', 'get_school_info']);
 const teachingServices = capability('teaching-services', '授課、批改與請假核閱工作區', 'service',
   ['classroom', 'leave-review', 'teacher'], ['propose_open_page']);
 const merchantServices = capability('merchant-services', '門市訂單、菜單與營運工作區', 'service',
@@ -135,32 +142,39 @@ export const ASSISTANT_ROLE_PROFILES: readonly AssistantRoleProfile[] = Object.f
     // Keep the existing student tool surface intact. Notifications currently
     // returns NOT_CONNECTED; food proposals may hand off to the payment page.
     // Neither is advertised as a live query or a completed purchase here.
-    compatibilityToolNames: ['get_notifications', 'propose_food_order', 'reorder_last_food_order'],
+    compatibilityToolNames: ['get_notifications', 'propose_food_order', 'reorder_last_food_order',
+      'get_teaching_overview', 'get_merchant_overview', 'get_public_social', 'get_school_info',
+      'get_campus_announcements', 'get_campus_events', 'get_campus_map', 'get_lost_found', 'get_public_courses'],
     guidance: '以本人修課、待處理事項和個人時間為重點。待繳清單不等於全部歷史作業；買家訂單不等於店家營運訂單。只讀自己的已匯入成績，不把匯入紀錄稱為校方最新正式成績。作業送出、請假、私人訊息及正式點餐付款請到服務頁確認。',
   }),
   profile({
     id: 'teacher', label: '教師與助教', title: '接續教學工作',
     description: '安排備課時間，並進入已獲授權的課程與核閱工作。',
-    placeholder: '想安排備課時間，還是開啟授課與核閱工作？',
+    placeholder: '例如：查我的授課概況，查近期活動',
     examples: [
+      { label: '查授課概況', prompt: '查我的授課概況', capabilityId: 'teaching-overview' },
+      { label: '授課與活動', prompt: '查我的授課概況，查近期活動', capabilityId: 'teaching-overview' },
       { label: '安排備課', prompt: '幫我新增行程明天15:00到16:00備課', capabilityId: 'personal-event' },
       { label: '開啟課程', prompt: '打開課程與作業', capabilityId: 'teaching-services' },
       { label: '開啟請假核閱', prompt: '打開請假核閱', capabilityId: 'teaching-services' },
     ],
-    capabilities: [personalTime, publicCampus, publicTransit, personalEvent, teachingServices, directory],
-    guidance: '以備課和授課工作入口為重點。現有課務 reader 是本人學生修課投影，不能用來回答授課名單、收件數、待批改、成績發布或學生請假；這些要求提供 classroom、leave-review 或 teacher 正式服務入口。個人行程不代表已替課程排課或通知學生。',
+    capabilities: [teachingOverview, workPublicContext, personalTime, publicCampus, publicTransit, personalEvent, teachingServices, directory],
+    guidance: '以授課概況、備課和授課工作入口為重點。get_teaching_overview 只讀已核對授權的授課概況，已交數不等於待批數。學生修課 reader 不能作為授課來源；授課名單、批改、成績發布或學生請假請提供 classroom、leave-review 或 teacher 正式服務入口。個人行程不代表已替課程排課或通知學生。',
   }),
   profile({
     id: 'merchant', label: '店家', title: '接續門市工作',
     description: '進入門市處理訂單與菜單，另外安排自己的工作時間。',
-    placeholder: '想開啟門市工作，還是安排盤點與備料時間？',
+    placeholder: '例如：查我的門市營運概況，查學校電話',
     examples: [
+      { label: '查門市概況', prompt: '查我的門市營運概況', capabilityId: 'merchant-overview' },
+      { label: '門市與活動', prompt: '查我的門市營運概況，查近期活動', capabilityId: 'merchant-overview' },
+      { label: '門市與聯絡資訊', prompt: '查我的門市營運概況，查學校電話', capabilityId: 'merchant-overview' },
       { label: '開啟門市', prompt: '打開店家工作區', capabilityId: 'merchant-services' },
       { label: '安排盤點', prompt: '幫我新增行程明天15:00到16:00盤點', capabilityId: 'personal-event' },
       { label: '核對個人行程', prompt: '查明天的個人行程', capabilityId: 'personal-time' },
     ],
-    capabilities: [personalTime, publicCampus, publicTransit, personalEvent, merchantServices, directory],
-    guidance: '以本人已授權門市的工作入口和個人工作時間為重點。現有 list_food_orders/get_food_order 是買家本人訂單，不能當作門市訂單、銷售或營運來源；接單、出餐、菜單、退款、交班與營業狀態請開啟 merchant 工作區。安排個人盤點行程不代表已排員工班表或改變門市。',
+    capabilities: [merchantOverview, workPublicContext, personalTime, publicCampus, publicTransit, personalEvent, merchantServices, directory],
+    guidance: '以本人已授權門市概況和個人工作時間為重點。get_merchant_overview 只讀已核對授權的門市訂單與當班概況。現有 list_food_orders/get_food_order 是買家本人訂單，不能當作門市訂單、銷售或營運來源；接單、出餐、菜單、退款、交班與營業狀態請開啟 merchant 工作區。安排個人盤點行程不代表已排員工班表或改變門市。',
   }),
   profile({
     id: 'club', label: '社團幹部', title: '整理社團活動與籌備時間',

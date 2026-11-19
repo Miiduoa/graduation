@@ -128,6 +128,108 @@ describe('public course transport', () => {
     expect(result?.content).not.toContain('0 筆');
   });
 
+  it.each([
+    ['HTTP 503', { status: 503, headers: { 'content-type': 'application/json' } }, undefined],
+    ['non-JSON media type', { headers: { 'content-type': 'text/html' } }, undefined],
+    ['unexpected mobile final URL', { headers: { 'content-type': 'application/json' } }, 'https://untrusted.example/courses'],
+  ] as Array<[string, ResponseInit, string | undefined]>)(
+    'cancels an unread streaming body for %s instead of relying on fetch abort',
+    async (_reason, init, redirectedUrl) => {
+      let cancelled = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          // An adapter may deliver headers and an open body, but ignore AbortSignal.
+          controller.enqueue(new Uint8Array([123]));
+        },
+        cancel() { cancelled = true; },
+      });
+      const response = new Response(stream, init);
+      if (redirectedUrl) Object.defineProperty(response, 'url', { value: redirectedUrl });
+      const result = await answer({
+        ...options,
+        origin: redirectedUrl ? 'mobile' : 'web',
+        fetcher: vi.fn<typeof fetch>().mockResolvedValue(response),
+      });
+      expect(result?.read?.status).toBe('unavailable');
+      expect(result?.content).toContain('暫時無法取得');
+      expect(cancelled).toBe(true);
+    },
+  );
+
+  it('stops an unbounded chunked course reply before buffering the full body', async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        // Missing Content-Length: the previous response.text() path buffered
+        // all 1.8 MiB before rejecting, rather than stopping at the second chunk.
+        if (pulls <= 6) controller.enqueue(new Uint8Array(300_000).fill(65));
+        else controller.close();
+      },
+      cancel() { cancelled = true; },
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(stream, { headers: { 'content-type': 'application/json' } }),
+    );
+    const result = await answer({ ...options, fetcher });
+    expect(result?.read?.status).toBe('unavailable');
+    expect(result?.content).not.toContain('0 筆');
+    expect(pulls).toBeGreaterThanOrEqual(2);
+    expect(cancelled).toBe(true);
+  });
+
+  it('decodes an official Chinese course name split across streaming UTF-8 chunks', async () => {
+    const course = {
+      code: 'CS100', section: '01', title: '資料庫', department: '資工系',
+      teacher: '王老師', time: '一2', room: '教室101', semester: '1151', credits: '3',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify({ ...data(), courses: [course] }));
+    const chinese = bytes.findIndex((byte) => byte >= 0xe0);
+    expect(chinese).toBeGreaterThan(0);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, chinese + 1));
+        controller.enqueue(bytes.slice(chinese + 1));
+        controller.close();
+      },
+    });
+    const result = await answer({
+      ...options,
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(stream, { headers: { 'content-type': 'application/json' } }),
+      ),
+    });
+    expect(result?.read?.status).toBe('ready');
+    expect(result?.content).toContain('資料庫');
+  });
+
+  it('rejects damaged UTF-8 in a chunked Chinese course instead of accepting replacement text', async () => {
+    const course = {
+      code: 'CS100', section: '01', title: '資料庫', department: '資工系',
+      teacher: '王老師', time: '一2', room: '教室101', semester: '1151', credits: '3',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify({ ...data(), courses: [course] }));
+    const chinese = bytes.findIndex((byte) => byte >= 0xe0);
+    expect(chinese).toBeGreaterThan(0);
+    bytes[chinese + 1] = 0xff;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, chinese + 1));
+        controller.enqueue(bytes.slice(chinese + 1));
+        controller.close();
+      },
+    });
+    const result = await answer({
+      ...options,
+      fetcher: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(stream, { headers: { 'content-type': 'application/json' } }),
+      ),
+    });
+    expect(result?.read?.status).toBe('unavailable');
+    expect(result?.content).not.toContain('資料庫');
+  });
+
   it('omits error and request details from failures', async () => {
     const result = await answer({
       ...options,
@@ -153,6 +255,45 @@ describe('public course transport', () => {
     finish(reply(data()));
     await Promise.resolve();
     expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+
+  it('cancels an unread late response after a school switch even if fetch ignores abort', async () => {
+    const controller = new AbortController();
+    let resolveLate!: (response: Response) => void;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(
+      () => new Promise<Response>((resolve) => { resolveLate = resolve; }),
+    );
+    const pending = answer({ ...options, signal: controller.signal, fetcher });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(streamController) { streamController.enqueue(new Uint8Array([123])); },
+      cancel() { cancelled = true; },
+    });
+    resolveLate(new Response(stream, { headers: { 'content-type': 'application/json' } }));
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+  });
+
+  it('cancels a stale response when the selected school changes during fetch', async () => {
+    let current = true;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(streamController) { streamController.enqueue(new Uint8Array([123])); },
+      cancel() { cancelled = true; },
+    });
+    const response = new Response(stream, { headers: { 'content-type': 'application/json' } });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+      current = false;
+      return response;
+    });
+    await expect(answer({
+      ...options,
+      fetcher,
+      isCurrent: () => current,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancelled).toBe(true);
   });
 
   it('rejects changed school/account scope after a response arrives', async () => {
