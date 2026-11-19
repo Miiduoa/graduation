@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { createRef } from 'react';
 import { callCampusAssistant } from '@/lib/campusAssistantClient';
 import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
@@ -151,6 +151,15 @@ function saveTodayLesson(now?: Date): string {
   );
   return daysAhead === 2 ? '後天有哪些課？' : daysAhead === 1 ? '明天有哪些課？' : '今天有哪些課？';
 }
+
+beforeAll(async () => {
+  // Compile the real lazy conversations before user-interaction assertions.
+  // Their cold module transform should not consume a DOM query's wait window.
+  await Promise.all([
+    import('@/features/nuni/Assistant'),
+    import('@/app/ai-assistant/LegacyAssistant'),
+  ]);
+});
 
 beforeEach(() => {
   localStorage.clear();
@@ -728,6 +737,55 @@ it('keeps the draft and ignores a late bootstrap after stopping a question and a
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.change(input, { target: { value: '還能舉其他例子嗎？' } });
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '送出' }).disabled).toBe(true);
+});
+
+it('stops a Today map read, preserves both drafts and ignores its late result after a new question', async () => {
+  let finishMap!: (response: Response) => void;
+  let mapSignal: AbortSignal | null | undefined;
+  const ask = vi.fn<(body: Record<string, unknown>) => Response>(() => reply('交易具有原子性與一致性。'));
+  const mapRead = vi.fn((_body: Record<string, unknown>, signal?: AbortSignal | null) => {
+    mapSignal = signal;
+    return new Promise<Response>((resolve) => { finishMap = resolve; });
+  });
+  mockNuniAsk(ask, mapRead);
+  render(entry());
+  fireEvent.click(await screen.findByRole('button', { name: '下一堂課在哪裡？' }));
+  const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(mapRead).toHaveBeenCalledOnce());
+  expect(mapRead.mock.calls[0][0]).toEqual({
+    schoolId: 'pu', conversationId: expect.any(String), task: { kind: 'next-class' },
+  });
+  expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false);
+  expect(ask).not.toHaveBeenCalled();
+
+  const followup = '請解釋資料庫交易的特性？';
+  fireEvent.change(input, { target: { value: followup } });
+  fireEvent.click(screen.getByRole('button', { name: '停止回答' }));
+  await screen.findByText(/已停止這次地點查詢/);
+  expect(mapSignal?.aborted).toBe(true);
+  expect(input.value).toBe(followup);
+  expect(input.readOnly).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(input.value).toBe('下一堂課在哪裡？');
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(input.value).toBe(followup);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('交易具有原子性與一致性。');
+  await act(async () => finishMap(Response.json({
+    version: 2, modelCalls: 0, dataRead: true, answer: '舊地點不應顯示。', cards: [],
+    steps: [{ name: 'get_campus_map', status: 'ok', summary: '舊地點來源已核對。' }],
+    taskPlan: { version: 1, steps: [{ id: 'map', label: '查校園地點', serviceId: 'map',
+      dependsOn: [], status: 'completed', summary: '舊地點來源已核對。', href: '/map?schoolId=pu' }] },
+  })));
+  expect(screen.queryByText('舊地點不應顯示。')).toBeNull();
+  expect(screen.queryByText('舊地點來源已核對。')).toBeNull();
+  expect(screen.getByText('交易具有原子性與一致性。')).toBeTruthy();
+  expect(mapRead).toHaveBeenCalledOnce();
+  expect(ask).toHaveBeenCalledOnce();
+  expect(ask.mock.calls[0][0]).toMatchObject({ question: followup, history: [] });
 });
 
 it('stops a school query without clearing previous answers or letting the cancelled result appear', async () => {
