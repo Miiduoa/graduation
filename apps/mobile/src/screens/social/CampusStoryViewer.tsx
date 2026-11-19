@@ -565,7 +565,8 @@ function StoryClip({
         isMuted={muted}
         isLooping={false}
         onError={() => {
-          if (!current.current) return;
+          // Ignore decoder errors queued before the student paused or restarted this clip.
+          if (current.current !== session) return;
           setMuted(true);
           setPositionSeconds(0);
           setDurationSeconds(0);
