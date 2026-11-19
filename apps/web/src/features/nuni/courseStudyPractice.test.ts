@@ -535,6 +535,28 @@ describe('visible attempts required for self-check', () => {
     expect(exported).not.toContain('參考答案秘密');
   });
 
+  it('rejects standalone combining marks and Braille blank without erasing the draft', () => {
+    for (const invisible of ['\u0301', '\u20dd', '\u2800', '\u2800\u0301\u200b']) {
+      const entered = change(round(1), { type: 'attempt', value: invisible });
+      const id = entered.cards[0].id;
+      expect(entered.responses[id].attempt).toBe(invisible);
+      expect(hasVisibleStudyAttempt(invisible)).toBe(false);
+      expect(updateStudyPracticeRound(entered, { type: 'toggle_answer' })).toBe(entered);
+      expect(getStudyPracticeSummary(entered).answered).toBe(0);
+      const exported = buildCourseStudyPracticeNotes('資料庫', '講義', entered);
+      expect(exported).toContain('（尚未作答）');
+      expect(exported).not.toContain(invisible);
+      expect(exported).not.toContain('參考答案秘密');
+    }
+    // A base letter with a combining mark or a real Braille cell is substantive.
+    for (const visible of ['e\u0301', '主鍵\u20dd', '\u2801', '👩‍💻', '∅']) {
+      expect(hasVisibleStudyAttempt(visible)).toBe(true);
+      const entered = change(round(1), { type: 'attempt', value: visible });
+      expect(updateStudyPracticeRound(entered, { type: 'toggle_answer' })
+        .responses[entered.cards[0].id].answerVisible).toBe(true);
+    }
+  });
+
   it('still accepts actual Chinese text, numbers, mathematical symbols and joined emoji', () => {
     for (const answer of ['\u200b主鍵\u200d', '0', '∅', '👩‍💻']) {
       expect(hasVisibleStudyAttempt(answer)).toBe(true);

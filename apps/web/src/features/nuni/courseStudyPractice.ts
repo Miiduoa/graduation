@@ -78,7 +78,10 @@ function emptyResponse(): StudyPracticeResponse {
  * schema or source text.
  */
 export function hasVisibleStudyAttempt(attempt: string): boolean {
-  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}]/gu, '').length > 0;
+  // Standalone accent/enclosing marks and U+2800 Braille blank are not
+  // substantive answers. A mark attached to a real letter, and a nonblank
+  // Braille cell, still have a visible base and remain valid.
+  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '').length > 0;
 }
 
 /** Read actual source order and only the selected lesson of the requested mode. */
