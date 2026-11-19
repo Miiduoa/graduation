@@ -224,8 +224,8 @@ it('does not let untimed WebView records override newer timestamped visibility',
   expect(scene.create).not.toHaveBeenCalled();
 
   const notify = (records: Array<{ isIntersecting: boolean; time?: number }>) => {
-    act(() => intersection?.(records.map((record) => ({ ...record, target: graphics }))
-      as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    const entries = records.map((record) => ({ ...record, target: graphics })) as unknown as IntersectionObserverEntry[];
+    act(() => intersection?.(entries, {} as IntersectionObserver));
   };
   // An earlier timed on-screen entry remains valid even when an untimed
   // offscreen record happens to be last in the batch.
