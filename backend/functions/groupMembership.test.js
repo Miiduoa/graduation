@@ -445,6 +445,135 @@ describe('transferGroupOwnership', () => {
       }),
     ).rejects.toMatchObject({ code: 'already-exists' });
   });
+
+  // Snapshot every document, including membership mirrors, the group count and
+  // immutable audit/operation receipts. Rejections must not partially hand off ownership.
+  const completeState = () => JSON.stringify(
+    [...store.docs.entries()].sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+  test.each(
+    ['alice', 'bob'].flatMap((uid) => [
+      ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => [uid, { status }]),
+      [uid, { accountDeletionInProgress: true }],
+    ]),
+  )('the transaction rejects unavailable account %s with %j without changing any document', async (uid, profile) => {
+    store.docs.set(`users/${uid}`, profile);
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each([
+    { role: 'student' }, { role: 'student', status: 'active' }, { role: 'teacher' }, {},
+    { status: '' },
+    { role: 'student', schoolId: 'other-school' },
+  ])('legacy profiles %j still transfer and recover the same immutable receipt', async (profile) => {
+    for (const uid of ['alice', 'bob']) {
+      store.docs.set(`users/${uid}`, { ...profile });
+    }
+    const first = await transfer();
+    expect(first).toMatchObject({ success: true, reused: false, fromUid: 'alice', toUid: 'bob' });
+    expect(store.docs.get('groups/one/members/alice').role).toBe('member');
+    expect(store.docs.get('groups/one/members/bob').role).toBe('owner');
+    for (const uid of ['alice', 'bob']) {
+      expect(store.docs.get(`users/${uid}`)).toEqual(profile);
+    }
+    const beforeReplay = completeState();
+    expect(await transfer()).toEqual({ ...first, reused: true });
+    expect(completeState()).toBe(beforeReplay);
+  });
+
+  test('a missing target account cannot receive ownership despite active school and group memberships', async () => {
+    store.docs.delete('users/bob');
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test('a missing actor profile preserves legacy transfer compatibility', async () => {
+    store.docs.delete('users/alice');
+    expect(await transfer()).toMatchObject({ success: true, reused: false });
+    expect(store.docs.has('users/alice')).toBe(false);
+    expect(store.docs.get('groups/one/members/bob').role).toBe('owner');
+  });
+
+  test('a transaction retry rejects a target account that disappears after the first attempt', async () => {
+    const aborted = new Error('discard first attempt');
+    let attempts = 0;
+    handlers = createGroupMembershipHandlers({ db: {
+      ...store.db,
+      runTransaction: async (callback) => {
+        await expect(store.db.runTransaction(async (transaction) => {
+          attempts++;
+          expect(await callback(transaction)).toMatchObject({ success: true, reused: false });
+          throw aborted;
+        })).rejects.toBe(aborted);
+        store.docs.delete('users/bob');
+        const before = completeState();
+        try {
+          return await store.db.runTransaction((transaction) => {
+            attempts++;
+            return callback(transaction);
+          });
+        } finally {
+          expect(completeState()).toBe(before);
+        }
+      },
+    } });
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(attempts).toBe(2);
+    expect(store.docs.get('groups/one/members/alice').role).toBe('owner');
+    expect(store.docs.get('groups/one/members/bob').role).toBe('member');
+  });
+
+  test.each(['deleted', 'deleting', 'disabled', 'suspended', 'inactive'])('receipt recovery rejects an unavailable original actor who becomes %s', async (status) => {
+    await transfer();
+    store.docs.set('users/alice', status === 'deleting' ? { accountDeletionInProgress: true } : { status });
+    const before = completeState();
+    await expect(transfer()).rejects.toMatchObject({ code: 'failed-precondition' });
+    expect(completeState()).toBe(before);
+  });
+
+  test('receipt recovery preserves legacy compatibility when the original actor profile disappears', async () => {
+    const first = await transfer();
+    store.docs.delete('users/alice');
+    const before = completeState();
+    expect(await transfer()).toEqual({ ...first, reused: true });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each(['disabled', 'suspended', 'inactive', 'deleted', 'missing'])('an eligible original actor can recover history after the target account becomes %s', async (status) => {
+    const first = await transfer();
+    if (status === 'missing') store.docs.delete('users/bob');
+    else store.docs.set('users/bob', { role: 'student', status });
+    const before = completeState();
+    expect(await transfer()).toEqual({ ...first, reused: true });
+    expect(completeState()).toBe(before);
+  });
+
+  test.each(['users/alice', 'users/bob'])('failure to read canonical account %s propagates before any write', async (accountPath) => {
+    const failure = new Error('account source unavailable');
+    const writes = jest.fn();
+    const database = {
+      ...store.db,
+      runTransaction: (callback) => store.db.runTransaction((transaction) => callback({
+        ...transaction,
+        getAll: async (...references) => {
+          if (references.some((reference) => reference.path === accountPath)) throw failure;
+          return transaction.getAll(...references);
+        },
+        set: (...args) => { writes('set'); return transaction.set(...args); },
+        create: (...args) => { writes('create'); return transaction.create(...args); },
+        update: (...args) => { writes('update'); return transaction.update(...args); },
+      })),
+    };
+    handlers = createGroupMembershipHandlers({ db: database });
+    const before = completeState();
+    await expect(transfer()).rejects.toBe(failure);
+    expect(writes).not.toHaveBeenCalled();
+    expect(completeState()).toBe(before);
+  });
 });
 
 describe('transferGroupOwnership registration', () => {
