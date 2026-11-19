@@ -1,3 +1,4 @@
+import { normalizeClubProfileText } from '@campus/shared/src/clubProfile';
 import { shareClubCsv } from '../services/clubExport';
 import { ClubCheckIn } from './ClubCheckIn';
 import React, { useEffect, useRef, useState } from 'react';
@@ -5,6 +6,7 @@ import { Linking, Text, TextInput, View } from 'react-native';
 import { Button, Card } from '../ui/components';
 import { theme } from '../ui/theme';
 import { callClubPortal } from '../services/clubPortal';
+import { clubRoleLabel } from '../services/clubSummary';
 import type { ClubPortalView } from '@campus/shared/src/clubPortal';
 import {
   clubProfileFields,
@@ -12,26 +14,36 @@ import {
   clubEventInput,
 } from '../../../../packages/shared/src/clubForms';
 
+const MEETING_TIME_PLACEHOLDER = '社課時間未提供';
+const roleOfficeLabel = (role: string) =>
+  role === 'owner' ? '社長' : role === 'admin' ? '幹部' : clubRoleLabel(role);
+
 export function ClubPortal({
   uid,
   schoolId,
   groupId,
   onChanged,
+  onBack,
+  searchQuery,
 }: {
   uid: string;
   schoolId: string;
   groupId?: string;
   onChanged?: () => void;
+  onBack?: () => void;
+  searchQuery?: string;
 }) {
   const [view, setView] = useState<ClubPortalView | null>(null),
     [selected, setSelected] = useState(groupId || ''),
     [office, setOffice] = useState(false),
     [manage, setManage] = useState(false),
+    [showPastEvents, setShowPastEvents] = useState(false),
     [search, setSearch] = useState(''),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [busy, setBusy] = useState(false),
     [revision, setRevision] = useState(0),
+    [confirmCancelJoin, setConfirmCancelJoin] = useState(false),
     [confirmLeave, setConfirmLeave] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({}),
     [clock, setClock] = useState(Date.now());
@@ -52,7 +64,9 @@ export function ClubPortal({
     lock.current = false;
     setError('');
     setManage(false);
+    setShowPastEvents(false);
     setConfirmLeave(false);
+    setConfirmCancelJoin(false);
     setValues({});
     operation.current = null;
     callClubPortal(
@@ -68,15 +82,20 @@ export function ClubPortal({
           if (data.club)
             setValues({
               ...Object.fromEntries(
-                clubProfileFields.map(([key]) => [key, String(data.club?.[key] || '')]),
+                clubProfileFields.map(([key]) => [
+                  key,
+                  key === 'meetingTime' || key === 'description'
+                    ? normalizeClubProfileText(data.club?.[key])
+                    : String(data.club?.[key] || ''),
+                ]),
               ),
               joinPolicy: data.club.joinPolicy,
               recruiting: String(data.club.recruiting),
             });
         }
       },
-      (err) => {
-        if (generation.current === current) setError(err.message);
+      () => {
+        if (generation.current === current) setError('社團服務暫時無法使用，請稍後重試。');
       },
     );
     return () => {
@@ -183,7 +202,8 @@ export function ClubPortal({
       await callClubPortal(uid, schoolId, { ...input, groupId: selected });
       if (generation.current !== current) return;
       operation.current = null;
-      if (['join', 'leave', 'review', 'profile'].includes(String(input.action))) onChanged?.();
+      if (['join', 'leave', 'review', 'profile', 'cancelJoin'].includes(String(input.action)))
+        onChanged?.();
       if (input.action === 'leave') {
         setNotice('已退出社團');
         setSelected('');
@@ -193,7 +213,14 @@ export function ClubPortal({
       if (generation.current === current) {
         setView(next);
         setConfirmLeave(false);
-        setNotice(next.status === 'pending' ? '已送出申請，等幹部回覆' : '已由伺服器確認');
+        setConfirmCancelJoin(false);
+        setNotice(
+          input.action === 'cancelJoin'
+            ? '已取消入社申請'
+            : next.status === 'pending'
+              ? ''
+              : '已由伺服器確認',
+        );
       }
     } catch (err) {
       if (generation.current === current)
@@ -208,16 +235,26 @@ export function ClubPortal({
   const style = { color: theme.colors.text, lineHeight: 22 },
     club = view?.club,
     officer = ['owner', 'admin'].includes(view?.role || '');
+  const directorySearch = searchQuery ?? search;
+  const directoryClubs =
+    view?.clubs
+      ?.filter((club) => `${club.name} ${club.category}`.includes(directorySearch))
+      .sort((a, b) => a.category.localeCompare(b.category)) || [];
+  const events = view?.events || [];
+  const visibleEvents = events.filter((event) => manage || showPastEvents || event.endsAt >= clock);
+  const hasPastEvents = events.some((event) => event.endsAt < clock);
   const button = (label: string, input: Record<string, unknown>, disabled = false) => (
     <Button text={label} disabled={busy || disabled} onPress={() => void act(input)} />
   );
-  const field = (key: string, label: string, fallback = '') => (
+  const field = (key: string, label: string, fallback = '', placeholder?: string) => (
     <View key={key}>
       <Text style={style}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
         value={values[key] ?? fallback}
         onChangeText={(value) => setValues((v) => ({ ...v, [key]: value }))}
+        placeholder={placeholder}
+        placeholderTextColor={theme.colors.muted}
         style={{
           color: theme.colors.text,
           borderColor: theme.colors.border,
@@ -240,6 +277,7 @@ export function ClubPortal({
   };
   return (
     <Card title="社團服務" subtitle="生活 › 社團">
+      {onBack ? <Button text="回社團介紹" disabled={busy} onPress={onBack} /> : null}
       {view?.memberCursor ? (
         <Button text="載入更多社員" disabled={busy} onPress={() => void loadMore('member')} />
       ) : null}
@@ -265,26 +303,37 @@ export function ClubPortal({
               onPress={() => setOffice(!office)}
             />
           ) : null}
-          <TextInput
-            accessibilityLabel="搜尋學校社團"
-            placeholder="搜尋名稱或類別"
-            value={search}
-            onChangeText={setSearch}
-            style={style}
-          />
+          {searchQuery === undefined && (
+            <TextInput
+              accessibilityLabel="搜尋學校社團"
+              placeholder="搜尋名稱或類別"
+              value={search}
+              onChangeText={setSearch}
+              style={style}
+            />
+          )}
           {!view.clubs?.length ? <Text style={style}>學校還沒提供社團名單。</Text> : null}
-          {view.clubs
-            ?.filter((c) => `${c.name} ${c.category}`.includes(search))
-            .sort((a, b) => a.category.localeCompare(b.category))
-            .map((c) => (
-              <View key={c.id} style={{ minHeight: 64, paddingVertical: 8 }}>
-                <Text style={style}>
-                  {c.name} · {c.category} · {c.meetingTime} · {c.recruiting ? '招新中' : ''}
-                  {office ? ` · ${c.approval}` : ''}
-                </Text>
-                <Button text={`查看社團：${c.name}`} onPress={() => setSelected(c.id)} />
-              </View>
-            ))}
+          {directoryClubs.map((c) => (
+            <View key={c.id} style={{ minHeight: 64, paddingVertical: 8 }}>
+              <Text style={style}>
+                {[
+                  c.name,
+                  c.category,
+                  normalizeClubProfileText(c.meetingTime) || MEETING_TIME_PLACEHOLDER,
+                  c.recruiting ? '招新中' : '',
+                  office ? c.approval : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+              <Button text={`查看社團：${c.name}`} onPress={() => setSelected(c.id)} />
+            </View>
+          ))}
+          {!!view.clubs?.length && !directoryClubs.length && !!directorySearch.trim() && (
+            <Text
+              style={style}
+            >{`找不到符合「${directorySearch.trim()}」的社團，請試試其他關鍵字。`}</Text>
+          )}
           {office ? (
             <>
               {field('groupId', '待核可社團群組 ID')}
@@ -300,8 +349,18 @@ export function ClubPortal({
             {club.name}
           </Text>
           <Text style={style}>
-            {club.category} · {club.memberCount ?? '未提供'} 位社員 · {club.meetingTime}
+            {[
+              club.category,
+              `${club.memberCount ?? '未提供'} 位社員`,
+              normalizeClubProfileText(club.meetingTime) || MEETING_TIME_PLACEHOLDER,
+              club.recruiting ? '招新中' : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </Text>
+          {officer && !normalizeClubProfileText(club.meetingTime) ? (
+            <Button text="填寫社課時間" onPress={() => setManage(true)} />
+          ) : null}
           {club.approval === 'approved' ? <Text style={style}>本校社團（課外組核可）</Text> : null}
           {officer ? <Button text="管理" onPress={() => setManage(!manage)} /> : null}
           {view.status === 'active' ? (
@@ -316,7 +375,21 @@ export function ClubPortal({
               ) : null}
             </>
           ) : view.status === 'pending' ? (
-            <Text style={style}>已送出申請，等幹部回覆</Text>
+            <>
+              <Text style={style}>已送出申請，等幹部回覆</Text>
+              <Button
+                text="取消入社申請"
+                disabled={busy}
+                onPress={() => setConfirmCancelJoin(true)}
+              />
+              {confirmCancelJoin ? (
+                <>
+                  <Text style={style}>確定要取消入社申請嗎？</Text>
+                  {button('確認取消入社申請', { action: 'cancelJoin' })}
+                  <Button text="取消" onPress={() => setConfirmCancelJoin(false)} />
+                </>
+              ) : null}
+            </>
           ) : (
             <>
               {view.status === 'declined' ? (
@@ -330,91 +403,95 @@ export function ClubPortal({
             </>
           )}
           <Text style={style}>近期活動</Text>
-          {!view.events?.length ? <Text style={style}>目前沒有排定的活動。</Text> : null}
-          {view.events
-            ?.filter((e) => manage || e.endsAt >= clock)
-            .map((e) => (
-              <View key={e.id} style={{ gap: 8 }}>
-                <Text style={style}>
-                  {e.title} · {new Date(e.startsAt).toLocaleString('zh-TW')} · {e.location}
-                </Text>
-                <Text style={style}>
-                  報名 {e.registered}／{e.capacity} · 簽到 {e.checkedIn} ·{' '}
-                  {e.myCheckIn ? '已簽到' : e.mine ? '已報名' : ''}
-                </Text>
-                {button(
-                  e.mine ? '取消報名' : e.registered >= e.capacity ? '名額已滿' : '報名',
-                  { action: e.mine ? 'cancel' : 'register', eventId: e.id },
-                  e.myCheckIn ||
-                    clock >= (e.mine ? e.cancellationDeadline : e.registrationDeadline) ||
-                    (!e.mine && e.registered >= e.capacity),
-                )}
-                {e.mine && clock >= e.cancellationDeadline ? (
-                  <Text style={style}>已過取消時間，請聯絡幹部</Text>
-                ) : null}
-                {(officer && manage) || (clock >= e.startsAt && clock <= e.endsAt) ? (
-                  <ClubCheckIn
-                    key={`${uid}:${schoolId}:${selected}:${e.id}`}
-                    uid={uid}
-                    schoolId={schoolId}
-                    groupId={selected}
-                    eventId={e.id}
-                    myCode={e.myCheckInCode}
-                    suffix={e.studentSuffix}
-                    officer={officer && manage}
-                    acceptingCheckIns={clock >= e.startsAt && clock <= e.endsAt}
-                    onConfirmed={() => void act({ action: 'read' })}
-                  />
-                ) : null}
-                {manage && e.registrationCursor ? (
-                  <Text style={style}>請先載入完整報名名單，再確認未報名社員。</Text>
-                ) : null}
-                {manage && !e.registrationCursor
-                  ? view.members
-                      ?.filter((m) => !e.registrations?.some((r) => r.uid === m.id))
-                      .map((m) => (
-                        <View key={`onsite-${m.id}`}>
-                          <Text style={style}>{m.name} · 這位不在報名名單</Text>
-                          {button(
-                            '仍然簽到',
-                            {
-                              action: 'checkIn',
-                              eventId: e.id,
-                              targetUid: m.id,
-                              allowWalkIn: true,
-                            },
-                            clock < e.startsAt || clock > e.endsAt,
-                          )}
-                        </View>
-                      ))
-                  : null}
-                {manage
-                  ? e.registrations?.map((r) => (
-                      <View key={r.uid}>
-                        <Text style={style}>{r.name}</Text>
-                        {r.checkedInAt ? (
-                          <Text style={style}>
-                            已簽到 {new Date(r.checkedInAt).toLocaleTimeString('zh-TW')}
-                          </Text>
-                        ) : (
-                          button(
-                            '確認簽到',
-                            { action: 'checkIn', eventId: e.id, targetUid: r.uid },
-                            clock < e.startsAt || clock > e.endsAt,
-                          )
+          {!visibleEvents.length ? <Text style={style}>目前沒有即將舉行的活動</Text> : null}
+          {hasPastEvents && !manage ? (
+            <Button
+              text={showPastEvents ? '只看近期活動' : '查看過往活動'}
+              onPress={() => setShowPastEvents(!showPastEvents)}
+            />
+          ) : null}
+          {visibleEvents.map((e) => (
+            <View key={e.id} style={{ gap: 8 }}>
+              <Text style={style}>
+                {e.title} · {new Date(e.startsAt).toLocaleString('zh-TW')} · {e.location}
+              </Text>
+              <Text style={style}>
+                報名 {e.registered}／{e.capacity} · 簽到 {e.checkedIn} ·{' '}
+                {e.myCheckIn ? '已簽到' : e.mine ? '已報名' : ''}
+              </Text>
+              {button(
+                e.mine ? '取消報名' : e.registered >= e.capacity ? '名額已滿' : '報名',
+                { action: e.mine ? 'cancel' : 'register', eventId: e.id },
+                e.myCheckIn ||
+                  clock >= (e.mine ? e.cancellationDeadline : e.registrationDeadline) ||
+                  (!e.mine && e.registered >= e.capacity),
+              )}
+              {e.mine && clock >= e.cancellationDeadline ? (
+                <Text style={style}>已過取消時間，請聯絡幹部</Text>
+              ) : null}
+              {(officer && manage) || (clock >= e.startsAt && clock <= e.endsAt) ? (
+                <ClubCheckIn
+                  key={`${uid}:${schoolId}:${selected}:${e.id}`}
+                  uid={uid}
+                  schoolId={schoolId}
+                  groupId={selected}
+                  eventId={e.id}
+                  myCode={e.myCheckInCode}
+                  suffix={e.studentSuffix}
+                  officer={officer && manage}
+                  acceptingCheckIns={clock >= e.startsAt && clock <= e.endsAt}
+                  onConfirmed={() => void act({ action: 'read' })}
+                />
+              ) : null}
+              {manage && e.registrationCursor ? (
+                <Text style={style}>請先載入完整報名名單，再確認未報名社員。</Text>
+              ) : null}
+              {manage && !e.registrationCursor
+                ? view.members
+                    ?.filter((m) => !e.registrations?.some((r) => r.uid === m.id))
+                    .map((m) => (
+                      <View key={`onsite-${m.id}`}>
+                        <Text style={style}>{m.name} · 這位不在報名名單</Text>
+                        {button(
+                          '仍然簽到',
+                          {
+                            action: 'checkIn',
+                            eventId: e.id,
+                            targetUid: m.id,
+                            allowWalkIn: true,
+                          },
+                          clock < e.startsAt || clock > e.endsAt,
                         )}
                       </View>
                     ))
-                  : null}
-                {manage && e.registrationCursor ? (
-                  <Button
-                    text="載入更多報名者"
-                    disabled={busy}
-                    onPress={() => void loadRegistrations(e.id, e.registrationCursor!)}
-                  />
-                ) : null}
-              </View>
-            ))}
+                : null}
+              {manage
+                ? e.registrations?.map((r) => (
+                    <View key={r.uid}>
+                      <Text style={style}>{r.name}</Text>
+                      {r.checkedInAt ? (
+                        <Text style={style}>
+                          已簽到 {new Date(r.checkedInAt).toLocaleTimeString('zh-TW')}
+                        </Text>
+                      ) : (
+                        button(
+                          '確認簽到',
+                          { action: 'checkIn', eventId: e.id, targetUid: r.uid },
+                          clock < e.startsAt || clock > e.endsAt,
+                        )
+                      )}
+                    </View>
+                  ))
+                : null}
+              {manage && e.registrationCursor ? (
+                <Button
+                  text="載入更多報名者"
+                  disabled={busy}
+                  onPress={() => void loadRegistrations(e.id, e.registrationCursor!)}
+                />
+              ) : null}
+            </View>
+          ))}
           <Text style={style}>公告</Text>
           {view.announcements?.length ? (
             view.announcements.map((p) => (
@@ -429,7 +506,12 @@ export function ClubPortal({
             </Text>
           )}
           <Text style={style}>介紹</Text>
-          <Text style={style}>{club.description || '社團尚未提供介紹。'}</Text>
+          <Text style={style}>
+            {normalizeClubProfileText(club.description) || '社團尚未提供介紹。'}
+          </Text>
+          {officer && !normalizeClubProfileText(club.description) ? (
+            <Button text="填寫社團介紹" onPress={() => setManage(true)} />
+          ) : null}
           {club.instagram ? (
             <Button
               text="IG ↗ 外部連結"
@@ -466,7 +548,7 @@ export function ClubPortal({
               {view.members?.map((m) => (
                 <View key={m.id} style={{ minHeight: 56 }}>
                   <Text style={style}>
-                    {m.name} · {m.role} · 電話 {m.phone || '未提供'}
+                    {m.name} · {roleOfficeLabel(m.role)} · 電話 {m.phone || '未提供'}
                   </Text>
                   {button(m.duesPaid ? '社費已繳' : '社費未繳', {
                     action: 'dues',
@@ -476,7 +558,16 @@ export function ClubPortal({
                 </View>
               ))}
               <Text style={style}>編輯社團介紹</Text>
-              {clubProfileFields.map(([key, label]) => field(key, label))}
+              {clubProfileFields.map(([key, label]) =>
+                field(
+                  key,
+                  label,
+                  key === 'meetingTime' || key === 'description'
+                    ? normalizeClubProfileText(club[key])
+                    : '',
+                  key === 'meetingTime' ? MEETING_TIME_PLACEHOLDER : undefined,
+                ),
+              )}
               <Button
                 text={
                   values.joinPolicy === 'review' ? '入社方式：需幹部審核' : '入社方式：開放入社'
@@ -549,8 +640,7 @@ export function ClubPortal({
           {view.officialOfficers?.map((m) => (
             <View key={`official-${m.id}`}>
               <Text style={style}>
-                {view.members?.find((r) => r.id === m.id)?.name} ·{' '}
-                {m.role === 'owner' ? '社長' : '幹部'} ·{' '}
+                {view.members?.find((r) => r.id === m.id)?.name} · {roleOfficeLabel(m.role)} ·{' '}
                 {m.status === 'confirmed' ? '課外組已確認' : '待課外組確認'}
               </Text>
               {view.office && m.status === 'pending'

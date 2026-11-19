@@ -1,6 +1,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { createHash } = require('node:crypto');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 function id(value, name) {
   if (typeof value !== 'string' || !value.trim() || value.length > 160 || value.includes('/')) {
@@ -233,6 +234,11 @@ function createGroupMembershipHandlers({ db }) {
       }
 
       assertEligibleAccount(actorUserDoc, '目前帳號');
+      // A new recipient must have an account document; an existing empty legacy
+      // profile is still eligible. Historical receipt recovery above skips this check.
+      if (!targetUserDoc.exists) {
+        throw new HttpsError('failed-precondition', '接收對象帳號不存在，無法完成轉讓。');
+      }
       assertEligibleAccount(targetUserDoc, '接收對象');
       assertActiveSchoolSeat(actorSchoolDoc, '目前帳號');
       assertActiveSchoolSeat(targetSchoolDoc, '接收對象');
@@ -325,8 +331,10 @@ function createGroupMembershipHandlers({ db }) {
 }
 
 function assertEligibleAccount(userDoc, label) {
+  // Recheck canonical account state on every transaction attempt, including replay.
+  // Missing legacy profiles remain compatible with active canonical school seats.
   const data = userDoc.exists ? userDoc.data() || {} : {};
-  if (data.accountDeletionInProgress === true || data.status === 'deleted') {
+  if (isAccountUnavailable(data)) {
     throw new HttpsError('failed-precondition', `${label}正在刪除或已停用，無法完成轉讓。`);
   }
   if (data.role === 'guest' || data.accountKind === 'guest') {

@@ -204,10 +204,10 @@ it('requires a fresh resident selection after changing parcel search', async () 
   const search = await screen.findByLabelText('學號末三碼或姓名（本棟住宿生）');
   fireEvent.change(search, { target: { value: '123' } });
   fireEvent.click(await screen.findByText('***123 小明 A 101'));
-  expect((screen.getByText('登錄並通知學生') as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByText('登錄包裹') as HTMLButtonElement).disabled).toBe(false);
   fireEvent.change(search, { target: { value: '456' } });
-  expect((screen.getByText('登錄並通知學生') as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByText('登錄並通知學生'));
+  expect((screen.getByText('登錄包裹') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByText('登錄包裹'));
   expect(api.call.mock.calls.some(([d]) => d.action === 'registerPackage')).toBe(false);
 });
 
@@ -370,7 +370,13 @@ it('blocks partial statistics until all 51 records have loaded', async () => {
   polling.mockRestore();
 });
 
-it('selects a masked resident using the opaque handle for package registration', async () => {
+it.each([
+  ['宿舍管理室', '已登錄，學生開啟 nuni 宿舍頁即可看到。'],
+  ['校內郵局', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['掛號領取處', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['第一宿舍收發室', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+  ['Post Office', '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'],
+])('registers the selected masked resident and reports parcel visibility at %s', async (location, notice) => {
   api.config.packages = true;
   api.rows.residents = [
     {
@@ -386,12 +392,14 @@ it('selects a masked resident using the opaque handle for package registration',
     target: { value: '456' },
   });
   fireEvent.click(await screen.findByText('***456 合成同學 A 101'));
-  fireEvent.click(screen.getByText('登錄並通知學生'));
+  fireEvent.change(screen.getByLabelText('領取地點'), { target: { value: location } });
+  fireEvent.click(screen.getByText('登錄包裹'));
   await waitFor(() =>
     expect(api.call).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_synthetic_resident' }),
+      expect.objectContaining({ action: 'registerPackage', studentId: 'dw_synthetic_resident', location }),
     ),
   );
+  expect(await screen.findByText(notice)).toBeTruthy();
 });
 
 it('resolves ticket photos through the authorized backend only on request', async () => {
@@ -450,7 +458,7 @@ it('完整學號查詢可選取遮罩住宿生，並顯示零筆核銷結果', a
   });
   fireEvent.click(screen.getByText('以完整學號查詢'));
   fireEvent.click(await screen.findByText('***456 查詢同學 A 101'));
-  fireEvent.click(screen.getByText('登錄並通知學生'));
+  fireEvent.click(screen.getByText('登錄包裹'));
   await waitFor(() =>
     expect(api.call).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'registerPackage', studentId: 'dw_found' }),
@@ -531,4 +539,139 @@ it.each([0, 1])('reports announcement push delivery honestly (%i delivered)', as
   expect(
     await screen.findByText(delivered ? '公告已發布，推播 1/1 人。' : '公告已發布，推播尚未送出。'),
   ).toBeTruthy();
+});
+
+it.each([false, true])('設定查詢失敗可重試並重新開啟服務（submitOnly=%s）', async (submitOnly) => {
+  api.call.mockRejectedValueOnce(new Error('offline'));
+  render(<DormWorkflow schoolId="pu" uid="student" submitOnly={submitOnly} draft={{ title: '燈壞了', description: '不亮', category: 'electric', location: '浴室' }} />);
+  await screen.findByText('宿舍服務暫時無法使用，請稍後再試。');
+  fireEvent.click(screen.getByText('重試'));
+  expect(await screen.findByText('送給宿舍輔導員')).toBeTruthy();
+  expect(api.call.mock.calls.filter(([data]) => data.action === 'config')).toHaveLength(2);
+});
+
+it('工單區分載入、失敗、重試與空白結果', async () => {
+  let rejectRows!: (reason: Error) => void;
+  api.call.mockImplementation(async (data) => data.action === 'config'
+    ? { enabled: true, repairs: false, packages: false }
+    : new Promise((_, reject) => { rejectRows = reject; }));
+  render(<DormWorkflow schoolId="pu" uid="student" />);
+  expect(await screen.findByText('正在讀取工單…')).toBeTruthy();
+  expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+  await waitFor(() =>
+    expect(api.call).toHaveBeenCalledWith(expect.objectContaining({ action: 'mine', schoolId: 'pu' })),
+  );
+  await act(async () => rejectRows(new Error('offline')));
+  expect(await screen.findByText('工單讀取失敗，請重試。')).toBeTruthy();
+  expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+  api.call.mockResolvedValue({ repairs: [], leaves: [] });
+  fireEvent.click(screen.getByText('重試'));
+  expect(await screen.findByText('目前沒有送給輔導員的工單。')).toBeTruthy();
+  expect(screen.queryByText('工單讀取失敗，請重試。')).toBeNull();
+  expect(screen.queryByText('讀取失敗，請重試。')).toBeNull();
+});
+
+it('外宿卡說明使用校方名冊且不送出本機棟別與房間', async () => {
+  render(<DormWorkflow schoolId="pu" uid="student" building="本機棟別" room="999" />);
+  expect(await screen.findByText('棟別與寢室依校方住宿名冊帶入')).toBeTruthy();
+  expect(screen.queryByText('外宿棟別')).toBeNull();
+  expect(screen.queryByText('外宿房間')).toBeNull();
+  fireEvent.change(screen.getByLabelText('外宿日期 YYYY-MM-DD'), { target: { value: '2099-01-01' } });
+  fireEvent.change(screen.getByLabelText('外宿原因'), { target: { value: '返家' } });
+  fireEvent.click(screen.getByText('送給輔導員核可'));
+  await waitFor(() => expect(api.call).toHaveBeenCalledWith(expect.objectContaining({ action: 'requestLeave', date: '2099-01-01', reason: '返家' })));
+  const payload = api.call.mock.calls.find(([data]) => data.action === 'requestLeave')![0];
+  expect(payload).not.toHaveProperty('building');
+  expect(payload).not.toHaveProperty('room');
+});
+
+it.each([false, true])('非輔導員開啟工作台有說明（enabled=%s）', async (enabled) => {
+  api.config.enabled = enabled;
+  render(<DormWorkflow schoolId="pu" uid="student" initialStaff />);
+  expect(await screen.findByText('此頁供宿舍輔導員使用；你的帳號目前沒有輔導員工作台；需要服務請到宿舍頁。')).toBeTruthy();
+  expect(screen.queryByText('開啟輔導員工作台')).toBeNull();
+});
+
+it.each([
+  ['manual', true, true],
+  ['manual', false, true],
+  ['manual', true, false],
+  ['timer', true, true],
+  ['timer', false, true],
+  ['timer', true, false],
+] as const)(
+  'only the latest row read updates the UI (%s, olderFails=%s, latestFirst=%s)',
+  async (source, olderFails, latestFirst) => {
+    const polling = vi.spyOn(globalThis, 'setInterval');
+    const pending: { resolve: (value: unknown) => void; reject: (reason: Error) => void }[] = [];
+    const repair = (title: string) => ({
+      repairs: [{ id: title, title, dormitory: 'A', room: '101', dormStatus: 'sent', history: [] }],
+      leaves: [],
+    });
+    try {
+      render(<DormWorkflow schoolId="pu" uid="student" />);
+      await screen.findByText('目前沒有送給輔導員的工單。');
+      api.call.mockImplementation(() => new Promise((resolve, reject) => {
+        pending.push({ resolve, reject });
+      }));
+      fireEvent.click(screen.getByText('重新整理'));
+      await waitFor(() => expect(pending).toHaveLength(1));
+      if (source === 'timer') {
+        await act(async () => {
+          for (const [tick, ms] of polling.mock.calls) {
+            if (ms === 60000 && typeof tick === 'function') tick();
+          }
+        });
+      } else {
+        fireEvent.click(screen.getByText('重新整理'));
+      }
+      await waitFor(() => expect(pending).toHaveLength(2));
+      const settleOlder = () => olderFails
+        ? pending[0].reject(new Error('older request failed'))
+        : pending[0].resolve(repair('舊工單'));
+      const settleLatest = () => olderFails
+        ? pending[1].resolve(repair('新工單'))
+        : pending[1].reject(new Error('latest request failed'));
+      await act(async () => { (latestFirst ? settleLatest : settleOlder)(); });
+      if (!latestFirst) {
+        expect(screen.getByText('正在讀取工單…')).toBeTruthy();
+        expect(screen.queryByText('工單讀取失敗，請重試。')).toBeNull();
+        expect(screen.queryByText('讀取失敗，請重試。')).toBeNull();
+      }
+      await act(async () => { (latestFirst ? settleOlder : settleLatest)(); });
+      expect(screen.queryByText('舊工單 · A 101')).toBeNull();
+      expect(screen.queryByText('正在讀取工單…')).toBeNull();
+      if (olderFails) {
+        expect(screen.getByText('新工單 · A 101')).toBeTruthy();
+        expect(screen.queryByText('工單讀取失敗，請重試。')).toBeNull();
+        expect(screen.queryByText('讀取失敗，請重試。')).toBeNull();
+      } else {
+        expect(screen.getByText('工單讀取失敗，請重試。')).toBeTruthy();
+        expect(screen.queryByText('目前沒有送給輔導員的工單。')).toBeNull();
+      }
+    } finally {
+      polling.mockRestore();
+    }
+  },
+);
+
+it.each([
+  ['2026-11-17T15:04:05+08:00', '2026/11/17 15:04:05'],
+  ['2026-11-17T17:04:05Z', '2026/11/18 01:04:05'],
+])('工單與外宿歷程以台灣時間顯示（%s）', async (instant, expected) => {
+  const at = Date.parse(instant);
+  api.rows.repairs = [{
+    id: 'r-time', title: '歷程時間測試', dormitory: 'A', room: '101',
+    dormStatus: 'fixed', expectedDate: '2026-11-19',
+    history: [{ status: 'fixed', at }],
+  }];
+  api.rows.leaves = [{
+    id: 'l-time', building: 'A', room: '101', date: '2026-11-18',
+    reason: '外宿歷程時間測試', status: 'approved', history: [{ status: 'approved', at }],
+  }];
+  render(<DormWorkflow schoolId="pu" uid="alice" />);
+  expect(await screen.findByText(`已修好，請確認 · ${expected}`)).toBeTruthy();
+  expect(screen.getByText(`已核可 · ${expected}`)).toBeTruthy();
+  expect(screen.getByText('2026-11-18 · A 101 · 已核可')).toBeTruthy();
+  expect(screen.getByText('預計日期：2026-11-19')).toBeTruthy();
 });

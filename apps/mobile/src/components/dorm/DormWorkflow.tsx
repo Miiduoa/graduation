@@ -1,10 +1,11 @@
-import { projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
+import { isDormPostalParcel, projectDormRepair, type DormCloudRepair } from '@campus/shared/src/dormitoryCloud';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import {
   DORM_TICKET_LABELS,
   DORM_LEAVE_LABELS,
   dormTicketOverdue,
+  formatDormWorkflowTime,
   dormRequestKey,
   parseDormResidentsCsv,
   dormWorkflowSummary,
@@ -240,6 +241,9 @@ export function DormWorkflow({
     query: string;
     residents: DormWorkflowRows['residents'];
   } | null>(null);
+  const [configAttempt, setConfigAttempt] = useState(0);
+  const [configError, setConfigError] = useState(false);
+  const [rowsError, setRowsError] = useState(false);
   const [rowsLoaded, setRowsLoaded] = useState(false);
   const summaryReady = rowsLoaded && !Object.values(rows.nextCursors || {}).some(Boolean);
   const [ownLeaves, setOwnLeaves] = useState<DormLeave[]>([]);
@@ -274,19 +278,28 @@ export function DormWorkflow({
     async (staff = staffMode) => {
       paginationStarted.current = false;
       setRowsLoaded(false);
+      setRowsError(false);
+      setNotice((old) => old === '讀取失敗，請重試。' ? '' : old);
       const token = generation.current;
-      const rowToken = rowGeneration.current;
-      const [result, mine] = await Promise.all([
-        call<Partial<DormWorkflowRows>>({
-          action: staff ? 'workspace' : 'mine',
-          ...(staff && includeHistory ? { includeHistory: true } : {}),
-        }),
-        staff ? call<Partial<DormWorkflowRows>>({ action: 'mine' }) : Promise.resolve(null),
-      ]);
-      if (token === generation.current && rowToken === rowGeneration.current) {
-        setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
-        setRowsLoaded(true);
-        setOwnLeaves((mine ?? result).leaves ?? []);
+      const rowToken = ++rowGeneration.current;
+      try {
+        const [result, mine] = await Promise.all([
+          call<Partial<DormWorkflowRows>>({
+            action: staff ? 'workspace' : 'mine',
+            ...(staff && includeHistory ? { includeHistory: true } : {}),
+          }),
+          staff ? call<Partial<DormWorkflowRows>>({ action: 'mine' }) : Promise.resolve(null),
+        ]);
+        if (token === generation.current && rowToken === rowGeneration.current) {
+          setRows({ repairs: [], leaves: [], packages: [], residents: [], ...result });
+          setRowsLoaded(true);
+          setRowsError(false);
+          setOwnLeaves((mine ?? result).leaves ?? []);
+        }
+      } catch (error) {
+        if (token !== generation.current || rowToken !== rowGeneration.current) return;
+        setRowsError(true);
+        throw error;
       }
     },
     [call, staffMode, includeHistory],
@@ -322,6 +335,9 @@ export function DormWorkflow({
     generation.current++;
     const token = generation.current;
     setCapability(null);
+    setConfigError(false);
+    setNotice('');
+    setRowsError(false);
     setRowsLoaded(false);
     setOwnLeaves([]);
     selectedStudentId.current = '';
@@ -344,12 +360,12 @@ export function DormWorkflow({
         }
       })
       .catch(() => {
-        if (token === generation.current) setNotice('宿舍服務暫時無法使用，請稍後再試。');
+        if (token === generation.current) setConfigError(true);
       });
     return () => {
       generation.current++;
     };
-  }, [call, uid, initialStaff, capabilityKey]);
+  }, [call, uid, initialStaff, capabilityKey, configAttempt]);
   useEffect(() => {
     if (capability?.key !== capabilityKey || submitOnly) return;
     let active = true;
@@ -406,7 +422,11 @@ export function DormWorkflow({
             ? result.delivered
               ? `公告已發布，推播 ${result.delivered}/${result.recipients} 人。`
               : '公告已發布，推播尚未送出。'
-            : '紀錄已更新。',
+            : data.action === 'registerPackage'
+              ? isDormPostalParcel(data)
+                ? '已登錄。此類郵件請學生依領取地點通知領取，不會顯示在學生的宿舍包裹清單。'
+                : '已登錄，學生開啟 nuni 宿舍頁即可看到。'
+              : '紀錄已更新。',
       );
       await refresh();
     } catch (error) {
@@ -418,7 +438,12 @@ export function DormWorkflow({
   }
   if (!uid) return null;
   if (capability?.key !== capabilityKey)
-    return <Box><Label>{notice || '正在確認宿舍服務…'}</Label></Box>;
+    return (
+      <Box>
+        <Label>{configError ? '宿舍服務暫時無法使用，請稍後再試。' : '正在確認宿舍服務…'}</Label>
+        {configError && <Btn label="重試" onPress={() => setConfigAttempt((value) => value + 1)} />}
+      </Box>
+    );
   if (!config.enabled && submitOnly) return null;
   const f = (key: string, label: string, initial = '', multiline = false) => (
     <Field
@@ -456,7 +481,7 @@ export function DormWorkflow({
       {r.history.map((h, i) => (
         <Label key={i}>
           {DORM_TICKET_LABELS[h.status]} ·{' '}
-          {new Date(h.at).toLocaleString('zh-TW', { hour12: false })}
+          {formatDormWorkflowTime(h.at)}
         </Label>
       ))}
       {r.schoolReference && <Label>學校單號 {r.schoolReference}（輔導員填）</Label>}
@@ -519,7 +544,7 @@ export function DormWorkflow({
       <Label>{r.reason}</Label>
       {r.history.map((h, i) => (
         <Label key={i}>
-          {DORM_LEAVE_LABELS[h.status]} · {new Date(h.at).toLocaleString('zh-TW')}
+          {DORM_LEAVE_LABELS[h.status]} · {formatDormWorkflowTime(h.at)}
         </Label>
       ))}
       {staff && r.status === 'pending' && (
@@ -636,12 +661,20 @@ export function DormWorkflow({
                 </Box>
               ))}
               <Label strong>報修處理進度</Label>
-              {!rows.repairs.length && <Label>目前沒有送給輔導員的工單。</Label>}
+              {rowsError ? (
+                <Box>
+                  <Label>工單讀取失敗，請重試。</Label>
+                  <Btn label="重試" onPress={() => void refresh().catch(() => {})} />
+                </Box>
+              ) : !rowsLoaded ? (
+                <Label>正在讀取工單…</Label>
+              ) : !rows.repairs.length ? (
+                <Label>目前沒有送給輔導員的工單。</Label>
+              ) : null}
               {rows.repairs.map((r) => ticket(r, false))}
               <Box>
                 <Label strong>外宿卡</Label>
-                {f('leaveBuilding', '外宿棟別', building)}
-                {f('leaveRoom', '外宿房間', room)}
+                <Label>棟別與寢室依校方住宿名冊帶入</Label>
                 {f('leaveDate', '外宿日期 YYYY-MM-DD')}
                 {f('reason', '外宿原因', '', true)}
                 {button(
@@ -649,8 +682,6 @@ export function DormWorkflow({
                   {
                     action: 'requestLeave',
                     key: requestKey,
-                    building: get('leaveBuilding', building),
-                    room: get('leaveRoom', room),
                     date: get('leaveDate'),
                     reason: get('reason'),
                   },
@@ -774,7 +805,7 @@ export function DormWorkflow({
               {f('item', '品名（可使用鍵盤語音輸入）')}
               {f('location', '領取地點')}
               {button(
-                '登錄並通知學生',
+                '登錄包裹',
                 {
                   action: 'registerPackage',
                   key: requestKey,

@@ -6,6 +6,7 @@ import {
   internshipProgress,
   createInternshipCallableTransport,
   createInternshipService,
+  isTransientInternshipReadError,
 } from '@campus/shared/src/careerInternship';
 import { internshipPersonalEvent } from '@campus/shared/src/careerInternshipCalendar';
 import { createCareerInternshipPorts } from './careerInternshipPorts';
@@ -147,4 +148,54 @@ it('forwards read cancellation and bounds even an uncooperative fetch or auth pr
   } finally {
     vi.useRealTimers();
   }
+});
+
+it.each(
+  [
+    { status: 502, code: 'unavailable', transient: true },
+    { status: 503, code: 'unavailable', transient: true },
+    { status: 504, code: 'deadline-exceeded', transient: true },
+    { status: 408, code: 'deadline-exceeded', transient: true },
+    { status: 500, code: 'internal', transient: true },
+    { status: 401, code: 'unauthenticated', transient: false },
+    { status: 403, code: 'permission-denied', transient: false },
+    { status: 404, code: 'not-found', transient: false },
+  ].flatMap((entry) => [
+    { ...entry, label: 'HTML', body: '<html><body>Service unavailable</body></html>' },
+    { ...entry, label: 'empty', body: '' },
+  ]),
+)('classifies HTTP $status with a $label body', async ({ status, code, transient, body }) => {
+  const transport = createInternshipCallableTransport({
+    endpoint: '/internship',
+    authHeaders: async () => ({}),
+    fetcher: async () => new Response(body, { status }),
+  });
+  const error = await transport('pu', { action: 'list', audience: 'student' }).catch(
+    (error: unknown) => error,
+  );
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({ message: '實習服務暫時無法使用，請稍後重試。', code });
+  expect(isTransientInternshipReadError(error)).toBe(transient);
+});
+
+it.each([
+  [403, 'PERMISSION_DENIED', 'PERMISSION_DENIED'],
+  [401, 'UNAUTHENTICATED', 'UNAUTHENTICATED'],
+  [404, 'NOT_FOUND', 'NOT_FOUND'],
+  [503, 'UNAVAILABLE', 'UNAVAILABLE'],
+  [504, 'DEADLINE_EXCEEDED', 'DEADLINE_EXCEEDED'],
+  [500, 'INTERNAL', 'INTERNAL'],
+  [403, undefined, 'permission-denied'],
+  [503, undefined, 'unavailable'],
+])('preserves callable read error codes for HTTP %s / %s', async (status, code, expected) => {
+  const transport = createInternshipCallableTransport({
+    endpoint: '/internship',
+    authHeaders: async () => ({}),
+    fetcher: async () =>
+      Response.json({ error: { message: '讀取失敗', status: code } }, { status }),
+  });
+  await expect(transport('pu', { action: 'list', audience: 'student' })).rejects.toMatchObject({
+    message: '讀取失敗',
+    code: expected,
+  });
 });

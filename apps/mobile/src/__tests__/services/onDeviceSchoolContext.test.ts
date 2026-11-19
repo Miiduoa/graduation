@@ -459,7 +459,7 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
     assignments: {
       status: 'available', count: 3,
       items: [{ title: '期中報告', groupName: '資料庫', dueAt: null }],
-      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
     },
     announcements: { status: 'available', items: [] },
   };
@@ -469,7 +469,7 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
   expect(result).toContain('期中報告');
   expect(result).toContain('未列出不代表沒有其他作業');
   expect(result).toContain('沒有繳交回條也不能斷言未交');
-  expect(result).toContain('請到原作業頁核對');
+  expect(result).toContain('請到原課程作業頁核對');
 
   // Legacy snapshots do not prove completeness, even if their item count matches.
   expect(format({
@@ -514,6 +514,104 @@ test('partial or inconsistent assignment coverage never becomes a complete task-
     },
   });
   expect(unsupported).not.toContain('期中報告');
+});
+
+test('restored partial assignment metadata matches legacy or eight-page reader behavior', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  // These are authorized-reader shapes, not actual school records.
+  const rows = Array.from({ length: 400 }, (_, index) => ({
+    title: `作業清單項目 #${index + 1}`, groupName: '資料庫', dueAt: null,
+  }));
+  const base: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 401, items: rows,
+      coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const format = (snapshot: CampusSenseSnapshot) => formatOnDeviceSchoolPrompt(local, snapshot, 'alice');
+  const budget = format(base);
+  expect(budget).toContain('來源總數：401；本次已取得：400；完整性：僅讀取部分資料');
+  expect(budget).toContain('作業清單項目 #1');
+  const legacy: CampusSenseSnapshot = {
+    ...base, assignments: {
+      ...base.assignments, items: rows.slice(0, 50),
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
+    },
+  };
+  expect(format(legacy)).toContain('來源總數：401；本次已取得：50；完整性：僅讀取部分資料');
+  // A genuinely empty older source remains usable, without a false
+  // assertion that missing coverage proves all historical work was read.
+  expect(format({ ...legacy, assignments: {
+    ...legacy.assignments, count: 0, items: [], coverage: undefined,
+  } })).toContain('來源總數：0；本次已取得：0；完整性：未能核對是否完整');
+
+  // The real reader cannot return 51 legacy rows or exhaust its eight-page
+  // budget with fewer than 400 rows. A saved JSON snapshot can forge either.
+  const forged: CampusSenseSnapshot[] = [
+    { ...base, assignments: {
+      ...base.assignments, coverage: { complete: false, reason: 'read-budget', pages: 1 },
+    } },
+    { ...base, assignments: {
+      ...base.assignments, coverage: { complete: false, reason: 'read-budget', pages: 7 },
+    } },
+    { ...base, assignments: {
+      ...base.assignments, items: rows.slice(0, 399),
+    } },
+    // The first (legacy) page cannot be empty if the source reports pending
+    // tasks. Do not mistake contradictory restored data for "no homework".
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: [],
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [],
+    } },
+    // Older JSON snapshots may lack coverage metadata entirely. This still
+    // cannot be the first page of a source reporting any pending assignments.
+    { ...legacy, assignments: {
+      ...legacy.assignments, count: 1, items: [], coverage: undefined,
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, coverage: { complete: false, reason: 'legacy-partial', pages: 2 },
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, items: rows.slice(0, 51),
+    } },
+    { ...legacy, assignments: {
+      ...legacy.assignments, coverage: { complete: false, reason: 'read-budget', pages: 8 },
+    } },
+  ];
+  for (const restored of forged) {
+    const prompt = format(restored);
+    expect(prompt).toContain('此回合沒有主動同步且有效的校園資料');
+    expect(prompt).not.toContain('作業清單項目 #1');
+    expect(prompt).toContain('資料庫概論'); // Independent verified local timetable survives.
+  }
+});
+
+test('complete pending-only evidence never implies all assignments or submitted history', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const pendingOnly: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 0, items: [],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  // The server reader deliberately excludes submitted, closed and unpublished
+  // assignments; a complete pending list is not a complete student history.
+  const prompt = formatOnDeviceSchoolPrompt(local, pendingOnly, 'alice');
+  expect(prompt).toContain('已授權待處理作業來源：available；來源總數：0；本次已取得：0；完整性：來源已完整讀取');
+  expect(prompt).toContain('不包括已提交、草稿、關閉或無權存取的作業');
+  expect(prompt).toContain('不能當成全部作業或歷史繳交清單');
+  expect(prompt).toContain('若要核對全部作業與繳交狀態，請到原課程作業頁核對');
+  expect(prompt).toContain('沒有繳交回條也不能斷言未交');
 });
 
 test('complete assignment evidence must match the number of authorized 50-row pages', async () => {
@@ -592,6 +690,248 @@ test('restored assignment snapshot cannot double count the same original student
   expect(rejected).not.toContain('資料庫期中報告');
   expect(rejected).not.toContain('資料庫期末報告');
   expect(rejected).toContain('資料庫概論'); // Independent authorized offline timetable remains.
+});
+
+test('sparse caller-supplied evidence cannot claim complete task, announcement or timetable rows', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const sense: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 2,
+      items: [
+        { title: '私人待辦 A', groupName: '資料庫', dueAt: null },
+        { title: '私人待辦 B', groupName: '資料庫', dueAt: null },
+      ],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: {
+      status: 'available', items: [
+        { title: '校園公告 A', publishedAt: null },
+        { title: '校園公告 B', publishedAt: null },
+      ],
+    },
+  };
+  const format = (context: OnDeviceSchoolContext, campus: CampusSenseSnapshot) =>
+    formatOnDeviceSchoolPrompt(context, campus, 'alice');
+  const normal = format(local, sense);
+  expect(normal).toContain('私人待辦 A');
+  expect(normal).toContain('校園公告 A');
+  expect(normal).toContain('資料庫概論');
+
+  // Array#every ignores holes. A caller-provided source claiming two complete
+  // rows must not silently serialize its missing second row as null.
+  const sparseAssignments = new Array<CampusSenseSnapshot['assignments']['items'][number]>(2);
+  sparseAssignments[0] = sense.assignments.items[0];
+  const badAssignments = format(local, {
+    ...sense, assignments: { ...sense.assignments, items: sparseAssignments },
+  });
+  expect(badAssignments).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badAssignments).not.toContain('私人待辦 A');
+  expect(badAssignments).toContain('資料庫概論');
+
+  const sparseAnnouncements = new Array<CampusSenseSnapshot['announcements']['items'][number]>(2);
+  sparseAnnouncements[0] = sense.announcements.items[0];
+  const badAnnouncements = format(local, {
+    ...sense, announcements: { ...sense.announcements, items: sparseAnnouncements },
+  });
+  expect(badAnnouncements).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badAnnouncements).not.toContain('校園公告 A');
+  expect(badAnnouncements).toContain('資料庫概論');
+
+  // Invalid device evidence also prevents a synced campus summary from
+  // piggybacking on a timetable whose provenance cannot be verified.
+  const sparseCourses = new Array<OnDeviceSchoolContext['timetable']['courses'][number]>(2);
+  sparseCourses[0] = local.timetable.courses[0];
+  const badTimetable = format({
+    ...local, timetable: { ...local.timetable, courses: sparseCourses },
+  }, sense);
+  expect(badTimetable).toContain('目前沒有可確認的本機個人課表');
+  expect(badTimetable).not.toContain('資料庫概論');
+  expect(badTimetable).not.toContain('私人待辦 A');
+});
+
+test('getter-backed rows cannot swap authorized assignment evidence after validation', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const trusted = { title: '真實作業', groupName: '資料庫', dueAt: null };
+  const items: CampusSenseSnapshot['assignments']['items'] = [trusted];
+  let reads = 0;
+  Object.defineProperty(items, 0, {
+    enumerable: true,
+    configurable: true,
+    get: () => {
+      reads += 1;
+      return reads === 1 ? trusted : { ...trusted, title: '來源核對後偽造的作業' };
+    },
+  });
+  const snapshot: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1, items,
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const result = formatOnDeviceSchoolPrompt(local, snapshot, 'alice');
+  expect(result).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(result).not.toContain('來源核對後偽造的作業');
+  expect(result).toContain('資料庫概論'); // Independently verified timetable remains.
+  expect(reads).toBe(0); // No untrusted accessor is ever invoked.
+});
+
+test('restored record getters cannot swap task, announcement, timetable or route evidence after validation', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const sense: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: '真實作業', groupName: '資料庫', dueAt: null }],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [{ title: '原始公告', publishedAt: null }] },
+  };
+  const format = (device: OnDeviceSchoolContext, campus: CampusSenseSnapshot) =>
+    formatOnDeviceSchoolPrompt(device, campus, 'alice');
+  expect(format(local, sense)).toContain('真實作業');
+
+  const assignment = { ...sense.assignments.items[0] };
+  let assignmentReads = 0;
+  Object.defineProperty(assignment, 'title', {
+    enumerable: true, configurable: true,
+    get: () => { assignmentReads += 1; return assignmentReads === 1 ? '真實作業' : '被替換的作業'; },
+  });
+  const badAssignment = format(local, {
+    ...sense, assignments: { ...sense.assignments, items: [assignment] },
+  });
+  expect(badAssignment).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badAssignment).not.toContain('被替換的作業');
+  expect(badAssignment).toContain('資料庫概論');
+  expect(assignmentReads).toBe(0);
+
+  const announcement = { ...sense.announcements.items[0] };
+  let announcementReads = 0;
+  Object.defineProperty(announcement, 'title', {
+    enumerable: true, configurable: true,
+    get: () => { announcementReads += 1; return '被替換的公告'; },
+  });
+  const badAnnouncement = format(local, {
+    ...sense, announcements: { ...sense.announcements, items: [announcement] },
+  });
+  expect(badAnnouncement).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badAnnouncement).not.toContain('被替換的公告');
+  expect(announcementReads).toBe(0);
+
+  const course = { ...local.timetable.courses[0] };
+  let courseReads = 0;
+  Object.defineProperty(course, 'name', {
+    enumerable: true, configurable: true,
+    get: () => { courseReads += 1; return '被替換的私人課程'; },
+  });
+  const badCourse = format({
+    ...local, timetable: { ...local.timetable, courses: [course] },
+  }, sense);
+  expect(badCourse).toContain('目前沒有可確認的本機個人課表');
+  expect(badCourse).not.toContain('被替換的私人課程');
+  expect(badCourse).not.toContain('真實作業');
+  expect(courseReads).toBe(0);
+
+  const source = { kind: 'group-assignment' as const, groupId: 'g1', assignmentId: 'a1' };
+  let routeReads = 0;
+  Object.defineProperty(source, 'assignmentId', {
+    enumerable: true, configurable: true,
+    get: () => { routeReads += 1; return 'forged'; },
+  });
+  const badRoute = format(local, {
+    ...sense,
+    assignments: {
+      ...sense.assignments, items: [{ ...sense.assignments.items[0], source }],
+    },
+  });
+  expect(badRoute).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(badRoute).not.toContain('forged');
+  expect(routeReads).toBe(0);
+});
+
+test('accessor-backed source envelopes cannot replace authorized student evidence after validation', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const sense: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: '已核對的作業', groupName: '資料庫', dueAt: null }],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const format = (campus: CampusSenseSnapshot, device: OnDeviceSchoolContext = local) =>
+    formatOnDeviceSchoolPrompt(device, campus, 'alice');
+  expect(format(sense)).toContain('已核對的作業');
+  expect(format(sense)).toContain('資料庫概論');
+
+  // The scope check used to read userId before checking any descriptors.
+  // It must never invoke a restored root accessor, even once.
+  const root = { ...sense };
+  let rootReads = 0;
+  Object.defineProperty(root, 'userId', {
+    configurable: true, enumerable: true,
+    get: () => { rootReads += 1; return 'alice'; },
+  });
+  expect(format(root)).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(rootReads).toBe(0);
+
+  // Previously the row array was re-read after validation; a parent getter
+  // could return trusted rows first and a different student's list later.
+  const assignments = { ...sense.assignments };
+  let listReads = 0;
+  Object.defineProperty(assignments, 'items', {
+    configurable: true, enumerable: true,
+    get: () => {
+      listReads += 1;
+      return listReads === 1 ? sense.assignments.items :
+        [{ title: '被掉包的作業', groupName: '資料庫', dueAt: null }];
+    },
+  });
+  const swapped = format({ ...sense, assignments });
+  expect(swapped).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(swapped).not.toContain('被掉包的作業');
+  expect(swapped).toContain('資料庫概論'); // Independent local source survives.
+  expect(listReads).toBe(0);
+
+  const coverage = { complete: true, reason: 'complete' as const, pages: 1 };
+  let coverageReads = 0;
+  Object.defineProperty(coverage, 'complete', {
+    configurable: true, enumerable: true,
+    get: () => { coverageReads += 1; return true; },
+  });
+  expect(format({
+    ...sense, assignments: { ...sense.assignments, coverage },
+  })).toContain('此回合沒有主動同步且有效的校園資料');
+  expect(coverageReads).toBe(0);
+
+  // The timetable envelope is another authorization boundary: a getter
+  // cannot swap the already checked course array just before serialization.
+  const restored = { ...local.timetable };
+  let courseReads = 0;
+  Object.defineProperty(restored, 'courses', {
+    configurable: true, enumerable: true,
+    get: () => {
+      courseReads += 1;
+      return courseReads === 1 ? local.timetable.courses :
+        [{ name: '被掉包的課程', day: 1, start: 2, end: 3 }];
+    },
+  });
+  const badDevice = format(sense, { ...local, timetable: restored });
+  expect(badDevice).toContain('目前沒有可確認的本機個人課表');
+  expect(badDevice).not.toContain('被掉包的課程');
+  expect(badDevice).not.toContain('已核對的作業');
+  expect(courseReads).toBe(0);
 });
 
 test('missing or invalid cached data does not become a fabricated timetable', async () => {

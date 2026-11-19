@@ -1,5 +1,5 @@
 /** Approval-isolated: never registered in API routes, fnDispatch or deployed exports. */
-import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { Timestamp, type Firestore, type Query } from 'firebase-admin/firestore';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import {
@@ -17,6 +17,11 @@ function id(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value))
     fail('invalid-argument', '資料編號不正確。');
   return value;
+}
+function requiredText(value: unknown, message: string, max = 200): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > max)
+    fail('invalid-argument', message);
+  return value.trim();
 }
 function text(value: unknown, max = 200): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max)
@@ -110,7 +115,120 @@ export function createCareerInternshipHandlers({
           : [];
       const records = school.collection('internshipRecords');
       const rules = school.collection('internshipRules');
+      const members = school.collection('members');
+      const directory = school.collection('directory');
       const at = now().toISOString();
+      const advisorView = (
+        uid: string,
+        member: Record<string, unknown>,
+        profile?: Record<string, unknown>,
+        user?: Record<string, unknown>,
+      ) => ({
+        uid,
+        name: String(profile?.displayName || member.displayName || '').trim() || '姓名待確認',
+        email: String(profile?.email || member.email || '').trim(),
+        department: String(profile?.department || member.department || '').trim(),
+        identifier: [member, profile, user]
+          .flatMap((data) => [data?.studentId, data?.student_id, data?.login])
+          .filter(Boolean)
+          .join(' '),
+      });
+      const advisorRoles = ['teacher', 'staff', 'admin'];
+      const isAdvisor = (data?: Record<string, unknown>) =>
+        data?.status === 'active' && advisorRoles.includes(String(data?.role || ''));
+      const loadAdvisors = async (keywordRaw: string, max: number) => {
+        const keyword = keywordRaw.trim();
+        const limit = Math.max(1, Math.min(50, max || 20));
+        const lowered = keyword.toLocaleLowerCase('zh-TW');
+        const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lowered);
+        // Includes query documents and profile/member hydration; never scan without a bound.
+        let remaining = 200;
+        const seen = new Set<string>();
+        const advisors: ReturnType<typeof advisorView>[] = [];
+        const matches = (row: ReturnType<typeof advisorView>) => {
+          const haystack =
+            `${row.name} ${row.email} ${row.department} ${row.identifier}`.toLocaleLowerCase(
+              'zh-TW',
+            );
+          return haystack.includes(lowered) || (!isEmail && row.name.startsWith(keyword));
+        };
+        const pending: { query: Query; paginate: boolean; memberQuery: boolean }[] = [];
+        const take = async (query: Query, paginate = false, memberQuery = false) => {
+          pending.push({ query, paginate, memberQuery });
+        };
+        for (const field of ['studentId', 'student_id', 'login']) {
+          for (const value of new Set([keyword, keyword.toUpperCase(), lowered])) {
+            await take(members.where(field, '==', value), false, true);
+            await take(directory.where(field, '==', value));
+            await take(db.collection('users').where(field, '==', value));
+          }
+        }
+        if (isEmail) {
+          const emails = Array.from(new Set([keyword, lowered]));
+          for (const email of emails) {
+            await take(members.where('email', '==', email), false, true);
+            await take(directory.where('email', '==', email));
+            await take(db.collection('users').where('email', '==', email));
+          }
+        } else {
+          const names = Array.from(new Set([keyword]));
+          for (const name of names) {
+            await take(members.where('displayName', '==', name), true, true);
+            await take(directory.where('displayName', '==', name), true);
+            await take(
+              members.where('displayName', '>=', name).where('displayName', '<=', `${name}\uf8ff`),
+              true,
+              true,
+            );
+            await take(
+              directory
+                .where('displayName', '>=', name)
+                .where('displayName', '<=', `${name}\uf8ff`),
+              true,
+            );
+          }
+        }
+        // Keep the legacy first page of each query ahead of all continuation pages.
+        // Reserve a candidate's worst-case reads for every later source, so a busy
+        // members query cannot prevent directory, users or another field from running.
+        while (pending.length && remaining >= 4 && advisors.length < limit) {
+          const { query, paginate, memberQuery } = pending.shift()!;
+          const available = remaining - pending.length * 4;
+          const size = Math.min(20, Math.floor(available / 4));
+          const snap = await tx.get(query.limit(size));
+          remaining -= Math.max(1, snap.size);
+          for (const doc of snap.docs) {
+            if (seen.has(doc.id)) continue;
+            const memberDoc = memberQuery ? doc : await tx.get(members.doc(doc.id));
+            if (!memberQuery) remaining--;
+            seen.add(doc.id);
+            if (!isAdvisor(memberDoc.data())) continue;
+            const [profile, user] = await tx.getAll(
+              directory.doc(doc.id),
+              db.collection('users').doc(doc.id),
+            );
+            remaining -= 2;
+            const row = advisorView(
+              doc.id,
+              memberDoc.data()!,
+              { ...user.data(), ...profile.data() },
+              user.data(),
+            );
+            if (matches(row)) advisors.push(row);
+            if (advisors.length >= limit) break;
+          }
+          if (paginate && snap.size === size && remaining >= (pending.length + 1) * 4)
+            pending.push({
+              query: query.startAfter(snap.docs[snap.docs.length - 1]),
+              paginate,
+              memberQuery,
+            });
+        }
+        return advisors
+          .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+          .slice(0, limit)
+          .map(({ uid, name, email, department }) => ({ uid, name, email, department }));
+      };
       const audit = (action: string, targetId: string) =>
         tx.create(school.collection('adminLogs').doc(), {
           action: `internship_${action}`,
@@ -147,6 +265,20 @@ export function createCareerInternshipHandlers({
         const unique = [...new Map(all.map((r) => [r.id, r])).values()];
         if (ruleRows.size > 500 || unique.length > 500)
           fail('resource-exhausted', '資料超過單次範圍，請洽平台營運分批處理。');
+        for (const record of unique) {
+          // Only enrich records the viewer is already authorized to read.
+          delete record.studentName;
+          delete record.studentId;
+          if (record.uid === uid) continue;
+          const [member, profile] = await Promise.all([
+            tx.get(members.doc(record.uid)),
+            tx.get(db.collection('users').doc(record.uid)),
+          ]);
+          const m = member.data();
+          const u = profile.data();
+          record.studentName = m?.displayName || u?.displayName || '';
+          record.studentId = m?.studentId || m?.student_id || u?.studentId || u?.student_id || '';
+        }
         let logs: InternshipAudit[] = [];
         if (c.audience === 'ops') {
           const result = await tx.get(
@@ -166,6 +298,22 @@ export function createCareerInternshipHandlers({
             rules: ruleRows.docs.map((d) => ({ ...d.data(), id: d.id }) as InternshipRule),
             records: unique,
             audit: logs,
+            viewerRole: member.data()?.role,
+            canManage: staff || departments.length > 0,
+          },
+        };
+      }
+      if (c.action === 'advisorSearch') {
+        if (typeof c.keyword !== 'string' || !c.keyword.trim())
+          fail('invalid-argument', '請輸入指導老師姓名、學號或學校信箱。');
+        return {
+          snapshot: {
+            rules: [],
+            records: [],
+            audit: [],
+            advisors: await loadAdvisors(c.keyword, Number(c.limit) || 20),
+            viewerRole: member.data()?.role,
+            canManage: staff || departments.length > 0,
           },
         };
       }
@@ -197,20 +345,23 @@ export function createCareerInternshipHandlers({
         if (!ruleSnap.exists || ruleSnap.data()?.revision !== c.ruleRevision)
           fail('failed-precondition', '系所規則已更新，請重新選擇。');
         const rule = ruleSnap.data() as InternshipRule;
-        const teacherUid = id(c.teacherUid);
-        const teacher = await tx.get(school.collection('members').doc(teacherUid));
+        const teacherUid =
+          typeof c.teacherUid === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(c.teacherUid)
+            ? c.teacherUid
+            : fail('invalid-argument', '請選擇本校指導老師');
+        const teacher = await tx.get(members.doc(teacherUid));
         if (
           teacher.data()?.status !== 'active' ||
           !['teacher', 'staff', 'admin'].includes(teacher.data()?.role)
         )
-          fail('invalid-argument', '請填寫本校有效指導老師的帳號編號。');
+          fail('invalid-argument', '找不到這位本校指導老師，請改用姓名、學號或學校信箱搜尋後選擇');
         const record: InternshipRecord = {
           id: ref.id,
           uid,
           revision: 1,
           rule,
-          organization: text(c.organization),
-          teacher: text(c.teacher),
+          organization: requiredText(c.organization, '請填寫實習機構'),
+          teacher: requiredText(c.teacher, '請填寫指導老師姓名'),
           teacherUid,
           hours: [],
           documents: rule.documents.map(() => ({
@@ -234,7 +385,7 @@ export function createCareerInternshipHandlers({
       const assignedTeacher = teacherEligible && r.teacherUid === uid;
       const reviewer = staff || departments.includes(r.rule.department) || assignedTeacher;
       if (!owner && !reviewer) fail('permission-denied', '無法查看這筆實習紀錄。');
-      if (c.revision !== r.revision) fail('aborted', '紀錄已更新，請重新整理後再操作。');
+      if (c.revision !== r.revision) fail('aborted', '另一個視窗已更新這筆紀錄，已為你重新整理。');
       if (r.confirmed) fail('failed-precondition', '老師已確認此紀錄，如需更正請洽承辦。');
       if (c.action === 'hours') {
         if (!owner) fail('permission-denied', '只能登錄自己的實習時數。');
