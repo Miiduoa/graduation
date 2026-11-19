@@ -102,7 +102,7 @@ Campus One 的空間圖目前表示公開地點座標的相對位置，不包含
 
 每個 `trialId` 代表同一輪、同一任務、同一裝置及同一地點的完整對照，應包含 nuni、Google Maps、Apple Maps、靜宜官方導覽、UniTable 五筆紀錄。輸入的 `schoolId` 必須是 `pu`；`sceneId`、`task`、`deviceId`、`osVersion`、`network`、`locationPermission`、`textScale`、`startState`、`destinationId`、`groundTruthLevel` 與 `groundTruthUrl` 必須完全一致。產品自己的 `appVersion` 則分別記錄。
 
-每筆應填寫真實的 `testedAt`、`evidenceUrl`、`outcome`、`destinationLevel`、`buildingCorrect`、`roomCorrect`、`routeVerified`、`steps`、`elapsedMs`；有量測才填 `fpsP50`，有視覺評分才填 1～5 分的 `visualScore` 與 `visualRubric`。來源及操作證據需為可核對的 HTTPS 連結。室內房間的正確性不能由建築標記推得；若只能證實建築，不得將房間層級記為成功。步行路線若沒有通行核對，不得標成功。
+每筆應填寫真實的 `testedAt`、`evidenceUrl`、`outcome`、`destinationLevel`、`buildingCorrect`、`entranceCorrect`、`floorCorrect`、`roomCorrect`、`routeVerified`、`steps`、`elapsedMs`；有量測才填 `fpsP50`，有視覺評分才填 1～5 分的 `visualScore` 與 `visualRubric`。來源及操作證據需為可核對的 HTTPS 連結。室內房間的正確性不能由建築標記推得；若只能證實建築，不得將房間層級記為成功。步行路線若沒有通行核對，不得標成功。
 
 可用以下命令執行驗證器的**合成資料回歸測試**：
 
