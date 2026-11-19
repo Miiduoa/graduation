@@ -24,6 +24,13 @@ export type PickupNumberView =
   | { state: 'pending'; label: string; text: string; detail: string }
   | { state: 'cancelled'; text: string };
 
+/** 成功回執可能是既有訂單的重送結果；只有狀態時不推測取消者或要求再次取餐。 */
+export function describeTerminalOrderReceipt(status: unknown): string | null {
+  if (status === 'cancelled') return '訂單已取消';
+  if (status === 'completed') return '訂單已完成';
+  return null;
+}
+
 function toDate(value: unknown): Date | null {
   if (value == null || value === '') return null;
   if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
