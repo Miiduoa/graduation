@@ -90,6 +90,59 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it('refreshes disclosure clearance after the header moves and releases its layout observers', () => {
+  let onResize: (() => void) | undefined;
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        onResize = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    },
+  );
+  const view = render(<AppHeader />);
+  const navigation = screen.getByRole('banner');
+  const account = navigation.querySelector<HTMLDetailsElement>('details')!;
+  const trigger = account.querySelector('summary')!;
+  let bottom = 96;
+  const geometry = vi
+    .spyOn(navigation, 'getBoundingClientRect')
+    .mockImplementation(() => ({ bottom }) as DOMRect);
+  try {
+    expect(observe).toHaveBeenCalledWith(navigation);
+    expect(observe).toHaveBeenCalledWith(navigation.parentElement);
+    act(() => trigger.focus());
+    account.open = true;
+    fireEvent(account, new Event('toggle'));
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('96px');
+    expect(document.activeElement).toBe(trigger);
+
+    // A banner above the header can change its position without a header resize.
+    bottom = 144;
+    act(() => onResize?.());
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('144px');
+    expect(document.activeElement).toBe(trigger);
+
+    bottom = -20;
+    fireEvent(window, new Event('scroll'));
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('0px');
+    view.unmount();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    bottom = 220;
+    fireEvent(window, new Event('resize'));
+    fireEvent(window, new Event('scroll'));
+    fireEvent(account, new Event('toggle'));
+    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('0px');
+  } finally {
+    view.unmount();
+    geometry.mockRestore();
+  }
+});
+
 it('opens the actual account conversation without a search detour, recording, or automatic submission', async () => {
   const start = vi.fn();
   const abort = vi.fn();
