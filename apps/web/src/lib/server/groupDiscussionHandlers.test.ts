@@ -1,15 +1,17 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { createGroupDiscussionHandlers } from './groupDiscussionHandlers';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 
 type Row = { id: string; createdAt: Timestamp; [key: string]: unknown };
-function setup(rows: Row[], status: string | null = 'active', options: { profile?: Record<string, unknown> | null; group?: Record<string, unknown> | null; schoolStatus?: string | null } = {}) {
+function setup(rows: Row[], status: string | null = 'active', options: { profile?: Record<string, unknown> | null; group?: Record<string, unknown> | null; schoolStatus?: string | null; globalRows?: Row[]; canonicalError?: boolean } = {}) {
   const writes = vi.fn(() => {
     throw new Error('Listing must not write');
   });
   const reads = vi.fn();
+  const globalReads = vi.fn();
   const membershipReads = vi.fn();
   const ordered = [...rows].sort(
     (a, b) => b.createdAt.toMillis() - a.createdAt.toMillis() || b.id.localeCompare(a.id),
@@ -35,6 +37,7 @@ function setup(rows: Row[], status: string | null = 'active', options: { profile
       doc: (id: string) => ({ id }),
       get: async () => {
         reads();
+        if (options.canonicalError) throw new Error('canonical read failed');
         return {
           docs: ordered
             .slice(offset, offset + count)
@@ -48,7 +51,20 @@ function setup(rows: Row[], status: string | null = 'active', options: { profile
     };
   }
   const db = {
-    collection: (root: string) => ({
+    collection: (root: string) => root === 'groupPosts' ? {
+      where: (field: string, operator: string, value: string) => {
+        expect([field, operator, value]).toEqual(['groupId', '==', 'g1']);
+        return {
+          // No orderBy method: combining it with equality would need an index.
+          limit: (count: number) => ({ get: async () => {
+            globalReads(count);
+            return { docs: (options.globalRows ?? []).slice(0, count)
+              .map((row) => ({ id: row.id, data: () => row })) };
+          } }),
+        };
+      },
+      set: writes, update: writes, delete: writes, add: writes,
+    } : ({
       doc: (parentId: string) => ({
         get: async () => {
           const data = root === 'users'
@@ -77,7 +93,7 @@ function setup(rows: Row[], status: string | null = 'active', options: { profile
     runTransaction: writes,
     batch: writes,
   } as unknown as Firestore;
-  return { db, writes, reads, membershipReads, list: createGroupDiscussionHandlers({ db }).listGroupDiscussionPage };
+  return { db, writes, reads, globalReads, membershipReads, list: createGroupDiscussionHandlers({ db }).listGroupDiscussionPage };
 }
 const row = (id: string, extra: Record<string, unknown> = {}): Row => ({
   id,
@@ -233,3 +249,55 @@ it.each([null, {}, { schoolId: 'other', primarySchoolId: 'other' }])(
     expect(writes).not.toHaveBeenCalled();
   },
 );
+
+it.each([false, true])('reads global-only legacy posts when canonical fails=%s, sorts and paginates without writes', async (canonicalError) => {
+  const globalRows = [
+    row('old', { createdAt: new Timestamp(20, 1) }),
+    row('tie-a'), row('tie-z'),
+    row('new', { createdAt: new Timestamp(100, 124) }),
+  ];
+  const { list, writes, globalReads } = setup([], 'active', { globalRows, canonicalError });
+  const first = await list(request({ pageSize: 2 }));
+  expect(first.posts.map(p => p.id)).toEqual(['new', 'tie-z']);
+  expect(first.hasMore).toBe(true);
+  const next = setup([], 'active', { globalRows: globalRows.filter(r => r.id !== 'tie-z'), canonicalError });
+  const second = await next.list(request({ pageSize: 2, cursor: JSON.parse(JSON.stringify(first.cursor)) }));
+  expect(second.posts.map(p => p.id)).toEqual(['tie-a', 'old']);
+  expect(second.hasMore).toBe(false);
+  expect(globalReads).toHaveBeenCalledWith(501);
+  expect(writes).not.toHaveBeenCalled();
+  expect(next.writes).not.toHaveBeenCalled();
+});
+
+it('applies every canonical visibility exclusion to global posts', async () => {
+  const flags = [
+    { published: false }, ...['draft', 'unpublished', 'scheduled', 'pending', ''].map(status => ({ status })),
+    { deleted: true }, { deletedAt: new Timestamp(1, 0) }, { deletedAt: false }, { deletedAt: 0 },
+  ];
+  const { list, writes } = setup([], 'active', { globalRows: [row('legacy'),
+    ...flags.map((data, i) => row(`hidden-${i}`, data))] });
+  expect((await list(request())).posts.map(p => p.id)).toEqual(['legacy']);
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it('never falls back for raw canonical rows, even hidden or past the cursor', async () => {
+  const { list, globalReads } = setup([row('hidden', { status: 'draft' })], 'active', { globalRows: [row('global')] });
+  expect((await list(request())).posts).toEqual([]);
+  expect((await list(request({ cursor: { id: 'old', createdAt: { seconds: 1, nanoseconds: 0 } } }))).posts).toEqual([]);
+  expect(globalReads).not.toHaveBeenCalled();
+});
+
+it('fails closed above the legacy cap, including hidden rows', async () => {
+  const globalRows = Array.from({ length: 500 }, (_, i) => row(String(i), { status: 'draft' }));
+  expect((await setup([], 'active', { globalRows }).list(request())).posts).toEqual([]);
+  const { list, writes } = setup([], 'active', { globalRows: [...globalRows, row('visible')] });
+  await expect(list(request())).rejects.toMatchObject({ code: 'resource-exhausted' });
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it('requires no groupId/createdAt composite index for global posts', () => {
+  const config = JSON.parse(readFileSync(new URL('../../../../../backend/firestore/firestore.indexes.json', import.meta.url), 'utf8'));
+  expect(config.indexes.some((index: { collectionGroup: string; fields: { fieldPath: string }[] }) =>
+    index.collectionGroup === 'groupPosts' && ['groupId', 'createdAt'].every(field => index.fields.some(f => f.fieldPath === field))
+  )).toBe(false);
+});

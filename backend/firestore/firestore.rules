@@ -181,15 +181,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
     }
 
-    // Match the clients' trusted primary-school selection, falling back only
-    // when the legacy profile has no primary school. Stale memberships in the
-    // previous school must never override an explicit current primary school.
+    // Prefer an explicit primary school for transfer students. Legacy accounts
+    // without a school binding still need active membership in the target school.
     function isCurrentLostFoundMember(schoolId) {
-      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let profileExists = exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : {};
       let primary = profile.get('primarySchoolId', null);
+      let school = profile.get('schoolId', null);
       return schoolId is string && schoolId.size() > 0
         && isSchoolMember(schoolId)
-        && (primary != null ? primary : profile.get('schoolId', '')) == schoolId;
+        && ((primary != null && primary != '') ? primary == schoolId
+          : ((school != null && school != '') ? school == schoolId : true));
     }
 
     function isConversationMember(conversationId) {

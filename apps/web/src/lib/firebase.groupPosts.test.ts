@@ -12,13 +12,18 @@ vi.mock('firebase/auth', async (original) => ({
 vi.mock('firebase/firestore', async (original) => ({
   ...await original<typeof import('firebase/firestore')>(),
   getDocs: runtime.getDocs,
+  getFirestore: () => ({}),
+  doc: (_db: unknown, ...path: string[]) => ({ path }),
+  getDoc: async () => ({ exists: () => true, id: 'g1', data: () => ({ title: '課程' }) }),
+  collection: (_db: unknown, ...path: string[]) => ({ path }),
+  query: (ref: unknown) => ref,
 }));
 
 beforeEach(() => {
   vi.resetModules();
   vi.stubEnv('NEXT_PUBLIC_FIREBASE_PROJECT_ID', 'demo-group-feed');
   runtime.auth.currentUser = runtime.user;
-  runtime.getDocs.mockClear();
+  runtime.getDocs.mockReset().mockResolvedValue({ docs: [] });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
@@ -45,4 +50,21 @@ it('discards hosted results when the login session changes', async () => {
   const { fetchGroupPosts } = await import('./firebase');
   expect(await fetchGroupPosts('g1')).toEqual([]);
   expect(runtime.getDocs).not.toHaveBeenCalled();
+});
+
+it('loads course workspace discussions through the same hosted visibility policy', async () => {
+  const fetchPage = vi.fn(async () => ({ ok: true, json: async () => ({ result: { posts: [{
+    id: 'legacy', content: '課程歷史貼文', createdAt: { seconds: 100, nanoseconds: 0 },
+  }] } }) }));
+  vi.stubGlobal('fetch', fetchPage);
+  const { fetchCourseWorkspace } = await import('./firebase');
+  const workspace = await fetchCourseWorkspace('g1');
+  expect(workspace.posts).toEqual([{
+    id: 'legacy', groupId: 'g1', content: '課程歷史貼文', createdAt: '1970-01-01T00:01:40.000Z',
+  }]);
+  expect(fetchPage).toHaveBeenCalledWith('/api/fn/listGroupDiscussionPage', expect.objectContaining({
+    body: JSON.stringify({ data: { groupId: 'g1', pageSize: 5 } }),
+  }));
+  expect(runtime.getDocs).toHaveBeenCalledTimes(6);
+  expect(runtime.getDocs.mock.calls.every(([ref]) => ref.path.at(-1) !== 'posts')).toBe(true);
 });

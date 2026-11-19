@@ -1,4 +1,4 @@
-import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { Timestamp, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import { isAccountUnavailable } from './dmConversationsHandler';
@@ -40,7 +40,6 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
     }
     const postsRef = group.collection('posts');
     const base = postsRef.orderBy('createdAt', 'desc');
-    let scan = base;
     let boundary: { id: string; time: Timestamp } | null = null;
     if (input.cursor != null) {
       const cursor = input.cursor as {
@@ -61,56 +60,94 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
         throw new HttpsError('invalid-argument', '分頁游標無效');
       }
       boundary = { id: cursor.id, time: new Timestamp(time.seconds!, time.nanoseconds!) };
-      // Resume at the timestamp, then apply the implicit descending document-ID
-      // boundary in process. This uses only the createdAt single-field index and
-      // remains valid if the cursor document has been deleted.
-      scan = base.startAt(boundary.time);
     }
-    const posts: Record<string, unknown>[] = [];
-    let nextCursor: { id: string; createdAt: { seconds: number; nanoseconds: number } } | null =
-      null;
-    const batchSize = Math.max(size + 1, 50);
-    while (true) {
-      const batch = await scan.limit(batchSize).get();
-      for (const doc of batch.docs) {
-        const data = doc.data();
-        const time = data.createdAt as Timestamp;
-        if (
-          boundary &&
-          time.isEqual(boundary.time) &&
-          Buffer.compare(Buffer.from(doc.id), Buffer.from(boundary.id)) >= 0
-        )
-          continue;
-        if (
-          data.published === false ||
-          (typeof data.status === 'string' && data.status !== 'published') ||
-          data.deleted === true ||
-          data.deletedAt != null
-        )
-          continue;
-        // Look ahead by one visible row, without advancing the returned cursor past it.
-        if (posts.length === size) return { posts, cursor: nextCursor, hasMore: true };
-        nextCursor = {
-          id: doc.id,
-          createdAt: { seconds: time.seconds, nanoseconds: time.nanoseconds },
-        };
-        posts.push({
-          ...data,
-          id: doc.id,
-          createdAt: nextCursor.createdAt,
-          ...(data.pinnedAt instanceof Timestamp
-            ? {
-                pinnedAt: {
-                  seconds: data.pinnedAt.seconds,
-                  nanoseconds: data.pinnedAt.nanoseconds,
-                },
-              }
-            : {}),
-        });
+    type PostDoc = QueryDocumentSnapshot;
+    async function readPage(globalDocs?: PostDoc[]) {
+      const posts: Record<string, unknown>[] = [];
+      let nextCursor: { id: string; createdAt: { seconds: number; nanoseconds: number } } | null =
+        null;
+      const batchSize = Math.max(size + 1, 50);
+      // Resume using the single-field index, then apply timestamp/document-ID
+      // boundaries in process, even if the cursor document has been deleted.
+      let scan = boundary ? base.startAt(boundary.time) : base;
+      while (true) {
+        const batch = globalDocs ? { docs: globalDocs } : await scan.limit(batchSize).get();
+        for (const doc of batch.docs) {
+          const data = doc.data();
+          // Legacy rows without a timestamp use the epoch for a stable JSON cursor.
+          const time = data.createdAt instanceof Timestamp ? data.createdAt : new Timestamp(0, 0);
+          if (
+            boundary &&
+            (time.seconds > boundary.time.seconds ||
+              (time.seconds === boundary.time.seconds && time.nanoseconds > boundary.time.nanoseconds) ||
+              (time.isEqual(boundary.time) &&
+                Buffer.compare(Buffer.from(doc.id), Buffer.from(boundary.id)) >= 0))
+          )
+            continue;
+          if (
+            data.published === false ||
+            (typeof data.status === 'string' && data.status !== 'published') ||
+            data.deleted === true ||
+            data.deletedAt != null
+          )
+            continue;
+          // Look ahead by one visible row, without advancing the returned cursor past it.
+          if (posts.length === size) return { posts, cursor: nextCursor, hasMore: true };
+          nextCursor = {
+            id: doc.id,
+            createdAt: { seconds: time.seconds, nanoseconds: time.nanoseconds },
+          };
+          posts.push({
+            ...data,
+            id: doc.id,
+            createdAt: nextCursor.createdAt,
+            ...(data.pinnedAt instanceof Timestamp
+              ? {
+                  pinnedAt: {
+                    seconds: data.pinnedAt.seconds,
+                    nanoseconds: data.pinnedAt.nanoseconds,
+                  },
+                }
+              : {}),
+          });
+        }
+        if (globalDocs || batch.docs.length < batchSize) {
+          return { posts, cursor: nextCursor, hasMore: false };
+        }
+        scan = base.startAfter(batch.docs[batch.docs.length - 1]!);
       }
-      if (batch.docs.length < batchSize) return { posts, cursor: nextCursor, hasMore: false };
-      scan = base.startAfter(batch.docs[batch.docs.length - 1]!);
     }
+    try {
+      // Probe raw canonical rows independently of the cursor and visibility.
+      // Hidden rows and exhausted pages must never activate the legacy fallback.
+      const canonical = await base.limit(1).get();
+      if (canonical.docs.length > 0) return await readPage();
+    } catch {
+      // Match the legacy read path when the canonical read is unavailable.
+    }
+    // Equality-only query uses the automatic single-field index. Read one extra
+    // row to detect overflow; never return a partial or incorrectly sorted page.
+    const maxLegacyRows = 500;
+    const legacy = await db.collection('groupPosts')
+      .where('groupId', '==', input.groupId)
+      .limit(maxLegacyRows + 1)
+      .get();
+    if (legacy.docs.length > maxLegacyRows) {
+      throw new HttpsError('resource-exhausted', '群組歷史貼文超過讀取上限，請聯絡管理員');
+    }
+    const timeOf = (doc: PostDoc): Timestamp => {
+      const value = doc.data().createdAt;
+      return value instanceof Timestamp ? value : new Timestamp(0, 0);
+    };
+    const sorted = [...legacy.docs].sort((a, b) => {
+      const left = timeOf(a);
+      const right = timeOf(b);
+      return (
+        right.seconds - left.seconds || right.nanoseconds - left.nanoseconds ||
+        Buffer.compare(Buffer.from(b.id), Buffer.from(a.id))
+      );
+    });
+    return readPage(sorted);
   }
   return { listGroupDiscussionPage };
 }

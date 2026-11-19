@@ -2793,10 +2793,7 @@ export async function fetchCourseWorkspace(courseId: string): Promise<CourseWork
         ]),
         fetchSubcollection<CourseWorkspaceAttendanceSession>(['groups', courseId, 'liveSessions']),
         fetchSubcollection<CourseWorkspaceGradebookRow>(['groups', courseId, 'gradebook']),
-        fetchSubcollection<CourseWorkspacePost>(
-          ['groups', courseId, 'posts'],
-          [orderBy('createdAt', 'desc'), limit(5)],
-        ),
+        fetchGroupPosts(courseId, 5),
       ]);
 
     const normalizedAttendance =
