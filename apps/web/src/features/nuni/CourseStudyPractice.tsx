@@ -250,7 +250,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           {previousDraftIndex !== null && <button type="button" className={styles.button}
             onClick={() => onAction({ type: 'go', index: previousDraftIndex })}>上一題草稿待自評</button>}
           {nextDraftIndex !== null && <button type="button" className={styles.button}
-            onClick={() => onAction({ type: 'go', index: nextDraftIndex })}>下一題草稿待自評</button>
+            onClick={() => onAction({ type: 'go', index: nextDraftIndex })}>下一題草稿待自評</button>}
           <button type="button" className={styles.button} onClick={() => onReadSource(card)}>回白板看這段</button>
           {response.outcome === 'skipped'
             ? <button type="button" className={styles.button}
