@@ -126,6 +126,52 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('does not autoplay a previously seen photo again until its new image instance loads', () => {
+    const expiresAt = Date.now() + 100_000;
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'photo-a',
+            kind: 'image',
+            createdAt: 1,
+            mediaUrl: 'https://example.com/photo-a.jpg',
+            text: '校園合照',
+            expiresAt,
+          },
+          {
+            ...common,
+            id: 'photo-b',
+            kind: 'image',
+            createdAt: 2,
+            mediaUrl: 'https://example.com/photo-b.jpg',
+            text: '活動海報',
+            expiresAt,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('自動播放'));
+    fireEvent(view.getByLabelText('限時動態照片'), 'load');
+    fireEvent.press(view.getByText('下一則'));
+    expect(view.getByText('活動海報')).toBeTruthy();
+    fireEvent.press(view.getByText('上一則'));
+    expect(view.getByText('校園合照')).toBeTruthy();
+
+    // Returning to the same story creates a new Image; the previous onLoad is stale.
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.getByText('校園合照')).toBeTruthy();
+    fireEvent(view.getByLabelText('限時動態照片'), 'load');
+    act(() => jest.advanceTimersByTime(6_999));
+    expect(view.getByText('校園合照')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(1));
+    expect(view.getByText('活動海報')).toBeTruthy();
+    view.unmount();
+  });
+
   test('a muted clip uses the native end event rather than the photo timer and keeps its caption', () => {
     const expiresAt = Date.now() + 100_000;
     const view = render(
