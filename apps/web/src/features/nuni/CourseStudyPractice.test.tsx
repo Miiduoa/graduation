@@ -392,10 +392,19 @@ it('returns to another written draft during practice without revealing answers o
   const handlers = callbacks();
   render(<Controller handlers={handlers} />);
   expect(screen.queryByRole('button', { name: '下一題草稿待自評' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '上一題草稿待自評' })).toBeNull();
   writeAnswer('第一題草稿');
   expect(screen.queryByRole('button', { name: '下一題草稿待自評' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '上一題草稿待自評' })).toBeNull();
   selectQuestion(2);
   writeAnswer('第二題草稿');
+  fireEvent.click(screen.getByRole('button', { name: '上一題草稿待自評' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 0 });
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
+  expect(answerInput().value).toBe('第一題草稿');
+  fireEvent.click(screen.getByRole('button', { name: '下一題草稿待自評' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 1 });
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 2 題' }));
   fireEvent.click(screen.getByRole('button', { name: '下一題草稿待自評' }));
   expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 0 });
   expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
@@ -406,6 +415,7 @@ it('returns to another written draft during practice without revealing answers o
   writeAnswer('');
   selectQuestion(1);
   expect(screen.queryByRole('button', { name: '下一題草稿待自評' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '上一題草稿待自評' })).toBeNull();
   expect(answerInput().value).toBe('第一題草稿');
 });
 

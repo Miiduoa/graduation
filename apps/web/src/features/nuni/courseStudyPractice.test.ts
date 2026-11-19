@@ -10,6 +10,7 @@ import {
   hasVisibleStudyAttempt,
   nextUnassessedDraftStudyPracticeIndex,
   nextUnreviewedStudyPracticeIndex,
+  previousUnassessedDraftStudyPracticeIndex,
   previousUnreviewedStudyPracticeIndex,
   startStudyPracticeRound,
   updateStudyPracticeRound,
@@ -448,12 +449,17 @@ describe('unreviewed question navigation', () => {
     );
     const snapshot = JSON.stringify(current);
     expect(nextUnassessedDraftStudyPracticeIndex(current)).toBe(0);
+    expect(previousUnassessedDraftStudyPracticeIndex(current)).toBe(2);
     expect(nextUnassessedDraftStudyPracticeIndex(change(current, { type: 'go', index: 0 }))).toBe(2);
+    expect(previousUnassessedDraftStudyPracticeIndex(change(current, { type: 'go', index: 0 }))).toBe(2);
     expect(nextUnassessedDraftStudyPracticeIndex(change(current, { type: 'go', index: 2 }))).toBe(0);
+    expect(previousUnassessedDraftStudyPracticeIndex(change(current, { type: 'go', index: 2 }))).toBe(0);
     expect(nextUnassessedDraftStudyPracticeIndex(round(1))).toBeNull();
+    expect(previousUnassessedDraftStudyPracticeIndex(round(1))).toBeNull();
     expect(JSON.stringify(current)).toBe(snapshot);
     current = change(current, { type: 'go', index: 2 }, { type: 'skip' }, { type: 'go', index: 0 });
     expect(nextUnassessedDraftStudyPracticeIndex(current)).toBeNull();
+    expect(previousUnassessedDraftStudyPracticeIndex(current)).toBeNull();
     expect(current.responses[current.cards[0].id].attempt).toBe('第一題保留草稿');
     expect(current.responses[current.cards[2].id].outcome).toBe('skipped');
     expect(current.responses[current.cards[1].id].attempt).toBe('\u2800\u0301');

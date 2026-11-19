@@ -236,6 +236,11 @@ export function nextUnassessedDraftStudyPracticeIndex(round: StudyPracticeRound)
   return adjacentUnreviewedStudyPracticeIndex(round, 1, true);
 }
 
+/** The previous written, not-yet-self-rated question; does not modify any response. */
+export function previousUnassessedDraftStudyPracticeIndex(round: StudyPracticeRound): number | null {
+  return adjacentUnreviewedStudyPracticeIndex(round, -1, true);
+}
+
 /** Find a previous unfinished card without changing any response or skipping the current card. */
 export function previousUnreviewedStudyPracticeIndex(round: StudyPracticeRound): number | null {
   return adjacentUnreviewedStudyPracticeIndex(round, -1);
