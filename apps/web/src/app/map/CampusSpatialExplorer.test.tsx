@@ -107,6 +107,47 @@ it('does not allocate offscreen WebGL or start its deadline until the canvas ent
   }
 });
 
+it('uses the latest viewport state when a fast mobile scroll batches observer entries', async () => {
+  // A queued offscreen state followed by onscreen in one callback must start
+  // WebGL once. The inverse order must suspend it, not keep rendering offscreen.
+  // These are synthetic browser callbacks, not measurements from a phone.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+  expect(scene.create).not.toHaveBeenCalled();
+
+  act(() => intersection?.([
+    { isIntersecting: false }, { isIntersecting: true },
+  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+  act(() => intersection?.([
+    { isIntersecting: true }, { isIntersecting: false },
+  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  // An empty callback is not evidence that the canvas became visible.
+  const callsBeforeEmpty = scene.setActive.mock.calls.length;
+  act(() => intersection?.([] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive.mock.calls.length).toBe(callsBeforeEmpty);
+
+  act(() => intersection?.([
+    { isIntersecting: false }, { isIntersecting: true },
+  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
   // The API exists and observe() succeeds, but the WebView never invokes its
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
