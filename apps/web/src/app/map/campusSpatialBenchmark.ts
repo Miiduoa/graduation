@@ -132,9 +132,21 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
       issues.push(`${prefix}: invalid measured fpsP50`);
     }
     if (row.visualScore !== undefined && row.visualScore !== null &&
-        (!Number.isInteger(row.visualScore) || (row.visualScore as number) < 1 ||
+        ((typeof row.visualScore !== 'number' || !Number.isInteger(row.visualScore)) || (row.visualScore as number) < 1 ||
           (row.visualScore as number) > 5 || !text(row.visualRubric))) {
       issues.push(`${prefix}: visual ratings require a 1–5 score and named rubric`);
+    }
+    // Missing durations and steps cannot support speed/effort comparisons.
+    // Keep 'unverified' entries for honest coverage tracking, but exclude them
+    // from the complete-trial count below.
+    if (row.outcome !== 'unverified' && (row.steps === null || row.elapsedMs === null)) {
+      issues.push(`${prefix}: measured steps and elapsedMs required for a claimed outcome`);
+    }
+    if (row.task === 'visual-performance' && row.outcome !== 'unverified' &&
+        (typeof row.fpsP50 !== 'number' || !Number.isFinite(row.fpsP50) ||
+          typeof row.visualScore !== 'number' || !Number.isInteger(row.visualScore) ||
+          !text(row.visualRubric))) {
+      issues.push(`${prefix}: performance comparison requires measured FPS and rated visual rubric`);
     }
     if (row.roomCorrect === true && row.buildingCorrect !== true) {
       issues.push(`${prefix}: room correctness requires verified building correctness`);
