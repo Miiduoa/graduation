@@ -107,6 +107,29 @@ it('does not allocate offscreen WebGL or start its deadline until the canvas ent
   }
 });
 
+it.each(['constructor', 'observe'] as const)(
+  'falls back to working 3D and walking navigation when a WebView observer fails at %s',
+  async (failurePoint) => {
+    const brokenDisconnect = vi.fn();
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(_callback: IntersectionObserverCallback) {
+        if (failurePoint === 'constructor') throw new Error('unsupported observer');
+      }
+      observe() {
+        if (failurePoint === 'observe') throw new Error('observer registration failed');
+      }
+      disconnect = brokenDisconnect;
+    });
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(brokenDisconnect).toHaveBeenCalledTimes(failurePoint === 'observe' ? 1 : 0);
+  },
+);
+
 it('delays hidden-tab WebGL startup and its 12-second deadline until the tour is visible', async () => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
   const timerSpy = vi.spyOn(window, 'setTimeout');
