@@ -602,6 +602,28 @@ describe('firestore security rules', () => {
     await assertFails(bob.doc('comments/root-legacy-comment').get());
     await assertSucceeds(alice.doc('groupPosts/root-draft').get());
     await assertSucceeds(teacher.doc('groupPosts/root-draft').get());
+
+    // A withdrawn staff role cannot keep privileged draft/comment preview.
+    // Reuse the original signed-in clients so cached auth cannot mask revocation.
+    await seedFirestore(db => db.doc('groups/root-pu/members/teacher').update({ status: 'revoked' }));
+    await assertFails(teacher.doc('groupPosts/root-draft').get());
+    await assertFails(teacher.doc('comments/root-draft-comment').get());
+    await seedFirestore(db => db.doc('groups/root-pu/members/teacher').update({ status: 'active' }));
+    await assertSucceeds(teacher.doc('groupPosts/root-draft').get());
+
+    // The author must not bypass campus transfer with an otherwise valid group role.
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'ncku' }));
+    await assertFails(alice.doc('groupPosts/root-draft').get());
+    await assertFails(alice.doc('comments/root-draft-comment').get());
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(alice.doc('groupPosts/root-draft').get());
+
+    // A missing canonical profile must not inherit orphaned school memberships.
+    await seedFirestore(db => db.doc('users/bob').delete());
+    await assertFails(bob.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('postLikes/root-existing-like').get());
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', schoolId: 'pu' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
     await assertFails(alice.doc('postLikes/root-draft-vote').set({ postId: 'root-draft', userId: 'alice' }));
     await assertFails(teacher.doc('postLikes/root-draft-vote').set({ postId: 'root-draft', userId: 'teacher' }));
     await assertSucceeds(bob.doc('postLikes/root-new-like').set({ postId: 'root-public', userId: 'bob' }));

@@ -935,3 +935,10 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **問題與處理：** 已合併 main 的 root `groupPosts/{id}` 只依群組會員核准讀取，可能讓殘留的舊校會員於已知 ID 讀取缺發布欄位／草稿；root `comments`、`postLikes` 間接承襲。候選改為已驗證目前校籍及群組會員、雙校籍欄位衝突時 fail-closed；非作者／非管理員只接受明確四欄發布狀態。作者與合法管理員仍可精確預覽，但未公開文不可按讚。全域列表拒絕，已在 security-rules.test.js 補合成 Emulator 回歸程式。此變更可能影響舊版列表／未分類歷史文，尚須相容性盤點與人工判讀。
 - **本輪離線確認：** 新增測試檔完整內容經 V8 `new Function()` 語法解析成功；從來源核對 8/8 個關鍵權限子條件；以 **1,152** 組合成布林角色、目前雙校籍、群組／學校狀態及公開／草稿／缺欄／封存情境的獨立矩陣推演（允許 GET 39 組、公開互動 12 組，非作者讀取缺欄 0 組、雙校籍衝突授權 0 組）。此為模型而不是 Firestore Rules 編譯器／Emulator 執行、真實流量或正式資料證明。
 - **仍需阻擋：** 尚無精確候選 Firebase Emulator、HTTP／Web／Functions、CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro，亦無指定 App 5504170 對新 head 的「審查通過」。因先前明確未授權向 npm registry 外送依賴清單，本輪僅建立並使用 `expected_sha` 非強制前進獨立開發分支 `fix/security-legacy-root-post-visibility-20261120`，未建立 PR、未觸發現有 `security-gates` 的 `pnpm/npm audit`，也不改工具轉送同一 payload。正式 PR 及完整 CI 需先解決外送授權問題；主線合併仍待精確 head 測試與指定 App 審查。正式 GCS/Supabase 已發網址撤權、真實 Storage CAS、舊資料／索引相容性、發布及復原仍未驗收。未操作正式資料／金鑰／token／migration／E 校園或部署。
+
+
+### 2026-11-20｜獨立 Firebase Rules 回歸：教師撤權／作者轉校／帳號文件消失
+
+- 從 `fix/security-legacy-root-post-visibility-20261120` 的精確 `8f94c3670b97d98c6c5ed451626133e87a1a59ad` 另開隔離驗證分支 `feature/security-root-post-emulator-20261120`，保留原修補分支與原主線，不重寫其他進行中的工作。新增真 Firebase Rules Emulator 可執行的相同登入情境：教師被撤銷後不得預覽根草稿與留言、權限恢復後允許；作者校籍欄位衝突時不得借作者權限讀草稿、恢復後允許；Canonical 使用者文件消失但學校／群組會員殘留時不得讀公開貼文或票據，重建有效 profile 後允許。
+- 相關測試併入 `backend/tests/security-rules.test.js` 既有 legacy root 情境，正式執行指令為 `pnpm test:rules`；測試資料為合成，未接 E 校園、正式 GCS、Supabase 或 Firebase 正式資源。此紀錄於觸發驗證前建立，**不得視為 Emulator 已通過**。需查精確提交工作紀錄、CI／CodeQL／Supabase／Python／Mobile Agent／適用 Maestro 與指定 App 5504170；未具該精確 head 核可不得合併、發布。
+- 已確認既有 `.github/workflows/firestore-rules.yml` 針對 `feature/**` push 有獨立 Firestore／Storage Emulator 測試，**不執行 `pnpm/npm audit`**；不建立 PR 來觸發包含外送 audit 的 CI，也不以新工具或代理重送 audit payload。相關其他 CI 沒有新 head 的綠燈不得沿用。
