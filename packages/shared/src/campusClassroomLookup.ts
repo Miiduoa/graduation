@@ -163,8 +163,12 @@ function isExplicitNonClassroomCategory(value: unknown): boolean {
 function isCandidateInSchoolScope(location: CampusMapPlaceLike, school: string): boolean {
   if (!('schoolId' in location)) return true;
   const suppliedSchool: unknown = location.schoolId;
-  return suppliedSchool == null ||
-    (typeof suppliedSchool === 'string' && (!suppliedSchool.trim() || suppliedSchool === school));
+  if (suppliedSchool == null) return true;
+  if (typeof suppliedSchool !== 'string') return false;
+  // Imported school IDs may be padded; trimming must apply to matching as
+  // well as empty checks, otherwise a same-school duplicate evades ID safety.
+  const normalizedSchool = suppliedSchool.trim();
+  return !normalizedSchool || normalizedSchool === school;
 }
 
 function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
