@@ -115,10 +115,12 @@ test('dual-runtime public pages must remain 200 html', async () => {
   const healthy = fakeFetch();
   const report = await inspectPublic(sha, healthy);
   assert.ok(PUBLIC_RELEASE_PAGES.includes('/life'));
+  assert.ok(PUBLIC_RELEASE_PAGES.includes('/connect'));
   assert.ok(PUBLIC_RELEASE_PAGES.includes('/privacy'));
   assert.equal(report.pages.find((page) => page.path === '/life').status, 200);
+  assert.equal(report.pages.find((page) => page.path === '/connect').status, 200);
   assert.equal(report.pages.find((page) => page.path === '/privacy').status, 200);
-  for (const missing of ['/life', '/privacy']) {
+  for (const missing of ['/life', '/connect', '/privacy']) {
     const fetcher = (url, init) => url.endsWith(missing)
       ? Promise.resolve(new Response('missing', { status: 404, headers: { 'Content-Type': 'text/html' } }))
       : healthy(url, init);

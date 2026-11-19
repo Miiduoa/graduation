@@ -18,8 +18,11 @@ export type MobileAssistantDestination = NativeDestination | WebDestination;
 
 const campusRouteOverrides: Partial<Record<AssistantServiceId, string>> = {
   attendance: 'CoursesHome',
+  clubs: 'Clubs',
 };
-const platformTabs: Partial<Record<AssistantServiceId, 'courses' | 'food' | 'merchant' | 'account'>> = {
+const platformTabs: Partial<
+  Record<AssistantServiceId, 'courses' | 'food' | 'merchant' | 'account'>
+> = {
   classroom: 'courses',
   attendance: 'courses',
   cafeteria: 'food',
@@ -29,7 +32,9 @@ const platformTabs: Partial<Record<AssistantServiceId, 'courses' | 'food' | 'mer
   account: 'account',
 };
 const platformPersonalRoutes: Partial<Record<AssistantServiceId, string>> = {
-  timetable: 'PersonalTimetable', calendar: 'PersonalCalendar', import: 'PersonalImport',
+  timetable: 'PersonalTimetable',
+  calendar: 'PersonalCalendar',
+  import: 'PersonalImport',
 };
 const publicRoutes: Partial<Record<AssistantServiceId, readonly string[]>> = {
   map: ['MapV2', 'Map'],
@@ -55,7 +60,9 @@ export function mobileAssistantServiceDestination(
   const service = getAssistantService(serviceId);
   if (!service) return null;
   const native = (route?: string, params?: Record<string, unknown>): NativeDestination | null =>
-    route && canNavigate(navigation, route) ? { kind: 'native', route, ...(params && { params }) } : null;
+    route && canNavigate(navigation, route)
+      ? { kind: 'native', route, ...(params && { params }) }
+      : null;
   let target: NativeDestination | null = null;
   if (audience === 'campus') {
     target = native(campusRouteOverrides[service.id] ?? service.mobileRoute);
@@ -66,7 +73,8 @@ export function mobileAssistantServiceDestination(
     target = native('NuniWorkspace', { tab: 'account' });
   }
   if (!target && service.access === 'public') {
-    for (const route of publicRoutes[service.id] ?? (service.mobileRoute ? [service.mobileRoute] : [])) {
+    for (const route of publicRoutes[service.id] ??
+      (service.mobileRoute ? [service.mobileRoute] : [])) {
       target = native(route);
       if (target) break;
     }
@@ -76,7 +84,11 @@ export function mobileAssistantServiceDestination(
   if (target?.route === 'PersonalImport' && service.id === 'import' && importKind === 'grades')
     return { ...target, params: { kind: 'grades' } };
   if (target) return target;
-  const href = assistantServiceHref(service.id, undefined, audience === 'platform' ? 'platform' : 'school');
+  const href = assistantServiceHref(
+    service.id,
+    undefined,
+    audience === 'platform' ? 'platform' : 'school',
+  );
   return href ? { kind: 'web', url: `https://nuni.tw${href}` } : null;
 }
 
@@ -86,7 +98,12 @@ export function navigateMobileAssistantService(
   navigation: Navigation,
   importKind?: 'grades',
 ): boolean {
-  const destination = mobileAssistantServiceDestination(serviceId, audience, navigation, importKind);
+  const destination = mobileAssistantServiceDestination(
+    serviceId,
+    audience,
+    navigation,
+    importKind,
+  );
   return destination?.kind === 'native'
     ? safeNavigate(navigation, destination.route, destination.params, { fallbackMessage: null })
     : false;

@@ -32,7 +32,9 @@ jest.mock('../components/SchoolBrowsingControl', () => ({
   SchoolBrowsingControl: () => null,
 }));
 jest.mock('../components/TodayTimetablePanel', () => ({
-  TodayTimetablePanel: () => null,
+  TodayTimetablePanel: () => require('react').createElement(
+    require('react-native').Text, { testID: 'today-timetable-panel' }, '今天的課表',
+  ),
 }));
 
 beforeEach(() => {
@@ -86,7 +88,7 @@ it('provides a named header shortcut to the platform workspace without starting 
   expect(shortcut.props.accessibilityRole).toBe('button');
   expect(shortcut.props.accessibilityLabel).toBe('開啟課程與作業');
   await fireEventAsync.press(shortcut);
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
@@ -112,7 +114,7 @@ it.each([
   const view = await landing();
   expect(view.getByText(label)).toBeTruthy();
   await fireEventAsync.press(view.getByTestId('login-start'));
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+    expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
@@ -169,14 +171,64 @@ it.each([false, true])('opens the platform without selecting or verifying a scho
   }
   const sessionBeforeNavigation = mockAuth.session;
   const view = await landing();
-  expect(view.getByText(signedIn ? '回到我的 nuni' : '登入或建立帳號')).toBeTruthy();
-  expect(view.getByText('和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。')).toBeTruthy();
+  expect(view.getByText(signedIn ? '回到我的課程' : '登入或建立帳號')).toBeTruthy();
+  if (!signedIn) expect(view.getByText('和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。')).toBeTruthy();
   await fireEventAsync.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledTimes(1);
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  if (signedIn) expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });
+  else expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
   expect(mockAuth.request).not.toHaveBeenCalled();
   expect(mockAuth.bffRequest).not.toHaveBeenCalled();
   expect(mockAuth.session).toBe(sessionBeforeNavigation);
   expect(view.queryByTestId('school-login-start')).toBeNull();
+});
+
+it('a verified Google account resumes named tasks before setup without querying or assuming a school role', async () => {
+  mockAuth.session = {
+    platformAccountId: 'pa_student', context: 'account-a', isPlatformOperator: false,
+    expiresAt: Date.now() + 60_000,
+  };
+  const view = await landing();
+  expect(view.getByText('今天先處理哪件事？')).toBeTruthy();
+  expect(view.queryByText('Google 帳號')).toBeNull();
+  expect(view.getAllByTestId('today-timetable-panel')).toHaveLength(1);
+  expect(view.getAllByTestId('public-PersonalCalendar')).toHaveLength(1);
+  const tree = JSON.stringify(view.toJSON());
+  expect(tree.indexOf('today-timetable-panel')).toBeLessThan(tree.indexOf('school-import-start'));
+  for (const [label, tab] of [['回到我的課程', 'courses'], ['點餐與訂單', 'food'], ['帳號與資格', 'account']]) {
+    await fireEventAsync.press(view.getByText(label));
+    expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'NuniWorkspace', { tab });
+  }
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+  expect(mockAuth.request).not.toHaveBeenCalled();
+  expect(mockAuth.bffRequest).not.toHaveBeenCalled();
+});
+
+it.each([
+  { operator: true, patch: {}, visible: true },
+  { operator: false, patch: {}, visible: false },
+  { operator: true, patch: { loading: true }, visible: false },
+  { operator: true, patch: { pendingLogout: true }, visible: false },
+  { operator: true, patch: { error: '無法確認登入' }, visible: false },
+])('only a verified operator session gets the direct platform work entry: %p', async ({ operator, patch, visible }) => {
+  mockAuth.session = {
+    platformAccountId: 'pa_operator', context: 'account-a', isPlatformOperator: operator,
+    expiresAt: Date.now() + 60_000,
+  };
+  Object.assign(mockAuth, patch);
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  try {
+    const view = await landing();
+    const entry = view.queryByRole('link', { name: /平台管理（網頁）/ });
+    expect(Boolean(entry)).toBe(visible);
+    if (entry) {
+      await fireEventAsync.press(entry);
+      expect(open).toHaveBeenCalledWith('https://nuni.tw/admin');
+    }
+    expect(mockAuth.request).not.toHaveBeenCalled();
+    expect(mockAuth.signIn).not.toHaveBeenCalled();
+  } finally {
+    open.mockRestore();
+  }
 });

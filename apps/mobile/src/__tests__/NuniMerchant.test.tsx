@@ -148,6 +148,7 @@ test('failed lists are an error, never an empty application history', async () =
   });
   const view = render(<NuniMerchant />);
   await view.findByText('目前無法確認店家資料，請重新載入。');
+  expect(view.queryByText('下一步')).toBeNull();
   expect(view.queryByText('這個帳號尚未送出進駐申請。')).toBeNull();
   expect(view.queryByRole('button', { name: '送出進駐申請' })).toBeNull();
 });
@@ -256,8 +257,31 @@ test('a returning applicant sees the review status before opening a new applicat
   );
   const view = render(<NuniMerchant />);
   await view.findByText('審核中');
+  expect(view.getByText('查看這次進駐申請')).toBeTruthy();
   expect(view.queryByLabelText('品牌名稱')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: '申請另一間門市' }));
   expect(view.getByLabelText('品牌名稱')).toBeTruthy();
   expect(mockRequest.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });
+
+test.each([
+  ['needs-information', '1 筆申請需要補件'],
+  ['approved', '申請已核准，等待門市權限'],
+  ['rejected', '查看申請結果'],
+  ['withdrawn', '查看申請結果'],
+])(
+  'guides a %s applicant from the actual receipt without creating a new application',
+  async (state, title) => {
+    mockRequest.mockImplementation(async (path) =>
+      path === 'merchant-applications'
+        ? { applications: [{ ...receipt, state, reviewerNote: '請向受理單位確認資料' }] }
+        : data(path),
+    );
+    const view = render(<NuniMerchant />);
+    await view.findByText(title);
+    expect(view.getByText('審核說明：請向受理單位確認資料')).toBeTruthy();
+    expect(view.queryByLabelText('品牌名稱')).toBeNull();
+    expect(view.queryByRole('button', { name: /管理門市/ })).toBeNull();
+    expect(mockRequest.mock.calls.filter((call) => call[2])).toHaveLength(0);
+  },
+);

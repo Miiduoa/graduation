@@ -104,3 +104,25 @@ it('does not query private campus content before a campus is selected', () => {
   expect(screen.getByText(/選擇校園後/)).toBeTruthy();
   expect(mocks.load).not.toHaveBeenCalled();
 });
+
+it('keeps the supplied browsing campus through creator, message and settings links', async () => {
+  mocks.load.mockResolvedValue(page([{ ...base, id: 'signed-1' }]));
+  render(<MySocialProfile uid="alice" name="小安" navigationSearch="schoolId=school-a&campus=school-a&school=A" />);
+  await screen.findByText('社團活動紀錄');
+  for (const name of ['編輯資料', '發表貼文', /社團活動紀錄/, '看看校園動態', '私人訊息']) {
+    const href = screen.getByRole('link', { name }).getAttribute('href')!;
+    const target = new URL(href, 'https://campus.local');
+    expect(target.searchParams.get('schoolId')).toBe('school-a');
+    expect(target.searchParams.get('campus')).toBe('school-a');
+    expect(target.searchParams.get('school')).toBe('A');
+  }
+  const compose = new URL(screen.getByRole('link', { name: '發表貼文' }).getAttribute('href')!, 'https://campus.local');
+  expect(compose.searchParams.get('source')).toBe('profile');
+});
+
+it('keeps all-campus navigation explicit while asking the user to select a campus', () => {
+  mocks.scope.ready = false;
+  render(<MySocialProfile uid="alice" name="小安" navigationSearch="campus=all" />);
+  expect(screen.getByRole('link', { name: '選擇校園' }).getAttribute('href')).toBe('/community?campus=all');
+  expect(mocks.load).not.toHaveBeenCalled();
+});

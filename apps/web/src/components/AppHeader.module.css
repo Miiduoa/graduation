@@ -2,14 +2,15 @@
   position: relative;
   z-index: 30;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) minmax(100px, 180px) auto;
   grid-template-areas: 'brand navigation campus account';
   align-items: center;
-  gap: 20px;
+  gap: 18px;
   width: 100%;
+  min-height: 84px;
   max-width: var(--page-width);
   margin-inline: auto;
-  padding: 20px var(--page-padding-inline);
+  padding: 18px var(--page-padding-inline);
   border-bottom: 1px solid var(--border);
   color: var(--text);
   background: var(--bg);
@@ -19,8 +20,10 @@
   grid-area: brand;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   width: fit-content;
+  min-width: 44px;
   min-height: 44px;
   color: var(--text);
   text-decoration: none;
@@ -28,9 +31,9 @@
 }
 
 .wordmark {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
-  letter-spacing: -0.6px;
+  letter-spacing: -0.65px;
 }
 
 .mark {
@@ -41,7 +44,7 @@
   width: 28px;
   height: 28px;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 7px;
   line-height: 0;
 }
 
@@ -56,7 +59,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -68,50 +71,55 @@
   gap: 7px;
   min-width: 48px;
   min-height: 44px;
-  padding: 10px 11px;
-  border-radius: 7px;
+  padding: 10px 12px;
+  border-radius: 11px;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
   line-height: 20px;
   white-space: nowrap;
   text-decoration: none;
   transition:
-    background-color 160ms ease,
-    color 160ms ease;
-}
-
-.nav > a:active {
-  background: var(--panel);
-  color: var(--text);
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
 .nav > a > svg {
   flex-shrink: 0;
   width: 17px;
   height: 17px;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .nav > a[aria-current='page'] {
   color: var(--brand);
   background: var(--accent-soft);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .nav > a[aria-current='page']::after {
   content: '';
   position: absolute;
   bottom: 4px;
-  left: calc(50% - 7px);
-  width: 14px;
+  left: calc(50% - 6px);
+  width: 12px;
   height: 2px;
   border-radius: 1px;
   background: currentColor;
 }
 
+.nav > a:active {
+  color: var(--brand);
+  background: var(--panel2);
+}
+
+.nav > a:active > svg {
+  transform: scale(0.92);
+}
+
 .campus {
   grid-area: campus;
   min-width: 0;
-  max-width: 190px;
+  max-width: 180px;
 }
 
 .account {
@@ -119,67 +127,240 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-body-sm-size);
   line-height: 20px;
 }
 
 .account > a,
-.account > button {
+.account > button,
+.accountMenu > summary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
+  min-width: 44px;
   min-height: 44px;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--text);
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
   font: inherit;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease;
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
-.account > .quickSearch {
-  gap: 7px;
-  background: var(--panel);
+.account > .voiceTrigger {
+  color: var(--brand);
+}
+
+.account > .voiceTrigger[aria-expanded='true'],
+.accountMenu[open] > summary {
+  background: var(--accent-soft);
+  color: var(--brand);
   border-color: var(--border);
-  border-radius: 11px;
-  font-weight: 600;
 }
 
 .account > .login {
+  margin-inline-start: 4px;
+  padding-inline: 15px;
   border-color: var(--brand);
   background: var(--brand);
   color: var(--on-brand);
   font-weight: 600;
 }
 
-.account > .profileLink,
-.account > .operatorLink {
-  border-color: transparent;
-  background: transparent;
-  padding-inline: 4px;
-}
-
 .account > [role='status'] {
+  max-width: 82px;
+  margin-inline-start: 4px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.75rem;
+  line-height: 1.4;
 }
 
-.account > button:disabled {
+.accountMenu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.accountMenu > summary {
+  position: relative;
+  gap: 6px;
+  color: var(--text);
+  list-style: none;
+}
+
+.accountMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.accountMenu > summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin: -3px 1px 0 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.accountMenu[open] > summary::after {
+  transform: translateY(3px) rotate(225deg);
+}
+
+.retryIndicator {
+  position: absolute;
+  top: 7px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.accountPanel,
+.voicePanel {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow:
+    0 12px 36px color-mix(in srgb, var(--text) 8%, transparent),
+    var(--shadow-sm);
+  animation: panelEnter var(--motion-normal) var(--ease-out);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.accountPanel {
+  position: absolute;
+  z-index: 210;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 256px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 120px);
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.accountHeading,
+.voicePanelHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 0 6px 10px;
+  font-size: var(--font-body-sm-size);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.accountHeading > button,
+.voicePanelHeading > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.accountPanel > a,
+.accountPanel > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.accountPanel > a > svg:last-child {
+  margin-inline-start: auto;
+  color: var(--muted);
+}
+
+.accountPanel > .logout {
+  margin-top: 6px;
+  border-top-color: var(--border);
+  border-radius: 0 0 10px 10px;
+  color: var(--muted);
+}
+
+.accountStatus {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--muted);
+}
+
+.accountError {
+  margin: 6px 4px 4px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.accountPanel > button:disabled {
   opacity: 0.55;
   cursor: wait;
 }
 
-.header :is(a, button, summary):focus-visible {
+.voicePanel {
+  --voice-header-bottom: calc(84px + env(safe-area-inset-top, 0px));
+  position: fixed;
+  z-index: 90;
+  top: calc(var(--voice-header-bottom) + 8px);
+  right: max(16px, env(safe-area-inset-right, 0px));
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(660px, calc(100dvh - var(--voice-header-bottom) - 24px));
+  padding: 10px;
+  overflow-y: auto;
+  scroll-padding-block: 12px;
+}
+
+.voicePanel:focus {
+  outline: none;
+}
+
+.header :is(a, button, summary):focus-visible,
+.voicePanel :is(a, button, input):focus-visible {
   outline: 3px solid var(--focus-ring);
-  outline-offset: 3px;
+  outline-offset: 2px;
+  scroll-margin-block: 6px;
 }
 
 .error {
@@ -188,42 +369,56 @@
   padding: 12px var(--page-padding-inline);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--font-body-sm-size);
   line-height: 1.7;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .nav > a:hover {
+  .nav > a:hover,
+  .account > a:hover,
+  .account > button:not(:disabled):hover,
+  .accountMenu > summary:hover,
+  .accountPanel > a:hover,
+  .accountPanel > button:not(:disabled):hover,
+  .accountHeading > button:hover,
+  .voicePanelHeading > button:hover {
     color: var(--text);
     background: var(--panel);
   }
 
-  .account > a:hover,
-  .account > button:not(:disabled):hover {
-    border-color: var(--border-strong);
-    background: var(--panel);
+  .nav > a[aria-current='page']:hover {
+    color: var(--brand);
+    background: var(--accent-soft);
   }
 
   .account > .login:hover {
     border-color: var(--brand2);
     background: var(--brand2);
+    color: var(--on-brand);
   }
+}
+
+.account > button:active,
+.accountMenu > summary:active,
+.accountPanel > :is(a, button):active,
+.accountHeading > button:active,
+.voicePanelHeading > button:active {
+  background: var(--panel2);
 }
 
 @media (max-width: 1150px) {
   .header {
+    grid-template-columns: auto minmax(0, 1fr) minmax(100px, 150px) auto;
     gap: 12px;
   }
 
   .nav > a {
-    padding-inline: 9px;
+    padding-inline: 10px;
   }
 
-  .nav > a > svg {
-    display: none;
-  }
-
-  .account > .profileLink {
+  .nav > a > svg,
+  .voiceTrigger > span,
+  .quickSearch > span {
     display: none;
   }
 }
@@ -235,22 +430,23 @@
       'brand campus account'
       'navigation navigation navigation';
     gap: 10px 16px;
-    padding-block: 16px 10px;
+    padding-block: 14px 10px;
   }
 
   .campus {
     justify-self: end;
+    width: min(100%, 220px);
+    max-width: none;
   }
 
   .nav {
     justify-content: flex-start;
     gap: 8px;
-    border-top: 1px solid var(--border);
     padding-top: 8px;
+    border-top: 1px solid var(--border);
   }
 
   .nav > a {
-    gap: 7px;
     padding-inline: 16px;
   }
 
@@ -262,17 +458,18 @@
 @media (max-width: 760px) {
   .header {
     grid-template-areas: 'brand campus account';
-    gap: 10px;
-    padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px;
+    gap: 8px;
+    min-height: calc(68px + env(safe-area-inset-top, 0px));
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px;
   }
 
-  .wordmark {
+  .wordmark,
+  .accountMenu > summary > svg {
     display: none;
   }
 
   .campus {
     justify-self: start;
-    max-width: 100%;
     width: 100%;
   }
 
@@ -294,10 +491,10 @@
     align-items: stretch;
     gap: 4px;
     height: var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px)));
-    padding: 4px max(12px, env(safe-area-inset-right, 0px))
-      calc(4px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    padding: 6px max(12px, env(safe-area-inset-right, 0px))
+      calc(6px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
     border-top: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--surface);
   }
 
   .nav > a {
@@ -307,7 +504,7 @@
     min-height: 56px;
     height: 100%;
     padding: 5px 2px 7px;
-    border-radius: 9px;
+    border-radius: 13px;
     font-size: var(--font-label-size);
     line-height: 1.2;
     -webkit-tap-highlight-color: transparent;
@@ -322,12 +519,8 @@
     bottom: 3px;
   }
 
-  .nav > a:active {
-    background: var(--panel);
-  }
-
   .account {
-    gap: 6px;
+    gap: 2px;
   }
 
   .account > a,
@@ -335,145 +528,160 @@
     padding-inline: 10px;
   }
 
-  .account > .quickSearch {
-    min-width: 44px;
-    padding-inline: 10px;
+  .accountMenu > summary {
+    padding-inline: 8px;
+    gap: 4px;
   }
-  .quickSearch span {
-    display: none;
+
+  .account > .login {
+    margin-inline-start: 0;
   }
 
   .account > [role='status'] {
-    max-width: 65px;
-    font-size: 11px;
+    max-width: 64px;
+    font-size: 0.6875rem;
+  }
+
+  .accountPanel {
+    position: fixed;
+    top: calc(76px + env(safe-area-inset-top, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    max-height: calc(
+      100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 96px
+    );
+  }
+
+  .voicePanel {
+    --voice-header-bottom: calc(68px + env(safe-area-inset-top, 0px));
+    top: auto;
+    bottom: calc(var(--mobile-nav-offset, 72px) + 10px);
+    right: max(12px, env(safe-area-inset-right, 0px));
+    left: max(12px, env(safe-area-inset-left, 0px));
+    width: auto;
+    max-height: calc(100dvh - var(--mobile-nav-offset, 72px) - var(--voice-header-bottom) - 18px);
+    animation-name: panelEnterFromBottom;
   }
 }
 
-@media (max-width: 360px) {
-  .header {
-    padding-inline: 16px;
-    column-gap: 6px;
+@supports (backdrop-filter: blur(16px)) {
+  @media (max-width: 760px) {
+    .nav {
+      background: color-mix(in srgb, var(--surface) 94%, transparent);
+      backdrop-filter: blur(16px);
+    }
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .nav {
+    background: var(--surface);
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .nav > a[aria-current='page']:not(:focus-visible),
+  .accountMenu[open] > summary:not(:focus-visible),
+  .accountPanel,
+  .voicePanel {
+    outline: 1px solid currentColor;
+    outline-offset: -1px;
+  }
+}
+
+@media (forced-colors: active) {
+  .nav > a[aria-current='page']:not(:focus-visible) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 
-  .account {
-    font-size: 12px;
+  .nav,
+  .accountPanel,
+  .voicePanel {
+    border-color: CanvasText;
+    background: Canvas;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+
+@keyframes panelEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes panelEnterFromBottom {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+:global([data-reduced-motion='true']) .header *,
+:global([data-reduced-motion='true']) .header *::after,
+:global([data-reduced-motion='true']) .voicePanel,
+:global([data-reduced-motion='true']) .voicePanel * {
+  animation: none !important;
+  transition: none !important;
+}
+
+:global([data-reduced-motion='true']) .nav > a:active > svg {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header *,
+  .header *::after,
+  .voicePanel,
+  .voicePanel * {
+    animation: none !important;
+    transition: none !important;
   }
 
-  .account > a,
-  .account > button {
-    padding-inline: 7px;
+  .nav > a:active > svg {
+    transform: none;
   }
 }
 
 @media print {
-  .nav {
+  .nav,
+  .account,
+  .voicePanel {
     display: none;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .header * {
-    animation: none !important;
-    transition: none !important;
-  }
-}
+.voicePanel[hidden] { display: none; }
+.voicePanelHeading h2 { margin: 0; font: inherit; }
+.voicePanelHeading { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.voicePanelHeading > button { width: auto; min-width: 44px; flex-basis: auto; padding-inline: 10px; }
 
-.account > .voiceTrigger {
-  gap: 7px;
-  border-color: var(--brand);
-  background: var(--accent-soft);
-  color: var(--brand);
-  font-weight: 650;
-  border-radius: 11px;
-}
-.voicePanel {
-  position: fixed;
-  z-index: 90;
-  width: min(440px, calc(100vw - 28px));
-  max-height: min(660px, calc(100dvh - 115px));
-  overflow-y: auto;
-  top: 78px;
-  right: max(14px, env(safe-area-inset-right, 0px));
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 12px;
-  background: var(--bg);
-  box-shadow: 0 24px 70px color-mix(in srgb, var(--text) 17%, transparent);
-}
-.voicePanelHeading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 4px 12px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-}
-.voicePanelHeading button {
-  min-height: 40px;
-  padding: 7px 12px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  border-radius: 10px;
-  font: inherit;
-  cursor: pointer;
-}
-.voicePanel:focus { outline: none; }
-@media (max-width: 760px) {
-  .voiceTrigger span { display: none; }
-  .voicePanel {
-    top: auto;
-    bottom: calc(var(--mobile-nav-offset, 72px) + 10px);
-    right: 12px;
-    left: 12px;
-    width: auto;
-    max-height: calc(100dvh - var(--mobile-nav-offset, 72px) - 85px);
-  }
-}
 @media (max-width: 360px) {
-  .account > .voiceTrigger { min-width: 40px; padding-inline: 7px; }
-}
-
-.today .account > a,
-.today .account > button {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 6px;
-  font-weight: 500;
-}
-
-.today .account > .voiceTrigger,
-.today .account > .quickSearch {
-  min-width: 44px;
-  padding-inline: 10px;
-}
-
-.today .account > .login {
-  color: var(--brand);
-}
-
-.today .nav > a[aria-current='page'] {
-  background: transparent;
-}
-
-.today .nav > a[aria-current='page']::after {
-  display: none;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .today .account > a:hover,
-  .today .account > button:not(:disabled):hover {
-    color: var(--text);
-    background: var(--panel);
-    border-color: transparent;
+  .header {
+    grid-template-areas:
+      'brand campus campus'
+      'account account account';
+    row-gap: 8px;
   }
-}
-
-@media (max-width: 760px) {
-  .today .account {
-    gap: 0;
+  .campus {
+    min-width: 44px;
+  }
+  .account {
+    justify-self: stretch;
+    justify-content: flex-end;
+  }
+  .campus > details > div,
+  .accountPanel {
+    top: calc(var(--navigation-header-bottom, 128px) + 8px);
   }
 }
