@@ -136,13 +136,18 @@ function stripTrailingCategoryQualifiers(value: string): string {
   return unqualified;
 }
 
-/** Compare only exact non-building root categories, not substrings of
- * legitimate teaching-building labels such as "交通工程學院".
+/** Compare explicit non-building category roots, not substrings of legitimate
+ * building labels such as "交通工程學院". Importers may append descriptive
+ * qualifiers with punctuation instead of brackets (e.g. "公車站 / 校內").
+ * Only a complete root category before a separator may exclude a POI.
  */
 function isExplicitNonClassroomCategory(value: unknown): boolean {
   const category = comparisonText(value);
-  return NON_CLASSROOM_POI_CATEGORIES.has(category) ||
-    NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(category));
+  if (NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(category))) return true;
+  // Split only on standalone annotation separators. A bare ASCII hyphen
+  // within a code/name is not a delimiter; never infer identity from keywords.
+  const root = category.split(/(?:\s+-\s+|\s*[–—]\s*|[/:：／|｜·])/u, 1)[0]?.trim() ?? '';
+  return root !== category && NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(root));
 }
 
 /** Missing school scope is legacy/unscoped even when an importer writes
