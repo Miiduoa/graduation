@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
+import { subscribeCourseLocation } from '@/features/nuni/useCoursePanel';
+import { parseCourseWorkHash } from '@/lib/courseWorkLanding';
 import {
   CLASSROOM_ASSIGNMENT_LOADING,
   CLASSROOM_ASSIGNMENT_MISSING,
@@ -23,6 +25,8 @@ type FocusStatus = 'idle' | 'loading' | 'missing';
  */
 export function ClassroomDeepLinkFocus() {
   const params = useParams<{ workspaceId?: string }>();
+  // Next can navigate within this course without emitting a browser history event.
+  const search = useSearchParams().toString();
   const workspaceId =
     typeof params?.workspaceId === 'string' ? params.workspaceId : '';
   const [status, setStatus] = useState<FocusStatus>('idle');
@@ -31,6 +35,8 @@ export function ClassroomDeepLinkFocus() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let appliedRequest = '';
+    opened.current = '';
 
     const apply = () => {
       const { assignmentId, openSubmissions } = parseClassroomDeepLink(window.location.search);
@@ -38,10 +44,27 @@ export function ClassroomDeepLinkFocus() {
         ensureTeacherSubmissionLinks(document, workspaceId, window.location.search);
       }
       if (!assignmentId) {
+        appliedRequest = '';
+        opened.current = '';
         setStatus('idle');
         return;
       }
       const expectedHash = classroomAssignmentHash(assignmentId);
+      const request = `${window.location.pathname}${window.location.search}`;
+      const currentHash = window.location.hash;
+      const currentTarget = parseCourseWorkHash(currentHash);
+      // Explicit task links and a user's later fragment choice take precedence
+      // over a stale notification query. DOM updates may finish the requested
+      // landing, but must not navigate the user back after they have left it.
+      if (
+        (currentTarget && currentHash !== expectedHash) ||
+        (appliedRequest === request && currentHash !== expectedHash)
+      ) {
+        opened.current = '';
+        setStatus('idle');
+        return;
+      }
+      appliedRequest = request;
       if (window.location.hash !== expectedHash) {
         const url = new URL(window.location.href);
         url.hash = expectedHash.slice(1);
@@ -77,13 +100,13 @@ export function ClassroomDeepLinkFocus() {
     const panel = document.getElementById('panel-assignments');
     const observer = new MutationObserver(scheduleApply);
     observer.observe(panel ?? document.body, { childList: true, subtree: true });
-    window.addEventListener('popstate', scheduleApply);
+    const unsubscribeLocation = subscribeCourseLocation(scheduleApply);
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       observer.disconnect();
-      window.removeEventListener('popstate', scheduleApply);
+      unsubscribeLocation();
     };
-  }, [workspaceId]);
+  }, [workspaceId, search]);
 
   if (status === 'idle') return null;
   if (status === 'loading') {

@@ -9,13 +9,17 @@ export function ClubDirectory({
   uid,
   schoolId,
   onOpen,
+  onBrowseClub,
+  initialSegment = 'mine',
 }: {
   uid?: string;
   schoolId?: string;
   clubs: { groupId: string; name: string }[];
   onOpen: (groupId: string) => void;
+  onBrowseClub?: (groupId: string) => void;
+  initialSegment?: 'mine' | 'discover';
 }) {
-  const [segment, setSegment] = useState<'mine' | 'discover'>('mine');
+  const [segment, setSegment] = useState(initialSegment);
   const [search, setSearch] = useState('');
   const visible = clubs.filter((club) =>
     club.name.toLocaleLowerCase('zh-TW').includes(search.trim().toLocaleLowerCase('zh-TW')),
@@ -42,18 +46,18 @@ export function ClubDirectory({
         />
       </View>
       <TextInput
-        accessibilityLabel={segment === 'mine' ? '搜尋我的社團' : '搜尋學校社團'}
-        value={search}
-        onChangeText={setSearch}
-        placeholder="輸入社團名稱"
-        placeholderTextColor={theme.colors.muted}
-        style={{
-          color: theme.colors.text,
-          padding: 12,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          borderRadius: 8,
-        }}
+          accessibilityLabel={segment === 'mine' ? '搜尋我的社團' : '搜尋學校社團'}
+          value={search}
+          onChangeText={setSearch}
+          placeholder={segment === 'mine' ? '輸入社團名稱' : '搜尋名稱或類別'}
+          placeholderTextColor={theme.colors.muted}
+          style={{
+            color: theme.colors.text,
+            padding: 12,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            borderRadius: 8,
+          }}
       />
       {segment === 'discover' ? (
         uid && schoolId ? (
@@ -62,6 +66,7 @@ export function ClubDirectory({
             uid={uid}
             schoolId={schoolId}
             searchQuery={search}
+            onOpen={onBrowseClub}
           />
         ) : (
           <Text style={textStyle}>登入後查看學校社團。</Text>

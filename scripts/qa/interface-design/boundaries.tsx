@@ -104,6 +104,16 @@ export function useSelectedSchool() {
 }
 export const useOptionalSelectedSchool = useSelectedSchool;
 export const isFirebaseConfigured = () => false;
+// The full assistant is lazy-loaded by the header. Keep its infrastructure
+// imports available, but fail loudly if this isolated fixture attempts access.
+const unavailableFirebase = () => {
+  throw new Error('Firebase access is disabled in the interface fixture');
+};
+export const getAuth = unavailableFirebase;
+export const getDb = unavailableFirebase;
+export const getFunctionsInstance = unavailableFirebase;
+export const getCloudFunctionUrl = unavailableFirebase;
+export const fetchAssistantWritePermissions = unavailableFirebase;
 export const watchAccountNotifications = () => () => {};
 export const notificationDestination = () => null;
 export const usePersonalTodayRecords = () => {

@@ -765,6 +765,7 @@ test('a restaurant without dishes is still browsable and does not show a global 
   expect(view.queryByText('找不到符合的餐廳或餐點')).toBeNull();
   fireEvent.press(view.getByLabelText('查看校園餐廳甲的店家資訊'));
   expect(navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'Storefront',
     params: { cafeteriaId: 'venue-a' },
   });
@@ -823,6 +824,7 @@ test('expanded menus keep their storefront destination and reset when the school
   expect(view.getByText('第二道餐點')).toBeTruthy();
   fireEvent.press(view.getByLabelText('查看校園餐廳甲的店家資訊'));
   expect(navigate).toHaveBeenLastCalledWith('校園', {
+    initial: false,
     screen: 'Storefront',
     params: { cafeteriaId: 'venue-a' },
   });
@@ -843,6 +845,7 @@ test('expanded menus keep their storefront destination and reset when the school
   expect(view.getByText('另一道新校餐點')).toBeTruthy();
   fireEvent.press(view.getByLabelText('查看另一校的餐廳的店家資訊'));
   expect(navigate).toHaveBeenLastCalledWith('校園', {
+    initial: false,
     screen: 'Storefront',
     params: { cafeteriaId: 'new-venue' },
   });

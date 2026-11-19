@@ -1,308 +1,351 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppHeader } from './AppHeader';
 
 const state = vi.hoisted(() => ({
-  pathname: '/timetable',
-  search: 'schoolId=pu',
-  hash: '',
-  campus: 'schoolId=pu',
-  hydrated: true,
-  firebase: {
-    user: null as { uid: string } | null,
-    loading: false,
-    signOutUser: vi.fn(),
-  },
-  nuni: {
-    session: null as null | { platformAccountId: string; isPlatformOperator: boolean },
-    loading: false,
-    pendingLogout: false,
-    logout: vi.fn(),
-  },
+  pathname: '/library',
+  search: 'campus=pu',
+  schoolId: 'pu' as string | null,
+  campusLoading: false,
+  context: 'session-a' as string | null,
+  loading: false,
+  pendingLogout: false,
+  ask: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.search),
 }));
-vi.mock('@/lib/useClientHydrated', () => ({ useClientHydrated: () => state.hydrated }));
-vi.mock('@/lib/useLocationHash', () => ({ useLocationHash: () => state.hash }));
-vi.mock('@/lib/campusNavigation', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/campusNavigation')>()),
-  useCampusNavigationSearch: () => state.campus,
+vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
+vi.mock('./CampusServiceMenu', () => ({ CampusServiceMenu: () => null }));
+vi.mock('./AuthGuard', () => ({
+  useAuth: () => ({ user: null, loading: false, error: null, signOutUser: vi.fn() }),
 }));
-vi.mock('./AuthGuard', () => ({ useAuth: () => state.firebase }));
-vi.mock('@/features/nuni/Session', () => ({ useNuniSession: () => state.nuni }));
-vi.mock('./SchoolSelector', () => ({
-  SchoolSelector: () => (
-    <details name="campus-navigation-popover">
-      <summary>切換校園</summary>
-      <input aria-label="搜尋校園" />
-    </details>
-  ),
+vi.mock('./SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => ({
+    selectedSchool:
+      !state.campusLoading && state.schoolId ? { id: state.schoolId, name: state.schoolId } : null,
+    selectedSchoolId: state.campusLoading ? null : state.schoolId,
+    catalogStatus: 'ready',
+    loading: state.campusLoading,
+  }),
 }));
-vi.mock('./CampusServiceMenu', () => ({
-  CampusServiceMenu: () => (
-    <details name="campus-navigation-popover">
-      <summary>所有服務</summary>
-      <a href="/library">圖書館</a>
-    </details>
-  ),
+vi.mock('@/features/nuni/Session', () => {
+  const session = () => ({
+    session: state.context ? { context: state.context, platformAccountId: state.context } : null,
+    loading: state.loading,
+    error: null,
+    pendingLogout: state.pendingLogout,
+    logout: vi.fn(),
+  });
+  return { useNuniSession: session, useOptionalNuniSession: session };
+});
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => false,
 }));
-vi.mock('./QuickCampusEntry', () => ({
-  QuickCampusEntry: () => (
-    <div>
-      <label htmlFor="header-quick-input">想做什麼？</label>
-      <input id="header-quick-input" />
-      <a href="/library">查看圖書館</a>
-    </div>
-  ),
-}));
+vi.mock('@/features/nuni/Assistant', async () => {
+  const { VoiceDictationButton } = await import('./VoiceDictationButton');
+  return {
+    Conversation: ({
+      inlineDraft,
+    }: {
+      inlineDraft: { text: string; setText: (value: string) => void };
+    }) => (
+      <form
+        aria-label="傳送問題"
+        onSubmit={(event) => {
+          event.preventDefault();
+          state.ask(inlineDraft.text);
+        }}
+      >
+        <label>
+          問題
+          <textarea
+            value={inlineDraft.text}
+            onChange={(event) => inlineDraft.setText(event.target.value)}
+          />
+        </label>
+        <VoiceDictationButton onTranscript={inlineDraft.setText} />
+        <button type="submit">送出問題</button>
+      </form>
+    ),
+  };
+});
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  state.pathname = '/timetable';
-  state.search = 'schoolId=pu';
-  state.hash = '';
-  state.campus = 'schoolId=pu';
-  state.hydrated = true;
-  state.firebase.user = null;
-  state.firebase.loading = false;
-  state.firebase.signOutUser.mockResolvedValue(undefined);
-  state.nuni.session = null;
-  state.nuni.loading = false;
-  state.nuni.pendingLogout = false;
-  state.nuni.logout.mockResolvedValue(undefined);
+  state.pathname = '/library';
+  state.search = 'campus=pu';
+  state.schoolId = 'pu';
+  state.campusLoading = false;
+  state.context = 'session-a';
+  state.loading = false;
+  state.pendingLogout = false;
+  state.ask.mockReset();
+  window.history.replaceState({}, '', '/library?campus=pu');
+  Element.prototype.scrollIntoView = vi.fn();
+  sessionStorage.clear();
 });
 
-function openVoice() {
-  const trigger = screen.getByRole('button', { name: '開啟校園語音 AI' });
-  fireEvent.click(trigger);
-  return { trigger, panel: screen.getByRole('dialog', { name: '校園語音與 AI 快速操作' }) };
-}
+afterEach(() => vi.unstubAllGlobals());
 
-it('keeps account actions in one disclosure and removes privileged links while revalidating', () => {
-  state.nuni.session = { platformAccountId: 'operator', isPlatformOperator: true };
-  const view = render(<AppHeader />);
-  const disclosure = screen.getByLabelText('帳號').closest('details');
-  expect(disclosure?.open).toBe(false);
-  expect(screen.getByRole('link', { name: '我的帳號' }).closest('details')).toBe(disclosure);
-  expect(screen.getByRole('link', { name: '平台管理' }).closest('details')).toBe(disclosure);
-  fireEvent.click(screen.getByLabelText('帳號'));
-  expect(screen.getByRole('link', { name: '我的帳號' }).getAttribute('href')).toBe('/profile');
-  expect(screen.getByRole('link', { name: '平台管理' }).getAttribute('href')).toBe('/admin');
-  expect(screen.getByRole('button', { name: '登出' })).toBeTruthy();
-
-  state.nuni.loading = true;
-  view.rerender(<AppHeader />);
-  expect(screen.queryByRole('link', { name: '平台管理', hidden: true })).toBeNull();
-  expect(screen.queryByRole('link', { name: '我的帳號', hidden: true })).toBeNull();
-  expect(screen.getByRole('status').textContent).toContain('確認帳號中');
-  expect((screen.getByRole('button', { name: '登出' }) as HTMLButtonElement).disabled).toBe(true);
-});
-
-it('keeps failed sign-out actionable and retries a pending platform logout', async () => {
-  state.firebase.user = { uid: 'school-user' };
-  state.nuni.session = { platformAccountId: 'platform-user', isPlatformOperator: false };
-  state.nuni.logout.mockRejectedValueOnce(new Error('network unavailable'));
-  const view = render(<AppHeader />);
-  fireEvent.click(screen.getByLabelText('帳號'));
-  fireEvent.click(screen.getByRole('button', { name: '登出' }));
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', '登出失敗，請稍後重試。');
-  await waitFor(() => expect(screen.getByRole('alert').closest('details')?.open).toBe(true));
-  expect(state.firebase.signOutUser).toHaveBeenCalledOnce();
-  expect(state.nuni.logout).toHaveBeenCalledOnce();
-
-  state.firebase.user = null;
-  state.nuni.session = null;
-  state.nuni.pendingLogout = true;
-  view.rerender(<AppHeader />);
-  fireEvent.click(screen.getByLabelText('帳號，登出尚未完成'));
-  fireEvent.click(screen.getByRole('button', { name: '重試登出' }));
-  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-  expect(state.nuni.logout).toHaveBeenCalledTimes(2);
-  expect(state.firebase.signOutUser).toHaveBeenCalledOnce();
-});
-
-it('returns account focus on explicit close, and keeps the selected outside control focused', () => {
-  state.firebase.user = { uid: 'school-user' };
-  render(
-    <>
-      <AppHeader />
-      <button type="button">頁面操作</button>
-    </>,
-  );
-  const trigger = screen.getByLabelText('帳號');
-  fireEvent.click(trigger);
-  const close = screen.getByRole('button', { name: '關閉帳號選單' });
-  close.focus();
-  fireEvent.keyDown(close, { key: 'Escape' });
-  expect(trigger.closest('details')?.open).toBe(false);
-  expect(document.activeElement).toBe(trigger);
-
-  fireEvent.click(trigger);
-  const outside = screen.getByRole('button', { name: '頁面操作' });
-  act(() => outside.focus());
-  expect(trigger.closest('details')?.open).toBe(false);
-  expect(document.activeElement).toBe(outside);
-});
-
-it('opens a nonmodal voice panel and restores focus on Escape without cancelling IME composition', () => {
-  render(<AppHeader />);
-  const { trigger, panel } = openVoice();
-  expect(document.activeElement).toBe(panel);
-  expect(trigger.getAttribute('aria-expanded')).toBe('true');
-  expect(trigger.getAttribute('aria-controls')).toBe(panel.id);
-  const input = screen.getByLabelText('想做什麼？');
-  input.focus();
-  fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
-  expect(screen.getByRole('dialog')).toBe(panel);
-  fireEvent.keyDown(input, { key: 'Escape' });
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(document.activeElement).toBe(trigger);
-  expect(trigger.getAttribute('aria-expanded')).toBe('false');
-});
-
-it('dismisses voice on outside pointer or keyboard focus without moving focus back', () => {
-  render(
-    <>
-      <AppHeader />
-      <button type="button">繼續頁面操作</button>
-    </>,
-  );
-  openVoice();
-  const outside = screen.getByRole('button', { name: '繼續頁面操作' });
-  fireEvent.pointerDown(outside);
-  expect(screen.queryByRole('dialog')).toBeNull();
-  act(() => outside.focus());
-  expect(document.activeElement).toBe(outside);
-
-  openVoice();
-  act(() => outside.focus());
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(document.activeElement).toBe(outside);
-});
-
-it('keeps the measured header inset available to menus and voice without changing focus', () => {
-  let onResize: (() => void) | undefined;
-  const observe = vi.fn();
-  const disconnect = vi.fn();
+it('opens the actual account conversation without a search detour, recording, or automatic submission', async () => {
+  const start = vi.fn();
+  const abort = vi.fn();
   vi.stubGlobal(
-    'ResizeObserver',
+    'SpeechRecognition',
     class {
-      constructor(callback: () => void) {
-        onResize = callback;
-      }
-      observe = observe;
-      disconnect = disconnect;
+      start = start;
+      abort = abort;
+    },
+  );
+  render(<AppHeader />);
+  expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  await waitFor(() => expect(document.activeElement).toBe(field));
+  expect(window.location.pathname + window.location.search).toBe('/library?campus=pu');
+  expect(screen.queryByRole('searchbox')).toBeNull();
+  expect(start).not.toHaveBeenCalled();
+  expect(state.ask).not.toHaveBeenCalled();
+
+  fireEvent.change(field, { target: { value: '幫我確認借書後的讀書安排' } });
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  expect(start).toHaveBeenCalledOnce();
+  fireEvent.keyDown(field, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(abort).toHaveBeenCalledOnce();
+
+  fireEvent.click(trigger);
+  const resumed = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  expect(resumed.value).toBe('幫我確認借書後的讀書安排');
+  expect(start).toHaveBeenCalledOnce();
+  expect(state.ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '送出問題' }));
+  expect(state.ask).toHaveBeenCalledExactlyOnceWith('幫我確認借書後的讀書安排');
+});
+
+it('resumes a login-return assistant only after the account is ready, and respects closing it', async () => {
+  const start = vi.fn();
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
+    },
+  );
+  state.loading = true;
+  window.history.replaceState({}, '', '/library?campus=pu#campus-assistant-entry');
+  const view = render(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  state.loading = false;
+  view.rerender(<AppHeader />);
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  await waitFor(() => expect(document.activeElement).toBe(field));
+  expect(screen.getByRole('dialog', { name: '校園助理' })).toBeTruthy();
+  expect(start).not.toHaveBeenCalled();
+  expect(state.ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '關閉校園助理' }));
+  expect(window.location.hash).toBe('');
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('keeps a requested assistant open while the first campus resolves without offering a temporary input', async () => {
+  state.pathname = '/life';
+  state.search = '';
+  state.schoolId = null;
+  state.campusLoading = true;
+  window.history.replaceState({}, '', '/life');
+  const start = vi.fn();
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
     },
   );
   const view = render(<AppHeader />);
-  const navigation = screen.getByRole('banner');
-  let bottom = 68;
-  const geometry = vi
-    .spyOn(navigation, 'getBoundingClientRect')
-    .mockImplementation(() => ({ bottom }) as DOMRect);
-  try {
-    fireEvent(window, new Event('resize'));
-    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('68px');
-    const { panel } = openVoice();
-    expect(observe).toHaveBeenCalledWith(navigation);
-    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('68px');
-    const input = screen.getByLabelText('想做什麼？');
-    act(() => input.focus());
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const panel = screen.getByRole('dialog', { name: '校園助理' });
+  await screen.findByText('正在確認瀏覽校園…');
+  expect(screen.queryByRole('searchbox')).toBeNull();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(screen.queryByRole('button', { name: '使用語音輸入' })).toBeNull();
 
-    bottom = 112;
-    act(() => onResize?.());
-    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('112px');
-    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('112px');
-    expect(document.activeElement).toBe(input);
+  state.campusLoading = false;
+  state.schoolId = 'pu';
+  view.rerender(<AppHeader />);
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  expect(screen.getByRole('dialog', { name: '校園助理' })).toBe(panel);
+  await waitFor(() => expect(document.activeElement).toBe(field));
+  expect(start).not.toHaveBeenCalled();
+  expect(state.ask).not.toHaveBeenCalled();
 
-    bottom = 88;
-    fireEvent(window, new Event('resize'));
-    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('88px');
-    bottom = -32;
-    fireEvent(window, new Event('scroll'));
-    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('0px');
-    expect(document.activeElement).toBe(input);
-
-    fireEvent.keyDown(input, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).toBeNull();
-    bottom = 96;
-    fireEvent(window, new Event('resize'));
-    fireEvent(window, new Event('scroll'));
-    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('96px');
-    expect(panel.style.getPropertyValue('--voice-header-bottom')).toBe('0px');
-
-    const disconnectsBeforeUnmount = disconnect.mock.calls.length;
-    view.unmount();
-    expect(disconnect).toHaveBeenCalledTimes(disconnectsBeforeUnmount + 1);
-    bottom = 120;
-    fireEvent(window, new Event('resize'));
-    fireEvent(window, new Event('scroll'));
-    expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('96px');
-  } finally {
-    view.unmount();
-    geometry.mockRestore();
-    vi.unstubAllGlobals();
-  }
+  fireEvent.change(field, { target: { value: '已確認校園的問題' } });
+  state.schoolId = 'nthu';
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByDisplayValue('已確認校園的問題')).toBeNull();
 });
 
-it.each(['pathname', 'search', 'hash', 'campus'] as const)(
-  'closes voice when %s changes and does not reopen it when returning',
-  (key) => {
+it.each(['account', 'route'] as const)(
+  'does not carry an unresolved campus opening across a different %s',
+  async (changed) => {
+    state.search = '';
+    state.schoolId = null;
+    state.campusLoading = true;
     const view = render(<AppHeader />);
-    openVoice();
-    const original = state[key];
-    state[key] = key === 'pathname' ? '/library' : 'changed';
+    fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+    await screen.findByText('正在確認瀏覽校園…');
+    if (changed === 'account') state.context = 'session-b';
+    else state.pathname = '/calendar';
+    view.rerender(<AppHeader />);
+    state.campusLoading = false;
+    state.schoolId = 'pu';
     view.rerender(<AppHeader />);
     expect(screen.queryByRole('dialog')).toBeNull();
-    state[key] = original;
-    view.rerender(<AppHeader />);
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(state.ask).not.toHaveBeenCalled();
   },
 );
 
-it('closes both disclosures when the signed-in account changes', () => {
-  state.nuni.session = { platformAccountId: 'account-a', isPlatformOperator: false };
+it('does not reopen or move focus after the pending campus assistant was closed', async () => {
+  state.search = '';
+  state.schoolId = null;
+  state.campusLoading = true;
   const view = render(<AppHeader />);
-  fireEvent.click(screen.getByLabelText('帳號'));
-  state.nuni.session = { platformAccountId: 'account-b', isPlatformOperator: false };
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  await screen.findByText('正在確認瀏覽校園…');
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  state.campusLoading = false;
+  state.schoolId = 'pu';
   view.rerender(<AppHeader />);
-  expect(screen.getByLabelText('帳號').closest('details')?.open).toBe(false);
-  openVoice();
-  state.nuni.session = { platformAccountId: 'account-c', isPlatformOperator: false };
+  await act(async () => {});
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(state.ask).not.toHaveBeenCalled();
+});
+
+it('does not treat a confirmed all-campus selection as an unresolved campus', async () => {
+  state.search = 'campus=all';
+  state.schoolId = null;
+  const view = render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const field = await screen.findByRole('searchbox');
+  fireEvent.change(field, { target: { value: '不限校園的搜尋' } });
+  state.schoolId = 'pu';
   view.rerender(<AppHeader />);
   expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByDisplayValue('不限校園的搜尋')).toBeNull();
 });
 
-it('closes an existing navigation disclosure before opening the voice panel', () => {
-  render(<AppHeader />);
-  const school = screen.getByText('切換校園').closest('details')!;
-  school.open = true;
-  openVoice();
-  expect(school.open).toBe(false);
+it('does not revive a confirmed campus conversation after that campus reloads', async () => {
+  const view = render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  fireEvent.change(field, { target: { value: '重新確認校園前的問題' } });
+  state.campusLoading = true;
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  state.campusLoading = false;
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  expect((await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' })).value).toBe(
+    '',
+  );
+  expect(state.ask).not.toHaveBeenCalled();
 });
 
-it('closes voice when another navigation disclosure opens', async () => {
-  render(<AppHeader />);
-  openVoice();
-  const services = screen.getByText('所有服務').closest('details')!;
-  act(() => {
-    services.open = true;
-    fireEvent(services, new Event('toggle'));
-  });
+it('keeps keyboard focus on the page when the first campus resolves after the user moved away', async () => {
+  state.search = '';
+  state.schoolId = null;
+  state.campusLoading = true;
+  const content = () => (
+    <>
+      <button type="button">繼續編輯</button>
+      <AppHeader />
+    </>
+  );
+  const view = render(content());
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByText('正在確認瀏覽校園…');
+  const edit = screen.getByRole('button', { name: '繼續編輯' });
+  edit.focus();
+  state.campusLoading = false;
+  state.schoolId = 'pu';
+  view.rerender(content());
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(services.open).toBe(true);
+  expect(document.activeElement).toBe(edit);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByRole('textbox', { name: '問題' });
 });
 
-it('keeps the Today shortcut in the existing assistant and closes other navigation popovers', () => {
-  const onOpenVoice = vi.fn();
-  render(<AppHeader onOpenVoice={onOpenVoice} />);
-  const services = screen.getByText('所有服務').closest('details')!;
-  services.open = true;
-  fireEvent.click(screen.getByRole('button', { name: '開啟校園語音 AI' }));
-  expect(onOpenVoice).toHaveBeenCalledOnce();
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(services.open).toBe(false);
+it.each(['account', 'campus', 'route'] as const)(
+  'discards the old assistant surface when the %s changes',
+  async (changed) => {
+    const view = render(<AppHeader />);
+    fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+    const field = await screen.findByRole('textbox', { name: '問題' });
+    fireEvent.change(field, { target: { value: '前一個身分的未送出問題' } });
+    if (changed === 'account') state.context = 'session-b';
+    if (changed === 'campus') state.schoolId = 'nthu';
+    if (changed === 'route') {
+      state.pathname = '/calendar';
+      window.history.replaceState({}, '', '/calendar?campus=pu');
+    }
+    view.rerender(<AppHeader />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByDisplayValue('前一個身分的未送出問題')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+    expect((await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' })).value).toBe(
+      '',
+    );
+    expect(state.ask).not.toHaveBeenCalled();
+  },
+);
+
+it('does not take focus from the current page when an assistant finishes loading late', async () => {
+  state.loading = true;
+  const content = () => (
+    <>
+      <button type="button">繼續編輯</button>
+      <AppHeader />
+    </>
+  );
+  const view = render(content());
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByText('正在確認登入狀態…');
+  const edit = screen.getByRole('button', { name: '繼續編輯' });
+  edit.focus();
+  state.loading = false;
+  view.rerender(content());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(document.activeElement).toBe(edit);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  await screen.findByRole('textbox', { name: '問題' });
+});
+
+it('preserves the current service, filters and campus in the guest assistant login return', async () => {
+  state.context = null;
+  state.pathname = '/life';
+  state.search = 'campus=pu&group=travel&q=公車';
+  window.history.replaceState({}, '', '/life?campus=pu&group=travel&q=%E5%85%AC%E8%BB%8A');
+  render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const login = await screen.findByRole('link', { name: '登入後，接著詢問校園助理' });
+  const url = new URL(login.getAttribute('href')!, window.location.origin);
+  const destination = new URL(url.searchParams.get('returnUrl')!, window.location.origin);
+  expect(destination.pathname).toBe('/life');
+  expect(destination.hash).toBe('#campus-assistant-entry');
+  expect(destination.searchParams.get('group')).toBe('travel');
+  expect(destination.searchParams.get('q')).toBe('公車');
+  expect(destination.searchParams.get('schoolId')).toBe('pu');
+  expect(destination.searchParams.get('campus')).toBe('pu');
+  expect(url.searchParams.get('schoolId')).toBe('pu');
 });
