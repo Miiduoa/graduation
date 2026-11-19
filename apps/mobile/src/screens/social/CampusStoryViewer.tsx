@@ -177,11 +177,13 @@ function StorySlide({
   const playbackActive = playing && !inspecting && !replying;
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
+  const [imageRetry, setImageRetry] = useState(0);
   const mediaUrl = usePrivateMedia(story.mediaUrl);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
   const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
-  const ready = !hasImage || loadedImage === story.id || imageFailed;
+  // An image error must not start the next-story timer before the student can retry.
+  const ready = !hasImage || (loadedImage === story.id && !imageFailed);
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
@@ -305,19 +307,36 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={story.id}
+              key={JSON.stringify([story.id, imageRetry])}
               source={{ uri: mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
               onLoad={() => setLoadedImage(story.id)}
-              onError={() => setFailedImage(story.id)}
+              onError={() => {
+                setLoadedImage('');
+                setFailedImage(story.id);
+              }}
             />
           ) : (
             <ScrollView key={story.id} contentContainerStyle={styles.centerText}>
               <Text style={styles.storyText}>
                 {imageFailed ? '照片暫時無法顯示' : story.text || '（無內容）'}
               </Text>
+              {hasImage && failedImage === story.id && !!mediaUrl && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新載入照片"
+                  style={[styles.step, styles.photoRetry]}
+                  onPress={() => {
+                    setLoadedImage('');
+                    setFailedImage('');
+                    setImageRetry((count) => count + 1);
+                  }}
+                >
+                  <Text style={styles.stepText}>重新載入照片</Text>
+                </Pressable>
+              )}
             </ScrollView>
           )}
           <Pressable
@@ -566,6 +585,7 @@ const styles = StyleSheet.create({
   sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
+  photoRetry: { alignSelf: 'center', marginTop: 16 },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
     color: 'white',

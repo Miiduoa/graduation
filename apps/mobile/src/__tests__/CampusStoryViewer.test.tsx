@@ -83,6 +83,49 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+
+  test('keeps a failed photo visible and retries it before resuming autoplay', () => {
+    const expiresAt = Date.now() + 100_000;
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'photo',
+            kind: 'image',
+            createdAt: 1,
+            mediaUrl: 'https://example.com/photo-fails-once.jpg',
+            text: '社團活動照片',
+            expiresAt,
+          },
+          { ...common, id: 'next', createdAt: 2, text: '下一則限時動態', expiresAt },
+        ]}
+      />,
+    );
+
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('自動播放'));
+    fireEvent(view.getByLabelText('限時動態照片'), 'error');
+    expect(view.getByText('照片暫時無法顯示')).toBeTruthy();
+    expect(view.getByLabelText('重新載入照片')).toBeTruthy();
+
+    // A failed image must not silently advance while the student is trying to recover.
+    act(() => jest.advanceTimersByTime(10_000));
+    expect(view.getByText('照片暫時無法顯示')).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText('重新載入照片'));
+    const retry = view.getByLabelText('限時動態照片');
+    expect(retry.props.source.uri).toBe('https://example.com/photo-fails-once.jpg');
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.getByLabelText('限時動態照片')).toBeTruthy();
+    fireEvent(retry, 'load');
+    act(() => jest.advanceTimersByTime(6_999));
+    expect(view.getByLabelText('限時動態照片')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(1));
+    expect(view.getByText('下一則限時動態')).toBeTruthy();
+    view.unmount();
+  });
+
   test('a muted clip uses the native end event rather than the photo timer and keeps its caption', () => {
     const expiresAt = Date.now() + 100_000;
     const view = render(
