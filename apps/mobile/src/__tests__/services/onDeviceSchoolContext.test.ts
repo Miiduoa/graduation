@@ -934,6 +934,52 @@ test('accessor-backed source envelopes cannot replace authorized student evidenc
   expect(courseReads).toBe(0);
 });
 
+test('untrusted array slice overrides cannot substitute another account\'s verified student evidence', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const courses = [...local.timetable.courses];
+  const assignments = [{ title: '本人原作業', groupName: '資料庫', dueAt: null,
+    source: { kind: 'group-assignment' as const, groupId: 'alice_group', assignmentId: 'alice_task' },
+  }];
+  const announcements = [{ title: '本人原公告', publishedAt: null }];
+  const spoofSlice = <T>(rows: T[], otherAccountRows: T[]) => {
+    const override = jest.fn(() => otherAccountRows);
+    Object.defineProperty(rows, 'slice', { configurable: true, value: override });
+    return override;
+  };
+  const courseSlice = spoofSlice(courses, [{ name: '其他帳號私有課程', day: 1, start: 2, end: 3 }]);
+  const assignmentSlice = spoofSlice(assignments, [
+    { title: '其他帳號私有作業', groupName: '資料庫', dueAt: null,
+      source: { kind: 'group-assignment' as const, groupId: 'bob_group', assignmentId: 'bob_task' } },
+  ]);
+  const announcementSlice = spoofSlice(announcements, [
+    { title: '其他帳號私有公告', publishedAt: null },
+  ]);
+  const campus: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1, items: assignments,
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: announcements },
+  };
+  const prompt = formatOnDeviceSchoolPrompt({
+    ...local, timetable: { ...local.timetable, courses },
+  }, campus, 'alice');
+  expect(prompt).toContain('資料庫概論');
+  expect(prompt).toContain('本人原作業');
+  // Source identity must survive the excerpt step: this is evidence for the
+  // original assignment destination, never a model-invented URL or another account's ID.
+  expect(prompt).toContain('"assignmentId":"alice_task"');
+  expect(prompt).not.toContain('"assignmentId":"bob_task"');
+  expect(prompt).toContain('本人原公告');
+  expect(prompt).not.toContain('其他帳號私有');
+  expect(courseSlice).not.toHaveBeenCalled();
+  expect(assignmentSlice).not.toHaveBeenCalled();
+  expect(announcementSlice).not.toHaveBeenCalled();
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
