@@ -184,17 +184,21 @@ const VERIFIED_CLASSROOM_BUILDING_CODES = [
  * Allow its own sourced name and explicitly verified bilingual code aliases;
  * other schools and unsourced records retain the existing matching behavior.
  */
-function sourcedBuildingLabel(school: string, published: CampusMapPlaceLike | undefined, building: unknown): unknown {
-  if (!published || !comparisonText(building)) return building;
-  const label = comparisonText(building);
-  if (label === comparisonText(published.name)) return building;
-  const verifiedAlias = VERIFIED_CLASSROOM_BUILDING_CODES.some(
+function isSourcedBuildingLabel(school: string, published: CampusMapPlaceLike, suppliedLabel: unknown): boolean {
+  const label = comparisonText(suppliedLabel);
+  if (!label) return false;
+  if (label === comparisonText(published.name)) return true;
+  return VERIFIED_CLASSROOM_BUILDING_CODES.some(
     (entry) =>
       entry.schoolId === school &&
       entry.buildingNames.some((name) => comparisonText(name) === comparisonText(published.name)) &&
       entry.buildingNames.some((name) => comparisonText(name) === label),
   );
-  return verifiedAlias ? building : undefined;
+}
+
+function sourcedBuildingLabel(school: string, published: CampusMapPlaceLike | undefined, building: unknown): unknown {
+  if (!published || !comparisonText(building)) return building;
+  return isSourcedBuildingLabel(school, published, building) ? building : undefined;
 }
 
 // A verified code may be followed by either a room (PH303) or an explicitly
@@ -269,15 +273,17 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       return false;
     if ('schoolId' in location && location.schoolId !== school) return false;
     // Recheck the existing sourced identity rather than trusting a reused ID.
-    // The shared attribution helper checks name and position; do not invent
-    // a building location when an imported catalog row has drifted.
+    // Classroom identity accepts normalized names and verified bilingual aliases.
+    // Once the supplied name is verified, use the catalog name for attribution's
+    // exact-name check while preserving its coordinate check and the original POI.
     const published = school === 'pu' ? PUBLISHED_PROVIDENCE_PLACES.get(location.id) : undefined;
     if (
       published &&
       // Source identity and source category are both necessary: a matching
       // ID/name/coordinate does not make a restaurant a classroom building.
       (isExplicitNonClassroomCategory(published.category) ||
-        !providencePlaceSourceUrl(school, location))
+        !isSourcedBuildingLabel(school, published, location.name) ||
+        !providencePlaceSourceUrl(school, { ...location, name: published.name }))
     ) return false;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.

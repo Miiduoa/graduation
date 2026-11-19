@@ -287,6 +287,45 @@ describe('published stop identity survives missing imported metadata', () => {
 describe('published building identity cannot drift into a classroom destination', () => {
   const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
 
+  it.each(['Providence Hall', '  PROVIDENCE HALL  ', 'Ｐｒｏｖｉｄｅｎｃｅ Ｈａｌｌ'])('preserves the published ID with verified English name %s', (name) => {
+    expect(sourcedHall).toBeDefined();
+    // Synthetic bilingual import variant; coordinates remain the catalog's
+    // building point, not a surveyed classroom or indoor destination.
+    const imported = { ...sourcedHall!, name };
+    for (const query of ['PH303', 'Providence Hall 303']) {
+      const result = resolveCampusClassroom({ schoolId: 'pu', query, locations: [imported] });
+      expect(result.status, query).toBe('matched');
+      expect(result.matches, query).toEqual([imported]);
+      expect(result.matches[0]).toBe(imported);
+    }
+    const withChineseLabel = { ...imported, building: '主顧樓' };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: '主顧樓303', locations: [withChineseLabel],
+    }).matches).toEqual([withChineseLabel]);
+  });
+
+  it('keeps identity, category, transit and duplicate safeguards for an English-named published building', () => {
+    expect(sourcedHall).toBeDefined();
+    const imported = { ...sourcedHall!, name: 'Providence Hall' };
+    const invalidVariants = [
+      { ...imported, lat: imported.lat + 0.007 },
+      { ...imported, name: 'Unverified Hall', building: 'Providence Hall' },
+      { ...imported, category: '公車站' },
+      { ...imported, transitStopIds: ['synthetic-stop'] },
+    ];
+    for (const invalid of invalidVariants) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [invalid],
+      }).status).toBe('unmatched');
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [imported, sourcedHall!],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: '無關建築303', locations: [{ ...imported, building: '無關建築' }],
+    }).status).toBe('unmatched');
+  });
+
   it('rejects a moved known building ID rather than routing PH303 to a different point', () => {
     expect(sourcedHall?.sourceUrl).toBe('https://www.openstreetmap.org/way/255784268');
     // Only the changed coordinate is synthetic; it is NOT a surveyed location.
