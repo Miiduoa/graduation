@@ -35,12 +35,13 @@ const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 // The 3D overlay is scoped to the *filtered* map. When the view contains
 // only transit stops (official transit feed), OSM nodes or other non-outline
 // POIs, downloading every campus building wastes bandwidth on mobile.
-// Include relation IDs for future reviewed relation support, without
-// claiming that each way/relation has passed the building geometry parser.
+// Only audited OSM ways can become 3D volumes today. A relation-only POI
+// still has its own map marker/source link, but must not trigger an unusable
+// whole-campus Overpass download until relation geometries are implemented.
 const POTENTIAL_OUTLINE_POI_IDS = new Set(
   PROVIDENCE_CAMPUS_PLACES
     .filter((place) => place.verification === 'cross-checked' &&
-      /^https:\/\/www\.openstreetmap\.org\/(?:way|relation)\/[1-9]\d*$/.test(place.sourceUrl))
+      /^https:\/\/www\.openstreetmap\.org\/way\/[1-9]\d*$/.test(place.sourceUrl))
     .map((place) => place.id),
 );
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
@@ -454,9 +455,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // ID at different coordinates, under a new name or with a new category.
   // Skip the whole-campus download unless a *visible* marker still matches
   // the bundled OSM provenance identity used by visibleFootprints below.
-  const hasOutlineCandidate = school === 'pu' &&
-    model.points.some((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id) &&
-      providencePlaceSourceUrl(school, point.location) !== null);
+  const auditedWayCandidateCount = school === 'pu'
+    ? model.points.filter((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id) &&
+      providencePlaceSourceUrl(school, point.location) !== null).length
+    : 0;
+  const hasOutlineCandidate = auditedWayCandidateCount > 0;
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
@@ -1026,6 +1029,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {hasOutlineCandidate && footprintStatus === 'ready' && (
                   <>
                     <strong role="status">{visibleFootprints.length} 棟公開建築輪廓</strong>
+                    {auditedWayCandidateCount > visibleFootprints.length && <span>
+                      目前範圍另有 {auditedWayCandidateCount - visibleFootprints.length} 筆清單中的 OSM 建築 way 未取得可顯示的有效外框；不代表建築不存在，也不代表已驗證入口。
+                    </span>}
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
