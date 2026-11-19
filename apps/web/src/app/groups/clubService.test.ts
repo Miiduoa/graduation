@@ -1,6 +1,6 @@
 import { getDocFromServer, getDocsFromServer } from 'firebase/firestore';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { callClub, loadClubView } from './clubService';
+import { callClub, loadClubView, clubRoleLabel } from './clubService';
 const { user, auth } = vi.hoisted(() => {
   const user = { uid: 'one', getIdToken: vi.fn() };
   return { user, auth: { currentUser: user as typeof user | null } };
@@ -102,4 +102,10 @@ test('後備直接查詢失去讀權時仍拒絕，不回傳舊名單', async ()
   vi.mocked(getDocFromServer).mockRejectedValue(new Error('permission-denied'));
   await expect(loadClubView('one', 'school', 'club')).rejects.toThrow('permission-denied');
   expect(getDocsFromServer).not.toHaveBeenCalled();
+});
+
+test('舊版會長與 owner 身分統一顯示社長', () => {
+  expect(clubRoleLabel('owner')).toBe('社長');
+  expect(clubRoleLabel('會長')).toBe('社長');
+  expect(clubRoleLabel('社長')).toBe('社長');
 });

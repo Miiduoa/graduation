@@ -74,7 +74,7 @@ test('所選校的課程、住宿、諮商、職涯入口皆屬於同一校', ()
 });
 
 test('有校方課程查詢或說明頁時，只開放該校已核實的功能', () => {
-  for (const id of ['ncnu', 'ncue', 'ncut', 'ncyu', 'ndhu', 'nfu', 'nuk', 'nuu']) {
+  for (const id of ['ncue', 'ncut', 'ncyu', 'ndhu', 'nfu', 'nuk', 'nuu']) {
     const { url, label } = resolveOfficialCourseQueryLink(id);
     const { protocol, hostname } = new URL(url);
     assert.equal(protocol, 'https:');
@@ -86,4 +86,9 @@ test('有校方課程查詢或說明頁時，只開放該校已核實的功能',
     assert.equal(resolveSchoolPublicServices(id), null);
     assert.equal(resolveOfficialCourseQueryLink(id), null);
   }
+});
+
+test('暨南大學公開課程目錄有獨立的校內查詢入口', () => {
+  assert.equal(hasIntegratedCourseCatalog('ncnu'), true);
+  assert.equal(new URL(resolveOfficialCourseQueryLink('ncnu').url).hostname, 'ccweb6.ncnu.edu.tw');
 });

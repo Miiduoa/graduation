@@ -1,10 +1,12 @@
 import { addDays, clip, eventArgs, taipeiDate, type Obj } from './contracts';
 import { eventInterval } from './actions';
+import { parseAssistantCourseworkTargets } from '../../assistantCoursework';
 
 export type DirectRead = {
   kind: 'schedule' | 'next-class' | 'calendar' | 'due-work';
   tool: 'get_schedule' | 'get_calendar' | 'get_due_work';
   args: { from: string; to: string };
+  taskKind?: 'assignment' | 'quiz';
 };
 
 
@@ -42,7 +44,7 @@ function hasOnlySupportedReadTerms(text: string): boolean {
 
 /** Only unambiguous information requests get automatic, read-only retrieval. */
 export function directReads(question: string, now: number): DirectRead[] {
-  if (question.length > 1000 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(question)) return [];
+  if (question.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return [];
   const text = question.normalize('NFKC').trim();
   if (
     /[「」『』“”"'`]|不要|不用|不必|無須|不需要|不想|不是要|先別|別幫|翻譯|這句話|假設|如果|例如|範例|曾經|之前|昨天|前天/.test(text) ||
@@ -83,7 +85,8 @@ export function directReads(question: string, now: number): DirectRead[] {
     // "今天還有哪些沒交" asks what remains, not only what is due today.
     // A named future date or an explicit due-today question narrows the range.
     const dueOnDay = dates.length > 0 || /明天|明日|後天|後日/.test(text) || /(?:今天|今日).{0,8}(?:要交|截止|到期)|(?:截止|到期).{0,4}(?:今天|今日)/.test(text);
-    reads.push({ kind: 'due-work', tool: 'get_due_work', args: { from: day, to: dueOnDay ? day : addDays(day, 6) } });
+    reads.push({ kind: 'due-work', tool: 'get_due_work',
+      ...(/作業/.test(text) !== /測驗/.test(text) ? { taskKind: /測驗/.test(text) ? 'quiz' as const : 'assignment' as const } : {}), args: { from: day, to: dueOnDay ? day : addDays(day, 6) } });
   }
   return reads;
 }
@@ -92,7 +95,7 @@ type Evidence = { tool: string; result: unknown };
 const row = (v: unknown): Obj => v && typeof v === 'object' && !Array.isArray(v) ? v as Obj : {};
 const rows = (v: unknown): Obj[] => Array.isArray(v) ? v.map(row) : [];
 const label = (v: unknown, fallback = '未提供') => typeof v === 'string' && v.trim()
-  ? clip(v.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ').trim(), 240) : fallback;
+  ? clip(v.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ').trim(), 240) : fallback;
 const validClock = (v: unknown): v is string => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 function dayLabel(day: string, now: number): string {
   const today = taipeiDate(now);
@@ -107,6 +110,21 @@ function resultFor(read: DirectRead, evidence: Evidence[]): Obj | undefined {
   if (!found) return;
   const wrapped = row(found.result);
   return wrapped.data && typeof wrapped.data === 'object' ? row(wrapped.data) : wrapped;
+}
+
+/** Only this request's actual reader result may supply a selectable source. */
+export function directReadCourseworkTargets(reads: DirectRead[], evidence: Evidence[], now: number) {
+  const read = reads.find((item) => item.kind === 'due-work');
+  const result = read && resultFor(read, evidence);
+  if (!read || !result) return [];
+  const pending = rows(result.pending).filter((entry) => entry.submitted === false &&
+    entry.state === 'open' && (!read.taskKind || entry.kind === read.taskKind) &&
+    (entry.kind === 'assignment' || entry.kind === 'quiz') &&
+    typeof entry.dueAt === 'string' && Date.parse(entry.dueAt) > now);
+  return parseAssistantCourseworkTargets(pending.slice(0, 12).map((entry) => ({
+    workspaceId: entry.courseId, taskId: entry.id, kind: entry.kind,
+    title: label(entry.title), courseTitle: label(entry.courseTitle, '課程作業'), dueAt: entry.dueAt,
+  })));
 }
 
 /** Facts are rendered from this request's authenticated tool results, not model prose. */
@@ -127,14 +145,14 @@ export function directReadAnswer(reads: DirectRead[], evidence: Evidence[], now:
         .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
       const selected = read.kind === 'next-class'
         ? classes.filter((entry) => Date.parse(entry.date + 'T' + entry.startTime + ':00+08:00') >
-          (read.args.from === taipeiDate(now) ? now : Date.parse(read.args.from + 'T00:00:00+08:00') - 1)).slice(0, 1)
+          Math.max(now, Date.parse(read.args.from + 'T00:00:00+08:00') - 1)).slice(0, 1)
         : classes.slice(0, 20);
       const lines = [read.kind === 'next-class' ? '已同步課表中的下一堂課：' : day + '的已同步課表：'];
       for (const entry of selected) lines.push('- ' + (read.kind === 'next-class' ? dayLabel(String(entry.date), now) + ' ' : '') +
         entry.startTime + '–' + entry.endTime + '　' + label(entry.title) + '｜' + label(entry.location));
       if (!selected.length) lines.push(read.kind === 'next-class'
         ? (read.args.from === read.args.to ? day : '接下來七日') + '的已同步資料中，沒有找到下一堂課。'
-        : '這一天沒有已同步且能定位時間的課程紀錄。');
+        : '已同步課表中，這一天沒有能定位時間的課程紀錄。');
       if (classes.length > 20 && read.kind === 'schedule') lines.push('共 ' + classes.length + ' 堂，先列出前 20 堂。');
       if (typeof result.unplaced === 'number' && result.unplaced > 0)
         lines.push('另有 ' + result.unplaced + ' 筆課表缺少可定位的日期或節次，未計入結果。');
@@ -175,23 +193,29 @@ export function directReadAnswer(reads: DirectRead[], evidence: Evidence[], now:
       sections.push(lines.join('\n'));
       continue;
     }
-    const pending = rows(result.pending).filter((entry) => entry.submitted === false && entry.state === 'open');
-    const undated = rows(result.undated).filter((entry) => entry.submitted === false && entry.state === 'open');
-    const overdue = rows(result.overdue).filter((entry) => entry.submitted === false);
-    const period = read.args.from === read.args.to ? day : read.args.from + ' 至 ' + read.args.to;
-    const lines = [period + '的待繳作業／測驗：'];
+    const matchesKind = (entry: Obj) => !read.taskKind || entry.kind === read.taskKind;
+    const unknownKinds = read.taskKind ? [...rows(result.pending), ...rows(result.undated), ...rows(result.overdue)]
+      .filter((entry) => entry.kind !== 'assignment' && entry.kind !== 'quiz').length : 0;
+    const pending = rows(result.pending).filter((entry) => entry.submitted === false && entry.state === 'open' && matchesKind(entry));
+    const undated = rows(result.undated).filter((entry) => entry.submitted === false && entry.state === 'open' && matchesKind(entry));
+    const overdue = rows(result.overdue).filter((entry) => entry.submitted === false && matchesKind(entry));
+    const period = read.args.from + ' 至 ' + read.args.to;
+    const lines = [period + '的待繳' + (read.taskKind === 'assignment' ? '作業' : read.taskKind === 'quiz' ? '測驗' : '作業與測驗') + '：'];
     for (const entry of pending.slice(0, 20)) lines.push('- ' + label(entry.title) +
       (entry.kind === 'quiz' ? '（測驗）' : '') + '｜截止 ' + timeLabel(entry.dueAt));
-    if (!pending.length) lines.push('目前成功讀取的課程資料中，沒有列出這段期間尚未到期的待繳項目。');
+    if (!pending.length) lines.push(result.partial === true || unknownKinds
+      ? '已讀取的部分尚未讀到符合的待繳項目，其餘仍待確認。'
+      : '目前成功讀取的課程資料中，沒有列出這段期間尚未到期的待繳項目。');
     if (pending.length > 20) lines.push('共 ' + pending.length + ' 筆，先列出前 20 筆。');
     if (overdue.length) lines.push('同一查詢期間內已逾期且未交：\n' + overdue.slice(0, 10)
       .map((entry) => '- ' + label(entry.title) + '｜原截止 ' + timeLabel(entry.dueAt)).join('\n'));
     if (overdue.length > 10) lines.push('另有 ' + (overdue.length - 10) + ' 筆同期間逾期項目未列出。');
-    if (undated.length) lines.push('尚未提供截止時間：\n' + undated.slice(0, 10).map((entry) => '- ' + label(entry.title)).join('\n'));
+    if (undated.length) lines.push('尚未提供截止時間，無法判定是否屬於上述截止日期範圍：\n' + undated.slice(0, 10).map((entry) => '- ' + label(entry.title) + '｜未設定截止時間').join('\n'));
+    if (unknownKinds) lines.push('另有 ' + unknownKinds + ' 筆項目未標示作業或測驗類型，未納入上述清單。');
     if (undated.length > 10) lines.push('另有 ' + (undated.length - 10) + ' 筆未定期限項目未列出。');
     if (result.partial === true) {
       const missing = rows(result.unqueried).map((entry) => label(entry.title, '')).filter(Boolean);
-      lines.push('仍有課程未完成查詢' + (missing.length ? '：' + missing.slice(0, 8).join('、') : '') + '，以上不是完整清單。');
+      lines.push('部分課程未能讀取；仍有課程未完成查詢' + (missing.length ? '：' + missing.slice(0, 8).join('、') : '') + '，以上不是完整清單。');
     }
     lines.push('來源：目前可讀取的課程作業與測驗，時間為台灣時間；未連接的課程不包含在內。');
     sections.push(lines.join('\n'));

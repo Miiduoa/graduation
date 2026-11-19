@@ -181,7 +181,7 @@ function writeCheck(evidence: Evidence, start: number, context: AssistantCalenda
 
 /** Suggestions are read-only, bounded to today plus six days, and never inferred from a blank day. */
 export async function findCourseworkStudySlots(context: AssistantCalendarContext, dueAt: string,
-  options: { signal?: AbortSignal } = {}): Promise<CourseworkStudySlots> {
+  options: { signal?: AbortSignal; date?: string } = {}): Promise<CourseworkStudySlots> {
   try {
     const deadline = Date.parse(dueAt);
     if (!Number.isFinite(deadline) || deadline <= Date.now())
@@ -189,10 +189,16 @@ export async function findCourseworkStudySlots(context: AssistantCalendarContext
     const evidence = await readEvidence(context, options.signal);
     const now = Date.now();
     const midnight = Date.parse(`${classDate(new Date(now))}T00:00:00+08:00`);
-    const windowEnd = Math.min(midnight + 7 * DAY, deadline);
+    const requestedDay = options.date === undefined ? undefined
+      : typeof options.date === 'string' && isPersonalImportDate(options.date)
+        ? Date.parse(`${options.date}T00:00:00+08:00`) : NaN;
+    if (requestedDay !== undefined && (!Number.isFinite(requestedDay) || requestedDay < midnight || requestedDay >= midnight + 7 * DAY)) {
+      return { kind: 'blocked', message: '指定日期已過或超出今天起七天的查詢範圍，請重新指定準備日期。' };
+    }
+    const windowEnd = Math.min(requestedDay === undefined ? midnight + 7 * DAY : requestedDay + DAY, deadline);
     const slots: CourseworkStudySlot[] = [];
     let incomplete = false;
-    for (let day = midnight; day < windowEnd && slots.length < 3; day += DAY) {
+    for (let day = requestedDay ?? midnight; day < windowEnd && slots.length < 3; day += DAY) {
       const date = classDate(new Date(day));
       const gaps = freeWindows(evidence, date);
       if (gaps === null) { incomplete = true; continue; }
@@ -209,7 +215,7 @@ export async function findCourseworkStudySlots(context: AssistantCalendarContext
     }
     if (options.signal?.aborted || !sameGeneration(evidence.generation, context)) return { kind: 'blocked', message: CHANGED };
     if (!slots.length) return incomplete ? { kind: 'unavailable', message: UNAVAILABLE }
-      : { kind: 'no-slot', message: '今天起七天內、作業截止前，已存課表的課間空堂沒有足夠的 30 分鐘。可自行核對後手動輸入其他時段。' };
+      : { kind: 'no-slot', message: `${options.date ? `${options.date}、` : '今天起七天內、'}作業截止前，已存課表的課間空堂沒有足夠的 30 分鐘。可自行核對後手動輸入其他時段。` };
     return { kind: 'available', slots: Object.freeze(slots), checkedAt: evidence.checkedAt,
       message: '找到可供核對的 30 分鐘準備時段。請選擇一個，再確認建立；尚未保留或保存時段。' };
   } catch (error) { return failure(error); }

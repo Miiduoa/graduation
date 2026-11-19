@@ -1,8 +1,24 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { informationKinds } from './information';
+import { studyGuardForTask } from './courseworkStudy';
 import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
+import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskPlan';
+import { parseAssistantPublicCourseResults, type AssistantPublicCourseResult } from '@campus/shared/src/assistantPublicCourseResults';
+import { parsePublicCourseArguments, publicCourseArguments, publicCourseSearches, taskQuestionOutsidePublicCourses } from './publicCourses';
+import { parsePublicCampusRead, parsePublicCampusResult, type PublicCampusRead } from './publicCampus';
+import { CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, publicEventCalendarSourceIntent } from './publicCampusSelection';
+import { lostFoundListInput, parseLostFoundRead, parseLostFoundResult } from './lostFound';
+import { parseCampusMapArguments, parseCampusMapResult } from './campusMap';
+import { parseCampusMapCommand } from './campusMapRequest';
+import { parsePublicSocialArguments, parsePublicSocialResult } from './publicSocial';
+import { parseSchoolInfoArguments, parseSchoolInfoResult, readSchoolInfo } from './schoolInfo';
+import { connectedServiceClauses, connectedServiceRead, connectedServiceReads, publicPostSourceReferenced } from './connectedServiceReads';
+import { isRoleWorkspaceTool, parseRoleWorkspaceResult } from './roleWorkspaceReads';
+import { parseTeachingArguments } from './teacherWorkspace';
 import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
+import { assistantRoleToolAllowed, getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -11,6 +27,7 @@ import { buildPersonalToday } from '@campus/shared/src/imports/today';
 import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './actions';
 import {
   addDays,
+  assistantPermissionRecovery,
   bounded,
   bytes,
   canonical,
@@ -19,12 +36,17 @@ import {
   eventArgs,
   fail,
   id,
+  isSessionInvalidation,
   object,
+  proposalPermission,
+  requireAssistantPermission,
   taipeiDate,
   text,
   type Adapter,
+  type AssistantPermissionKey,
   type Binding,
   type Card,
+  type EventArgs,
   type Ledger,
   type Obj,
   type Task,
@@ -41,6 +63,28 @@ const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  get_teaching_overview: [{ limit: { type: 'integer', minimum: 1, maximum: 3 } }, []],
+  get_merchant_overview: [{}, []],
+  get_public_social: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_school_info: [{ field: { enum: ['overview', 'address', 'phone', 'website'] } }, []],
+  get_campus_announcements: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_campus_events: [{ limit: { type: 'integer', minimum: 1, maximum: 5 } }, []],
+  get_campus_map: [{ query: { type: 'string', minLength: 1, maxLength: 120 },
+    limit: { type: 'integer', minimum: 1, maximum: 5 } }, ['query']],
+  get_lost_found: [{
+    q: { type: 'string', minLength: 1, maxLength: 100 },
+    type: { enum: ['lost', 'found'] },
+    category: { enum: ['electronics', 'cards', 'documents', 'wallet', 'clothing', 'accessories', 'books', 'keys', 'other'] },
+    status: { enum: ['open', 'resolved', 'all'] },
+    mine: { type: 'boolean' },
+    limit: { type: 'integer', minimum: 1, maximum: 5 },
+  }, []],
+  get_public_courses: [
+    { schoolId: { enum: ['nthu', 'ncnu'] }, query: { type: 'string', maxLength: 80 },
+      weekday: { type: 'integer', minimum: 1, maximum: 7 },
+      credits: { type: 'number', minimum: 0, maximum: 40 } },
+    ['schoolId', 'query'],
+  ],
   list_campus_services: [
     {
       serviceId: { enum: ASSISTANT_SERVICES.map((service) => service.id) },
@@ -408,7 +452,7 @@ function clockRanges(text: string): { from: string; to: string }[] {
 const PERIODS: [RegExp, string, string][] = [
   [/上午|早上|早晨|今早|明早/, '08:00', '12:00'],
   [/中午/, '11:00', '13:00'],
-  [/晚上|今晚|今夜/, '18:00', '22:00'],
+  [/晚上|晚間|今晚|今夜|明晚/, '18:00', '22:00'],
   [/下午/, '13:00', '18:00'],
 ];
 export function studyWindow(question: string, answer = ''): { from: string; to: string } {
@@ -431,12 +475,35 @@ export function studyWindow(question: string, answer = ''): { from: string; to: 
 export const toolNames = Object.keys(definitions);
 // One executable reader/proposal per explicitly requested domain takes precedence
 // over optional context and secondary tools when the eight-tool budget is full.
-function requestedToolDomains(question: string, simulation: boolean): [string, string][] {
+function requestedToolDomains(question: string, simulation: boolean, schoolId = ''): [string, string][] {
+  const connected = connectedServiceReads(question);
+  const roleReads = connected.filter(read => isRoleWorkspaceTool(read.tool));
+  if (roleReads.length) {
+    const remaining = connectedServiceClauses(question).filter(clause =>
+      !isRoleWorkspaceTool(connectedServiceRead(clause)?.tool || '')).join('，');
+    return [...roleReads.map(read => [read.label, read.tool] as [string, string]),
+      ...(remaining ? requestedToolDomains(remaining, simulation, schoolId) : [])];
+  }
+  const campusMap = parseCampusMapCommand(question);
+  if (campusMap) return campusMap.kind === 'next-class'
+    ? [['課表／行程', 'get_schedule'], ['校園位置', 'get_campus_map']] : [['校園位置', 'get_campus_map']];
+  const lostFound = parseLostFoundRead(question);
+  if (lostFound) return [['失物招領', lostFound.tool]];
+  const publicCampus = parsePublicCampusRead(question);
+  if (publicCampus) return [[publicCampus.kind === 'announcements' ? '學生公告' : '公開活動', publicCampus.tool]];
+  const other = taskQuestionOutsidePublicCourses(question, schoolId);
+  if (other !== question) {
+    const domains: [string, string][] = publicCourseSearches(question, schoolId).length
+      ? [['公開開課', 'get_public_courses']] : [];
+    return [...domains, ...requestedToolDomains(other, simulation, schoolId)];
+  }
   const domains: [string, string][] = [];
   const add = (requested: boolean, label: string, tool: string) => {
     if (requested) domains.push([label, tool]);
   };
+  for (const read of connected) add(true, read.label, read.tool);
   add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(informationKinds(question).includes('orders'), '訂單進度', 'list_food_orders');
   add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
   add(/教材/.test(question), '教材', 'get_materials');
   add(/社團/.test(question), '社團', 'list_clubs');
@@ -447,7 +514,9 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
   const campusLookup = question.length <= 1000 &&
     !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(question) &&
     !/[「」『』“”"'`]|不要|不用|不必|無須|不需要|不想|不是要|先別|別幫|翻譯|這句話|假設|如果|昨天|前天|剛才|之前|曾經|以前/.test(campusQuestion);
-  add(campusLookup && /圖書館|怎麼走|地圖|公告|活動/.test(campusQuestion), '校園資訊', 'get_campus_info');
+  add(campusLookup && /圖書館|怎麼走|地圖/.test(campusQuestion), '校園資訊', 'get_campus_info');
+  add(campusLookup && /公告/.test(campusQuestion) && !/開啟|打開|前往|進入/.test(campusQuestion), '學生公告', 'get_campus_announcements');
+  add(campusLookup && /活動/.test(campusQuestion) && !/開啟|打開|前往|進入|報名/.test(campusQuestion), '公開活動', 'get_campus_events');
   add(foodOrderIntent(question) || /點餐|菜單|便當/.test(question), '點餐',
     /再點|跟上次一樣/.test(question) ? 'reorder_last_food_order' : 'get_food_menu');
   add(/吃|中午|餐廳/.test(question) && !foodOrderIntent(question), '餐廳', 'get_dining');
@@ -464,7 +533,7 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
 }
 // Call only after execution, with successful (including cached) tool steps.
 // Selection alone does not establish coverage; preludes can cover unselected tools.
-export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[]): string {
+export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[], schoolId = ''): string {
   const completed = new Set(completedNames);
   // A successful day overview also reads due work and the schedule.
   if (completed.has('get_day_overview')) {
@@ -472,15 +541,49 @@ export function toolSelectionNotice(question: string, simulation: boolean, compl
     completed.add('get_schedule');
   }
   if (completed.has('get_course_work')) completed.add('get_due_work');
-  const deferred = requestedToolDomains(question, simulation)
+  const deferred = requestedToolDomains(question, simulation, schoolId)
     .filter(([, tool]) => !completed.has(tool)).map(([label]) => label);
   return deferred.length
     ? '本輪尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
     : '';
 }
-export function selectTools(question: string, simulation: boolean): string[] {
+export function selectTools(question: string, simulation: boolean, schoolId = ''): string[] {
+  const connected = connectedServiceReads(question);
+  const roleReads = connected.filter(read => isRoleWorkspaceTool(read.tool));
+  if (roleReads.length) {
+    const remaining = connectedServiceClauses(question).filter(clause =>
+      !isRoleWorkspaceTool(connectedServiceRead(clause)?.tool || '')).join('，');
+    const other = remaining ? selectTools(remaining, simulation, schoolId)
+      .filter(name => !['get_today_context', 'propose_open_page'].includes(name)) : [];
+    return [...new Set([...roleReads.map(read => read.tool), ...other])].slice(0, 8);
+  }
+  const campusMap = parseCampusMapCommand(question);
+  if (campusMap) return campusMap.kind === 'next-class'
+    ? ['get_schedule', 'get_campus_map'] : ['get_campus_map'];
+  const lostFound = parseLostFoundRead(question);
+  if (lostFound) return [lostFound.tool];
+  const publicCampus = parsePublicCampusRead(question);
+  if (publicCampus) return [publicCampus.tool];
+  const other = taskQuestionOutsidePublicCourses(question, schoolId);
+  if (other !== question) {
+    const names = selectTools(other, simulation, schoolId)
+      .filter(name => name !== 'get_today_context' && name !== 'propose_open_page');
+    const publicNames = publicCourseSearches(question, schoolId).length ? ['get_public_courses'] : [];
+    return [...new Set([...publicNames, ...names])].slice(0, 8);
+  }
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  if (connected.length) {
+    out.delete('get_today_context');
+    out.delete('propose_open_page');
+    add(...connected.map(read => read.tool));
+  }
+  const information = informationKinds(question);
+  // A shortcut card cannot satisfy a request for facts already available to readers.
+  if (information.length || personalSlotSelect(question)) out.delete('propose_open_page');
+  if (information.includes('schedule')) add('get_schedule');
+  if (information.includes('work')) add('get_due_work');
+  if (information.includes('orders')) add('list_food_orders', 'get_food_order');
   // School grades stay on campus readers; imported records need an explicit local source.
   if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
   if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
@@ -516,7 +619,13 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/社團/.test(question)) add('list_clubs', 'get_club_feed');
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
+  if (/公告/.test(question) && !/開啟|打開|前往|進入/.test(question)) add('get_campus_announcements');
+  if (/活動/.test(question) && !/開啟|打開|前往|進入|報名/.test(question)) add('get_campus_events');
   if (/通知/.test(question) && simulation) add('get_notifications');
+  if (information.length && !foodOrderIntent(question) && !scheduleIntent(question) && !personalSlotSelect(question)) {
+    out.delete('propose_personal_event');
+    out.delete('propose_study_plan');
+  }
   // Prioritize the requested domain, retaining proposals for planning questions.
   if (foodOrderIntent(question)) {
     out.delete('get_today_context');
@@ -552,9 +661,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'find_free_time',
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
-    ];
+      ...connected.map(read => read.tool),
+    ].slice(0, 8);
   if (names.length <= 8) return names;
-  const primary = requestedToolDomains(question, simulation)
+  const primary = requestedToolDomains(question, simulation, schoolId)
     .map(([, tool]) => tool).filter((tool) => names.includes(tool));
   return [...new Set([...primary, ...names])].slice(0, 8);
 }
@@ -578,6 +688,11 @@ export function validateTool(name: string, raw: unknown): Obj {
   const [props, required] = definitions[name];
   const a = object(raw, Object.keys(props));
   if (required.some((k) => a[k] === undefined)) return fail();
+  if (name === 'get_teaching_overview') return { ...parseTeachingArguments(a) };
+  if (name === 'get_public_courses') return publicCourseArguments(parsePublicCourseArguments(a));
+  if (name === 'get_campus_map') return { ...parseCampusMapArguments(a) };
+  if (name === 'get_public_social') return { ...parsePublicSocialArguments(a) };
+  if (name === 'get_school_info') return { ...parseSchoolInfoArguments(a) };
   if (name === 'propose_food_order') return { ...cartArgs(a) };
   for (const [key, value] of Object.entries(a)) {
     const spec = props[key] as Obj;
@@ -662,7 +777,8 @@ export function schedule(ledger: Ledger, from: string, to: string) {
         end: c.endAt,
       });
   }
-  return { classes: result, unplaced, source: 'personal-imports', updatedAt: ledger.updatedAt };
+  return { classes: result, unplaced, hasTimetableSource: ledger.records.some(record => record.kind === 'timetable'),
+    source: 'personal-imports', updatedAt: ledger.updatedAt };
 }
 export function calendar(ledger: Ledger, from: string, to: string) {
   return ledger.records
@@ -712,6 +828,28 @@ export function freeTime(ledger: Ledger, args: Obj, notBefore = -Infinity) {
   append(cursor, end);
   return { slots, source: 'personal-imports', coverage: '僅已同步資料，未同步裝置資料不包含在內' };
 }
+/** Shared interval policy for model proposals and exact form-based revisions. */
+export function validateEventProposal(
+  ledger: Ledger, raw: unknown, priorEvents: readonly EventArgs[], now: number, requireFuture: boolean,
+): EventArgs {
+  const event = eventArgs(raw), [start, end] = eventInterval(event);
+  if (requireFuture && (event.allDay ? end <= now : start < now))
+    return fail('EVENT_START_PASSED', 409);
+  const classes = schedule(ledger, event.date, event.endDate || event.date);
+  if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
+  if (
+    classes.classes.some(row => row.start < end && start < row.end) ||
+    priorEvents.some(previous => {
+      const [a, b] = eventInterval(previous);
+      return a < end && start < b;
+    }) ||
+    calendar(ledger, addDays(event.date, -31), event.endDate || event.date).some(row => {
+      const [a, b] = eventInterval(eventArgs(row));
+      return a < end && start < b;
+    })
+  ) return fail('EVENT_CONFLICT', 409);
+  return event;
+}
 export function createTools(
   adapter: Adapter,
   binding: Binding,
@@ -720,7 +858,22 @@ export function createTools(
   writes: boolean,
   reorder = false,
   question = '',
+  exactEventArguments = false,
+  // Signed read-only retries retain the original query for provenance without
+  // reactivating its completed write intent or time normalization.
+  readRequestQuestion = question,
+  // Only a verified read-retry signature can supply this target. Never model or HTTP input.
+  merchantRetryTarget?: { tenantId: string; locationId: string },
+  taskProfile?: AssistantRoleProfileId,
 ) {
+  // Preserve the profile argument used on main and the signed retry provenance
+  // used by this branch. Profile IDs are fixed application values, never roles.
+  const positionalProfile = getAssistantRoleProfile(readRequestQuestion);
+  if (!taskProfile && positionalProfile) {
+    taskProfile = positionalProfile.id;
+    readRequestQuestion = question;
+  }
+  const executionQuestion = taskQuestionOutsidePublicCourses(question, binding.schoolId);
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
   let courses: Promise<{ id: string; title: string }[]> | undefined;
@@ -728,9 +881,33 @@ export function createTools(
   const workCache = new Map<string, Promise<Task[]>>();
   let realms: Promise<{ tenantId: string; schoolId?: string }[]> | undefined;
   const tasks = new Map<string, Task>();
+  const ambiguousTaskIds = new Set<string>();
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  const publicCourseResults: AssistantPublicCourseResult[] = [];
+  const sourceEventRequested = publicEventCalendarSourceIntent(executionQuestion, now);
+  const sourcePostActionRequested = publicPostSourceReferenced(executionQuestion, now);
+  let publicEventReadAttempted = false;
+  let publicEventRead: PublicCampusRead | undefined;
+  let publicEventReadGeneration = 0;
+  const requiresEventSelection = () => sourceEventRequested || publicEventReadAttempted;
+  async function requirePermission(key: AssistantPermissionKey) {
+    try {
+      await requireAssistantPermission(adapter, key);
+      operationSignal()?.throwIfAborted();
+    } catch (error) {
+      // Repeated calls cannot reuse an earlier card after its grant was revoked.
+      for (let i = cards.length - 1; i >= 0; i--) {
+        if (proposalPermission(cards[i].tool) === key) cards.splice(i, 1);
+      }
+      for (const cached of cache.keys()) {
+        const name = cached.slice(0, cached.indexOf('{'));
+        if (proposalPermission(name) === key) cache.delete(cached);
+      }
+      throw error;
+    }
+  }
   let proposalSeq: string | undefined;
   const sequence = () => (proposalSeq ||= beginProposal(binding, now));
   const diningIds = new Set<string>();
@@ -771,7 +948,11 @@ export function createTools(
   async function work(courseId: string) {
     if (!workCache.has(courseId)) workCache.set(courseId, adapter.work(courseId));
     const found = await workCache.get(courseId)!;
-    found.forEach((t) => tasks.set(t.id, t));
+    found.forEach((t) => {
+      const previous = tasks.get(t.id);
+      if (previous && (previous.courseId !== t.courseId || previous.kind !== t.kind)) ambiguousTaskIds.add(t.id);
+      tasks.set(t.id, t);
+    });
     return found;
   }
   async function dueWork(a: Obj) {
@@ -780,7 +961,7 @@ export function createTools(
     if (to < from || Date.parse(to) - Date.parse(from) > 30 * 86400000) return fail();
     const list = await getCourses();
     const unqueried: { id: string; title: string; reason: string }[] = [];
-    const found: Task[] = [];
+    const found: (Task & { courseTitle: string })[] = [];
     // Reserve whole assignment/quiz pairs before starting parallel work.
     let remaining = adapter.remainingApiCalls?.() ?? 12;
     const selected = list.filter((c) => {
@@ -800,10 +981,10 @@ export function createTools(
               (child) => withOperationSignal(child, () => work(c.id)),
               operationSignal() || new AbortController().signal,
               3000,
-            )),
+            )).map((task) => ({ ...task, courseTitle: c.title })),
           );
         } catch (e) {
-          if ((e as { status?: number }).status === 401) throw e;
+          if (isSessionInvalidation(e)) throw e;
           unqueried.push({ ...c, reason: (e as { code?: string }).code || 'UNAVAILABLE' });
         }
       }),
@@ -827,37 +1008,24 @@ export function createTools(
       source: 'class-workspaces',
     };
   }
-  async function propose(raw: Obj) {
+  async function propose(raw: Obj, studyTask?: Task, requestQuestion = executionQuestion) {
+    if (!studyTask && requiresEventSelection()) return fail('CAMPUS_EVENT_SELECTION_REQUIRED', 409);
     if (!writes)
       return {
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
-    const explicit = parseAssistantCalendarIntent(question, now);
-    if (typeof raw.title === 'string' && /^寫/.test(raw.title) &&
+    const explicit = parseAssistantCalendarIntent(requestQuestion, now);
+    if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title) &&
       !(explicit?.kind === 'draft' && raw.title === explicit.event.title))
       raw = { ...raw, title: studyTitle(raw.title) };
-    const l = await getLedger(),
-      e = eventArgs(raw),
-      [start, end] = eventInterval(e);
-    if (scheduleIntent(question) && (e.allDay ? end <= now : start < now))
-      return fail('EVENT_START_PASSED', 409);
-    const classes = schedule(l, e.date, e.endDate || e.date);
-    if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
-    if (
-      classes.classes.some((c) => c.start < end && start < c.end) ||
-      cards.some((c) => {
-        if (c.tool !== 'propose_personal_event') return false;
-        const [a, b] = eventInterval(eventArgs(c.args));
-        return a < end && start < b;
-      }) ||
-      calendar(l, addDays(e.date, -31), e.endDate || e.date).some((c) => {
-        const [a, b] = eventInterval(eventArgs(c));
-        return a < end && start < b;
-      })
-    )
-      return fail('EVENT_CONFLICT', 409);
+    const l = await getLedger();
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
+    validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(executionQuestion));
+    await requirePermission('createPersonalEvent');
+    // A concurrent/late public lookup cannot turn these model-supplied fields
+    // into a source-bound event while ledger or permission reads were pending.
+    if (!studyTask && requiresEventSelection()) return fail('CAMPUS_EVENT_SELECTION_REQUIRED', 409);
     const card = signCard(
       binding,
       'propose_personal_event',
@@ -867,13 +1035,73 @@ export function createTools(
       now,
       sequence(),
       priorEvents.at(-1),
+      studyTask ? studyGuardForTask(studyTask, 'study') : undefined,
     );
     cards.push(card);
     return { proposed: true, ...raw, requiresConfirmation: true };
   }
-  async function dispatch(name: string, raw: unknown): Promise<unknown> {
+  async function dispatch(name: string, raw: unknown, requestQuestion = executionQuestion): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_teaching_overview':
+      case 'get_merchant_overview': {
+        if (!connectedServiceReads(readRequestQuestion).some(read =>
+          read.tool === name && canonical(read.args) === canonical(a)))
+          return fail('ROLE_READ_QUERY_MISMATCH');
+        if (name === 'get_teaching_overview') {
+          if (!adapter.teachingOverview) return fail('TEACHING_UNAVAILABLE', 503);
+          return parseRoleWorkspaceResult(name, await adapter.teachingOverview(a), binding.schoolId, a);
+        }
+        if (!adapter.merchantOverview) return fail('MERCHANT_UNAVAILABLE', 503);
+        const result = parseRoleWorkspaceResult(name,
+          await adapter.merchantOverview(a, merchantRetryTarget), binding.schoolId, a, merchantRetryTarget);
+        // Adapter implementations, including fixtures, cannot return another store on retry.
+        if (merchantRetryTarget && (!('selected' in result) || !result.selected ||
+          result.selected.tenantId !== merchantRetryTarget.tenantId ||
+          result.selected.locationId !== merchantRetryTarget.locationId)) return fail('FORBIDDEN_SCOPE', 403);
+        return result;
+      }
+      case 'get_public_social':
+      case 'get_school_info': {
+        const requested = connectedServiceReads(readRequestQuestion);
+        if (!requested.some(read => read.tool === name && canonical(read.args) === canonical(a)))
+          return fail('PUBLIC_READ_QUERY_MISMATCH');
+        if (name === 'get_school_info') return parseSchoolInfoResult(readSchoolInfo(binding.schoolId, a, now), binding.schoolId, a);
+        if (!adapter.publicSocial) return fail('PUBLIC_SOCIAL_UNAVAILABLE', 503);
+        return parsePublicSocialResult(await adapter.publicSocial(a), binding.schoolId, a);
+      }
+      case 'get_campus_map': {
+        const args = parseCampusMapArguments(a);
+        if (!adapter.campusMap) return fail('CAMPUS_MAP_UNAVAILABLE', 503);
+        const result = await adapter.campusMap(args);
+        return parseCampusMapResult(result, binding.schoolId, args);
+      }
+      case 'get_lost_found': {
+        lostFoundListInput(a, binding.schoolId);
+        if (!adapter.lostFound) return fail('LOST_FOUND_UNAVAILABLE', 503);
+        const result = await adapter.lostFound(a);
+        return parseLostFoundResult(result, binding.schoolId, a);
+      }
+      case 'get_campus_announcements':
+      case 'get_campus_events': {
+        if (!adapter.publicCampus) return fail('PUBLIC_CAMPUS_UNAVAILABLE', 503);
+        const kind = name === 'get_campus_announcements' ? 'announcements' : 'events';
+        const result = await adapter.publicCampus(kind, Number(a.limit ?? 5));
+        return parsePublicCampusResult(result, binding.schoolId, kind);
+      }
+      case 'get_public_courses': {
+        const search = parsePublicCourseArguments(a);
+        const requested = publicCourseSearches(readRequestQuestion, binding.schoolId);
+        if (!requested.some(item => canonical(publicCourseArguments(item)) === canonical(a)))
+          return fail('PUBLIC_COURSE_QUERY_MISMATCH');
+        if (!adapter.publicCourses) return fail('PUBLIC_COURSES_UNAVAILABLE', 503);
+        const data = await adapter.publicCourses(search);
+        const result = { search, data };
+        if (!parseAssistantPublicCourseResults([...publicCourseResults, result])?.length)
+          return fail('INVALID_PUBLIC_COURSE_RESULT', 502);
+        publicCourseResults.push(result);
+        return result;
+      }
       case 'list_campus_services': {
         const selected = a.serviceId ? getAssistantService(a.serviceId) : null;
         const services = a.serviceId ? (selected ? [selected] : []) : ASSISTANT_SERVICES;
@@ -886,6 +1114,7 @@ export function createTools(
             label: service.label,
             summary: service.summary,
             access: service.access,
+            capability: getAssistantServiceCapability(service.id),
             href: assistantServiceHref(service.id, binding.schoolId, 'platform'),
           })),
           total: services.length,
@@ -991,6 +1220,7 @@ export function createTools(
                 ? '此訂單需付款，請到點餐頁完成'
                 : '確認後下單，自取',
         };
+        await requirePermission('prepareFoodOrder');
         cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
         return { proposed: true, mode, reason: args.reason, summary, href: args.href, requiresConfirmation: true };
       }
@@ -1017,7 +1247,7 @@ export function createTools(
         );
         if (typeof detail.locationId !== 'string' || !detail.locationId)
           return fail('INVALID_INPUT');
-        const pickup = pickupAt(now, a.requestedPickupAt, question);
+        const pickup = pickupAt(now, a.requestedPickupAt, executionQuestion);
         const items = (Array.isArray(detail.lines) ? detail.lines : []).slice(0, 5).map((raw) => {
           const line = object(raw);
           const selected = Array.isArray(line.selectedOptionIds)
@@ -1166,9 +1396,13 @@ export function createTools(
       case 'find_free_time':
         return freeTime(await getLedger(), a, a.date === taipeiDate(now) ? now : undefined);
       case 'propose_personal_event':
-        return propose(a);
+        return propose(a, undefined, requestQuestion);
       case 'propose_open_page': {
         if (a.entityId) {
+          // A page proposal must not indirectly read student courses or buyer
+          // orders while the active task context excludes those sources.
+          if (taskProfile && taskProfile !== 'student' && ['classroom', 'orders'].includes(String(a.page)))
+            return fail('TASK_CONTEXT_MISMATCH', 409);
           const entity = String(a.entityId);
           const observedOrders = a.page === 'orders'
             ? [...orders].filter((key) => key.endsWith(':' + entity))
@@ -1189,10 +1423,11 @@ export function createTools(
       case 'propose_study_plan': {
         const requested = Array.isArray(a.taskIds) ? (a.taskIds as string[]) : [];
         if (new Set(requested).size !== requested.length) return fail();
-        if (requested.length && requested.some((k) => !tasks.has(k))) return fail('UNKNOWN_PENDING_TASK');
+        if (requested.length && requested.some((k) => !tasks.has(k) || ambiguousTaskIds.has(k))) return fail('UNKNOWN_PENDING_TASK');
         const selected = (requested.length ? requested.map((k) => tasks.get(k)!) : [...tasks.values()].filter((t) => !t.submitted && t.state === 'open' && t.dueAt && Date.parse(t.dueAt) >= now))
           .sort((a, b) => String(a?.dueAt || '9999').localeCompare(String(b?.dueAt || '9999')))
           .slice(0, 4);
+        if (selected.some(t => ambiguousTaskIds.has(t.id))) return fail('UNKNOWN_PENDING_TASK');
         if (selected.some((t) => t.submitted || t.state !== 'open'))
           return fail('UNKNOWN_PENDING_TASK');
         if (!selected.length)
@@ -1220,7 +1455,7 @@ export function createTools(
               startTime: slot.startTime,
               endTime,
               allDay: false,
-            }),
+            }, task),
           );
           slot.startTime = endTime;
           slot.minutes -= minutes;
@@ -1231,6 +1466,8 @@ export function createTools(
     return fail('UNKNOWN_TOOL');
   }
   function context() {
+    if (taskProfile && !assistantRoleToolAllowed(taskProfile, 'get_today_context'))
+      return fail('TASK_CONTEXT_MISMATCH', 409);
     return (contextCache ||= buildContext());
   }
   async function buildContext() {
@@ -1253,7 +1490,7 @@ export function createTools(
       result.updatedAt = l.updatedAt;
       if (data.unplaced) missing.push('unplaced_schedule');
     } catch (e) {
-      if ((e as { status?: number }).status === 401) throw e;
+      if (isSessionInvalidation(e)) throw e;
       missing.push('personal-imports');
     }
     try {
@@ -1265,7 +1502,7 @@ export function createTools(
         try {
           found.push(...(await work(c.id)));
         } catch (e) {
-          if ((e as { status?: number }).status === 401) throw e;
+          if (isSessionInvalidation(e)) throw e;
           missing.push('course_work');
         }
       }
@@ -1281,14 +1518,14 @@ export function createTools(
         .sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt)))
         .slice(0, 3);
     } catch (e) {
-      if ((e as { status?: number }).status === 401) throw e;
+      if (isSessionInvalidation(e)) throw e;
       missing.push('courses');
     }
     try {
       result.realms = await getRealms();
       if (!(result.realms as unknown[]).length) missing.push('realm_school_mapping');
     } catch (e) {
-      if ((e as { status?: number }).status === 401) throw e;
+      if (isSessionInvalidation(e)) throw e;
       missing.push('realms');
     }
     if (!adapter.simulation) missing.push('notifications_NOT_CONNECTED');
@@ -1316,7 +1553,13 @@ export function createTools(
   return {
     cards,
     context,
+    get publicCourseResults() { return [...publicCourseResults]; },
+    get publicEventReadAttempted() { return publicEventReadAttempted; },
+    get publicEventRead() { return publicEventRead; },
     recovery(name: string) {
+      if ((name === 'propose_personal_event' && requiresEventSelection()) ||
+          (name === 'propose_study_plan' && sourceEventRequested))
+        return { nextStep: CAMPUS_EVENT_SELECTION_REQUIRED_MESSAGE, availableIds: [] };
       const next: Record<string, string> = {
         get_dining: '先呼叫 get_dining {} 取得 locationId',
         get_food_locations:
@@ -1335,9 +1578,12 @@ export function createTools(
         get_transit: '先以 action=campus 查詢；arrivals 需真實 city/stopId',
       };
       return {
+        ...(name === 'get_public_courses' ? {
+          requestedQueries: publicCourseSearches(readRequestQuestion, binding.schoolId).map(publicCourseArguments),
+        } : {}),
         nextStep:
           next[name] || `依 ${name} schema 補正參數後重試；日期 YYYY-MM-DD、時間 HH:mm，不猜 id`,
-        availableIds: (['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
+        availableIds: (['get_public_courses', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(name) ? [] : ['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
           ? tenantIds
           : name === 'get_dining'
             ? [...diningIds]
@@ -1358,15 +1604,34 @@ export function createTools(
       };
     },
     withSignal: withOperationSignal,
-    async call(name: string, raw: unknown) {
+    async call(name: string, raw: unknown, requestQuestion = executionQuestion) {
+      // Context selection can narrow tool use, never authorize a new resource.
+      // Check before argument repair, pre-reads, permissions or cache access.
+      if (taskProfile && !assistantRoleToolAllowed(taskProfile, name))
+        return fail('TASK_CONTEXT_MISMATCH', 409);
+      if (sourcePostActionRequested && proposalPermission(name))
+        return fail('PUBLIC_POST_ACTION_SOURCE_UNVERIFIED', 409);
+      let eventReadGeneration: number | undefined;
+      // Mark the attempt before argument validation or I/O. A failed lookup
+      // must not authorize a guessed event, nor revive a previous choice list.
+      if (name === 'get_campus_events') {
+        publicEventReadAttempted = true;
+        publicEventRead = undefined;
+        eventReadGeneration = ++publicEventReadGeneration;
+      }
+      if ((name === 'propose_personal_event' && requiresEventSelection()) ||
+          (name === 'propose_study_plan' && sourceEventRequested))
+        return fail('CAMPUS_EVENT_SELECTION_REQUIRED', 409);
+      const permission = proposalPermission(name);
+      if (permission) await requirePermission(permission);
       const cleaned = { ...object(raw) };
-      if (name === 'propose_personal_event') {
-        const spoken = parseSpokenClock(question);
+      if (!exactEventArguments && name === 'propose_personal_event') {
+        const spoken = parseSpokenClock(requestQuestion);
         if (spoken) {
-          const window = studyWindow(question);
+          const window = studyWindow(requestQuestion);
           if (
             window.from < window.to &&
-            (personalSlotSelect(question) || !parseClock(cleaned.startTime))
+            (personalSlotSelect(requestQuestion) || !parseClock(cleaned.startTime))
           ) {
             cleaned.startTime = window.from;
             cleaned.endTime = window.to;
@@ -1375,13 +1640,13 @@ export function createTools(
         }
       }
       if (name === 'propose_study_plan' || name === 'find_free_time') {
-        const window = studyWindow(question);
+        const window = studyWindow(requestQuestion);
         const ranged = parseRange(cleaned.from) || parseRange(cleaned.to);
         const from = parseClock(cleaned.from) || ranged?.from || window.from;
         const to = parseClock(cleaned.to) || ranged?.to || window.to;
         if (from && to) {
           const requestedWindow = name === 'propose_study_plan' &&
-            (parseSpokenClock(question) || PERIODS.some(([pattern]) => pattern.test(question)));
+            (parseSpokenClock(requestQuestion) || PERIODS.some(([pattern]) => pattern.test(requestQuestion)));
           cleaned.from = requestedWindow && from < window.from ? window.from : from;
           cleaned.to = requestedWindow && to > window.to ? window.to : to;
         }
@@ -1414,7 +1679,10 @@ export function createTools(
       }
       if (name === 'list_food_orders' && reorder) delete cleaned.state;
       if (name === 'reorder_last_food_order' || name === 'propose_food_order')
-        cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, question);
+        cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, requestQuestion);
+      // Public content readers do not reinterpret unsupported school, date or
+      // endpoint fields as an unfiltered query for the bound campus.
+      if (['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(name)) validateTool(name, cleaned);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);
@@ -1482,18 +1750,21 @@ export function createTools(
       const a = validateTool(name, cleaned),
         key = name + canonical(a),
         cached = cache.has(key);
-      if (!cached) cache.set(key, dispatch(name, a));
+      if (!cached) cache.set(key, dispatch(name, a, requestQuestion));
       let value: unknown;
       try {
         value = await cache.get(key);
       } catch (error) {
+        if (assistantPermissionRecovery(String((error as { code?: string }).code))) throw error;
         if (name !== 'reorder_last_food_order') throw error;
-        const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
+        const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, executionQuestion) });
         const retryKey = name + canonical(filled);
         if (retryKey === key) throw error;
         cache.set(retryKey, dispatch(name, filled));
         value = await cache.get(retryKey);
       }
+      if (name === 'get_campus_events' && eventReadGeneration === publicEventReadGeneration)
+        publicEventRead = parsePublicCampusResult(value, binding.schoolId, 'events');
       remember(value, name);
       return {
         value: ignored.length ? { data: value, note: '已忽略未知參數欄位' } : value,

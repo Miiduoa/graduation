@@ -57,13 +57,14 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
   const { user, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const routeBoardId = searchParams?.get('boardId') ?? '';
+  const fromCreatorProfile = searchParams?.get('source') === 'profile';
 
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [boardsLoaded, setBoardsLoaded] = useState(false);
   const [boardId, setBoardId] = useState(routeBoardId);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [anonymous, setAnonymous] = useState(true);
+  const [anonymous, setAnonymous] = useState(!fromCreatorProfile);
   const [tagsRaw, setTagsRaw] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -115,10 +116,10 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
   const selectedBoard = useMemo(() => boards.find((b) => b.id === boardId), [boards, boardId]);
 
   useEffect(() => {
-    if (selectedBoard?.defaultAnonymous != null) {
+    if (!fromCreatorProfile && selectedBoard?.defaultAnonymous != null) {
       setAnonymous(selectedBoard.defaultAnonymous);
     }
-  }, [selectedBoard?.defaultAnonymous]);
+  }, [fromCreatorProfile, selectedBoard?.defaultAnonymous]);
 
   // Generate object URLs for previews
   useEffect(() => {
@@ -315,6 +316,13 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
         />
         匿名貼文
       </label>
+      {fromCreatorProfile && (
+        <p style={{ marginTop: 5, marginBottom: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+          {anonymous
+            ? '匿名貼文不會出現在個人作品中。'
+            : '這篇將以你的帳號署名發表，並顯示在你的個人作品中。'}
+        </p>
+      )}
 
       <Label>標題</Label>
       <input

@@ -18,6 +18,7 @@ const platforms: Readonly<Record<string, readonly LearningLink[] | undefined>> =
     { label: '清大 eeclass', url: 'https://eeclass.nthu.edu.tw/' },
   ],
   ncku: [{ label: '成大 Moodle', url: 'https://moodle.ncku.edu.tw/' }],
+  ncnu: [{ label: '暨大 Moodle', url: 'https://moodle.ncnu.edu.tw/' }],
   ncu: [{ label: '中央大學新 ee-class', url: 'https://ncueeclass.ncu.edu.tw/' }],
   nchu: [{ label: '興大 iLearning 3.0', url: 'https://lms2020.nchu.edu.tw/' }],
   // The E3 login page directs enrolled students to this SSO entry: https://e3p.nycu.edu.tw/

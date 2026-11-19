@@ -237,8 +237,8 @@ it('leaves school services available to visitors and other roles', async () => {
   state.signedIn = false;
   state.schoolId = 'thu';
   const { rerender } = render(<StudentCardPage />);
-  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=' + encodeURIComponent('/student-card?campus=thu'),
+  expect(screen.getByRole('link', { name: '登入學校帳號' }).getAttribute('href')).toContain(
+    'student-card',
   );
   expect(screen.getByRole('link', { name: '開啟校方服務' }).getAttribute('href')).toContain(
     'page.line.me',
@@ -251,6 +251,41 @@ it('leaves school services available to visitors and other roles', async () => {
   expect(await screen.findByText('學生帳號專用')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '取得驗證碼' })).toBeNull();
 });
+
+it.each(['pu', 'thu'])('opens school sign-in for the displayed %s student card', (schoolId) => {
+  state.signedIn = false;
+  state.schoolId = schoolId;
+  render(<StudentCardPage />);
+
+  const link = screen.getByRole('link', { name: '登入學校帳號' });
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/login');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    reconnect: 'school',
+    returnUrl: `/student-card?campus=${schoolId}`,
+    campus: schoolId,
+  });
+  expect(state.read).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  'opens the displayed card’s account settings when the profile exists: %s',
+  async (exists) => {
+    state.read.mockResolvedValue({ exists: () => exists, data: () => state.profile });
+    render(<StudentCardPage />);
+
+    const link = await screen.findByRole('link', {
+      name: exists ? '更新個人資料' : '開啟帳號設定',
+    });
+    const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+    expect(destination.pathname).toBe('/settings');
+    expect(Object.fromEntries(destination.searchParams)).toMatchObject({
+      section: 'account',
+      campus: 'pu',
+      schoolId: 'pu',
+    });
+  },
+);
 
 const demoAccountId = 'pa_12345678-1234-1234-1234-123456789abc';
 function accountDemo(overrides: Partial<AccountDemoSnapshot> = {}): AccountDemoSnapshot {
@@ -284,7 +319,7 @@ it('shows an account-owned demonstration card for Google platform sign-in withou
   expect(card.textContent).toContain('展示同學');
   expect(card.textContent).toContain('DEMO');
   expect(card.textContent).not.toContain('DEMO20261112');
-  expect(screen.queryByRole('link', { name: '登入帳號' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '登入學校帳號' })).toBeNull();
   expect(state.read).not.toHaveBeenCalled();
   expect(state.demoRequest).toHaveBeenCalledWith('account-demo', 'platform-session-a');
   expect(screen.getByRole('link', { name: '學生證設定' }).getAttribute('href')).toBe(
@@ -440,7 +475,7 @@ it('cannot restore an old account response after the platform account changes', 
   };
   state.demoRequest.mockResolvedValueOnce({ demo: null });
   rerender(<StudentCardPage />);
-  await screen.findByRole('link', { name: '登入帳號' });
+  await screen.findByRole('link', { name: '登入學校帳號' });
   await act(async () => finish({ demo: accountDemo() }));
   expect(screen.queryByRole('article', { name: '展示學生證' })).toBeNull();
   expect(screen.queryByText('展示同學')).toBeNull();

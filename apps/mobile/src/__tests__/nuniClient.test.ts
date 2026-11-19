@@ -43,6 +43,82 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+it('uses the fixed BFF and native Platform authorization for account permission reads and writes', async () => {
+  const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await nuniBffRequest('assistant-permissions', handle);
+  const input = {
+    expectedRevision: 0,
+    permissions: { createPersonalEvent: true, prepareFoodOrder: false },
+  };
+  await nuniBffRequest('assistant-permissions', handle, input);
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    1,
+    'https://nuni.tw/api/nuni/assistant-permissions',
+    expect.objectContaining({
+      method: 'GET',
+      cache: 'no-store',
+      redirect: 'error',
+      headers: expect.objectContaining({ Authorization: `Platform ${handle}` }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    2,
+    'https://nuni.tw/api/nuni/assistant-permissions',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: expect.objectContaining({
+        Authorization: `Platform ${handle}`,
+        'Content-Type': 'application/json',
+      }),
+    }),
+  );
+});
+
+it.each([
+  ['lost response', undefined, { status: 0, code: 'NETWORK_ERROR' }],
+  ...[500, 502, 503, 504].map((status) => [
+    `HTTP ${status}`,
+    { ok: false, status, text: async () => '{"error":"ASSISTANT_PERMISSION_STORE_UNAVAILABLE"}' },
+    { status, code: 'ASSISTANT_PERMISSION_STORE_UNAVAILABLE' },
+  ]),
+])('does not resend assistant permission changes after %s', async (_label, response, failure) => {
+  const fetchMock = jest.fn();
+  if (response) fetchMock.mockResolvedValueOnce(response);
+  else fetchMock.mockRejectedValueOnce(new TypeError('Response lost after committed save'));
+  fetchMock.mockResolvedValue({ ok: true, text: async () => '{}' });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(
+    nuniBffRequest('assistant-permissions', handle, {
+      expectedRevision: 0,
+      permissions: { createPersonalEvent: true, prepareFoodOrder: false },
+    }),
+  ).rejects.toMatchObject(failure);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('retains wake retry for permission reads and preserves bounded BFF conflict codes', async () => {
+  const fetchMock = jest
+    .fn()
+    .mockRejectedValueOnce(new TypeError('waking'))
+    .mockResolvedValueOnce({ ok: true, text: async () => '{}' })
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      text: async () => '{"error":"ASSISTANT_PERMISSION_REVISION_CONFLICT"}',
+    });
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await expect(nuniBffRequest('assistant-permissions', handle)).resolves.toEqual({});
+  await expect(
+    nuniBffRequest('assistant-permissions', handle, {
+      expectedRevision: 0,
+      permissions: { createPersonalEvent: true, prepareFoodOrder: false },
+    }),
+  ).rejects.toMatchObject({ status: 409, code: 'ASSISTANT_PERMISSION_REVISION_CONFLICT' });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
 it('sends a platform credential only to the fixed HTTPS API and refuses paths that escape it', async () => {
   const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
   global.fetch = fetchMock as unknown as typeof fetch;
@@ -292,7 +368,8 @@ it.each([
 ])('does not resend check-in after %s', async (_label, response, failure) => {
   const fetchMock = jest.fn();
   if (response) fetchMock.mockResolvedValueOnce(response);
-  else fetchMock.mockRejectedValueOnce(new TypeError('Response lost after server accepted check-in'));
+  else
+    fetchMock.mockRejectedValueOnce(new TypeError('Response lost after server accepted check-in'));
   fetchMock.mockResolvedValue({ ok: true, text: async () => '{}' });
   global.fetch = fetchMock as unknown as typeof fetch;
   const classroom = createNuniClassroom((path, input) => nuniPlatformRequest(path, handle, input));

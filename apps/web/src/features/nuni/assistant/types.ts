@@ -1,3 +1,5 @@
+import type { PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
+
 export type V2Card = {
   tool: string;
   args: Record<string, unknown>;
@@ -5,6 +7,8 @@ export type V2Card = {
   mutationId: string;
   schoolId: string;
   destination: string;
+  /** Display policy only; the server's signed token retains source authority. */
+  sourceBound?: 'food-pickup';
   /** Kept with recovery cards; never derived from model-generated arguments. */
   conversationId?: string;
 };
@@ -16,13 +20,40 @@ export type V2Reply = {
   steps: V2Step[];
   cards: V2Card[];
   simulation?: boolean;
-  /** Source-backed deterministic data: render as text and keep out of later model history. */
+  /** Verified reader output stays literal and out of later model history. */
   dataRead?: boolean;
+  /** Fixed capability guidance; not a completed private-data read. */
+  roleGuide?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
+  serviceIds?: readonly import('@campus/shared/src/assistantServices').AssistantServiceId[];
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
   demo?: import('@/lib/accountDemoAssistant').AccountDemoAssistantAnswer;
+  courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
+  courseworkDate?: string;
+  /** Exact public records offered for an explicit, independently re-read selection. */
+  eventTargets?: import('@/lib/assistantCampusEvent').AssistantCampusEventTarget[];
+  /** True for a source-bound preview; false for a discovery that still needs
+   * an explicit source choice. A preview's single source is not a new list. */
+  campusEventPreview?: boolean;
+  /** Server-prepared task results; validate before rendering or linking. */
+  taskPlan?: import('@campus/shared/src/assistantTaskPlan').AssistantTaskPlan;
+  /** Scoped read continuation; never an action-card confirmation. */
+  taskRetry?: import('@campus/shared/src/assistantTaskRetry').AssistantTaskRetry;
+  /** Reviewed public catalogs; validate their envelope before rendering cards. */
+  publicCourseResults?: import('@campus/shared/src/assistantPublicCourseResults').AssistantPublicCourseResult[];
 };
 
-export type V2Turn = { question: string; reply: V2Reply };
+export type V2Turn = {
+  question: string;
+  reply: V2Reply;
+  /** Local request provenance, never copied from a server reply. A fresh
+   * discovery preview cannot expose an older activity list to later ordinals. */
+  campusEventDiscovery?: true;
+  /** Preserve the original conversation when retrying this turn's scoped reads. */
+  conversationId?: string;
+  taskProfile?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
+  /** Local public lookup, outside the model conversation and signed action cards. */
+  publicCourse?: { read?: PublicCourseAssistantRead };
+};
 
 export type V2ActionState =
   | { status: 'executing' | 'checking' }

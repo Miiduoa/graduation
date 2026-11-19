@@ -1,49 +1,84 @@
-import React, { useSyncExternalStore } from 'react';
-import { ActivityIndicator } from 'react-native';
+import React, { useState, useSyncExternalStore } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { DormStaffHome } from './DormStaffHome';
 import ShopDockScreen from './ShopDockScreen';
 import StudentTodayScreen from './StudentTodayScreen';
 import TeacherTodayScreen from './TeacherTodayScreen';
 import { useAuth } from '../state/auth';
-import { AIDetailScreen, AICard, aiTokens } from '../ui/aiFirst';
-import { getThemeVersion, subscribeToTheme } from '../ui/theme';
+import { AIDetailScreen, AICard, AIButton, AIScreen, aiTokens } from '../ui/aiFirst';
+import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
 import { isSchoolLoginEntryAvailable } from '../services/schoolLoginAvailability';
+import { roleWorkspaceFlow, ROLE_DAILY_ACTIONS, type RoleWorkspaceAction } from '../services/roleWorkspaceFlow';
+import { safeNavigate } from '../utils/safeNavigate';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 export { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
 
-const roleTitles: Partial<Record<ResolvedDashboardRole, string>> = {
-  ta: '助教工作台',
-  club_officer: '社團工作台',
-  department: '系所工作台',
-  admin: '管理工作台',
-  staff: '校務服務',
-  alumni: '校友服務',
-};
+function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
+  role: ResolvedDashboardRole;
+  children?: React.ReactNode;
+}) {
+  const s = useThemeStyleSheet(createStyles);
+  const [dailyOpen, setDailyOpen] = useState(false);
+  const flow = roleWorkspaceFlow(role);
+  const open = (action: RoleWorkspaceAction) => safeNavigate(navigation, action.route);
+  const daily = ROLE_DAILY_ACTIONS.filter((action) =>
+    action.route !== flow.primary.route && !flow.next.some((next) => next.route === action.route),
+  );
+  const row = (action: RoleWorkspaceAction) => (
+    <Pressable key={action.route} accessibilityRole="button" accessibilityLabel={action.label}
+      onPress={() => open(action)} style={s.row}>
+      <View style={s.rowText}>
+        <Text style={s.rowTitle}>{action.label}</Text>
+        <Text style={s.description}>{action.description}</Text>
+      </View>
+      <Text style={s.arrow} accessibilityElementsHidden importantForAccessibility="no">›</Text>
+    </Pressable>
+  );
+  return (
+    <AIScreen>
+      <View style={s.heading}>
+        <Text style={s.eyebrow}>nuni · 今日工作</Text>
+        <Text accessibilityRole="header" style={s.title}>{flow.title}</Text>
+        <Text style={s.description}>{flow.description}</Text>
+      </View>
+      {children}
+      <AICard title="從這裡開始">
+        <Text style={s.primaryDescription}>{flow.primary.description}</Text>
+        <AIButton label={flow.primary.label} onPress={() => open(flow.primary)} />
+      </AICard>
+      <View style={s.section}>
+        <Text accessibilityRole="header" style={s.sectionTitle}>接著處理</Text>
+        <View style={s.rows}>{flow.next.map(row)}</View>
+      </View>
+      <View style={s.section}>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: dailyOpen }}
+          onPress={() => setDailyOpen((current) => !current)} style={s.disclosure}>
+          <Text style={s.sectionTitle}>日常與帳號</Text>
+          <Text style={s.arrow}>{dailyOpen ? '−' : '＋'}</Text>
+        </Pressable>
+        {dailyOpen ? <View style={s.rows}>{daily.map(row)}</View> : null}
+      </View>
+    </AIScreen>
+  );
+}
+
 export function RoleWorkspaceScreen({
   role,
   ...props
 }: ServiceScreenProps & { role: ResolvedDashboardRole }) {
   if (role === 'vendor') return <ShopDockScreen navigation={props.navigation} />;
-  return (
-    <UnavailableFeatureScreen
-      {...props}
-      title={roleTitles[role] ?? '校園服務'}
-      actions={
-        role === 'admin'
-          ? [
-              { label: '管理公告與活動', route: 'AdminDashboard' },
-              { label: '查看校方公告', route: '公告總覽' },
-            ]
-          : undefined
-      }
-      description={
-        role === 'admin'
-          ? '可以管理校方公告與活動，或查看目前公開的校園資訊。'
-          : role === 'guest'
-            ? '可以先查看校方公告與校園活動。個人課務服務需要登入並確認學校身分。'
-            : '此身分的工作台尚未開放。你可以先查看校方公告與校園活動。'
-      }
+  const workspace = (children?: React.ReactNode) => (
+    <RoleWorkflow key={role} {...props} role={role}>{children}</RoleWorkflow>
+  );
+  return role === 'staff' ? (
+    <DormStaffHome
+      fallback={workspace}
+      onOpen={(route) => safeNavigate(props.navigation, route)}
     />
+  ) : (
+    workspace()
   );
 }
 export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
@@ -64,9 +99,8 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
         title="確認帳號身分"
         description="目前無法確認帳號身分。請到登入頁重新確認；也可以先查看公開公告。"
         actions={[
-          ...(isSchoolLoginEntryAvailable()
-            ? [{ label: '前往學校登入', route: 'SSOLogin' }]
-            : []),
+          ...(isSchoolLoginEntryAvailable() ? [{ label: '前往學校登入', route: 'SSOLogin' }] : []),
+          { label: '查看帳號與登入狀態', route: 'MeHome' },
           { label: '查看校方公告', route: '公告總覽' },
         ]}
       />
@@ -76,3 +110,19 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
   if (role === 'teacher') return <TeacherTodayScreen />;
   return <RoleWorkspaceScreen key={auth.user?.uid} {...props} role={role} />;
 }
+
+const createStyles = () => StyleSheet.create({
+  heading: { paddingHorizontal: 22, paddingTop: 24, paddingBottom: 8, gap: 8 },
+  eyebrow: { color: theme.colors.muted, fontSize: 12, fontWeight: '600' },
+  title: { color: theme.colors.text, fontSize: 28, lineHeight: 36, fontWeight: '700' },
+  description: { color: theme.colors.muted, fontSize: 14, lineHeight: 21 },
+  primaryDescription: { color: theme.colors.text, fontSize: 15, lineHeight: 23, marginBottom: 16 },
+  section: { marginHorizontal: 16, marginTop: 18, gap: 10 },
+  sectionTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
+  rows: { borderColor: theme.colors.border, borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, overflow: 'hidden', backgroundColor: theme.colors.surface },
+  row: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border },
+  rowText: { flex: 1, gap: 5 },
+  rowTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
+  arrow: { color: theme.colors.muted, fontSize: 20 },
+  disclosure: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+});

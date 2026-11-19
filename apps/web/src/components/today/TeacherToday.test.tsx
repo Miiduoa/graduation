@@ -53,10 +53,45 @@ it('shows today classes, grading entries and upcoming work in one flow', () => {
     within(screen.getByRole('heading', { name: TEACHER_TODAY_GRADING_TITLE }).parentElement!)
       .getByRole('link', { name: /教學實習/ })
       .getAttribute('href'),
-  ).toBe('/course/teach-1');
+  ).toBe('/teacher/course/teach-1');
   expect(
     within(screen.getByRole('heading', { name: TEACHER_TODAY_DUE_TITLE }).parentElement!)
       .getByRole('link', { name: /觀摩報告/ })
       .getAttribute('href'),
   ).toBe('/course/teach-1#assignment-hw-1');
+});
+
+it('opens the teacher workspace with the existing school query and keeps school LMS links', () => {
+  render(
+    <TeacherToday
+      now={now}
+      unsigned={false}
+      classes={[]}
+      teachingCourses={[
+        {
+          id: 'course a',
+          name: '資料結構',
+          role: 'instructor',
+          unreadCount: 0,
+          href: '/course/course%20a?schoolId=pu',
+        },
+        {
+          id: 'cw-school',
+          name: '校方課程',
+          role: 'owner-teacher',
+          unreadCount: 0,
+          href: '/classroom/course/cw-school?school=pu',
+        },
+      ]}
+      upcomingTodos={[]}
+      timetableHref="/timetable"
+      importHref="/import"
+    />,
+  );
+  expect(screen.getByRole('link', { name: /資料結構.*開啟課程工作台/ }).getAttribute('href')).toBe(
+    '/teacher/course/course%20a?schoolId=pu',
+  );
+  expect(screen.getByRole('link', { name: /校方課程/ }).getAttribute('href')).toBe(
+    '/classroom/course/cw-school?school=pu',
+  );
 });

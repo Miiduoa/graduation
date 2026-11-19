@@ -13,7 +13,7 @@ it('opens the school account channel and keeps custom prompt text', () => {
   expect(screen.getByText(LOGIN_REQUIRED_COMMENTS_TEXT)).toBeTruthy();
   const link = screen.getByRole('link', { name: '連線學校帳號' });
   expect(link.getAttribute('href')).toBe(
-    '/login?reconnect=school&returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu',
+    '/login?reconnect=school&returnUrl=%2Fcafeteria%2Fstall%3FschoolId%3Dpu&schoolId=pu',
   );
 });
 
@@ -23,7 +23,7 @@ it('preserves lost-found returnUrl with schoolId and uses school reconnect', () 
   );
   expect(screen.getByText('查看失物招領需要學校帳號。')).toBeTruthy();
   expect(screen.getByRole('link', { name: '連線學校帳號' }).getAttribute('href')).toBe(
-    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu',
+    '/login?reconnect=school&returnUrl=%2Flost-found%3FschoolId%3Dpu&schoolId=pu',
   );
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
 });
@@ -33,6 +33,6 @@ it('collapses stacked fragments before the terminal hash on school login', () =>
     <LoginRequiredLostFoundComments returnUrl="/lost-found/item-1?schoolId=pu#note#note" />,
   );
   expect(screen.getByRole('link', { name: '連線學校帳號' }).getAttribute('href')).toBe(
-    '/login?reconnect=school&returnUrl=%2Flost-found%2Fitem-1%3FschoolId%3Dpu%23note#',
+    '/login?reconnect=school&returnUrl=%2Flost-found%2Fitem-1%3FschoolId%3Dpu%23note&schoolId=pu#',
   );
 });

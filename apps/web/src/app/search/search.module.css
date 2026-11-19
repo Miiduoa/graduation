@@ -149,6 +149,69 @@
   align-content: start;
 }
 
+.categoryContent {
+  min-width: 0;
+}
+
+.browseHelp {
+  margin-top: 6px !important;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.related,
+.moreServices {
+  min-width: 0;
+}
+
+.related > summary,
+.moreServices > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.related > summary::-webkit-details-marker,
+.moreServices > summary::-webkit-details-marker {
+  display: none;
+}
+
+.related > summary::after,
+.moreServices > summary::after {
+  content: '+';
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--brand);
+}
+
+.related[open] > summary::after,
+.moreServices[open] > summary::after {
+  content: '−';
+}
+
+.related > summary:focus-visible,
+.moreServices > summary:focus-visible,
+.filters button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.related {
+  border-bottom: 1px solid var(--border);
+}
+
+.moreServices {
+  margin-top: 12px;
+}
+
 .serviceEntry {
   display: grid;
   min-width: 0;

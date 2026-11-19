@@ -9,6 +9,7 @@ const mockWebSearch = jest.fn(async () => null);
 
 function mockSnapshot(path) {
   const data = mockStore.docs.get(path);
+  if (data instanceof Error) throw data;
   return { id: path.split('/').pop(), exists: data !== undefined, data: () => data };
 }
 
@@ -32,6 +33,8 @@ function mockCollection(path, filters = [], maximum = Infinity) {
 
 function mockQuery(query) {
   mockReads.push(query.path);
+  const failure = mockStore.docs.get(query.path);
+  if (failure instanceof Error) throw failure;
   const docs = [...mockStore.docs]
     .filter(([path, data]) => path.startsWith(`${query.path}/`) &&
       !path.slice(query.path.length + 1).includes('/') && query.filters.every(({ field, operator, value }) => {
@@ -39,6 +42,7 @@ function mockQuery(query) {
         if (operator === 'in') return value.includes(data[field]);
         throw new Error(`Unsupported fixture query: ${operator}`);
       }))
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .slice(0, query.maximum)
     .map(([path]) => mockSnapshot(path));
   return { docs, size: docs.length, empty: docs.length === 0 };
@@ -76,6 +80,7 @@ const { Timestamp } = require('firebase-admin/firestore');
 const borrowBook = require('./tools/borrowBook');
 const renewBook = require('./tools/renewBook');
 const getLibraryLoans = require('./tools/getLibraryLoans');
+const { libraryLoanVersion } = require('./libraryLoanSource');
 const { executeCampusAssistantCore } = require('./executeCampusAssistantCore');
 const { connectCampusServiceData } = require('./semanticCampusData');
 
@@ -89,10 +94,27 @@ function loanPath(id, uid = 'alice', schoolId = 'pu') {
 function snapshot() {
   return new Map(mockStore.docs);
 }
-function expectDraft(result, toolName, loanId) {
+function seedReturnedLoans(count, prefix = 'history') {
+  for (let index = 0; index < count; index += 1) {
+    mockStore.docs.set(loanPath(`${prefix}-${String(index).padStart(4, '0')}`), {
+      userId: 'alice', schoolId: 'pu', bookId: 'returned-book', bookTitle: '已歸還的舊借閱',
+      status: 'returned', dueAt: Timestamp.fromMillis(now - day),
+    });
+  }
+}
+async function borrowAfterHistory() {
+  seedReturnedLoans(50);
+  const loan = await borrowBook.execute(actor(), { bookId: 'book-a' });
+  mockReads.length = 0;
+  mockDb.runTransaction.mockClear();
+  return loan;
+}
+function expectDraft(result, toolName, loanId, schoolId = 'pu') {
   expect(result.actions).toEqual([expect.objectContaining({
     action: 'queue_action', requiresConfirmation: true, status: 'pending_confirmation',
-    params: expect.objectContaining({ toolName, input: { loanId }, agentRunId: 'library-fixture-run' }),
+    params: expect.objectContaining({ toolName, input: {
+      loanId, expectedLoanVersion: libraryLoanVersion(mockStore.docs.get(`schools/${schoolId}/libraryLoans/${loanId}`)),
+    }, agentRunId: 'library-fixture-run' }),
   })]);
   expect(result.citations).toContainEqual(expect.objectContaining({ id: 'campus-agent-confirmation' }));
   expect(result.content).toContain('確認後才會');
@@ -184,6 +206,96 @@ test('the real semantic library card retains loan dates after verifying current 
   expect(mockDb.runTransaction).not.toHaveBeenCalled();
 });
 
+test('the real reader and semantic card find the active loan after fifty returned records', async () => {
+  const loan = await borrowAfterHistory();
+  const before = snapshot();
+  const result = await getLibraryLoans.execute(actor(), {});
+  expect(result).toMatchObject({ ok: true, count: 1 });
+  expect(result.loans).toEqual([expect.objectContaining({ id: loan.loanId, bookTitle: '資料結構' })]);
+
+  const cards = await connectCampusServiceData({
+    uid: 'alice', schoolId: 'pu', utterance: '我的借閱紀錄', destinations: ['/library'],
+  });
+  expect(cards).toEqual([expect.objectContaining({
+    destination: '/library', status: 'available', source: 'campus-platform',
+    items: [{ title: '資料結構', detail: `到期 ${loan.dueAt}` }],
+  })]);
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test.each([['renew_book', 'renewBook'], ['return_book', 'returnBook']])(
+  '%s drafts the active loan after fifty returned records without executing the action',
+  async (intent, toolName) => {
+    const loan = await borrowAfterHistory();
+    const before = snapshot();
+    const result = await run(intent, intent === 'renew_book' ? '幫我續借快到期的書' : '幫我還快到期的書');
+    expectDraft(result, toolName, loan.loanId);
+    expect(result.content).toContain('書籍：資料結構');
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['renew_book', 'return_book'])(
+  '%s withholds an early active loan when 501 source records exceed the complete-read budget',
+  async (intent) => {
+    await borrowBook.execute(actor(), { bookId: 'book-a' });
+    seedReturnedLoans(500, 'zz-history');
+    mockDb.runTransaction.mockClear();
+    const before = snapshot();
+
+    const result = await run(intent, intent === 'renew_book' ? '幫我續借' : '幫我還書');
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain('無法完整讀取');
+    expect(result.content).not.toMatch(/目前找不到|書籍：資料結構|我已整理/);
+
+    const cards = await connectCampusServiceData({
+      uid: 'alice', schoolId: 'pu', utterance: '我的借閱紀錄', destinations: ['/library'],
+    });
+    expect(cards).toEqual([expect.objectContaining({
+      destination: '/library', status: 'unavailable', source: 'none', items: [],
+    })]);
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['renew_book', 'return_book'])(
+  '%s reports a reader outage as unavailable rather than an empty loan list',
+  async (intent) => {
+    mockStore.docs.set('users/alice/schools/pu/libraryLoans', new Error('private-reader-outage'));
+    const before = snapshot();
+    const result = await run(intent, intent === 'renew_book' ? '幫我續借' : '幫我還書');
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain('無法完整讀取');
+    expect(result.content).not.toMatch(/目前找不到|private-reader-outage/);
+
+    const cards = await connectCampusServiceData({
+      uid: 'alice', schoolId: 'pu', utterance: '我的借閱紀錄', destinations: ['/library'],
+    });
+    expect(cards).toEqual([expect.objectContaining({
+      destination: '/library', status: 'unavailable', source: 'none', items: [],
+    })]);
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['renew_book', 'return_book'])(
+  '%s keeps an exhaustively empty loan list distinct from a read failure',
+  async (intent) => {
+    seedReturnedLoans(50);
+    const before = snapshot();
+    const result = await run(intent, intent === 'renew_book' ? '幫我續借' : '幫我還書');
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain('目前找不到');
+    expect(result.content).not.toContain('無法完整讀取');
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
 test.each([['renew_book', 'renewBook'], ['return_book', 'returnBook']])(
   '%s drafts the earliest due loan after borrow A, renew A, then borrow B without executing it',
   async (intent, toolName) => {
@@ -213,6 +325,199 @@ test.each([['renew_book', 'renewBook'], ['return_book', 'returnBook']])(
   },
 );
 
+test.each(['renew_book', 'return_book'])(
+  '%s does not substitute another active loan when a quoted book title has no match',
+  async (intent) => {
+    await borrowRenewThenBorrow();
+    const before = snapshot();
+    const result = await run(intent, `${intent === 'renew_book' ? '續借' : '還書'}《不存在的書》`);
+
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain('沒有符合');
+    expect(result.content).not.toMatch(/我已整理|書籍：資料結構|書籍：演算法/);
+    expect(mockReads).toContain('users/alice/schools/pu/libraryLoans');
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['renew_book', 'return_book'])(
+  '%s asks for a specific loan when a partial book title matches multiple records',
+  async (intent) => {
+    for (const [bookId, title] of [['book-a', '資料結構入門'], ['book-b', '資料結構實作']]) {
+      const path = `schools/pu/libraryBooks/${bookId}`;
+      mockStore.docs.set(path, { ...mockStore.docs.get(path), title });
+    }
+    await borrowRenewThenBorrow();
+    const before = snapshot();
+    const result = await run(intent, `${intent === 'renew_book' ? '續借' : '還書'}《資料結構》`);
+
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain('多筆');
+    expect(result.content).toMatch(/完整書名|借閱.*編號/);
+    expect(result.content).not.toContain('我已整理');
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each([['renew_book', 'renewBook'], ['return_book', 'returnBook']])(
+  '%s prefers a unique exact title over a longer title containing the same words',
+  async (intent, toolName) => {
+    for (const [bookId, title] of [['book-a', '資料結構進階'], ['book-b', '資料結構']]) {
+      const path = `schools/pu/libraryBooks/${bookId}`;
+      mockStore.docs.set(path, { ...mockStore.docs.get(path), title });
+    }
+    const { second } = await borrowRenewThenBorrow();
+    const before = snapshot();
+    const result = await run(intent, `${intent === 'renew_book' ? '續借' : '還書'}《資料結構》`);
+
+    expectDraft(result, toolName, second.loanId);
+    expect(result.content).toContain('書籍：資料結構');
+    expect(result.content).not.toContain('資料結構進階');
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['renew_book', 'return_book'])(
+  '%s does not pick between duplicate exact book titles',
+  async (intent) => {
+    const path = 'schools/pu/libraryBooks/book-b';
+    mockStore.docs.set(path, { ...mockStore.docs.get(path), title: '資料結構' });
+    await borrowRenewThenBorrow();
+    const before = snapshot();
+    const result = await run(intent, `${intent === 'renew_book' ? '續借' : '還書'}《資料結構》`);
+
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain('多筆');
+    expect(result.content).toMatch(/借閱.*編號/);
+    expect(result.content).not.toContain('我已整理');
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  ['renew_book', 'outage'], ['return_book', 'outage'],
+  ['renew_book', 'overflow'], ['return_book', 'overflow'],
+])('%s keeps a named book request unavailable after a source %s', async (intent, failure) => {
+  await borrowBook.execute(actor(), { bookId: 'book-a' });
+  if (failure === 'outage') {
+    mockStore.docs.set('users/alice/schools/pu/libraryLoans', new Error('private-reader-outage'));
+  } else {
+    seedReturnedLoans(500, 'zz-history');
+  }
+  mockDb.runTransaction.mockClear();
+  const before = snapshot();
+  const result = await run(intent, `${intent === 'renew_book' ? '續借' : '還書'}《資料結構》`);
+
+  expect(result.actions).toEqual([]);
+  expect(result.content).toContain('無法完整讀取');
+  expect(result.content).not.toMatch(/沒有符合|多筆|我已整理|private-reader-outage/);
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test.each(['missing', 'outage'])(
+  'a long quoted English title cannot bypass the real loan reader when the source is %s',
+  async (source) => {
+    await borrowRenewThenBorrow();
+    if (source === 'outage') {
+      mockStore.docs.set('users/alice/schools/pu/libraryLoans', new Error('private-reader-outage'));
+    }
+    const before = snapshot();
+    const result = await run('renew_book', '續借《IntroductionToAlgorithms》');
+
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain(source === 'outage' ? '無法完整讀取' : '沒有符合');
+    expect(result.content).not.toMatch(/我已整理|private-reader-outage/);
+    expect(mockReads.filter((path) => path.includes('/libraryLoans'))).toEqual([
+      'users/alice/schools/pu/libraryLoans',
+    ]);
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test('a one-character quoted title selects the named loan instead of the earliest due loan', async () => {
+  const path = 'schools/pu/libraryBooks/book-a';
+  mockStore.docs.set(path, { ...mockStore.docs.get(path), title: 'C' });
+  const { first } = await borrowRenewThenBorrow();
+  const before = snapshot();
+  const result = await run('return_book', '還書《C》');
+
+  expectDraft(result, 'returnBook', first.loanId);
+  expect(result.content).toContain('書籍：C');
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test('an unquoted unknown book request asks for the full title without substituting another loan', async () => {
+  await borrowRenewThenBorrow();
+  const before = snapshot();
+  const result = await run('renew_book', '幫我續借不存在的書');
+
+  expect(result.actions).toEqual([]);
+  expect(result.content).toContain('完整書名');
+  expect(result.content).not.toContain('我已整理');
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['return_book', '還書《資料結構》和《演算法》'],
+  ['renew_book', '續借《資料結構」'],
+])('%s asks for one full title when quoted selectors are ambiguous or malformed: %s', async (intent, message) => {
+  await borrowRenewThenBorrow();
+  const before = snapshot();
+  const result = await run(intent, message);
+
+  expect(result.actions).toEqual([]);
+  expect(result.content).toContain('完整書名');
+  expect(result.content).not.toContain('我已整理');
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test('a case-preserved labeled loan ID disambiguates duplicate titles only after reading the owned source', async () => {
+  const path = 'schools/pu/libraryBooks/book-b';
+  mockStore.docs.set(path, { ...mockStore.docs.get(path), title: '資料結構' });
+  const { first } = await borrowRenewThenBorrow();
+  const loanId = 'LoanCaseSensitive001';
+  for (const prefix of ['users/alice/schools/pu/libraryLoans', 'schools/pu/libraryLoans']) {
+    const oldPath = `${prefix}/${first.loanId}`;
+    mockStore.docs.set(`${prefix}/${loanId}`, mockStore.docs.get(oldPath));
+    mockStore.docs.delete(oldPath);
+  }
+  const before = snapshot();
+  const result = await run('renew_book', `續借《資料結構》 借閱：${loanId}`);
+
+  expectDraft(result, 'renewBook', loanId);
+  expect(result.content).toContain('書籍：資料結構');
+  expect(mockReads.filter((readPath) => readPath.includes('/libraryLoans'))).toEqual([
+    'users/alice/schools/pu/libraryLoans',
+    `schools/pu/libraryLoans/${loanId}`,
+  ]);
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test('a labeled loan ID cannot override a different explicitly quoted title', async () => {
+  const { first } = await borrowRenewThenBorrow();
+  const before = snapshot();
+  const result = await run('return_book', `還書《演算法》 借閱：${first.loanId}`);
+
+  expect(result.actions).toEqual([]);
+  expect(result.content).toContain('沒有符合');
+  expect(result.content).not.toContain('我已整理');
+  expect(mockReads.filter((path) => path.includes('/libraryLoans'))).toEqual([
+    'users/alice/schools/pu/libraryLoans',
+  ]);
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
 test.each([['renew_book', 'renewBook'], ['return_book', 'returnBook']])(
   '%s preserves an explicit loan ID and still requires confirmation',
   async (intent, toolName) => {
@@ -220,6 +525,75 @@ test.each([['renew_book', 'renewBook'], ['return_book', 'returnBook']])(
     const before = snapshot();
     const result = await run(intent, `${intent === 'renew_book' ? '續借' : '還書'} 借閱：${first.loanId}`);
     expectDraft(result, toolName, first.loanId);
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  ['book identity', { bookId: 'book-b', bookTitle: '演算法' }],
+  ['deadline', { dueAt: Timestamp.fromMillis(started + 40 * day), renewCount: 2 }],
+])('a changed canonical %s cannot reuse a stale personal-mirror selection', async (_label, change) => {
+  const { first } = await borrowRenewThenBorrow();
+  const path = `schools/pu/libraryLoans/${first.loanId}`;
+  mockStore.docs.set(path, { ...mockStore.docs.get(path), ...change });
+  const before = snapshot();
+  const result = await run('renew_book', '續借《資料結構》');
+  expect(result.actions).toEqual([]);
+  expect(result.content).toContain('借閱資料已變更');
+  expect(result.content).not.toContain('我已整理');
+  expect(mockReads).toContain(path);
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test('an explicit ID reads and binds canonical data even with more than 500 mirror records', async () => {
+  const { first } = await borrowRenewThenBorrow();
+  seedReturnedLoans(501);
+  const path = `schools/pu/libraryLoans/${first.loanId}`;
+  const changed = { ...mockStore.docs.get(path), dueAt: Timestamp.fromMillis(started + 40 * day), renewCount: 2 };
+  mockStore.docs.set(path, changed);
+  const before = snapshot();
+  const result = await run('return_book', `還書 借閱：${first.loanId}`);
+  expectDraft(result, 'returnBook', first.loanId);
+  expect(result.actions[0].params.input.expectedLoanVersion).toBe(libraryLoanVersion(changed));
+  expect(mockReads.filter((readPath) => readPath.includes('/libraryLoans'))).toEqual([path]);
+  expect(mockStore.docs).toEqual(before);
+  expect(mockDb.runTransaction).not.toHaveBeenCalled();
+});
+
+test.each(['missing', 'foreign', 'returned', 'outage'])(
+  'an explicit ID cannot create a confirmation from a %s canonical source', async (state) => {
+    const { first } = await borrowRenewThenBorrow();
+    const path = `schools/pu/libraryLoans/${first.loanId}`;
+    if (state === 'missing') mockStore.docs.delete(path);
+    else if (state === 'outage') mockStore.docs.set(path, new Error('private-canonical-outage'));
+    else mockStore.docs.set(path, { ...mockStore.docs.get(path),
+      ...(state === 'foreign' ? { userId: 'bob', bookTitle: 'private-foreign-title' } : { status: 'returned' }),
+    });
+    const before = snapshot();
+    const result = await run('return_book', `還書 借閱：${first.loanId}`);
+    expect(result.actions).toEqual([]);
+    expect(result.content).toContain(state === 'outage' ? '無法完整讀取' : '沒有符合');
+    expect(result.content).not.toMatch(/我已整理|private-canonical-outage|private-foreign-title/);
+    expect(mockStore.docs).toEqual(before);
+    expect(mockDb.runTransaction).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['renew_book', 'return_book'])(
+  '%s never truncates a malformed explicit ID or drops it in favor of a matching title',
+  async (intent) => {
+    const { first } = await borrowRenewThenBorrow();
+    const before = snapshot();
+    const action = intent === 'renew_book' ? '續借' : '還書';
+    for (const title of ['', '《資料結構》']) {
+      const result = await run(intent, `${action}${title} 借閱：${first.loanId}/Other`);
+      expect(result.actions).toEqual([]);
+      expect(result.content).toContain('完整書名');
+      expect(result.content).not.toContain('我已整理');
+    }
+    expect(mockReads.filter((path) => path.includes('/libraryLoans'))).toEqual([]);
     expect(mockStore.docs).toEqual(before);
     expect(mockDb.runTransaction).not.toHaveBeenCalled();
   },
@@ -254,10 +628,11 @@ test('each authorized account and school reads only its own loan collection', as
   ]) {
     mockReads.length = 0;
     const result = await run('renew_book', '幫我續借快到期的書', { uid, schoolId });
-    expectDraft(result, 'renewBook', expectedId);
+    expectDraft(result, 'renewBook', expectedId, schoolId);
     expect(result.content).toContain(`書籍：${title}`);
     expect(mockReads.filter((path) => path.includes('/libraryLoans'))).toEqual([
       `users/${uid}/schools/${schoolId}/libraryLoans`,
+      `schools/${schoolId}/libraryLoans/${expectedId}`,
     ]);
   }
   expect(mockStore.docs).toEqual(before);

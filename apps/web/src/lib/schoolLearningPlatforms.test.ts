@@ -18,7 +18,7 @@ it('offers every named MOE campus its own LMS or its exact listed school website
       expect(entry?.links).toEqual([{ label: school.name + '官網', url: school.websiteUrl }]);
     }
   }
-  expect([...withPlatform].sort()).toEqual(['fju', 'nchu', 'ncku', 'ncu', 'nkust', 'nthu', 'ntu', 'nycu', 'pu', 'thu']);
+  expect([...withPlatform].sort()).toEqual(['fju', 'nchu', 'ncku', 'ncnu', 'ncu', 'nkust', 'nthu', 'ntu', 'nycu', 'pu', 'thu']);
 });
 
 it('only accepts known campus identities and the confirmed public-contact alias', () => {

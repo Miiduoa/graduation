@@ -173,6 +173,38 @@ test('finding creates only immutable previews between known classes, with no net
   expect(await readAssistantCalendarJournal(scope(), () => true)).toHaveLength(0);
 });
 
+test('a requested day cannot silently fall back to a different day with available gaps', async () => {
+  const snapshot = read([assignment({ dueAt: '2026-11-15T18:00:00+08:00' })]);
+  const result = await findCourseworkStudyDrafts(snapshot, assignmentId, context(), { date: '2026-11-10' });
+  expect(result.kind).toBe('no-slot');
+  expect(result.message).toContain('2026-11-10');
+  expect(ledgerWrites()).toHaveLength(0);
+  const unrestricted = await findCourseworkStudyDrafts(snapshot, assignmentId, context());
+  expect(unrestricted.kind).toBe('available');
+});
+
+test('only the requested Taiwan day is proposed and its slot still uses the fresh confirmation guard', async () => {
+  courses.push(...courses.map((row) => ({ ...row, id: row.id + '-tuesday', dayOfWeek: 2 })));
+  const snapshot = read([assignment({ dueAt: '2026-11-11T18:00:00+08:00' })]);
+  const result = await findCourseworkStudyDrafts(snapshot, assignmentId, context(), { date: '2026-11-10' });
+  expect(result.kind).toBe('available');
+  if (result.kind !== 'available') throw new Error('Expected requested-day candidates');
+  expect(result.drafts.every((draft) => draft.event.date === '2026-11-10')).toBe(true);
+  transport.bffRequest.mockResolvedValue({ assignments: [assignment({ dueAt: '2026-11-11T18:00:00+08:00' })] });
+  const saved = await confirmCourseworkStudyDraft(result.drafts[0], context(), transport);
+  expect(saved.kind).toBe('calendar');
+  if (saved.kind === 'calendar') expect(saved.task.state).toBe('verified');
+  expect((await loadPersonalImports(scope())).records).toEqual([expect.objectContaining({ date: '2026-11-10' })]);
+});
+
+test.each(['', '2026-02-30', '2026-11-08', '2026-11-16'])(
+  'invalid or out-of-window requested date %s never starts an unrestricted search', async (date) => {
+    const result = await findCourseworkStudyDrafts(read(), assignmentId, context(), { date });
+    expect(result.kind).toBe('blocked');
+    expect(ledgerWrites()).toHaveLength(0);
+  },
+);
+
 test.each(['missing', 'unreadable', 'wrong-school', 'wrong-term', 'missing-weekday', 'invalid-clock'] as const)(
   '%s timetable evidence does not become an empty or available day', async (problem) => {
     if (problem === 'missing') timetable.mockResolvedValue(null);

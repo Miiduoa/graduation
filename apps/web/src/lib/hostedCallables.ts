@@ -1,9 +1,14 @@
 /** Same-origin Next.js callables hosted at `/api/fn/{name}`. Keep this list tiny. */
 export const HOSTED_WEB_CALLABLES = [
+  'dormWorkflow',
+  'careerWorkstudy',
+  'careerInternship',
+  'clubPortal',
   'prepareDmConversation',
   'sendDmText',
   'replyToCampusStory',
   'joinGroupByCode',
+  'listGroupDiscussionPage',
   'leaveGroup',
   'createTimetableShare',
   'revokeTimetableShare',

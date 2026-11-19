@@ -1,3 +1,4 @@
+import { requestPersonalImportCloudImage } from '@campus/shared/src/imports/aiCloudImage';
 import {
   NuniError,
   nuniId,
@@ -509,6 +510,40 @@ export class NuniSessionController {
       await plansCleaned;
       this.deps.savedPlansCleanup.end();
       this.loggingOut = false;
+    }
+  };
+  recognizeImportImage = async (
+    expectedContext: string,
+    input: Pick<Parameters<typeof requestPersonalImportCloudImage>[0],
+      'base64' | 'mime' | 'kind' | 'academicYear' | 'semester' | 'explicitConsent' | 'signal'>,
+  ) => {
+    const session = this.state.session;
+    if (!session || session.context !== expectedContext || this.state.loading ||
+      this.state.pendingLogout || !this.record) throw new NuniError(409, 'SESSION_CHANGED');
+    if (this.record.expiresAt <= this.now()) {
+      await this.refresh();
+      throw new NuniError(401, 'SESSION_EXPIRED');
+    }
+    const run = this.generation;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    input.signal?.addEventListener('abort', cancel, { once: true });
+    if (input.signal?.aborted) controller.abort();
+    this.controllers.add(controller);
+    try {
+      const result = await requestPersonalImportCloudImage({
+        ...input,
+        endpoint: 'https://nuni.tw/api/personal-import/recognize-image',
+        headers: { Authorization: 'Platform ' + this.record.sessionHandle },
+        signal: controller.signal,
+      });
+      if (!this.current(run) || this.state.session?.context !== expectedContext)
+        throw new NuniError(409, 'SESSION_CHANGED');
+      if (result.ok === false && result.reason === 'unauthenticated') await this.refresh();
+      return result;
+    } finally {
+      input.signal?.removeEventListener('abort', cancel);
+      this.controllers.delete(controller);
     }
   };
   bffRequest = async (

@@ -1,2 +1,2 @@
-// Web and native assistants must interpret the same explicit appointment identically.
+// Keep explicit appointment parsing identical on Web and native.
 export { parseAssistantCalendarIntent, type AssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';

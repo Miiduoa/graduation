@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   session: { authenticated: false } as Record<string, unknown>,
   unexpected: [] as string[],
   auth: { user: null, loading: false, error: null },
+  catalogResponse: null as Promise<Response> | null,
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => state.auth }));
 vi.mock('@/components/imports/PersonalImportSync', () => ({
@@ -74,6 +75,7 @@ function Bound() {
       <output data-testid="scope">
         {scope.loading ? 'loading' : `${scope.scope.owner}|${school.selectedSchoolId}`}
       </output>
+      <output data-testid="catalog">{school.catalogStatus}</output>
       <StudentTodayPage
         now={now}
         updatedAt={null}
@@ -103,6 +105,7 @@ beforeEach(() => {
     session: { authenticated: false },
     unexpected: [],
     auth: { user: null, loading: false, error: null },
+    catalogResponse: null,
   });
   window.scrollTo = vi.fn();
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -116,7 +119,7 @@ beforeEach(() => {
       const url = String(input);
       const method = init?.method || 'GET';
       if (method === 'GET' && init?.body === undefined && url === '/api/schools')
-        return new Response(JSON.stringify({ schools: catalog }), { status: 200 });
+        return state.catalogResponse ?? new Response(JSON.stringify({ schools: catalog }), { status: 200 });
       if (method === 'GET' && init?.body === undefined && url === '/api/nuni/session') {
         return new Response(JSON.stringify(state.session), { status: 200 });
       }
@@ -288,4 +291,52 @@ it('keeps each campus course and fallback isolated through NTU–NCKU–NTU navi
   view.rerender(<App />);
   expect(await classHref(owner, 'ntu', '台大合成課程')).toBe('/timetable?campus=ntu');
   expect(screen.queryByText('成大合成課程')).toBeNull();
+});
+
+it.each([
+  ['ntu', '加入課程', '/classroom'],
+  ['ntu', '查看行事曆', '/calendar'],
+  ['all', '加入課程', '/classroom'],
+  ['all', '查看行事曆', '/calendar'],
+])('continues the %s home journey through %s despite a saved PU preference', async (campus, label, path) => {
+  const owner = prepare('platform');
+  state.search = `campus=${campus}&token=private&q=old-search`;
+  const view = render(<App />);
+  const expectedScope = `${owner}|${campus === 'all' ? 'null' : campus}`;
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(expectedScope));
+  const link = await screen.findByRole('link', { name: label });
+  const href = link.getAttribute('href')!;
+  const destination = new URL(href, 'https://fixture.invalid');
+  expect(destination.pathname).toBe(path);
+  expect(Object.fromEntries(destination.searchParams)).toEqual(
+    campus === 'all' ? { campus: 'all' } : { schoolId: 'ntu', campus: 'ntu', school: 'NTU' },
+  );
+
+  state.pathname = destination.pathname;
+  state.search = destination.search.slice(1);
+  view.rerender(<App />);
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(expectedScope));
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(`|${ACCOUNT}`))!)).toEqual({ schoolId: 'pu' });
+});
+
+it.each([
+  ['campus=ntu', 'ntu'],
+  ['', 'pu'],
+] as const)('does not turn a pending campus into all when opening the calendar from %s', async (search, expectedCampus) => {
+  const owner = prepare('platform');
+  state.search = search;
+  let resolveCatalog!: (response: Response) => void;
+  state.catalogResponse = new Promise<Response>((resolve) => { resolveCatalog = resolve; });
+  const view = render(<App />);
+  const link = await screen.findByRole('link', { name: '查看行事曆' });
+  expect(screen.getByTestId('catalog').textContent).toBe('loading');
+  const destination = new URL(link.getAttribute('href')!, 'https://fixture.invalid');
+  expect(destination.pathname).toBe('/calendar');
+  expect(Object.fromEntries(destination.searchParams)).toEqual(search ? { campus: 'ntu' } : {});
+  state.pathname = destination.pathname;
+  state.search = destination.search.slice(1);
+  view.rerender(<App />);
+  resolveCatalog(new Response(JSON.stringify({ schools: catalog }), { status: 200 }));
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(`${owner}|${expectedCampus}`));
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(`|${ACCOUNT}`))!)).toEqual({ schoolId: 'pu' });
 });

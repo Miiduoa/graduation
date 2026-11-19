@@ -8,9 +8,11 @@ import QRCode from 'qrcode';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { SiteShell } from '@/components/SiteShell';
-import { getAuth, getDb } from '@/lib/firebase';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { AccountDemoStudentCard } from './AccountDemoStudentCard';
+import { getAuth, getDb } from '@/lib/firebase';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
+import { schoolLoginHref } from '@/lib/navigation';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import {
   getStudentCardService,
@@ -88,30 +90,32 @@ export function StudentCardPage() {
   const platform = useOptionalNuniSession();
   const school = useSelectedSchool();
   const schoolId = toPublicSchoolId(school.selectedSchoolId);
-  const ready =
-    !loading && !platform?.loading && !school.loading && school.catalogStatus === 'ready';
-  const platformSession =
-    platform && !platform.pendingLogout && !platform.error ? platform.session : null;
-  const card =
-    !user || user.isAnonymous ? (
-      <section className={styles.message}>
-        <h2>把學號放進隨身卡片</h2>
-        <p>登入後查看已開通的卡片與學生資料。</p>
-        <Link
-          className={styles.button}
-          href={'/login?returnUrl=' + encodeURIComponent('/student-card?campus=' + schoolId)}
-        >
-          登入帳號
-        </Link>
-      </section>
-    ) : schoolId ? (
-      <AccountCard
-        key={user.uid + ':' + schoolId}
-        user={user}
-        schoolId={schoolId}
-        schoolName={school.selectedSchool?.name || '我的學校'}
-      />
-    ) : null;
+  const ready = !loading && !platform?.loading && !school.loading && school.catalogStatus === 'ready';
+  const platformSession = platform && !platform.pendingLogout && !platform.error ? platform.session : null;
+  const settingsHref = campusServiceHref(
+    '/settings?section=account',
+    buildCampusNavigationSearch(null, school.selectedSchool, ready),
+  );
+  const card = !user || user.isAnonymous ? (
+    <section className={styles.message}>
+      <h2>把學號放進隨身卡片</h2>
+      <p>使用學校帳號登入後，可查看個人資料並取得學號驗證碼。</p>
+      <Link
+        className={styles.button}
+        href={schoolLoginHref('/student-card?campus=' + schoolId)}
+      >
+        登入學校帳號
+      </Link>
+    </section>
+  ) : schoolId ? (
+    <AccountCard
+      key={user.uid + ':' + schoolId}
+      user={user}
+      schoolId={schoolId}
+      schoolName={school.selectedSchool?.name || '我的學校'}
+      settingsHref={settingsHref}
+    />
+  ) : null;
   return (
     <SiteShell title="數位學生證" subtitle="需要出示學號時，打開這張卡。" compactHeading>
       <div className={styles.page}>
@@ -124,19 +128,13 @@ export function StudentCardPage() {
           </section>
         ) : platformSession ? (
           <AccountDemoStudentCard
-            key={JSON.stringify([
-              platformSession.platformAccountId,
-              platformSession.context,
-              schoolId,
-            ])}
+            key={JSON.stringify([platformSession.platformAccountId, platformSession.context, schoolId])}
             accountId={platformSession.platformAccountId}
             context={platformSession.context}
             schoolId={schoolId}
             fallback={card}
           />
-        ) : (
-          card
-        )}
+        ) : card}
         {ready && <OfficialService schoolId={schoolId} />}
       </div>
     </SiteShell>
@@ -147,10 +145,12 @@ function AccountCard({
   user,
   schoolId,
   schoolName,
+  settingsHref,
 }: {
   user: User;
   schoolId: string;
   schoolName: string;
+  settingsHref: string;
 }) {
   const [state, setState] = useState<CardState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -204,7 +204,7 @@ function AccountCard({
       <section className={styles.message}>
         <h2>補上你的學生資料</h2>
         <p>目前尚未取得個人檔案，可先到帳號設定確認。</p>
-        <Link className={styles.link} href="/settings">
+        <Link className={styles.link} href={settingsHref}>
           開啟帳號設定
         </Link>
       </section>
@@ -230,6 +230,7 @@ function AccountCard({
       profile={profile}
       schoolId={schoolId}
       schoolName={schoolName}
+      settingsHref={settingsHref}
     />
   );
 }
@@ -239,11 +240,13 @@ function Wallet({
   profile,
   schoolId,
   schoolName,
+  settingsHref,
 }: {
   user: User;
   profile: Profile;
   schoolId: string;
   schoolName: string;
+  settingsHref: string;
 }) {
   const [presentation, setPresentation] = useState<'number' | 'code' | null>(null);
   const studentId = profile.studentId;
@@ -296,7 +299,7 @@ function Wallet({
             : '卡面來自你的個人檔案。驗證碼會另外向學校登入資料核對學號。'}
         </p>
         <p className={styles.edit}>
-          <Link href="/settings">更新個人資料</Link>
+          <Link href={settingsHref}>更新個人資料</Link>
         </p>
       </div>
       <aside className={styles.guide}>

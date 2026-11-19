@@ -35,13 +35,8 @@ const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
 const PUBLIC_UNAVAILABLE_ACTIONS = [{ label: '查看校方公告', route: '公告總覽' }];
 
 function PublicCareerScreen(props: ServiceScreenProps) {
-  return (
-    <UnavailableFeatureScreen
-      {...props}
-      route={{ ...props.route, name: 'Career' }}
-      actions={PUBLIC_UNAVAILABLE_ACTIONS}
-    />
-  );
+  const { CareerScreen } = require('./CareerScreen') as typeof import('./CareerScreen');
+  return <CareerScreen navigation={props.navigation} />;
 }
 
 function PublicSchoolRoute({ children, onHome }: { children: React.ReactNode; onHome: () => void }) {
@@ -74,7 +69,7 @@ export function PreAuthStack() {
     <Stack.Navigator
       initialRouteName="LoginLanding"
       screenLayout={({ children, route, navigation }) =>
-        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' ? <>{children}</> : (
+        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
           <PublicSchoolRoute onHome={() => navigation.navigate('LoginLanding')}>{children}</PublicSchoolRoute>
         )
       }
@@ -128,6 +123,11 @@ export function PreAuthStack() {
       />
       <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '失物招領' }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen
+        name="OralExamDemo"
+        getComponent={() => require('./OralExamDemoScreen').default}
+        options={{ title: '口試示範工作區' }}
+      />
       <Stack.Screen
         name="NuniTimetableAssistant"
         getComponent={() => require('./NuniTimetableAssistantScreen').NuniTimetableAssistantScreen}

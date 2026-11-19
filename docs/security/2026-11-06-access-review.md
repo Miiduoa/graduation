@@ -500,3 +500,413 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 
 本輪提交後的新精確 head 須重新以 CI／Rules／Functions／Web／CodeQL 驗證，尤其 Web 非附件路徑三項測試仍可能因 main 的近期功能變更而失敗，**不可聲稱本次已全綠**。保留相對主線分歧、指定 nuni-merge-gate App 5504170 審查、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、歷史資料盤點、minimatch 雙鎖檔及正式發布／回復等限制。未觸及 E 校園、正式 bucket／token／金鑰或受限 npm／pnpm audit。
+
+
+## 2026-11-11：已合併 #569 後的 legacy 作業草稿讀取收據補強（隔離驗證待 CI）
+
+以最新確認 main `58dc17ccfba698cad54d704a6bf7036476f8e5d3` 建立獨立修補分支；#517、#559、#569 已合併，不向已合併 PR 推送。本次閱讀 #569 合併版共享授權及 Web 合成測試，發現為相容缺少 `attachments` 清單的歷史收據，群組與舊式路徑的 manager GET 仍允許**完全不存在提交收據**或 `submittedAt` 為 null 的附件。知道物件路徑的管理者因此可能在學生真正繳交前讀取已上傳草稿；保留學生本人草稿預覽、跨校／退組拒絕、明確附件清單逐項比對。
+
+最小變更：兩種 assignment 路徑均要求第三方 manager 有既存 `submissions/{student}`、收據 owner 與路徑一致及 `submittedAt != null`；對真正已提交且沒有 `attachments` 欄位的 legacy 收據保留原閱讀相容性。有清單時仍須精確匹配路徑，未修改學生日常上傳資格。合成回歸改為驗證「無收據／空提交時間拒絕、真實 legacy 已提交收據通過」，並保留錯 owner、未引用 sibling、跨帳號／跨校及撤權案例。另同步調整 Functions Jest、Firebase emulator HTTP、Web 預簽 URL 的合成案例，確保舊測試不再把提前下載草稿當作應有功能。
+
+**驗證界線：** 原始碼及 Web 測試已修改；本輪此處不代表完整 CI 已成功。需以新 PR 精確 head 核對 Web、Functions、Firestore Rules、CodeQL、Supabase permissions、Python、Mobile Agent、適用 Maestro、review threads 及指定 nuni-merge-gate App 5504170「審查通過」。此補強不撤銷已簽發 GCS/Supabase 網址，也不證明所有歷史附件皆有可信提交收據；缺收據的管理者下載將 fail-closed，正式發布前應以隔離資料盤點並提供安全修復流程。真 GCS staging、minimatch 雙鎖檔、歷史 URL 清理、正式資料／金鑰／migration／部署需另行走既有審查與回復程序。E 校園連線繼續停用；未重跑未獲授權的 npm/pnpm audit。
+
+
+## 2026-11-11：顯式錯誤附件欄位不得當作無欄位 legacy 讀取（PR #577 後續修補）
+
+核對 #577 精確父提交 `fc214fa6ba010cb5a51734430d78f359d74fdf79` 的 Actions 主 CI #42899167145 與 CodeQL #42899167060 均已 completed/success（新提交不得沿用結果）。該版本共用 `allowsListedOrLegacyPrivateFile` 將「缺少 attachments 欄位」與「有 attachments 但值為 null／非陣列」視為一樣的歷史相容情況；作業收據中也以 `Array.isArray` 為開關。已公開貼文或已提交作業一旦含有顯式錯誤類型，就會允許同組非作者或老師透過猜得的路徑讀取未列出的 sibling 私人檔案，並非可信發布授權。
+
+最小修補只對明確**不存在**的 `attachments` 鍵保留舊相容行為；顯式 `null`、map、字串、布林等值一律不得讓第三方取得私人物件，即使 `submittedAt` 有值。有效陣列仍要求精確路徑，原作者草稿預覽及現有授權撤銷條件不變。新增 Web 共用授權測試：group-post 同組學生／manager 的 4 種畸形欄位需 403，兩種作業 namespace 的老師需 403，作者仍可合法預覽；既有真正缺欄位 legacy 相容測試保留。
+
+此修補防止畸形欄位觸發廣泛授權，但**尚未消除真正缺少附件欄位的歷史貼文／已提交收據的模糊檔案引用風險**。應使用合成隔離清單建立唯讀盤點與可信補齊，不可直接在正式資料上猜測檔案引用。新提交必須另核對 CI／CodeQL／適用 Supabase、Python、Mobile Agent、Maestro、指定 nuni-merge-gate App 5504170 的精確 head 核可。未合併、部署、執行 migration、改動金鑰、清理正式 bearer/signed URL、連線 E 校園，也未重新發出被拒絕授權的 npm/pnpm audit payload。
+
+## 2026-11-11：教師讀取私人作業附件時驗證實際提交時間格式（PR #577）
+
+在前次修補之後，第三方教師下載群組與 legacy 作業附件的條件仍是 `submittedAt != null`。它會把 `false`、`0`、空字串、任意物件等非真正提交時間當作有效收據，搭配精確附件路徑或缺欄位 legacy 相容模式可能錯誤簽發私有檔案下載。本次只收緊**教師的讀取條件**：支援有效 Firestore Timestamp 的 `toMillis()`、Date、正整數毫秒及 ISO 日期／日期時間；拒絕空值、布林、畸形字串及不可信 map。學生本人草稿讀取和既有寫入時的「欄位非 null 即視為已提交、禁止再次上傳」保護不變。
+
+新增 Web 記憶體 Firestore 合成回歸，對新／舊兩種作業路徑模擬無效提交標記、正常提交時間、作者預覽及教師校籍撤銷。**開發補強並非已發 URL 撤銷；只有新提交精確 head 的 CI 才能視為驗證結果。** 真正缺少附件清單的歷史收據仍不能證明個別物件被提交，隔離 staging、可信資料補齊與正式發布順序仍待驗收。沒有修改正式資料、token、金鑰、migration、部署、E 校園連線或重跑被限制的 npm/pnpm audit。
+
+
+## 2026-11-11：只有全域作業鏡像時不得繞過關閉或已繳交限制（PR #577）
+
+共享 `authorizePrivateFile` 原本在舊路徑 `assignments/{id}/submissions/{uid}/...` 的 canonical 群組作業文件不存在時，直接放行已有全域鏡像的同群學生寫入。即使鏡像已關閉、尚未發布、過期或全域提交收據已有 submittedAt，仍可能取得新的上傳資格，屬舊資料相容路徑的寫入授權缺口。
+
+本次維持**正常開放、尚未繳交的全域鏡像**可用；在 read-only 交易重讀全域鏡像，要求其 groupId 與原解析群組相符，檢查 published/status/dueAt/allowLateSubmission；同時檢查全域 submission 的 owner 與 submittedAt，拒絕已繳交及錯 owner。canonical group assignment 存在時維持原審查邏輯，學生本人預覽既有草稿不受影響。
+
+新增合成回歸：全域-only 正常與明確遲交開放、跨群鏡像、關閉／草稿／未發布、已過期與格式錯誤截止日、已繳交、錯 owner。正式判定必須以**新精確 head** 的 Web/Functions/Rules/CI/CodeQL 為準；舊 head 的成功不可沿用。先前報告的真 PG CI 缺口已由現有 test-web 的 PostgreSQL 15 service 與 NUNI_TEST_POSTGRES_PORT=5432 接入，但仍須核對最新 job 實際執行。
+
+本補強不是歷史資料 migration，無法解決缺少 attachments 清單的真正舊收據檔案級授權、舊 GCS／Supabase URL 撤銷、真隔離 Storage、minimatch 雙鎖檔及正式發布／回復。沒有自行合併 main、部署、清理 token、修改正式資料或金鑰、連線 E 校園或直接重跑未授權 npm/pnpm audit。
+
+
+## 2026-11-11：拒絕錯誤日曆日期冒充已繳交收據（PR #577 隔離補強）
+
+精確父 head `1db2023dfeda3537fe41f8f51eeec3c4b27456e2` 的主 CI #42990047129、CodeQL #42990047257 與 Course access #42990047189 已完成 success；此次新變更需重新驗證，不得借用父版本結論。共享 `hasSubmittedReceiptTime` 原以格式正則加 `Date.parse` 判定歷史 ISO 收據，Node 可將 `2026-02-30`／`2025-02-29`／`2026-04-31` 默默正規化成其他日期，讓不可能存在的提交日被誤認為已繳交，尤其與缺 attachments 清單的歷史讀取相容邊界疊加時，會錯誤授權教師取得私人檔案。以隔離 Node22 合成值重現該日期正規化；沒有連真實資料。
+
+最小修補：先將 ISO 字串的 YYYY-MM-DD 當成 UTC 日曆日期往返比對，無效月份／閏年／日數一律拒絕；通過後仍沿用原有 `Date.parse` 驗證時間及正值。保留有效 ISO 日期與完整時區、Firestore Timestamp、Date 與整數毫秒，以及學生本人草稿預覽。Web 共用授權測試對群組及 legacy 兩種路徑增加無效 2/29、2/30、4/31 禁止教師 GET、有效閏年日期保留讀取，既有撤權／跨帳號測試不變。新提交的 CI／CodeQL／適用工作流及 App 5504170 核可須重新對精確 head 查核。
+
+尚未解除：真正缺少 attachments 的歷史收據欠缺檔案級證據、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、minimatch 雙鎖檔相容與正式發布／回復。沒有執行正式 migration、金鑰或 token 操作、E 校園連線及未授權 npm/pnpm audit。
+
+
+## 2026-11-12：legacy 上傳路徑必須同時尊重 global 與 canonical 繳交收據（PR #577）
+
+在前一精確 head `36048052ee8f9e8df8b56d72a5f5921687bca3e9` 讀取共用 `authorizePrivateFile`，發現 `assignments/{id}/submissions/{uid}/...` 的新上傳授權只在群組 canonical assignment **不存在**時檢查 global submission。當兩份作業文件同時存在、global submission 已正式繳交但 canonical submission 尚未同步時，程式會跳過既有 global 收據，重新簽發 legacy 路徑的上傳權限。此前補上的「global-only 作業已繳交拒絕」不足以涵蓋此組合。
+
+最小修補在同一 read-only Firestore transaction 中**不論 canonical assignment 是否存在**都核對 global submission 擁有者及 `submittedAt`，非本人或非 null 時一律拒絕上傳；後續仍核對 canonical 或 global 作業發布狀態、截止與群組／校籍資格。移除 global-only 路徑的重複讀取，未放寬任何 GET。可重跑 `apps/web/src/lib/server/privateFileAccess.test.ts` 新案例：雙份作業正常草稿可上傳、global 已提交拒絕、global owner 不符拒絕、未提交收據仍可上傳、canonical 關閉拒絕、校籍撤銷拒絕。此變更不改已簽 URL 的生命週期；已簽 URL、實際 Storage 競態與正式部署須另行驗收。
+
+**提交前查核：** `36048052ee8f9e8df8b56d72a5f5921687bca3e9` 的 CI [#43023595275](https://github.com/Miiduoa/graduation/actions/runs/43023595275)、CodeQL [#43023595149](https://github.com/Miiduoa/graduation/actions/runs/43023595149)、Course access [#43023595244](https://github.com/Miiduoa/graduation/actions/runs/43023595244) 已 completed/success；其 15 個 check runs 中無 App 5504170 的「審查通過」。`main` 查核為 `1d76ad50c8caedda74862ba4ad1ad4d212207f8b`，分支相對主線 ahead 6／behind 8。新提交的完整 CI／CodeQL 必須重新讀取結果，**不能挪用父 head 綠燈**。Supabase permissions、Python Security、Mobile Agent、Maestro 依 workflow 路徑條件在本次差異中不應觸發，不代表通過；正式資料、E 校園、遷移、金鑰、token 與未授權本機 npm/pnpm audit 均不觸碰。
+
+
+## 2026-11-12：group-path 上傳同步檢查同組 global 已繳交收據（PR #577）
+
+延續上一輪 legacy URL 的雙收據修補，讀取共用 `authorizePrivateFile` 確認對稱缺口：`groups/{groupId}/assignments/{assignmentId}/submissions/{uid}/{filename}` 上傳只檢查 canonical 群組收據；若同一份作業的 global 鏡像已標記繳交、canonical 群組收據尚未同步，仍能重新取得新群組路徑的上傳資格。此為授權重開問題，不代表跨學生讀取或已簽網址撤銷。
+
+最小修補在**同一次 Firestore read-only transaction**中，當 global assignment 明確指向同一 `groupId` 時額外核對其 `submissions/{uid}`；錯 owner 或 `submittedAt != null` 一律拒絕 group-path 新上傳及 claim。沒有 global 鏡像、或該 global ID 屬於不同群組時維持原 canonical 權限，避免用其他校群的同名作業封鎖合法草稿。原有 canonical published/status/期限、跨帳號及校籍撤銷仍生效。
+
+新增 Web 合成授權回歸覆蓋正常未提交、global 已提交、錯 owner、合法草稿、跨帳號、不同群組的鏡像碰撞、canonical 關閉、校籍撤銷。精確 head 必須重新核對 CI、CodeQL、Firestore Rules、真 PostgreSQL CI 及適用專用工作流；未見 nuni-merge-gate App 5504170 對新 head「審查通過」之前不能合併。這次沒有操作正式資料、GCS／Supabase、金鑰、migration、token、E 校園及未授權 npm/pnpm audit。已發 URL、缺附件清單的歷史資料、真實隔離 Storage、minimatch 雙鎖檔、正式發布與回復仍未驗收。
+
+
+## 2026-11-12：global 作業鏡像關閉狀態不可被尚未同步的 canonical 作業重新開放（PR #577）
+
+在前一 head `8d711e97a26aab930ec30626b952fdabc0962387` 的共用上傳授權檢查發現：group-path 雖已讀取同群 global submission，卻未核對 global assignment 的 published/status/dueAt；legacy-path 在 canonical 作業存在時也只檢查 global submission，略過 global 作業是否已關閉。當 global 鏡像已關閉／逾期但 canonical 作業仍顯示開放，兩種 namespace 都可再取得新的寫入授權。這是資料同步狀態分歧下的「關閉後重新開放」缺口，與已簽發 URL 的回收不同。
+
+最小修補：新增只用於 global 鏡像的新上傳資格檢查，在相同的 read-only Firestore transaction 中同時核對 global published/status、dueAt/allowLateSubmission，並延續同群與已繳交收據／owner 比對。global 作業屬其他群組時 group-path 不受其關閉狀態影響；合法晚交仍准許，校籍撤銷與 canonical 關閉仍拒絕。合成 Web 回歸對 group-path 和 legacy-path 各驗證正常、未發布、關閉、過期、異常日期、明確晚交及撤權。
+
+**驗證分級：** 此文件記錄原始碼變更與可重跑合成案例；新精確 head 的 CI、CodeQL、Supabase／Python／Mobile Agent／適用 Maestro 與 App 5504170 審查狀態，必須以 GitHub 實際結果另核對，未完成不能說已通過。read-only 授權檢查不等於撤銷既有 GCS／Supabase 已簽 URL，後者及真隔離 GCS staging、歷史缺附件清單、minimatch 雙鎖檔、正式發布與回復仍待驗收。未觸碰正式資料、憑證、token、migration、部署、E 校園或未授權的 npm／pnpm audit。
+
+## 2026-11-12：明確未發布的群組貼文附件禁止第三方讀取（PR #577）
+
+於父 head `e18e6a98c4c594e0ca4bf09f7993997ec705abd2` 的共用 `authorizePrivateFile` 發現：讀取群組貼文時，非作者只需群組／校籍有效且貼文存在、未刪除、`attachments` 引用符合，即可通過；**忽略 `published:false` 與 `status:draft/scheduled/pending/unpublished`**。因此在貼文已有精確附件引用但尚未發布的情況下，同組成員及管理者仍可透過既知檔案路徑讀取。這是當次授權判定的程式邏輯缺口，並非證明正式環境已有此類物件或檔案外洩。
+
+最小修補只在**非作者 GET** 增加明確未發布狀態的拒絕；作者自己的上傳、草稿預覽保持不變；真正已發布的貼文仍須符合附件精確路徑比對，歷史**未明確標記未發布**且缺 `attachments` 的讀取維持原相容行為。無法據此宣稱所有歷史模糊附件引用已修復。
+
+新增 `privateFileAccess.test.ts` 合成回歸：五種未發布狀態、非作者一般成員／管理者拒絕、作者讀取、發布後恢復，以及無附件清單的明確草稿拒絕／已發布歷史相容。`backend/functions/privateGroupFiles.test.js` 加入三種 HTTP 403 與作者／發布後 200 案例。父 head `e18e6a98c4c594e0ca4bf09f7993997ec705abd2` 的 [CI](https://github.com/Miiduoa/graduation/actions/runs/43129558111)、[CodeQL](https://github.com/Miiduoa/graduation/actions/runs/43129558002)、[Course access](https://github.com/Miiduoa/graduation/actions/runs/43129557915) 已 completed/success；**新提交仍須以自身精確 head 的全部 CI 結果判定**。
+
+未觸碰正式資料、金鑰、token、migration、部署或 E 校園；未重跑受限的 npm/pnpm audit。仍待歷史附件可信清單、已發 GCS／Supabase URL 撤銷、真隔離 Storage 競態、minimatch 雙鎖檔相容性、主線整合、正式發布／回復與指定 nuni-merge-gate App 5504170 對精確 head 的「審查通過」。
+
+
+## 2026-11-12：作業明確非開放狀態不得簽發新上傳授權（PR #577）
+
+前一精確 head `cf0544c7b2d8e0bb3bf798ce5031193018354c0b` 的 CI #43157129296、CodeQL #43157129272、Course access #43157129281 已完成 success；這不代表本次新 head 已通過。共用授權原只將 assignment 的 `draft`、`closed` 視為關閉，但明確 `scheduled`、`pending`、`unpublished`、`archived`、`cancelled/canceled` 仍可能被當成開放上傳；尤其 global 與 canonical 鏡像狀態不同步時，一邊已撤回或封存仍可能簽發新 URL。
+
+最小修補統一兩種路徑的 canonical、global-only 與 global-mirror 開放狀態判定，明確的非開放狀態一律拒絕新上傳，即使設定 `allowLateSubmission:true`；真正開放的 legacy 草稿與作者已上傳檔案預覽、跨帳號／校籍撤銷原條件維持。新增 `apps/web/src/lib/server/privateFileAccess.test.ts` 的合成隔離回歸：兩種上傳路徑、global/canonical 雙佈局、global-only、狀態切換恢復、跨帳號及校籍撤銷。
+
+**驗證範圍**：僅是開發分支的授權守門與合成測試；必須對新精確 head 重新查核 CI、CodeQL、適用工作流與 App 5504170 的「審查通過」。此變更不撤銷先前已簽發的 GCS／Supabase URL，也不取代 Storage CAS／競態、可信歷史附件引用補齊、隔離 staging、minimatch 雙鎖檔和正式部署／回復驗證。未連 E 校園，未操作正式資料、金鑰、token 或 migration，未重送未獲准的 npm/pnpm audit payload。
+
+
+## 2026-11-12：群組貼文撤回／封存狀態仍不得開放私人媒體 GET（PR #577）
+
+核對目前 PR #577 父 head `a92c895d4c2425bd8b53aad530c05469405b900f` 的所有主要適用檢查：CI #43185909288、CodeQL #43185909552、Course access #43185909415 已完成 success；沒有 Functions／Rules／Web 等既有失敗先修項。Supabase permissions／Python security／Mobile Agent／Maestro 未於此 head 個別觸發，不能算成功；指定 nuni-merge-gate App 5504170 對此 head 仍未見「審查通過」。
+
+共用 `authorizePrivateFile` 已阻擋 draft、scheduled、pending、unpublished 貼文的非作者媒體讀取，但明確 `status:archived/cancelled/canceled` 的貼文，只要附件列在 `attachments`，其他同組成員與 manager 仍可能經過 HTTP GCS 或 Supabase private URL 簽發入口讀取。這些撤回／封存狀態不應等同對群組公開；這是授權決策的隔離可重現條件，不表示已找到真實外洩樣本。
+
+最小修補只對非作者 GET 將上述三個狀態加入禁止公開清單，保留作者預覽、正常 `status:published` 的精確附件引用及沒有明確限制的歷史貼文相容。新增 Web 共用授權及 Functions HTTP 惰性 Storage 正反向回歸，涵蓋同組讀者／管理者拒絕、作者仍可讀，以及轉為 published 後合法讀取；原本的跨帳號、跨校、退組測試維持。新提交必須重新以精確 head 的 GitHub CI／CodeQL 驗證。
+
+**尚未解除的不同層面風險**：Firestore `groups/{groupId}/posts/{postId}` 規則目前仍對 active member 放行文件讀取，可能揭露尚未發布貼文的 metadata；收緊 Firestore list 規則可能要求同步修改群組動態查詢，不能以本次附件 HTTP 守門聲稱已修復。其他仍有舊 GCS／Supabase bearer/signed URL 撤銷、真隔離 Storage staging、缺附件清單歷史資料、minimatch 雙鎖檔、最新 main 整合、正式部署與回復。未操作正式資料、金鑰、token、migration、E 校園，未重送未授權 pnpm/npm audit；不合併、不部署，等 App 5504170 對新精確 head 核可後交主線窗口。
+
+
+## 2026-11-13：未發布／撤回的群組貼文，子集合留言不能被成員繞道讀取（PR #577）
+
+原 Firestore Rules 對 `groups/{groupId}/posts/{postId}/comments` 只檢查 active group membership。即使附件 HTTP 已阻擋非作者讀取未發布／撤回貼文，知道 postId 的其他有效成員仍可能直接列舉留言，包括未發表時的內容與助理回覆。這是與父貼文讀取不同的路徑授權漏洞，且不需要任何正式資料即可用合成文件重現判定。父貼文 `posts` 集合的 **list/read 還沒有收緊**：因既有 Mobile 無條件 `orderBy(createdAt)` 查詢包含缺 status 的歷史貼文，若只改 Rules 而不做雙路徑相容查詢／可信歷史資料補齊，會使正常動態全面失敗。此輪不宣稱父貼文本身的曝光已修復。
+
+最小修補在 comments 子集合的讀取與新留言建立增加固定父 post 檢查，保留作者草稿檢視；非作者遇到 `published:false`、`draft/scheduled/pending/unpublished/archived/cancelled/canceled`、刪除旗標或刪除時間立即拒絕；只有會員資格仍有效且貼文發布時才能讀取／留言。缺父貼文拒絕。已新增 `backend/tests/security-rules.test.js` Firebase emulator 合成回歸：既有可讀、草稿／撤回／刪除時 peer 與 instructor get/list/create 拒絕、作者可讀、重新發布恢復、再次撤回及作者校籍撤銷。這是拒絕新的 Firestore 存取，不會撤銷先前已簽 GCS/Supabase URL。
+
+此次只有開發分支修補與可重跑測試，**尚待此精確 head 的 Rules CI、全部適用 CI／CodeQL 與 nuni-merge-gate App 5504170 核可**。不合併／部署、不執行 migration、token 清理或正式資料測試；沿用 E 校園暫停與未授權 npm/pnpm audit 的限制。GCS/Supabase 已發 URL、真 Storage CAS／重放、歷史附件引用、minimatch 雙鎖檔、父貼文 list 相容改造及正式發布／回復仍待驗證。
+
+
+## 2026-11-13：群組留言撤回後的變更／刪除守門與 status=deleted 補漏（PR #577）
+
+延續精確父 head `0b926cccb4be49c0aff3567a00d9bb8592a14812`：當日父 head 主 CI #43262007810、CodeQL #43262007893、Course access #43262007784 均 completed/success，Firebase Rules 322/322、Web emulator 51/51；15 個 check runs 中未見 nuni-merge-gate App 5504170 的核可。原 `groups/{groupId}/posts/{postId}/comments` 子集合已對未發布／撤回父貼文拒絕 read/create，卻**沒有對 update/delete 套用相同父貼文查核**。知道既有 commentId 的同組留言作者或管理者，仍可能在父貼文撤回、封存或刪除後修改／刪除舊留言；另外只有 `status:'deleted'` 的父貼文仍被誤認為可公開讀取留言。
+
+本次最小修補將 `canReadPostComments()` 共同套至留言 update/delete，且在父貼文非公開狀態集合加入 `deleted`；原本的作者草稿預覽及已發布貼文留言編輯、管理者正常管理功能保留。合成 Firebase emulator 測試在既有安全案例中補上 `status:'deleted'`、留言作者與管理者對隱藏內容的 update/delete 拒絕、作者草稿編輯、重新發布後恢復、重度撤回後重放、學籍撤銷及父貼文刪除後拒絕。
+
+這些檢查只封鎖**新的 Firestore 操作**，沒有解決父貼文 documents 集合仍允許會員 list/read 的獨立暴露，也無法讓已簽發 GCS／Supabase URL 失效。真隔離 Storage CAS、可信歷史附件清單、minimatch 雙鎖檔、最新主線合併前整合、正式發布及回復仍待完成。此輪僅更新開發分支；不觸及正式資料、金鑰、token、migration、部署、E 校園連線及受限 pnpm/npm audit。**新 head 的實際 CI／CodeQL 必須重新驗收**，不得沿用本段父 head 成功結果；未取得指定 App 對精確 head 的「審查通過」前不得合併。
+
+
+## 2026-11-13：群組留言客戶端欄位偽造與輸入資源界線（PR #577）
+
+延續 `485b5205457a1b48cd14d4fcd3eba6cca5c78117`，以最小 Rules 守門限制 `groups/{groupId}/posts/{postId}/comments` 的直接 SDK 建立：`body` 必須為 1–5000 字元字串；新留言不得預填非零 `likeCount`、任意 `likedBy` 或 `isAnswer:true`。既有留言如修改 `body` 也驗證型別及長度；`isAnswer` 的狀態改動限有效群組管理者，避免留言本人單獨將回覆標為已採納答案。貼文正式發布、正常留言建立／文字修改、教師標記及校籍／群組撤權的原授權保留；後端 Admin SDK 助理回覆不經此直接客戶端規則。
+
+隔離合成回歸新增於 `backend/tests/security-rules.test.js`：無效 body、超長 body、偽造答案／投票初始化拒絕；正常留言、教師標記、一般修改通過；撤權後重放拒絕。本變更針對資料完整性／資源界線，**不能宣稱修補父貼文集合本身的讀取洩露**。其他待處理項目：父貼文 get/list 與 Web/Mobile 查詢相容改造、真隔離 GCS/Supabase 已簽網址撤銷及 CAS 競態、可信舊附件引用、minimatch 雙鎖檔、主線整合、發布及回復驗證。
+
+此段記錄提交的測試設計；CI／CodeQL 結果必須以**新精確 head** 核對，不能借用 `485b5205457a1b48cd14d4fcd3eba6cca5c78117` 成功。未接觸正式資料／金鑰／token、migration、部署、E 校園或受限 npm/pnpm audit。沒有取得指定 nuni-merge-gate App 5504170 對精確 head 的核可前，不合併 main。
+
+
+## 2026-11-13：群組留言已建立後仍可偽造他人按讚與採納標記（PR #577）
+
+精確父 head `1e3f848d1430a7e851d1e90c0db48ca0b3add6ef` 的 [主 CI #43339348653](https://github.com/Miiduoa/graduation/actions/runs/43339348653)、[CodeQL #43339348667](https://github.com/Miiduoa/graduation/actions/runs/43339348667)、[Course access #43339348683](https://github.com/Miiduoa/graduation/actions/runs/43339348683) 均 completed/success（包含 Web、Mobile、Functions、Rules、Security Gates 與建置）。對此父 head 的 15 個 check runs 未找到指定 nuni-merge-gate App 5504170 的 APPROVED review；reviews／threads 均為空。main 核對為 `f61b5192c699c3dc8d43a933581a9222c50a2498`，分支 15 ahead／29 behind，仍為 Draft。Supabase／Python／Mobile Agent／Maestro 未於此精確 head 獨立觸發，不能沿用較早版本的成功結果。
+
+新增的最小資料完整性守門：舊規則只限制新留言的 `likedBy:[]`、`likeCount:0`、`isAnswer:false`，但留言作者或有效群組管理員在已存在留言的 `update` 可直接寫入任意他人 UID 與票數，甚至建立／更改 `isBestAnswer:true`。現改為普通編輯必須保留反應欄位；若變更票數，僅限當次使用者自己的 UID 加入／移除且票數精確 ±1；`isBestAnswer` 採納標記新增時不得預填 true、後續只能由有效群組管理員切換。維持原本 `isAnswer` 保護與既有角色限制，對助理回覆的伺服器寫入無影響。
+
+可重跑的 Firebase Rules emulator 案例加入 `backend/tests/security-rules.test.js` 既有 assistant reply 測試：作者與管理員偽造他人投票、偽造採納、500 票重放均拒絕；正常建立、本人投票／取消、本文編輯及管理員採納仍通過。**本段是原始碼與測試設計紀錄，提交後新 head 的 CI／CodeQL 成功與否必須另行核對，不代表正式發布驗收。**
+
+父貼文 documents 的 Firestore read/list 權限仍會對有效會員放行未發布資訊；其 Mobile／Web 查詢與歷史相容要獨立改造。GCS／Supabase 已發 URL 撤銷、真隔離 Storage 競態、歷史檔案引用、minimatch 雙鎖檔、主線整合及正式發布／回復也未解除。未操作正式資料、金鑰、token、migration、部署、E 校園或重跑未授權 npm/pnpm audit。
+
+
+## 2026-11-13：留言作者與父貼文作者混淆造成跨帳號編輯（PR #577）
+
+先前 `groups/{groupId}/posts/{postId}/comments/{commentId}` 的 update/delete 以 `activeAuthor()` 判定一般使用者權限，但該函式取的是**父貼文**的 `resource.data.authorId`。所以有效會員若是貼文作者，可能修改或刪除其他會員的留言；反而留言作者不一定能編輯自己的留言。投票也錯誤依賴父貼文作者身分。這是規則可推導的跨帳號寫入缺口，不代表正式資料曾被篡改。
+
+最小修補把文字編輯／刪除授權改為**留言文件**的 `resource.data.authorId == request.auth.uid` 或有效群組管理員；其他有效會員若只更新 `likedBy/likeCount/updatedAt`，仍須通過既有 `changesOnlyOwnVote` 本人單票增減檢查，絕不可藉投票改留言正文或最佳解答欄位。原有父貼文撤回/封存、校籍、帳號停用與 AI 回覆防護保留。
+
+新增 `backend/tests/security-rules.test.js` 的 Firebase Emulator 合成測試，驗證貼文作者無法冒名修改／刪除 Bob 留言、Bob 可編輯及刪除自己的留言、Charlie 不能改寫、跨校 Mallory 拒絕、教師可以管理、Bob 對 Alice 留言合法按讚／取消但不能以投票改正文，以及移除群組資格後重放與父貼文封存後的拒絕。這是**開發分支的可重跑隔離回歸**，必須在新精確 head 的 CI 執行通過後才標示已驗證；不等於已合併、部署或正式資料驗收。
+
+其他高風險保留：父貼文 Firestore get/list 對未發布內容的曝光、舊 GCS／Supabase URL 撤銷、真正隔離 Storage CAS／競態、歷史可信附件引用、minimatch 雙鎖檔、與最新主線整合和正式回復測試。指定 App 5504170 對精確 head 審查通過前不合併。無正式資料／金鑰／token、migration、部署、E 校園或未獲授權 npm/pnpm audit 操作。
+
+## 2026-11-13：群組父貼文按讚防偽與會員合法反應（PR #577）
+
+隔離檢查發現 `groups/{groupId}/posts/{postId}` 的直接 SDK `update` 僅允許貼文作者或群組管理員，卻未限制 `likedBy`／`likes` 的差異：作者／管理員可以任意製造其他 UID 的票數，普通有效成員則無法依 Mobile 既有互動流程正常按讚。這與先前修補的 **留言** 投票為兩個不同路徑。
+
+最小 Rules 修補：建立貼文時反應欄位必須為空陣列及零票（不能在 create 時預填假票）；已發布、未撤回且未刪除貼文允許有效群組成員僅用自己的 UID 精確加減一票；一般文字／置頂／管理員修改不可同筆改寫反應欄位。對撤回、草稿、封存等狀態的新反應 fail closed，保留原本作者修改正文及管理員管理功能。原先欠缺 `likedBy`／`likes` 的合法歷史貼文，以空陣列／零票進行第一次正規反應，不執行正式資料修復。
+
+在 `backend/tests/security-rules.test.js` 新增 Firebase emulator 合成回歸，驗證作者與教師偽造票數拒絕、同組會員合法投票／取消、跨帳號票數和正文竄改拒絕、跨校拒絕、撤回後重放、重新發布、群組資格及學校資格撤銷。**這裡的原始碼／回歸提交不等於 GitHub CI 已完成或正式環境已部署**；必須依新精確 head 工作流結果另記。未發布父貼文本身的 Firestore `get/list` 仍是**未修補、較高資料保密風險**，需要連 Web/Mobile feed 查詢與歷史資料相容性改造。GCS/Supabase 已簽 URL 撤銷、真隔離 Storage CAS／競態、歷史附件引用、minimatch 雙鎖檔與正式發布／回復也仍待驗收。
+
+本次只觸及開發分支、Rules、合成測試與同一安全紀錄；不操作正式資料、憑證、token、migration、部署、E 校園或被拒絕的 npm/pnpm audit。缺少指定 App 5504170 對精確 head 的「審查通過」，不自行合併。
+
+## 2026-11-14：群組貼文的 AI 來源標記不可由一般 SDK 偽造（PR #577）
+
+在精確父 head `745b1b23e1e69a27d636eed1b50274b1d611152e` 檢查到：雖然 `assistantReply` 原本只供伺服器建立／修改，但有效群組成員仍能建立 `isAI:true`、`generatedBy:'server'` 或 `authorName:'助理回覆'` 的假 AI 貼文，或在既有普通貼文中竄改這些來源標記。本項是依 Rules 推導、可用合成資料重現的身分來源偽造，並非正式資料已被冒用的證據。
+
+最小修補：直接 Firestore SDK create 不能自行標記 AI 或伺服器生成，且不可將發文者名稱設定為「助理回覆」；update 的 `isAI`、`generatedBy`、`assistantReply` 欄位保持伺服器專用，最終內容仍不能標示 AI 或冒充保留名稱。正常學生發文、學生與教師編輯、既有票數授權、Admin SDK 真實 AI 回覆路徑維持。新增 `backend/tests/security-rules.test.js` 的合成 Firebase Emulator 回歸，包含初始偽造／更新偽造、正常操作、跨校身分與撤權重放；**回歸結果仍須核對新精確 head 的 CI，未通過前不列為已驗證。**
+
+**仍未解決**：未發布父貼文 `get/list` 直接讀取、GCS/Supabase 已發 URL 撤權、真 GCS 隔離 bucket 競態、歷史附件可信引用、minimatch 雙鎖檔、正式發布與回復。父貼文 list 必須配合 Web/Mobile feed 和歷史資料轉換，避免直接收緊造成查詢失敗。本項只修改開發分支，無正式資料、憑證、token、migration、部署、E 校園或未授權 npm/pnpm audit；App 5504170 精確 head 審查通過前不得由此 PR 合併。
+
+
+### 2026-11-14：精確合併預覽 Web CI 失敗與週末測試日期（待新 head CI 驗證）
+
+- PR #577 精確父 head `4aabc336be2dcb0096a57111886fbd107583e8ce` 的主 CI [#43466697560](https://github.com/Miiduoa/graduation/actions/runs/43466697560) **completed/failure**。Web job #132027623409 顯示 4 個失敗、14,489 通過、63 略過，失敗全部來自 `TodayCampusEntry.test.tsx`，其餘 Functions／Rules／Security Gates／Mobile／建置／Lint 皆成功；同一 head CodeQL #43466697769 與 Course access #43466697555 均成功。不能把這個 CI 標為綠燈。
+- 這四個案例是 main `75bda317cdbac687ce14899736186eda07e9754a` 新增的案例，原 PR head 尚未包含，只有 GitHub 合併預覽 `63c20294d4b39e63669089bce6ec9197f4b2f895` 會執行。測試固定合成校園 `pu` 的課表，但 `saveTodayLesson()` 以 CI 真實日期產生星期六的課程。該校課表的 `periodProfileForSchool` 正確拒絕週末星期六／日資料，原本測試期待的「入口測試資料庫」因此無法讀取，UI 返回裝置資料不可用提示。此情境屬於**合成測試時間依賴**，不是應放寬正式資料驗證的理由。
+- 本次在整合 main 的 PR 開發分支，僅讓此四個案例共用的合成課表建立器固定在 2026-11-12（台灣星期四），只 fake `Date` 不假造 `setTimeout` 等 React 非同步時鐘，並於 `afterEach` 復原真實計時器，保留校籍／本機來源拒絕規則不變。這是解決既有 CI 失敗的最小測試修正，**尚待精確新 head 的 Web CI 證實**。PR branch 合併 main 不等於主線合併，仍保持 Draft。
+- 不涉及正式資料、GCS/Supabase token、migration、部署、E 校園或手動 npm/pnpm audit。未發布群組父貼文直接讀取、已發網址撤權、真隔離 GCS CAS、歷史可信附件、minimatch 雙鎖檔與發布驗收仍是待辦。沒有指定 App 5504170 對新精確 head 的「審查通過」，不得合併 main 或部署。
+
+## 2026-11-14：Firestore SDK 直接繳交不能繞過非開放作業狀態（PR #577）
+
+前一精確 head `7c37ad76560c74a63171f5435490f54ce497cdfe` 的 [主 CI #43503880571](https://github.com/Miiduoa/graduation/actions/runs/43503880571)、[CodeQL #43503880641](https://github.com/Miiduoa/graduation/actions/runs/43503880641) 與 [Course access #43503880532](https://github.com/Miiduoa/graduation/actions/runs/43503880532) 均 completed/success。主 CI 含 Web、Mobile、Functions、Rules、Build、Lint 全部成功；15 項 check runs 未見指定 App 5504170，reviews／未解決討論為零。Supabase permissions、Python security、Mobile Agent Regression、Maestro 於此 head 沒有獨立執行。當時 main `75bda317cdbac687ce14899736186eda07e9754a`，PR ahead 21／behind 0。
+
+發現 Firestore 規則的 `acceptsStudentSubmission()` 僅阻擋 `draft/closed`，直接 Firestore SDK 建立 `groups/{groupId}/assignments/{assignmentId}/submissions/{uid}` 收據時，`scheduled/pending/unpublished/archived/cancelled/canceled/deleted` 仍可能通過狀態檢查；這與先前 HTTP 附件上傳授權的明確非開放狀態判定不一致。本次只收緊同一個 Firestore helper 的狀態清單，保留正常開放繳交、期限與合法晚交、送出後禁止覆寫及教師評分權限。這是可在合成資料下推導的授權漏洞，並未取得正式環境實際遭利用證據。
+
+擴充 `backend/tests/security-rules.test.js` 的作業與測驗非開放狀態矩陣，加入 `allowLateSubmission:true` 仍拒絕撤回／封存的案例，以及沿用同一登入 context 檢驗「封存→開放、校籍撤銷→恢復、首次提交→重放」。原跨帳號／跨校與正常繳交案例保留。此為開發分支程式碼與可重跑回歸，**新精確 head 的 Rules、完整 CI、CodeQL 仍須以 GitHub 實際結果驗證，不沿用父 head 通過結果**。
+
+未發布群組父貼文 get/list、GCS／Supabase 已發網址撤銷、真隔離 Storage CAS／競態、舊附件可信引用、minimatch 雙鎖檔與正式發布／回復仍待。新直接寫入拒絕不撤銷既有簽發 URL。保持 Draft，未取得 nuni-merge-gate App 5504170 對精確 head 的 APPROVED 不合併／部署；不觸碰正式資料、金鑰、token、migration、E 校園或重跑受限 npm/pnpm audit。
+
+## 2026-11-14：群組貼文遭管理員撤回後，原作者不可用 SDK 自行復活（PR #577）
+
+基於精確父 head `612ea1bdfd787c490988f0c4e548c1b43d0a2f1e` 的 Rules 檢查發現：`groups/{groupId}/posts/{postId}` 的一般作者 `update` 只限制 `kind` 與身分欄位，**並未檢查既有貼文已被軟刪除／取消**。當教師透過伺服器或 SDK 將 `deleted:true`、`deletedAt` 或 `status:deleted/cancelled/canceled` 設定為撤回，仍在校籍內的原作者可能直接使用 Firestore SDK 清空這些欄位並重新公開。這是合成規則下可推導的撤銷繞過，尚無正式資料遭利用的證據。
+
+最小修改只在**一般作者**的內容修改分支，拒絕既有資料帶軟刪除或取消狀態的後續寫入；具有當前有效群組管理權限的教師／管理員仍可明確恢復，正常公開貼文仍可由本人編輯，按讚專用分支本就要求貼文可見。本次測試新增合成 Firebase Emulator 矩陣：不同撤回標記、作者直接復原／一般編輯拒絕、跨校拒絕、教師明確恢復、恢復後作者正常編輯、撤銷群組資格後同一登入 context 重放。**此新精確 head 的實際 CI／CodeQL 須獨立確認，暫不列為已通過。**
+
+父 head 的 [主 CI #43536293392](https://github.com/Miiduoa/graduation/actions/runs/43536293392)、[CodeQL #43536293459](https://github.com/Miiduoa/graduation/actions/runs/43536293459)、[Course access #43536293391](https://github.com/Miiduoa/graduation/actions/runs/43536293391) 均已 completed/success，且 Web／Mobile／Build Web／Build Mobile 全部成功。新補丁不代表正式發布。**未發布群組父貼文 get/list 曝光仍未解決**，需要配套 Web/Mobile 查詢與舊資料改造；此外 GCS／Supabase 已簽 URL 撤權、真隔離 Storage 競態、歷史可信附件、minimatch 雙圖相容與正式發布回復仍待驗收。Supabase permissions、Python security、Mobile Agent Regression、Maestro 沒有這個新 head 的獨立結果。PR 保留 Draft、未取得 App 5504170 對精確 head 的 APPROVED 審查前不合併。不操作正式資料、token、憑證、migration、部署、E 校園，也不重跑受限 npm／pnpm audit。
+
+## 2026-11-14：封鎖根目錄 postLikes 的跨校身分枚舉（PR #577）
+
+精確父 head `129162e38daa23b72acdf8fa1c496c26568586ea` 的主 CI #43558304404、CodeQL #43558304415 與 Course access 均 completed/success；該 head 的主 CI 包括 Web、Mobile、Firestore Rules、Functions、Security Gates、Lint/Type、PostgreSQL policy、Build Web/Mobile 全通過。Supabase permissions、Python security、Mobile Agent Regression 與 Maestro 無該 head 的獨立證據。當時 main `5b9f93602a057df52a884eadf002bb9e71f50231`，PR ahead 24、behind 4；主線新增檔案未與 PR 八個修改檔重疊。Reviews 0、未解決 threads 0，App 5504170 沒有精確 head APPROVED。
+
+本輪另查到根目錄 `postLikes/{docId}` 的 `allow read: if isSignedIn()` 允許任何有效登入者對全域投票集合 list／get（含其他學校的 `userId` 與 `postId`）。這不同於之前已收緊的 `groups/{groupId}/posts/{postId}` 內嵌按讚欄位；目前未取得正式資料遭枚舉的證據。最小 fail-closed 修補將直接 GET 綁定現存 `groupPosts/{postId}` 的現時有效群組、校籍，完全禁止全域 list；既有本人建立／刪除票的規則不變。若舊客戶端依賴全域 list，須遷往限群組的伺服器索引後才能恢復，絕不為相容性重新開放全域枚舉。
+
+新增合成 Firebase Emulator 回歸：同組合法讀票、跨帳號與跨校直接 GET 拒絕、匿名拒絕、缺失 parent 拒絕、無條件或過濾後全域 list 拒絕、合法建立／刪除、冒刪拒絕、跨校建立拒絕，以及同登入 context 在群組與校籍撤銷後的重放拒絕和恢復成功。**本輪程式碼及測試已提交的狀態不代表新精確 head CI 已通過；以 GitHub 新工作流驗證為準。**
+
+本變更不處理 `groups/{groupId}/posts/{postId}` 未發布父貼文的 get/list 曝光；該高優先項仍需 Web/Mobile feed 查詢、歷史欄位與索引配套改造。GCS/Supabase 已發網址撤權、真隔離 Storage CAS 競態、歷史可信附件引用、minimatch 雙鎖檔與正式發布/回復驗收仍未完成。PR 維持 Draft，指定 nuni-merge-gate App 5504170 核可前不合併或部署；沒有操作正式資料、金鑰、token、migration、E 校園或執行受限制的 npm/pnpm audit。
+
+## 2026-11-14：私訊 readBy 冒名已讀／清除他人回條的資料完整性漏洞（PR #577）
+
+本輪以 PR #577 前一精確 head `736dd8b6dd90d3563dfc0af39123db8a6ade1ea8` 核對：主 CI #43577396054、CodeQL #43577396162、Course access #43577396040 已 completed/success，主 CI 全部已執行 job（含 Firebase Rules、Web、Mobile、Functions、Lint、Build）成功，Preview Deploy skipped。PR reviews 及未解決 review threads 均為 0，未見指定 App 5504170 的對應 APPROVED。Supabase permissions、Python security、Mobile Agent Regression、Maestro 在這個精確 head 未獨立觸發，舊結果不得套用。查核期間 main 是 `e4446262880c3d8188e0741f185d7aeebc3f944f`，PR ahead 25／behind 6；未合併主線。
+
+另外檢查到直接 SDK 建立 `conversations/{conversationId}/messages/{messageId}` 時僅驗證 senderId，客戶端可預填其他收件人 `readBy`；而原 update 只確認「更新後的 readBy 包含自己的 UID」，導致有效對話成員可直接替其他成員標記已讀、刪除既有已讀紀錄或植入重複 UID。這可能讓私訊已讀狀態不可信，但目前沒有正式資料遭利用的證據。
+
+最小修補：客戶端新增訊息時 `readBy` 只能缺省（舊客戶端）或 `[senderUid]`；讀取者的後續更新僅能在既有陣列尾端追加自己的 UID，已讀過者重試必須保持原陣列不變，禁止更動其他欄位。現有 Mobile `arrayUnion(myUid)` 與伺服器 `[uid]` 初始化皆相容。原先的合成照片讀取測試調整為真實伺服器已初始化 `readBy:['alice']` 的形狀。新增 Firebase Emulator 合成回歸涵蓋正常已讀、冪等重放、跨帳號偽造／清除、重複回條、跨校非會員、帶內容竄改、對話成員撤銷、停權與恢復。正式 CI 必須以本次新提交精確 head 重新驗證，以上不預先宣稱通過。
+
+**未解除風險：** 未發布群組父貼文的 `get/list` 直接曝光（需 Web／Mobile 查詢與歷史補齊共同改造）、已發 GCS／Supabase URL 撤權、真隔離 Storage CAS 競態、歷史可信附件、DM reaction 完整性與其他訊息欄位策略、minimatch 雙鎖檔相容及正式發布回復驗收。App 5504170 精確 head 核可前保持 Draft，不合併／部署。不修改正式資料／憑證／token、不執行 migration、不連 E 校園、不重跑受限制的 pnpm/npm audit。
+
+## 2026-11-15：私訊 reactions 防止跨帳號偽造／清除（PR #577，待精確新 head 回歸）
+
+最新審視前一 head `1ff5a9f11a2e5090a4aa2b1ad55b795354caab35`：主 CI #43597013821、CodeQL #43597013811、Course access #43597013797 已全部 completed/success；Firestore Rules、Web、Mobile、Functions、Build、Security Gates、Lint/Type 等 CI jobs 皆成功。15 個該 head check runs 未見指定 nuni-merge-gate App 5504170，PR reviews／未解決 threads 均為 0。Supabase permissions、Python security、Mobile Agent Regression、Maestro 未在該 head 獨立觸發，不能沿用舊 head 證據。主線查核 `65e07a31f6cac87c6075496fdba74dd3307e56c1`，PR ahead 26／behind 7；主線新增 7 commits 與目前資安 PR 八個修改檔不重疊。
+
+**新發現的獨立缺口**：Firestore `conversations/{conversationId}/messages/{messageId}` 原本允許任何有效對話成員直接覆寫整個 `reactions` map（只限制頂層變更欄位），或在 create 預填任意人的表情。可以偽造他人對訊息的反應、刪除他人表情及覆寫其他人的 emoji，屬資料完整性缺口；目前沒有正式資料遭利用證據。
+
+**更正後修補**：既有 App 真正資料形狀是 `reactions: { emoji: [uid, ...] }`，不是以 UID 為 map key。新訊息 `reactions` 必須缺省或空 map；更新時目前有效成員僅能在受審查的 16 個 emoji key 中對自己的 UID 新增／刪除，其他人的 UID 須完整保留，且不可同筆改寫訊息正文。未知 emoji key 暫時唯讀（避免 Firestore Rules 無法動態遍歷 map key 的限制導致越權），必須在產品端評估相容性後擴充。允許舊訊息沒有 reactions，保留正常 readBy 與撤回。合成回歸涵蓋正常票、跨帳號偽造與清票、重複 UID、非法型別、跨校、撤權及競態重放。
+
+**驗證界線**：本項程式碼及回歸提交後，精確新 head 的 GitHub CI／CodeQL 須另行驗證，不以父 head 成功結果代替。仍未完成未發布群組父貼文 Firestore get/list 與 Web/Mobile 查詢過渡、GCS/Supabase 已簽 URL 撤權、真隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔相容與正式發布／回復。持續遵守禁用 E 校園連線、正式資料／token／migration／部署未授權不動，以及不重跑未授權 npm/pnpm audit。指定 App 5504170 對精確 head 未 APPROVED 前不得合併 main。
+
+**隔離 CI 失敗與修正紀錄（不可省略）**：首次提交 `807ab668b69afcf7874906bb9c7618ae44d83fdd` 的 [Rules job #132514984597](https://github.com/Miiduoa/graduation/actions/runs/43617275795/job/132514984597) 完成 **330 passed / 2 failed / 0 skipped**；兩項失敗是同名的既有 `nested conversation message reaction/read/recall cannot strip or forge fields` 回歸，證明最初的 UID→emoji 假設與正式 Mobile 所使用的 emoji→UID[] 結構不相容。此修正同時調整 Rules 和合成矩陣，不擴張讀取或合併權限。只有**本次新 head** 的完整 Firebase Emulator CI 成功，才能視為已驗證；原失敗不能標為綠燈。
+
+**第二次 CI 失敗及縮減求值路徑**：修正 emoji→UID[] 結構後的提交 `780b8de9ba3f626ea84b9d488f005ad5f3e9395e` 在 [Rules job #132517197527](https://github.com/Miiduoa/graduation/actions/runs/43617967474/job/132517197527) **329 passed / 3 failed**，失敗均屬既有跨校聊天相容回歸，Firestore Emulator 明確報出 1000 expressions 求值上限。根因是對所有 16 個 emoji 都無條件執行完整 array 比較。現在改為先用 `MapDiff.affectedKeys()` 判斷變更的 emoji，再用短路求值只檢查**實際修改**的鍵；未變更的 emoji 完全略過高成本 list 比對，超出 16 種已審核 emoji 仍拒絕。保留前版新增的合成回歸與 16 種限定清單，仍待新 head Firebase Rules job 結果證實。CodeQL、Security Gates 的成功不代表 Rules 通過。
+
+**第三次精確 head 的 evaluator 限制與降階相容方案**：`b190c453f5baaa212edc5d6a8a1022b63b6b92ba` 的 [Rules job #132518328190](https://github.com/Miiduoa/graduation/actions/runs/43618340274/job/132518328190) 再得 **329 passed / 3 failed**，同三項相容案例都在更新反應時觸及 Firestore 的 1000 expressions 上限，即使採用 affectedKeys 短路，仍超過 16 emoji 的規則求值預算。為避免放寬任何人的 UID 權限或刪除舊測試，這輪採保守的 **6 個 emoji key（👍 ❤️ 😂 😆 🎉 😢）**，現有其他 emoji 歷史資料仍可讀、保持原樣，客戶端更新未知 emoji 會被拒絕（功能相容風險待修）。待新 head 的 emulator 先證實基礎讀寫與撤權通過，才能單獨規劃不限 emoji 的受審核伺服器端反應 API。
+
+**第四次 CI 誤差排查（2026-11-15）**：`48a41913a020ed1fa845565422e6d0d8ab9e0159` 的 [Rules job #132519573817](https://github.com/Miiduoa/graduation/actions/runs/43618748807/job/132519573817) **329 passed / 3 failed**，這次不再是 1000 expressions 錯誤，而是三個原有「existing DM members retain reads, sends and edits」相容回歸仍使用舊版 `reactions: { bob: '❤️' }`（**UID → emoji**）。因此歷史存在兩種資料形狀：舊用戶端 UID→emoji，新版 Mobile 顯示的 emoji→UID[]。不能為了修補安全而破壞任何一種。現追加 UID→emoji 的對應本人欄位精確限制（受檢 UID 以外的 map keys 不可變），並保留前輪 emoji→UID[] 的六種受審核 emoji 逐 key 限制，補上舊格式的正常、偽造、清票、型別及重放回歸。**新 head CI 尚待確認**；舊格式和新格式並存需要前端規格統一，不能宣稱完全相容。前版 16 key 超過求值上限是另一次獨立已證實的問題。
+
+
+## 2026-11-15：店家 followers 收據限本人精確讀取（PR #577）
+
+檢視 Firestore `schools/{schoolId}/cafeterias/{cafeteriaId}/followers/{uid}` 發現，原規則 `allow read: if isSignedIn()` 讓任何登入帳號直接讀取或列舉不同店家的全部追蹤收據，進而取得用戶 UID 與其店家追蹤興趣。無須是該使用者本人，也無需具備該校校籍。這是由既有 Rules 可推導的隱私資料曝光面，**尚無正式站遭到列舉的證據**。
+
+本輪將讀權分離為 `get: isSelf(uid)`、`list: false`，維持既有 `create/delete: isSelf(uid)` 與 `update: false`。目前 Web／Mobile 的 `isFollowingStorefront` 都只依登入者 UID 進行單筆 `getDoc`／`getDocFromServer`，`followStorefront` 仍建立／刪除本人收據，正常追蹤功能不應受影響。受限制的僅是直接讀取他人追蹤及全店追蹤者名單。若未來需要店家總追蹤數，須採伺服器維護的無個資彙總，不能恢復任意列舉用戶資料。
+
+新增 `backend/tests/security-rules.test.js` Firebase Emulator 合成回歸：本人與另一帳號各自合法 GET、跨帳號／跨校／匿名讀取拒絕、無條件與過濾查詢 list 拒絕、本人追蹤／取消後復原、他人冒刪／冒寫拒絕。**本輪原始碼與測試完成並不代表新 head CI 已通過**，須重新核對精確提交 Rules、主 CI、CodeQL 與相容性。此修補不回收先前已被下載的追蹤資料，也不處理尚未解除的群組未發布父貼文 get/list、已發 GCS/Supabase URL 撤銷、真隔離 Storage 競態、歷史可信附件引用、minimatch 雙鎖檔及正式發布回復驗證。
+
+沿用資安 Draft PR，不觸碰主線、正式資料／憑證／token／migration、部署、E 校園，也不重新執行未取得授權的 npm/pnpm audit；指定 nuni-merge-gate App 5504170 對精確 head 的「審查通過」仍是主線合併必要條件。
+
+
+## 2026-11-15：失物招領聯絡資料跨校讀取及冒名欄位修補（PR #577）
+
+前一精確 head `8a8a3a6d430590d290fa7f8c6099dbde087bcf12` 的 [主 CI #43620085955](https://github.com/Miiduoa/graduation/actions/runs/43620085955)、[CodeQL #43620085873](https://github.com/Miiduoa/graduation/actions/runs/43620085873) 與 [Course access #43620085884](https://github.com/Miiduoa/graduation/actions/runs/43620085884) 均已 completed/success；Firestore 333/333、Web emulator 51/51。此前結果不可冒充本輪新提交的驗證。指定 App 5504170 無精確 head APPROVED，reviews 與 unresolved threads 均為 0；Supabase permissions、Python security、Mobile Agent Regression 與 Maestro 沒有這個父 head 的獨立觸發證據。
+
+可利用邊界：`schools/{schoolId}/lostFound/{docId}` 與全域舊集合 `lostFoundItems/{docId}` 原本允許任意已登入帳號讀取或列舉，不要求目前校籍，可能跨校讀到 `contactInfo` 等當事人聯絡資訊；前端學校過濾擋不住直接 SDK。原 create/update 也未對路徑校籍或新 `userId/reporterId/schoolId` 欄位保持一致。沒有正式站曾遭利用的證據。
+
+開發分支最小修補：兩條路徑讀寫改用 `isCurrentSchoolMember`（active membership + canonical `users/{uid}.schoolId`），拒絕停權、退學、跨校以及保留舊 membership 的轉校帳號。新資料必須屬於本人、正確校園，現有資料 update 不得改寫作者、報告者或校園。全域舊集合以文件 `schoolId` 定界，Web 與 Mobile 已採 `where('schoolId','==',schoolId)`；不帶學校條件的查詢不應通過。無 `schoolId` 的舊文件 fail-closed，需依正式資料盤點與受控修復流程處理，不執行即時 migration。
+
+已將合成 Firebase Emulator 回歸加入 `backend/tests/security-rules.test.js`，涵蓋同校 GET/list、Web/Mobile 舊集合限定查詢、跨帳號/跨校、匿名、缺校園文件、跨校或冒名建立、owner/reporter/school 欄位竄改、正常改名/刪除、資格撤銷後相同 token 重放、殘留校籍與恢復。已補正既有訪客案例的合法 synthetic 校籍及歷史 `schoolId` fixture。**本輪新增測試仍須在新精確 head CI 實際跑完後，才能標記隔離驗證通過**；不能用掃描綠燈替代。
+
+仍未完成未發布群組父貼文 Firestore read/list 及 Web/Mobile feed 相容性、GCS/Supabase 已發 URL 撤銷、真隔離 Storage CAS／競態、歷史附件引用、minimatch 雙鎖檔相容、最新 main 整合與正式發布／回復驗收。保持 PR Draft，無指定 App 5504170 核可不得合併。沒有操作正式資料、金鑰、token、migration、部署、E 校園連線，也未重送受限制的 npm/pnpm audit。
+
+
+## 2026-11-15：對話在線／已讀／打字欄位的跨帳號偽造與競態覆寫（PR #577）
+
+核對精確父 head `41c5dcbb38b24bf9aa2f8634a60bcc7f3ae31a64` 的 [主 CI #43639266034](https://github.com/Miiduoa/graduation/actions/runs/43639266034)、[CodeQL #43639266099](https://github.com/Miiduoa/graduation/actions/runs/43639266099) 與 [Course access](https://github.com/Miiduoa/graduation/actions/runs/43639266027) 均已 completed/success；其 15 項 check runs 無 nuni-merge-gate App 5504170 的 APPROVED。PR reviews 與 unresolved threads 均為零。Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 均未在父 head 單獨觸發，不沿用舊 head 成功資料。查核當時主線為 `c2c3a7f0c82362b663c7eff382282d0a72099dcb`，資安 PR ahead 33／behind 11，維持 Draft。
+
+**獨立可利用邊界：** `conversations/{conversationId}` 原本容許任何對話成員修改任意 `onlineUsers`、`lastReadBy`、`typingUsers` map，包括指定其他成員 UID、擦除別人的狀態及以舊快照覆蓋新值。建立對話亦未阻止預先填入對方已讀／在線狀態。既有 Mobile 使用以自己 UID 為鍵的 Firestore 欄位路徑原子更新。沒有正式資料遭利用的證據。
+
+**最小修補：** 新對話只能初始化自己 UID 的狀態；既有對話若變更任一 presence map，三個 map 的差異都只能包含自己的 UID，且該次不得夾帶其他欄位變更。未修改 presence 的原有文字預覽更新仍可通過；保留目前已存在的對話成員與校籍相容策略，不擅自撤銷跨校後既有私訊。合成 Firebase Emulator 測試包含正常雙人原子更新、偽造對方狀態、清除他人欄位、舊快照競態丟資料、同筆夾帶其他欄位、跨校非成員、建立時冒填、撤銷成員、停權與恢復重放。
+
+**驗證分級：** 本次 Git blob／tree／commit 建立與非強制 expected-SHA 推送後，精確新 head 的 Firestore Rules／Web／Mobile／Functions／CodeQL 等須由新工作流另行確認，不能沿用父 head。正式發佈及實際撤權未驗證。未發布群組父貼文直接讀取、GCS／Supabase 已發 URL 撤銷、真隔離 Storage CAS、歷史附件可信引用、minimatch 兩套鎖檔相容及正式發布回復驗收仍屬待處理。保留 Draft，App 5504170 對精確 head 核可及主線窗口確認前不合併／部署。未觸碰正式資料、金鑰、token、migration、E 校園；未重跑受限制的 npm／pnpm audit。
+
+## 2026-11-15：店家貼文 likes 收據限本人讀取（PR #577）
+
+**漏洞與影響：** `schools/{schoolId}/cafeterias/{cafeteriaId}/posts/{postId}/likes/{uid}` 原本使用 `allow read: if isSignedIn()`。任何已登入帳號可透過 Firestore SDK 精確讀取其他人的按讚收據、直接列舉或以 UID 篩選整篇貼文的按讚者，跨校亦然。這可能暴露帳號 UID 及個人店家興趣；目前沒有正式資料遭利用證據。
+
+**最小修補：** 拆分 `get` 與 `list`：僅准 `isSelf(uid)` 的精確 GET，一律拒絕集合 list；保留既有 `create/delete: isSelf(uid)` 和 `update: false`。同一登錄帳號可繼續在公開跨校店家貼文按讚，讀取自己的那一筆收據；不新增校籍限制，以維持既有 Web `apps/web/src/lib/storefront.ts`、Mobile `apps/mobile/src/services/storefront.ts` 以本人 UID 精確 `getDoc`／`getDocFromServer` 判斷 liked 的行為。帳號停權後 `isSelf` 的共同 `isSignedIn` 會拒絕；它不是已簽發網址撤銷機制。
+
+**可重跑證據：** 新增 `backend/tests/security-rules.test.js` Firebase Emulator 合成案例，驗證本人、跨帳號、跨校、匿名直接 GET，無條件及加 UID 過濾的 list、本人正常 like/unlike、冒刪與冒寫，以及同一已登入 context 在停權後重放拒絕與恢復。舊規則的 `allow read` 可由原始碼確認允許跨帳號／列舉；新精確 head 的 Emulator、主 CI、CodeQL **須依 GitHub 實際執行結果判定**，不能預先宣稱已通過。
+
+**其餘風險及發布界線：** 最高影響尚未修補的是未發布群組父貼文 Firestore 直接 GET/list 曝光，須先協同 Web/Mobile feed 查詢、歷史 publication metadata 與索引過渡。GCS／Supabase 舊簽發 URL、真隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔及正式發布／回復驗收也仍未結案。Supabase permissions、Python security、Mobile Agent Regression、Maestro 未在本次新 head 觸發時不得沿用父版結果。PR 維持 Draft，指定 nuni-merge-gate App 5504170 對精確 head 核可前不合併；沒有使用正式資料、金鑰、token、migration、部署、E 校園，沒有重跑受限制的 npm／pnpm audit。
+
+## 2026-11-15：店家貼文留言作者與管理欄位不可被客戶端偽造（PR #577）
+
+**本輪新檢查：** `schools/{schoolId}/cafeterias/{cafeteriaId}/posts/{postId}/comments/{commentId}` 原有 `create` 僅核對作者及文字長度，允許夾帶 `isOfficial`、`pinnedBy` 等任意欄位或回填任意時間；`update` 則允許任意其他欄位變更（包括 `authorId`），使作者可透過 Firestore SDK 偽裝其他帳號或產生看似管理端認可的留言。此為規則可推導的資料完整性問題，**未取得正式站被利用證據**。
+
+**最小修補：** 新留言必須有真實父貼文、只接受 `authorId/text/createdAt`；作者綁目前 UID、非空文字不超過 2000 字，存在 `createdAt` 時必須等於伺服器 `request.time`。更新限原作者修改 `text/updatedAt`，保留其身分與原始建立時間，`updatedAt` 若存在須為伺服器時間。刪除仍限原作者並要求父貼文存在。Web 與 Mobile 現有 `addStorefrontComment` 都只送 `authorId/text/createdAt:serverTimestamp()`，不修改正常跨校公開店家留言的現行可讀政策。
+
+**隔離回歸：** 在 `backend/tests/security-rules.test.js` 新增 Firebase Emulator 合成案例，覆蓋正常建立與編輯、跨校公開留言與訪客拒絕、冒用作者、夾帶管理欄位、偽造建立時間、空字串與超長輸入、失聯父貼文、他人修改／刪除、停權後同一登入 context 重放及恢復。**新精確 head 的主 CI、CodeQL、相關工作流需依實際 GitHub 結果核對；本記錄不預先宣稱通過。**
+
+**截至變更前核對：** `cc7a0a2acbaf4ca551794810a55b08827c5d4fc3` 的主 CI #43678048016、CodeQL #43678048018、Course access #43678048047 均 completed/success；主線 `5d371af2e85a0e45cf8d05248d4a42ef847111a2`，PR 相對 main ahead 35/behind 13，reviews 0、未解決 threads 0，指定 nuni-merge-gate App 5504170 未有該 head 的 APPROVED。本變更不解決未發布群組父貼文 get/list、已簽發 GCS/Supabase URL 撤銷、真隔離 Storage CAS、歷史附件引用、minimatch 雙鎖檔及正式發布回復驗收。保持 Draft；不觸碰正式資料、憑證、token、migration、部署、E 校園，不執行受限的 npm/pnpm audit。
+
+### 2026-11-15 08:53 UTC｜PR #577 新留言權限回歸 CI 修正
+
+**精確原 head：** `c8ebd45b7bbe50644e8c0ccd416d8317a07dc47f`；[CI #43696250184](https://github.com/Miiduoa/graduation/actions/runs/43696250184) 的 Firestore Rules job #132757315268 已 `completed/failure`，Node emulator 337 項中 336 pass／1 fail。失敗唯一案例 `storefront comment author and moderation fields cannot be forged or replayed`，log 指向 Firestore 規則第 681 行的 update 權限拒絕。原測試先用 `updatedAt: serverTimestamp()` 成功編輯，再於停權解除後只更新 `text`，沿用舊 `updatedAt`，未符合新安全規則的更新時間檢查。這是回歸 fixture 未符合規則，不應為測試放寬生產權限。
+
+**最小修補：** 只修改同一測試的停權後重放及恢復正常寫入，各自都附 `updatedAt: serverTimestamp()`；因此停權後拒絕不會被缺少時間戳的輸入預先拒絕所掩蓋，恢復後使用有效輸入。原規則、Web/Mobile 既有建立流程與所有其他安全案例維持不變。修補後 CI 結果須以**新精確 head**核對；沒有本地完整 emulator 套件，不宣稱修補後全綠。對指定 nuni-merge-gate App 5504170 核可、GCS/Supabase 舊 URL 撤銷、未發布群組父貼文、正式部署與 E 校園連線的限制不變。
+
+
+## 2026-11-15：歷史根集合私訊已讀收據跨帳號偽造（PR #577）
+
+**獨立發現與界線**：現行 `messages/{docId}`（不同於已修補的 `conversations/{id}/messages/{id}`）允許任一對話成員改寫整份 `readBy`，只檢查更新後包含自己的 UID。可藉直接 SDK 請求預先標記他人已讀、刪除他人的已讀收據、透過過期快照覆寫。其 `create` 也未限制初始 `readBy`，能在發送時偽造別人已讀。這是規則可推導的資料完整性缺口；尚無正式站已遭利用證據。
+
+**最小修補**：沿用巢狀訊息已經測試的 `onlyOwnMessageReadReceipt()`：根集合新訊息 `readBy` 可省略或只能為單一發送者 UID；更新只准既有讀者維持原列表、或新增目前讀者 UID 到陣列尾端。相同收據重試可成功；不可刪除、重排、重複或代加他人。若純更新 `updatedAt` 而不修改 `readBy`，為了歷史相容仍沿用舊行為；不在本輪擴大變更。保留原有既存對話跨校讀取與成員資格政策，未繞過帳號停權。
+
+**合成測試**：`backend/tests/security-rules.test.js` 新增專屬 Firebase Emulator 案例，涵蓋正常建立與本人已讀／冪等重試、偽造建立與代標、跨校非成員與訪客、停權／恢復、撤銷對話成員、重複 UID、別人已讀遭刪除及過時快照競態重放。對照舊規則，偽造建立與改寫他人 `readBy` 可直接由規則邏輯推導；新修補必須以此精確 head 的 Firebase CI 取得可重跑結果，不以靜態檢查代替。其他未發布群組父貼文讀取、已簽發 GCS/Supabase URL、真實 Storage CAS 競態、歷史附件可信引用、minimatch 雙圖與正式部署／回復驗證仍未解除。維持 Draft，不操作正式資料、金鑰、token、migration、E 校園，不進行未授權 npm/pnpm audit；未取得 App 5504170 對精確 head 的 APPROVED 前不合併。
+
+
+## 2026-11-16：群組貼文排程／封存／撤回狀態不得由原作者復活（PR #577）
+
+- **前一精確 head** `133531acf781fed8775c23931f97eaba895201ea`，對應 [CI #43715385125](https://github.com/Miiduoa/graduation/actions/runs/43715385125)、[CodeQL #43715384977](https://github.com/Miiduoa/graduation/actions/runs/43715384977) 與 [Course access #43715385057](https://github.com/Miiduoa/graduation/actions/runs/43715385057) 均已 `completed/success`；該版 Firebase Emulator 338/338、Web 51/51，主 CI Web/Mobile/Build 全部成功。精確 head 15 個 checks 中未有指定 nuni-merge-gate App 5504170 的 APPROVED，reviews 與未解決 threads 均為零。Supabase permissions、Python security、Mobile Agent Regression 與 Maestro 在該版未各自獨立觸發，不能沿用更舊版本。
+- **新發現**：群組貼文的一般作者先前僅不能復活 deleted/cancelled，但可以利用 Firestore SDK 將教師標記為 `draft/scheduled/pending/unpublished/archived` 的既有貼文改回 `status:published`，或把 `published:false` 改為 true，繞過管理者撤權/發布安排；此外可透過舊快照將剛封存的貼文再公開。尚未取得正式站遭利用的證據。
+- **最小權限修補**：一般作者更新只允許當下可見的貼文，且不得改動 published/status/deleted/deletedAt 四種發布與撤回標記；具有目前有效管理權限的人仍可恢復、封存。保留一般作者的正常正文編輯與任一有效成員的本人按讚分支。新回歸使用 Firebase Emulator 的合成同校/跨校與權限資料，覆蓋 7 種狀態、published:false、跨帳號、管理員明示重開、管理員於舊快照後封存、校籍/群組成員撤銷後重放與恢復。**新精確 head 的 CI、CodeQL 必須實際完成，不能提前稱為通過。**
+- **重要未解**：目前 `groups/{groupId}/posts` 的讀取規則仍允許有效群組成員直接 GET/LIST 未發布父貼文，此問題**沒有被本次作者寫入修補解決**。需搭配 Web/Mobile feed 查詢、公開狀態欄位與歷史文件安全遷移，不可直接改 list 造成舊資料無法讀取。已簽 GCS/Supabase URL 撤權、真隔離 Storage CAS 競態、歷史附件引用、minimatch 雙鎖檔及正式發布回復驗證均尚待。
+- **發布界線**：保持 Draft，沒有指定 App 5504170 對精確新 head 審查通過不可合併 main/部署。未修改正式資料、金鑰、token、migration、E 校園，亦未重跑受限制的 npm/pnpm audit。
+
+## 2026-11-16｜隱藏的 v1 點名／課堂父文件不可經子集合繞過（PR #577）
+
+- **精確父 head：** `f068f5f77692ca556982973c35a7b0fb2048da5f`。前版 GitHub [CI #43737897167](https://github.com/Miiduoa/graduation/actions/runs/43737897167)、[CodeQL #43737897151](https://github.com/Miiduoa/graduation/actions/runs/43737897151) 與 Course access 已完成成功；Firebase Node 339/339、Web Emulator 51/51。reviews 0、未解決討論 0、指定 App 5504170 無 APPROVED。新提交須重新驗證，不能沿用前版成功結果。
+- **可重現的規則缺口：** `groups/{groupId}/liveSessions/{sessionId}` 與 `attendanceSessions/{sessionId}` 父文件已要求 `schemaVersion == 2`，但 `questions`、`polls`、`attendanceRecords`、`attendanceCorrections` 子集合的 GET/LIST 未檢查父版本。即使舊版父文件含 QR/token/名冊而被隱藏，有效成員仍可直接 SDK 讀取其某些子文件；這不是父文件密鑰本身已曝光的證據。
+- **最小規則修補：** 上述四個子集合增加固定父路徑 `exists + schemaVersion == 2` 檢查，保留 v2 正常學生提問、投票閱讀、本人點名與有效教師更正查閱權限，並在每次讀取核對目前校籍、群組身分。不改動提交/管理寫入與既有歷史資料。
+- **隔離回歸待跑：** 在 `backend/tests/security-rules.test.js` 新增合成 v1/v2 資料，驗證 v2 的 GET/LIST、v1 四種子集合拒絕、跨校與停權、校籍撤銷後同 SDK 重放、父 schema 降級與恢復競態。本輪須以新精確 head 的 Firebase Emulator 和 CI 真實結果為準；提交前僅靜態驗證，不預稱已通過。
+- **未解除：** 群組未發布父貼文仍可在舊 feed 的 GET/LIST 洩漏；GCS/Supabase 已簽 URL 撤權、真正隔離 Storage CAS、歷史附件可信引用、minimatch 雙鎖檔、主線整合與正式發布/回復驗證未結案。僅合成測試；未動正式資料、金鑰、token、migration、部署或 E 校園，且未重送先前被拒絕的 npm/pnpm audit。
+
+
+## 2026-11-16：群組貼文撤回後的作者硬刪除繞過（PR #577）
+
+- **前一精確 head：** `6cbcb1eed98ac66c27683783520f85fe19d99f1a`。該版主 CI #43759950703、CodeQL #43759950791 與 Course access #43759950712 均 completed/success，Rules 340/340、Web Emulator 56/56。這些成功**不能替代本次新提交的測試**。
+- **漏洞與最小修補：** `groups/{groupId}/posts/{postId}` 的一般作者 `delete` 原本只要求身分與非公告，沒有核對貼文已被管理者標為 draft、scheduled、pending、unpublished、archived、cancelled、canceled、deleted 或 `published:false`；作者可以直接 SDK 硬刪遭保留或撤回的父貼文，規避管理保全。現在非管理作者刪除必須通過與互動相同的可見狀態檢查，只有仍具有效管理資格的管理者可以刪除被保留內容；一般作者刪除已發布普通貼文仍保留。
+- **隔離回歸：** `backend/tests/security-rules.test.js` 新增合成 Firebase Emulator 測試，包括九種隱藏／撤回狀態、同校他人／跨校／匿名拒絕、合法作者刪除與管理者刪除、管理員撤回後的舊會話重放，以及停權、群組撤權、校籍撤權與恢復。須以新 head CI 實際執行結果決定通過與否，未經執行不得宣稱已驗收。
+- **相容性限制：** 不具管理權的作者不能直接硬刪自己已進入未發布／撤回狀態的草稿；此類清理須走有授權的管理流程。既有 UI 若提供草稿刪除功能，須另行檢查顯示與錯誤引導，不能把此開發分支變更說成已正式上線。
+- **仍未結案：** 群組父貼文的 Firestore GET/LIST 仍可能直接曝光未發布資料，需要 Web/Mobile feed 查詢與歷史欄位安全過渡；已發 GCS/Supabase URL 撤權、真隔離 Storage CAS、歷史附件引用、minimatch 兩套鎖檔、目前 main 整合、App 5504170 的精確 head APPROVED 與正式發布／回復驗證也均未完成。本輪不合併或部署，不觸碰正式資料、金鑰、附件 token、migration、E 校園，也不重送受限制 npm/pnpm audit。
+
+
+## 2026-11-16：群組貼文 SDK 輸入文字資源上限（PR #577）
+
+- **缺口：** Web 討論發文介面限制 title 120／body 8000 字，但 Firestore groups/{groupId}/posts/{postId} 的 create 與普通內容 update 缺少同等伺服器規則。具有效校籍／群組資格的帳號能直接用 SDK 建立或更新超長文字，消耗額外儲存及讀取資源（仍受 Firestore 文件實際總大小限制）。這不是跨帳號讀取漏洞，也不能視為已解決未發布貼文曝光。
+- **修補：** 在規則建立專屬 title/body 型別與長度檢查，title 不超過 120、body 不超過 8000；只在建立或實際修改此兩個文字欄位時要求驗證。歷史文章欄位缺失時，其他 metadata 更新、按讚及管理流程不因本變更被一概封鎖。未新增對正式資料的讀寫。
+- **合成回歸：** backend/tests/security-rules.test.js 測試合法、邊界、超長、非字串、正常改文、跨帳號／跨校拒絕、群組與校籍撤權、停權、舊 SDK replay 及恢復。只有對此精確 head 執行成功的 Firebase emulator／主 CI／CodeQL 才能標記驗證；發布前不借用舊 head 成果。
+- **明確限制：** 其他非 title/body 欄位及大量發文頻率並未由此上限全面處理；未發布父貼文 GET/LIST、GCS/Supabase 已簽 URL 撤銷、真隔離 Storage CAS、歷史附件資料補證、minimatch 雙依賴圖、正式部署與回復，以及指定 App 5504170 精確 head APPROVED 仍未結案。維持 PR Draft，不自行合併、部署、清理正式 token／金鑰、migration、E 校園連線或受限制的 npm/pnpm audit。
+
+
+## 2026-11-16｜P0 群組父貼文讀取範圍：待正式發布的隔離修補
+
+- 修補採用最小可驗證的 Firestore 界線：非管理成員的直接 GET 只接受可見貼文，原作者可讀取自己的草稿，活躍管理員可審查被保留貼文；LIST 僅接受可由查詢證明是明確 `published:true`、`status:published`、`deleted:false`、`deletedAt:null` 的貼文。一般成員的無條件 LIST／僅以一個旗標過濾的 LIST 應被拒絕。拒絕對隱藏父貼文 GET 與 LIST 的正式有效性，須以精確 head 的 Firebase Emulator 回歸結果為準。
+- Web 與 Mobile 群組列表加入相同四個 where 條件，新貼文建立時明確寫入四個欄位；Firestore 另加入複合索引。這是**候選規則與呼叫端整合**，不是正式已上線。
+- **發布阻礙／相容性：** 舊紀錄可能缺少其中一個明確旗標，雖然舊的正常直接 GET 可維持，但新 LIST 會故意排除這類資料。必須先在隔離資料與正式資料唯讀盤點歷史可見貼文，確認可修補的正規化範圍及待遷移數量、索引 READY 與 Web／Mobile／規則的發布順序；不能逕自把缺欄位的草稿推定為公開。未獲資料發布資格前，不能遷移、套用正式規則或宣稱正式歷史貼文完整可見。
+- 測試設計：合成資料涵蓋公開／草稿／排程／封存／撤回／刪除標記、正常列表、已知路徑 GET、群組／校籍撤權、同一認證狀態重放與跨校群組變更。依本精確提交的 CI 記錄確認是否真正執行且通過，不能沿用上一版綠燈。
+- 其餘既發 GCS/Supabase bearer URL 撤銷、真 Storage CAS、歷史附件引用、minimatch 兩圖相容及 App 5504170 核可、正式發布回復仍未結案。沒有正式資料、金鑰、migration、E 校園或受限 npm/pnpm audit 操作。
+
+### 2026-11-16 安全補充：既有缺少發布旗標的父貼文不得預設公開
+
+- 第一版候選修補容許一般成員以直接 GET 讀取沒有明確 published/status/deleted/deletedAt 的舊貼文，並不保證這些舊貼文真的曾公開。第二版改為非作者、非管理員直接 GET **也必須具備全部四項公開欄位**。這是 fail-closed 的刻意相容性變更：無明確欄位的舊連結可能暫時不可讀，不得為了恢復顯示而推定全部舊文公開。
+- 增加純離線、唯讀的 `scripts/audit-group-post-visibility.cjs` 與 Node 測試。輸入為經獨立授權取得的 NDJSON（每筆 `{path:"groups/G/posts/P",data:{...}}`），僅輸出 `canonicalVisible/hidden/reviewRequired` 件數，不輸出原文、UID 或標題、不連網或修改資料；`reviewRequired` 須人工判定。可用 `node --test scripts/audit-group-post-visibility.test.cjs` 驗證，`node scripts/audit-group-post-visibility.cjs synthetic.ndjson` 操作合成輸入。不得未經發布授權直接匯出正式資料，亦不會自動修補紀錄。
+- 本輪候選版本仍待精確 head CI/Firebase emulator、正式索引及 Web/Mobile 相容性、歷史資料稽核、App 5504170 審查；不得合併或部署。
+
+### 2026-11-17｜P0 follow-up：未明示公開之 legacy 父貼文的巢狀留言不可讀取（PR #577）
+
+- **問題：** 上輪父貼文 GET/LIST 改為四個顯式公開欄位 fail-closed，但 `groups/{groupId}/posts/{postId}/comments/{commentId}` 仍沿用 `published` 預設 true、`deleted` 預設 false 等舊相容條件。有群組資格的非作者可直接 GET/LIST 這些 legacy 父貼文的留言；父貼文拒絕讀取不會自動保護子集合。這是獨立權限繞過，不能把上一輪父貼文修補當成整個討論串已防護。
+- **最小修補：** 將子留言讀寫共用的 `canReadPostComments()` 非作者可見條件改為與父貼文一致的四項明確值（`published:true`、`status:'published'`、`deleted:false`、`deletedAt:null`）；保留原作者在有效校籍／群組資格下預覽自己的草稿留言、正常發布貼文的其他成員互動，以及撤權與刪文後拒絕。未增加角色或跨校豁免，也未修改正式資料。
+- **合成回歸：** 更新 `backend/tests/security-rules.test.js` 的通用正常 fixture 為明示公開；另在父貼文及留言案例明確建立 legacy 缺欄位父文件，要求非作者（含教師）透過直接 GET 與 LIST 讀取留言被拒，作者仍可讀；伺服器明示發布後正常讀取與互動恢復，原有封存、撤權及重放案例保留。**本次改動如沒有精確 head Firebase Emulator 成功紀錄，就只能稱為待驗證候選，不得稱已隔離驗收。**
+- **發佈阻礙不變：** 歷史缺欄位的原本可見留言對非作者會被暫時隱藏；需事先合法盤點與人工判斷、隔離資料相容/索引、主線整合、完整 CI 及指定 App 5504170 對新 head 審查通過後，再由正式發布窗口處理。GCS/Supabase 既發網址、真 Storage CAS、歷史附件可信引用、minimatch 與回復驗證仍未結案。不執行正式資料、金鑰、token、migration、部署、E 校園或未授權 npm/pnpm audit 操作。
+
+
+### 2026-11-17：P0 未明示公開舊貼文的寫入繞過與作者硬刪阻斷（PR #577）
+
+- 前一精確 head `82e36071fe8a7b53237581557bbc2e2fb22f1ffb` 在父貼文 GET/LIST、留言都 fail-closed 後，寫入條件仍以 `resource.data.get('published', true)`、`get('deleted',false)`、`get('deletedAt',null)` 的預設值比對。缺欄位但有 `status:'published'` 的歷史文件，可由原作者直接 UPDATE 加入缺少的公開旗標，繞過管理員審核後重新變成 GET/LIST 可讀。一般成員按讚及作者硬刪也沿用寬鬆的舊可見條件，可能操作尚未分類的歷史文。
+- 最小修補：普通作者 UPDATE 不得新增、移除或修改 `published/status/deleted/deletedAt` 四個欄位（使用 `diff(...).affectedKeys().hasAny(...)` 而非預設值比較）；保留原作者文字更正及管理員人工發布。第三方 vote 與原作者硬刪只接受四個欄位完整的 `isCanonicalVisiblePost()`，不對缺欄位資料推定公開。
+- 新增 Firebase 模擬器合成回歸：未分類歷史貼文直接 GET、跨帳號與跨校投票拒絕，原作者補旗標公開與硬刪拒絕，文字更正保留，管理員手動明示發布後恢復讀取／投票，封存後重放及群組撤權後重放拒絕。既有正常公開貼文 fixture 補齊四欄位。
+- **本輪驗證限制：** GitHub 新 head 的 Firebase Emulator、CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 尚須各自核實，靜態語法檢查不構成隔離驗收。歷史貼文缺旗標時，作者刪除與一般成員投票會暫停，必須先完成合法唯讀盤點、人工判讀、索引及 Web/Mobile/Rules 相容性與回復程序。PR Draft、最新主線分歧與指定 nuni-merge-gate App 5504170 對精確 head APPROVED 均阻擋合併與部署。
+- 未操作正式資料、金鑰、Storage token、migration、E 校園連線或受限制的 npm/pnpm audit；GCS/Supabase URL 撤銷、真 Storage CAS、歷史附件可信引用、minimatch 雙套鎖檔仍待驗收。
+
+
+### 2026-11-17｜群組貼文唯讀盤點工具的資料保密與重複紀錄防護（PR #577）
+
+- **發現：** 原 `scripts/audit-group-post-visibility.cjs` 直接把 `JSON.parse` 的錯誤訊息輸出至 stderr；Node.js 錯誤有時包含壞掉的原始 NDJSON 片段，可能將學生貼文內容寫入工作紀錄或 CI 日誌。若匯出檔案中相同 `groups/G/posts/P` 路徑重複出現，舊工具會重複計數，可能讓後續相容性／正規化盤點失真。原 32 MiB 大小限制只存在 CLI，直接呼叫匯出函式尚未檢查。
+- **最小修補：** 解析失敗僅回報固定的 `Invalid NDJSON record`，不回傳敏感原文；對重複路徑直接中止、拒絕產出有誤計數；程式入口及直接呼叫 `inventory` 均限制 32 MiB，CLI 限定一般檔案。不輸出 UID、貼文路徑或正文，仍僅計算 `canonicalVisible/hidden/reviewRequired`，不連線 Firebase、不修改資料。
+- **可重跑證據：** 使用 Node v22.16.0，在純合成臨時 NDJSON 與 subprocess CLI 上執行 `node --test scripts/audit-group-post-visibility.test.cjs`，**6/6 通過、0 失敗、0 略過**。新增重複路徑拒絕、含敏感字串的壞 JSON 不出現在 stdout/stderr、直接 API 32 MiB 上限；既有 3 項分類案例仍通過。這不等於 Firebase Emulator、真實歷史資料或正式發布驗收。
+- **尚待與不變限制：** P0 父貼文／留言 Firestore Rules 的最新精確 head 仍需實際 Emulator 與 CI、索引 READY、合法歷史資料盤點與人工判讀；目前 PR 與 main 分歧且有合併衝突。指定 nuni-merge-gate App 5504170 完整精確 head APPROVED 前不得合併或部署。已發 GCS／Supabase URL 撤銷、真 GCS CAS、minimatch 兩圖及其他風險仍待，沒有處理正式資料、金鑰、token、migration、E 校園或重新執行被拒絕的 npm/pnpm audit。
+
+
+## 2026-11-17：歷史貼文盤點工具：拒絕符號連結及限制真實讀取大小（隔離驗證）
+
+- 以前一提交 fe9a0663b38321f84c382b9a706c37f16ec77621 為精確分支基準，核對當時 main 為 e71bccf0ab8ea10fccb7b092271d2810a9e06bf8。PR #577 仍 Draft/dirty，與主線 diverged 48 ahead／33 behind；沒有自行合併或執行正式部署。
+- 發現唯讀 scripts/audit-group-post-visibility.cjs 的 CLI 曾採 stat(path) 後再用同一路徑 readFileSync(path)，兩步之間路徑若遭替換，可讀到非原始驗證檔；stat 同時會追蹤符號連結。另需避免文件在 stat 後持續成長使原先 32 MiB 上限失效。
+- 最小修補改用 O_NOFOLLOW | O_NONBLOCK | O_RDONLY 開啟單一 FD，再以 fstatSync 驗證一般檔案與初始大小；透過 readSync 有界分塊最多讀 32 MiB + 1 byte（超過立即拒絕），最後關閉同一 FD。執行平台缺少安全開檔旗標則 fail-closed；OS 文件系統錯誤改為固定文字，避免輸入路徑或個資外洩。32 MiB 合成盤點規則與 reviewRequired 人工審查不變。
+- 以本次實際生成並核對 Git blob SHA 的兩個檔案，在 Node.js v22.16.0 隔離容器執行 node --test scripts/audit-group-post-visibility.test.cjs，**10/10 通過、0 失敗、0 略過**。包含正常輸入、重複紀錄、無效 JSON 不吐個資、CLI 符號連結、失效／含秘密路徑、目錄與超 32 MiB 檔案；原始碼 blob f9e68662e7ea5e5e601c13799629be394b8d9af7、測試 blob 95536dff7ce30ef1e27d43182c816019977caf71，均與本機已跑版本逐位元組相符。
+- **驗證限制：** 這是盤點 CLI 的隔離 Node 回歸，不等於 Firebase Emulator、Supabase Storage、GCS CAS 或 Web/Mobile/Rules 成功。既有精確 fe9a0663 沒有 PR-triggered Actions、CodeQL 或 combined checks；本次新 head 須另查。指定 nuni-merge-gate App 5504170 仍待對新 head 核可。P0 未發布貼文及子留言的 Firestore 修補、歷史資料盤點與發布相容性、已簽發 GCS/Supabase URL 撤權、真實 GCS staging、minimatch 雙鎖檔相容等未關閉。
+- 全程只用本機合成檔案，未接 E 校園、未操作正式資料／憑證／token／migration、未啟動任何 npm/pnpm audit，也沒有繞過主線合併閘門。
+
+## 2026-11-19：PR #577 全域歷史提交收據相容性修正
+
+- 審查使用 `git merge-base HEAD origin/main` 的 `5c9e058cafb8bed3a5f7f7cbf8cb73e623012828`。歷史 `assignments/{id}/submissions/{uid}/...` 下載，先由全域作業父文件解析群組並驗證目前帳號、群組及學校資格。群組收據不存在時，改讀同一全域作業下的歷史收據；群組收據存在時仍以它為準，避免舊鏡像繞過未提交狀態或明確撤回的附件。
+- 兩種收據均須符合原有 owner 驗證、有效提交時間及附件引用限制。仍保留真正缺少附件欄位的已提交歷史收據相容性；明示空清單、格式錯誤、其他檔名、錯誤作者均拒絕。提交者預覽草稿、舊帳號缺少較新欄位與現有轉校／綁定判斷不變；停用、刪除、暫停帳號與撤銷 membership 的限制保留。
+- 本機 Web 三個定向套件 140/140、Functions HTTP 單元測試 74/74 通過。使用 `/tmp/career-jre/bin/java` 執行隔離 Firestore/Storage Emulator，HTTP 整合測試 9/9 通過，包含新增的全域歷史收據下載。Emulator 仍無法證明正式 GCS generation CAS 或撤銷舊下載 token；本輪沒有進行正式資料或部署操作。
+- **尚未解決：舊貼文列表相容性 P1。** 現有四欄等值查詢排除缺少欄位的正常歷史貼文。Firestore 不能以缺少欄位作等值查詢；直接放寬成員 LIST 再於用戶端篩選會洩漏隱藏內容，不能採用。僅做一次回填也不能保護仍在使用舊寫入格式的用戶端。完整的無資料異動方案需要可信的伺服器列表讀取、用戶端分頁及父貼文／留言相容判斷；伺服器入口來源檔目前不在 PR diff 中，須先取得擴大檔案範圍的授權。此提交不宣稱 COMPAT 已通過，也不撤回既有隱藏內容保護。
+
+### 2026-11-19：合併基準相容性修復與剩餘阻礙（PR #577）
+
+- 修復 Mobile 發送訊息交易：更新最後訊息欄位時可同時清除本人的 `typingUsers`；presence map 仍逐一限制只能修改本人鍵，不得冒改他人的上線、已讀或輸入狀態。新增與 Mobile payload 相同的原子交易測試，涵蓋輸入狀態缺失、時間戳記、null、重送，以及他人鍵保護。
+- 依本次相容性要求恢復歷史貼文單筆 GET 與留言 GET/LIST 的舊預設語意；缺少新版欄位本身不構成草稿。明確草稿、排程、封存、撤回與刪除標記仍拒絕其他成員讀取，作者預覽及有效會員檢查保留。此項取代前述以缺欄位一律拒絕單筆及留言讀取的候選策略，不修改任何既有資料。
+- 私人附件提交收據驗證保持不變。新增正常帳號、缺少 status 的舊帳號、未加戳記會員，以及 schoolId 已異動但 primarySchoolId 與有效戳記相符的相容性回歸；deleted／disabled／suspended／inactive 帳號仍拒絕。
+- 本機驗證：Firestore／Storage security-rules 與 privateGroupFiles Emulator **204/204**；Web 三組定向測試 **147/147**；privateGroupFiles Jest **74/74**；唯讀盤點 **10/10**；`git diff --check` 通過。執行環境 Node 24.22.1（有專案 Node 22 engine 警告）、Java 21；這些結果不代表完整 CI 或正式發布驗收。
+- **仍不可標記 COMPAT PASS：歷史列表 P1 尚未修復。** Web／Mobile 目前的四欄等值查詢仍會排除缺欄位舊文。Firestore rules 無法替無條件查詢逐筆篩選；移除查詢條件並放寬 LIST 會再次曝光明確草稿。完整修復須加入驗證即時帳號／學校／群組資格的伺服器唯讀分頁，依歷史可見性語意過濾，再供兩端使用。這需要擴充本 PR 原本未修改的伺服器來源檔，已提出範圍確認；未取得答覆前不越過「只改 PR 檔案」限制。不以刪除安全修補或資料遷移繞過此阻礙。
+- 本輪不推送、不合併、不部署，不讀寫正式資料、金鑰或 token。
+
+
+### PR #577 主要校籍相容性修補（2026-11-19）
+
+兩種失物招領路徑改以可信使用者文件的 `primarySchoolId` 為優先；該欄位缺少或為 null 時，才回退至舊 `schoolId`。保留有效學校 membership、帳號停權與刪除限制，以及作者與校別不可被竄改的檢查。修補只作用於失物招領，其他使用 `isCurrentSchoolMember` 的功能不變。沒有回填、刪除或修改既有資料。
+
+新增四組 Emulator 回歸案例，涵蓋轉學生、只有主要校籍的舊帳號、只有舊校籍欄位的帳號及 null 主要校籍；同時驗證停權、刪除中、撤權及殘留舊校 membership 不可取得權限。完整 security-rules 測試 199/199、Web 討論服務與私有附件三組測試 147/147、離線盤點工具 10/10 通過；`git diff --check` 通過。
+
+歷史討論列表的 P1 尚未修復：缺少公開欄位的文件無法由現有四條等值查詢找回，而直接放寬列表規則會讓明確草稿外洩。保留此安全限制，完整修補需要可信伺服器分頁讀取及兩端串接；現行 PR 已修改檔案中沒有可用的分頁端點，須先取得擴充檔案範圍的授權。單筆讀取或離線盤點均不能取代此修補，PR 的相容性驗收仍未通過。

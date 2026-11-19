@@ -1,5 +1,11 @@
 import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
+import { courseworkStudyGuard, verifyCourseworkStudyGuard } from './courseworkStudy';
+import { courseworkRecoveryGuard, courseworkRecoveryId, verifyCourseworkRecoveryCalendar,
+  type CourseworkRecoveryGuard } from './courseworkRecovery';
+import { parsePublicEventGuard, type PublicEventGuard } from './publicEvent';
+import { verifyPublicEventGuard } from './campusEventGuard';
+import { foodPickupGuard, verifyFoodPickupGuard } from './foodPickup';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
@@ -16,17 +22,22 @@ import {
   hash,
   id,
   object,
+  requireAssistantPermission,
   type Adapter,
   type Binding,
   type Card,
+  type CourseworkStudyGuard,
   type EventArgs,
+  type FoodPickupGuard,
   type Ledger,
   type Obj,
 } from './contracts';
 // Each process boot is a new issuance epoch. A lost owner is never reassigned.
 const routeEpoch = randomUUID();
-export function issueRoute(binding: Binding, secret: string) {
-  const payload = { scope: hash({ session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }), binding: hash(binding), issuer: process.env.FLY_MACHINE_ID || 'local', epoch: routeEpoch };
+type RoutePurpose = 'chat' | 'event-preview';
+export function issueRoute(binding: Binding, secret: string, purpose: RoutePurpose = 'chat') {
+  const payload = { scope: hash({ session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }), binding: hash(binding), issuer: process.env.FLY_MACHINE_ID || 'local', epoch: routeEpoch,
+    ...(purpose === 'event-preview' ? { purpose } : {}) };
   const body = Buffer.from(canonical(payload)).toString('base64url');
   return body + '.' + mac(secret, 'route:' + body);
 }
@@ -41,20 +52,24 @@ function routePayload(token: unknown, secret: string) {
   catch { return fail('CONFIRMATION_REVOKED', 409); }
   return payload;
 }
-export function routeTarget(token: unknown, scope: Omit<Binding, 'account'>, secret: string) {
+export function routeTarget(token: unknown, scope: Omit<Binding, 'account'>, secret: string, purpose: RoutePurpose = 'chat') {
   const payload = routePayload(token, secret);
-  if (payload.scope !== hash(scope)) return fail('CONFIRMATION_REVOKED', 409);
+  if (payload.scope !== hash(scope) || (payload.purpose ?? 'chat') !== purpose)
+    return fail('CONFIRMATION_REVOKED', 409);
   const owner = machineId(payload.issuer);
   if (owner === (process.env.FLY_MACHINE_ID || 'local') && payload.epoch !== routeEpoch)
     return fail('CONFIRMATION_REVOKED', 409);
   return owner;
 }
-export function routeOwner(token: unknown, binding: Binding, secret: string) {
+export function routeOwner(token: unknown, binding: Binding, secret: string, purpose: RoutePurpose = 'chat') {
   const payload = routePayload(token, secret);
   if (payload.binding !== hash(binding)) return fail('CONFIRMATION_REVOKED', 409);
-  return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret);
+  return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret, purpose);
 }
-const proposals = new Map<string, { seq: string; expires: number; revoked: Set<string> }>();
+const proposals = new Map<string, {
+  seq: string; expires: number; revoked: Set<string>;
+  issued: string[]; dispatched: Set<string>;
+}>();
 type CalendarOperation = {
   bindingKey: string;
   proposalSeq: string;
@@ -69,7 +84,7 @@ const calendarOperations = new Map<string, CalendarOperation>();
 export function beginProposal(binding: Binding, now: number) {
   for (const [key, value] of proposals) if (value.expires <= now) proposals.delete(key);
   const seq = randomUUID();
-  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set() });
+  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set(), issued: [], dispatched: new Set() });
   for (const [key, value] of calendarOperations)
     if (!value.pending && proposals.get(value.bindingKey)?.seq !== value.proposalSeq)
       calendarOperations.delete(key);
@@ -125,15 +140,29 @@ export function signCard(
   now: number,
   proposalSeq: string = beginProposal(binding, now),
   previousEvent?: Card,
+  studyGuard?: CourseworkStudyGuard,
+  sourceGuard?: PublicEventGuard | FoodPickupGuard,
+  recoveryGuard?: CourseworkRecoveryGuard,
+  pickupGuard?: FoodPickupGuard,
 ): Card {
   operationSignal()?.throwIfAborted();
+  const publicEventGuard = sourceGuard && 'target' in sourceGuard ? sourceGuard : undefined;
+  if (sourceGuard && !('target' in sourceGuard)) {
+    if (pickupGuard) return fail('CONFIRMATION_INVALID', 409);
+    pickupGuard = sourceGuard;
+  }
+  if (publicEventGuard && (tool !== 'propose_personal_event' || studyGuard)) return fail();
+  if (recoveryGuard && (tool !== 'propose_personal_event' || !studyGuard || publicEventGuard || previousEvent)) return fail();
+  if (pickupGuard && (tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     tool === 'propose_food_order'
       ? foodCardArgs(raw)
       : tool === 'propose_personal_event'
         ? { ...eventArgs(raw) }
         : pageArgs(raw);
-  const mutationId = 'av2_' + randomUUID().replaceAll('-', '');
+  const mutationId = recoveryGuard ? courseworkRecoveryId(binding, courseworkRecoveryGuard(recoveryGuard).mutationId)
+    : 'av2_' + randomUUID().replaceAll('-', '');
   const payload = {
     v: 2,
     proposalSeq,
@@ -143,6 +172,10 @@ export function signCard(
     binding: hash(binding),
     tool,
     argsHash: hash(args),
+    ...(studyGuard ? { studyGuard: courseworkStudyGuard(studyGuard) } : {}),
+    ...(publicEventGuard ? { publicEventGuard: parsePublicEventGuard(publicEventGuard) } : {}),
+    ...(recoveryGuard ? { recoveryGuard: courseworkRecoveryGuard(recoveryGuard) } : {}),
+    ...(pickupGuard ? { pickupGuard: foodPickupGuard(pickupGuard) } : {}),
     ...(previousEvent && {
       previousEventHash: hash(
         eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
@@ -154,12 +187,13 @@ export function signCard(
     exp: now + 300000,
   };
   const body = Buffer.from(canonical(payload)).toString('base64url');
-  return {
+  const card: Card = {
     tool,
     args,
     token: body + '.' + mac(secret, body),
     mutationId,
     schoolId: binding.schoolId,
+    ...(pickupGuard ? { sourceBound: 'food-pickup' as const } : {}),
     destination:
       tool === 'propose_food_order'
         ? String(args.reason)
@@ -167,6 +201,9 @@ export function signCard(
           ? '個人行事曆（無推播提醒）'
           : pageHref(args, binding.schoolId),
   };
+  const current = proposals.get(hash(binding));
+  if (current?.seq === proposalSeq) current.issued.push(mutationId);
+  return card;
 }
 function signedPayload(raw: unknown, secret: string) {
   const v = object(raw, ['token', 'args']);
@@ -220,6 +257,18 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
   )
     return fail('CONFIRMATION_INVALID', 409);
   if (p.issuer !== undefined) machineId(p.issuer);
+  const studyGuard = p.studyGuard === undefined ? undefined : courseworkStudyGuard(p.studyGuard);
+  if (studyGuard && p.tool !== 'propose_personal_event') return fail('CONFIRMATION_INVALID', 409);
+  const publicEventGuard = p.publicEventGuard === undefined ? undefined : parsePublicEventGuard(p.publicEventGuard);
+  if (publicEventGuard && (p.tool !== 'propose_personal_event' || studyGuard ||
+      publicEventGuard.target.schoolId !== binding.schoolId)) return fail('CONFIRMATION_INVALID', 409);
+  const recoveryGuard = p.recoveryGuard === undefined ? undefined : courseworkRecoveryGuard(p.recoveryGuard);
+  if (recoveryGuard && (p.tool !== 'propose_personal_event' || !studyGuard || publicEventGuard ||
+      p.previousEventHash !== undefined ||
+      p.mutationId !== courseworkRecoveryId(binding, recoveryGuard.mutationId))) return fail('CONFIRMATION_INVALID', 409);
+  const pickupGuard = p.pickupGuard === undefined ? undefined : foodPickupGuard(p.pickupGuard);
+  if (pickupGuard && (p.tool !== 'propose_personal_event' || studyGuard || publicEventGuard || recoveryGuard))
+    return fail('CONFIRMATION_INVALID', 409);
   const args =
     p.tool === 'propose_food_order'
       ? foodCardArgs(v.args)
@@ -237,6 +286,10 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
     card: {
       tool: p.tool as Card['tool'],
       args,
+      ...(studyGuard ? { studyGuard } : {}),
+      ...(publicEventGuard ? { publicEventGuard } : {}),
+      ...(recoveryGuard ? { recoveryGuard } : {}),
+      ...(pickupGuard ? { pickupGuard } : {}),
       previousEventHash: p.previousEventHash as string | undefined,
       revision: Number(p.revision),
       mutationId: p.mutationId,
@@ -246,6 +299,18 @@ function authenticatedCard(binding: Binding, raw: unknown, secret: string, now: 
 }
 type AuthenticatedCard = ReturnType<typeof authenticatedCard>;
 type VerifiedCard = AuthenticatedCard['card'];
+
+/**
+ * Authenticate only provenance for a read. Expiry, issuer restart and a new
+ * login never turn this proof into permission to confirm, revoke or revise.
+ * Callers derive account/school from the current authenticated principal.
+ */
+export function authenticateCourseworkFollowup(binding: Binding, raw: unknown, secret: string, now: number) {
+  const { card } = authenticatedCard(binding, raw, secret, now);
+  if (card.tool !== 'propose_personal_event' || card.pickupGuard) return fail('INVALID_INPUT', 422);
+  return { mutationId: card.mutationId, iat: card.iat, event: eventArgs(card.args),
+    studyGuard: card.studyGuard ? { ...card.studyGuard } : null };
+}
 
 function liveAuthorization(binding: Binding, p: Obj, now: number, allowRevoked = false) {
   if (p.issuer !== undefined && p.issuer !== process.env.FLY_MACHINE_ID)
@@ -259,10 +324,69 @@ function liveAuthorization(binding: Binding, p: Obj, now: number, allowRevoked =
   return current;
 }
 
+/**
+ * Expiry removes write authority, but this process can still retire a preview
+ * it knows it issued and never dispatched. The caller holds the operation
+ * queue and has just established that the exact record is absent.
+ */
+function expiredRevocationAuthorization(
+  binding: Binding,
+  authenticated: AuthenticatedCard,
+  state: CalendarOperation,
+) {
+  const { payload, card } = authenticated;
+  const bindingKey = hash(binding);
+  const current = proposals.get(bindingKey);
+  if (
+    payload.epoch !== routeEpoch ||
+    (payload.issuer ?? 'local') !== (process.env.FLY_MACHINE_ID || 'local') ||
+    !current || current.seq !== payload.proposalSeq ||
+    state.bindingKey !== bindingKey || state.proposalSeq !== payload.proposalSeq ||
+    !current.issued.includes(card.mutationId)
+  )
+    return fail('CONFIRMATION_REVOKED', 409);
+  if (state.uncertain || current.dispatched.has(card.mutationId))
+    return fail('EXECUTION_UNKNOWN', 503);
+  return current;
+}
+
 export function verifyCard(binding: Binding, raw: unknown, secret: string, now: number) {
   const authenticated = authenticatedCard(binding, raw, secret, now);
   liveAuthorization(binding, authenticated.payload, now);
   return authenticated.card;
+}
+
+/** Require the complete, untouched issuance order of a never-dispatched plan. */
+export function verifyRevokedCalendarPlan(
+  binding: Binding, raw: unknown, secret: string, now: number,
+) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 16)
+    return fail('INVALID_PLAN_REVISION');
+  const authenticated = raw.map(value => authenticatedCard(binding, value, secret, now));
+  const current = liveAuthorization(binding, authenticated[0].payload, now, true);
+  const cards = authenticated.map(value => value.card);
+  // A generic plan revision must not strip recovery provenance or allocate a new child ID.
+  if (cards.some(card => card.recoveryGuard)) return fail('INVALID_PLAN_REVISION', 409);
+  if (cards.length !== current.issued.length ||
+      cards.some((card, index) => card.tool !== 'propose_personal_event' || card.publicEventGuard ||
+        card.mutationId !== current.issued[index]) ||
+      new Set(cards.map(card => card.mutationId)).size !== cards.length)
+    return fail('INVALID_PLAN_REVISION');
+  for (const [index, value] of authenticated.entries()) {
+    if (liveAuthorization(binding, value.payload, now, true) !== current)
+      return fail('CONFIRMATION_REVOKED', 409);
+    const previous = cards[index - 1], card = value.card;
+    if (previous
+      ? card.revision !== previous.revision + 1 ||
+        card.previousEventHash !== hash(eventRecord(eventArgs(previous.args), binding.schoolId, previous.mutationId, previous.iat))
+      : card.previousEventHash !== undefined)
+      return fail('INVALID_PLAN_REVISION');
+    const operation = calendarOperations.get(hash(binding) + ':' + card.mutationId);
+    if (operation?.pending || operation?.uncertain) return fail('EXECUTION_UNKNOWN', 503);
+    if (!current.revoked.has(card.mutationId) || current.dispatched.has(card.mutationId))
+      return fail('PLAN_REVISION_UNRESOLVED', 409);
+  }
+  return cards;
 }
 
 async function calendarOperation<T>(
@@ -297,7 +421,7 @@ function elapsedClock(now: number, clock?: () => number) {
   return clock || (() => now + (Date.now() - started));
 }
 
-async function calendarLedger(binding: Binding, adapter: Adapter) {
+export async function calendarLedger(binding: Binding, adapter: Adapter) {
   operationSignal()?.throwIfAborted();
   const ledger = await adapter.ledger();
   operationSignal()?.throwIfAborted();
@@ -345,6 +469,7 @@ function calendarRetryable(p: VerifiedCard, ledger: Ledger, now: number) {
   const event = eventArgs(p.args), [start] = eventInterval(event);
   return ledger.revision === p.revision &&
     (!p.previousEventHash || ledger.records.some((row) => row.kind === 'events' && hash(row) === p.previousEventHash)) &&
+    (!p.publicEventGuard || start > now) &&
     (event.allDay || start < p.iat || start >= Math.floor(now / 60000) * 60000);
 }
 
@@ -370,14 +495,23 @@ export async function reconcile(
   if (p.tool !== 'propose_personal_event') return fail('INVALID_INPUT', 422);
   const currentTime = elapsedClock(now, clock);
   return calendarOperation(binding, authenticated, async (state) => {
-    const ledger = await calendarLedger(binding, adapter), checkedAt = currentTime();
+    const ledger = await calendarLedger(binding, adapter);
+    let checkedAt = currentTime();
     const match = calendarMatch(binding, p, ledger);
     if (match.record) {
       const receipt = calendarReceipt(binding, p, ledger, checkedAt, true);
       state.uncertain = false;
       return receipt;
     }
-    const authorizationValid = hasAuthorization(binding, raw, secret, checkedAt);
+    let permissionGranted = false;
+    try {
+      await requireAssistantPermission(adapter, 'createPersonalEvent');
+      permissionGranted = true;
+    } catch {
+      // Receipt checks stay available even when the setting cannot be read.
+    }
+    checkedAt = currentTime();
+    const authorizationValid = permissionGranted && hasAuthorization(binding, raw, secret, checkedAt);
     if (match.conflict) return calendarCheck(binding, p, ledger, checkedAt, 'conflict', authorizationValid, false);
     if (knownRevoked(binding, authenticated)) {
       if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
@@ -409,9 +543,11 @@ export async function revoke(
     }
     if (match.conflict) return calendarCheck(binding, p, ledger, checkedAt, 'conflict',
       hasAuthorization(binding, raw, secret, checkedAt), false);
-    // Repeated cancellation may acknowledge this registry's revocation. Expired
-    // or old-process authorization is never used to assert that work was stopped.
-    const current = liveAuthorization(binding, authenticated.payload, checkedAt, true);
+    // Only the still-present issuer registry can retire an expired preview that
+    // never reached write dispatch. Absence alone cannot cancel uncertain work.
+    const current = Number(authenticated.payload.exp) <= checkedAt
+      ? expiredRevocationAuthorization(binding, authenticated, state)
+      : liveAuthorization(binding, authenticated.payload, checkedAt, true);
     const alreadyRevoked = current.revoked.has(p.mutationId);
     current.revoked.add(p.mutationId);
     if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
@@ -443,6 +579,7 @@ export async function confirm(
   const currentTime = elapsedClock(now, clock);
   const p = verifyCard(binding, raw, secret, now);
   if (p.tool === 'propose_food_order') {
+    await requireAssistantPermission(adapter, 'prepareFoodOrder');
     const cart = cartArgs(p.args.cart);
     if (
       !(await adapter.realms()).some(
@@ -451,16 +588,22 @@ export async function confirm(
     )
       return fail('FORBIDDEN_SCOPE', 403);
     if (!adapter.food) return fail('ORDERING_DISABLED', 403);
-    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired)
+    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired) {
+      await requireAssistantPermission(adapter, 'prepareFoodOrder');
+      verifyCard(binding, raw, secret, currentTime());
+      operationSignal()?.throwIfAborted();
       return { href: String(p.args.href), reason: p.args.reason };
+    }
     const summary = priceCart(cart, await adapter.food.menu(cart.tenantId, cart.locationId));
     if (canonical(summary) !== canonical(p.args.summary)) return fail('PRICE_CHANGED', 409);
+    await requireAssistantPermission(adapter, 'prepareFoodOrder');
     verifyCard(binding, raw, secret, currentTime());
     operationSignal()?.throwIfAborted();
     return adapter.food.submit(cart, p.mutationId);
   }
   if (p.tool === 'propose_open_page') return { href: pageHref(p.args, binding.schoolId) };
   if (!writes) return fail('ASSISTANT_WRITE_UNAVAILABLE', 403);
+  await requireAssistantPermission(adapter, 'createPersonalEvent');
   const authenticated = authenticatedCard(binding, raw, secret, now);
   return calendarOperation(binding, authenticated, async (state) => {
     verifyCard(binding, raw, secret, currentTime());
@@ -474,6 +617,9 @@ export async function confirm(
       return receipt;
     }
     if (match.conflict) return fail('CONFIRMATION_CONFLICT', 409);
+    // A dispatched write may still commit after its transport failed. An
+    // absent read is not proof of failure; only read back the original action.
+    if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
     if (
       ledger.revision !== p.revision ||
       (p.previousEventHash &&
@@ -482,15 +628,31 @@ export async function confirm(
       return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
     }
     const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
+    if (p.recoveryGuard && p.studyGuard)
+      verifyCourseworkRecoveryCalendar(binding, p.recoveryGuard, p.studyGuard, ledger, currentTime());
+    if (p.studyGuard)
+      await verifyCourseworkStudyGuard(adapter, binding, p.studyGuard, event, ledger, currentTime());
+    if (p.publicEventGuard)
+      await verifyPublicEventGuard(adapter, binding, p.publicEventGuard, event, currentTime());
+    if (p.pickupGuard)
+      await verifyFoodPickupGuard(adapter, binding, p.pickupGuard, event, currentTime());
+    await requireAssistantPermission(adapter, 'createPersonalEvent');
     const writeTime = currentTime();
     verifyCard(binding, raw, secret, writeTime);
     const [start] = eventInterval(event);
+    if (p.pickupGuard && start <= writeTime) return fail('FOOD_PICKUP_PASSED', 409);
+    if (p.studyGuard?.policy === 'coursework-gap' && start <= writeTime)
+      return fail('STUDY_SLOT_CHANGED', 409);
+    if (p.publicEventGuard && start <= writeTime)
+      return fail('CAMPUS_EVENT_START_PASSED', 409);
     // An explicitly backdated entry can still be recorded. Recheck a prospective
     // timed card after reading the ledger and before its first write.
     if (!event.allDay && start >= p.iat && start < Math.floor(writeTime / 60000) * 60000)
       return fail('EVENT_START_PASSED', 409);
     operationSignal()?.throwIfAborted();
     state.uncertain = true;
+    const proposal = proposals.get(hash(binding));
+    if (proposal && proposal.seq === authenticated.payload.proposalSeq) proposal.dispatched.add(p.mutationId);
     await adapter.write({
       schoolId: binding.schoolId,
       expectedRevision: p.revision,

@@ -162,7 +162,7 @@ export function answerLocalSchedule(
         ? { availability: 'available', content: eventAnswer(intent, imported, now) }
         : { availability: 'missing', content: '還沒讀到這個帳號在此瀏覽器保存的個人事件，無法判定當天是否有行程。' };
     } else {
-      const local = readPersonalTimetableOnDevice(scope.owner, scope.schoolId);
+      const local = readPersonalTimetableOnDevice(scope.schoolId, scope.owner);
       const records = withClassExceptions(
         [...imported, ...(local.found ? manualClassRecords(local.timetable) : [])],
         local.timetable.classExceptions,

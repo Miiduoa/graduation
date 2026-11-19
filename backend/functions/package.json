@@ -19,11 +19,11 @@
     "test": "pnpm run build:shared && node parse5-runtime-smoke.cjs && ONLINE_ORDERING_ENABLED=true jest"
   },
   "dependencies": {
-    "firebase-admin": "14.5.0",
+    "firebase-admin": "14.5.1",
     "firebase-functions": "^7.4.0",
-    "jose": "^6.2.15",
+    "jose": "^6.2.17",
     "node-fetch": "^3.3.2",
-    "parse5": "8.1.0",
+    "parse5": "8.1.1",
     "saml2-js": "^4.0.2",
     "xml2js": "^0.6.2",
     "zod": "^4.6.7",

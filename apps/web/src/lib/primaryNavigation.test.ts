@@ -10,6 +10,11 @@ it.each([
   ['/school-lms', 'study'],
   ['/school-lms/homework/10001/20001', 'study'],
   ['/course/cs101/assignments', 'study'],
+  ['/groups', 'study'],
+  ['/groups/group-1', 'study'],
+  ['/groups/group-1/assignments', 'study'],
+  ['/groups/group-1/clubhouse', 'study'],
+  ['/groups/group-1/club-other', 'study'],
   ['/teacher/course/cs101', 'study'],
   ['/classroom', 'study'],
   ['/classroom/grades', 'study'],
@@ -20,11 +25,27 @@ it.each([
   ['/cafeteria/restaurant-1', 'life'],
   ['/food', 'life'],
   ['/shops', 'life'],
-  ['/hub', 'life'],
+  ['/hub', 'today'],
   ['/bus/registered', 'life'],
   ['/library', 'life'],
+  ['/career', 'life'],
   ['/events/talk-1', 'life'],
-  ['/community/post/topic-1', 'life'],
+  ['/clubs', 'life'],
+  ['/groups/club-1/club', 'life'],
+  ['/groups/club-1/club/overview', 'life'],
+  ['/groups/club-1/club/members', 'life'],
+  ['/community/post/topic-1', 'connect'],
+  ['/connect', 'connect'],
+  ['/social', 'connect'],
+  ['/dms/conversation-1', 'connect'],
+  ['/friends', 'connect'],
+  ['/announcements/news-1', 'connect'],
+  ['/messages', 'connect'],
+  ['/student-card', 'me'],
+  ['/student-card/verify', 'me'],
+  ['/profile', 'me'],
+  ['/auth/account', 'me'],
+  ['/auth/platform/class-workspace/cw_123', 'study'],
   ['/settings', 'me'],
   ['/classroom/account', 'me'],
   ['/admin/students/student-1', 'more'],
@@ -38,7 +59,11 @@ it.each([
   '/classroom-old',
   '/grades-old',
   '/school-courses-old',
+  '/career-old',
   '/unknown',
+  '/connect-old',
+  '/community-old',
+  '/student-card-old',
   '/classroom/login',
   null,
   undefined,
@@ -46,9 +71,9 @@ it.each([
   expect(primaryNavigationSection(pathname)).toBeNull();
 });
 
-it('treats legacy /today and /hub only as section aliases, not as link targets from header vocabulary', () => {
+it('keeps home aliases in the section they redirect to', () => {
   expect(primaryNavigationSection('/today')).toBe('today');
-  expect(primaryNavigationSection('/hub')).toBe('life');
+  expect(primaryNavigationSection('/hub')).toBe('today');
   expect(primaryNavigationSection('/')).toBe('today');
   expect(primaryNavigationSection('/life')).toBe('life');
 });

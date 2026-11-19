@@ -1,7 +1,12 @@
+import type { Firestore } from 'firebase-admin/firestore';
 import { NuniError } from '@campus/shared/src/nuni';
 import { boundedBytes } from './boundedBytes';
 import { isSchoolLmsReadonlyEnabled } from './schoolLmsReadonly';
-import { isHostedWebCallable, isLeaveWebCallable, isSchoolLoginWebCallable } from '@/lib/hostedCallables';
+import {
+  isHostedWebCallable,
+  isLeaveWebCallable,
+  isSchoolLoginWebCallable,
+} from '@/lib/hostedCallables';
 import { callableErrorBody, HttpsError } from './httpsError';
 import { isLeaveWebApiServerEnabled } from './leaveWebApiEnabled';
 import { isSchoolStudentIdLoginEnabled } from './schoolStudentIdLoginEnabled';
@@ -10,6 +15,7 @@ import {
   assertJoinCodeAttemptsAllowed,
   assertTimetableShareCreatesAllowed,
   checkUidRateLimit,
+  createUidRateLimiter,
   recordInvalidJoinCode,
   recordTimetableShareCreate,
 } from './uidRateLimit';
@@ -30,7 +36,21 @@ const JSON_HEADERS = {
 const CORS_ALLOW_HEADERS =
   'Authorization, Content-Type, X-Firebase-AppCheck, X-Client-Version, X-Firebase-gmpid, X-Firebase-Encoding';
 
+// Separate 240/UID/min budget covers workbench polling, photos and user actions.
+const dormRateLimit = createUidRateLimiter({ requestsPerMinute: 240 });
+
+const entryRateLimits = {
+  careerWorkstudy: createUidRateLimiter({ requestsPerMinute: 240 }),
+  careerInternship: createUidRateLimiter({ requestsPerMinute: 240 }),
+  clubPortal: createUidRateLimiter({ requestsPerMinute: 240 }),
+};
+function isEntry(name: string): name is keyof typeof entryRateLimits {
+  return Object.hasOwn(entryRateLimits, name);
+}
+
 const MAX_BODY_BYTES = 64 * 1024;
+// The photo handler accepts 8 MiB of base64; reserve a bounded JSON envelope.
+const DORM_MAX_BODY_BYTES = 8 * 1024 * 1024 + MAX_BODY_BYTES;
 
 export type FnRuntime = {
   db: import('./groupInviteHandlers').GroupFirestore;
@@ -101,7 +121,7 @@ async function verifyCallableAuth(
   }
 }
 
-async function readJsonBody(request: Request): Promise<unknown> {
+async function readJsonBody(request: Request, maxBodyBytes = MAX_BODY_BYTES): Promise<unknown> {
   const contentType = String(request.headers.get('content-type') || '')
     .split(';')[0]
     .trim()
@@ -112,7 +132,7 @@ async function readJsonBody(request: Request): Promise<unknown> {
   if (!request.body) return undefined;
   let raw: Buffer;
   try {
-    raw = await boundedBytes(request, MAX_BODY_BYTES);
+    raw = await boundedBytes(request, maxBodyBytes);
   } catch (error) {
     if (error instanceof NuniError && error.code === 'BODY_TOO_LARGE') {
       throw new HttpsError('invalid-argument', 'Request body too large');
@@ -144,10 +164,33 @@ async function invokeHostedCallable(
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
+  if (name === 'listGroupDiscussionPage') {
+    const { createGroupDiscussionHandlers } = await import('./groupDiscussionHandlers');
+    return createGroupDiscussionHandlers({ db: db as unknown as Firestore }).listGroupDiscussionPage(request);
+  }
+  if (name === 'careerWorkstudy') {
+    const { createCareerWorkstudyHandlers } = await import('./careerWorkstudyHandlers');
+    return createCareerWorkstudyHandlers({ db: db as unknown as Firestore })(request);
+  }
+  if (name === 'careerInternship') {
+    const { createCareerInternshipHandlers } = await import('./careerInternshipHandlers');
+    return createCareerInternshipHandlers({ db: db as unknown as Firestore })(request);
+  }
+  if (name === 'clubPortal') {
+    const { createClubPortal } = await import('./clubPortalHandlers');
+    return createClubPortal({ db })(request);
+  }
+  if (name === 'dormWorkflow') {
+    if (!request.auth) throw new HttpsError('unauthenticated', '請先登入');
+    const { invokeDormWorkflow } = await import('./dormWorkflowHandler');
+    return invokeDormWorkflow(db, request);
+  }
   if (name === 'prepareDmConversation' || name === 'sendDmText') {
     const { createDmConversations } = await import('./dmConversationsHandler');
     const handlers = createDmConversations({ db });
-    return name === 'prepareDmConversation' ? handlers.prepare(request) : handlers.sendText(request);
+    return name === 'prepareDmConversation'
+      ? handlers.prepare(request)
+      : handlers.sendText(request);
   }
   if (name === 'replyToCampusStory') {
     const { createReplyToCampusStory } = await import('./storyReplyHandler');
@@ -155,18 +198,25 @@ async function invokeHostedCallable(
   }
   if (name === 'getMyTronClassCourses') {
     const { createTronClassCoursesHandler } = await import('./tronClassCoursesHandler');
-    const fetchCourses = lmsCoursesFetcher ?? (await import('./tronClassSchoolSource')).tronClassSchoolSource;
-    return createTronClassCoursesHandler({ db: db as unknown as AcademicFirestore, fetchCourses })(request);
+    const fetchCourses =
+      lmsCoursesFetcher ?? (await import('./tronClassSchoolSource')).tronClassSchoolSource;
+    return createTronClassCoursesHandler({ db: db as unknown as AcademicFirestore, fetchCourses })(
+      request,
+    );
   }
   if (name === 'getMyTronClassLms') {
     const { createTronClassLmsHandler } = await import('./tronClassLmsHandler');
-    const source = lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
+    const source =
+      lmsReadonlySource ?? (await import('./tronClassLmsSource')).tronClassLmsReadonlySource;
     return createTronClassLmsHandler({ db: db as unknown as AcademicFirestore, source })(request);
   }
   if (name === 'getMyAcademicRecords') {
     const { createAcademicRecordsHandler } = await import('./academicRecordsHandlers');
-    const fetchers = academicFetchers ?? (await import('./academicSchoolSource')).academicSchoolSource;
-    return createAcademicRecordsHandler({ db: db as unknown as AcademicFirestore, fetchers })(request);
+    const fetchers =
+      academicFetchers ?? (await import('./academicSchoolSource')).academicSchoolSource;
+    return createAcademicRecordsHandler({ db: db as unknown as AcademicFirestore, fetchers })(
+      request,
+    );
   }
   if (name === 'clearPuCampusSessions') {
     const { createClearPuCampusSessions } = await import('./academicRecordsHandlers');
@@ -180,7 +230,12 @@ async function invokeHostedCallable(
     const { createTimetableShareHandlers } = await import('./timetableShareHandlers');
     return createTimetableShareHandlers({ db })[name](request);
   }
-  if (name === 'startLiveSession' || name === 'endLiveSession' || name === 'joinLiveSession' || name === 'correctAttendanceRecord') {
+  if (
+    name === 'startLiveSession' ||
+    name === 'endLiveSession' ||
+    name === 'joinLiveSession' ||
+    name === 'correctAttendanceRecord'
+  ) {
     const { createLiveSessionHandlers } = await import('./attendanceSessionHandlers');
     return createLiveSessionHandlers({ db })[name](request);
   }
@@ -269,23 +324,38 @@ export async function dispatchFnRequest(
 
   let uid: string | undefined;
   try {
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(
+      request,
+      name === 'dormWorkflow' ? DORM_MAX_BODY_BYTES : MAX_BODY_BYTES,
+    );
     if (!body || typeof body !== 'object' || Array.isArray(body) || !('data' in body)) {
       throw new HttpsError('invalid-argument', 'Request body is missing data.');
     }
     const auth = await verifyCallableAuth(
       request.headers.get('authorization'),
       resolved.verifyIdToken,
-      isLeaveWebCallable(name) || name === 'correctAttendanceRecord' ||
-        name === 'getMyAcademicRecords' || name === 'getMyTronClassCourses' ||
+      isLeaveWebCallable(name) ||
+        name === 'correctAttendanceRecord' ||
+        name === 'getMyAcademicRecords' ||
+        name === 'getMyTronClassCourses' ||
         name === 'getMyTronClassLms' ||
-        name === 'clearPuCampusSessions',
+        name === 'clearPuCampusSessions' ||
+        name === 'dormWorkflow' ||
+        isEntry(name),
     );
     uid = auth?.uid;
     if (uid) {
       // DM / story-reply Functions have no per-UID minute cap. Do not share
       // the hosted 10/min budget with chat, or a long conversation is rejected.
-      if (name !== 'prepareDmConversation' && name !== 'sendDmText' && name !== 'replyToCampusStory') {
+      if (isEntry(name)) {
+        entryRateLimits[name].check(uid);
+      } else if (name === 'dormWorkflow') {
+        dormRateLimit.check(uid);
+      } else if (
+        name !== 'prepareDmConversation' &&
+        name !== 'sendDmText' &&
+        name !== 'replyToCampusStory'
+      ) {
         checkUidRateLimit(uid);
       }
       if (name === 'joinGroupByCode') {
@@ -300,8 +370,14 @@ export async function dispatchFnRequest(
       data: (body as { data: unknown }).data,
       auth,
     };
-    const result = await invokeHostedCallable(name, callableRequest, resolved.db,
-      resolved.academicFetchers, resolved.lmsCoursesFetcher, resolved.lmsReadonlySource);
+    const result = await invokeHostedCallable(
+      name,
+      callableRequest,
+      resolved.db,
+      resolved.academicFetchers,
+      resolved.lmsCoursesFetcher,
+      resolved.lmsReadonlySource,
+    );
     return jsonResponse(200, { result }, cors);
   } catch (error) {
     const mapped = mapThrownError(error);

@@ -10,20 +10,53 @@ on:
       - 'apps/web/src/app/home.module.css'
       - 'apps/web/src/app/globals.css'
       - 'apps/web/src/app/layout.tsx'
+      - 'apps/web/src/app/servicePages.module.css'
       - 'apps/web/src/app/life/**'
+      - 'apps/web/src/app/career/**'
+      - 'apps/web/src/app/connect/**'
+      - 'apps/web/src/app/profile/**'
+      - 'apps/web/src/app/login/**'
+      - 'apps/web/src/app/auth/account/**'
+      - 'apps/web/src/app/search/**'
       - 'apps/web/src/app/settings/**'
+      - 'apps/web/src/app/student-card/**'
       - 'apps/web/src/components/today/**'
+      - 'apps/web/src/components/academic/**'
       - 'apps/web/src/components/AppearancePreferences*'
+      - 'apps/web/src/components/AccountRoleLinks*'
       - 'apps/web/src/components/AppHeader*'
       - 'apps/web/src/components/CampusIcon*'
       - 'apps/web/src/components/CampusWeek*'
       - 'apps/web/src/components/CampusServiceMenu*'
+      - 'apps/web/src/components/ServiceDirectory*'
+      - 'apps/web/src/components/ServiceBreadcrumbs*'
+      - 'apps/web/src/components/SiteShell*'
+      - 'apps/web/src/components/SiteFooter*'
+      - 'apps/web/src/components/NuniSignIn*'
+      - 'apps/web/src/components/LoginLink*'
       - 'apps/web/src/components/SchoolSelector*'
+      - 'apps/web/src/components/SchoolAccountRequired*'
+      - 'apps/web/src/components/SelectedSchoolProvider*'
+      - 'apps/web/src/components/SchoolLmsReadonlyProvider*'
       - 'apps/web/src/components/transit.module.css'
       - 'apps/web/src/lib/webPreferences*'
       - 'apps/web/src/lib/primaryNavigation*'
+      - 'apps/web/src/lib/campusNavigation*'
+      - 'apps/web/src/lib/campusServices*'
+      - 'apps/web/src/lib/serviceJourneys*'
+      - 'apps/web/src/lib/academicSections*'
+      - 'apps/web/src/lib/publicCampusServices*'
+      - 'apps/web/src/lib/accountDestination*'
+      - 'apps/web/src/lib/navigation*'
       - 'apps/web/src/lib/todayScreen*'
+      - 'apps/web/src/lib/personalImports*'
+      - 'apps/web/src/lib/usePersonalImports*'
       - 'apps/web/src/lib/usePersonalTodayRecords*'
+      - 'apps/web/src/lib/campusPreferences*'
+      - 'apps/web/src/lib/useCampusPersonalization*'
+      - 'packages/shared/src/campusPersonalization.ts'
+      - 'packages/shared/src/primaryDestinations.ts'
+      - 'scripts/qa/contextual-home/**'
       - 'apps/web/public/offline.html'
       - 'scripts/timetable-browser-smoke.py'
       - 'scripts/campus-visual-smoke.py'
@@ -47,7 +80,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: '22.23.4'
+          node-version: '22.23.5'
           cache: pnpm
       - uses: actions/setup-python@v7
         with:
@@ -58,6 +91,10 @@ jobs:
         run: |
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium
+      - name: Verify contextual home preferences in the browser
+        run: |
+          node scripts/qa/contextual-home/build.mjs
+          python scripts/qa/contextual-home/check.py
       - name: Build Web
         run: pnpm --filter web build
       - name: Exercise production guest timetable
@@ -87,4 +124,5 @@ jobs:
           path: |
             artifacts/timetable-browser
             artifacts/campus-visual
+            artifacts/contextual-home
           retention-days: 7

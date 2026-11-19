@@ -5,7 +5,6 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
-import { useAuth } from './AuthGuard';
 import {
   forgetDirectorySearch,
   rememberDirectorySearch,
@@ -15,11 +14,26 @@ import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavi
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { VoiceDictationButton } from './VoiceDictationButton';
 import { CampusIcon } from './CampusIcon';
-import { resolveCampusActions, getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
+import {
+  resolveCampusActions,
+  getQuickCampusActions,
+  QUICK_CAMPUS_EXAMPLES,
+} from '@/lib/quickCampusActions';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
-import { ASSISTANT_SERVICES, assistantServiceHref, resolveAssistantServiceIntent, type AssistantServiceId } from '@campus/shared/src/assistantServices';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import {
+  answerPublicCourseQuestion,
+  type PublicCourseAssistantAnswer,
+} from '@campus/shared/src/publicCourseAssistantClient';
+import { PublicCourseAssistantResult } from './PublicCourseAssistantResult';
+import {
+  ASSISTANT_SERVICES,
+  assistantServiceHref,
+  resolveAssistantServiceIntent,
+  type AssistantServiceId,
+} from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
-import { useOptionalNuniSession } from '@/features/nuni/Session';
+import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
 import styles from './QuickCampusEntry.module.css';
 
 type Analysis = {
@@ -27,131 +41,269 @@ type Analysis = {
   phrase: string;
   state: 'loading' | 'ready' | 'error';
   result?: CampusSemanticResult;
+  publicAnswer?: PublicCourseAssistantAnswer;
+  message?: string;
 };
 
-export function QuickCampusEntry({ onAsk, compact = false }: {
+export function QuickCampusEntry({
+  onAsk,
+  compact = false,
+}: {
   onAsk?: ((phrase: string) => void) | null;
   compact?: boolean;
 } = {}) {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
-  const { user } = useAuth();
-  const platform = useOptionalNuniSession();
-  const platformAudience = !!(platform?.session && !platform.loading && !platform.error && !platform.pendingLogout);
+  const account = useCampusFinderAccount();
+  const { uid, platformAudience } = account;
+  const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
+  const canInterpret = account.canInterpret && campusReady;
+  const canUseAssistant = account.canUseAssistant && campusReady;
+  const canRemember = account.canRemember && campusReady;
   const selected = selection?.selectedSchool;
-  const uid = user?.uid || '';
   const selectedSchoolId = selected?.id || '';
-  const scope = JSON.stringify([uid, selectedSchoolId]);
+  const scope = JSON.stringify([
+    account.responseScope,
+    selectedSchoolId,
+    Boolean(selection?.loading),
+    selection?.catalogStatus,
+  ]);
+  const storageScope = JSON.stringify([account.ownerScope, selectedSchoolId]);
+  const draftScope = useCampusFinderDraftScope(
+    account.ownerScope,
+    campusReady ? selectedSchoolId : null,
+  );
   const campusSearch = buildCampusNavigationSearch(
     null,
     selected ? { id: selected.id, code: selected.code } : null,
     Boolean(selection && !selection.loading && selection.catalogStatus === 'ready'),
   );
-  const [query, setQuery] = useState('');
+  const [draft, setDraft] = useState({ scope: draftScope, query: '', edited: false });
+  const query = draft.scope === draftScope ? draft.query : '';
+  if (draft.scope !== draftScope) setDraft({ scope: draftScope, query: '', edited: false });
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const sequence = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+  const currentScope = useRef(scope);
+  const restoredScope = useRef<string | null>(null);
   useLayoutEffect(() => {
-    const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/');
-    if (!snapshot) return;
+    currentScope.current = scope;
+    // A later return to the same account must not revive its earlier response.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAnalysis(null);
+    return () => {
+      sequence.current += 1;
+      controller.current?.abort();
+    };
+  }, [scope]);
+  useLayoutEffect(() => {
+    if (!canRemember || restoredScope.current === storageScope) return;
+    restoredScope.current = storageScope;
+    // A deferred history restore must not replace text entered while campus resolution was pending.
+    const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/', storageScope);
+    if (draft.edited || !snapshot) return;
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setQuery(snapshot.query.slice(0, 160));
-  }, []);
-  useEffect(() => () => {
-    sequence.current += 1;
-  }, []);
+    setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
+  }, [canRemember, draftScope, storageScope, draft.edited]);
+  useEffect(
+    () => () => {
+      sequence.current += 1;
+    },
+    [],
+  );
 
   const phrase = query.trim();
   const serviceIntent = resolveAssistantServiceIntent(phrase);
   const active = analysis?.phrase === phrase && analysis.scope === scope ? analysis : null;
   const aiResult = active?.state === 'ready' ? active.result : null;
-  const semanticActions = aiResult?.status === 'understood'
-    ? resolveCampusActions(aiResult.destinations, schoolLmsEnabled)
-    : null;
-  const actions = semanticActions || getQuickCampusActions(phrase, schoolLmsEnabled, platformAudience ? 'platform' : 'school');
-  const route = (href: string, serviceId?: AssistantServiceId) => campusServiceHref(
-    serviceId
-      ? assistantServiceHref(serviceId, undefined, platformAudience ? 'platform' : 'school') ?? href
-      : href,
-    campusSearch,
+  const publicIntent = resolvePublicCourseAssistantIntent(phrase, selectedSchoolId);
+  const publicAnswer = active?.state === 'ready' ? active.publicAnswer : null;
+  const semanticActions =
+    aiResult?.status === 'understood'
+      ? resolveCampusActions(aiResult.destinations, schoolLmsEnabled)
+      : null;
+  const actions =
+    semanticActions ||
+    getQuickCampusActions(phrase, schoolLmsEnabled, platformAudience ? 'platform' : 'school');
+  const route = (href: string, serviceId?: AssistantServiceId) =>
+    campusServiceHref(
+      serviceId
+        ? (assistantServiceHref(serviceId, undefined, platformAudience ? 'platform' : 'school') ??
+            href)
+        : href,
+      campusSearch,
+    );
+  const searchHref = route(
+    '/search' + (phrase ? '?q=' + encodeURIComponent(phrase.slice(0, 100)) : ''),
   );
-  const searchHref = route('/search' + (phrase ? '?q=' + encodeURIComponent(phrase.slice(0, 100)) : ''));
   const assistantHref = route('/ai-assistant?q=' + encodeURIComponent(phrase.slice(0, 4000)));
+  const primaryHandoff = Boolean(
+    phrase &&
+    platformAudience &&
+    canUseAssistant &&
+    !canInterpret &&
+    !publicIntent &&
+    !serviceIntent &&
+    onAsk !== null,
+  );
 
   function updateQuery(value: string) {
     sequence.current += 1;
+    controller.current?.abort();
     setAnalysis(null);
-    setQuery(value.slice(0, 160));
+    setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
   }
 
   function rememberQuick(href: string) {
+    if (!canRemember) return;
     rememberDirectorySearch('quick', {
       path: window.location.pathname || '/',
       destination: href,
       query,
       open: true,
+      scope: storageScope,
     });
   }
 
   async function analyze(input: string) {
-    const text = input.trim().slice(0, 160);
-    if (!text || !uid) return;
-    if (resolveAssistantServiceIntent(text)) return;
+    const text = input.trim();
+    const publicRequest = resolvePublicCourseAssistantIntent(text, selectedSchoolId);
+    if (!text || (!canInterpret && !publicRequest)) return;
+    controller.current?.abort();
+    const activeController = new AbortController();
+    controller.current = activeController;
+    if (!publicRequest && resolveAssistantServiceIntent(text)) return;
     const request = ++sequence.current;
     const requestScope = scope;
     setAnalysis({ phrase: text, scope: requestScope, state: 'loading' });
     try {
-      const result = await interpretCampusRequest({ uid, schoolId: selectedSchoolId, utterance: text });
-      if (request === sequence.current) {
+      if (publicRequest) {
+        const lookup = await answerPublicCourseQuestion({
+          question: text,
+          schoolId: selectedSchoolId,
+          origin: 'web',
+          signal: activeController.signal,
+          isCurrent: () => request === sequence.current && currentScope.current === requestScope,
+        });
+        if (lookup) {
+          if (
+            request === sequence.current &&
+            currentScope.current === requestScope &&
+            !activeController.signal.aborted
+          ) {
+            setAnalysis({
+              phrase: text,
+              scope: requestScope,
+              state: 'ready',
+              publicAnswer: lookup,
+            });
+          }
+          return;
+        }
+        if (!canInterpret) {
+          if (request === sequence.current && currentScope.current === requestScope) {
+            setAnalysis({
+              phrase: text,
+              scope: requestScope,
+              state: 'error',
+              message: '暫時查不到這項公開課程，請調整條件後重試。',
+            });
+          }
+          return;
+        }
+      }
+      if (
+        request !== sequence.current ||
+        currentScope.current !== requestScope ||
+        activeController.signal.aborted
+      )
+        return;
+      if (text.length > 160) {
+        setAnalysis({
+          phrase: text,
+          scope: requestScope,
+          state: 'error',
+          message: '一般需求請縮短至 160 字以內，再送出分析。',
+        });
+        return;
+      }
+      const result = await interpretCampusRequest({
+        uid,
+        schoolId: selectedSchoolId,
+        utterance: text,
+      });
+      if (
+        request === sequence.current &&
+        currentScope.current === requestScope &&
+        !activeController.signal.aborted
+      ) {
         setAnalysis({ phrase: text, scope: requestScope, state: 'ready', result });
       }
     } catch {
-      if (request === sequence.current) {
+      if (
+        request === sequence.current &&
+        currentScope.current === requestScope &&
+        !activeController.signal.aborted
+      ) {
         setAnalysis({ phrase: text, scope: requestScope, state: 'error' });
       }
     }
   }
 
   function onVoiceTranscript(text: string) {
-    const transcript = text.slice(0, 160);
+    const transcript = text.slice(0, 320);
     updateQuery(transcript);
     // Starting a speech capture is an explicit interaction; only the transcript is sent to AI.
-    if (uid && !resolveAssistantServiceIntent(transcript)) void analyze(transcript);
+    if (
+      resolvePublicCourseAssistantIntent(transcript, selectedSchoolId) ||
+      (canInterpret && !resolveAssistantServiceIntent(transcript))
+    )
+      void analyze(transcript);
   }
 
   return (
-    <section className={compact ? styles.compactEntry : styles.entry} aria-labelledby="quick-entry-title">
+    <section
+      className={compact ? styles.compactEntry : styles.entry}
+      aria-labelledby="quick-entry-title"
+    >
       <div className={styles.heading}>
         {compact ? (
-          <h2 id="quick-entry-title" className={styles.compactHeading}>搜尋服務</h2>
+          <h2 id="quick-entry-title" className={styles.compactHeading}>
+            搜尋服務
+          </h2>
         ) : (
           <div>
             <p className={styles.eyebrow}>快速開始</p>
             <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
-            <p className={styles.subtitle}>
-              說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
-            </p>
+            <p className={styles.subtitle}>先找到服務，也可以把需求交給校園助理接著處理。</p>
           </div>
         )}
-        <Link className={styles.allServices} href={searchHref} onClick={() => rememberQuick(searchHref)}>
+        <Link
+          className={styles.allServices}
+          href={searchHref}
+          onClick={() => rememberQuick(searchHref)}
+        >
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
       </div>
       <div className={styles.inputRow}>
-        <label className={styles.srOnly} htmlFor="quick-campus-input">想做什麼？</label>
+        <label className={styles.srOnly} htmlFor="quick-campus-input">
+          想做什麼？
+        </label>
         <CampusIcon name="search" size={20} />
         <input
           id="quick-campus-input"
           type="search"
           autoComplete="off"
-          maxLength={160}
+          maxLength={320}
           value={query}
           onChange={(event) => updateQuery(event.target.value)}
           placeholder="例如：明天沒課，想讀書再吃飯"
         />
         <VoiceDictationButton onTranscript={onVoiceTranscript} />
       </div>
-      {phrase && uid && !serviceIntent ? (
+      {phrase && (publicIntent || (canInterpret && !serviceIntent)) ? (
         <div className={styles.aiRow}>
           <button
             type="button"
@@ -159,14 +311,42 @@ export function QuickCampusEntry({ onAsk, compact = false }: {
             disabled={active?.state === 'loading'}
             onClick={() => void analyze(phrase)}
           >
-            {active?.state === 'loading' ? 'AI 正在理解…' : '用 AI 理解這句話'}
+            {active?.state === 'loading'
+              ? publicIntent
+                ? '正在查詢課程…'
+                : 'AI 正在理解…'
+              : publicIntent
+                ? '查詢公開課程'
+                : '用 AI 理解這句話'}
           </button>
-          <span className={styles.hint}>語音完成後會自動分析轉寫文字；打字則由你決定是否送出。</span>
+          <span className={styles.hint}>
+            {publicIntent
+              ? '從校方公開資料找課，可接著查看完整課程。'
+              : '語音完成後會自動分析轉寫文字；打字則由你決定是否送出。'}
+          </span>
+        </div>
+      ) : null}
+      {primaryHandoff ? (
+        <div className={styles.aiRow}>
+          {onAsk ? (
+            <button type="button" className={styles.analyzeButton} onClick={() => onAsk(phrase)}>
+              交給校園助理
+            </button>
+          ) : (
+            <Link
+              className={styles.analyzeButton}
+              href={assistantHref}
+              onClick={() => rememberQuick(assistantHref)}
+            >
+              交給校園助理
+            </Link>
+          )}
+          <span className={styles.hint}>把這段需求帶入助理，檢查後再送出。</span>
         </div>
       ) : null}
       {!phrase ? (
         <div className={styles.examples} aria-label="常用需求">
-          {QUICK_CAMPUS_EXAMPLES.map((example) => (
+          {[...QUICK_CAMPUS_EXAMPLES, '查清大資料庫課程'].map((example) => (
             <button key={example} type="button" onClick={() => updateQuery(example)}>
               {example}
             </button>
@@ -181,10 +361,21 @@ export function QuickCampusEntry({ onAsk, compact = false }: {
               audience={platformAudience ? 'platform' : 'school'}
             />
           )}
-          {serviceIntent?.kind === 'catalog' && !selectedSchoolId && <p>先選擇學校，即可查看對應的服務入口。</p>}
-          {active?.state === 'loading' && (
-            <p role="status" className={styles.hint}>AI 正在理解你想完成的事情，不會直接執行操作。</p>
+          {serviceIntent?.kind === 'catalog' && !selectedSchoolId && (
+            <p>先選擇學校，即可查看對應的服務入口。</p>
           )}
+          {active?.state === 'loading' && (
+            <p role="status" className={styles.hint}>
+              {publicIntent
+                ? '正在讀取校方公開課程…'
+                : 'AI 正在理解你想完成的事情，不會直接執行操作。'}
+            </p>
+          )}
+          {publicAnswer?.read ? (
+            <PublicCourseAssistantResult read={publicAnswer.read} />
+          ) : publicAnswer ? (
+            <p role="status">{publicAnswer.content}</p>
+          ) : null}
           {aiResult?.source === 'model' && (
             <div className={styles.understanding}>
               <strong>{aiResult.status === 'clarify' ? '需要再確認一下' : 'AI 理解的需求'}</strong>
@@ -194,13 +385,29 @@ export function QuickCampusEntry({ onAsk, compact = false }: {
           )}
           {(active?.state === 'error' || aiResult?.status === 'unavailable') && (
             <p role="status" className={styles.hint}>
-              AI 暫時無法使用。以下是基本關鍵字捷徑，並非 AI 理解結果。
+              {active?.message || 'AI 暫時無法使用。以下是基本關鍵字捷徑，並非 AI 理解結果。'}
             </p>
           )}
-          {!uid && !serviceIntent && (
-            <p className={styles.hint}>目前為基本捷徑。登入學校帳號後，可使用 AI 理解較複雜的需求。</p>
+          {!canInterpret && !serviceIntent && !publicIntent && (
+            <p className={styles.hint}>
+              {!campusReady
+                ? selection?.catalogStatus === 'error'
+                  ? '暫時無法確認校園；你可以先搜尋服務，重新確認校園後再分析需求。'
+                  : '正在確認校園；你可以先搜尋服務，輸入的文字會保留。'
+                : account.status === 'checking'
+                  ? '正在確認帳號；你可以先搜尋服務。'
+                  : account.status === 'signing-out'
+                    ? '正在確認登出狀態；公開服務仍可瀏覽。'
+                    : account.status === 'error'
+                      ? '暫時無法確認帳號；公開服務仍可瀏覽，請重新確認登入狀態後使用助理。'
+                      : platformAudience
+                        ? '服務捷徑可直接開啟；複合需求可以交給目前帳號的校園助理。'
+                        : '目前顯示服務捷徑；登入 Google 或學校帳號後，可使用校園助理。'}
+            </p>
           )}
-          {serviceIntent?.kind === 'catalog' ? null : actions.length ? (
+          {publicAnswer ||
+          publicIntent ||
+          serviceIntent?.kind === 'catalog' ? null : actions.length ? (
             <>
               <p className={styles.resultHeading}>
                 {semanticActions ? 'AI 建議先開啟' : '基本快速入口'}
@@ -216,38 +423,62 @@ export function QuickCampusEntry({ onAsk, compact = false }: {
                     <span>
                       <strong>{action.name}</strong>
                       <small>{action.text}</small>
-                      {aiResult?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
-                        <span key={preview.destination} className={styles.serviceSnapshot}>
-                          <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
-                          {preview.items.map((item, index) => (
-                            <span key={index} className={styles.snapshotItem}>
-                              {item.title}{item.detail ? ' · ' + item.detail : ''}
+                      {aiResult?.previews
+                        ?.filter((preview) => preview.destination === action.destination)
+                        .map((preview) => (
+                          <span key={preview.destination} className={styles.serviceSnapshot}>
+                            <span>
+                              {preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：
+                              {preview.message}
                             </span>
-                          ))}
-                        </span>
-                      ))}
+                            {preview.items.map((item, index) => (
+                              <span key={index} className={styles.snapshotItem}>
+                                {item.title}
+                                {item.detail ? ' · ' + item.detail : ''}
+                              </span>
+                            ))}
+                          </span>
+                        ))}
                     </span>
                     <CampusIcon name="arrow" size={18} />
                   </Link>
                 ))}
               </div>
             </>
-          ) : aiResult?.status !== 'clarify' ? (
+          ) : !publicAnswer && !publicIntent && aiResult?.status !== 'clarify' ? (
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>搜尋更多服務</Link>
-            {onAsk ? (
-              <button type="button" onClick={() => onAsk(phrase)}>詢問校園助理</button>
-            ) : onAsk === undefined ? (
-              <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>詢問校園助理</Link>
+            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>
+              搜尋更多服務
+            </Link>
+            {!primaryHandoff && onAsk && canUseAssistant ? (
+              <button type="button" onClick={() => onAsk(phrase)}>
+                詢問校園助理
+              </button>
+            ) : !primaryHandoff &&
+              onAsk === undefined &&
+              campusReady &&
+              (canUseAssistant || account.status === 'guest') ? (
+              <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
+                {account.status === 'guest' ? '登入後詢問助理' : '詢問校園助理'}
+              </Link>
             ) : null}
-            <button type="button" onClick={() => { forgetDirectorySearch('quick'); updateQuery(''); }}>重新輸入</button>
+            <button
+              type="button"
+              onClick={() => {
+                forgetDirectorySearch('quick');
+                updateQuery('');
+              }}
+            >
+              重新輸入
+            </button>
           </div>
         </div>
       )}
       <p className={styles.privacy}>
-        轉寫結果可修改。語音辨識可能由瀏覽器供應商處理；使用 AI 時會將轉寫文字傳給雲端模型，不會上傳本功能的錄音檔。此入口不會自行繳交、付款或更改資料。
+        轉寫結果可修改。語音辨識可能由瀏覽器供應商處理；公開查課只傳送校別與搜尋條件，其他 AI
+        分析會將轉寫文字傳給雲端模型，不會上傳本功能的錄音檔。此入口不會自行繳交、付款或更改資料。
       </p>
     </section>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   use,
   useCallback,
@@ -32,13 +33,16 @@ import {
 } from '@campus/shared/src/todaySenseAgent';
 import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
+import { AccountDemoSettings } from '@/components/AccountDemoSettings';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
-import { AccountDemoSettings } from '@/components/AccountDemoSettings';
-import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { useSignInOptions } from '@/lib/signInOptions';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { loginHref, schoolLoginHref } from '@/lib/navigation';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   getAuth,
@@ -61,6 +65,7 @@ import {
   type ThemePreference,
 } from '@/lib/webPreferences';
 import { PlatformServiceControls } from './PlatformServiceControls';
+import { PlatformAssistantPermissions } from './PlatformAssistantPermissions';
 import styles from './settings.module.css';
 import {
   currentSettingsSection,
@@ -221,8 +226,14 @@ function SettingsContent({
 }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
-  const assistantEnabled = useAssistantEnabled();
-  const schoolLoginReady = useSignInOptions().studentId;
+  const selection = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params ?? new URLSearchParams(schoolSearch));
+  const hash = useLocationHash();
+  const schoolReady = !selection || (
+    !selection.loading && selection.catalogStatus === 'ready' && Boolean(selection.selectedSchoolId)
+  );
+  const schoolLoginReady = useSignInOptions(selection?.selectedSchoolId ?? null, schoolReady).studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
   const notificationLock = useRef(false);
@@ -245,6 +256,10 @@ function SettingsContent({
     currentSettingsSection,
     () => initialSection,
   );
+  const settingsReturn = campusServiceHref(
+    activeSection === 'general' ? '/settings' : `/settings?section=${activeSection}`,
+    campusSearch,
+  ) + hash;
   const sectionContent = useRef<HTMLDivElement>(null);
   const focusSection = useRef(false);
   useEffect(() => {
@@ -670,7 +685,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>登入後查看通知</h3>
               <p>課程更新與學校通知使用各自的帳號。外觀設定不需要登入。</p>
-              <Link href="/classroom/login" className="btn primary">
+              <Link href={loginHref(settingsReturn)} className="btn primary">
                 登入課程空間
               </Link>
             </section>
@@ -679,7 +694,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>學校通知</h3>
               <p>連線學校帳號後，可以調整學校公告、成績與校園訊息的通知偏好。</p>
-              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              <Link href={schoolLoginHref(settingsReturn)} className="btn">
                 連線學校帳號
               </Link>
             </section>
@@ -819,35 +834,17 @@ function SettingsContent({
   }
 
   function renderAssistant() {
-    const googlePlatformReady = !!nuni.session && !nuni.loading && !nuni.pendingLogout && !nuni.error;
+    const showPlatform = !user || !!nuni.session || nuni.loading || !!nuni.error || nuni.pendingLogout;
     const updateAssistantPermission = (key: AssistantWritePermissionKey, value: boolean) => {
       setAssistantWritePrefs((prev) => ({ ...prev, [key]: value }));
     };
     return (
       <div className={styles.stack}>
         <SectionHeading title="助理權限">
-          平台雲端 AI 與校內助理採不同帳號及資料權限。校內助理的寫入動作預設關閉，開啟後仍需每次確認。
+          設定助理可以代你完成哪些事。每項動作獨立授權，開啟後仍需每次確認。
         </SectionHeading>
-        {assistantEnabled && googlePlatformReady && (
-          <p role="note">Google 平台 AI 會維持開啟，無法透過「平台權限」關閉。下方寫入動作屬於學校帳號，不會授予平台 AI 校籍、課表或私人訊息權限。</p>
-        )}
-        {!user && googlePlatformReady ? (
-          <div className={styles.notice}>
-            <h3>Google 平台帳號已登入</h3>
-            <p>可管理這次網頁登入的雲端 AI 使用設定。校內助理寫入需另外確認學校帳號，兩種權限不會自動合併。</p>
-            <button type="button" className="btn primary" onClick={() => openSection('platform')}>
-              管理平台 AI 權限
-            </button>
-          </div>
-        ) : !user && (
-          <div className={styles.notice}>
-            <h3>登入後設定校內助理權限</h3>
-            <p>校內助理寫入需有效學校帳號；平台 AI 可在 Google 登入後另行管理。</p>
-            <Link href={`/login${schoolSearch}`} className="btn primary">
-              前往登入
-            </Link>
-          </div>
-        )}
+        {showPlatform && <PlatformAssistantPermissions returnUrl={settingsReturn} />}
+        {user && <>
         {user && !isFirebaseConfigured() && (
           <div className={styles.notice} role="status">
             <h3>目前無法連線帳號服務</h3>
@@ -888,6 +885,7 @@ function SettingsContent({
             {savingAssistantPermissions ? '儲存中…' : '儲存助理權限'}
           </button>
         </div>
+        </>}
       </div>
     );
   }
@@ -1115,7 +1113,7 @@ function SettingsContent({
             <section className={styles.notice}>
               <h3>登入課程空間</h3>
               <p>登入後可開啟已加入的課程、作業與課堂回饋。你也可以先調整外觀。</p>
-              <Link href="/classroom/login" className="btn primary">
+              <Link href={loginHref(settingsReturn)} className="btn primary">
                 登入課程空間
               </Link>
             </section>
@@ -1126,7 +1124,7 @@ function SettingsContent({
               <p>
                 學校帳號尚未連線。連線後可查看與編輯校園個人資料；填寫學號或系所不會取得學校權限。
               </p>
-              <Link href="/login?reconnect=school&returnUrl=%2Fsettings" className="btn">
+              <Link href={schoolLoginHref(settingsReturn)} className="btn">
                 連線學校帳號
               </Link>
             </section>
@@ -1273,7 +1271,7 @@ function SettingsContent({
     general: renderGeneral,
     notifications: renderNotifications,
     assistant: renderAssistant,
-    platform: () => <PlatformServiceControls />,
+    platform: () => <PlatformServiceControls onManageAssistant={() => openSection('assistant')} />,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,
@@ -1326,7 +1324,10 @@ function SettingsContent({
               </button>
             ))}
           </nav>
-          <Link className={styles.profileLink} href="/profile">
+          <Link
+            className={styles.profileLink}
+            href={campusServiceHref('/profile', campusSearch)}
+          >
             返回個人資料 <span aria-hidden="true">↗</span>
           </Link>
         </aside>

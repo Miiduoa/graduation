@@ -1,3 +1,4 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
 import { privateFileNonce } from '../services/privateFileNonce';
 import { claimPrivateFile } from '../services/privateFiles';
 import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
@@ -14,6 +15,7 @@ import {
 } from '../services/privateFiles';
 import { PrivateImage } from '../ui/PrivateImage';
 import { PrivateAttachment } from '../ui/PrivateAttachment';
+import { ClubProfile } from './ClubProfile';
 import { ClubSummary, clubSummaryEnabled } from './ClubSummary';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
@@ -341,18 +343,15 @@ export function GroupDetailScreen(props: any) {
   } = useAsyncList<Post>(async () => {
     if (isFirebaseMockMode()) return (groupId ? DEMO_POSTS_FOR_GROUP[groupId] : undefined) ?? [];
     if (!groupId) return [];
-    const ref = collection(db, 'groups', groupId, 'posts');
-    const qy = query(ref, orderBy('createdAt', 'desc'), limit(50));
-    const snap = await getDocs(qy);
-    const rows = snap.docs.map((d) => {
-      const data = d.data() as any;
-      return {
-        id: d.id,
-        ...data,
-        likes: data.likes || 0,
-        userLiked: data.likedBy?.includes(auth.user?.uid) || false,
-      };
-    }) as Post[];
+    if (!auth.user) return [];
+    const page = await postNuniWebFn<{ groupId: string; pageSize: number }, { posts: (Post & { likedBy?: string[] })[] }>(
+      'listGroupDiscussionPage', { groupId, pageSize: 50 }, auth.user.uid,
+    );
+    const rows = page.posts.map((data) => ({
+      ...data,
+      likes: data.likes || 0,
+      userLiked: data.likedBy?.includes(auth.user?.uid ?? '') || false,
+    }));
     return rows;
   }, [db, groupId, auth.user?.uid]);
 
@@ -424,8 +423,8 @@ export function GroupDetailScreen(props: any) {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
       if (a.pinned && b.pinned) {
-        const aTime = (a.pinnedAt?.toMillis?.() ?? 0) as number;
-        const bTime = (b.pinnedAt?.toMillis?.() ?? 0) as number;
+        const aTime = (a.pinnedAt?.toMillis?.() ?? (a.pinnedAt?.seconds ?? 0) * 1000) as number;
+        const bTime = (b.pinnedAt?.toMillis?.() ?? (b.pinnedAt?.seconds ?? 0) * 1000) as number;
         return bTime - aTime;
       }
       return 0;
@@ -620,6 +619,10 @@ export function GroupDetailScreen(props: any) {
         schoolId: school.id,
         likes: 0,
         likedBy: [],
+        published: true,
+        status: 'published',
+        deleted: false,
+        deletedAt: null,
       });
 
       // 如果是問題，助理回覆由伺服器在提問建立後產生，這邊不用再寫
@@ -716,6 +719,14 @@ export function GroupDetailScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
+        {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && (
+          <ClubProfile
+            key={JSON.stringify([auth.user.uid, school.id, groupId])}
+            uid={auth.user.uid}
+            schoolId={school.id}
+            groupId={groupId}
+          />
+        )}
         {group?.type === 'club' && group.schoolId === school.id && groupId && auth.user?.uid && clubSummaryEnabled() && (
           <ClubSummary
             key={`${auth.user.uid}:${school.id}:${groupId}`}

@@ -144,6 +144,7 @@ export function AssistantCard({
   cards,
   states,
   pending,
+  confirmationDisabled = false,
   onConfirm,
   onCancel,
   onReconcile,
@@ -153,6 +154,8 @@ export function AssistantCard({
   cards: V2Card[];
   states: V2ActionStates;
   pending: boolean;
+  /** Keep read-only reconciliation and cancellation usable when new writes are unavailable. */
+  confirmationDisabled?: boolean;
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
   onReconcile?: (card: V2Card) => void;
@@ -205,7 +208,7 @@ export function AssistantCard({
             type="button"
             className={styles.primary}
             disabled={
-              pending ||
+              pending || confirmationDisabled ||
               !priorCalendarActionsVerified(cards, index, states)
             }
             onClick={() => onConfirm([card])}
@@ -228,6 +231,7 @@ export function AssistantCardStack({
   onConfirm,
   onCancel,
   onReconcile,
+  allowBatchConfirmation = true,
 }: {
   cards: V2Card[];
   states: V2ActionStates;
@@ -235,6 +239,7 @@ export function AssistantCardStack({
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
   onReconcile?: (card: V2Card) => void;
+  allowBatchConfirmation?: boolean;
 }) {
   if (!cards.length) return null;
   const open = cards.filter((c) => supportedCard(c) && canConfirmAction(states[c.mutationId]));
@@ -261,7 +266,7 @@ export function AssistantCardStack({
       ) : calendar.length > 0 ? <p className={styles.executionSummary} role="status" aria-label="行程執行進度">
         已核對 {verified}/{calendar.length} 項{uncertain ? ` · 待核對 ${uncertain} 項` : ''}{calendar.length - verified - uncertain - retired ? ` · 尚未完成 ${calendar.length - verified - uncertain - retired} 項` : ''}{retired ? ` · 已停止 ${retired} 項提議` : ''}
       </p> : null}
-      {calendarOnly && open.length > 1 ? (
+      {allowBatchConfirmation && calendarOnly && open.length > 1 ? (
         <button type="button" className={styles.batch} disabled={pending || !priorCalendarActionsVerified(cards, cards.indexOf(open[0]), states)} onClick={() => onConfirm(open)}>
           依序確認 {open.length} 筆個人行程
         </button>

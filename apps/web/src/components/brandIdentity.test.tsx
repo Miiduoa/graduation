@@ -42,7 +42,6 @@ it('shows nuni in the site footer without Campus One', () => {
   const { container } = render(<SiteFooter />);
   expect(screen.getByText('nuni')).toBeTruthy();
   expect(container.textContent).not.toMatch(/Campus One|CampusOne|\bC1\b/);
-  expect(screen.queryByRole('link', { name: '口試示範' })).toBeNull();
 });
 
 it('shows nuni brand mark and wordmark in the header without Campus One', () => {

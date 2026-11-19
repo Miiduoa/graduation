@@ -6,7 +6,7 @@ export function foodOrderIntent(question: string): boolean {
     !/(?:幫我|給我|我要)[點訂]|再點|跟上次|訂一份|點一份|點兩份|點\d+份|訂便當|點便當/.test(question)
   )
     return false;
-  return /幫我點|幫我訂|再點|跟上次一樣|訂一份|點一份|點兩份|點\d+份|訂便當|點便當|我要點|我要訂(?:餐|便當|麵|飯)|餐好了|給我點/.test(
+  return /幫我點|幫我訂|再點|跟上次一樣|訂一份|點一份|點兩份|點\d+份|訂便當|點便當|我要點|我要訂(?:餐|便當|麵|飯)|給我點/.test(
     question,
   );
 }

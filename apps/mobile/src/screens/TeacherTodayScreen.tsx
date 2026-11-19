@@ -154,7 +154,7 @@ export default function TeacherTodayScreen() {
           <RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.colors.accent} />
         }
       >
-        <Text style={s.brand}>CAMPUS ONE</Text>
+        <Text style={s.brand}>nuni</Text>
         <Text accessibilityRole="header" style={s.heading}>
           {TEACHER_TODAY_LABEL}
         </Text>
@@ -204,6 +204,19 @@ export default function TeacherTodayScreen() {
                     <View key={course.groupId} style={s.course}>
                       <Text style={s.courseTitle}>{course.name}</Text>
                       <View style={s.actions}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${course.name}，開啟課程工作台`}
+                          onPress={() =>
+                            safeNavigate(navigation, 'CourseHub', {
+                              groupId: course.groupId,
+                              groupName: course.name,
+                            })
+                          }
+                          style={s.secondary}
+                        >
+                          <Text style={s.link}>課程工作台</Text>
+                        </Pressable>
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`${course.name}，${activeSession?.sessionId ? '進入課堂' : '開始點名'}`}

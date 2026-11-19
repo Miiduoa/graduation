@@ -20,6 +20,9 @@ jest.mock('../app/useAIOverlay', () => ({
 }));
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
+let mockSelection: { schoolId: string | null } | undefined;
+let mockLegacySchool = false;
+let mockSelectionReady: boolean | undefined = true;
 let mockPlatform: {
   loading?: boolean; session?: { platformAccountId: string; context?: string };
   isSessionCurrent?: (id: string, context: string) => boolean;
@@ -34,7 +37,8 @@ jest.mock('../state/auth', () => ({
 }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({
-    selectionReady: true, selection: { schoolId: mockSchool },
+    selectionReady: mockSelectionReady,
+    selection: mockLegacySchool ? undefined : mockSelection ?? { schoolId: mockSchool },
     school: {
       id: mockSchool,
       name: mockSchool === 'pu' ? '靜宜大學' : `學校（${mockSchool}）`,
@@ -104,6 +108,9 @@ beforeEach(async () => {
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([]);
   mockUid = 'A';
   mockSchool = 'pu';
+  mockSelection = undefined;
+  mockLegacySchool = false;
+  mockSelectionReady = true;
   mockUpcomingClass = false;
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
@@ -123,6 +130,27 @@ test('campus follow-up questions reuse one sessionId', async () => {
   expect(first.length).toBeGreaterThan(8);
   expect(second).toBe(first);
   expect(request.mock.calls[0][0].mode).toBe('campus');
+});
+
+test.each([
+  ['legacy selected school', undefined, true, 'pu'],
+  ['legacy caller without readiness', undefined, undefined, 'pu'],
+  ['explicit selection', { schoolId: 'nthu' }, true, 'nthu'],
+  ['explicitly unselected school', { schoolId: null }, true, ''],
+  ['selection still loading', undefined, false, ''],
+] as const)('%s preserves assistant access and school scope', async (_name, selection, ready, expectedSchoolId) => {
+  mockSelection = selection;
+  mockLegacySchool = selection === undefined;
+  mockSelectionReady = ready;
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '查校方公告');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  if (ready === false) {
+    expect(request).not.toHaveBeenCalled();
+  } else {
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ scope: { uid: 'A', schoolId: expectedSchoolId } }));
+  }
 });
 
 test.each(['account', 'school'])('changing %s starts a new campus sessionId', async (change) => {
@@ -364,6 +392,7 @@ test('assistant offers the existing service directly instead of inventing a tran
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '圖書館怎麼走');
   fireEvent.press(view.getByText('前往校園地圖'));
   expect(navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'MapV2',
     params: undefined,
   });
@@ -386,6 +415,7 @@ test('a verified offline timetable result opens only its allowlisted local servi
   expect(view.getByText(/本機規則／已保存資料/)).toBeTruthy();
   fireEvent.press(view.getByText('開啟我的課表'));
   expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'PersonalTimetable',
     params: undefined,
   });
@@ -450,6 +480,7 @@ test('a server proposal requires review and a second explicit tap before writing
   expect(view.queryByText('確認並執行')).toBeNull();
   fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
   expect(navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
     screen: 'Dormitory',
     params: undefined,
   });
@@ -648,7 +679,9 @@ test('the seven-day agent entry shows sourced steps and only navigates to verifi
 
   fireEvent.press(view.getByText('開啟課程與作業核對'));
   expect(navigate).toHaveBeenCalledWith('學習', {
-    screen: 'CoursesHome', params: undefined,
+    initial: false,
+    screen: 'CoursesHome',
+    params: undefined,
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
 });
@@ -1004,7 +1037,11 @@ test('tapping a result retains the unsent draft and opens only the selected sour
   expect(turns[2]).toEqual({ role: 'user', content: '第 2 筆' });
   expect(field.props.value).toBe('還在輸入的問題');
   fireEvent.press(view.getByText('查看這份作業'));
-  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'HomeworkSubmit', params: { groupId: 'db1', assignmentId: 'report' } });
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'db1', assignmentId: 'report' },
+  });
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
   expect(view.getByText('確認設定本機提醒')).toBeTruthy();
 });
@@ -1058,10 +1095,18 @@ test('the next-class shortcut opens the selected occurrence in its own term and 
   expect(view.getByText('同時段有多堂課')).toBeTruthy();
   expect(view.queryByText('開啟我的課表')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: /在課表中查看專題.*B203/ }));
-  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
-    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
-    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
-  } });
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'PersonalTimetable',
+    params: {
+      schoolId: 'pu',
+      courseId: second.courseId,
+      date: second.date,
+      term: second.term,
+      startAt: Date.parse('2026-11-05T10:10:00+08:00'),
+      reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+    },
+  });
   mockSchool = 'other';
   view.rerender(<CampusAssistantScreen navigation={{ navigate }} />);
   expect(view.queryByText('B203')).toBeNull();
@@ -1090,10 +1135,18 @@ test('one tap on current class checks the device and can open a staggered overla
   expect(view.getByText('查詢時間 2026/11/5 上午10:25（台灣時間）')).toBeTruthy();
   expect(view.queryByText('下一堂課')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: /在課表中查看資料庫.*10:10–11:00.*B203/ }));
-  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
-    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
-    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
-  } });
+  expect(navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'PersonalTimetable',
+    params: {
+      schoolId: 'pu',
+      courseId: second.courseId,
+      date: second.date,
+      term: second.term,
+      startAt: Date.parse('2026-11-05T10:10:00+08:00'),
+      reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+    },
+  });
 });
 
 test('a verified free period offers the next class without erasing an unsent draft', async () => {

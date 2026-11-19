@@ -89,6 +89,35 @@ function intersects(a: [number, number], b: [number, number],
     (cdB === 0 && onSegment(b, c, d));
 }
 
+/** A closed OSM way repeats the *same node ID* at both ends. Coordinates can
+ * happen to coincide for different nodes even when the source is an open line.
+ * When Overpass supplies node refs, verify they describe the same geometry
+ * before treating the coordinate ring as a building. Legacy geometry-only
+ * fixtures remain supported, but malformed/mismatched refs fail closed.
+ */
+function hasConsistentOsmWayNodes(way: Record<string, unknown>): boolean {
+  const nodes = way.nodes;
+  if (nodes === undefined) return true;
+  if (!Array.isArray(nodes) || !Array.isArray(way.geometry) ||
+      nodes.length !== way.geometry.length || nodes.length < 4) return false;
+  // The same closing node ID must resolve to exactly the same coordinate.
+  // safeOutline intentionally tolerates tiny coordinate-rounding gaps for
+  // geometry-only payloads, but a supplied OSM node identity is stronger
+  // evidence: contradictory endpoint positions cannot describe one node.
+  const first = object(way.geometry[0]);
+  const last = object(way.geometry[way.geometry.length - 1]);
+  if (!first || !last || first.lon !== last.lon || first.lat !== last.lat) return false;
+  // Every intermediate OSM node must be distinct. Repeating an ID inside
+  // the ring (rather than only to close it) is not a simple building loop,
+  // even when an upstream geometry array assigns that ID two different
+  // coordinates. Those contradictory node/geometry pairs must fail closed.
+  const interior = nodes.slice(0, -1);
+  return nodes.every((id) => typeof id === 'number' &&
+    Number.isSafeInteger(id) && id > 0) &&
+    nodes[0] === nodes[nodes.length - 1] &&
+    new Set(interior).size === interior.length;
+}
+
 function safeOutline(value: unknown): Array<[number, number]> | null {
   if (!Array.isArray(value) || value.length < 4 || value.length > MAX_VERTICES + 1) return null;
   const points: Array<[number, number]> = [];
@@ -172,12 +201,61 @@ const LIFECYCLE_STATUS_TAGS = [
   'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
 ] as const;
 
+// A valid OSM building ID may later gain a condition tag. A full, intact 3D
+// solid is misleading for explicit ruins or ambiguous conditions. Keep the
+// verified POI marker rather than claiming a surveyed roof.
+// https://wiki.openstreetmap.org/wiki/Key:building:condition
+const STANDING_BUILDING_CONDITIONS = new Set([
+  'good', 'preserved', 'renovated', 'reconstructed',
+]);
+
+/** An audited OSM ID is not enough to inherit a campus building's old name.
+ * If a mapper explicitly names a different building, do not attach the verified
+ * POI identity to its volume until that name/source change is reviewed. A
+ * matching Chinese name can validate a bilingual primary name. Missing name
+ * tags remain valid because many real OSM building polygons are unnamed.
+ */
+function matchesAuditedOsmName(tags: unknown, expectedName: string): boolean {
+  const record = object(tags);
+  if (!record) return false;
+  const primary = record.name;
+  if (primary !== undefined && (typeof primary !== 'string' || !primary.trim())) return false;
+  // OSM may supply a traditional/Taiwanese name without the generic
+  // name:zh key. All present Chinese identity claims must agree with the
+  // audited campus POI: a matching generic label cannot override an explicit
+  // name:zh-TW/name:zh-Hant for a different building after an OSM edit.
+  const chineseKeys = ['name:zh', 'name:zh-TW', 'name:zh-Hant'] as const;
+  let hasMatchingChineseName = false;
+  for (const key of chineseKeys) {
+    const label = record[key];
+    if (label === undefined) continue;
+    if (typeof label !== 'string' || label.trim() !== expectedName) return false;
+    hasMatchingChineseName = true;
+  }
+  if (hasMatchingChineseName) {
+    // English primary names are permitted when a verified Chinese label
+    // anchors identity. An explicitly different Han-script primary still
+    // contradicts that identity, regardless of which locale supplied it.
+    if (typeof primary === 'string' && /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(primary) &&
+        primary.trim() !== expectedName) return false;
+    return true;
+  }
+  return primary === undefined || primary.trim() === expectedName;
+}
+
 function isStandingBuilding(value: unknown): boolean {
   const tags = object(value);
   const classification = tags?.building;
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
-  if (!kind || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A multi-value building classification can mix current and demolished states.
+  // Without a single verified type, do not extrude a complete standing volume.
+  if (!kind || /[;,|]/.test(kind) || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // A closed OSM way explicitly tagged area=no represents a line, not a roof
+  // polygon. Unknown area values also need review rather than an invented wall.
+  const area = tags?.area;
+  if (area !== undefined && (typeof area !== 'string' ||
+      !['yes', 'true', '1'].includes(area.trim().toLowerCase()))) return false;
   // OSM building:part marks an individual section of a larger building. This
   // renderer only extrudes audited whole-building ways from the ground and
   // cannot reconstruct a part's neighbouring volumes or real base elevation.
@@ -212,6 +290,22 @@ function isStandingBuilding(value: unknown): boolean {
     const marker = tags?.[key];
     if (marker !== undefined && (typeof marker !== 'string' ||
         !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
+  }
+  // building:levels is the above-ground storey count, not a measured height.
+  // A zero, negative, composite, or implausible count is not evidence for the
+  // intact, ground-standing volume this renderer displays. Never multiply
+  // storeys by an assumed height.
+  const levelsTag = tags?.['building:levels'];
+  if (levelsTag !== undefined) {
+    if (typeof levelsTag !== 'string' || !/^\d+$/.test(levelsTag.trim())) return false;
+    const levels = Number(levelsTag.trim());
+    if (!Number.isFinite(levels) || levels < 1 || levels > 100) return false;
+  }
+  const condition = tags?.['building:condition'];
+  if (condition !== undefined) {
+    if (typeof condition !== 'string') return false;
+    const state = condition.trim().toLowerCase();
+    if (!state || /[;,|]/.test(state) || !STANDING_BUILDING_CONDITIONS.has(state)) return false;
   }
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
@@ -253,7 +347,10 @@ function heightFromOsmTags(value: unknown):
   // are also documented. Only convert unambiguous units, never infer levels.
   if (typeof raw !== 'string') return null;
   const label = raw.trim();
-  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m)?$/.exec(label);
+  // OSM recommends `m`; explicit metre/meter aliases are discouraged but
+  // unambiguous. Accept them rather than silently hiding a sourced building.
+  // Keep the required space for spelled-out aliases; never guess other units.
+  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m|\s+(?:metre|metres|meter|meters))?$/.exec(label);
   const feet = /^(\d{1,3}(?:\.\d{1,6})?)\s+(?:ft|feet)$/i.exec(label);
   const feetInches = /^(\d{1,3})'(?:([0-9]{1,2})")?$/.exec(label);
   if (feetInches && Number(feetInches[2] ?? 0) >= 12) return null;
@@ -264,10 +361,38 @@ function heightFromOsmTags(value: unknown):
     ? { heightMeters: height, heightBasis: 'osm-tag' } : null;
 }
 
+/** A node ID identifies one global OSM coordinate, including when two
+ * separately audited campus building ways share a wall. An Overpass response
+ * assigning different positions to the same node cannot describe a valid map.
+ * Reject the whole inconsistent snapshot rather than selecting a building by
+ * response order. Unknown ways and legacy geometry-only ways are not promoted.
+ */
+function hasConsistentAuditedNodePositions(elements: unknown[]): boolean {
+  const positions = new Map<number, [number, number]>();
+  for (const candidate of elements) {
+    const way = object(candidate);
+    if (!way || way.type !== 'way' || typeof way.id !== 'number' ||
+        !knownWays.has(way.id) || way.nodes === undefined) continue;
+    if (!Array.isArray(way.nodes) || !Array.isArray(way.geometry) ||
+        way.nodes.length !== way.geometry.length) return false;
+    for (let index = 0; index < way.nodes.length; index += 1) {
+      const id = way.nodes[index];
+      const point = safeCoordinate(way.geometry[index]);
+      if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0 ||
+          !point) return false;
+      const previous = positions.get(id);
+      if (previous && (previous[0] !== point[0] || previous[1] !== point[1])) return false;
+      positions.set(id, point);
+    }
+  }
+  return true;
+}
+
 /** Overpass JSON：不接收動態 way ID、不猜位置、不補無來源的建築。 */
 export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
   if (!Array.isArray(data?.elements) || data.elements.length > MAX_WAYS) return [];
+  if (!hasConsistentAuditedNodePositions(data.elements)) return [];
   // A single OSM way cannot have two simultaneous outlines in one Overpass reply.
   // Failing closed avoids a forged/partial first entry winning merely by order,
   // even when its duplicate is missing tags or has invalid geometry.
@@ -284,7 +409,9 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const element = object(value);
     if (element?.type !== 'way' || typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) continue;
     const place = knownWays.get(element.id);
-    if (!place || seen.has(element.id) || !isStandingBuilding(element.tags)) continue;
+    if (!place || seen.has(element.id) || !hasConsistentOsmWayNodes(element) ||
+        !isStandingBuilding(element.tags) ||
+        !matchesAuditedOsmName(element.tags, place.name)) continue;
     const outline = safeOutline(element.geometry);
     if (!outline || !outlineNearPoi(outline, place)) continue;
     const height = heightFromOsmTags(element.tags);

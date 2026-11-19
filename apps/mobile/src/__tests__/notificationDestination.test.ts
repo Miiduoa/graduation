@@ -203,7 +203,7 @@ describe('resolveNotificationDestination', () => {
     expect(resolveNotificationDestination({ data: { type: 'library_due' } })).toMatchObject({
       ok: true,
       mode: 'nested',
-      tab: '我的',
+      tab: '訊息',
       screen: 'Notifications',
     });
     expect(resolveNotificationDestination({})).toMatchObject({
@@ -241,4 +241,18 @@ test('本機作業提醒直接開啟指定作業，不以名稱或截止時間�
       ok: true, mode: 'nested', tab: '學習', screen: 'LearnHome',
     });
   }
+});
+
+test('school announcement inbox rows and pushes preserve the exact school source', () => {
+  const data = { announcementId: 'a1', schoolId: 'pu', url: 'https://example.com' };
+  const row = { id: 'n1', type: 'announcement', title: '校園公告', body: '', read: false, data } as Notification;
+  const expected = {
+    ok: true, mode: 'nested', tab: 'Today', screen: '公告詳情',
+    params: { id: 'a1', schoolId: 'pu', sourceKind: 'school-announcement' },
+  };
+  expect(resolveNotificationRow(row)).toMatchObject(expected);
+  expect(resolveNotificationDestination({ data: { ...data, type: 'announcement' } })).toMatchObject(expected);
+  expect(resolveNotificationRow({ ...row, data: { ...data, schoolId: '../pu' } })).toMatchObject({
+    ok: false, code: 'malformed_id',
+  });
 });
