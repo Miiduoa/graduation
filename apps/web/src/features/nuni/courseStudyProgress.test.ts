@@ -292,6 +292,39 @@ describe('source and passage integrity', () => {
 });
 
 describe('lesson and draft validation', () => {
+  it('rejects invisible-only restored reference disclosure in both v1/v2, while preserving real student answers', () => {
+    for (const version of [1, 2]) {
+      for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
+        const saved = envelope();
+        saved.version = version;
+        mode(saved).lessons[0].attempt = invisible;
+        mode(saved).lessons[0].answerVisible = true;
+        expect(() => parseCourseStudyProgress(JSON.stringify(saved), scope)).toThrow(/試答與參考回答狀態不一致/);
+
+        const inMemory = data();
+        inMemory.passages['0:0'].modes.understand.lessons[0].attempt = invisible;
+        inMemory.passages['0:0'].modes.understand.lessons[0].answerVisible = true;
+        expect(() => serializeCourseStudyProgress(inMemory)).toThrow(/試答與參考回答狀態不一致/);
+
+        // An unreviewed draft is preserved verbatim, not silently discarded.
+        saved.passages['0:0'].modes.understand.lessons[0].answerVisible = false;
+        const restored = parseCourseStudyProgress(JSON.stringify(saved), scope);
+        expect(restored.passages['0:0'].modes.understand.lessons[0].attempt).toBe(invisible);
+        expect(restored.passages['0:0'].modes.understand.lessons[0].answerVisible).toBe(false);
+      }
+      for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
+        const saved = envelope();
+        saved.version = version;
+        mode(saved).lessons[0].attempt = visible;
+        mode(saved).lessons[0].answerVisible = true;
+        const restored = parseCourseStudyProgress(JSON.stringify(saved), scope);
+        expect(restored.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
+          attempt: visible, answerVisible: true,
+        });
+      }
+    }
+  });
+
   it.each([
     (value: Envelope) => { value.passages['0:0'].note = '字'.repeat(2001); },
     (value: Envelope) => { mode(value).question = '字'.repeat(501); },

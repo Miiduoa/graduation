@@ -6,6 +6,16 @@ export const STUDY_SESSION_LIMITS = {
   attemptCharacters: 2_000,
 } as const;
 
+/**
+ * A response made only of whitespace, direction markers, joiners, variation
+ * selectors, isolated combining marks or Braille blank is not an actual answer.
+ * Reuse this gate for live review, reading/checkpoint restore and TXT export.
+ * Keep real letters, mathematics, full emoji and attached accents intact.
+ */
+export function hasVisibleStudyAttempt(attempt: string): boolean {
+  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '').length > 0;
+}
+
 export type StudyLesson = StudyTutorTurn & {
   id: number;
   previousLessonId: number | null;

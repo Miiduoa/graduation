@@ -1,5 +1,5 @@
 import type { StudyMode, StudyPassage } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, type StudyPassageMemory } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, type StudyPassageMemory } from './courseStudySession';
 import { courseStudyNotesFilename } from './courseStudyNotes';
 
 export type StudyPracticeCard = {
@@ -70,19 +70,8 @@ function emptyResponse(): StudyPracticeResponse {
   return { attempt: '', answerVisible: false, hintVisible: false, outcome: null };
 }
 
-/**
- * A pasted response made only of whitespace, direction markers, joiners or
- * variation selectors is not a visible attempt. Do not unlock the reference
- * answer or count it as answered. Visible text, symbols, numbers and emoji
- * remain valid. This only affects practice presentation, not the v1 backup
- * schema or source text.
- */
-export function hasVisibleStudyAttempt(attempt: string): boolean {
-  // Standalone accent/enclosing marks and U+2800 Braille blank are not
-  // substantive answers. A mark attached to a real letter, and a nonblank
-  // Braille cell, still have a visible base and remain valid.
-  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '').length > 0;
-}
+// Preserve the public import path used by practice/checkpoint consumers.
+export { hasVisibleStudyAttempt } from './courseStudySession';
 
 /** Read actual source order and only the selected lesson of the requested mode. */
 export function buildStudyPracticeDeck(
