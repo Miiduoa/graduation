@@ -19,7 +19,8 @@ function fixture(trialId: string): CampusSpatialBenchmarkRow[] {
     testedAt: '2026-11-19T01:00:00.000Z', appVersion: 'fixture-only',
     evidenceUrl: `https://evidence.invalid/${trialId}/${product}`,
     outcome: 'correct', destinationLevel: 'building',
-    buildingCorrect: true, roomCorrect: null, routeVerified: null,
+    buildingCorrect: true, entranceCorrect: null, floorCorrect: null,
+    roomCorrect: null, routeVerified: null,
     steps: 2, elapsedMs: 2000, fpsP50: null, visualScore: null,
   }));
 }
@@ -59,6 +60,25 @@ describe('campus spatial benchmark evidence gate', () => {
     const rooms = fixture('synthetic-1');
     rooms[0] = { ...rooms[0], destinationLevel: 'room', roomCorrect: true };
     expect(validateCampusSpatialBenchmarkRows(rooms).issues.join(' ')).toContain('exceeds verified destination');
+
+    const reportedRoom = fixture('synthetic-verified-room');
+    reportedRoom[0] = {
+      ...reportedRoom[0], groundTruthLevel: 'room', destinationLevel: 'room',
+      roomCorrect: false,
+    };
+    for (const row of reportedRoom) row.groundTruthLevel = 'room';
+    expect(validateCampusSpatialBenchmarkRows(reportedRoom).issues.join(' ')).toContain(
+      'claimed indoor destination',
+    );
+
+    const reportedFloor = fixture('synthetic-verified-floor');
+    for (const row of reportedFloor) row.groundTruthLevel = 'floor';
+    reportedFloor[0] = {
+      ...reportedFloor[0], destinationLevel: 'floor', floorCorrect: null,
+    };
+    expect(validateCampusSpatialBenchmarkRows(reportedFloor).issues.join(' ')).toContain(
+      'claimed indoor destination',
+    );
 
     const routes = fixture('synthetic-2').map((row) => ({
       ...row, task: 'walking-route' as const, routeVerified: false,
