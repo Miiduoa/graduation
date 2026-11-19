@@ -56,8 +56,8 @@ describe('NCNU public course to personal timetable credit handoff', () => {
   it.each([null, undefined, 3, { day: '1a' }])(
     'refuses a malformed cached period value %s without crashing the student screen',
     (time) => {
-      expect(ncnuCourseMeetings(time as string, '1151')).toBeNull();
-      expect(ncnuTimetableImportCsv({ ...officialCourse, time: time as string })).toBeNull();
+      expect(ncnuCourseMeetings(time as unknown as string, '1151')).toBeNull();
+      expect(ncnuTimetableImportCsv({ ...officialCourse, time: time as unknown as string })).toBeNull();
     },
   );
 
